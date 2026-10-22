@@ -3,36 +3,36 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-03T08:13:36Z",
+    "timestamp": "2026-10-22T19:21:19Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
-      "version": "0.6.10",
-      "purl": "pkg:pypi/dgc-sdk@0.6.10"
+      "version": "0.7.0",
+      "purl": "pkg:pypi/dgc-sdk@0.7.0"
     }
   },
   "components": [
     {
       "type": "library",
       "name": "dgc-sdk",
-      "version": "0.6.10",
-      "purl": "pkg:pypi/dgc-sdk@0.6.10"
+      "version": "0.7.0",
+      "purl": "pkg:pypi/dgc-sdk@0.7.0"
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/__init__.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1b65ad498a88c0cdbaea94372f9d1a6077645ce0f87d1b85f4b72d98296a3ac3"
+          "content": "32321e43d0e2cc92db6ad9ba95e08552187fb88beb4eff66f689a60a2dafe7fd"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/_mcp_bridge.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -43,7 +43,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/_state.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -54,18 +54,18 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/_version.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "29f65a5335a93ad6098d75a455d38439cd42bd76f4ec99e17acd278f71d605bf"
+          "content": "0b7a08b2ba6495de34e9509fc2e62ebd7850c61fdc1f20f6b4575f0278736453"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/audit.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -75,19 +75,30 @@
     },
     {
       "type": "file",
-      "name": "sdk/python/dgc_sdk/client.py",
-      "version": "0.6.10",
+      "name": "sdk/python/dgc_sdk/chat.py",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "947498ba29b6366507b643d6f00943c979ce0a6d680cb067a91a58b6f818feb1"
+          "content": "b487989235b70f63aaf1deef4bc06ae15cc45576ac2c44e9934f3945a9e11c6d"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/python/dgc_sdk/client.py",
+      "version": "0.7.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4479ce2715a3ab400894e25674f39a7771dd946b1e75d04321191cace84eb3da"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/errors.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -98,29 +109,29 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/pips.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "18c12e3fbb1e5a56d287ba9ff67d1158b6cac2c50c5beb0ab9bccc393928c184"
+          "content": "4c7111e915b5984dc25f9a94008250bb001c4649cc9873d8a7380468b0eedf50"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/policy.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f7d584c4dbfb5194997f8b34c19e4b89e3c5ce242d94d7712753399066ead70c"
+          "content": "f2c5066a5136613f36d981cf112b3a63434a62af2b08432746ee1cc9224eb9e1"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/py.typed",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -131,7 +142,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/retry.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -142,7 +153,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/runtime.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -153,7 +164,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/schema.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -164,18 +175,18 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/session.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9cf9484591dd4a418d3f4c047be0aee2f1ab8e46afa64bec63a8e981ad4e7e2f"
+          "content": "6255b5ca70db2fd386e376fdd68a47069e4c5784ff18374f7282d68b994614ad"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/tools.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -186,18 +197,18 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/types.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "bf1fd6f32b20d9a74e8aa671a5a032b2175466698dccad3162e92c1b1eae9b20"
+          "content": "1c20b3fdd86c7c17a0922eb6fb85d976718c573c29db10982a2905518bdef829"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/usage.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -208,7 +219,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/wire/__init__.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -219,7 +230,7 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/wire/client.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -230,18 +241,18 @@
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/wire/editor_protocol.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9777aadaae84167649fb4648160e28d5538806c14c3e1a63eef6f8519e3b6811"
+          "content": "fbf13013b4288d85eec78342f795b28feb416340b9e6bee4f2ca6fdb0b9823cf"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/dgc_sdk/wire/protocol.py",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -252,7 +263,7 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/audit.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -263,7 +274,7 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/changes.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -273,19 +284,30 @@
     },
     {
       "type": "file",
-      "name": "sdk/typescript/src/client.ts",
-      "version": "0.6.10",
+      "name": "sdk/typescript/src/chat.ts",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "398dbde8707abfa87d8832e0f862c56c1a8ff7977101c1c9580d4d7079911784"
+          "content": "0e4a37a1661a3f66fe5e3c6c7bf43d89bf86fe744537de589c455494cf6ccdda"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/typescript/src/client.ts",
+      "version": "0.7.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "07a56bf4d217e3b0b68a2baa826a7cd6eaaf0616f9eac7fbfb5d060b3bc00330"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/errors.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -296,18 +318,18 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/index.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "d7b9550ddcf0797dd87828b5f4764803d3341f52311a6a8902b5693277d6f46d"
+          "content": "bb4241a01a11f2e42c12d2a6985e1c34e8975decf532e93bbb612017a6afa19b"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/mcp-bridge.mjs",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -318,29 +340,29 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/pips.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7bae971c1b5a090e1260513b9226d436a2fd794a244214b5d1eda510dfd8ef9d"
+          "content": "bd9d08dc94ad1b9378e2f5ddf7fb61c3ab01139a3309447c2df1f777f3e5ba9f"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/policy.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f8a14cfbd60b977ea68df30d488987a3a53365c5b14e7283047f0b423efa91b2"
+          "content": "1d670ade9797de678e77f61853bce77f76750e14fa10d335868362dd90efe65a"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/runtime.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -351,7 +373,7 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/schema.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -362,18 +384,18 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/session.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "088a5e65366c8414dec3101c37459221176d03c57bbb63201d0876f71d136ceb"
+          "content": "142910921948f78cac30f381830038ac4316fafbc88b7b64f6416d33de238b1f"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/state.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -384,7 +406,7 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/tools.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -395,29 +417,29 @@
     {
       "type": "file",
       "name": "sdk/typescript/src/transport.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6ed59f481cc802cf668b39f4c58e1e173c4dcaa570d658404fadb5d2b85ab035"
+          "content": "04d100057e351bb94fbdd75089e5ced2d50f2d0c6f72cdbccd6e0b1779a70918"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/types.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "1961661ba9c220127296649d9689d08e712586acfa862820f1dac22f636c7343"
+          "content": "a54add9a75b2a81cf3d6aad1bf42babee084ac0cc6014bca42c136a43953f74b"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/src/usage.ts",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -428,29 +450,29 @@
     {
       "type": "file",
       "name": "sdk/python/pyproject.toml",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "38413210b4268a332dc903ab74641875af67570a27da682bd3c451b82f6b0efd"
+          "content": "97703107153dd2a2c49af156d567684cb822ea8280263b1e984f28c2ae9cf28d"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/README.md",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "14ae54aac252d4ffde82d4f8f0132d8737453b523136fb82b08759ce9d0f7a27"
+          "content": "da42179db45369aa314d726ae07a4a94f5b98284635bf6fd14bde3726b0b1c61"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/python/LICENSE",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -461,29 +483,29 @@
     {
       "type": "file",
       "name": "sdk/typescript/package.json",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "5417adad51b562f35d4ba371b002d682c06c955af0c02f9b0acc769e09770633"
+          "content": "46146d5a39ce94a194a01e1ec1effe8b17f4c9b8cbb1e92820b50fc9e3692a36"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/package-lock.json",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "760fc74bb1d89d8956d625ff1ebf9c1378e75123bde804455c7652eebd3a74c3"
+          "content": "7f8be8fe9e7738626d366c11c57c9e68515fb560ae26427c7aec1883394a5c49"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/tsconfig.json",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -494,7 +516,7 @@
     {
       "type": "file",
       "name": "sdk/typescript/scripts/build.mjs",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -505,18 +527,18 @@
     {
       "type": "file",
       "name": "sdk/typescript/README.md",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "971c81120c2e37036b6b9af40f8c3241e848fc25adf24f874f6790a6b0bc8814"
+          "content": "2445f6a2b7d6756aaa63c3dd1a038f724ee6e538935c94af0ab3e36c44b2ea26"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/typescript/LICENSE",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -527,22 +549,22 @@
     {
       "type": "file",
       "name": "sdk/README.md",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "811d65f3570983bea91647dac1f000857dcb320723f5d4d03b2dc286d8d043bd"
+          "content": "fdefc39755d15d357a8488d97a1e27cd3a3bbd6fce4419d68ab70dafea9992f7"
         }
       ]
     },
     {
       "type": "file",
       "name": "sdk/COMPATIBILITY.md",
-      "version": "0.6.10",
+      "version": "0.7.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "64fe7704abf2b4ffce2de407465692571375a872c90acf100b0887265fe8f78b"
+          "content": "32d691d1300a4eac8627237e940cdad58b194c195ae1da36f733fe00ac4971ca"
         }
       ]
     }
