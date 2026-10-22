@@ -17,7 +17,7 @@ FORMAT = "dgc-pip"
 VERSION = 1
 MAX_BYTES = 24 * 1024          # fits a nested Pips request (32 KiB) with room to spare
 _PIP_KEYS = {"name", "goal", "pip_type", "scope", "schedule", "event_trigger", "model_choice",
-             "web_plan", "source_ref", "verification_plan"}
+             "web_plan", "source_ref", "verification_plan", "live_plan"}
 _TYPES = {"scout", "lens", "rook", "lock", "quill", "pulse"}
 ALWAYS_LEFT_OUT = "Memory, history, findings and results stay with the original Pip."
 
@@ -44,6 +44,8 @@ def export(store, pip_id) -> dict:
         pip["source_ref"] = job.get("source_ref") or "HEAD"
     if job["pip_type"] == "pulse" and job.get("verification_plan") is not None:
         pip["verification_plan"] = job["verification_plan"]
+    if job["pip_type"] == "pulse" and job.get("live_plan") is not None:
+        pip["live_plan"] = job["live_plan"]          # a live-data Pip's read-only commands, reviewed again on import
     left_out = []
     if job.get("app_plan") is not None:
         left_out.append("Reads from connected apps: they name your accounts. Choose accounts again after importing.")
@@ -92,6 +94,8 @@ def setup_request(document, *, project_root, request_key) -> dict:
     personal = pip["scope"] == "personal"
     if personal:
         work_kind = "personal_task"
+    elif pip["pip_type"] == "pulse" and "live_plan" in pip:
+        work_kind = "live_data"
     elif pip["pip_type"] == "pulse":
         network = (pip.get("verification_plan") or {}).get("action", {}).get("network")
         work_kind = "app_smoke_test" if network == "loopback_http_v1" else "command_verification"
@@ -102,7 +106,7 @@ def setup_request(document, *, project_root, request_key) -> dict:
     request = {"target_root": str(project_root), "name": pip["name"], "goal": pip["goal"], "pip_type": pip["pip_type"],
                "work_kind": work_kind, "scope": pip["scope"], "schedule": pip["schedule"], "run_now": False,
                "request_key": request_key, "reason": "Imported from a shared Pip file."}
-    for key in ("event_trigger", "model_choice", "web_plan", "verification_plan"):
+    for key in ("event_trigger", "model_choice", "web_plan", "verification_plan", "live_plan"):
         if key in pip:
             request[key] = pip[key]
     if not personal:

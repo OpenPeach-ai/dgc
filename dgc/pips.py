@@ -4085,6 +4085,8 @@ def _execute_run(registry, row, config):
     if live:
         live_commands = _run_live_commands(registry, row, manifest, config, binding)
         manifest = {**manifest, 'live_outputs': live_commands}
+        # Its lines have their own clock (a minute each); the summary that follows gets a fresh one.
+        deadline = time.monotonic() + MAX_WALL_SECONDS
     worker_home = run_dir / "worker-home"
     worker_home.mkdir(mode=0o700)
     worker_env = {k: os.environ[k] for k in ("PATH", "LANG", "SYSTEMROOT", "WINDIR") if k in os.environ}

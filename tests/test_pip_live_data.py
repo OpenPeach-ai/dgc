@@ -376,6 +376,15 @@ class JobTests(unittest.TestCase):
                                    "last_report": reference})
         self.assertIn("can't run them", live.CHAT_NOTICE)
 
+    def test_sharing_carries_the_commands_and_an_import_is_a_live_data_card_to_review(self):
+        from dgc import pip_share
+        job = self.pulse()
+        document = pip_share.export(self.store, job["id"])
+        self.assertEqual(document["pip"]["live_plan"], PLAN)
+        request = pip_share.setup_request(pip_share.parse(pip_share.dumps(document)), project_root=self.root, request_key="import-1")
+        self.assertEqual((request["work_kind"], request["live_plan"]), ("live_data", PLAN))
+        self.assertNotIn("verification_plan", request)
+
     def test_automatic_name_changes_keep_the_approved_commands(self):
         from dgc import pip_adaptation
         job = self.pulse(adaptation_policy={"mode": "bounded_adaptive", "allowed_fields": ["name"]})

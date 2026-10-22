@@ -976,6 +976,9 @@ def _format(value):
                  f'Expires: {item["expires_at"]}', f'Digest: {item["digest"]}']
         if item.get('verification_plan'):
             lines.append('Exact reviewed plan: ' + json.dumps(item['verification_plan'], ensure_ascii=False, indent=2))
+        if item.get('live_plan'):
+            lines += ['Live data: DGC runs exactly these read-only commands each time, in a read-only box:',
+                      *('  ' + line for line in item['live_plan']['commands'])]
         if item.get('receipt'):
             lines.append('Receipt: ' + json.dumps(item['receipt'], ensure_ascii=False))
         if item['status'] == 'pending':
@@ -1260,6 +1263,10 @@ def _format(value):
         lines = [f'{row["name"]} ({row["id"]})', f'{row["status"]} · version {row["current_version"]} · {row["policy"]} · {row["trigger"]}',
                  "Type: " + row.get("pip_type", "rook"), "Source: " + source_label, "Goal: " + row["goal"]]
         lines += _run_here_lines(row)
+        if row.get("live_plan") is not None:
+            lines += ["Live data: DGC runs exactly these read-only commands each time, in a read-only box, and its model "
+                      "sums up what they print:", *("  " + line for line in row["live_plan"]["commands"]),
+                      "Run it with dgc pips run " + row["id"] + "; change the commands with dgc pips propose --live-command."]
         if row.get("verification_plan") is not None:
             lines += ["Reviewed Pulse plan (no model):", json.dumps(row["verification_plan"], ensure_ascii=False, indent=2),
                       "Plan digest: " + str(row.get("verification_plan_digest")),
