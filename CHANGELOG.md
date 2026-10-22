@@ -6,6 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A command's output is a diff only when it has a diff's shape.** A script that printed section headers such as
+  `--- dispatch:` was taken for a diff: its output was hidden behind an empty diff, and the editor listed each
+  header as an edited file. A diff now needs its `---` and `+++` lines and a hunk.
+
 - **vLLM, SGLang and llama.cpp: DGC uses the window the server was started with.** These servers set the context
   window when they start (vLLM `--max-model-len`, SGLang `--context-length`, llama.cpp `-c`), and DGC never read it:
   against an 8K server it planned for 32K, so a long turn overflowed, compacted and retried; against a 128K server it

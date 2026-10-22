@@ -4620,6 +4620,12 @@
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/;
 
   const EDIT_TOOLS = new Set(["edit_file", "write_file", "multi_edit", "apply_patch", "create_file"]);
+  // A diff is this turn's edit only when a file-editing tool made it: DGC's own, or a subscription
+  // engine's under its vendor name (Claude Code's Edit/Write/MultiEdit, Gemini's and Qwen's replace).
+  // A shell printing `git diff`, or an MCP tool returning a pull request's diff, shows a diff of
+  // changes made elsewhere; listing those as edits offered an Undo for them.
+  const VENDOR_EDIT_TOOLS = /^(edit|multiedit|write|writefile|create|replace|str_replace_editor|str_replace_based_edit_tool|notebookedit)$/i;
+  const isEditTool = (name) => EDIT_TOOLS.has(String(name || "")) || VENDOR_EDIT_TOOLS.test(String(name || ""));
   // `counted` separates "we diffed it and the totals are these" from "we never had a diff to
   // count" -- a brand-new file, a binary write, or a change over MAX_DIFF_BYTES. Without it both
   // arrive as 0/0, and the summary printed "+0 −0", which reads as "nothing changed" when it
@@ -6614,8 +6620,9 @@
             rendered.dataset.agentId = c.dataset.agentId;
             rendered.classList.add("agent-owned");
           }
-          if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del,
-                                       rendered.dataset.add !== undefined || rendered.dataset.del !== undefined);
+          if (!ev.is_error && isEditTool(ev.name || c.dataset.toolName))
+            recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del,
+                       rendered.dataset.add !== undefined || rendered.dataset.del !== undefined);
         }
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));

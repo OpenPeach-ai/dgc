@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Edited files lists only files that were edited.** The card at the end of a turn listed a script's printed
+  headers as files (+0 −0, with an Undo), and a `git diff` a command printed as if the turn had made those
+  changes. It now lists what DGC's file tools, or a subscription engine's own edit tools, changed; other
+  diffs are still drawn where they appear.
+
 - **vLLM, SGLang and llama.cpp: the context meter shows the window the server was started with.** In the meter's
   details, Window size reads **Set by the server: 32K** with one line on how to change it there (restart vLLM with
   `--max-model-len`, SGLang with `--context-length`, `llama-server` with `-c`), instead of offering sizes that can't

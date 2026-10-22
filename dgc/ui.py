@@ -314,11 +314,19 @@ def edit_preview(name: str, args: dict, root) -> str:
 
 
 def split_diff(out: str) -> tuple[bool, str]:
-    """If a tool's output contains a unified diff, return (True, diff_text); else (False, "")."""
-    if "\n--- " in out or out.startswith("---"):
-        i = out.find("---")
-        if i != -1:
-            return True, out[i:]
+    """If a tool's output contains a unified diff, return (True, diff_text); else (False, "").
+
+    A diff is a `--- ` line, the `+++ ` line straight after it, then an `@@ ` hunk header. Any
+    line that merely starts with `---` was enough before, so a script printing section headers
+    (`--- dispatch:`) became a "diff": its output was hidden behind an empty diff view and each
+    header was listed as an edited file, +0 −0, with an Undo for files that never existed."""
+    lines = out.split("\n")
+    offset = 0
+    for i, line in enumerate(lines[:-2]):
+        if (line.startswith("--- ") and lines[i + 1].startswith("+++ ")
+                and lines[i + 2].startswith("@@ ")):
+            return True, out[offset:]
+        offset += len(line) + 1
     return False, ""
 
 

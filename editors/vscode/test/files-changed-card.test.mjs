@@ -127,3 +127,40 @@ test("Undo and Review still do what they did", () => {
   assert.equal(h.posted.at(-1).type, "undoTurn");
   assert.equal(h.posted.at(-1).prompt, "fix it");
 });
+
+// Only a file-editing tool's diff is one of this turn's edits (found on a real ERP session on .111,
+// 2026-10-22). A shell that prints `git diff` shows changes made elsewhere; listing them offered an
+// Undo for files this turn never touched.
+function turnWithResults(results) {
+  const h = makeDom();
+  const event = (d) => h.send({ type: "event", event: d });
+  event({ type: "turn_start", turn_id: "t", prompt: "look at things" });
+  results.forEach((r, i) => {
+    event({ type: "tool_call", call_id: `r${i}`, name: r.name, args: {} });
+    const diff = diffFor(r.path);
+    event({ type: "tool_result", call_id: `r${i}`, name: r.name, output: diff, is_diff: true, diff });
+  });
+  event({ type: "text_delta", text: "done" });
+  event({ type: "turn_end", turn_id: "t", reason: "completed" });
+  return h.doc;
+}
+
+test("a diff a shell printed is drawn but is not one of this turn's edits", () => {
+  const doc = turnWithResults([{ name: "bash", path: "src/elsewhere.py" }]);
+  assert.ok(doc.querySelector(".diff"), "the diff is still drawn where the command ran");
+  assert.equal(doc.querySelector(".turn-summary"), null, "but no Edited card lists it");
+});
+
+test("an MCP tool's diff is not an edit either", () => {
+  const doc = turnWithResults([{ name: "mcp__github__get_pull_request_diff", path: "README.md" }]);
+  assert.equal(doc.querySelector(".turn-summary"), null);
+});
+
+test("a subscription engine's Edit and a Gemini replace are this turn's edits", () => {
+  const doc = turnWithResults([{ name: "Edit", path: "src/a.py" }, { name: "replace", path: "src/b.py" },
+                               { name: "bash", path: "src/c.py" }]);
+  const rows = [...doc.querySelectorAll(".turn-summary .ts-row")].map(r => r.textContent);
+  assert.equal(rows.length, 2, rows.join(" | "));
+  assert.match(rows[0], /a\.py/);
+  assert.match(rows[1], /b\.py/);
+});
