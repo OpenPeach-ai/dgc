@@ -228,6 +228,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "server_window",
     # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
     "watch_pip_reports", "pip_report_dismiss",
+    # Ask DGC to fix: reading a chat's fixes or one file a fix changed.
+    "list_pip_fixes", "get_pip_fix_change",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
     "list_background_shells", "stop_background_shell", "get_background_output",
     # A liveness ping is the editor breathing, not the user acting. Left out of this set, every
@@ -337,6 +339,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss",
+    "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
@@ -2328,6 +2331,10 @@ class Backend:
                           # once the client sends watch_pip_reports; pip_report_dismiss removes one.
                           # Never a turn (dgc/pip_report_delivery.py).
                           "pip_reports": 1,
+                          # Ask DGC to fix on a report card starts a background fix in this chat
+                          # (start_pip_fix, pip_fix, list_pip_fixes, undo_pip_fix, get_pip_fix_change;
+                          # dgc/pip_fix.py): no turn, its card is its status, Review and Undo after.
+                          "pip_fix": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -2455,6 +2462,8 @@ class Backend:
     def start(self) -> None:
         self.em.emit("ready", **self._ready_payload())
         self._after_open()
+        from .pip_fix import sweep_soon
+        sweep_soon()                     # fix copies unused for 14 days go, off this thread
         # The backend is genuinely serving now, so this is the moment to tell the other DGCs in
         # this checkout that it exists.
         self._announce_peer("idle")
@@ -4837,6 +4846,15 @@ class Backend:
         # (once it has been read: a prompt opens its turn), never inside it -- live, a card that
         # comes while a turn runs goes under that turn's block.
         arrived: list = []
+        fixes: dict | None = None
+
+        def fixed(reports: list) -> list:
+            nonlocal fixes
+            if not reports:
+                return reports
+            if fixes is None:
+                fixes = self._pip_fix_latest()
+            return self._with_pip_fixes(reports, fixes)
 
         def place_reports() -> None:
             if not arrived:
@@ -4850,7 +4868,7 @@ class Backend:
         for index, m in enumerate(self.agent.messages):
             position = index
             place_reports()
-            arrived.extend(pip_report_items(m))
+            arrived.extend(fixed(pip_report_items(m)))
             # Before any `continue`: images anchored at or before this message join the open turn.
             items.extend(self._history_before_message(index, turn))
             role = m.get("role")
@@ -5219,6 +5237,198 @@ class Backend:
         if stop is not None:
             stop.set()
             self._kick_pip_reports()
+
+    # ---- Ask DGC to fix (dgc/pip_fix.py) ------------------------------------------------------------
+    # A report card's Ask DGC to fix starts a background sub-agent in this chat's session: no turn, so
+    # the chat stays free. Its record goes out as `pip_fix` at every change; a replayed card carries
+    # its latest fix as `report.fix`. The handlers that touch the registry, the copy or the project's
+    # files run on threads of their own: dispatch is the loop that reads stdin.
+    def _pip_fix_session(self) -> str:
+        session = getattr(self.agent, "session_file", None)
+        return session.stem if session is not None else ""
+
+    def _emit_pip_fix(self, record: dict, request_id: str | None = None) -> None:
+        from .pip_fix import wire
+        self.em.emit("pip_fix", fix=wire(record), **_request_fields(request_id))
+
+    def _start_pip_fix(self, cmd: dict, request_id: str | None) -> None:
+        from . import pip_fix
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command="start_pip_fix", reason=reason, message=message,
+                         **_request_fields(request_id))
+
+        run_id = str(cmd.get("run_id") or "")
+        if not pip_fix.RUN_ID.match(run_id):
+            reject("invalid_run", "That is not a Pip run.")
+            return
+        agent, session_id = self.agent, self._pip_fix_session()
+
+        def go() -> None:
+            secrets = secret_values(self.config)
+            brief = pip_fix.run_brief(run_id, session_id=session_id, project_root=agent.config.project_root,
+                                      secrets=secrets)
+            if brief is None:
+                reject("unknown_run", "DGC can't find that Pip run in this project any more.")
+                return
+            report = brief["report"]
+            if report.get("outcome") in ("clear", "checks_passed"):
+                reject("nothing_to_fix", "That run found nothing to fix.")
+                return
+            with self._dispatch_guard():
+                if self.agent is not agent or self._pip_fix_session() != session_id:
+                    reject("chat_changed", "This chat changed before the fix could start. Ask again.")
+                    return
+                self._show_asked_report(report)
+
+                def emit(record: dict) -> None:
+                    # Only to the chat that asked: another session opened in this tab never hears of it.
+                    if self.agent is agent and self._pip_fix_session() == session_id:
+                        self._emit_pip_fix(record)
+                try:
+                    record = pip_fix.start(agent, brief, session_id=session_id, emit=emit)
+                except pip_fix.FixRefused as refused:
+                    reject(refused.reason, str(refused))
+                    return
+                except Exception as exc:                    # noqa: BLE001 -- said, never thrown at stdin
+                    reject("failed", f"DGC couldn't start the fix: {type(exc).__name__}: {exc}")
+                    return
+                self._emit_pip_fix(record, request_id)
+
+        self._pip_fix_job(go)
+
+    def _pip_fix_job(self, job) -> None:
+        """Run a fix command off the stdin loop, in the order the commands came: two quick clicks start their
+        fixes in the order they were clicked, so the second waits behind the first."""
+        jobs = self.__dict__.get("_pip_fix_jobs")
+        if jobs is None:
+            jobs = self.__dict__.setdefault("_pip_fix_jobs", queue.SimpleQueue())
+
+            def work() -> None:
+                while True:
+                    item = jobs.get()
+                    try:
+                        item()
+                    except Exception:                       # noqa: BLE001 -- each job says its own refusal
+                        pass
+            threading.Thread(target=work, name="dgc-pip-fix-commands", daemon=True).start()
+        jobs.put(job)
+
+    def _show_asked_report(self, report: dict) -> None:
+        """A fix asked for a run this chat was never shown (from the Pip's own chat): show its card here,
+        as a report the chat asked for, so the fix has a card to report on."""
+        from .pip_report_delivery import transcript_runs
+        state = self._pip_report_state()
+        run_id = report.get("run_id")
+        messages = list(getattr(self.agent, "messages", None) or [])
+        with state._lock:
+            if run_id in transcript_runs(messages) or run_id in state.waiting:
+                return
+            entry = {"run_id": run_id, "pip_id": report.get("pip_id"), "finished_at": report.get("finished_at") or "",
+                     "outcome": report.get("outcome"), "signature": "asked", "report": report, "shown": True}
+            state.waiting[run_id] = {"session": self._pip_fix_session(),
+                                     "anchor": messages[-1] if messages else None, "entry": entry}
+        self.em.emit("pip_report", report=report)
+        with self._turn_state_lock():
+            idle = not self._busy()
+        if idle:
+            self._flush_pip_reports()
+
+    def _undo_pip_fix(self, cmd: dict, request_id: str | None) -> None:
+        from . import pip_fix
+        fix_id = str(cmd.get("fix_id") or "")
+        agent, session_id = self.agent, self._pip_fix_session()
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command="undo_pip_fix", reason=reason, message=message,
+                         **_request_fields(request_id))
+
+        def go() -> None:
+            project = pip_fix.FixProject(agent.config.project_root)
+            record = project.get(fix_id) if pip_fix.FIX_ID.match(fix_id) else None
+            if record is None or record.get("session_id") != session_id:
+                reject("unknown_fix", "DGC can't find that fix in this chat.")
+                return
+            if record.get("state") in pip_fix.ACTIVE:
+                reject("still_running", "The fix is still working. Stop it first, or wait for it to finish.")
+                return
+            if (record.get("undo") or {}).get("state") == "done":
+                self._emit_pip_fix(record, request_id)
+                return
+            try:
+                record = project.put(pip_fix.undo(project, record))
+            except pip_fix.FixRefused as refused:
+                reject(refused.reason, str(refused))
+                return
+            except Exception as exc:                        # noqa: BLE001
+                reject("failed", f"DGC couldn't undo the fix: {type(exc).__name__}: {exc}")
+                return
+            if self.agent is agent and self._pip_fix_session() == session_id:
+                self._emit_pip_fix(record, request_id)
+
+        self._pip_fix_job(go)
+
+    def _emit_pip_fixes(self, request_id: str | None = None) -> None:
+        from . import pip_fix
+        session_id = self._pip_fix_session()
+        try:
+            rows = pip_fix.for_session(self.agent.config.project_root, session_id) if session_id else []
+        except OSError:
+            rows = []
+        self.em.emit("pip_fixes", items=[pip_fix.wire(row) for row in rows[:pip_fix.MAX_RECORDS]],
+                     **_request_fields(request_id))
+
+    def _pip_fix_change(self, cmd: dict) -> None:
+        from . import pip_fix
+        request_id = str(cmd.get("request_id") or "")[:128] or "pip-fix-change"
+        fix_id, path = str(cmd.get("fix_id") or ""), str(cmd.get("path") or "")
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command="get_pip_fix_change", reason=reason, message=message,
+                         request_id=request_id)
+
+        project = pip_fix.FixProject(self.agent.config.project_root)
+        record = project.get(fix_id) if pip_fix.FIX_ID.match(fix_id) else None
+        if record is None or record.get("session_id") != self._pip_fix_session():
+            reject("unknown_fix", "DGC can't find that fix in this chat.")
+            return
+        try:
+            before, after, kind = pip_fix.change_texts(project, record, path)
+        except pip_fix.FixRefused as refused:
+            reject(refused.reason, str(refused))
+            return
+        except OSError as exc:
+            reject("unreadable", f"DGC couldn't read that change: {exc}")
+            return
+        from .redaction import redact_text
+        secrets = secret_values(self.config)
+        self.em.emit("pip_fix_change", request_id=request_id, fix_id=fix_id, path=path,
+                     before=redact_text(before, secrets), after=redact_text(after, secrets), kind=kind)
+
+    def _pip_fix_latest(self) -> dict:
+        """run_id -> this chat's latest fix of it, read once for one replay."""
+        from . import pip_fix
+        session_id = self._pip_fix_session()
+        try:
+            rows = pip_fix.for_session(self.agent.config.project_root, session_id) if session_id else []
+        except OSError:
+            rows = []
+        latest: dict = {}
+        for row in rows:                                     # newest first: the first one per run wins
+            latest.setdefault(row.get("run_id"), row)
+        return latest
+
+    def _with_pip_fixes(self, items: list, latest: dict) -> list:
+        """Replayed report cards, each with its latest fix in this chat (`report.fix`)."""
+        if not items or not latest:
+            return items
+        from . import pip_fix
+        out = []
+        for item in items:
+            report = item.get("report") if isinstance(item, dict) else None
+            row = latest.get(report.get("run_id")) if isinstance(report, dict) else None
+            out.append({**item, "report": {**report, "fix": pip_fix.wire(row)}} if row else item)
+        return out
 
     def _pip_starter(self, config, request):
         """Starter Pips: list them, or save one as a pending setup card owned by this chat.
@@ -6838,6 +7048,14 @@ class Backend:
                 idle = not self._busy()
             if idle:
                 self._flush_pip_reports()
+        elif t == "start_pip_fix":
+            self._start_pip_fix(cmd, request_id)
+        elif t == "undo_pip_fix":
+            self._undo_pip_fix(cmd, request_id)
+        elif t == "list_pip_fixes":
+            self._emit_pip_fixes(request_id)
+        elif t == "get_pip_fix_change":
+            self._pip_fix_change(cmd)
         elif t == "clear_todos":
             # A list the model left behind, or a resumed session brought back, used to have no
             # exit short of a new chat: every later turn was reminded about it. Clear it through

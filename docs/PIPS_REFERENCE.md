@@ -643,7 +643,8 @@ pairs with a user message. A conversation run's context carries the five newest 
 characters), and the worker puts them in the reference data beside `last_report`, with a note
 that the user saw each as a short message from the Pip and that DGC wrote them, not the user.
 `get_pip` returns `report_session`: the newest chat the Pip reports to (attached, or set up there),
-where the editor's **Ask DGC to fix** sends its prompt.
+where the editor's **Ask DGC to fix** fixes the report in the background (`start_pip_fix`, see
+[PIPS.md](PIPS.md#ask-dgc-to-fix)).
 
 ## Schedules and event triggers
 

@@ -867,6 +867,12 @@ class TaskWorkspace:
     # construction of this class is positional.
     linked: list[str] = field(default_factory=list)
     link_errors: list[str] = field(default_factory=list)
+    # A file the user already had uncommitted work in is never written by an integration: its whole
+    # delta is refused instead (and kept for /tasks). A checkout whose integration keeps an exact
+    # copy of every file it writes, so one Undo puts the user's bytes back (KeptTaskWorkspace),
+    # treats such a file like any other: applied when untouched since, merged or held back if not.
+    # A class attribute, not a field: every construction of this dataclass is positional.
+    protect_dirty = True
 
     @classmethod
     def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None,
@@ -955,6 +961,31 @@ class TaskWorkspace:
                 detail += (f"; cleanup failed for {task.path} on branch {task.branch}: "
                            f"{cleanup_error}")
             return None, detail
+
+    def _populate(self) -> None:
+        """Copy the project's uncommitted state (dirty tracked files, untracked ones, deletions) into
+        this checkout, which holds `base_commit`, and record it as the baseline the delta is read
+        against. Raises TaskWorkspaceError when it is too big or the project changed meanwhile."""
+        repo, base_commit, project_rel = self.repo, self.base_commit, self.project_rel
+        self.initial_dirty = _dirty_paths(repo, base_commit, project_rel)
+        self.baseline = {}
+        if len(self.initial_dirty) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_FILES} files")
+        total = 0
+        for repo_path in sorted(self.initial_dirty):
+            state = _read_state(_checked_target(repo, repo_path))
+            total += len(state.data)
+            if total > _MAX_TASK_BYTES:
+                raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_BYTES} bytes")
+            self.baseline[repo_path] = state
+            _replace_state(_checked_target(self.path, repo_path), state)
+        # DGC's checkout lease excludes peer DGC writers; this second read also detects a
+        # manual editor change racing the baseline copy.
+        if _dirty_paths(repo, base_commit, project_rel) != self.initial_dirty:
+            raise TaskWorkspaceError("source file set changed while creating the isolated baseline")
+        for repo_path, expected in self.baseline.items():
+            if _read_state(_checked_target(repo, repo_path)) != expected:
+                raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
 
     def _link_shared(self, link_paths) -> None:
         """Share a few parent directories into this checkout, by explicit user opt-in only.
@@ -1074,7 +1105,8 @@ class TaskWorkspace:
         if not changed:
             cleanup_error = self.cleanup() or ""
             return TaskIntegration("clean", cleanup_error=cleanup_error)
-        protected = [path for path in changed if path in self.initial_dirty]
+        protected = ([path for path in changed if path in self.initial_dirty]
+                     if self.protect_dirty else [])
         if protected:
             conflicts = [self._display_path(path) for path in protected]
             reason = "sub-agent changed files that were already dirty before delegation"
@@ -1233,6 +1265,129 @@ class TaskWorkspace:
 
     def cleanup(self) -> str | None:
         return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
+
+
+@dataclass
+class KeptTaskWorkspace(TaskWorkspace):
+    """A task checkout KEPT between tasks: one per project, reused by every task that asks for it.
+
+    The same checkout, delta and integration as TaskWorkspace. `sync` puts the kept checkout at the
+    project's HEAD plus its uncommitted state before each task -- exactly what `prepare` gives a new
+    checkout -- but what the project ignores (installed dependencies, a copied .env) stays between
+    tasks, so they are installed once rather than by every task. Integration never removes it, and
+    a path it holds back (`held_paths`) is the caller's to keep: the next sync resets the checkout.
+    Ask DGC to fix on a Pip report keeps one (dgc/pip_fix.py).
+    """
+    held_reason: str = ""
+    held_paths: list[str] = field(default_factory=list)
+    # The caller keeps an exact copy of every file an integration writes, so one Undo puts the
+    # user's bytes back: a file they had uncommitted work in is integrated like any other.
+    protect_dirty = False
+
+    @classmethod
+    def sync(cls, source_root: Path, path: Path) -> tuple["KeptTaskWorkspace | None", str | None]:
+        """The kept checkout at `path`, made or reset to the project's HEAD and uncommitted state."""
+        source_root = Path(source_root).resolve(strict=False)
+        repo = repo_root(source_root)
+        if repo is None:
+            return None, "project is not inside a git repository"
+        try:
+            project_rel = source_root.relative_to(repo)
+        except ValueError:
+            return None, "project root is outside its git checkout"
+        base = _git(["rev-parse", "HEAD"], repo)
+        if base.returncode != 0 or not base.stdout.strip():
+            return None, "repository has no committed HEAD"
+        refusal = _case_alias_refusal(source_root)
+        if refusal:
+            return None, refusal
+        base_commit = base.stdout.strip()
+        path = Path(path).expanduser().resolve(strict=False)
+        try:
+            if os.path.commonpath((str(repo), str(path))) == str(repo):
+                return None, "the kept checkout must be outside the source repository"
+        except ValueError:
+            pass
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.chmod(0o700)
+        except OSError as exc:
+            return None, f"could not create the kept checkout's folder: {exc}"
+        prune_worktrees(repo)
+        known = any(Path(item.get("path", "")).resolve(strict=False) == path
+                    for item in list_worktrees(repo))
+        if known and not (path / ".git").exists():
+            known = False
+        if not known:
+            if path.exists() or path.is_symlink():
+                # A folder git no longer knows as this repository's worktree: what was ours is gone.
+                try:
+                    if path.is_symlink() or path.is_file():
+                        path.unlink()
+                    else:
+                        shutil.rmtree(path)
+                except OSError as exc:
+                    return None, f"could not clear the old kept checkout: {exc}"
+                prune_worktrees(repo)
+            free = _free_bytes(path.parent)
+            if free is not None and free < _MIN_FREE_BYTES:
+                return None, (f"only {free // (1024 * 1024)} MB free where the kept checkout is made "
+                              f"({path.parent})")
+            add = _git(["worktree", "add", "--quiet", "--detach", str(path), base_commit], repo)
+            if add.returncode != 0:
+                return None, (add.stderr or "could not create the kept checkout").strip()
+        else:
+            # In the kept checkout itself, never the user's: tracked files to HEAD, files the
+            # project does not ignore and a previous task left behind removed. What it ignores stays.
+            for args in (["checkout", "--quiet", "--detach", "--force", base_commit],
+                         ["reset", "--quiet", "--hard", base_commit],
+                         ["clean", "--quiet", "-f", "-d"]):
+                step = _git(args, path, timeout=120.0)
+                if step.returncode != 0:
+                    return None, (step.stderr or f"git {args[0]} failed in the kept checkout").strip()
+        task = cls(source_root, repo, project_rel, path, path / project_rel, "", base_commit,
+                   set(), {}, path.parent / f"{path.name}.held.json")
+        try:
+            task._populate()
+        except Exception as exc:                         # noqa: BLE001 -- said to the caller
+            return None, str(exc) or type(exc).__name__
+        return task, None
+
+    def cleanup(self) -> str | None:
+        """Kept: an integration that found nothing, or applied everything, leaves it for the next task."""
+        return None
+
+    def retain(self, reason: str, paths: list[str]) -> str | None:
+        """What integration could not apply, said to the caller instead of a /tasks record."""
+        self.held_reason = str(reason)[:2000]
+        self.held_paths = list(paths)
+        return None
+
+    def held_state(self, repo_path: str) -> tuple[str, bytes, int]:
+        """The task's own version of a path it changed: (kind, data, mode)."""
+        state = _read_state(_checked_target(self.path, repo_path))
+        return state.kind, state.data, state.mode
+
+    def display_path(self, repo_path: str) -> str:
+        return self._display_path(repo_path)
+
+    @staticmethod
+    def remove(source_root: Path, path: Path) -> str | None:
+        """Remove a kept checkout and git's record of it. None, or what went wrong."""
+        path = Path(path)
+        repo = repo_root(source_root) if Path(source_root).exists() else None
+        if repo is not None:
+            _git(["worktree", "remove", "--force", str(path)], repo)
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+        except OSError as exc:
+            return str(exc)
+        if repo is not None:
+            prune_worktrees(repo)
+        return None
 
 
 @dataclass

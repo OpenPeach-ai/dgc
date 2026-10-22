@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Ask DGC to fix, in the background.** On a Pip report's card, **Ask DGC to fix** (or **Fix**) no longer sends a
+  message: DGC fixes the report in the background, in a copy of the project, and you keep chatting. The card becomes
+  the fix's status, on a line of its own under its two: "Getting the fix copy ready", "Fixing · Running npm test",
+  with how long it has worked, **Watch** (the helper's own page) and **Stop**. A permission it needs (installing the
+  project's dependencies in the copy, copying a `.env` a test needs) is asked on the card, and the agents pill says an
+  agent needs you. When it ends: "Fixed · 2 files changed +12 −3", the files (each opens its diff), whether the tests
+  ran in the fix copy, and **Review** and **Undo** (Undo asks first, and keeps a file you have changed since). A file
+  you changed on the same lines while it worked is held back, and the card says so. Stopped or failed, it says that
+  nothing in your project changed, with **Try again**.
+  - A **Pip fixes** chip on the chip line above the message box (never a new row) shows only Pip fixes while one works
+    or until you've seen how it ended; it turns amber when one needs you and lists them, each going to its card.
+  - A card with a fix leaves a folded group of reports, so a running fix stays in sight. After a reload, or a window
+    reload with the session kept running, the card draws the fix as it is. From a Pip's own chat, **Ask DGC to fix**
+    starts the same fix in the chat the Pip reports to.
+  - Needs a DGC CLI with the same feature; with an older one, Ask DGC to fix sends its one message as before.
+
 - **The prompt rail in Work chats,** as ChatDGC has it: in a session of five prompts or more, a short tick for each
   prompt sits in the transcript's right margin, centred, and the one you're reading is bright.
   - **Hover it** (or Tab to it) for a card of every prompt with its time under day headings, the one you're reading

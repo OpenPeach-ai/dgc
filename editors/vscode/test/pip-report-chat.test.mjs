@@ -1,13 +1,14 @@
 // Pip reports reach the chat, end to end: the REAL panel, the REAL `dgc serve` of this checkout, a
 // real Pip registry in the session's HOME, and media/main.js in Chromium (test/support/panel-live.mjs).
 // A Pip attached to the chat finishes a run; its card arrives in the open chat by itself (no turn);
-// Ask DGC to fix sends one message naming the run, once (the founder, 19 Oct), and the model reads
-// the whole report with pips_context; a reload draws
+// Ask DGC to fix starts a BACKGROUND fix (the founder, 19 Oct): no turn, the card is its status, the
+// fixer reads the whole finding, its change is applied with Undo and the card says so; a reload draws
 // the same card; Dismiss is saved; and the card fits a narrow panel.
 // DGC_REQUIRE_CHROMIUM=1 turns a missing browser or Python into a failure.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { answer, launch, modelServer, panelSession, repoRoot, sleep, toolCalls, until } from "./support/panel-live.mjs";
@@ -20,6 +21,11 @@ before(async () => {
   model = await modelServer(({ messages, lastUser }) => {
     seen.push(lastUser);
     const results = messages.filter((m) => m.role === "tool").map((m) => String(m.content || ""));
+    const task = String(messages.find((m) => m.role === "user")?.content || "");
+    if (task.startsWith("Fix what Pip")) {                    // the background fixer, in the fix copy
+      if (!results.length) return toolCalls([["call_fix", "write_file", { path: "app/gst.py", content: "def total(x):\n    return x * 118 // 100\n" }]]);
+      return answer("Added the cess to the GST total.\nTESTS: not run \u2014 this fixture has no tests");
+    }
     if (!lastUser.includes("pips_context")) return answer("Done: the audit is set up.");
     if (!results.length) return toolCalls([["call_load", "use_pips", {}]]);
     if (!results.some((r) => r.includes("total_findings"))) {
@@ -49,10 +55,15 @@ const cards = (page) => page.evaluate(() => [...document.querySelectorAll("#log 
     && !!(block.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) };
 }));
 
-test("a report reaches the open chat as a card, Ask DGC to fix fills the box, and the model reads it", async (t) => {
+test("a report reaches the open chat as a card, Ask DGC to fix fixes it in the background with Undo", async (t) => {
   if (env.skipOrFail(t)) return;
-  const s = await panelSession({ ...env, model, name: "pip-report", config: { pips_enabled: true } });
+  const s = await panelSession({ ...env, model, name: "pip-report", config: { pips_enabled: true },
+    files: { ".gitignore": ".env\n" } });
   try {
+    mkdirSync(join(s.work, "app"), { recursive: true });
+    writeFileSync(join(s.work, "app", "gst.py"), "def total(x):\n    return x\n");
+    for (const args of [["init", "-q"], ["config", "user.email", "t@dgc.invalid"], ["config", "user.name", "T"],
+      ["add", "."], ["commit", "-qm", "baseline"]]) assert.equal(spawnSync("git", args, { cwd: s.work }).status, 0);
     const pip = py(s, "create", s.work, "ERP daily audit", "scout");  // Pips in use before the chat saves
     await s.openWebview({ width: 360, height: 760 });
     await s.ready();
@@ -61,7 +72,7 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
     await until(() => s.provider.currentSessionSaved, "the chat to be saved", 10_000);
     py(s, "attach", s.work, s.provider.currentSessionId, pip);
     reportRun = py(s, "finish", s.work, pip, JSON.stringify([
-      { title: "GST total skips cess", severity: "high", path: "app/gst.py", line: 88, evidence: "total", verification: "source_excerpt_only" },
+      { title: "GST total skips cess", severity: "high", path: "app/gst.py", line: 2, evidence: "return x", verification: "source_excerpt_only" },
       { title: "Rounding drops paise", severity: "medium", path: "app/billing.py", line: 12, evidence: "round", verification: "source_excerpt_only" }]));
     const turnsBefore = s.events.filter((e) => e.type === "turn_start").length;
 
@@ -75,7 +86,7 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
     assert.equal(state, "finished · 2 findings (1 high, 1 medium)");
 
     // The narrow panel: nothing clipped sideways, the actions on screen.
-    const fit = await s.page.evaluate(() => {
+    const fit = async () => s.page.evaluate(() => {
       const card = document.querySelector(".pip-report"), log = document.getElementById("log");
       const box = card.getBoundingClientRect();
       return { overflow: card.scrollWidth - card.clientWidth, logOverflow: log.scrollWidth - log.clientWidth,
@@ -84,28 +95,35 @@ test("a report reaches the open chat as a card, Ask DGC to fix fills the box, an
         buttons: [...card.querySelectorAll("button")].filter((b) => b.getClientRects().length)
           .map((b) => { const r = b.getBoundingClientRect(); return r.right <= innerWidth && r.width > 0; }) };
     });
-    assert.ok(fit.overflow <= 0 && fit.logOverflow <= 0, JSON.stringify(fit));
-    assert.ok(fit.right <= fit.width && fit.buttons.every(Boolean), JSON.stringify(fit));
+    const before = await fit();
+    assert.ok(before.overflow <= 0 && before.logOverflow <= 0, JSON.stringify(before));
+    assert.ok(before.right <= before.width && before.buttons.every(Boolean), JSON.stringify(before));
+    assert.ok(before.buttons.length >= 3, "Fix, Open and ✕ are on the card's second line");
 
-    assert.ok(fit.buttons.length >= 3, "Fix, Open and ✕ are on the card's second line");
-    await s.page.locator(".pip-report-fix-slim").click();                // the user's ask: sent at once, once
+    await s.page.locator(".pip-report-fix-slim").click();                // the user's ask: a fix in the background
     assert.equal(await s.page.locator("#input").evaluate((el) => el.value), "", "the box is left alone");
-    assert.equal(await s.page.locator(".pip-report-fix-slim").textContent(), "Asked DGC");
-    assert.ok(await s.page.locator(".pip-report-fix-slim").isDisabled(), "a second click can't send it again");
-    const ended = await until(() => s.events.filter((e) => e.type === "turn_end").length === 2
-      && s.events.filter((e) => e.type === "turn_end").at(-1), "the fix turn to end", 60_000);
-    assert.equal(ended.reason, "completed");
-    assert.ok(seen.some((u) => u.includes(reportRun)), "the model got the prompt naming the run");
-    const reply = await s.page.evaluate(() => [...document.querySelectorAll("#log .msg.dgc")].at(-1).textContent);
-    assert.match(reply, /I read the report: 2 findings, starting with the GST total\./);
+    const fixed = await until(() => s.events.find((e) => e.type === "pip_fix" && e.fix.state === "applied"),
+      "the background fix to be applied", 60_000);
+    assert.equal(s.events.filter((e) => e.type === "turn_start").length, turnsBefore, "the fix is no turn: the chat stays free");
+    assert.equal(readFileSync(join(s.work, "app", "gst.py"), "utf8"), "def total(x):\n    return x * 118 // 100\n");
+    assert.ok(seen.some((u) => u.includes("GST total skips cess") && u.includes("Evidence: return x")), "the fixer read the finding");
+    await until(async () => (await s.page.locator(".pip-fix .pip-fix-text").textContent()) === "Fixed · 1 file changed", "the card to say so");
+    assert.deepEqual(await s.page.locator(".pip-fix .pip-fix-act").allTextContents(), ["Review", "Undo", "Watch"]);
+    assert.match(await s.page.locator(".pip-fix .pip-fix-tests").textContent(), /^Tests didn't run in the fix copy: this fixture has no tests$/);
+    assert.equal(await s.page.locator(".pip-report-fix-slim").isVisible(), false, "the fix's own line replaces Fix");
+    const after = await fit();
+    assert.ok(after.overflow <= 0 && after.logOverflow <= 0 && after.buttons.every(Boolean), JSON.stringify(after));
+    assert.equal(fixed.fix.files[0].path, "app/gst.py");
 
-    // A reload draws the same card where it was.
+    // A reload draws the same card where it was, its fix with it.
     const liveCards = await cards(s.page);
     await s.reloadWebview({ width: 360, height: 760 });
     await s.ready();
     await until(async () => (await cards(s.page)).length === 1, "the replayed card", 20_000);
+    await until(async () => (await s.page.locator(".pip-fix .pip-fix-text").count()) === 1, "the replayed fix", 20_000);
     const replayed = await cards(s.page);
-    assert.deepEqual(replayed.map((c) => c.html), liveCards.map((c) => c.html), "replay draws what live drew");
+    const plain = (html) => html.replace(/<span class="pip-fix-time">[^<]*<\/span>/, "");
+    assert.deepEqual(replayed.map((c) => plain(c.html)), liveCards.map((c) => plain(c.html)), "replay draws what live drew");
 
     await s.page.locator(".pip-report-dismiss-slim").click();
     await sleep(800);

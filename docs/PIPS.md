@@ -482,10 +482,11 @@ Nothing for you to do." with **✓ Passed 12 times since Monday ›**, which ope
 day (each opens that run). A new pass updates that message where it is. A run that fails or finds
 something breaks the fold and says so in its own message, and a message from you starts a new one.
 
-**Open full report** opens that run under History, at its report. **Ask DGC to fix** sends
-the prompt the Work chat's report card sends, naming the run, to the chat the Pip reports to
-(the newest one it was set up in or attached to), in that chat's tab; a Pip that reports to no
-chat starts a new one. It is sent once: the button then reads "Asked DGC". The status under the
+**Open full report** opens that run under History, at its report. **Ask DGC to fix** opens the
+chat the Pip reports to (the newest one it was set up in or attached to) in its tab, and DGC fixes
+the report there in the background, as the Work chat's card does (see
+[Ask DGC to fix](#ask-dgc-to-fix)); a Pip that reports to no chat starts a new one, and its report's
+card appears there. The button then reads "Asked DGC". The status under the
 Pip's name says what its last run found ("Today's audit: 5 findings") and goes to its message.
 
 **Once, even with the editor closed.** The post is written when the run finishes, by the
@@ -516,9 +517,68 @@ saved error below it), with the worst findings, file and line. It has three butt
 
 | Button | What it does |
 | --- | --- |
-| **Ask DGC to fix** | Sends a prompt about this report, once, and leaves the message box alone. If a turn is running, it waits in the queue (**Steer now** moves it into the turn). The button then reads "Asked DGC", also after a reload. The prompt names the run, so DGC reads the whole report with `pips_context`, and it asks DGC to check before changing live data or services. |
+| **Ask DGC to fix** | DGC fixes it in the background, in a copy of the project, and the card shows how it is going; you keep working in the chat. See [Ask DGC to fix](#ask-dgc-to-fix). |
 | **Open report** | Opens the Pips view at that run. |
 | **Dismiss** | Removes the card. The report stays in Pips. Saved with the chat. |
+
+### Ask DGC to fix
+
+**Ask DGC to fix** (**Fix** on the card's second line) starts a helper that works in the background
+of the chat: no new turn, no message from you, and the message box is left alone, so you keep
+chatting while it works. It reads the whole report (every finding with its evidence, the checks
+that failed, or why the run failed), checks each finding against the code, fixes the real ones in a
+copy of the project and runs the project's tests there when it can. It never changes live data or
+services: no deploys, no pushes, nothing against a production database. If something can only be
+fixed on a live system, it stops and says what you should do.
+
+**The card is the fix's status.** It gets a line of its own under its two, shown whether the card
+is open or closed:
+
+| The line says | Its buttons |
+| --- | --- |
+| "Waiting · starts after the fix for ERP daily audit": another fix of this project runs first | **Stop** |
+| "Getting the fix copy ready", "Installing dependencies: npm ci" | **Watch**, **Stop** |
+| "Fixing · Running npm test": what the helper is doing now, and for how long | **Watch** (the helper's own page), **Stop** |
+| "Needs you", with the question under it: a permission it needs, asked on the card | the question's own buttons |
+| "Fixed · 2 files changed +12 −3", the files (each opens its diff), and whether the tests ran in the fix copy ("Tests passed in the fix copy · npm test", "Tests failed…", "Tests didn't run in the fix copy: no test command") | **Review**, **Undo**, **Watch** |
+| "Fixed 1 file · 1 held back": a file you changed on the same lines while it worked is not touched; "Held back: app/gst.py" opens what the fix would change there | **Review**, **Undo** |
+| "Nothing to change", with the helper's reason | **Watch** |
+| "Stopped", "The fix didn't finish", "Interrupted": nothing in your project was changed | **Try again** |
+
+**When it finishes, its changes are applied**, as any helper's are: a file you didn't touch gets its
+change, a file you changed elsewhere meanwhile is merged with your change, and one you changed on the
+same lines is held back. A file with uncommitted work of yours is fixed on top of that work.
+**Undo** puts every file it changed back as it was before the fix, after asking, and keeps a file you
+have changed since (the card says which). **Review** opens the diff of a file, or lets you pick one.
+A question it needs is asked on the card, and the agents pill at the bottom says an agent needs you.
+
+**One fix copy per project.** The fix works in a copy of the project DGC keeps for fixes (a Git
+worktree under `~/.dgc/fix-copies/`), never in your files. Before each fix the copy is brought up to
+date with your project: its commit and your uncommitted changes. What Git ignores stays in it
+between fixes, so dependencies are installed once, with the project's own install command (`npm ci`,
+`pnpm install`, `yarn install`, `bun install`, `uv sync`, `poetry install`, `pipenv sync`,
+`composer install`, `cargo fetch`, `go mod download`), and again only when a lock file changes. The
+install goes through your permission rules like any command: in Default mode the card asks before
+it runs, and **Always allow** saves the rule. A Git project is needed; Plan mode changes nothing, so a fix doesn't
+start there. Fixes run one at a time per project; another one waits its turn on its own card.
+
+**A file Git ignores, only when a test needs it.** A `.env` or a local config isn't in the copy. If
+a test the helper runs needs one, it asks for it on the card ("Copy .env from your project into
+the fix copy?"): **Copy it** copies the file (a copy, never a link), and later fixes of that project
+get it too without asking. Nothing is asked up front.
+
+**The Pip fixes chip.** While a fix works, and until you have seen how it ended, a **Pip fixes**
+chip sits on the line of chips above the message box (never a row of its own); it turns amber when
+a fix needs you, and opens a list of this chat's fixes, each one going to its card. Other background
+work stays in the agents pill.
+
+**After a reload.** A fix keeps working while the window reloads, and the reopened chat draws its
+card as it is, with a question it is waiting on. A fix that DGC itself stopped before it finished
+reads "Interrupted" and changed nothing.
+
+**Out of sight.** A fix copy nobody used for 14 days is removed by itself; `dgc doctor` lists the
+copies and their size. An older DGC CLI keeps the earlier behaviour: Ask DGC to fix sends DGC one
+message naming the run, and the button reads "Asked DGC".
 
 **Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, and a
 failed run of either. They are said when something changes: the first report, new or different
