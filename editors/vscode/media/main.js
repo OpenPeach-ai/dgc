@@ -2826,7 +2826,7 @@
   // the pages before it first. With an older CLI the rail lists the prompts on screen, and its card offers to load
   // the earlier messages. Only this chat's own transcript: a Pip's chat has none of these rows.
   let railOffered = false;            // ready.capabilities.outline
-  let railOutline = null;             // {token, prompts}: the answer to the latest get_outline
+  let railOutline = null;             // {prompts}: the answer to the latest get_outline
   let railAsked = 0;                  // that request's token: an older answer is dropped
   let railHeld = new Set();           // the turn ids of the prompts in the latest history snapshot (reachable here)
   let railSerial = 0, railSeeking = null;
