@@ -352,7 +352,10 @@ def _validate_package(package: dict, source_package: dict, version: str) -> None
         raise ValidationError("extension/package.json: unexpected VS Code engine range")
     if package.get("capabilities", {}).get("untrustedWorkspaces", {}).get("supported") is not False:
         raise ValidationError("extension/package.json: untrusted workspaces must remain disabled")
-    if package.get("activationEvents") != ["onView:dgc.chat"]:
+    # The side bar, plus the three editor tabs VS Code restores after a reload (a session tab, a ChatDGC tab, a
+    # ChatDGC widget), each revived by its own registerWebviewPanelSerializer: nothing else wakes DGC.
+    if package.get("activationEvents") != ["onView:dgc.chat", "onWebviewPanel:dgc.chatEditor",
+                                           "onWebviewPanel:dgc.chatdgcEditor", "onWebviewPanel:dgc.chatdgcWidget"]:
         raise ValidationError("extension/package.json: unexpected activation surface")
 
 
@@ -427,6 +430,8 @@ def _validate_content_types(raw: bytes) -> None:
         ".ico": "image/x-icon",
         ".woff": "font/woff",
         ".vsix": "application/octet-stream",
+        ".webp": "image/webp",          # the Pips' plush art (media/pips/plush-bodies.webp)
+        ".woff2": "font/woff2",         # KaTeX's fonts for ChatDGC's maths (dist/katex/fonts)
     }
     if (actual != expected or len(actual) != len(default_nodes)
             or root.findall(f"{{{CONTENT_NS}}}Override")):

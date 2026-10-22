@@ -10965,6 +10965,9 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/intercom.png",
         "extension/media/plugin-logos/mobbin.png",
         "extension/media/plugin-logos/mural.png",
+        "extension/media/plugin-logos/asana.png",
+        "extension/media/plugin-logos/docusign.png",
+        "extension/media/plugin-logos/zoom.png",
         "extension/media/plugin-logos/plain.png",
         "extension/media/plugin-logos/read-ai.png",
         "extension/media/plugin-logos/refero.png",
@@ -10991,6 +10994,13 @@ def test_extension_vsix_guard():
         "extension/media/agents/agent-08-rose.svg",
         "extension/media/agents/agent-08-rose-animated.svg",
         "extension/licenses/LUCIDE-LICENSES.txt",
+        "extension/media/msgtime.js",
+        "extension/media/readaloud.js",
+        "extension/media/texthistory.js",
+        "extension/media/voicebar.js",
+        "extension/media/voicebar.css",
+        "extension/media/voicemode.js",
+        "extension/media/promptrail.js",
         "extension/media/chatdgc.js",
         "extension/media/chatdgc.css",
         "extension/media/chart.js",
@@ -11038,7 +11048,7 @@ def test_extension_vsix_guard():
         "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 159)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 169)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real
