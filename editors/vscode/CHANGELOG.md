@@ -584,7 +584,7 @@
 - **Dictation over Remote SSH explains itself.** In Cursor or VS Code connected to another machine, the microphone
   said "Dictation records on the computer you're at" and nothing else. It now says DGC Voice must be installed in
   that editor on this computer while DGC runs on the remote host, and offers to install it.
-- **A link to a file with its line is a link.** `[README.md](README.md:1)` in a reply showed as raw text: a bare file
+- **A link to a file with its line is a link.** A Markdown link to `README.md:1` in a reply showed as raw text: a bare file
   name followed by a colon looked like a web address's scheme. The line comes off first now, so it opens README.md
   at line 1; `javascript:`, `command:` and the like are still refused, digits or not.
 - **A Pip's plugin action shows its Allow card again.** Since every plugin turned on became every Pip's, what a
