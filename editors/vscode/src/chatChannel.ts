@@ -50,7 +50,10 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
   private held: DgcCommand[] = [];
   private readonly hostListeners: Array<[string, (...args: any[]) => void]> = [];
 
-  constructor(readonly host: DgcBackend, readonly cwd: string, private readonly openRequestId: string) {
+  /** `adopt`: a chat the process already holds -- one a reattached backend kept running with no window
+   *  (DgcBackend.attachedOpened) -- is taken over instead of opening a new one. */
+  constructor(readonly host: DgcBackend, readonly cwd: string, private readonly openRequestId: string,
+              private readonly adopt = "") {
     super();
   }
 
@@ -78,6 +81,26 @@ export class OpenedChat extends EventEmitter implements ChatBackend {
       this.emit("exit", ...args);
     });
     this.listen("disposed", () => this.emit("disposed"));
+    if (this.adopt) {
+      const opened = this.host.attachedOpened.get(this.adopt);
+      if (!opened || !this.host.ready) {
+        this.failToOpen("the chat this window had is no longer running");
+        return;
+      }
+      // Claim it at once: a chat no window takes back after a reattach is closed when idle. A ping
+      // carries no answer and skips the chat's command queue.
+      this.host.send({ type: "ping", chat_id: this.adopt } as DgcCommand);
+      // Next tick, as an opened chat's `ready` would arrive: the slot finishes wiring itself first.
+      setTimeout(() => {
+        if (this.closed || this.chatId) { return; }
+        this.chatId = this.adopt;
+        this.ready = true;
+        this.emit("chat-log", `[extension: took back chat ${this.adopt} in ${this.cwd} on dgc serve ${this.hostPid()}, `
+          + "which kept it running with no window]");
+        this.deliver(this.readyFrom(opened));
+      }, 0);
+      return;
+    }
     if (!this.host.send({ type: "open_chat", request_id: this.openRequestId, cwd: this.cwd } as DgcCommand)) {
       this.failToOpen("the backend would not take a request to open a chat");
     }

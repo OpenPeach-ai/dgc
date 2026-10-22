@@ -2643,19 +2643,35 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // chat the user is looking at, and a background child's own death must still be handled.
     const slot = this.activeSlot();
     const folder = slot.cwd || this.cwd();
-    const host = this.chatHost(slot);
+    // "Open here", or a session another process is running: this chat reattaches with a process of its
+    // own (dgc/serve_relay.py), never a chat opened on the window's other one.
+    const reattach = this.attachMode === "steal" || this.liveElsewhere(this.sessionRestoreCandidate);
+    const host = reattach ? undefined : this.chatHost(slot);
     const be: ChatBackend = host
       ? new OpenedChat(host, folder, this.nextRequestId("open-chat"))
       : new DgcBackend(folder, cmd, this.context.extension.packageJSON.dgcCliVersion, this.hostRoute());
     if (!host) {
       this.processEpochs.set(be, this.processEpoch);
       this.logProcess(be as DgcBackend);
+      // A session's chat keeps its work running when the window goes (a reload, a closed window), and a
+      // window that comes back reattaches to it. The Sessions home's own backend does not: it holds no
+      // session of its own.
+      (be as DgcBackend).keepWorkRunning = !this.home;
       // The session this chat is about to restore may still be running in a backend whose window went:
       // a CLI that kept it running relays this spawn to it (dgc/serve_relay.py), and an older one ignores it.
       const session = /^[A-Za-z0-9_-]{1,128}$/.test(this.sessionRestoreCandidate) ? this.sessionRestoreCandidate : "";
-      if (session) { (be as DgcBackend).attach = { session, mode: this.attachMode }; }
-      this.attachMode = "auto";
+      if (session && !this.home) { (be as DgcBackend).attach = { session, mode: this.attachMode }; }
     }
+    this.attachMode = "auto";
+    this.wireSlotBackend(slot, be, host);
+    be.start();
+    this.backend = be;
+    return be;
+  }
+
+  /** Hang this slot's handlers on its backend: everything it says reaches the slot, whether or not the
+   *  slot is the chat on screen. */
+  private wireSlotBackend(slot: ChatSlot, be: ChatBackend, host: DgcBackend | undefined): void {
     slot.backend = be;
     const wired: Array<[string, (...args: any[]) => void]> = [];
     this.backendListeners.set(be, wired);
@@ -2721,10 +2737,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const recovering = this.recoverBackend();
       this.post({ type: "backend_exit", code, signal, recovering, cause, resumes: recovering ? resumes : "none" });
     });
-    be.start();
-    this.backend = be;
-    return be;
   }
+
 
   /** What a `dgc serve` says about itself -- its stderr, its start, a start that failed, being
    *  stopped, its exit -- written to the backend log once, by the process, however many chats run
@@ -2878,6 +2892,55 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void Promise.resolve(this.context.workspaceState.update(this.stateKey(QUEUED_PROMPTS_KEY),
         items.length ? { scope: this.draftScope(), items } : undefined)).catch(() => { /* only a reload's restore is lost */ });
     } catch { /* only a reload's restore is lost */ }
+  }
+
+  /** This chat's state in a backend that kept its session running with no window, when `ready` says it
+   *  reattached to one (ready.capabilities.attached): undefined for an ordinary start, and for a chat
+   *  opened anew on a reattached process (its session is not among the ones that process kept). */
+  private attachedChat(ev: DgcEvent): AttachedChatState | undefined {
+    const attached = (ev.capabilities as any)?.attached;
+    const session = String(ev.session_id || "");
+    if (!session || !attached || typeof attached !== "object" || !Array.isArray(attached.chats)) { return undefined; }
+    const found = attached.chats.find((chat: any) => chat && typeof chat === "object" && String(chat.session_id || "") === session);
+    return found ? found as AttachedChatState : undefined;
+  }
+
+  /** The prompts this window queued before it went are still queued in the backend that kept the
+   *  session running: they are tracked again as queued, not handed back as unsent. One that is no
+   *  longer in its queue ran with no window (the transcript has it); handing it back would send it
+   *  twice. One queued from another window is tracked with the backend's own words. */
+  private adoptLiveQueue(live: AttachedChatState): void {
+    const queued = new Map<string, string>();
+    for (const item of Array.isArray(live.queued) ? live.queued : []) {
+      const id = String(item?.request_id || "");
+      if (/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) { queued.set(id, String(item?.text || "")); }
+    }
+    const keep: QueuedPrompt[] = [];
+    for (const prompt of this.unsentPrompts) {
+      if (prompt.session && prompt.session !== live.session_id) { keep.push(prompt); continue; }
+      if (queued.has(prompt.requestId)) {
+        this.unstartedPrompts.set(prompt.requestId, { ...prompt, session: live.session_id, queued: true });
+        queued.delete(prompt.requestId);
+      }
+    }
+    for (const [requestId, text] of queued) {
+      if (this.unstartedPrompts.size >= 64) { break; }
+      this.unstartedPrompts.set(requestId, { requestId, session: live.session_id, text,
+                                             draft: { text, attachments: [] }, queued: true });
+    }
+    this.unsentPrompts = keep;
+    this.persistQueuedPrompts();
+  }
+
+  /** The last word from any backend on the DGC processes of this computer (live_sessions). */
+  private liveSessionRows: any[] = [];
+
+  /** `session` is running in another DGC process that a window can reattach to: a chat that opens it
+   *  starts a process of its own, which relays to that one, rather than a chat on this window's. */
+  private liveElsewhere(session: string): boolean {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(session)) { return false; }
+    return this.liveSessionRows.some((row) => row && !row.here && row.detachable
+      && Array.isArray(row.sessions) && row.sessions.some((item: any) => item?.session_id === session));
   }
 
   /** What a host that died (a window reload) had queued: its backend died with it, so none of it ran. */

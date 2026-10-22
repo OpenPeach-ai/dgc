@@ -588,7 +588,13 @@ class Switchboard:
                 "windowless_s": int(self.clock() - since) if windowless and since is not None else 0,
                 "work": work.reason(), "work_kind": work.kind()}
 
-    def _on_screen(self) -> tuple[bool, float]:
+    def _on_screen(self, mode: str = "restore") -> tuple[bool, float]:
+        """Whether the attached window's chat panel shows this session, and how long it has been quiet.
+
+        A reload (``restore``) judges it on two missed heartbeats, the panel's own definition of on
+        screen, so the window a reload left behind is taken within 40 seconds. Any other automatic
+        attach (a session opened from a list, a restart) is more careful: a window whose renderer
+        spoke in the last two minutes may only be in the background, and only "Open here" takes it."""
         liveness = getattr(self.host, "_editor_liveness", None)
         if liveness is None:
             return False, 0.0
@@ -598,6 +604,10 @@ class Switchboard:
             on_screen = False
         last = getattr(liveness, "_last_renderer", None)
         quiet = time.monotonic() - last if isinstance(last, (int, float)) else 0.0
+        if not on_screen and mode == "auto" and isinstance(last, (int, float)):
+            closed = getattr(liveness, "_view_closed_at", None)
+            from .headless import TAKEOVER_SILENCE_S
+            on_screen = (closed is None or closed < last) and quiet < TAKEOVER_SILENCE_S
         return on_screen, quiet
 
     def _stop(self, sock: socket.socket, hello: dict) -> None:
@@ -626,7 +636,7 @@ class Switchboard:
             return "not_here", {}
         mode = hello.get("mode") if hello.get("mode") in ATTACH_MODES else "auto"
         if self.current is not None and mode != "steal":
-            on_screen, quiet = self._on_screen()
+            on_screen, quiet = self._on_screen(mode)
             if on_screen:
                 return "on_screen", {"quiet_s": round(quiet, 1)}
         return "", {}
