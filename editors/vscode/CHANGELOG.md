@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **DOMPurify 3.4.17** for Mermaid's diagram rendering (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr,
+  GHSA-c6gr-qvv4-5v3f).
+
 - **A Pip for live data.** A Pulse's **Plan & schedule** now asks what it runs: tests or page checks on a copy of the
   code, or **read-only commands on live data**, one a line (up to six), with what they can reach one click away. DGC
   runs only those exact commands, read-only, and the Pip's model sums up what they print. Saving them is a reviewed
