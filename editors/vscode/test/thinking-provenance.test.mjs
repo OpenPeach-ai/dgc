@@ -36,6 +36,8 @@ for (const width of [300, 460]) {
         // The withheld block before the second command is a mark on that step now, inside its folded
         // line: open the lines, so the row measured is the one a reader sees.
         await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
+        // An answered turn folds its work, thinking included, into its "Worked for" row (work-fold.test.mjs): open it too.
+        await page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
         const facts = await page.evaluate((contrastSource) => {
           const contrast = eval(contrastSource);
           const log = document.getElementById("log");
@@ -98,6 +100,8 @@ test("forced colours keep the hint, the note and the static row visible", async 
   try {
     await page.emulateMedia({ forcedColors: "active" });
     await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
+    // An answered turn folds its work, thinking included, into its "Worked for" row (work-fold.test.mjs): open it too.
+    await page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
     const facts = await page.evaluate(() => {
       const visible = (node) => {
         const rect = node.getBoundingClientRect();
@@ -174,6 +178,8 @@ test("a block whose text is not here says so inside its body", async (t) => {
   try {
     // The first two blocks follow the git log step in its stretch: they are the last rows of its line.
     await page.evaluate(() => document.querySelectorAll(".tool-group").forEach((group) => { group.open = true; }));
+    // An answered turn folds its work, thinking included, into its "Worked for" row (work-fold.test.mjs): open it too.
+    await page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
     await page.evaluate(() => document.querySelectorAll(".disclosure").forEach((button) => button.click()));
     const facts = await page.evaluate((contrastSource) => {
       const contrast = eval(contrastSource);
