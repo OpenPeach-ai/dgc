@@ -117,6 +117,9 @@ STATIC_MEMBERS = {
     "extension/media/plugin-logos/plain.png": "media/plugin-logos/plain.png",
     "extension/media/plugin-logos/read-ai.png": "media/plugin-logos/read-ai.png",
     "extension/media/plugin-logos/refero.png": "media/plugin-logos/refero.png",
+    "extension/media/plugin-logos/asana.png": "media/plugin-logos/asana.png",
+    "extension/media/plugin-logos/docusign.png": "media/plugin-logos/docusign.png",
+    "extension/media/plugin-logos/zoom.png": "media/plugin-logos/zoom.png",
     "extension/media/seti.woff": "media/seti.woff",
     "extension/licenses/SETI-UI-MIT.txt": "licenses/SETI-UI-MIT.txt",
     "extension/licenses/CODICONS-CODE-MIT.txt": "licenses/CODICONS-CODE-MIT.txt",
@@ -128,6 +131,15 @@ STATIC_MEMBERS = {
     # computer's screen) and KaTeX (maths in ChatDGC's replies: its script, stylesheet and WOFF2 fonts, built from
     # the katex package into dist/katex/).
     "extension/media/chatdgc.js": "media/chatdgc.js",
+    # The scripts both chat pages share: message times, read aloud, a box's text history, the voice bar and
+    # voice mode, and the prompt rail.
+    "extension/media/msgtime.js": "media/msgtime.js",
+    "extension/media/readaloud.js": "media/readaloud.js",
+    "extension/media/texthistory.js": "media/texthistory.js",
+    "extension/media/voicebar.js": "media/voicebar.js",
+    "extension/media/voicebar.css": "media/voicebar.css",
+    "extension/media/voicemode.js": "media/voicemode.js",
+    "extension/media/promptrail.js": "media/promptrail.js",
     "extension/media/chatdgc.css": "media/chatdgc.css",
     "extension/media/chart.js": "media/chart.js",
     "extension/media/library.js": "media/library.js",
@@ -263,6 +275,9 @@ def _looks_like_placeholder(value: str) -> bool:
         normalized in PLACEHOLDER_WORDS
         or normalized.startswith(("${", "<", "your-", "example-"))
         or set(normalized) <= {"*", "x", "-", "_"}
+        # words for a person, not a credential: a key, token or password literal is one unbroken run, while
+        # `secret: "holds one of your configured secrets"` is the Pips view saying why it skipped a file
+        or len(normalized.split()) >= 3
     )
 
 
@@ -302,7 +317,9 @@ def _scan_credentials(member: str, raw: bytes, environment_values: list[bytes]) 
         raise ValidationError(f"{member}: expected UTF-8 text") from exc
     if re.search(r"(?:^|[/\\])\.env(?:$|[./\\])", text, re.I | re.M):
         raise ValidationError(f"{member}: contains a private environment-file path")
-    if re.search(r"(?:/home/[^/\s]+|/Users/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)", text):
+    # A real person's home folder, never a code template's: `/home/${user}` is DGC's own WSL distro account,
+    # built at run time (src/wsl.ts), not a path from the machine that packaged the extension.
+    if re.search(r"(?:/home/(?!\$\{)[^/\s]+|/Users/(?!\$\{)[^/\s]+|[A-Za-z]:\\Users\\(?!\$\{)[^\\\s]+)", text):
         raise ValidationError(f"{member}: contains a developer-machine path")
     if member in VENDORED_MEMBERS:
         return          # see VENDORED_MEMBERS: every high-signal check above still ran

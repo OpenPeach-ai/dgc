@@ -672,7 +672,7 @@
 
 - **DGC in VS Code or Cursor on Windows, with nothing else to install.** DGC is a Linux and macOS program, so on
   Windows the extension runs it inside WSL, in a distro of its own named `DGC`, and translates every path that
-  crosses: your `C:\Users\you\proj` is `/mnt/c/Users/you/proj` to DGC, and files DGC keeps for itself open from
+  crosses: your `C:\work\proj` is `/mnt/c/work/proj` to DGC, and files DGC keeps for itself open from
   `\\wsl.localhost\DGC\...`. Your own WSL distros are never touched.
 - **It sets itself up, one dialog at a time.** WSL off: "Turn on WSL for DGC?" (Windows asks for administrator
   permission, then a restart). No distro yet: "Set up DGC on Windows?" downloads Ubuntu 24.04 straight from its
