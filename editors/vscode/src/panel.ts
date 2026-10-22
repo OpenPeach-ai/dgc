@@ -1944,6 +1944,49 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  only when the CLI says so (`agent_control_foreground`), otherwise the map offers the turn's own Stop instead
    *  and never sends this. The backend answers with an `agents` snapshot and, later, the agent's own agent_ended;
    *  only a refusal needs saying here, so the map can put its Stop back. */
+  private pipFixLive(): boolean {
+    return (this.lastReadyEvent?.capabilities as any)?.pip_fix === 1;
+  }
+
+  /** Undo a background fix: every file it wrote that still holds what it left goes back. Confirmed first. */
+  private async undoPipFix(fixId: string, files: number): Promise<void> {
+    if (!/^fix_[0-9a-f]{32}$/.test(fixId) || !this.pipFixLive()) return;
+    const count = files > 0 ? `${files} file${files === 1 ? "" : "s"}` : "the files it changed";
+    const choice = await vscode.window.showWarningMessage(
+      `Undo this fix? DGC puts back ${count} as they were before it. A file you changed since is kept.`,
+      { modal: true }, "Undo fix");
+    if (choice !== "Undo fix") return;
+    this.ensureBackend().send({ type: "undo_pip_fix", fix_id: fixId, request_id: this.nextRequestId("pip-fix-undo") });
+  }
+
+  /** Review a background fix: one file opens its diff, several are offered to pick from. */
+  private async reviewPipFix(fixId: string, paths: string[]): Promise<void> {
+    if (!/^fix_[0-9a-f]{32}$/.test(fixId) || !this.pipFixLive() || !paths.length) return;
+    let path = paths[0];
+    if (paths.length > 1) {
+      const pick = await vscode.window.showQuickPick(paths.map((label) => ({ label })),
+        { placeHolder: "Review what the fix changed in…" });
+      if (!pick) return;
+      path = pick.label;
+    }
+    try {
+      const result: any = await this.ensureBackend().request({ type: "get_pip_fix_change", fix_id: fixId, path,
+        request_id: this.nextRequestId("pip-fix-change") }, "pip_fix_change", 15000);
+      if (result?.type !== "pip_fix_change" || result.path !== path) throw new Error("The fix's change could not be read.");
+      this.reviewDocuments.clear();
+      const id = createHash("sha256").update(`${fixId}:${path}:${Date.now()}`).digest("hex").slice(0, 16);
+      const leaf = basename(path) || "change";
+      const left = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/before/${leaf}` });
+      const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
+      this.reviewDocuments.set(left.toString(), String(result.before ?? ""));
+      this.reviewDocuments.set(right.toString(), String(result.after ?? ""));
+      const label = result.kind === "held" ? "your file ↔ the fix's version, held back" : "before ↔ after the fix";
+      await vscode.commands.executeCommand("vscode.diff", left, right, `${path} (${label})`, { preview: true });
+    } catch (error) {
+      void vscode.window.showInformationMessage(error instanceof Error ? error.message : "The fix's change could not be read.");
+    }
+  }
+
   private async stopAgent(id: string): Promise<void> {
     const agentId = String(id || "");
     if (!/^sub-[0-9a-f]{12}$/i.test(agentId) || !(this.lastReadyEvent?.capabilities as any)?.agent_control) { return; }
@@ -3307,7 +3350,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The request handlers project summaries and open text documents. Raw roots and file bodies
     // are owner-facing host data, not chat events or model inputs for the webview.
     if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
-        || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"].includes(ev.command))) return;
+        || ev.type === "pip_fix_change"
+        || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change", "get_pip_fix_change"].includes(ev.command))) return;
     // Account setup replies may contain single-use consent links. Never send them to chat.
     if (ev.type === "composio_connection") return;
     const openImageAnswer = this.noteImageEvent(ev);
@@ -4883,6 +4927,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.lastReadyEvent?.capabilities?.pip_reports === 1 && /^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) {
           be.send({ type: "pip_report_dismiss", run_id: String(msg.run_id) });
         }
+        break;
+      // Ask DGC to fix in the background (ready.capabilities.pip_fix): the card is the fix's status.
+      case "startPipFix":
+        if (this.pipFixLive() && /^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) {
+          be.send({ type: "start_pip_fix", run_id: String(msg.run_id), request_id: this.nextRequestId("pip-fix") });
+        }
+        break;
+      case "listPipFixes":
+        if (this.pipFixLive()) be.send({ type: "list_pip_fixes", request_id: this.nextRequestId("pip-fixes") });
+        break;
+      case "undoPipFix":
+        void this.undoPipFix(String(msg.fix_id || ""), Number(msg.files) || 0);
+        break;
+      case "reviewPipFix":
+        void this.reviewPipFix(String(msg.fix_id || ""),
+          Array.isArray(msg.paths) ? msg.paths.filter((p: unknown) => typeof p === "string" && p.length > 0 && p.length <= 4096).slice(0, 50) : []);
         break;
       case "stopTroupe":
         void this.stopTroupe(String(msg.run_id || ""));

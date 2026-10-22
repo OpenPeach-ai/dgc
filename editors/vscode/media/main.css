@@ -2818,8 +2818,8 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 @media (forced-colors: active) { .troupe-bar { border: 1px solid CanvasText; } .troupe-bar > span { background: Highlight; } }
 
 /* A Pip report in the chat: a finished run of a Pip that reports here, drawn where it arrived (after
-   the turn that was running), never above the composer. Ask DGC to fix only fills the composer. A
-   clean run is one quiet line. Narrow panels wrap the row, never clip the actions. */
+   the turn that was running), never above the composer. Ask DGC to fix starts a background fix whose status is
+   this card (.pip-fix below), or, with an older CLI, sends one prompt. A clean run is one quiet line. Narrow panels wrap the row, never clip the actions. */
 .pip-report { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; margin: var(--sp-3) 0;
   padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
   box-shadow: inset 3px 0 0 var(--accent-text); }
@@ -2918,6 +2918,55 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-group > .pip-report.slim { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
 .pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
 @media (prefers-reduced-motion: reduce) { .pip-report-chevron { transition: none; } }
+/* Ask DGC to fix, in the background: the report's card is the fix's status. One line (what it is doing or what it
+   did, how long, its actions), then what changed, whether tests ran in the fix copy, and a permission it needs. It is
+   its own line under the card's two, so it shows open or closed. */
+.pip-fix { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); font: var(--w-reg) var(--t-xs)/1.5 var(--sans);
+  cursor: default; }
+.pip-fix-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+.pip-fix-mark { flex: none; font-size: 13px; color: var(--accent-text); }
+.pip-fix[data-state="applied"] .pip-fix-mark, .pip-fix[data-state="partial"] .pip-fix-mark,
+.pip-fix[data-state="unchanged"] .pip-fix-mark { color: var(--good); }
+.pip-fix[data-state="failed"] .pip-fix-mark, .pip-fix[data-state="not_applied"] .pip-fix-mark,
+.pip-fix[data-state="interrupted"] .pip-fix-mark { color: var(--del-text); }
+.pip-fix[data-state="stopped"] .pip-fix-mark, .pip-fix[data-state="undone"] .pip-fix-mark { color: var(--muted); }
+.pip-fix[data-waiting] .pip-fix-mark, .pip-fix[data-waiting] .pip-fix-text { color: var(--need-text); }
+.pip-fix-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-fix-totals, .pip-fix-counts { display: inline-flex; gap: 4px; flex: none; }
+.pip-fix-time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pip-fix-actions { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.pip-fix-act { min-height: 0; height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--link, var(--accent-text)); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.pip-fix-act:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface2); }
+.pip-fix-act:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-fix-act:disabled { color: var(--muted); cursor: default; }
+.pip-fix-files { display: grid; gap: 1px; margin: 4px 0 0; padding: 0 0 0 19px; list-style: none; }
+.pip-fix-files li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pip-fix-file { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--link, var(--accent-text));
+  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); text-align: left; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: pointer; }
+.pip-fix-file:hover { text-decoration: underline; }
+.pip-fix-file:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.pip-fix-kind, .pip-fix-more { color: var(--muted); }
+.pip-fix-held, .pip-fix-note, .pip-fix-tests, .pip-fix-summary { margin: 3px 0 0 19px; min-width: 0; overflow-wrap: anywhere; }
+.pip-fix-held { color: var(--need-text); }
+.pip-fix-note, .pip-fix-summary { color: var(--muted); }
+.pip-fix-tests.tone-ok { color: var(--good); }
+.pip-fix-tests.tone-bad { color: var(--del-text); }
+.pip-fix-tests.tone-muted { color: var(--muted); }
+.pip-fix-ask:empty { display: none; }
+.pip-fix-ask .card { margin: 6px 0 0; }
+.pip-report.slim[data-fix] { cursor: default; }
+.pip-fixes-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.pip-fixes-row { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; min-width: 0; padding: 4px var(--sp-2);
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+  text-align: left; cursor: pointer; }
+.pip-fixes-row:hover { background: var(--surface2); }
+.pip-fixes-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.pip-fixes-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font-weight: var(--w-semi); }
+.pip-fixes-state { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 
 /* Memory that learns: the quiet "Remembered" line a look back adds, and /learn's skill card. */
 .memory-learned .memory-learned-rows { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

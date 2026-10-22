@@ -1353,6 +1353,11 @@
   // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
   let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
+  let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
+  // Declared up here: the rail's chip line reads them while the panel is still starting up.
+  const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
+  const pipFixSteps = new Map();         // agent id -> what the fixer is doing now ("Running npm test")
+  const PIP_FIX_ACTIVE = ["queued", "preparing", "running", "applying"];
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() {
@@ -5538,7 +5543,9 @@
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
-    renderRailChips(asChips ? present : []);
+    // Pip fixes are a chip on this line however many rows there are: they have no row of their own.
+    const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
+    renderRailChips([...(asChips ? present : []), ...fixes]);
   }
   function setChatChanges(next) {
     const files = Array.isArray(next?.files) ? next.files.filter((item) => item
@@ -5830,11 +5837,13 @@
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
   const RAIL_ROW_ORDER = ["pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
-    changes: "Changes in this chat", pips: "Pips" };
+    changes: "Changes in this chat", pips: "Pips", pipfixes: "Pip fixes" };
   const RAIL_FITS = ["full", "compact", "tight", "tighter", "wrap"];
   const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
   let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
-  const railBar = (kind) => (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null;
+  // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
+  const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel()
+    : (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null);
   const railCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   function railTroupeLead() {
     const runs = [...troupeRuns.values()];
@@ -5895,6 +5904,14 @@
         extra: total ? [[`+${additions}`, "change-add"], [`−${deletions}`, "change-del"]] : [["partial scan", ""]],
         label: total ? `${count}, ${railCount(additions, "line")} added, ${railCount(deletions, "line")} removed` : count,
         tip: total ? `${count} · +${additions} −${deletions}` : count };
+    }
+    if (kind === "pipfixes") {
+      const shown = pipFixesForChip(), live = shown.filter(pipFixActive);
+      const waiting = live.filter((fix) => agentRecords.get(fix.agent_id)?.state === "waiting").length;
+      const said = shown.map((fix) => `${fix.name || "Pip"}: ${pipFixHeadline(fix)}`).join("; ");
+      return { icon: "tools", word: "Pip fixes", num: String(live.length || shown.length), live: live.length > 0,
+        need: waiting > 0, tone: "warn", needWord: waiting ? "needs you" : "",
+        label: `Pip fixes: ${said}`, tip: `Pip fixes · ${said}` };
     }
     if (kind === "pips") {
       const alert = pipsBar.dataset.reason === "alert", headline = $("pips-digest-text").textContent;
@@ -6053,6 +6070,7 @@
     if (kind === "troupe" && !troupesOpen) { toggleTroupes(); railOpen.unfolded.push(() => { if (troupesOpen) toggleTroupes(); }); }
     if (kind === "tasks" && !tasksOpen()) { toggleTasks(); railOpen.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
     $("rail-pop-title").textContent = RAIL_POP_TITLES[kind] || "";
+    if (kind === "pipfixes") for (const fix of pipFixes.values()) if (!pipFixActive(fix)) fix._seen = true;
     railLinksSig = "";
     paintRailPopLinks(kind);
     railPop.dataset.kind = kind;
@@ -6073,9 +6091,14 @@
     const active = document.activeElement, inside = railPop.contains(active);
     railOpen = null;
     unfolded.forEach((fold) => fold());
-    const next = RAIL_ROW_ORDER.slice(RAIL_ROW_ORDER.indexOf(bar.id) + 1).map((id) => $(id))
-      .find((node) => node && node.parentElement === composerRail);
-    composerRail.insertBefore(bar, next || null);
+    if (bar === pipFixesPanel) {
+      bar.remove();                    // the Pip fixes list is the popover's own, never a rail row
+      setTimeout(syncComposerRail, 0); // the fixes it showed are seen now: an ended one leaves the chip
+    } else {
+      const next = RAIL_ROW_ORDER.slice(RAIL_ROW_ORDER.indexOf(bar.id) + 1).map((id) => $(id))
+        .find((node) => node && node.parentElement === composerRail);
+      composerRail.insertBefore(bar, next || null);
+    }
     railPop.hidden = true;
     railPop.style.maxHeight = "";
     delete railPop.dataset.kind;
@@ -6461,9 +6484,12 @@
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
         backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
+        pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
         // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
+        // ...and this chat's fixes, for the cards whose report is not in the history (dismissed) and the chip.
+        if (pipFixLive) vscode.postMessage({ type: "listPipFixes" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
@@ -6668,6 +6694,7 @@
         break;
       }
       case "tool_call": {
+        pipFixStepFrom(ev);
         const childId = agentIdFromCall(ev.call_id);
         if (childId && !turn) {
           finishReasoning();
@@ -6813,7 +6840,8 @@
       }
       case "permission_request": {
         if (requestShown(ev.id)) break;     // announced again after a history snapshot
-        ensureTurn();
+        const fixAsk = pipFixAskHome(ev.call_id);     // a background fix's: asked on its card
+        if (!fixAsk) ensureTurn();
         if (!replaying) {
           imageViewerAttention("permission_request");
           speak(`Permission required to run ${ev.name}`);
@@ -6828,7 +6856,19 @@
           : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
         const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
-        const c = requestCard(decisionCard(`<div class="q">${icon("shield")}<span>${ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`}</span></div>${signedIn ? "" : summary}${detail}<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        // In a fix: installing the project's dependencies in the fix copy, or copying an ignored file into it.
+        const fixInstall = fixAsk && ev.name === "bash" && /:install-\d+$/.test(String(ev.call_id || ""));
+        const fixFile = fixAsk && ev.name === "request_project_file";
+        const fixQuestion = fixInstall ? "Install the project's dependencies in the fix copy?"
+          : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
+        const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
+        const title = fixQuestion || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const buttons = fixFile
+          ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
+          : `<button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button>`;
+        const inner = `<div class="q">${icon("shield")}<span>${title}</span></div>${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>`;
+        // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
+        const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
@@ -6979,6 +7019,13 @@
       case "todos":
         renderTodos(ev.todos);
         return;   // the transcript did not change: no follow scroll, no "New" on the pill
+      case "pip_fix":
+        applyPipFix(ev.fix);
+        return;
+      case "pip_fixes":
+        for (const fix of (Array.isArray(ev.items) ? ev.items : []).slice().reverse()) applyPipFix(fix, { quiet: true });
+        syncComposerRail();
+        return;
       case "pip_report":
         // A Pip that reports to this chat finished: a card in the transcript, never a turn. A turn
         // running now carries on in its own block above it.
@@ -7033,6 +7080,7 @@
         return;
       case "agents":
         renderAgentsSnapshot(ev);
+        for (const fix of pipFixes.values()) if (fix.agent_id) pipFixAgentChanged(fix.agent_id);
         if (stick || following) scroll();
         return;
       case "files_ready": {
@@ -7233,6 +7281,7 @@
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
             || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
         if (ev.command === "steer_queued") { steerQueuedRefused(); sysLine(ev.message || "That message stays queued for the next turn."); break; }
+        if (ev.command === "start_pip_fix" || ev.command === "undo_pip_fix") { pipFixRefused(ev); break; }
         if (ev.command === "list_prompt_pips") {
           if (pipPicker.active && ev.request_id === pipPicker.id) { pipPicker.loading=false; pipPicker.error=String(ev.message || "Pip references are unavailable."); renderPipPicker(); }
           break;
@@ -8799,6 +8848,7 @@
     }
   }
   function askDgcToFix(r, card) {
+    if (pipFixLive) { startPipFix(r, card); return; }   // a background fix in this chat, never a turn
     if (pipReportAsked(r.run_id)) { markPipReportAsked(card); return; }
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
@@ -8837,12 +8887,16 @@
   }
   function flushPipAsks() {
     if (!sessionReady || replaying) return;
-    while (pipAsks.length) { const r = pipAsks.shift(); if (!pipReportAsked(r.run_id)) askDgcToFix(r, null); }
+    while (pipAsks.length) {
+      const r = pipAsks.shift();
+      if (pipFixLive ? !pipFixActive(pipFixes.get(r.run_id)) : !pipReportAsked(r.run_id)) askDgcToFix(r, null);
+    }
   }
   function pipReportCard(r) {
     const quiet = r.outcome === "clear" || r.outcome === "checks_passed";
     const card = el("div", `pip-report${quiet ? " quiet" : ""}`);
     card.dataset.run = r.run_id; card.dataset.outcome = r.outcome;
+    card._report = r;
     const state = pipReportState(r);
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", `Pip report from ${r.name}: ${state}`);
@@ -8895,7 +8949,9 @@
       const b = el("button", cls); b.type = "button"; b.textContent = label; b.title = title;
       b.onclick = (event) => { event.stopPropagation(); fn(); }; into.append(b); return b;
     };
-    const fixTitle = "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
+    const fixTitle = pipFixLive
+      ? "DGC fixes it in the background, in a copy of the project, while you keep working. It never changes live data or services; Undo puts your files back."
+      : "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
     const openReport = () => { showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id }); };
     const dismiss = () => {
       const group = card.parentElement?.closest(".pip-report-group");
@@ -8934,7 +8990,7 @@
       card.dataset.shown = open ? "open" : "closed"; line1.setAttribute("aria-expanded", String(open));
     };
     line1.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fold(); } });
-    card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail")) fold(); });
+    card.addEventListener("click", (event) => { if (!event.target.closest("button, a, .pip-report-findings, .pip-report-detail, .pip-fix")) fold(); });
     if (quiet) { line1.append(slimActs, chevron); main.prepend(line1); }
     else {
       line1.append(chevron);
@@ -8948,7 +9004,7 @@
       main.prepend(line1, line2);
     }
     card.append(face, main);
-    if (!quiet && pipReportAsked(r.run_id)) markPipReportAsked(card);
+    if (!quiet && !pipFixLive && pipReportAsked(r.run_id)) markPipReportAsked(card);
     return card;
   }
   // The card's first two lines, from the report: "5 findings · 2 high" and the worst finding; "failed" and why.
@@ -8970,10 +9026,13 @@
   // Three or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings".
   function groupPipReports(card) {
     if (!card?.parentNode) return;
+    // A card with a fix is the fix's status: it stays a card of its own, and breaks a run of reports.
+    const groupable = (node) => node?.matches(".pip-report:not([data-fix]), .pip-report-group");
+    if (!groupable(card)) return;
     let start = card;
-    while (start.previousElementSibling?.matches(".pip-report, .pip-report-group")) start = start.previousElementSibling;
+    while (groupable(start.previousElementSibling)) start = start.previousElementSibling;
     const run = [];
-    for (let node = start; node && node.matches(".pip-report, .pip-report-group"); node = node.nextElementSibling) run.push(node);
+    for (let node = start; node && groupable(node); node = node.nextElementSibling) run.push(node);
     const cards = run.flatMap((node) => (node.matches(".pip-report-group") ? [...node.querySelectorAll(":scope > .pip-report")] : [node]));
     if (cards.length < 3) return;
     let group = run.find((node) => node.matches(".pip-report-group"));
@@ -9019,12 +9078,335 @@
       if (group) paintPipReportGroup(group);
     }
     const card = pipReportCard(r);
-    if (replaying) { card.classList.add("hist"); appendTarget.appendChild(card); groupPipReports(card); return; }
+    if (r.fix) applyPipFix(r.fix, { quiet: true });          // a replayed card carries its latest fix
+    const fix = pipFixes.get(r.run_id);
+    if (replaying) {
+      card.classList.add("hist"); appendTarget.appendChild(card);
+      if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
+      return;
+    }
     const stick = atBottom();
     log.appendChild(card);
-    groupPipReports(card);
+    if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
     speak(`Pip ${r.name} ${pipReportState(r)}`);
     if (stick || following) scroll(); else noteNewContent();
+  }
+  // ---- Ask DGC to fix, in the background (ready.capabilities.pip_fix) ----
+  // The founder (19 Oct): the fix is a background sub-agent of this chat, never a turn, so the chat stays free. Its
+  // report's card IS its status: what it is doing, Watch (the agent's page) and Stop; a permission it needs is asked
+  // on the card; when it ends, what changed, whether tests ran in the fix copy, Review and Undo. Every state comes
+  // from the backend as `pip_fix`; a replayed card carries its latest fix as `report.fix`, so a reload draws the same.
+  let pipFixTick = null;
+  function pipFixActive(fix) { return PIP_FIX_ACTIVE.includes(fix?.state); }
+  const validPipFix = (fix) => !!fix && typeof fix === "object" && /^fix_[0-9a-f]{32}$/.test(String(fix.fix_id || ""))
+    && /^run_[0-9a-f]{32}$/.test(String(fix.run_id || "")) && typeof fix.state === "string";
+  function pipFixByAgent(agentId) {
+    for (const fix of pipFixes.values()) if (fix.agent_id && fix.agent_id === agentId) return fix;
+    return null;
+  }
+  function pipFixCards(runId) {
+    return [...new Set([log, appendTarget])].flatMap((root) => [...root.querySelectorAll(`.pip-report[data-run="${runId}"]`)]);
+  }
+  // A record arrived: keep it (an older one of the same report never replaces a newer one) and paint its card.
+  function applyPipFix(fix, { quiet = false } = {}) {
+    if (!validPipFix(fix)) return;
+    const had = pipFixes.get(fix.run_id);
+    if (had && had.fix_id !== fix.fix_id && Number(had.created_at || 0) > Number(fix.created_at || 0)) return;
+    const was = had?.fix_id === fix.fix_id ? had.state : "";
+    const next = { ...fix, _seen: quiet || (had?.fix_id === fix.fix_id && had._seen && !(pipFixActive(had) && !pipFixActive(fix))) };
+    pipFixes.set(fix.run_id, next);
+    for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, next);
+    if (!quiet && was !== next.state && !pipFixActive(next) && was) speak(`${next.name || "The Pip"}'s fix ${pipFixHeadline(next).toLowerCase()}`);
+    syncPipFixTick();
+    syncComposerRail();
+    if (railOpen?.kind === "pipfixes") paintPipFixesPanel();
+  }
+  function pipFixPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+  function pipFixCounts(fix) {
+    const files = Array.isArray(fix.files) ? fix.files : [];
+    const counted = files.filter((f) => f.counted !== false);
+    return { files, add: counted.reduce((n, f) => n + (Number(f.additions) || 0), 0),
+             del: counted.reduce((n, f) => n + (Number(f.deletions) || 0), 0), counted: counted.length > 0 };
+  }
+  // The card's one status line, in words: "Fixing · Running npm test", "Fixed · 2 files", "Stopped".
+  function pipFixHeadline(fix) {
+    const agent = fix.agent_id ? agentRecords.get(fix.agent_id) : null;
+    const { files } = pipFixCounts(fix);
+    const held = Array.isArray(fix.held) ? fix.held.length : 0;
+    switch (fix.state) {
+      case "queued": return fix.queued_behind ? `Waiting · starts after the fix for ${fix.queued_behind}` : "Waiting to start";
+      case "preparing": return agent?.state === "waiting" ? "Needs you" : String(fix.step || "Getting the fix copy ready");
+      case "running": {
+        if (agent?.state === "waiting") return "Needs you";
+        const step = pipFixSteps.get(fix.agent_id);
+        return step ? `Fixing · ${step}` : "Fixing";
+      }
+      case "applying": return "Applying the fix";
+      case "applied": return files.length ? `Fixed · ${pipFixPlural(files.length, "file")} changed` : "Fixed";
+      case "partial": return `Fixed ${pipFixPlural(files.length, "file")} · ${held} held back`;
+      case "unchanged": return "Nothing to change";
+      case "not_applied": return "Not applied";
+      case "failed": return "The fix didn't finish";
+      case "stopped": return "Stopped";
+      case "interrupted": return "Interrupted";
+      case "undone": return "Undone";
+      default: return "Fix";
+    }
+  }
+  function pipFixTests(fix) {
+    const t = fix.tests && typeof fix.tests === "object" ? fix.tests : null;
+    if (!t) return null;
+    const command = t.command ? ` · ${String(t.command).slice(0, 160)}` : "";
+    const note = t.note ? `: ${String(t.note).slice(0, 200)}` : "";
+    if (t.state === "passed") return { text: `Tests passed in the fix copy${command}`, tone: "ok" };
+    if (t.state === "failed") return { text: `Tests failed in the fix copy${command}${note}`, tone: "bad" };
+    return { text: `Tests didn't run in the fix copy${note}`, tone: "muted" };
+  }
+  function pipFixElapsed(fix) {
+    const from = Number(fix.started_at || fix.created_at || 0) * 1000;
+    if (!from) return "";
+    const to = pipFixActive(fix) ? Date.now() : Number(fix.ended_at || 0) * 1000;
+    return to > from ? agentElapsed(to - from) : "";
+  }
+  function syncPipFixTick() {
+    const live = [...pipFixes.values()].some(pipFixActive);
+    if (live && !pipFixTick) {
+      pipFixTick = setInterval(() => {
+        for (const fix of pipFixes.values()) {
+          if (!pipFixActive(fix)) continue;
+          for (const card of pipFixCards(fix.run_id)) {
+            const time = card.querySelector(".pip-fix-time");
+            if (time) time.textContent = pipFixElapsed(fix);
+          }
+        }
+      }, 1000);
+      if (typeof pipFixTick?.unref === "function") pipFixTick.unref();
+    }
+    if (!live && pipFixTick) { clearInterval(pipFixTick); pipFixTick = null; }
+  }
+  // Paint one card from its fix. The fix area is its own line under the card's two, shown open or closed, and the card
+  // leaves a folded group of reports: a running fix is never out of sight behind "3 Pip reports".
+  function paintPipFixCard(card, fix) {
+    if (!card || !fix) return;
+    const group = card.parentElement?.closest(".pip-report-group");
+    if (group) { group.after(card); paintPipReportGroup(group); }
+    card.dataset.fix = fix.state;
+    // The fix's own line replaces Fix (and puts back what a click on it said while it started).
+    for (const button of card.querySelectorAll(".pip-report-fix, .pip-report-fix-slim")) {
+      button.hidden = true; button.disabled = false;
+      button.textContent = button.classList.contains("pip-report-fix") ? "Ask DGC to fix" : "Fix";
+    }
+    const main = card.querySelector(".pip-report-main");
+    let area = card.querySelector(".pip-fix");
+    if (!area) {
+      area = el("div", "pip-fix");
+      area.setAttribute("role", "group");
+      const ask = el("div", "pip-fix-ask");
+      area._ask = ask;
+      const line2 = main?.querySelector(":scope > .pip-report-line2") || main?.querySelector(":scope > .pip-report-line1");
+      if (line2) line2.after(area); else main?.append(area);
+    }
+    const ask = area.querySelector(":scope > .pip-fix-ask") || area._ask;
+    area.dataset.state = fix.state;
+    const agent = fix.agent_id ? agentRecords.get(fix.agent_id) : null;
+    const waiting = agent?.state === "waiting" && pipFixActive(fix);
+    area.toggleAttribute("data-waiting", waiting);
+    area.setAttribute("aria-label", `Fix: ${pipFixHeadline(fix)}`);
+    const line = el("div", "pip-fix-line");
+    const mark = el("span", `pip-fix-mark codicon codicon-${pipFixActive(fix) ? (waiting ? "bell-dot" : "loading codicon-modifier-spin") : fix.state === "applied" || fix.state === "partial" ? "check" : fix.state === "undone" ? "discard" : fix.state === "unchanged" ? "pass" : "circle-slash"}`);
+    mark.setAttribute("aria-hidden", "true");
+    const text = el("span", "pip-fix-text"); text.textContent = pipFixHeadline(fix);
+    line.append(mark, text);
+    const { files, add, del, counted } = pipFixCounts(fix);
+    if ((fix.state === "applied" || fix.state === "partial") && counted) {
+      const totals = el("span", "pip-fix-totals");
+      totals.innerHTML = `<span class="change-add">+${add}</span><span class="change-del">−${del}</span>`;
+      line.append(totals);
+    }
+    const time = el("span", "pip-fix-time"); time.textContent = pipFixElapsed(fix);
+    line.append(el("span", "pip-report-fill"), time);
+    const acts = el("span", "pip-fix-actions");
+    const act = (label, cls, title, run) => {
+      const b = el("button", `pip-fix-act ${cls}`); b.type = "button"; b.textContent = label; b.title = title;
+      b.onclick = (event) => { event.stopPropagation(); fix._seen = true; run(b); };
+      acts.append(b); return b;
+    };
+    const canWatch = !!(fix.agent_id && agentRecords.has(fix.agent_id));
+    if (pipFixActive(fix)) {
+      if (canWatch && fix.state !== "queued") act("Watch", "pip-fix-watch", "See what the fix is doing, step by step", (b) => openAgentPage(fix.agent_id, { from: b }));
+      act("Stop", "pip-fix-stop", "Stop this fix. Nothing in your project changes.", (b) => {
+        b.disabled = true; b.textContent = "Stopping…";
+        vscode.postMessage({ type: "stopAgent", id: fix.agent_id });
+      });
+    } else {
+      const undoable = (fix.undo?.state === "available") && files.length > 0;
+      const reviewable = files.length > 0 || (Array.isArray(fix.held) && fix.held.length > 0);
+      if (reviewable && fix.state !== "undone") act("Review", "pip-fix-review", "Open the diff of what the fix changed", () => reviewPipFix(fix));
+      if (undoable) act("Undo", "pip-fix-undo", "Put these files back as they were before the fix", (b) => {
+        vscode.postMessage({ type: "undoPipFix", fix_id: fix.fix_id, files: files.length });
+      });
+      if (["failed", "stopped", "interrupted", "not_applied", "undone"].includes(fix.state) && validPipReport(card._report)) {
+        act("Try again", "pip-fix-again", "Start a new fix of this report", () => startPipFix(card._report, card));
+      }
+      if (canWatch && fix.state !== "undone") act("Watch", "pip-fix-watch", "See what the fix did, step by step", (b) => openAgentPage(fix.agent_id, { from: b }));
+    }
+    line.append(acts);
+    const body = [line];
+    // Files: three, then how many more; each opens its diff.
+    if ((fix.state === "applied" || fix.state === "partial" || fix.state === "undone") && files.length) {
+      const list = el("ul", "pip-fix-files");
+      list.setAttribute("aria-label", "Files the fix changed");
+      for (const f of files.slice(0, 3)) {
+        const li = el("li");
+        const open = el("button", "pip-fix-file"); open.type = "button";
+        open.title = `Review ${f.path}`;
+        open.onclick = (event) => { event.stopPropagation(); fix._seen = true; reviewPipFix(fix, [f.path]); };
+        open.textContent = String(f.path || "").slice(0, 300);
+        li.append(open);
+        if (f.kind === "added") li.append(el("span", "pip-fix-kind", "new"));
+        else if (f.kind === "deleted") li.append(el("span", "pip-fix-kind", "deleted"));
+        if (f.counted !== false) {
+          const n = el("span", "pip-fix-counts");
+          n.innerHTML = `<span class="change-add">+${Number(f.additions) || 0}</span><span class="change-del">−${Number(f.deletions) || 0}</span>`;
+          li.append(n);
+        }
+        list.append(li);
+      }
+      if (files.length > 3) list.append(el("li", "pip-fix-more", `${files.length - 3} more`));
+      body.push(list);
+    }
+    for (const h of (Array.isArray(fix.held) ? fix.held : []).slice(0, 3)) {
+      const p = el("p", "pip-fix-held");
+      const what = el("button", "pip-fix-file"); what.type = "button"; what.textContent = String(h.path || "");
+      what.title = `Review what the fix would change in ${h.path}`;
+      what.onclick = (event) => { event.stopPropagation(); fix._seen = true; reviewPipFix(fix, [h.path]); };
+      p.append(document.createTextNode("Held back: "), what, document.createTextNode(` · ${String(h.why || "you changed it while it worked")}`));
+      body.push(p);
+    }
+    if (Array.isArray(fix.merged) && fix.merged.length && fix.state !== "undone") {
+      body.push(el("p", "pip-fix-note", `Merged with your changes: ${fix.merged.slice(0, 3).join(", ")}`));
+    }
+    const tests = pipFixActive(fix) || fix.state === "undone" ? null : pipFixTests(fix);
+    if (tests) { const p = el("p", `pip-fix-tests tone-${tests.tone}`); p.textContent = tests.text; body.push(p); }
+    if (fix.message && !pipFixActive(fix)) body.push(el("p", "pip-fix-note", String(fix.message).slice(0, 400)));
+    if (fix.undo && (fix.undo.state === "done" || fix.undo.state === "partial")) {
+      const restored = Array.isArray(fix.undo.restored) ? fix.undo.restored.length : 0;
+      const kept = Array.isArray(fix.undo.kept) ? fix.undo.kept : [];
+      body.push(el("p", "pip-fix-note", `Put back ${pipFixPlural(restored, "file")}.`
+        + (kept.length ? ` Kept ${kept.map((k) => `${k.path} (${k.why})`).slice(0, 3).join(", ")}.` : "")));
+    }
+    if (fix.summary && !pipFixActive(fix)) { const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); body.push(p); }
+    const keepFocus = area.contains(document.activeElement) && !ask.contains(document.activeElement)
+      ? document.activeElement.className : "";
+    // An answered request leaves the card (the line says what happens next); one still open when the fix ends goes too.
+    for (const request of ask.querySelectorAll(".card")) {
+      if (request.classList.contains("resolved") || !pipFixActive(fix)) request.remove();
+    }
+    area.replaceChildren(...body, ask);
+    if (keepFocus) area.querySelector(`.${String(keepFocus).split(" ").filter(Boolean).join(".")}`)?.focus({ preventScroll: true });
+  }
+  function startPipFix(r, card) {
+    if (!validPipReport(r)) return;
+    const had = pipFixes.get(r.run_id);
+    if (pipFixActive(had)) return;
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Ask again in a moment."); return; }
+    vscode.postMessage({ type: "startPipFix", run_id: r.run_id });
+    for (const c of card ? [card] : pipFixCards(r.run_id)) {
+      for (const button of c.querySelectorAll(".pip-report-fix, .pip-report-fix-slim, .pip-fix-again")) {
+        button.disabled = true; button.textContent = "Starting…";
+      }
+    }
+    speak(`DGC is fixing what ${r.name} reported, in the background.`);
+  }
+  // Review: one file opens its diff; several are offered to pick from (the host does both).
+  function reviewPipFix(fix, paths) {
+    const all = [...(Array.isArray(fix.files) ? fix.files : []), ...(Array.isArray(fix.held) ? fix.held : [])]
+      .map((f) => String(f.path || "")).filter(Boolean);
+    vscode.postMessage({ type: "reviewPipFix", fix_id: fix.fix_id, paths: (paths || all).slice(0, 50) });
+  }
+  // A refused start or undo: the card says why, and its button comes back.
+  function pipFixRefused(ev) {
+    const card = [...log.querySelectorAll(".pip-report")].find((c) => c.querySelector(".pip-report-fix[disabled], .pip-report-fix-slim[disabled], .pip-fix-again[disabled]"));
+    for (const c of card ? [card] : []) {
+      for (const button of c.querySelectorAll(".pip-report-fix, .pip-report-fix-slim, .pip-fix-again")) {
+        button.disabled = false;
+        button.textContent = button.classList.contains("pip-report-fix") ? "Ask DGC to fix"
+          : button.classList.contains("pip-fix-again") ? "Try again" : "Fix";
+      }
+    }
+    sysLine(ev.message || "DGC couldn't do that.", true);
+  }
+  // A permission the fix needs is asked on its card (and the agents pill says an agent needs you).
+  function pipFixAskHome(callId) {
+    const id = agentIdFromCall(callId);
+    const fix = id ? pipFixByAgent(id) : null;
+    if (!fix) return null;
+    const card = pipFixCards(fix.run_id).find((c) => c.isConnected) || null;
+    const area = card?.querySelector(".pip-fix");
+    return area ? (area.querySelector(":scope > .pip-fix-ask") || area._ask) : null;
+  }
+  function fixAskCard(home, inner) {
+    const c = el("div", "card pip-fix-request");
+    c.setAttribute("role", "group"); c.setAttribute("aria-label", "The fix asks for your permission");
+    c.innerHTML = inner;
+    home.append(c);
+    return c;
+  }
+  // What the fixer does now, from its own steps: the card's "Fixing · Running npm test".
+  function pipFixStepFrom(ev) {
+    const id = agentIdFromCall(ev.call_id);
+    const fix = id ? pipFixByAgent(id) : null;
+    if (!fix || !pipFixActive(fix)) return;
+    const copy = toolCopy(ev.name);
+    const what = String(ev.summary || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    pipFixSteps.set(id, `${copy.present}${what ? ` ${what}` : ""}`);
+    for (const card of pipFixCards(fix.run_id)) {
+      const text = card.querySelector(".pip-fix-text");
+      if (text) text.textContent = pipFixHeadline(fix);
+    }
+  }
+  function pipFixAgentChanged(id) {
+    const fix = pipFixByAgent(id);
+    if (!fix) return;
+    for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, fix);
+    syncComposerRail();
+    if (railOpen?.kind === "pipfixes") paintPipFixesPanel();
+  }
+  function pipFixesReset(kind) {
+    if (kind === "rewound") return;               // the same chat: its history brings each card's fix back
+    pipFixes.clear(); pipFixSteps.clear();
+    syncPipFixTick();
+    if (pipFixLive && kind === "resumed") vscode.postMessage({ type: "listPipFixes" });
+  }
+  // The "Pip fixes" chip on the chip line (never a row of its own): this chat's fixes that are working, or ended and
+  // not looked at yet. General background work stays in the agents pill.
+  function pipFixesForChip() {
+    return [...pipFixes.values()].filter((fix) => pipFixActive(fix) || !fix._seen)
+      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+  }
+  let pipFixesPanel = null;
+  function paintPipFixesPanel() {
+    if (!pipFixesPanel) { pipFixesPanel = el("section", "pip-fixes-panel"); pipFixesPanel.setAttribute("aria-label", "Pip fixes"); }
+    const list = el("ul", "pip-fixes-list");
+    for (const fix of [...pipFixes.values()].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)).slice(0, 12)) {
+      const li = el("li");
+      const go = el("button", "rail-main pip-fixes-row"); go.type = "button";
+      go.title = `Show ${fix.name || "this Pip"}'s report in the chat`;
+      const name = el("span", "pip-fixes-name"); name.textContent = String(fix.name || "Pip").slice(0, 120);
+      const state = el("span", "pip-fixes-state"); state.textContent = pipFixHeadline(fix);
+      go.append(name, state);
+      go.onclick = () => {
+        fix._seen = true;
+        const card = pipFixCards(fix.run_id).find((c) => c.isConnected);
+        closeRailPop({ restore: false });
+        syncComposerRail();
+        if (card) { card.scrollIntoView?.({ block: "center" }); focusQuietly(card.querySelector(".pip-fix-act") || card.querySelector(".pip-report-line1"), { preventScroll: true }); }
+      };
+      li.append(go);
+      list.append(li);
+    }
+    pipFixesPanel.replaceChildren(list);
+    return pipFixesPanel;
   }
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
@@ -9482,6 +9864,7 @@
     pipSetupCards?.reset();
     cacheClockOnSessionReset(kind);   // the incoming chat's backend says its own
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
+    pipFixesReset(kind);
     railReset();                       // the prompt rail: the incoming chat's snapshot and outline say its own
   }
   function backendExitHooks(msg) {
@@ -10456,6 +10839,7 @@
     if (current) agentLineChanged(current, ev.type, pagePainted);
     renderAgents();
     agentAnnounce();
+    pipFixAgentChanged(id);
   }
 
   function renderAgentsSnapshot(ev) {
