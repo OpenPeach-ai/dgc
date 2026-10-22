@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A new Pip's card shows the Pip once.** When a Pip is created with a first run, the run used to appear as a second
+  card inside the first, the Pip's face and name again. Its first run is now the card's own status line ("First run:
+  working", then "First run: report ready").
+
 - **DOMPurify 3.4.17** for Mermaid's diagram rendering (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr,
   GHSA-c6gr-qvv4-5v3f).
 

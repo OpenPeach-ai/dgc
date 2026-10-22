@@ -19,7 +19,7 @@ export function mountRunCards(options) {
   const pose=stale||active(r?.status)&&!e.runner?.online?'offline':r?.status==='failed'||pulse?.failed?'failure':r?.status==='succeeded'?'success':r?.status==='running'?'working':'idle';
   e.root.dataset.state=stale?'offline':r?.status||'loading';
   const signature=`${e.pip?.pip_type}:${pose}`;
-  if(e.faceKey!==signature){
+  if(!e.inline&&e.faceKey!==signature){
    e.cleanup?.();e.face.replaceChildren();e.faceKey=signature;
    if(e.pip&&globalThis.PipConcepts?.plush){
     e.face.innerHTML=globalThis.PipConcepts.plush.markup({index:TYPES.indexOf(e.pip.pip_type),name:e.pip.name},pose,e.uid,{paused:stale,includeStyles:true});
@@ -32,6 +32,8 @@ export function mountRunCards(options) {
    active(r.status)?(!e.runner?.online?'Pips not running · '+label.toLowerCase():r.status==='queued'?'Waiting for its turn.':'Working on its own. You can keep chatting.'):
    r.status==='failed'?'Open it to see what went wrong.':r.status==='cancelled'?'It was cancelled.':'Ready to look at.');
   if(connected&&!e.error&&active(r?.status)&&!e.runner?.online){e.status.textContent='Pips not running';e.root.dataset.state='offline';}
+  // Inside the Pip's own card (its first run): one line of that card, never a second face and name.
+  if(e.inline)e.status.textContent=!r||stale||e.error?'Its first run is starting':e.status.textContent==='Pips not running'?'First run waiting · Pips not running':`First run: ${label.toLowerCase()}`;
   e.open.disabled=!r||!connected;e.refresh.disabled=e.loading||!connected;
   e.open.title=`Open ${e.pip?.name||'this Pip'} · ${e.status.textContent}`;
   e.open.setAttribute('aria-label',e.open.title);
@@ -53,9 +55,18 @@ export function mountRunCards(options) {
   }catch(error){if(token===epoch)e.error=error.message;}
   finally{if(token===epoch){e.loading=false;paint(e);}}
  }
- function add(parent,runId,pipId){
+ function add(parent,runId,pipId,into){
   if(disposed||!id(runId,'run')||!id(pipId,'pip')||!parent)return;
-  const existing=entries.get(runId);if(existing){if(existing.pipId===pipId&&!existing.root.isConnected){parent.append(existing.root);load(existing);}return;}
+  const existing=entries.get(runId);
+  if(existing&&into&&existing.inline&&existing.pipId===pipId){existing.root=existing.status=into;paint(existing);if(connected)load(existing);return;}
+  if(existing){if(existing.pipId===pipId&&!existing.root.isConnected){parent.append(existing.root);load(existing);}return;}
+  if(into){       // the card already shows the Pip's face and name: its first run is that card's status line
+   const quiet=cls=>node('span',cls);
+   const e={id:runId,pipId,root:into,face:quiet('pip-run-avatar'),title:quiet('pip-run-title'),status:into,detail:quiet('pip-run-detail'),
+            open:node('button','pip-run-open'),refresh:node('button','pip-run-refresh'),uid:`pip-run-face-${++sequence}`,loading:false,inline:true};
+   entries.set(runId,e);if(timer===null)timer=(options.setInterval||setInterval)(tick,5000);
+   paint(e);if(connected)load(e);else options.ready?.();return;
+  }
   if(entries.size>=12){parent.append(node('p','pip-run-detail','Open Pips to see more.'));return;}
   const root=node('div','pip-run-line'),face=node('span','pip-run-avatar'),title=node('span','pip-run-title'),status=node('span','pip-run-state'),detail=node('span','pip-run-detail');
   root.setAttribute('aria-label','Pip at work');face.setAttribute('aria-hidden','true');
@@ -74,7 +85,7 @@ export function mountRunCards(options) {
   const body=card.querySelector('.body');if(!body)return;
   body.replaceChildren();add(body,v.run_id,v.pip_id);
   const entry=entries.get(v.run_id);
-  if(!entry||entry.pipId!==v.pip_id)return;
+  if(!entry||entry.pipId!==v.pip_id||entry.inline)return;   // a run shown inside its Pip's card stays there
   // Keep the run at its tool-call position, just like a specialist agent line.
   // The original receipt remains in history but no longer draws a second card.
   const anchor=card.closest('.tool-group')||card;
@@ -89,6 +100,6 @@ export function mountRunCards(options) {
  // What the agent map lists as this chat's Pip runs: the same words the run's line says.
  function list(){return [...entries.values()].map(e=>({id:e.id,pipId:e.pipId,name:e.pip?.name||'Pip',status:e.run?.status||'',label:e.status.textContent,detail:e.detail.textContent,active:!e.error&&(!e.run||active(e.run.status))}));}
  function open(runId){const e=entries.get(runId);if(e?.run&&connected)options.onOpen?.({pip:e.pipId,section:'runs',run:e.id});}
- function reset(){epoch++;if(timer!==null)(options.clearInterval||clearInterval)(timer);timer=null;for(const e of entries.values()){e.cleanup?.();e.root.remove();}entries.clear();}
+ function reset(){epoch++;if(timer!==null)(options.clearInterval||clearInterval)(timer);timer=null;for(const e of entries.values()){e.cleanup?.();if(!e.inline)e.root.remove();}entries.clear();}
  return {add,toolResult,finish,connection,tick,reset,list,open,setVisible(v){visible=v===true;if(visible)tick();},dispose(){disposed=true;reset();doc.removeEventListener('visibilitychange',wake);}};
 }

@@ -114,7 +114,8 @@ export function mountSetupCards(options) {
   view.root.dataset.status=s?.status||'loading';
   const head=node('div','pip-setup-summary');
   head.append(face(entry,'line',s?.status==='accepted'?'success':'idle',view.uid));
-  const title=node('span','pip-setup-title');title.title=lineTitle(entry);title.append(node('strong','',lineTitle(entry)),node('span','',stateLine(entry)));head.append(title);
+  const state=node('span','',stateLine(entry));
+  const title=node('span','pip-setup-title');title.title=lineTitle(entry);title.append(node('strong','',lineTitle(entry)),state);head.append(title);
   const quick=node('span','pip-setup-quick-actions');
   if(s?.status==='pending'&&!entry.loading&&!(options.dock&&dockView?.entry===entry)){
    if(options.dock){quick.append(button('Review',()=>{entry.later=false;refreshDock(true);},'pip-setup-primary'));}
@@ -137,7 +138,8 @@ export function mountSetupCards(options) {
   if(entry.busy)body.append(node('p','pip-setup-notice','Saving your choice…'));
   body.append(button('Refresh',()=>load(entry),'pip-setup-refresh'));
   view.root.querySelectorAll('button,select,input').forEach(el=>{if(entry.busy)el.disabled=true;});
-  if(s?.status==='accepted'&&s.receipt?.run_id)runs.add(view.root,s.receipt.run_id,s.receipt.pip_id);
+  // Its first run is this card's own status line ("First run: report ready"), not a second card with the same face.
+  if(s?.status==='accepted'&&s.receipt?.run_id)runs.add(view.root,s.receipt.run_id,s.receipt.pip_id,state);
  }
  // The card docked above the chat box, where questions dock: one waiting Pip at a time.
  function paintDock(view){

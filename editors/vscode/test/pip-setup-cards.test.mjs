@@ -145,3 +145,20 @@ test('a personal card offers the user\'s own subscriptions from API 55, and says
  for(const api of [54,55]){const x=harness(t,{api});await x.loaded(personal);x.find('Choose model').click();x.answer(x.requests('list_pip_models')[0],catalog);await flush();const options=[...x.d.querySelectorAll('select option')].map(o=>o.textContent);assert.equal(options.includes('Codex · your subscription'),api===55,`api ${api}`);if(api===54)continue;
   const select=x.d.querySelector('select');select.value='subscription|codex';select.dispatchEvent(new x.w.Event('change'));assert.match(x.d.body.textContent,/Its replies and routines use your Codex plan’s usage\./);x.find('Use this model').click();assert.deepEqual(JSON.parse(JSON.stringify(x.requests('revise_pip_setup')[0].request.model_choice)),{mode:'subscription',engine:'codex'});}
  const project=harness(t,{api:55});await project.loaded(setup());project.find('Choose model').click();project.answer(project.requests('list_pip_models')[0],catalog);await flush();assert.equal([...project.d.querySelectorAll('select option')].some(o=>/subscription/.test(o.textContent)),false,'a project card offers none');});
+
+// Founder, 2026-10-23: the Pip's card showed its face twice, the card's own and a second run card's under it. Its first
+// run is the card's own status line now: one face, and the line follows the run ("First run: report ready").
+test('an accepted Pip with a first run shows one face; the run is its status line', async t => {
+ const x=harness(t),s={...setup(),run_now:true,run_now_policy:'It runs once, right after you create it.'},run='run_'+'5'.repeat(32);
+ // run once now: the receipt names the run
+ const accepted={...resolved(s,true),receipt:{...resolved(s,true).receipt,run_id:run}};
+ x.send(accepted);x.answer(x.requests('get_pip_setup').at(-1),{setup:accepted});await flush();
+ const line=x.d.querySelector('.pip-setup-line')||x.d.querySelector('.pip-setup-card');
+ const runReq=x.requests('get_pip_run').at(-1);assert.ok(runReq,'the first run is looked up');
+ x.answer(runReq,{run:{id:run,pip_id:pip,workspace_id:ws,status:'succeeded',manifest:{run_kind:'source_review'}}});await flush();
+ x.answer(x.requests('get_pip').at(-1),{pip:{id:pip,workspace_id:ws,pip_type:'rook',name:'Daily review'}});
+ x.answer(x.requests('get_pip_runner').at(-1),{runner:{online:true}});await flush();
+ assert.equal(x.d.querySelectorAll('.pip-run-line').length,0,'no second card inside the first');
+ assert.equal(x.d.querySelectorAll('.pip-run-avatar').length,0,'no second face');
+ assert.match(line.querySelector('.pip-setup-title').textContent,/^Daily review is onFirst run: report ready$/);
+});
