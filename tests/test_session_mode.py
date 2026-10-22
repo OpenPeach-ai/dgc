@@ -180,7 +180,10 @@ class SessionModeTest(unittest.TestCase):
         backend._dispatch({"type": "resume_session", "path": path.name, "request_id": "r1"})
         kinds = [event["type"] for event in events]
         self.assertIn("mode_changed", kinds, events)
-        self.assertEqual(kinds[-1], "mode_changed", kinds)
+        replay = {"history", "agents", "context", "goal_changed", "monitors"}
+        self.assertGreater(kinds.index("mode_changed"), max(i for i, kind in enumerate(kinds) if kind in replay), kinds)
+        # 0.48: only the prompt cache's clock follows it, a new event no older SDK counts as replay.
+        self.assertEqual(kinds[kinds.index("mode_changed") + 1:], ["cache_clock"], kinds)
 
     def test_an_sdk_apps_session_runs_in_the_mode_the_app_asked_for(self):
         # SDK 0.6.9 cannot correct a mode a reopen restored (0.6.10 sends set_mode afterwards), so

@@ -4907,7 +4907,8 @@ class Agent(GoalLifecycle):
                 # What a user's words newly asked for (a page to see, a skill) rides on them, inside
                 # the envelope, as on a prompt, instead of reopening the system prompt mid-turn
                 # (_turn_notes). A restored chat shows the recorded words (_dgc_steering), never this.
-                notes = self._turn_notes(intents_only=True) if kind == "user" else ""
+                turn_notes = getattr(self, "_turn_notes", None)   # an injected shim may have none
+                notes = turn_notes(intents_only=True) if kind == "user" and callable(turn_notes) else ""
                 content = (prefix + "\n".join(m["text"] for m in group)
                            + ("\n\n" + notes if notes else "") + suffix)
                 message = {"role": "user", "content": (

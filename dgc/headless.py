@@ -6610,8 +6610,9 @@ class Backend:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
-            self._emit_history(cmd["request_id"])
+            # The clock first: the correlated snapshot stays the last word of this reply.
             self._publish_cache_clock(current=True)
+            self._emit_history(cmd["request_id"])
         elif t == "watch_pip_reports":
             # This client draws Pip reports: from now on this chat hears about them (see
             # _look_for_pip_reports). Until a client says so none is sent, and none is taken.
