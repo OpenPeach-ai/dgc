@@ -1513,7 +1513,13 @@ test("a gate round promotes the answer the backend designated, and demotes every
   assert.equal(doc.querySelectorAll(".response-actions").length, 1);
   assert.ok(doc.querySelector(".answer > .response-actions"), "the actions belong to the answer");
   assert.ok(doc.querySelectorAll(".turn-summary").length <= 1);
-  assert.equal(finals[0].closest(".answer").previousElementSibling, doc.querySelector(".thinking.done"));
+  // The "Worked for" row heads the answered turn, and everything between it and the answer is work folded
+  // under it (work-fold.test.mjs): nothing is drawn between the row and the answer.
+  const act = doc.querySelector(".thinking.done");
+  const between = [];
+  for (let node = act.nextElementSibling; node && node !== finals[0].closest(".answer"); node = node.nextElementSibling) between.push(node);
+  assert.ok(between.length && between.every((node) => node.classList.contains("work-step")), between.map((n) => n.className).join(" | "));
+  assert.ok(act.closest(".msg.dgc").classList.contains("work-folded"));
   assert.deepEqual(errors, []);
   dom.window.close();
 });

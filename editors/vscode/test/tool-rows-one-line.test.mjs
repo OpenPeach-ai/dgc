@@ -26,7 +26,9 @@ test("the founder's six think-and-run pairs between two sentences are one line, 
   for (const frame of founderTurn()) event(frame);
   const groups = [...doc.querySelectorAll(".tool-group")];
   assert.equal(groups.length, 1, "one group for the stretch, not six");
-  assert.deepEqual(rows(turn()), ["text", "group", "act", "answer"], "nothing but the line between the sentences");
+  // The "Worked for" row heads the turn once it has answered: the sentence and the line fold under it
+  // (work-fold.test.mjs), and nothing but the line is between the sentences.
+  assert.deepEqual(rows(turn()), ["act", "text", "group", "answer"], "nothing but the line between the sentences");
   const group = groups[0];
   assert.equal(group.open, false, "folded once finished");
   assert.equal(squash(group.querySelector(".tool-group-label").textContent), "Ran 6 commands · thought 13s");

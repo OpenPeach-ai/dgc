@@ -26,7 +26,13 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 
-const open = (options) => openThinkingPage(browser, { theme: "dark-modern", height: 1200, config: { model: "deepseek-v4.1-flash:cloud" }, ...options });
+// A finished turn folds its work into its "Worked for" row (work-fold.test.mjs). These read the work
+// itself, so a finished turn is opened first, with the row, as a reader would.
+const open = async (options) => {
+  const page = await openThinkingPage(browser, { theme: "dark-modern", height: 1200, config: { model: "deepseek-v4.1-flash:cloud" }, ...options });
+  await page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
+  return page;
+};
 const send = (page, events) => page.evaluate((list) => {
   for (const event of list) window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event } }));
 }, events);

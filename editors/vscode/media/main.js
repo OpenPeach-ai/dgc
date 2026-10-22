@@ -3714,6 +3714,85 @@
     const record = agentRecords.get(agentIdFromCall(card.dataset.callId));
     return Boolean(record && record.background === true && AGENT_ACTIVE.has(record.state));
   }
+  // ---- a finished turn's work folds into its "Worked for 43s" row ----
+  // Once a turn has given its final answer, the work that led there folds into the turn's "Worked for
+  // 43s ›" row, which moves to the top of the turn: the one-line progress updates, the tool rows and
+  // their groups, thinking, a reconnect that recovered, a sub-agent line whose agents are done. One
+  // click shows them again, in place under the row, and the row folds them again once the next turn has
+  // answered. What a reader still needs stays: a detailed message (a diagnosis, a plan), a message you
+  // sent mid-turn, question and approval cards, notices, the files and artifacts the turn made, a
+  // sub-agent still working, and the answer with what it changed. A stopped or failed turn does not
+  // fold: its work is all it has to show. Codex collapses its commentary the same way once the final
+  // answer is shown, and the model is told the answer must stand on its own (dgc/presentation.py).
+  // endTurn draws it, live and replayed alike, so a reload, a reattach and a resume draw the same fold.
+  const WORK_STEPS = [".text.commentary:not(.commentary-detail)", ".tool-group", ".tg-live",
+    '.tool:not([data-tool-name="propose_options"])', ".disclosure", ".reasoning", ".thought-note",
+    ".thought-static", '.model-retry[data-state="recovered"]', ".agent-line"].join(", ");
+  function isWorkStep(node) {
+    return node.matches(WORK_STEPS) && !(node.matches(".agent-line") && node.querySelector(".agent-mark.is-live"));
+  }
+  // Which of the turn's blocks the row holds, and the spacing of what stays: a hidden step is still a
+  // sibling, so the rules that space a message sent mid-turn by its neighbour (main.css, `.msg.dgc >
+  // .msg.user`) took a folded step for that neighbour. Each block left showing is told what is drawn
+  // beside it instead. A background sub-agent still working when the turn folded keeps its line on
+  // screen; done, the line goes into the fold the next time the turn folds (the next turn's answer, or
+  // a click), never at the moment it finishes, under a reader who may be reading beside it. A reload
+  // draws it folded at once.
+  function paintWorkFold(block) {
+    const shown = [];
+    for (const node of block.children) {
+      if (node.matches(".role")) continue;
+      const step = isWorkStep(node);
+      node.classList.toggle("work-step", step);
+      if (!step) shown.push(node);
+    }
+    shown.forEach((node, i) => {
+      node.classList.toggle("wf-before-prompt", Boolean(shown[i + 1]?.matches(".msg.user")));
+      node.classList.toggle("wf-after-prompt", Boolean(shown[i - 1]?.matches(".msg.user")) && !node.matches(".msg.user"));
+      node.classList.toggle("wf-last", i === shown.length - 1);
+    });
+  }
+  function foldTurnWork(block, act) {
+    if (![...block.children].some(isWorkStep)) return;      // nothing to fold: the row stays a plain line
+    act.classList.add("work-toggle");
+    act.setAttribute("role", "button");
+    act.setAttribute("aria-expanded", "false");
+    act.tabIndex = 0;
+    const role = block.querySelector(":scope > .role");
+    if (role) role.after(act); else block.prepend(act);
+    block.classList.add("has-work-fold", "work-folded");
+    paintWorkFold(block);
+    if (replaying) return;      // an older page drawn into the chat leaves alone what you opened below it
+    // A turn opened to read folds again once the next one has answered, and one whose sub-agent has
+    // since finished takes its line in.
+    const others = [...log.querySelectorAll(".msg.dgc.has-work-fold")].filter((other) => other !== block
+      && (!other.classList.contains("work-folded") || other.querySelector(":scope > .agent-line:not(.work-step)")));
+    if (others.length) holdReadingPlace(() => { for (const other of others) setWorkOpen(other, false); });
+  }
+  function setWorkOpen(block, open) {
+    if (!open) paintWorkFold(block);
+    block.classList.toggle("work-folded", !open);
+    block.querySelector(":scope > .work-toggle")?.setAttribute("aria-expanded", String(open));
+    repinBlockOf(block);        // off screen it is skipped at its old height: measure it again
+  }
+  function toggleWorkFold(block) {
+    const open = block.classList.contains("work-folded");
+    setWorkOpen(block, open);
+    // Opened, the work is being read: a turn running below must not scroll() the reader away from it.
+    if (open && !atBottom()) following = false;
+    renderToLatest();
+  }
+  log.addEventListener("click", (event) => {
+    const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
+    if (row) toggleWorkFold(row.parentElement);
+  });
+  log.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
+    if (!row) return;
+    event.preventDefault();
+    toggleWorkFold(row.parentElement);
+  });
   function endTurn(reason = "completed", finalId) {
     if (!turn) return;
     flushText();
@@ -3786,6 +3865,7 @@
     const took = turn.t0 != null ? Date.now() - turn.t0
       : reason === "completed" && turn.promptAt > 0 && turn.replyAt >= turn.promptAt ? turn.replyAt - turn.promptAt : null;
     turn.act.textContent = took == null || reason === "moved" ? outcome : `${outcome} for ${Math.floor(took / 1000)}s`;
+    if (answer && reason === "completed") foldTurnWork(turn.block, turn.act);
     const finished = turn.block;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();

@@ -547,7 +547,7 @@ test("markers in the transcript take the space between blocks and add none of th
     assertSpacing(m, "compaction and notice");
     // The answer, the marker, the notice, then the next prompt a step further as always.
     const markers = m.pairs.filter((pair) => /compaction|sys/.test(pair.between))
-      .map((pair) => [pair.between.replace(/ hist| settled| turn-head/g, ""), pair.gap]);
+      .map((pair) => [pair.between.replace(/ hist| settled| turn-head| has-work-fold| work-folded/g, ""), pair.gap]);
     assert.deepEqual(markers, [["msg dgc -> compaction", BETWEEN_BLOCKS], ["compaction -> sys", BETWEEN_BLOCKS],
       ["sys -> msg user", ABOVE_PROMPT]]);
 
@@ -587,6 +587,17 @@ for (const width of WIDTHS) {
       await panel.events([{ type: "prompt_accepted", request_id: next, state: "started" },
         ...answeredTurn("t2", "S4 an ordinary prompt after the steered turn").map((e, i) => (i === 0 ? { ...e, request_id: next } : e))]);
       await panel.settle(); await toBottom(panel); await panel.settle();
+      // Answered, the turn folds its work into its "Worked for" row (work-fold.test.mjs): the steered prompts
+      // stay, spaced by what is still drawn beside them -- S1 now stands right above S2, two prompts in a row.
+      const folded = await measure(panel);
+      assertSpacing(folded, `steered and folded at ${width}px`);
+      const shown = folded.bubbles.filter((b) => b.steered);
+      assert.equal(shown.length, 3, "the steered prompts stay when the work folds");
+      for (const b of shown) assert.equal(b.above, ABOVE_PROMPT, `folded: "${b.text}" is ${b.above}px below what precedes it`);
+      assert.equal(around(folded, "S1 after a tool group").below, ABOVE_PROMPT, "folded: a prompt follows it, 24px as always");
+      // Opened, every neighbour is back: the same rhythm beside the tool group and the prose.
+      await panel.page.evaluate(() => document.querySelector("#log .msg.dgc.work-folded > .work-toggle").click());
+      await panel.settle();
       const m = await measure(panel);
       assertSpacing(m, `steered at ${width}px`);
       const steered = m.bubbles.filter((b) => b.steered);
@@ -963,13 +974,23 @@ for (const width of WIDTHS) {
       await panel.events([{ type: "prompt_accepted", request_id: next, state: "started" },
         ...answeredTurn("t2", "S9 the next prompt").map((e, i) => (i === 0 ? { ...e, request_id: next } : e))]);
       await panel.settle(); await wait(panel, 200); await toBottom(panel); await panel.settle();
-      const m = await measure(panel);
-      assertSpacing(m, `steered beside everything at ${width}px`);
-      const got = Object.fromEntries(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"].map((key) => {
+      const spaced = (m) => Object.fromEntries(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"].map((key) => {
         const hit = m.bubbles.find((b) => b.text.startsWith(key));
         return [key, hit ? [hit.above, hit.below] : null];
       }));
-      assert.deepEqual(got, { S1: [24, 16], S2: [24, 16], S3: [24, 16], S4: [24, 16], S5: [24, 16], S6: [24, 16],
+      // Answered, the turn folds its work into its "Worked for" row (work-fold.test.mjs). What stays -- the
+      // steered prompts, the permission card, the monitor card, the error line, the answer -- is spaced by
+      // what is still drawn beside it, never by a folded step: a prompt whose prose or tool line folded
+      // away now has the next prompt beside it, 24px, as two prompts in a row always are.
+      const folded = await measure(panel);
+      assertSpacing(folded, `steered beside everything, folded, at ${width}px`);
+      assert.deepEqual(spaced(folded), { S1: [24, 24], S2: [24, 24], S3: [24, 16], S4: [24, 24], S5: [24, 16], S6: [24, 16],
+        S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "folded: above/below each steered prompt");
+      await panel.page.evaluate(() => document.querySelector("#log .msg.dgc.work-folded > .work-toggle").click());
+      await panel.settle(); await toBottom(panel); await panel.settle();
+      const m = await measure(panel);
+      assertSpacing(m, `steered beside everything at ${width}px`);
+      assert.deepEqual(spaced(m), { S1: [24, 16], S2: [24, 16], S3: [24, 16], S4: [24, 16], S5: [24, 16], S6: [24, 16],
         S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "above/below each steered prompt (S7 is followed by a prompt, so 24)");
     } finally { await panel.page.close(); }
   });
