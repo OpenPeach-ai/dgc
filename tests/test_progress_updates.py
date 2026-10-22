@@ -77,6 +77,14 @@ class TheWorkPromptAsksForUpdatesTest(unittest.TestCase):
                       "final answer stand on its own"):
             self.assertIn(words, rule)
 
+    def test_the_final_answer_rule_says_the_updates_fold_away(self) -> None:
+        """The editor folds a turn's one-line updates and tool rows into "Worked for 43s" once the
+        answer arrives (Codex collapses its commentary the same way), so the model is told why the
+        answer must stand alone, in the cadence section it reads."""
+        section = cadence(self.prompt())
+        self.assertIn("Make the final answer stand on its own: once it arrives, the one-line updates and "
+                      "tool calls may fold away out of sight", section)
+
     def test_the_cadence_is_by_time_not_by_calls(self) -> None:
         """Counting calls rewarded splitting a batch and said nothing about a three-minute test run."""
         self.assertNotIn("every five or so calls", self.prompt())

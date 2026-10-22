@@ -22,7 +22,9 @@ RESPONSE_GUIDANCE = (
 # call and brief updates when something is found or the direction changes. Measured 2026-10-19: the
 # old "before EACH group of tool calls, one short line" was skipped at the start of 6 of 20 turns,
 # this rule's opening sentence at none. "In the same message as the call" matters: a text-only
-# message ends the turn, so an update sent on its own would stop the work.
+# message ends the turn, so an update sent on its own would stop the work. The editor folds a turn's
+# one-line updates and tool rows into its "Worked for" row once the answer arrives (detailed messages
+# stay), so the last line says why the answer must stand alone; "may" because the terminal keeps them.
 PROGRESS_UPDATES = (
     "- The user follows your work through short lines in your reply text, not your thinking. "
     "Before your first tool call, say in one sentence what you will do, in the same message as the "
@@ -34,7 +36,8 @@ PROGRESS_UPDATES = (
     "plan for substantial work, write it out with formatting in the message with your next tool "
     "call, then keep working. Only this kind of update runs past a sentence or two.",
     "- Do not narrate each call or trivial reads, or repeat the plan, the prompt or the tool cards. "
-    "Make the final answer stand on its own: the user may not have read the updates.",
+    "Make the final answer stand on its own: once it arrives, the one-line updates and tool calls may "
+    "fold away out of sight, and the user may not have read them.",
 )
 
 # An open model cannot see a clock, so "about a minute" needs help: when a tool round ends and the
