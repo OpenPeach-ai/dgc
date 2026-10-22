@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Every prompt of a session, for the editor's prompt rail.** `get_outline` (offered as
+  `ready.capabilities.outline`) answers with `outline`: every prompt of the session, oldest first, with its first
+  words (or "Image" when it is only an image) and when it was sent. The ones compaction folded away come first, then
+  each one the session still holds, under the turn id its history snapshot gives it, so an editor knows which it
+  already shows. A long session opens on its latest messages and its snapshot keeps only what one payload carries; the
+  outline lists them all. Editor protocol: a new command and a new event; no existing event changed.
+
 - **A command's output is a diff only when it has a diff's shape.** A script that printed section headers such as
   `--- dispatch:` was taken for a diff: its output was hidden behind an empty diff, and the editor listed each
   header as an edited file. A diff now needs its `---` and `+++` lines and a hunk.

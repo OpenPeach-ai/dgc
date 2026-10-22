@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Editor protocol: command `get_outline` and event `outline` (every prompt of a Work session, oldest first, for the
+  editor's prompt rail; offered as `ready.capabilities.outline`) are in the vendored protocol and the TypeScript SDK's
+  known events, so neither SDK drops it. An SDK session never sends the command, so it never gets the event.
+
 - Editor protocol: command `server_window` and event `server_window` (the window a vLLM, SGLang or llama.cpp server
   was started with) are in the vendored protocol and the TypeScript SDK's known events. An SDK session never sends
   the command, so it never gets the event.

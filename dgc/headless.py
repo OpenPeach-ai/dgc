@@ -222,7 +222,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_models", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
-    "get_config", "status", "get_history", "list_monitors", "stop_monitor", "list_mcp_context",
+    "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
     # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
     "server_window",
@@ -345,7 +345,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
     "set_config", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
-    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
+    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history", "get_outline",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory", "list_monitors", "stop_monitor", "restart_monitor", "rerun_task", "list_agents", "list_troupes", "stop_troupe",
     "list_background_shells", "stop_background_shell", "get_background_output",
@@ -779,6 +779,51 @@ def _history_written_at(message) -> float | None:
     if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
         return None
     return float(at) if 946_684_800 <= at <= time.time() + 172_800 else None   # 2000 .. two days ahead
+
+
+# The prompt outline (`get_outline`): every prompt of a session, for the editor's prompt rail.
+OUTLINE_PROMPTS = 4000          # the latest prompts an outline lists: well inside one frame
+OUTLINE_CHARS = 160             # of each prompt's words
+
+
+def _outline_words(text) -> str:
+    """A prompt's first words, spaces tidied and its image mark left out; one that is only an image says so."""
+    raw = str(text or "")
+    words = " ".join(raw.replace("📷", " ").split())
+    if not words and "📷" in raw:
+        words = "Image"
+    return words[:OUTLINE_CHARS]
+
+
+def outline_prompts(items, archived=()) -> list[dict]:
+    """Every prompt of a session, oldest first, as {id, text, at?, archived?}: the ones compaction archived
+    (``sessions.load_recall`` rows), then each one a history replay (``Backend._history``) opens a turn with.
+
+    A replayed prompt's id is the id of the turn it opens in that replay ("h3", or a running turn's own id),
+    so an editor can tell which of them it has on screen; an archived one's is "a<n>", the n-th prompt of the
+    archive. ``at`` is when it was sent (seconds since 1970), when the session saved it."""
+    prompts: list[dict] = []
+    for row in archived or ():
+        if isinstance(row, dict) and row.get("who") == "user":
+            words = _outline_words(row.get("body"))
+            if words:
+                prompts.append({"id": f"a{len(prompts)}", "text": words, "archived": True})
+    last = None
+    for item in items or ():
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "turn_start":
+            last = None
+            words = _outline_words(item.get("prompt")) if item.get("kind", "prompt") == "prompt" else ""
+            if words and isinstance(item.get("turn_id"), str) and item["turn_id"]:
+                last = {"id": item["turn_id"], "text": words}
+                prompts.append(last)
+        elif last is not None and item.get("role") == "time" and item.get("of") == "prompt":
+            at = item.get("at")
+            if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at):
+                last["at"] = at
+            last = None
+    return prompts[-OUTLINE_PROMPTS:]
 
 
 def _history_vision_items(seen) -> list:
@@ -2230,6 +2275,8 @@ class Backend:
                           # set_plugin_sign_in_scopes: what a plugin's sign-in may do (GitHub's checklist), and
                           # Sign in again with it; the plugin list's keys carry sign_in_scopes and signed_in.
                           "plugin_sign_in_scopes": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          # get_outline: every prompt of the session (`outline`), for the editor's prompt rail.
+                          "outline": 1,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "steer_queued": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
@@ -4680,7 +4727,20 @@ class Backend:
         # A chat that was just opened (or reloaded) hears about the Pip reports it missed.
         self._kick_pip_reports()
 
-    def _history(self, live_turn: dict | None = None) -> list:
+    def _emit_outline(self, request_id: str) -> None:
+        """Every prompt of this session (`outline`), however little of it the panel has drawn: the ones
+        compaction archived, then each one the transcript opens a turn with, under the turn ids the
+        history snapshot gives them. The editor's prompt rail reads it (ready.capabilities.outline)."""
+        with self._turn_state_lock():
+            live = getattr(self, "_live_turn", None) if getattr(self, "_running_turn_kind", "") else None
+            items = self._history(live_turn=live if isinstance(live, dict) else None, bounded=False)
+        session = getattr(self.agent, "session_file", None)
+        root = getattr(self.config, "project_root", None)
+        archived = sessions_mod.load_recall(session, root) if session and root else []
+        self.em.emit("outline", request_id=request_id, session_id=Path(session).stem if session else "",
+                     prompts=outline_prompts(items, archived))
+
+    def _history(self, live_turn: dict | None = None, *, bounded: bool = True) -> list:
         """A replayable event log of the current conversation (for resuming in a UI).
 
         Restored history used to be a flat message projection with its own idea of what an answer
@@ -4694,6 +4754,9 @@ class Backend:
         ``live_turn`` (``{"id", "anchor"}``, set only while a turn runs) names the running turn and
         the last message saved before it. The replayed turn that opened after that message is still
         running: it gets no ``turn_end`` (the live one arrives later) and carries the live turn id.
+
+        ``bounded`` False leaves out the cut to what one payload carries: the whole conversation,
+        for a reader that keeps only a little of each item (the prompt outline, `get_outline`).
         """
         # 0.40 lanes keep their per-call replay state behind these hooks (see the marked sections at
         # the end of this class); each one is a no-op until its lane lands.
@@ -5030,6 +5093,8 @@ class Backend:
                                  if not (isinstance(item, dict) and item.get("type") == "tool_call"
                                          and item.get("call_id") and item["call_id"] not in resulted
                                          and item["call_id"] not in shown)]
+        if not bounded:
+            return items
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
         # history remains intact; this limit applies only to the restored webview payload.
         retained, size = [], 0
@@ -6758,6 +6823,8 @@ class Backend:
             # The clock first: the correlated snapshot stays the last word of this reply.
             self._publish_cache_clock(current=True)
             self._emit_history(cmd["request_id"])
+        elif t == "get_outline":
+            self._emit_outline(cmd["request_id"])
         elif t == "watch_pip_reports":
             # This client draws Pip reports: from now on this chat hears about them (see
             # _look_for_pip_reports). Until a client says so none is sent, and none is taken.

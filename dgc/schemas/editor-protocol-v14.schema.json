@@ -4259,6 +4259,41 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "outline"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "prompts": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "session_id",
+            "prompts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "sessions"
             },
             "seq": {
@@ -9641,6 +9676,27 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_outline"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
           ],
           "additionalProperties": false
         },

@@ -460,6 +460,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "history": {"items": _A(), "request_id": _S(False), "todos": _A(False), "complete": _B(False)},
     "recall": {"items": _A(), "before": _I(), "more": _B(), "total": _I(),
                "request_id": _S(False)},
+    # The answer to get_outline: every prompt of the session, oldest first, however little of it the panel has
+    # drawn. `prompts`: {id, text (its first words, or "Image"), at? (when it was sent, seconds since 1970),
+    # archived? (folded away by compaction: id "a<n>", the archive's n-th prompt)}; a prompt still in the
+    # session has the id of the turn it opens in the history snapshot ("h3", or a running turn's own id).
+    "outline": {"request_id": _S(), "session_id": _S(), "prompts": _A()},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},
     "checkpoints": {"items": _A(), "request_id": _S(False)},
     "rewound": {"ok": _B(), "files_restored": _I(), "request_id": _S(False)},
@@ -819,6 +824,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # that archive so "Show earlier messages" keeps working past the summary marker, instead of
     # stopping at it with the rest of the conversation sitting unread on disk.
     "get_recall": {"before": _I(False), "limit": _I(False), "request_id": _S(False)},
+    # Every prompt of the session, for the editor's prompt rail (offered as ready.capabilities.outline): a
+    # long chat opens on its latest pages. Answered by `outline`.
+    "get_outline": {"request_id": _S()},
     "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
     "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},
