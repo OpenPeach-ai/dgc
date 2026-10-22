@@ -2562,6 +2562,121 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "cache_settings"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "prompt_cache": {
+              "type": "boolean"
+            },
+            "prompt_cache_ttl": {
+              "type": "string",
+              "enum": [
+                "5m",
+                "1h"
+              ]
+            },
+            "ollama_keep_alive": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "prompt_cache",
+            "prompt_cache_ttl",
+            "ollama_keep_alive"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "cache_clock"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "unknown",
+                "warm",
+                "cold"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "anthropic",
+                "ollama"
+              ]
+            },
+            "anchor_ms": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "expires_ms": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ttl_s": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "expired",
+                "compacted",
+                "unloaded"
+              ]
+            },
+            "tokens": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "resumed": {
+              "type": "boolean"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "mode_changed"
             },
             "seq": {

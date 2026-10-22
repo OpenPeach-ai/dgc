@@ -6,6 +6,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Claude models read the conversation from Anthropic's prompt cache.** DGC sent Anthropic no cache marker, so
+  every reply paid full price for the whole conversation again. Each request now marks where its cached part ends
+  (the tool list, the system prompt, the newest message and the previous request's end), as Anthropic documents,
+  and the next reply reads all of that from the cache at a tenth of the price or less. The new `prompt_cache_ttl`
+  setting is how long the cache lasts: `5m` (the default) or `1h` (each write costs more; for replies usually more
+  than five minutes apart). `prompt_cache: false` turns it off. An Anthropic-compatible server that refuses the
+  marker gets the request again without it. ChatDGC and Pips get the same saving.
+- **The cache lifetime and Ollama's keep-loaded time in the editor's Settings.** `dgc serve` sends both in a new
+  `cache_settings` event to an editor that asks for it (get_config `fields: ["cache_settings"]`), never as new
+  fields on `config`, and `set_config` takes `prompt_cache_ttl` (`5m` or `1h`) and `ollama_keep_alive` (a
+  duration Ollama takes, `-1`, or empty), refusing anything else. Both apply from the next request.
+
 - **A Personal Pip can borrow your own signed-in Chrome, with your consent each time (Pips API 59).** For one task
   that needs a site you're already signed in to in your Chrome (your bank, a hospital portal, an order history), the
   Pip asks with a card in its chat: **Let PIP use your Chrome?**, the sites and why, **Allow once** and **Not now**.

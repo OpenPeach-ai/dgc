@@ -139,6 +139,8 @@ const SEARCH_PROVIDERS = ["duckduckgo", "brave", "tavily", "searxng", "ollama"];
 // The ones that take a key. A CLI with ready.capabilities.search_keys keeps one per provider (set_config
 // search_api_key_<provider>); an older one keeps one key for all of them.
 const SEARCH_KEY_PROVIDERS = ["brave", "tavily", "ollama"];
+// Ollama's keep_alive as the CLI takes it (dgc/headless.py _KEEP_ALIVE_RE): a duration, seconds, -1, or "".
+const KEEP_ALIVE_RE = /^(?:|-?\d{1,9}|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})$/;
 
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
@@ -482,6 +484,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private chatdgcSettable = false;
   /** The CLI takes the per-turn token cap from Settings (its config answered turn_token_budget). */
   private budgetSettable = false;
+  /** Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time, from a CLI that answers
+   *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
+   *  refuse a save that carried them. */
+  private cacheSettings?: { prompt_cache: boolean; prompt_cache_ttl: string; ollama_keep_alive: string };
   private pipsEditor?: PipsEditor;
   private pipsDocumentId = randomBytes(16).toString("hex");
   private pendingSignIn?: McpBrowserRequest;
@@ -3160,6 +3166,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.retitle();
         this.tabSessionChanged();
         break;
+      case "cache_settings":
+        this.cacheSettings = {
+          prompt_cache: (ev as any).prompt_cache !== false,
+          prompt_cache_ttl: (ev as any).prompt_cache_ttl === "1h" ? "1h" : "5m",
+          ollama_keep_alive: String((ev as any).ollama_keep_alive ?? ""),
+        };
+        break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
           this.routeState.subscriptionModel = String(ev.model || "");
@@ -3411,7 +3424,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // Settings -> Web search offers the providers this CLI takes, from its handshake, and (from a CLI that keeps
         // one key per provider) which of them have a key saved. Never a key itself.
         : ev.type === "config" ? { ...ev, search_providers: this.searchProviders(),
-                                   ...(this.searchKeyState() ? { search_keys: Object.fromEntries(this.searchKeyState()!) } : {}) } : ev;
+                                   ...(this.searchKeyState() ? { search_keys: Object.fromEntries(this.searchKeyState()!) } : {}),
+                                   // Not protocol fields: the cache_settings event that came just before.
+                                   ...(this.cacheSettings ? { prompt_cache_ttl: this.cacheSettings.prompt_cache_ttl,
+                                                              ollama_keep_alive: this.cacheSettings.ollama_keep_alive,
+                                                              cache_settable: true } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6198,7 +6215,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
-                       "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget"] });
+                       "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
+                       "cache_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -6703,6 +6721,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // The per-turn token cap: blank or 0 is no cap. Only to a CLI that answered it (an older one refuses the save).
       if (this.budgetSettable && v.turn_token_budget !== undefined) {
         values.turn_token_budget = Math.max(0, Math.min(1_000_000_000, Math.floor(Number(v.turn_token_budget) || 0)));
+      }
+      // The prompt-cache lifetime and Ollama's keep-loaded time: only to a CLI that answered cache_settings.
+      if (this.cacheSettings) {
+        if (v.prompt_cache_ttl === "5m" || v.prompt_cache_ttl === "1h") { values.prompt_cache_ttl = v.prompt_cache_ttl; }
+        if (typeof v.ollama_keep_alive === "string" && KEEP_ALIVE_RE.test(v.ollama_keep_alive.trim())) {
+          values.ollama_keep_alive = v.ollama_keep_alive.trim();
+        }
       }
       if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {
         values.subagent_context_size = Math.max(0, Math.floor(Number(v.subagent_context_size) || 0));

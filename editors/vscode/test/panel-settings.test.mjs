@@ -887,6 +887,24 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
   }
 });
 
+test("the cache lifetime and keep-loaded time go only to a CLI that answered cache_settings", async () => {
+  const sent = (commands, key) => commands.filter((c) => c.type === "set_config" && key in (c.values || {}));
+  const older = harness();
+  await older.provider.saveSettings(settings({ prompt_cache_ttl: "1h", ollama_keep_alive: "4h" }));
+  assert.deepEqual(sent(older.commands, "prompt_cache_ttl"), [], "an older CLI refuses an unknown key, and the whole save with it");
+  assert.deepEqual(sent(older.commands, "ollama_keep_alive"), []);
+  const { provider, commands } = harness();
+  provider.onEvent({ type: "cache_settings", prompt_cache: true, prompt_cache_ttl: "5m", ollama_keep_alive: "30m" });
+  await provider.saveSettings(settings({ prompt_cache_ttl: "1h", ollama_keep_alive: "4h" }));
+  assert.equal(sent(commands, "prompt_cache_ttl")[0]?.values.prompt_cache_ttl, "1h");
+  assert.equal(sent(commands, "ollama_keep_alive")[0]?.values.ollama_keep_alive, "4h");
+  const bad = harness();
+  bad.provider.onEvent({ type: "cache_settings", prompt_cache: true, prompt_cache_ttl: "5m", ollama_keep_alive: "30m" });
+  await bad.provider.saveSettings(settings({ prompt_cache_ttl: "2 days", ollama_keep_alive: "forever" }));
+  assert.deepEqual(sent(bad.commands, "prompt_cache_ttl"), [], "only a lifetime the CLI takes");
+  assert.deepEqual(sent(bad.commands, "ollama_keep_alive"), [], "only a duration Ollama takes");
+});
+
 test("settings cancellation happens before backend or SecretStorage mutation", async () => {
   const { provider, timeline } = harness({ mode: "default", engine: "codex" });
   notices.warningResponses.push(undefined);

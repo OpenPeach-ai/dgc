@@ -209,6 +209,8 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "chatdgc_followups", "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes", "turn_token_budget",
     "thinking_inline", "thinking_inline_max_chars",
+    # Both shape only the next request (an Anthropic cache marker's ttl; Ollama's keep_alive).
+    "prompt_cache_ttl", "ollama_keep_alive",
     # Same dial as the composer: the in-flight generation keeps its budget; the next model
     # round in this turn (or the next prompt) uses the new level.
     "thinking", "subscription_effort",
@@ -402,6 +404,8 @@ _CONFIG_ENUMS = {
     "chatdgc_window": frozenset(CHATDGC_WINDOWS),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
+    # How long an Anthropic prompt-cache entry lives (dgc/llm.py PROMPT_CACHE_TTLS).
+    "prompt_cache_ttl": frozenset({"5m", "1h"}),
 }
 _CONFIG_INTEGER_RANGES = {
     "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
@@ -421,12 +425,22 @@ _CONFIG_INTEGER_RANGES = {
 }
 
 
+# Ollama's keep_alive: a Go duration ("30m", "1h30m", "90s"), a number of seconds, a negative value
+# (keep the model loaded until Ollama stops), 0 (unload at once), or "" (send none: Ollama's default).
+_KEEP_ALIVE_RE = re.compile(r"(?:-?\d{1,9}|-1|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})")
+
+
+def _keep_alive_ok(value) -> bool:
+    return isinstance(value, str) and (value == "" or (len(value) <= 32 and bool(_KEEP_ALIVE_RE.fullmatch(value))))
+
+
 def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None, str | None]:
     """Validate the generic set_config object completely before any state is changed."""
     if not isinstance(raw_values, dict):
         return None, "settings values must be an object"
     allowed = {*_CONFIG_BOOLEAN_KEYS, *_CONFIG_STRING_LIMITS, *_CONFIG_ENUMS,
-               *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine"}
+               *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine",
+               "ollama_keep_alive"}
     unknown = [key for key in raw_values if key not in allowed]
     if unknown:
         return None, f"unsupported settings key: {str(unknown[0])[:80]}"
@@ -469,6 +483,9 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
         if (isinstance(value, bool) or not isinstance(value, int)
                 or not minimum <= value <= maximum):
             return None, f"{key} must be an integer from {minimum} to {maximum}"
+    if "ollama_keep_alive" in values and not _keep_alive_ok(values["ollama_keep_alive"]):
+        return None, ("ollama_keep_alive must be a duration Ollama takes (5m, 30m, 1h, 24h), "
+                      "-1 to keep the model loaded until Ollama stops, or empty for Ollama's default")
     if "provider_capabilities" in values:
         capabilities = values["provider_capabilities"]
         from .llm import ProviderCapabilities
@@ -4287,8 +4304,19 @@ class Backend:
 
     _config_fields: frozenset = frozenset()     # opt-in config fields this client asked for
 
+    def _emit_cache_settings(self, request_id: str | None = None) -> None:
+        """Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time (cache_settings)."""
+        from .llm import normalize_prompt_cache_ttl
+        c = self.config
+        self.em.emit("cache_settings", prompt_cache=c.get("prompt_cache", True) is not False,
+                     prompt_cache_ttl=normalize_prompt_cache_ttl(c.get("prompt_cache_ttl", "5m")),
+                     ollama_keep_alive=str(c.get("ollama_keep_alive", "30m") or "")[:32],
+                     **_request_fields(request_id))
+
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
+        if getattr(self, "_cache_settings_wanted", False):
+            self._emit_cache_settings(request_id)
         extra = {}
         for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default"),
                               ("chatdgc_window", "32k")):
@@ -6804,6 +6832,7 @@ class Backend:
             refresh = bool(set(values) & {
                 "api_mode", "provider_state", "prompt_cache", "prompt_cache_key",
                 "provider_capabilities", "capability_cache_ttl_s", "context_size",
+                "prompt_cache_ttl", "ollama_keep_alive",
             })
             # Config.set normally persists each key. Suspend that behavior while staging so another
             # process cannot observe half of a route change, then commit the complete validated
@@ -6890,6 +6919,10 @@ class Backend:
             fields = cmd.get("fields")
             if isinstance(fields, list):
                 self._config_fields = frozenset(f for f in fields if f in _CONFIG_OPT_IN_FIELDS)
+                # 0.48: the prompt-cache settings travel in an event of their own (cache_settings),
+                # never as new fields on `config`, which a published SDK would refuse.
+                if "cache_settings" in fields:
+                    self._cache_settings_wanted = True
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()

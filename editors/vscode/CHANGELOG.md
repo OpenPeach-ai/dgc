@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Settings → Models: Cache lifetime and Keep the model loaded.** **Cache lifetime** (5 minutes or 1 hour) is how
+  long Anthropic keeps the conversation cached between replies; 1 hour costs more per write and suits replies that
+  are further apart. For a local Ollama, **Keep the model loaded** says how long Ollama keeps the model in memory
+  after the last reply (5 minutes to 24 hours, until Ollama stops, or Ollama's own default), so the next reply
+  starts at once. Both need a DGC CLI that has them; with an older one they are shown but can't be changed.
+
 - **Lend a Personal Pip your own Chrome, once (Pips API 59).** When a Pip asks to borrow your signed-in Chrome, its
   chat shows **Let PIP use your Chrome?** with the sites, why and the time limit, and **Allow once** or **Not now**
   (both wait until its reply is done; there is no Always allow). If DGC can't reach your Chrome yet, the card says how

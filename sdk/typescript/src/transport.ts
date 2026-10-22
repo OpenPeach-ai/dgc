@@ -23,7 +23,7 @@ export type Frame = Record<string, unknown>;
 /** Protocol v14 event types (dgc/editor_protocol.py EVENT_FIELDS). Others are skipped. */
 export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "agent_ended", "agent_message", "agent_started", "agent_step", "agent_updated", "agents", "artifact_ready", "artifacts",
-  "ask_request", "ask_resolved", "background_output", "background_shells",
+  "ask_request", "ask_resolved", "background_output", "background_shells", "cache_clock", "cache_settings",
   "chat_change", "chat_changes", "chat_closed", "chat_opened",
   "chatdgc_action", "chatdgc_activity", "chatdgc_canvas", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_followups", "chatdgc_images", "chatdgc_library", "chatdgc_library_file", "chatdgc_made", "chatdgc_message",
   "chatdgc_opened", "chatdgc_outline", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_widget", "chatdgc_widgets", "checkpoints", "command_rejected", "compacted", "config",

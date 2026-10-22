@@ -827,6 +827,11 @@ class ChatResult:
     # 0.40: the reasoning blocks this generation produced, with their provenance, filled by the
     # thinking-provenance lane. Empty when the model produced no reasoning.
     reasoning: list = field(default_factory=list)
+    # 0.48: what the provider said about its prompt cache for this request, when it said anything
+    # (Anthropic's cache read/write counters and the TTL its write used). ``sent_at`` is the wall
+    # time the request was sent: a cache entry's lifetime runs from the start of the request.
+    # Empty when the provider reported nothing about a cache.
+    cache: dict = field(default_factory=dict)
 
 
 def usage_reported(usage) -> bool:
@@ -1310,6 +1315,65 @@ _REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking", "reas
 _SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p")
 # Legacy (non-adaptive) Anthropic extended-thinking budgets DGC requests per level, in tokens.
 _ANTHROPIC_THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}
+
+# Anthropic prompt caching. Claude Messages caches nothing unless the request marks where a cached
+# prefix ends (`cache_control`), and DGC sent no marker, so every turn re-billed the whole context at
+# the full input price. The rules, from Anthropic's prompt-caching documentation:
+#   - at most 4 breakpoints per request; the prefix renders tools -> system -> messages;
+#   - an entry lives 5 minutes ("ephemeral", the default; a write costs 1.25x input) or 1 hour
+#     (`ttl: "1h"`; a write costs 2x), measured from the START of the request that wrote or read it,
+#     and every read refreshes it at no cost; entries with a longer TTL must come before shorter ones,
+#     so DGC gives every marker of one request the same TTL;
+#   - a prefix shorter than the model's minimum (512 to 4,096 tokens) is silently not cached;
+#   - each breakpoint looks back at most 20 positions for an earlier entry;
+#   - thinking blocks and empty text blocks cannot carry a marker.
+PROMPT_CACHE_TTLS = ("5m", "1h")
+_PROMPT_CACHE_TTL_ALIASES = {"5m": "5m", "5min": "5m", "5 min": "5m", "5 minutes": "5m", "300": "5m",
+                             "300s": "5m", "1h": "1h", "60m": "1h", "60min": "1h", "1 hour": "1h",
+                             "3600": "1h", "3600s": "1h"}
+_ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4
+_ANTHROPIC_CACHEABLE_BLOCKS = frozenset({"text", "image", "document", "tool_use", "tool_result"})
+# A 400 that is about the marker itself: an Anthropic-compatible server that does not take it (or
+# does not take `ttl`) names the field. Matched only when the request carried a marker.
+_CACHE_CONTROL_REFUSAL_RE = re.compile(r"cache_control|\bttl\b|ephemeral|prompt.cach", re.I)
+
+
+def _cache_markers_in(payload: dict):
+    """Every cache_control marker in an Anthropic payload (tools, system, message blocks)."""
+    for tool in payload.get("tools") or []:
+        if isinstance(tool, dict) and isinstance(tool.get("cache_control"), dict):
+            yield tool["cache_control"]
+    system = payload.get("system")
+    for block in system if isinstance(system, list) else []:
+        if isinstance(block, dict) and isinstance(block.get("cache_control"), dict):
+            yield block["cache_control"]
+    for message in payload.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and isinstance(block.get("cache_control"), dict):
+                yield block["cache_control"]
+
+
+def _has_cache_marker(payload: dict, ttl: str = "") -> bool:
+    return any(not ttl or marker.get("ttl") == ttl for marker in _cache_markers_in(payload))
+
+
+def _cache_marker_ttl(payload: dict) -> str:
+    """The lifetime a payload's markers asked for: "1h", "5m" (no ttl field), or "" (none)."""
+    for marker in _cache_markers_in(payload):
+        return "1h" if marker.get("ttl") == "1h" else "5m"
+    return ""
+
+
+def normalize_prompt_cache_ttl(value) -> str:
+    """The prompt-cache lifetime DGC asks Anthropic for: "5m" (the default) or "1h"."""
+    return _PROMPT_CACHE_TTL_ALIASES.get(str(value or "").strip().lower(), "5m")
+
+
+def prompt_cache_ttl_value(value) -> str | None:
+    """A settings value as one of PROMPT_CACHE_TTLS, or None when it is not one (for validation)."""
+    text = str(value or "").strip().lower()
+    return _PROMPT_CACHE_TTL_ALIASES.get(text) if text else None
 # Over-thinking watchdog (F4), "auto" schedule: the reasoning tokens a phase may spend before any
 # answer text or tool call, per level, before DGC aborts it and retries one level lower. Every
 # level's allowance is at least what DGC itself asks a provider for at that level (see
@@ -1478,7 +1542,7 @@ class LLMClient:
                  sampling: dict | None = None, api_mode: str = "auto",
                  provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
                  provider_state: str = "stateless", prompt_cache: bool = True,
-                 prompt_cache_key: str = "", context_size: int = 0,
+                 prompt_cache_key: str = "", context_size: int = 0, prompt_cache_ttl: str = "5m",
                  first_token_timeout="auto", idle_timeout=300, stall_notice=45,
                  stall_retries=2, load_timeout=900):
         self.base_url = base_url.rstrip("/")
@@ -1537,6 +1601,8 @@ class LLMClient:
         self.provider_state = ("server" if str(provider_state).lower() == "server" else "stateless")
         self.prompt_cache = bool(prompt_cache)
         self.prompt_cache_key = str(prompt_cache_key or "")
+        # How long an Anthropic cache entry should live: "5m" (Anthropic's default) or "1h".
+        self.prompt_cache_ttl = normalize_prompt_cache_ttl(prompt_cache_ttl)
         self._response_id = ""
         self._response_cursor = 0
         self._response_prefix_hash = ""
@@ -2445,6 +2511,111 @@ class LLMClient:
         }
 
     @staticmethod
+    def _anthropic_cache_report(usage: dict | None) -> dict:
+        """What one Claude Messages reply said about its prompt cache, from its raw usage.
+
+        Empty unless the reply read or wrote a cache entry. ``ttl`` is the lifetime of the entry it
+        WROTE, as the provider reports it (``cache_creation.ephemeral_1h_input_tokens`` /
+        ``ephemeral_5m_input_tokens``); a reply that only read leaves it blank, because a read keeps
+        whatever lifetime the entry was written with. ``prompt_tokens`` is the whole prompt:
+        uncached + written + read.
+        """
+        raw = usage if isinstance(usage, dict) else {}
+
+        def count(source: dict, key: str) -> int:
+            value = source.get(key)
+            if isinstance(value, bool):
+                return 0
+            try:
+                parsed = int(value or 0)
+            except (TypeError, ValueError, OverflowError):
+                return 0
+            return parsed if 0 <= parsed <= 1_000_000_000 else 0
+
+        read = count(raw, "cache_read_input_tokens")
+        write = count(raw, "cache_creation_input_tokens")
+        creation = raw.get("cache_creation")
+        creation = creation if isinstance(creation, dict) else {}
+        write_5m = count(creation, "ephemeral_5m_input_tokens")
+        write_1h = count(creation, "ephemeral_1h_input_tokens")
+        if not (read or write or write_5m or write_1h):
+            return {}
+        return {
+            "provider": "anthropic",
+            "read_tokens": read,
+            "write_tokens": max(write, write_5m + write_1h),
+            "write_5m_tokens": write_5m,
+            "write_1h_tokens": write_1h,
+            "ttl": "1h" if write_1h > 0 else "5m" if write_5m > 0 else "",
+            "prompt_tokens": count(raw, "input_tokens") + max(write, write_5m + write_1h) + read,
+        }
+
+    def _anthropic_cache_markers(self, payload: dict, disabled: set[str]) -> str:
+        """Mark where cached prefixes end, as Anthropic documents it; return the TTL asked for.
+
+        Breakpoints, at most four: the last tool (the tool list renders first), the system prompt
+        (which caches tools + system together), the last block of the newest message (so the next
+        request reads this whole conversation back), and the last block of the user message before
+        the newest assistant reply (where the previous request put its own marker, a read point
+        that does not depend on the 20-position lookback). "" when nothing was marked.
+        """
+        if (not self.prompt_cache or "cache_control" in disabled
+                or self._rejection_active("cache_control")):
+            return ""
+        ttl = self.prompt_cache_ttl
+        if ttl == "1h" and ("cache_ttl" in disabled or self._rejection_active("cache_ttl")):
+            ttl = "5m"
+
+        def marker() -> dict:
+            # The 5-minute lifetime is Anthropic's default: no ttl field, which every
+            # Anthropic-compatible server takes.
+            return {"type": "ephemeral", "ttl": "1h"} if ttl == "1h" else {"type": "ephemeral"}
+
+        def cacheable(block) -> bool:
+            if not isinstance(block, dict):
+                return False
+            kind = str(block.get("type") or "")
+            if kind not in _ANTHROPIC_CACHEABLE_BLOCKS:
+                return False          # thinking, redacted_thinking and server blocks take no marker
+            return kind != "text" or bool(str(block.get("text") or ""))
+
+        def mark_last(message: dict) -> bool:
+            content = message.get("content")
+            if not isinstance(content, list):
+                return False
+            for block in reversed(content):
+                if cacheable(block):
+                    block["cache_control"] = marker()
+                    return True
+            return False
+
+        used = 0
+        tools = payload.get("tools")
+        if isinstance(tools, list) and tools and isinstance(tools[-1], dict):
+            tools[-1]["cache_control"] = marker()
+            used += 1
+        system = payload.get("system")
+        if isinstance(system, str) and system:
+            payload["system"] = [{"type": "text", "text": system, "cache_control": marker()}]
+            used += 1
+        messages = payload.get("messages")
+        if isinstance(messages, list) and messages:
+            if used < _ANTHROPIC_MAX_CACHE_BREAKPOINTS and mark_last(messages[-1]):
+                used += 1
+            # The previous request's own read point: the newest user message before the newest
+            # assistant reply.
+            last_assistant = next((index for index in range(len(messages) - 1, -1, -1)
+                                   if isinstance(messages[index], dict)
+                                   and messages[index].get("role") == "assistant"), None)
+            if last_assistant is not None and used < _ANTHROPIC_MAX_CACHE_BREAKPOINTS:
+                earlier = next((messages[index] for index in range(last_assistant - 1, -1, -1)
+                                if isinstance(messages[index], dict)
+                                and messages[index].get("role") == "user"), None)
+                if earlier is not None and mark_last(earlier):
+                    used += 1
+        return ttl if used else ""
+
+    @staticmethod
     def _anthropic_result_from_blocks(blocks: dict[int, dict], result: ChatResult,
                                       on_text=None, on_thinking=None,
                                       *, emit_complete: bool = False,
@@ -2530,6 +2701,7 @@ class LLMClient:
                     })
         if retain_provider_state:
             result.provider_message = {"provider": "anthropic", "content": provider_content}
+        result.cache = LLMClient._anthropic_cache_report(result.usage)
         result.usage = LLMClient._anthropic_usage(result.usage)
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
@@ -2822,6 +2994,7 @@ class LLMClient:
         if result.finish_reason in ("cancelled", "overthink"):
             # Never turn a partially received tool block into an executable call. A watchdog retry
             # also must not retain an unsigned partial thinking block as continuation state.
+            result.cache = self._anthropic_cache_report(result.usage)
             result.usage = self._anthropic_usage(result.usage)
             return result
         if not terminal:
@@ -2856,6 +3029,7 @@ class LLMClient:
         effort = str(reasoning_effort or "").lower()
         if "effort" not in disabled and effort in {"low", "medium", "high", "xhigh", "max"}:
             payload["output_config"] = {"effort": effort}
+        self._anthropic_cache_markers(payload, disabled)
         return payload
 
     def _chat_anthropic(self, messages, tools, reasoning_effort, on_text, on_thinking,
@@ -2880,6 +3054,8 @@ class LLMClient:
             payload = self._anthropic_payload(
                 messages, tools, level, disabled, max_tokens_limit)
             watch = self._next_watch(cancel, f"{self.base_url}/messages")
+            # A cache entry's lifetime runs from the START of the request that wrote or read it.
+            sent_at = time.time()
             try:
                 with watch.registered():
                     response = requests.post(
@@ -2947,6 +3123,17 @@ class LLMClient:
                 last_err = body
                 if status == 413 or _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
+                if _has_cache_marker(payload) and _CACHE_CONTROL_REFUSAL_RE.search(body):
+                    # An Anthropic-compatible server that does not take the marker (or its ttl).
+                    # Before the tools check below, which a "tools.3.cache_control" error matches.
+                    if (re.search(r"\bttl\b", low) and "cache_ttl" not in disabled
+                            and _has_cache_marker(payload, ttl="1h")):
+                        self._mark_rejected("cache_ttl")
+                        disabled.add("cache_ttl")
+                    else:
+                        self._mark_rejected("cache_control")
+                        disabled.add("cache_control")
+                    continue
                 if _image_parts_in(messages) and _IMAGE_REFUSAL_RE.search(body):
                     # images: the endpoint refused the image part, not tools. Retry once without it.
                     messages = self._without_images(messages, refused=True)
@@ -2992,6 +3179,9 @@ class LLMClient:
             finally:
                 _close_response(response)
                 watch.stop()
+            if result.cache:
+                result.cache["sent_at"] = sent_at
+                result.cache["requested_ttl"] = _cache_marker_ttl(payload)
             stall = self._pre_progress_stall(result)
             if stall is not None:
                 stalls += 1

@@ -256,6 +256,7 @@ Paste this to any coding agent:
   "api_mode": "auto",
   "provider_state": "stateless",
   "prompt_cache": true,
+  "prompt_cache_ttl": "5m",
   "capability_cache_ttl_s": 300,
   "mode": "default",
   "thinking": "off",
@@ -340,6 +341,15 @@ thinking is negotiated away once without abandoning the Messages transport. Anth
 discovery, cache-token accounting, cancellation, retry/backoff, base64 vision estimation, and error
 responses use the same bounded lifecycle guarantees as the other native transports. Set
 `api_mode` to `"anthropic"` only when a proxy hides the provider identity from its URL.
+
+With `prompt_cache` on (the default), every Claude Messages request marks where its cached prefix ends,
+as Anthropic documents it: the tool list, the system prompt, the newest message and the previous
+request's end, four breakpoints at most. The next request then reads that prefix from Anthropic's cache
+instead of paying full price for it again. `prompt_cache_ttl` is how long an entry lives: `"5m"` (the
+default; a cache write costs 1.25x the input price, and every read refreshes the five minutes) or
+`"1h"` (a write costs 2x; worth it when your replies are usually more than five minutes apart). An
+Anthropic-compatible server that refuses the marker, or the one-hour lifetime, gets the request again
+without it. `prompt_cache: false` sends no marker.
 
 For OpenAI Responses, DGC defaults to `store: false`, locally preserves encrypted reasoning items
 needed for tool-loop continuity, and derives a hashed cache-routing key when DGC creates the key;

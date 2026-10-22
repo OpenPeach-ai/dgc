@@ -421,6 +421,8 @@ DEFAULTS: dict = {
     "provider_state": "stateless",              # stateless | server; server permits provider-side storage
     "prompt_cache": True,                        # send a privacy-safe stable cache-routing key when supported
     "prompt_cache_key": "",                     # optional explicit key (never derived from prompt text verbatim)
+    "prompt_cache_ttl": "5m",                   # Anthropic cache-entry lifetime: "5m" (a write costs 1.25x
+                                                #   input) or "1h" (2x; for replies more than 5 minutes apart)
     "provider_capabilities": {},                 # explicit feature -> bool overrides for compatible endpoints
     "capability_cache_ttl_s": 300,               # retry a rejected endpoint/model feature after this interval
     "mode": "default",                          # default | acceptEdits | plan | auto
@@ -727,7 +729,7 @@ _SESSION_KEYS = frozenset({
     "mode", "model", "base_url", "api_mode", "context_size", "thinking", "ultra_mode",
     "think_budget_tokens", "max_tokens", "temperature", "top_p", "top_k", "min_p",
     "tool_profile", "tool_profile_chosen", "subscription_engine", "subscription_model",
-    "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key",
+    "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key", "prompt_cache_ttl",
     "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size",
 })

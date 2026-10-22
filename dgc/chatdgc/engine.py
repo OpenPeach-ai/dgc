@@ -378,6 +378,7 @@ class ChatEngine:
                            provider_capabilities=config.get("provider_capabilities", {}),
                            capability_cache_ttl_s=int(config.get("capability_cache_ttl_s", 300)),
                            prompt_cache=bool(config.get("prompt_cache", True)),
+                           prompt_cache_ttl=str(config.get("prompt_cache_ttl", "5m") or "5m"),
                            context_size=int(config.get("context_size", 0)),
                            first_token_timeout=config.get("model_first_token_timeout_s", "auto"),
                            idle_timeout=config.get("model_idle_timeout_s", 300),

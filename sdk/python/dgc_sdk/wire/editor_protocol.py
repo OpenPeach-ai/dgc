@@ -342,6 +342,29 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "busy": _B(False),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
+    # 0.48: the prompt-cache settings, for Settings -> Models. Sent before `config` to a client whose
+    # get_config `fields` named "cache_settings" (an older client never asks, so never sees it).
+    # prompt_cache_ttl is the Anthropic cache-entry lifetime; ollama_keep_alive is how long a local
+    # Ollama keeps the model loaded after the last reply ("" sends none: Ollama's own default).
+    "cache_settings": {
+        "request_id": _S(False), "prompt_cache": _B(),
+        "prompt_cache_ttl": _f("string", enum=("5m", "1h")), "ollama_keep_alive": _S(),
+    },
+    # 0.48: the prompt cache's clock for this chat, only where DGC knows it from the provider itself:
+    # Anthropic (the reply's own cache read/write and the TTL it wrote) and a local Ollama (its own
+    # /api/ps unload time). "unknown" hides the clock (every other provider). "warm": the cache lasts
+    # until expires_ms (epoch ms; the client turns it cold once that passes). "cold": gone, with
+    # `reason` compacted (the conversation was summarised past it) or unloaded (Ollama let the model
+    # go); a warm clock that runs out is "expired" on the client. anchor_ms is the send time of the
+    # request the clock runs from; tokens is the prompt a next message re-caches; resumed marks the
+    # state sent as a saved chat is reopened.
+    "cache_clock": {
+        "state": _f("string", enum=("unknown", "warm", "cold")),
+        "source": _f("string", required=False, enum=("anthropic", "ollama")),
+        "anchor_ms": _I(False), "expires_ms": _I(False), "ttl_s": _I(False),
+        "reason": _f("string", required=False, enum=("expired", "compacted", "unloaded")),
+        "tokens": _I(False), "resumed": _B(False), "session_id": _S(False),
+    },
     "mode_changed": {
         "request_id": _S(False),
         "message": _S(False),

@@ -773,6 +773,7 @@ class TUI:
             ("provider_state", "Responses state", "enum", ["stateless", "server"]),
             ("prompt_cache", "Prompt cache routing", "bool"),
             ("prompt_cache_key", "Prompt cache key", "str"),
+            ("prompt_cache_ttl", "Prompt cache lifetime (Anthropic)", "enum", ["5m", "1h"]),
             ("capability_cache_ttl_s", "Capability retry TTL (s)", "int"),
             ("thinking", "Thinking effort", "enum", ["off", "low", "medium", "high", "xhigh"]),
             ("temperature", "Temperature", "float"), ("top_p", "Top-p", "float"),
@@ -838,7 +839,7 @@ class TUI:
         ],
     }
     _CLIENT_KEYS = {"model", "base_url", "api_key", "api_mode", "provider_state", "prompt_cache",
-                    "prompt_cache_key", "capability_cache_ttl_s", "temperature", "top_p", "top_k", "min_p",
+                    "prompt_cache_key", "prompt_cache_ttl", "capability_cache_ttl_s", "temperature", "top_p", "top_k", "min_p",
                     "max_tokens", "context_size", "thinking", "request_timeout", "ollama_keep_alive",
                     "model_first_token_timeout_s", "model_idle_timeout_s", "model_stall_notice_s",
                     "model_stall_retries", "model_load_timeout_s"}

@@ -5,12 +5,34 @@
  *  toggle that is on was telling the user something untrue. Ultra widens only a width still equal
  *  to the shipped default -- any number you set is honoured exactly, including 1, because the
  *  rate-limit advice tells you to lower this. The hint says which of the two you are looking at. */
+/** The keep-loaded choices, with a value set elsewhere (the CLI, config.json) kept as it is. */
+function keepAliveChoices(current) {
+    const value = String(current ?? "30m");
+    return KEEP_ALIVE_CHOICES.some(([v]) => v === value) ? KEEP_ALIVE_CHOICES : KEEP_ALIVE_CHOICES.concat([[value, value]]);
+}
 function parallelHint(c) {
     const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
     if (c.ultra_mode !== true) { return "How many sub-agents may run at once. Ultra raises this to 8 unless you set a number here."; }
     return pinned
         ? "Ultra would run 8; this pins it narrower. Clear it back to 4 to let Ultra widen again."
         : "Ultra is on, so this runs 8. Set any other number to pin it — 1 disables parallel sub-agents.";
+}
+
+// Ollama's keep_alive values Settings offers, in plain words. "" sends none (Ollama's own default, 5 minutes).
+export const KEEP_ALIVE_CHOICES = [["5m", "5 minutes"], ["15m", "15 minutes"], ["30m", "30 minutes"], ["1h", "1 hour"],
+    ["4h", "4 hours"], ["24h", "24 hours"], ["-1", "Until Ollama stops"], ["", "Ollama's default (5 minutes)"]];
+/** A host that is Ollama on this computer or this network: where keeping the model loaded is DGC's to choose.
+ *  An Ollama cloud model (…:cloud) is never loaded here, so it has nothing to keep. */
+export function localOllama(c) {
+    const url = String(c.base_url || "").trim();
+    let host = "", port = "";
+    try { const parsed = new URL(url); host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ""); port = parsed.port; }
+    catch { return false; }
+    const ollama = c.api_mode === "ollama" || port === "11434" || /ollama/i.test(url);
+    const near = host === "localhost" || host === "::1" || host === "0.0.0.0" || host.endsWith(".local")
+        || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host);
+    return ollama && near;
 }
 
 export function renderFields(section, main, config, providers, ui) {
@@ -48,8 +70,11 @@ export function renderFields(section, main, config, providers, ui) {
             + card("Runtime", field("API transport", "", sel("api_mode", [["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.api_mode || "auto"))
                 + field("Responses state", "", sel("provider_state", [["stateless", "Stateless"], ["server", "Server stored"]], c.provider_state || "stateless"))
                 + field("Prompt cache", "", bool("prompt_cache", c.prompt_cache !== false))
+                + field("Cache lifetime", c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "Update the DGC CLI to set this here.", sel("prompt_cache_ttl", [["5m", "5 minutes"], ["1h", "1 hour"]], c.prompt_cache_ttl === "1h" ? "1h" : "5m"))
+                + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "For this long after the last reply, so the next one starts at once and reuses what is already read. A loaded model keeps its memory in use." : "Update the DGC CLI to set this here.", sel("ollama_keep_alive", keepAliveChoices(c.ollama_keep_alive), String(c.ollama_keep_alive ?? "30m"))) : "")
                 + field("Capability retry TTL", "Seconds.", inp("capability_cache_ttl_s", c.capability_cache_ttl_s ?? "", "number")))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+        if (!c.cache_settable) for (const id of ["prompt_cache_ttl", "ollama_keep_alive"]) { const el = main.querySelector("#" + id); if (el) el.disabled = true; }
         const preset = document.getElementById("provider");
         if (preset)
             preset.onchange = () => {

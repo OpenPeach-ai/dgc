@@ -2319,6 +2319,7 @@ class Agent(GoalLifecycle):
                            provider_state=str(self.config.get("provider_state", "stateless")),
                            prompt_cache=bool(self.config.get("prompt_cache", True)),
                            prompt_cache_key=str(self.config.get("prompt_cache_key", "")),
+                           prompt_cache_ttl=str(self.config.get("prompt_cache_ttl", "5m") or "5m"),
                            context_size=int(self.config.get("context_size", 0)),
                            # Stall watcher: every request this client sends (main, fallback,
                            # sub-agent, compaction and title aux) is bounded by these windows,

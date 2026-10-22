@@ -3579,7 +3579,14 @@ Useful keys:
   Responses defaults to stateless (`store: false`) with local encrypted-reasoning replay and
   a hashed cache-routing key when DGC derives the key. An explicit `prompt_cache_key` of up to
   64 characters is sent verbatim. Choose `provider_state: server` only when provider-side
-  response storage is acceptable.
+  response storage is acceptable. On Anthropic Messages, `prompt_cache` (default on) marks where
+  each request's cached prefix ends (the tool list, the system prompt, the newest message and the
+  previous request's end), so the next request reads the conversation from Anthropic's cache instead
+  of paying for it again; `prompt_cache: false` sends no marker.
+- `prompt_cache_ttl` (default `5m`) — how long an Anthropic cache entry lives: `5m` (a write costs
+  1.25x the input price; every read refreshes the five minutes) or `1h` (a write costs 2x; for replies
+  usually more than five minutes apart). Settings → Models → Cache lifetime sets it too. A server
+  that refuses the one-hour lifetime gets the five-minute one.
 - `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
   interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — requested operating window. Known models receive memory-conscious defaults;
@@ -3717,7 +3724,11 @@ when you want to override it.
   Ollama cloud models never load locally and are never probed.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
-- `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.
+- `ollama_keep_alive` (default `30m`) — how long a local Ollama keeps the model loaded after the last
+  reply, so the next request starts at once and reuses the conversation Ollama already read. A
+  duration (`5m`, `30m`, `1h`, `24h`), seconds, `-1` (until Ollama stops) or empty (send nothing:
+  Ollama's own default, 5 minutes). Settings → Models → Keep the model loaded sets it for a local
+  Ollama. Ollama cloud models are not loaded on your computer, so it does nothing for them.
 - `prompt_cache_key` — an explicit cache key for providers that support prompt caching.
 
 ## Web search

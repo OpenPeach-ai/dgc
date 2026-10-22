@@ -878,3 +878,43 @@ test('GitHub: Sign in with GitHub, once DGC has an app for it, connects and show
   const plain=setup();openGithub(plain);
   assert.equal(plain.d.querySelector('[data-key-sign-in]'),null,'no sign-in button without an app to sign in with');
 });
+
+test('Models: the cache lifetime and, for a local Ollama only, how long the model stays loaded',()=>{
+  // 0.48. Both come from a CLI that answers cache_settings (the extension marks the config it forwards with
+  // cache_settable); an older CLI would refuse a save that carried them, so the controls are off there.
+  const older=setup();
+  older.click('[data-nav=models]');
+  assert.equal(older.d.querySelector('#prompt_cache_ttl').disabled,true,'an older CLI cannot take it');
+  assert.match(older.d.body.textContent,/Update the DGC CLI to set this here/);
+  assert.equal(older.d.querySelector('#ollama_keep_alive'),null,'not an Ollama host: nothing to keep loaded');
+
+  const x=setup();
+  x.message({type:'event',event:{...x.config,base_url:'http://localhost:11434/v1',cache_settable:true,prompt_cache_ttl:'5m',ollama_keep_alive:'30m'}});
+  x.click('[data-nav=models]');
+  const ttl=x.d.querySelector('#prompt_cache_ttl'),keep=x.d.querySelector('#ollama_keep_alive');
+  assert.equal(ttl.disabled,false);
+  assert.deepEqual([...ttl.options].map(o=>o.value),['5m','1h']);
+  assert.ok(keep,'a local Ollama shows the keep-loaded time');
+  assert.equal(keep.value,'30m');
+  assert.match(keep.closest('.field').textContent,/Keep the model loaded/);
+  assert.match(keep.closest('.field').textContent,/after the last reply/);
+  assert.deepEqual([...keep.options].map(o=>o.value),['5m','15m','30m','1h','4h','24h','-1','']);
+  x.input('#prompt_cache_ttl','1h');x.input('#ollama_keep_alive','4h');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.equal(saved.prompt_cache_ttl,'1h');assert.equal(saved.ollama_keep_alive,'4h');
+  x.message({type:'settingsSaved',ok:true});
+
+  // A value set elsewhere (the CLI, config.json) is shown as it is, not replaced by a preset.
+  x.message({type:'event',event:{...x.config,base_url:'http://127.0.0.1:11434',cache_settable:true,prompt_cache_ttl:'5m',ollama_keep_alive:'45m'}});
+  x.click('[data-nav=general]');x.click('[data-nav=models]');
+  assert.equal(x.d.querySelector('#ollama_keep_alive').value,'45m');
+
+  for(const remote of ['https://api.anthropic.com/v1','https://ollama.com/v1','https://api.deepseek.com/v1']){
+    const y=setup();
+    y.message({type:'event',event:{...y.config,base_url:remote,cache_settable:true,prompt_cache_ttl:'5m',ollama_keep_alive:'30m'}});
+    y.click('[data-nav=models]');
+    assert.equal(y.d.querySelector('#ollama_keep_alive'),null,`${remote}: not a local Ollama`);
+    assert.ok(y.d.querySelector('#prompt_cache_ttl'));
+  }
+});
