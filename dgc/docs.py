@@ -1865,8 +1865,13 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
 - **A ChatDGC reply too.** ChatDGC rides on the side bar's `dgc serve`, and a reply being written
   keeps it running with no window, under the same rules; the chat's tab shows the reply finished or
   still streaming when the window comes back. Closing a chat's tab mid-reply asks the same question,
-  and **Settings → Running sessions** lists a chat a closed window left answering. With no reply
-  running, that backend ends with its window as before.
+  and **Settings → Running sessions** lists a chat a closed window left answering, with **Open**,
+  which shows it in a ChatDGC tab here, still writing. With no reply running, that backend ends with
+  its window as before.
+- **One window writes to a ChatDGC chat.** A chat open in another window shows read-only, as it
+  was last saved, under the same bar, with **Open here**. Open here moves that one chat, not the
+  other window's DGC (its Pips, Sessions and Settings stay): mid-reply, the reply streams on here and
+  the chat is this window's once it ends.
 
 ## Several chats, several folders, in one panel
 
@@ -2657,7 +2662,9 @@ does **DGC: New Chat (ChatDGC)** in the Command Palette. One search box finds a 
 anything said in it. Enter sends, Shift+Enter adds a line, Esc stops a reply. A message you send
 while a reply is still being written waits above the box and goes when the reply finishes. A reply
 keeps going through a window reload or a closed window, and its tab shows it again when the window
-comes back; closing the tab mid-reply asks once whether to keep it running.
+comes back; closing the tab mid-reply asks once whether to keep it running. A chat open in another
+VS Code window shows read-only with **Open here**, which brings that chat to this window, its reply
+still streaming if it is being written.
 
 ## What it does
 

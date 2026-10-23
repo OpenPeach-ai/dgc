@@ -23,8 +23,14 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   itself 2 minutes after the reply finishes (12 hours at most). Closing a chat's tab mid-reply asks once: keep it
   running in the background, or stop it (what it wrote is saved), with **Remember my choice**
   (`dgc.closingAWorkingTab`, the same as for a Work session). A chat a closed window left answering is listed in
-  **Settings → Running sessions**, with **Stop**. Another window (another folder) has its own DGC and shows a chat as
-  it was last saved: a reply still being written elsewhere is there once it has finished and the chat is opened again.
+  **Settings → Running sessions**, with **Open** (it opens in a ChatDGC tab here, still writing) and **Stop**.
+- **One window at a time.** Each VS Code window has its own DGC. A chat open in another window shows read-only, as it
+  was last saved, under the bar a Work session open elsewhere has: "This chat is open in another window", with
+  **Open here**. Open here brings that one chat to this window (the other window's Pips, Sessions and Settings stay
+  where they are), and the other window goes read-only with an Open here of its own. If the reply is still being
+  written, it carries on where it is and streams here from what it has written so far, every part once; a message
+  you type meanwhile waits and goes when the reply finishes, and from then on the chat is this window's. A chat the
+  other window closes becomes this window's by itself.
 - **Dictate.** Press the microphone beside Send and speak. While you speak, the box's bottom row becomes the voice
   bar: ✕ Cancel, a live waveform of your voice with the time, ■ Stop and ↑ Send.
   - **Stop** puts what you said in the box where the caret is, so you can edit it before you send.
@@ -479,6 +485,19 @@ That is how a window that reloaded gets a reply back: the Sessions home's backen
 `set_detach_chatdgc {keep_running}` (offered as `ready.capabilities.detach.chatdgc`), keeps running with no window
 while a ChatDGC reply is being written and for nothing else, and a reloaded window reattaches to it by the home's
 own session id (see the editor protocol's `detach`).
+
+One window writes to a chat at a time (offered as `ready.capabilities.detach.chatdgc_open_here`). A window says
+which chats its tabs show with `chatdgc_shown {conversation_ids}`, all of them whenever that changes; until it does,
+its process holds nothing. A process names the chats it holds (shown by its window and held by no other, or being
+written by it) in its note, and a chat another window's process holds opens as last saved, followed by
+`chatdgc_held {conversation_id, state: "elsewhere", pid}`; a change to it (a message, Stop, an edit) is refused.
+`chatdgc_open_here {request_id, conversation_id}` takes it over the holder's owner-only socket: answered by
+`chatdgc_held {state: "here", request_id}` and `chatdgc_opened` (the same request_id), while the holder's window hears
+`chatdgc_held {state: "moved"}`. Taken while its reply is being written, the reply goes on in the holder and its
+events come through this process: that `chatdgc_opened` is `busy` with the reply so far, and every later part follows
+once. A change sent meanwhile waits; once the reply and its name and follow-ups are saved, `chatdgc_held {state:
+"here"}` with no `request_id` says the chat is this process's (open it again to show it as it is here), and what
+waited goes. The same event, unasked, says a chat whose holder let it go is this window's now.
 
 A turn sends its events in this order:
 

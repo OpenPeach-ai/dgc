@@ -10,7 +10,14 @@
 - **Closing a ChatDGC tab mid-reply asks once**, as a session's tab does: keep the reply running in the background,
   or stop it (what it wrote is saved), with **Remember my choice**. The same setting, `dgc.closingAWorkingTab`.
 - **Settings → Running sessions** lists a ChatDGC chat that a closed window left answering, as a ChatDGC chat, for
-  how long, with **Stop**; it comes back when that folder's window opens again.
+  how long, with **Open** and **Stop**. Open shows it in a ChatDGC tab here, still writing.
+- **Open here for a ChatDGC chat.** A chat open in another VS Code window shows read-only, as it was last saved,
+  under the same bar as a Work session open elsewhere: "This chat is open in another window", with **Open here**.
+  Open here brings that chat to this window, and only that chat: the other window's Pips, Sessions and Settings stay
+  where they are. If its reply is still being written, it carries on and streams here, every line once; a message
+  you type meanwhile waits and goes when the reply finishes. The other window goes read-only with an Open here of
+  its own, and a chat it closes is yours by itself. Needs a DGC CLI with the same feature; with an older one, a chat
+  opens as before.
 
 - **A new Pip's card shows the Pip once.** When a Pip is created with a first run, the run used to appear as a second
   card inside the first, the Pip's face and name again. Its first run is now the card's own status line ("First run:

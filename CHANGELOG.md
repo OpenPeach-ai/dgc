@@ -30,12 +30,27 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   in a tab, or in a window that reloaded) used to show only what came after; it now opens with everything the
   reply has written, its question cards, pictures, cards and files, and deep research's progress, and goes on from
   there.
+- **Open here for a ChatDGC chat: one window writes to a chat at a time.** Two windows (two folders) could open the
+  same chat and both send in it, and one save could overwrite the other's message. A chat open in another window now
+  shows read-only there, as it was last saved, under the bar Work sessions use ("This chat is open in another
+  window") with **Open here**. Open here moves that one chat, never the window's DGC, which also carries its Pips,
+  Sessions and Settings: an idle chat opens here from disk, and the other window goes read-only with an Open here of
+  its own; mid-reply, the reply carries on where it is being written and streams here from the reply so far, every
+  part once, and when it ends the chat is this window's own (a message typed meanwhile goes then). A chat the other
+  window closes becomes this window's by itself. **Settings → Running sessions** gives a chat a closed window left
+  answering an **Open**, which shows it live here the same way. With an older CLI, or another window's DGC that
+  doesn't offer it, a chat opens as before.
 - **`dgc ps` names the ChatDGC chats a backend is answering** (`chat "…"  (answering)`), and `--json` rows carry
   `chats` and `scope`.
 - Editor protocol (opt-in, old clients unchanged): command `set_detach_chatdgc {keep_running}`, offered as
   `ready.capabilities.detach.chatdgc`, opts the Sessions home's backend in with only ChatDGC's replies counting as
   work; `live_sessions` items say `scope` and `chats` (`[{conversation_id, title}]`). A client that never sends it
   gets exactly the old behaviour.
+- Editor protocol (opt-in, old clients unchanged): commands `chatdgc_shown {conversation_ids}` (the chats a window's
+  tabs show) and `chatdgc_open_here {request_id, conversation_id}`, and the event `chatdgc_held {conversation_id,
+  state: here | elsewhere | moved, pid?, request_id?}`, offered as `ready.capabilities.detach.chatdgc_open_here`. A
+  process's note names the chats it holds; another asks it for one over its owner-only socket. Until a window sends
+  `chatdgc_shown` its process holds nothing, as before.
 
 - **A Pip for live data.** A project Pulse can now keep an eye on live data instead of running tests: its job is a
   short list of exact read-only command lines you approve (up to six), such as a `SELECT` through a read-only
