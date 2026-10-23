@@ -200,6 +200,39 @@ class ChatDGCOpenHereIntegrationTests(unittest.TestCase):
         b.wait(lambda e: held(e, "moved", chat) and e["seq"] > moved_here["seq"], 30)
         self.assert_valid(a, b)
 
+    def test_open_here_back_mid_reply_takes_the_live_reply_back(self):
+        world = World(self, scale=0.05, handler=ChatModel)
+        a, _ = self.home(world, "home-a")
+        b, _ = self.home(world, "home-b")
+        chat = self.open_chat(a, "o1")["conversation"]["id"]
+        a.send({"type": "chatdgc_shown", "conversation_ids": [chat]})
+        self.send(a, "s1", chat, "CHAT_COUNT 400")
+        a.wait(lambda e: e.get("type") == "chatdgc_delta" and "10\n" in e.get("text", ""), 60)
+        wait_until(lambda: self.holds(world, a.proc.pid, chat), timeout=20, what="A's note")
+        b.send({"type": "chatdgc_shown", "conversation_ids": [chat]})
+        b.send({"type": "chatdgc_open_here", "request_id": "h1", "conversation_id": chat})
+        taken = b.wait(lambda e: e.get("type") == "chatdgc_opened" and e.get("request_id") == "h1", 40)
+        self.assertTrue(taken["busy"])
+        b.wait(lambda e: e.get("type") == "chatdgc_delta" and e["seq"] > taken["seq"], 30)
+
+        # A takes it back while A's own backend is still writing it: live again in A, read-only in B.
+        a.send({"type": "chatdgc_open_here", "request_id": "h2", "conversation_id": chat})
+        back = a.wait(lambda e: e.get("type") == "chatdgc_opened" and e.get("request_id") == "h2", 40)
+        self.assertTrue(back["busy"], "still being written")
+        reply_id = back["reply_id"]
+        moved = b.wait(lambda e: held(e, "moved", chat) and e["seq"] > taken["seq"], 30)
+        a.wait(lambda e: e.get("type") == "chatdgc_turn" and e.get("state") == "ended" and e.get("reply_id") == reply_id, 120)
+        after = "".join(e.get("text", "") for e in a.events if e.get("type") == "chatdgc_delta"
+                        and e.get("message_id") == reply_id and e["seq"] > back["seq"])
+        self.assertEqual(chat_lines(back["messages"][-1]["text"] + after), [str(n) for n in range(1, 401)])
+        self.assertFalse([e for e in b.events if e.get("type") == "chatdgc_delta" and e["seq"] > moved["seq"]],
+                         "B shows it as it was once A took it back")
+        self.send(a, "s2", chat, "CHAT_COUNT 1")
+        self.ended(a, "s2")
+        self.send(b, "s3", chat, "CHAT_COUNT 1")
+        self.refused(b, "s3")
+        self.assert_valid(a, b)
+
     def test_a_reply_left_running_with_no_window_opens_live_in_another_window(self):
         world = World(self, scale=0.05, handler=ChatModel)               # 2 minutes with no work are 6s
         a, _ = self.home(world, "home-a")

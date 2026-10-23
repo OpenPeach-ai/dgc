@@ -710,6 +710,14 @@ class ChatService:
     def _take_now(self, conversation_id: str, request_id: str) -> None:
         with self._lock:
             mine = conversation_id in self._turns
+        with self._hold_lock:
+            link = self._links.get(conversation_id)
+        if link is not None:
+            # Another window took this chat from here mid-reply, and this window takes it back (its reply may still be
+            # being written here): that window's link ends ("taken"), and it shows the chat read-only again.
+            mine = True
+            link.send({"k": "end", "reason": "taken"})
+            self._link_lost(conversation_id, link)
         refused = ""
         if not mine:
             for holder in self._holders(conversation_id):
