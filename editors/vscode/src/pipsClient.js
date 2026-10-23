@@ -31,6 +31,7 @@ import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCard
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
 import '../media/pips/plush.js';
+import {ownAppsPage,ownAppForServer,ownAppsMarkup} from './pipOwnApps.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
 import {outcomeWords,reviewStatusWords,commandLine,executionContextWords,notificationWords,eventWords} from './pipsModel.js';
@@ -2230,7 +2231,22 @@ function putAppLink(link){S.appLinks=[link,...(S.appLinks||[]).filter(l=>l.id!==
 // would then do in a plugin is an Allow card here: Allow, Always allow (never for a plugin that can
 // move money) or Don't. The same reviewed steps as the connector dialogs, without them.
 S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';let pluginSeq=0,pluginBusy='';const pluginDrafts=new Map();
+// Your own apps (Pips API 61): registered by your code; a change a Pip proposes in one is this same Allow card.
+S.ownApps=[];S.ownAppsError='';let ownAppsSeq=0;
+async function loadOwnApps(){
+ if(remoteHost||S.apiVersion<61||!usable())return;
+ const token=S.epoch,sequence=++ownAppsSeq;
+ try{const apps=ownAppsPage(await send('list_apps'));if(token!==S.epoch||sequence!==ownAppsSeq)return;
+  S.ownApps=apps;S.ownAppsError='';render();if(apps.length&&personalPip())void loadPluginDrafts();}
+ catch(error){if(token===S.epoch&&sequence===ownAppsSeq){S.ownAppsError=errorText(error);render();}}
+}
+async function acceptOwnAppUpdate(name,digest){
+ if(!usable()||pipsSettings.busy)return;
+ await pipsSettingsCall('accept_app_update',{name,expected_digest:digest},r=>`${r?.app?.display_name||'Your app'} is up to date: ${r?.app?.summary||''}.`);
+ void loadOwnApps();
+}
 async function loadPlugins(){
+ void loadOwnApps();
  if(remoteHost||S.apiVersion<44||!personalPip()||!usable())return;
  const token=scope(),sequence=++pluginSeq,pip=S.selected;
  try{const page=pluginsPage(await send('list_pip_plugins',{pip_id:pip}),pip);if(token!==scope()||sequence!==pluginSeq||S.selected!==pip)return;
@@ -2240,7 +2256,7 @@ async function loadPlugins(){
 // The draft list carries summaries; a plugin's Allow card shows the whole call, read once per version.
 async function loadPluginDrafts(){
  // API 45 on there are no cards to allow: every plugin turned on is every Pip's, so any installed one may have a draft.
- if(S.apiVersion<44||!personalPip()||!usable()||!((S.plugins||[]).some(c=>c.status==='allowed')||S.apiVersion>=45&&(S.pluginsInstalled||[]).length))return;
+ if(S.apiVersion<44||!personalPip()||!usable()||!((S.plugins||[]).some(c=>c.status==='allowed')||S.apiVersion>=45&&(S.pluginsInstalled||[]).length||S.apiVersion>=61&&(S.ownApps||[]).length))return;
  const token=scope(),pip=S.selected;
  for(const d of (S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired&&!pluginDrafts.has(d.id+':'+d.digest)).slice(0,5)){
   try{const v=connectorDraft((await send('get_pip_connector_draft',{draft_id:d.id})).draft,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
@@ -2249,7 +2265,7 @@ async function loadPluginDrafts(){
  }
 }
 function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),server=v&&v.payload.action.server;
- const plugin=v&&(pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
+ const plugin=v&&(S.apiVersion>=61&&ownAppForServer(S.ownApps,server,v.payload.action.call.tool)||pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
 function pluginCards(){
  if(remoteHost||S.apiVersion<44||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
@@ -2444,7 +2460,7 @@ async function loadPipsSettings(){
  if(remoteHost||S.apiVersion<43||!usable())return;
  const token=S.epoch,sequence=++pipsSettings.seq,view=pipsSettings.view;
  try{if(view==='plugins'){const uses=pluginUsesPage(await send('list_pip_plugin_uses'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.plugins=uses;pipsSettings.pluginsError='';}
-  else if(view==='apps'){const apps=appsPage(await send('list_pip_apps'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';
+  else if(view==='apps'){const apps=appsPage(await send('list_pip_apps'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.apps=apps;pipsSettings.appsError='';void loadOwnApps();
    if(S.apiVersion>=44){const v=await send('get_pips_limit');if(token===S.epoch&&record(v)&&Number.isSafeInteger(v.max_pips)){pipsSettings.limit=v;if(draft.pipsMax==='')draft.pipsMax=String(v.max_pips);}}}
   else{const value=computersPage(await send('get_pip_computers'));if(token!==S.epoch||sequence!==pipsSettings.seq)return;pipsSettings.computers=value;pipsSettings.computersError='';
    if(value.setup.state==='running'||value.computers.some(c=>c.resetting))window.setTimeout(()=>{if(pipsSettings.view==='computer'&&!disposed)void loadPipsSettings();},3000);}}
@@ -2460,7 +2476,7 @@ async function pipsSettingsCall(command,args,notice){
 function pipsSettingsMarkup(){
  const view=['apps','plugins'].includes(pipsSettings.view)&&(pipsSettings.view!=='plugins'||S.apiVersion>=44)?pipsSettings.view:'computer',busy=pipsSettings.busy||S.busy||!usable();
  const tabs=`<nav class="pip-page-tabs" aria-label="Pips settings">${[['computer','Computer'],['apps','Apps'],...(S.apiVersion>=44?[['plugins','Plugins']]:[])].map(([k,l])=>`<button type="button" class="seg" data-pips-settings="${k}" aria-pressed="${view===k}">${l}</button>`).join('')}</nav>`;
- const body=view==='plugins'?pluginUsesMarkup(pipsSettings.plugins,{esc,busy,error:pipsSettings.pluginsError}):view==='apps'?appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
+ const body=view==='plugins'?pluginUsesMarkup(pipsSettings.plugins,{esc,busy,error:pipsSettings.pluginsError}):view==='apps'?ownAppsMarkup(S.apiVersion>=61?S.ownApps:[],{esc,busy,error:S.apiVersion>=61?S.ownAppsError:''})+appsSettingsMarkup(pipsSettings.apps,{esc,busy,error:pipsSettings.appsError})+(S.apiVersion>=43&&!remoteHost?`<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Skills</strong><small>Your Pips use your DGC skills that fit everyday work: deep research, charts and planning, and the ones you add. A skill is instructions; it never gives a Pip new access.</small></span>${button('manage-skills','Manage skills…',false,'quiet pill')}</div></section>`:'')+(S.apiVersion>=44&&!remoteHost&&pipsSettings.limit?`<section class="pip-page-group"><form id="pips-limit-form" class="pip-page-row static"><span class="row-words"><label for="pipsMax"><strong>How many Pips you can have</strong></label><small>${pipsSettings.limit.default.toLocaleString('en-US')} unless you choose another number, up to ${pipsSettings.limit.maximum.toLocaleString('en-US')}. Archived Pips don’t count. A powerful computer can run thousands.</small></span><input id="pipsMax" data-draft="pipsMax" type="number" min="1" max="${pipsSettings.limit.maximum}" step="1" inputmode="numeric" value="${esc(draft.pipsMax)}" aria-label="How many Pips you can have"><button type="submit" class="quiet pill"${busy||String(pipsSettings.limit.max_pips)===draft.pipsMax?' disabled':''}>Save</button></form></section>`:'')
   :computersMarkup(pipsSettings.computers,{esc,busy,error:pipsSettings.computersError,formatDate:shortDate,confirming:pipsSettings.confirmReset});
  return `<header class="pip-topbar"><button type="button" id="pips-settings-close" class="topbar-icon" aria-label="Your Pips" title="Your Pips">${simpleIcon('back')}</button><div class="pip-pill settings-pill"><span>Pips settings</span></div><span></span></header><div class="simple-content"><div class="pip-page">${tabs}<div class="pip-page-body">${body}</div></div></div>`;
 }
@@ -3257,6 +3273,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.borrowAllow){void borrowAnswer('allow_pip_borrow',target.dataset.borrowAllow);return;}
   if(target.dataset.borrowDecline){void borrowAnswer('decline_pip_borrow',target.dataset.borrowDecline);return;}
   if(target.dataset.borrowStop){void borrowAnswer('stop_pip_borrow',target.dataset.borrowStop);return;}
+  if(target.dataset.ownAppAccept){void acceptOwnAppUpdate(target.dataset.ownAppAccept,target.dataset.ownAppDigest||'');return;}
   if(target.dataset.pluginAllow){void pluginAnswer('allow_pip_plugin',target.dataset.pluginAllow);return;}
   if(target.dataset.pluginDecline){void pluginAnswer('decline_pip_plugin',target.dataset.pluginDecline);return;}
   if(target.dataset.pluginRemove){void pluginAnswer('decline_pip_plugin',target.dataset.pluginRemove,true);return;}

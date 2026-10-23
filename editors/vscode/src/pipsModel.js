@@ -1038,6 +1038,12 @@ export function webReadLabel(read){return read.kind==='page'?'Page · '+read.url
 
 export function appReadPlan(value){
  const fail=()=>{throw Error('The app-read permissions are not supported. Refresh this review.');};
+ if(record(value)&&typeof value.server==='string'&&value.server.startsWith('app:')){
+  // Your own app (Pips API 61): version 1, one to four exact reads {tool, schema_digest, arguments}.
+  if(Object.keys(value).sort().join()!=='calls,connection_digest,schema_version,server'||value.schema_version!==1||!/^app:[a-z0-9-]{1,40}$/.test(value.server)||!/^[a-f0-9]{64}$/.test(value.connection_digest)||!Array.isArray(value.calls)||!value.calls.length||value.calls.length>4)fail();
+  for(const call of value.calls)if(!record(call)||Object.keys(call).sort().join()!=='arguments,schema_digest,tool'||typeof call.tool!=='string'||!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(call.tool)||!/^[a-f0-9]{64}$/.test(call.schema_digest)||!record(call.arguments)||new TextEncoder().encode(JSON.stringify(call.arguments)).length>4096)fail();
+  return value;
+ }
  if(!record(value)||Object.keys(value).sort().join()!=='calls,connection_digest,schema_version,server'||![1,2,3].includes(value.schema_version)||!/^[-\w.]{1,80}$/.test(value.server)||!/^([a-f0-9]{64})$/.test(value.connection_digest)||!Array.isArray(value.calls)||!value.calls.length||value.calls.length>4||new TextEncoder().encode(JSON.stringify(value)).length>8192)fail();
  for(const call of value.calls){
   if(!record(call)||!['arguments,schema_digest,tool','account,arguments,schema_digest,tool','account,arguments,schema_digest,tool,window'].includes(Object.keys(call).sort().join())||!['GMAIL_FETCH_EMAILS','GOOGLECALENDAR_FIND_EVENT',...extraReadTools].includes(call.tool)||!/^([a-f0-9]{64})$/.test(call.schema_digest)||!record(call.arguments)||new TextEncoder().encode(JSON.stringify(call.arguments)).length>4096)fail();

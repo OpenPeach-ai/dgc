@@ -1,4 +1,5 @@
 // Controller responses are data, never provider plans or tool instructions.
+import {ownAppReadWords} from './pipOwnApps.js';
 const digest = value => typeof value==='string' && /^[a-f0-9]{64}$/.test(value);
 const accountId = value => typeof value==='string' && /^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(value);
 export const appLabels={gmail:'Gmail',googlecalendar:'Google Calendar',googledrive:'Google Drive',notion:'Notion',googlecontacts:'Google Contacts'};
@@ -9,6 +10,7 @@ const READ_WORDS={GMAIL_FETCH_EMAILS:'Gmail: emails',GOOGLECALENDAR_FIND_EVENT:'
 /** An app-read plan in words, one line per read: "Gmail: emails matching “is:unread”, up to 5". */
 export function appReadWords(plan){
  if(!plan||typeof plan!=='object'||!Array.isArray(plan.calls))return [];
+ if(typeof plan.server==='string'&&plan.server.startsWith('app:'))return ownAppReadWords(plan);   // your own app (API 61)
  return plan.calls.map(c=>{const a=c?.arguments||{},q=[a.query,a.q,a.search_term].find(v=>typeof v==='string'&&v);
   return `${READ_WORDS[c?.tool]||String(c?.tool||'An app').toLowerCase().replace(/_/g,' ')}${q?` matching “${q}”`:''}${Number.isInteger(a.max_results)?`, up to ${a.max_results}`:''}${c?.window?.days?`, the next ${c.window.days} ${c.window.days===1?'day':'days'}`:''}`;});
 }
