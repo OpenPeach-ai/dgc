@@ -73,6 +73,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
   everything you need from them.
 
+- **`dgc -p` says why it is waiting on a silent pipe.** `-p` reads what is piped in to its end, as before. Over
+  ssh with no terminal, through `wsl.exe` over ssh, or in some CI steps, stdin is a pipe nobody writes to or closes,
+  and `-p` waited with no word. After three seconds of silence it now says once, on stderr, that it is waiting for
+  piped input, and to run with `< /dev/null` if there is none.
+
 - **"Worked for 43s" in the terminal.** A finished turn that used tools says `· Worked for 43s · 5 tools` above its
   answer, the editor's words for the same moment; the steps stay on screen above it. A reply with no tools, and a
   turn that was stopped, failed or paused, still ends with `· done · 3s` under it. `dgc --classic` keeps its line

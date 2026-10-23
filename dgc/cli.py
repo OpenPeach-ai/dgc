@@ -3080,6 +3080,27 @@ def _piped_stdin() -> bool:
     return stat_mod.S_ISFIFO(mode) or stat_mod.S_ISREG(mode)
 
 
+_SILENT_PIPE_NOTE_S = 3.0
+
+
+def _note_a_silent_pipe(stream) -> None:
+    """A pipe is read to its end, as it should be (`slow-tests | dgc -p "why did it fail"`). But a pipe nobody writes
+    to or closes looks the same: ssh without a terminal, `wsl.exe` over ssh, a CI step. `dgc -p` then waited with no
+    word. Measured 2026-10-23 on Windows: four minutes of silence until the timeout. When nothing has arrived after a
+    few seconds, say so once on stderr, and keep waiting: what was piped still counts."""
+    try:
+        import select
+        ready, _, _ = select.select([stream.fileno()], [], [], _SILENT_PIPE_NOTE_S)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return
+    if not ready:
+        try:
+            sys.stderr.write("dgc: waiting for piped input on stdin. If there is none, run with < /dev/null.\n")
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
+
+
 def _oneshot_prompt(prompt: str) -> str:
     """`-p` reads piped input too: `git diff | dgc -p "review"` appends the diff to the prompt,
     and `-p -` is the input alone. A terminal, /dev/null, or an inherited socket contributes
@@ -3087,6 +3108,7 @@ def _oneshot_prompt(prompt: str) -> str:
     stream = sys.stdin
     data = ""
     if _piped_stdin():
+        _note_a_silent_pipe(stream)
         try:
             data = stream.read(_MAX_STDIN_BYTES + 1)
         except (OSError, ValueError):

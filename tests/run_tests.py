@@ -13510,6 +13510,30 @@ def test_oneshot_machine_readable():
             _sys.stdin.close()
         finally:
             left.close(); right.close()
+        # A pipe nobody writes to yet (ssh without a terminal, wsl.exe over ssh, a CI step) is still read to its
+        # end, but after a few seconds of silence -p says why it is waiting, once, on stderr.
+        real_stderr, real_note_s = _sys.stderr, _cli._SILENT_PIPE_NOTE_S
+        _cli._SILENT_PIPE_NOTE_S = 0.2
+        try:
+            r, w = _os.pipe()
+            late = _threading.Timer(0.6, lambda: (_os.write(w, b"late output\n"), _os.close(w)))
+            late.start()
+            _sys.stderr = _io.StringIO()
+            as_stdin(_os.fdopen(r, "r"))
+            merged = _cli._oneshot_prompt("why")
+            note = _sys.stderr.getvalue()
+            _sys.stdin.close(); late.join()
+            check("a silent pipe gets one note on stderr, and what arrives later still counts",
+                  "waiting for piped input on stdin" in note and "< /dev/null" in note and note.count("\n") == 1
+                  and merged == "why\n\n<input from stdin>\nlate output\n</input>", repr((note, merged)))
+            _sys.stderr = _io.StringIO()
+            as_stdin(pipe_with(b"ready at once\n"))
+            merged = _cli._oneshot_prompt("why")
+            _sys.stdin.close()
+            check("a pipe with input ready gets no note", _sys.stderr.getvalue() == ""
+                  and merged.endswith("ready at once\n</input>"))
+        finally:
+            _sys.stderr, _cli._SILENT_PIPE_NOTE_S = real_stderr, real_note_s
         big = root / "big.txt"
         big.write_text("x" * (_cli._MAX_STDIN_BYTES + 10), encoding="utf-8")
         as_stdin(open(big, encoding="utf-8"))
