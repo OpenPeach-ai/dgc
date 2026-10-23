@@ -6,6 +6,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Live-data Pips and Troupe checkers' shell work on a Mac.** They used to need Linux with bubblewrap, so on a Mac a
+  live-data Pip said its commands couldn't run and a verifier had no shell. A Mac now has the same read-only box,
+  built with Apple's `sandbox-exec`: commands write nothing but a private temporary folder of their own (`$TMPDIR`,
+  removed after the run), can't read your home, the shared temporary folders or the project's credential files, reach
+  no network but the local ports the lines name and the project's read-only database (which a line reaches directly
+  as `$DGC_READONLY_DATABASE_URL`), and can't use the Keychain (no stored password, no prompt on your screen), the
+  clipboard, Apple Events, Spotlight or another app, start launchd jobs, or signal programs outside the box. It is a
+  little weaker than Linux's, and the Pip's card says so once: a command can see which other programs are running
+  (not touch them), and Apple marks `sandbox-exec` as deprecated. Whatever a live-data line leaves running is stopped
+  after it; here-documents fail there (macOS's bash writes them to `/var/tmp`). `dgc doctor` on a Mac has one row
+  for the box. Linux is unchanged.
+
 - **A ChatDGC reply keeps running through a window reload.** ChatDGC rides on the Sessions home's `dgc serve`, which
   used to end with its window and stop the reply. For an editor that asks for it, that backend now keeps running
   while a ChatDGC reply (or deep research) is being written: a reload, a closed window or a dropped connection
@@ -37,7 +49,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     Troupe checker's shell uses: the computer's files read only, the project's credential files hidden, a private
     `/tmp`, and no network but the local addresses the lines name (`localhost:PORT`) and the project's read-only
     database, which a line reaches as `$DGC_READONLY_DATABASE_URL` (`dgc readonly-db guide` shows how to make the
-    account). Linux with bubblewrap; elsewhere the Pip says why it can't run.
+    account). Linux with bubblewrap, or a Mac (below); elsewhere the Pip says why it can't run.
   - **A safety net for writes.** A line with an obvious write is refused when it is approved and again before it
     runs: a redirection into a file, `rm`, `mv`, `tee`, `sed -i`, `git push`, `systemctl restart`, SQL that changes
     data (`INSERT`, `UPDATE`, `DELETE`, `DROP`, ...), `curl -X POST` or a request body, `$(...)`, `bash -c`,

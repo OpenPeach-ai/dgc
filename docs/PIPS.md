@@ -283,6 +283,7 @@ The runner does one run at a time.
 | --- | --- | --- | --- |
 | Pips view, Pip chats, audits, Quill drafts, Personal tasks | Yes | Yes | Yes |
 | Patch fixes and Pulse commands | With bubblewrap (`/usr/bin/bwrap`, `python3`, `git`) | Under Seatbelt, with Xcode or the Command Line Tools; weaker, see below | As on Linux (`sudo apt install bubblewrap`) |
+| Live-data commands and a Troupe checker's shell | With bubblewrap | Under Seatbelt (`sandbox-exec`); a little weaker, see [A Pip for live data](#a-pip-for-live-data) | As on Linux |
 | Keep Pips running | systemd user service; also while logged out, where the system allows lingering | LaunchAgent, while you are logged in | Windows starts the runner when you sign in (`wslg.exe`, from your own Run list), which keeps WSL running |
 | Desktop notifications | `notify-send`, when a notification service is running | Notification Center | Windows notifications |
 
@@ -627,7 +628,7 @@ job change, like any other: in the Pips view, or by asking DGC in the chat, whic
 **Nothing it runs can change anything.** The lines run in your project folder as it is now (the live files, not a
 committed copy), in the read-only box a Troupe checker's shell uses: they can read the computer's files but write
 none, your homes and the project's credential files (`.env`, keys, `.git`) are hidden, and the one writable place is
-a private `/tmp`, gone when the line ends. They reach no network but the local addresses the lines name
+a private `/tmp` (on a Mac, a private `$TMPDIR`), gone when the line ends. They reach no network but the local addresses the lines name
 (`localhost:PORT` or `127.0.0.1:PORT`) and the project's read-only database. As a safety net, DGC also refuses a line
 with an obvious write when you approve it, and again before it runs: a redirection into a file, `rm`, `mv`, `tee`,
 `sed -i`, `git push`, `systemctl restart`, SQL that changes data (`INSERT`, `UPDATE`, `DELETE`, `DROP` and the like),
@@ -657,8 +658,22 @@ dgc pips run PIP
 dgc pips report RUN
 ```
 
-It needs Linux with working bubblewrap (as Pulse commands do); on stock Ubuntu 24.04, `dgc pips execution --fix`. Each
-line gets up to a minute and 64 KB of output.
+It runs on Linux with working bubblewrap (as Pulse commands do; on stock Ubuntu 24.04, `dgc pips execution --fix`), on
+a Mac under Seatbelt (`sandbox-exec`), and on Windows in DGC inside WSL 2. Each line gets up to a minute and 64 KB of
+output.
+
+**On a Mac** the box is Apple's `sandbox-exec`, built to match Linux's as closely as it allows, and a little weaker;
+the Pip's card says so once. The lines still write nothing but their own private temporary folder (`$TMPDIR`; `/tmp`
+itself is closed), can't read your home or the project's credential files, reach only the local ports they name and
+the read-only database, and can't use the Keychain (no stored password, no prompt on your screen), the clipboard,
+Apple Events, Spotlight or another app. What is weaker:
+
+- A line can see the names of the other programs running on the Mac, though it can't signal them or read their
+  details; on Linux it sees only its own.
+- Nothing ends with the box as on Linux: whatever a line leaves running is found by sampling and stopped, with
+  Patch and Pulse's 512 MB and 32-process limits.
+- Here-documents (`<<<`) fail, because macOS's own bash writes them to `/var/tmp`; pass text with a pipe instead.
+- Apple marks `sandbox-exec` as deprecated; a future macOS may change or remove it.
 
 ## Rating results
 

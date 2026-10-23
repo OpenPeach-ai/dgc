@@ -350,8 +350,25 @@ asked, never on events.
   forwarder per port relays to `127.0.0.1:PORT` on the host for each port the approved lines name
   (`localhost:PORT`, `127.0.0.1:PORT`, at most eight), and the project's read-only database
   (`dgc readonly-db set`) is reached as `$DGC_READONLY_DATABASE_URL`. The environment is the sandbox's small one
-  (`PATH`, `LANG`, `TZ`, `HOME=/tmp/dgc-home`). Linux with working bubblewrap only; elsewhere `run_pip` and the
-  schedule refuse it with `execution_unavailable` and the reason, and its status says so.
+  (`PATH`, `LANG`, `TZ`, `HOME=/tmp/dgc-home`). Linux with working bubblewrap, or macOS (below); elsewhere
+  `run_pip` and the schedule refuse it with `execution_unavailable` and the reason, and its status says so.
+- **The box on macOS.** `/usr/bin/sandbox-exec` with a profile built per line (`checker_box._seatbelt_wrap`), run in
+  the project's real path: `(allow default)`, then every write denied but a private folder made 0700 for the line
+  (`HOME` and `TMPDIR` inside it; all of a run's are removed after it); reads denied for the user's homes, DGC's
+  state, `/Users`, `/private/var/root`, `/private/tmp`, `/private/var/tmp`, `/private/var/folders` and
+  `/private/var/run`, then the project and that folder re-allowed (with path-ancestor metadata, so a project in a
+  hidden home is reachable), then the project's credential files and folders denied at their path and where a link
+  points; `(deny network*)`, then outbound TCP to `localhost:PORT` (127.0.0.1 and ::1) for each port the lines name
+  and the read-only database's, which `$DGC_READONLY_DATABASE_URL` names directly (no relay); Unix sockets denied;
+  `(deny mach-lookup)`, then only the base services Apple's `system.sb` allows every sandboxed process (no Keychain,
+  pasteboard, Apple Events, Launch Services or Spotlight); `(deny job-creation)`; signals and process information
+  only for its own sandbox, and no `kern.procargs`. `PATH` gains the selected developer tools' `usr/bin` before
+  `/usr/bin` (the `python3` and `git` shims can't use their cache in the box) and Homebrew's folders after it. The
+  runner's process sampler (as for Patch and Pulse, with its 512 MB and 32-process limits, `resource_limit`) stops
+  whatever a line leaves running. Weaker than Linux, as the Pip's card says: no PID namespace (a line sees other
+  programs' names), stopping is by sampling, `/tmp` is closed (macOS bash 3.2 writes here-documents there, so `<<<`
+  fails), and Apple marks `sandbox-exec` as deprecated. A Troupe checker's shell uses the same box, its commands
+  stopped by their process group.
 - **Limits.** 60 seconds and 64 KiB of output a line (`timed_out`, `output_limit`); 4 KiB of each output is kept,
   redacted for configured credentials. Statuses: `ok`, `failed`, `timed_out`, `output_limit`, `cancelled`,
   `refused`, `not_run`.
@@ -617,7 +634,8 @@ default `.config/systemd/user`).
 Pips work. Audits, Quill drafts, conversations and Personal tasks run on Linux and
 macOS. Patch and Pulse commands need Linux with bubblewrap, or macOS with
 Seatbelt and Xcode or the Command Line Tools, with weaker guarantees (see **macOS**
-under Patch and Pulse commands). Current-tree source needs POSIX directory handles.
+under Patch and Pulse commands). Live-data commands need Linux with bubblewrap, or
+macOS with Seatbelt (see **The box on macOS** under Live-data commands). Current-tree source needs POSIX directory handles.
 `export-run` and `capacity` need Linux `/proc`. The service needs Linux with user
 systemd.
 

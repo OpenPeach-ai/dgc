@@ -1422,13 +1422,15 @@ agent sees every item at once).
 
 - **explorer, researcher, critic** read only (files, search, the web), with no shell. They run beside
   your files, so a hundred of them cost no checkouts.
-- **verifier** reads the same and also has a **read-only shell in a sealed box** (Linux, bubblewrap),
-  to run the commands, tests and queries that would prove a finding wrong. In the box the project is
-  read only (at `/mnt`), the only writable place is a private `/tmp`, credential files a Pip snapshot
-  leaves out (`.env*`, keys, `.git`, `.ssh`, ...) are hidden, your home, `/run` and their sockets
-  (Docker's included) are empty, and there is no network, except the project's read-only database
-  when one is set. Where the box can't run (stock Ubuntu 23.10+ AppArmor: `dgc pips execution
-  --fix`), a verifier has no shell and is told so. A verifier that can't check something answers
+- **verifier** reads the same and also has a **read-only shell in a sealed box** (bubblewrap on
+  Linux, Seatbelt on a Mac), to run the commands, tests and queries that would prove a finding wrong.
+  In the box the project is read only (at `/mnt`; on a Mac at its own path), the only writable place
+  is a private `/tmp` (on a Mac, a private `$TMPDIR`), credential files a Pip snapshot leaves out
+  (`.env*`, keys, `.git`, `.ssh`, ...) are hidden, your home, `/run` and their sockets (Docker's
+  included) are empty or closed, and there is no network, except the project's read-only database
+  when one is set. On a Mac it is a little weaker: a command can see which other programs are
+  running, and one it detaches can outlive it, still inside the box. Where the box can't run (stock
+  Ubuntu 23.10+ AppArmor: `dgc pips execution --fix`), a verifier has no shell and is told so. A verifier that can't check something answers
   unsure, which counts neither way; what nobody could check is kept and marked unchecked.
 - **A read-only database account**, for checks on live data: make a read-only role yourself
   (`dgc readonly-db guide` prints the Postgres SQL; DGC never creates or changes a role), then
@@ -2749,8 +2751,9 @@ schedule, a commit trigger or a routine. Up to four Pips work at once, with no d
   run, and changing the list is a reviewed change. The summary posts in the Pip's chat and reaches
   your Work chat as a report: "all clear", or "needs you" with **Ask DGC to fix**. Ask the main chat
   to set one up, or choose **Read-only commands on live data** in a Pulse's Plan & schedule. Use a
-  read-only database account: `dgc readonly-db guide` shows how to make one. It needs Linux with
-  bubblewrap (on Windows, DGC inside WSL 2); elsewhere the Pip says why its commands can't run.
+  read-only database account: `dgc readonly-db guide` shows how to make one. It runs on Linux with
+  bubblewrap, on a Mac under Seatbelt (a little weaker, as its card says) and on Windows in DGC inside
+  WSL 2; elsewhere the Pip says why its commands can't run.
 
 ## A Personal Pip's computer
 
@@ -2788,8 +2791,10 @@ a Mac it works in its browser.
 
 Linux and macOS, and Windows with DGC inside WSL 2: there, Windows starts the runner when you sign
 in, notifications are Windows' own, and your signed-in Chrome is the one on Windows. Patch and Pulse
-commands run under bubblewrap on Linux and Seatbelt on macOS, which DGC tells you is weaker; a live-data
-Pip's commands run only under bubblewrap, so not on a Mac. Pause one
+commands run under bubblewrap on Linux and Seatbelt on macOS, which DGC tells you is weaker; so do a
+live-data Pip's commands and a Troupe checker's shell, in a read-only box that on a Mac is a little
+weaker too: a command there can see which other programs are running, and Apple marks sandbox-exec as
+deprecated. Pause one
 Pip, or stop them all with `dgc pips stop`. From your own program, the SDK's `session.pips` manages
 the Pips of your profile; see **SDK**.
 """.strip()),
