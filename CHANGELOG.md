@@ -6,6 +6,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Your app hears what waits for it, and can decide it (Pips API 62).** When a Pip's change in your own app waits for
+  a person, DGC tells the app at its own address, signed as its tool calls are: `approval_requested`, with the change,
+  its digest, the Pip, the run, a one-line summary, when it expires and whether it moves money. The app's admin screen
+  can show it, and a person there can accept or reject it through the SDK (`decide_app_approval`; what waits is
+  `list_app_approvals`). DGC's own Allow card still shows it, and whichever answers first wins, once: the other side
+  sees what was decided, and the change is called once and never again. When a change is accepted, rejected or
+  expires, wherever that happened, the app hears `approval_resolved` and by whom: DGC, the app, the Pip's Always allow
+  or its level. Decided in the app, the card in the Pip's chat settles with what the app decided; Edit in DGC
+  withdraws the app's copy and runs the edited change; Don't rejects it for both. DGC's runner sends these with a
+  first try and up to three more (5 seconds, 30 seconds and 2 minutes after a failure), records every try on the
+  action, and never lets a failed delivery hold up or reject anything. A change that moves money still asks a person
+  every time and never gets Always allow.
+
 - **Pips for your own app: its tools become a Pip's (Pips API 61).** A developer whose business app uses DGC's SDK
   registers it once (`register_app`, an approved SDK call): a name, the address DGC calls it at, and its tools, each
   a name, a description, a JSON schema and a kind, read or change (and whether a change moves money). DGC makes a

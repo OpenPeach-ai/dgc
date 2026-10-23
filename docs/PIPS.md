@@ -1013,6 +1013,12 @@ it; when the app doesn't answer, the Pip says so in plain words.
 address. When the developer adds or changes a tool, the update waits there until you choose **Accept**. The app's
 secret key is shown once, to the developer's code, and never in DGC. For developers: [sdk/PIPS.md](../sdk/PIPS.md#your-own-apps-tools-api-61).
 
+The app can show a change that waits for you on its own screen, and you can decide it there instead. Whichever you
+answer first counts, once: decide in the app and the card in the Pip's chat settles with one line, **Shop app
+accepted create_dispatch**; choose **Allow** or **Don't** in DGC and the app's screen hears that too. Nothing runs
+twice. If the app can't be reached, DGC tries a few more times and the card in DGC still waits for you. A change
+that moves money still asks a person every time, on either side. For developers: [Approvals in your app](../sdk/PIPS.md#approvals-in-your-app-api-62).
+
 ### App reads
 
 A Personal Pip can read from apps you've connected through Composio (see

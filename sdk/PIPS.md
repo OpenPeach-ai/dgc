@@ -4,9 +4,10 @@ SDK 0.7.0 adds `session.pips` to the Python (sync and async) and TypeScript SDKs
 lets trusted host code read and manage the Pips of an existing DGC profile through
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions. From Pips API 61 it also
-gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)).
+gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)), and from API 62
+your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)).
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 61** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 62** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -119,7 +120,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 61; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 62; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -171,6 +172,7 @@ job with `create_pip` and a reviewed update.
 | 59 | Borrowing your own signed-in Chrome, with your consent each time: `list_pip_borrows {pip_id}` (R: `{pip_id, minutes, borrows}`, each card's `status` requested, allowed, declined, replaced, in_use, returned or expired, its `sites`, `why`, whether your Chrome is `reachable`, and `ended`), `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow` (M, each `{pip_id, borrow_id}`, local only). Allow once lets only the one turn it starts use your Chrome, on the card's sites, in a tab of DGC's own; there is no Always allow. |
 | 60 | A live-data Pip: `changes.live_plan` on `propose_pip_update`, `{schema_version: 1, commands: [...]}` with one to six distinct read-only command lines (or `null` to remove them). Both SDKs refuse it before API 60 and check its shape; the backend refuses a line that writes (`write_command`) or holds a password (`secret_detected`). Its runs (`run_kind` `live`) start with `run_pip` and no Pulse pins; `get_pip_run`'s `result.live` has each line's `status`, `exit_code` and `output`, and the `summary` (`summary_by` `model` or `dgc`) with `attention`. Its run posts have `kind` `live` and `outcome` `live_clear` or `live_attention`. |
 | 61 | Your own app's tools ([below](#your-own-apps-tools-api-61)): `register_app`, `update_app`, `accept_app_update`, `remove_app` and `rotate_app_secret` (M) and `list_apps` (R), all local only; an `app_plan` on `app:<name>`. Both SDKs refuse them before API 61 and check a name, an address and each tool before anything is sent. `define_pip_tool` / `definePipTool` and `AppToolHandler` need no runtime. |
+| 62 | Approvals in your app ([below](#approvals-in-your-app-api-62)): `list_app_approvals` (R) and `decide_app_approval` (M), local only; `pips.pending()` and `pips.decide()` in both SDKs, refused before API 62 and checked before anything is sent. `AppToolHandler`'s approval callbacks need no runtime. `get_pip_app_action` of an app action carries `app_deliveries`. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -689,6 +691,94 @@ Python keys `tools` by each tool's `define_pip_tool` value (or by name, with tho
 TypeScript keys them by name, with the `definePipTool` values in `{ definitions }`. Python imports Flask only in
 `flask()`; `wsgi`, `asgi` and `handle` need no framework. An async tool needs `asgi` (or `handle_async`). In Express,
 mount the handler before any JSON body parser (or with `express.raw`), so it reads the bytes DGC signed.
+
+### Approvals in your app (API 62)
+
+When a Pip's change on your app waits for a person, your app hears about it at the same address, so its own admin
+screen can show it and decide it. DGC's Allow card shows it too. Whichever answers first wins, once: the other side
+sees what was decided, and the change is never called twice.
+
+What waits for a person: a change a Pip proposed in its run that still asks after the run (its Always allow and its
+level had their say first), or a review proposed with `propose_pip_connector_action`. A change marked `moves_money`
+always asks a person, at every level, and never gets Always allow.
+
+DGC POSTs two kinds of event, signed exactly as tool calls are (the same headers and HMAC):
+
+```json
+{"type": "approval_requested", "app": "shop", "action_id": "appaction_…", "action_digest": "…",
+ "tool": "create_dispatch", "arguments": {"order_id": "ord_17"}, "pip_id": "pip_…", "pip_name": "Payment chaser",
+ "run_id": "run_…", "summary": "Payment chaser asks to run create_dispatch (order_id ord_17) in Shop app.",
+ "expires_at": "2026-10-25T09:00:00.000Z", "moves_money": false}
+```
+
+```json
+{"type": "approval_resolved", "app": "shop", "action_id": "appaction_…", "tool": "create_dispatch",
+ "decision": "accepted", "by": "app", "at": "2026-10-24T09:05:00.000Z"}
+```
+
+`decision` is `accepted`, `rejected` or `expired`. `by` is `dgc` (DGC's own card, the CLI, or the 24-hour expiry),
+`app` (your app, through `decide`), `always_allow` (the Pip's Always allow) or `level` (the Pip's level, Approve for
+me or Full access). An Always allow-ed change was never waiting, so it has no `approval_requested`, only its
+`approval_resolved`: your audit sees it either way. An accepted change then arrives as its own `tool_call`, carrying
+the same `action_id`.
+
+**Delivery.** The Pips runner sends events (it looks every couple of seconds): a first try, then up to three more 5 s,
+30 s and 2 minutes after a failure. An HTTP 4xx other than 408 and 429, a redirect or a certificate DGC can't check
+is not tried again. Any 2xx is delivered. Every try is recorded on the action: `app_deliveries` in
+`get_pip_app_action`, `deliveries` in `pending()` and `decide()`. A request for something decided before DGC could
+send it is skipped; your app hears only how it was decided. A failed delivery never blocks or rejects the change:
+DGC's card still shows it. Treat a repeat of the same `action_id` and `type` as one event.
+
+**Showing them.** Give `AppToolHandler` the callbacks; each gets the event once its signature, time and nonce check
+out. With no callback the handler answers 204, so an app that doesn't care loses nothing.
+
+```python
+from dgc_sdk.pips_app import AppToolHandler
+
+waiting = {}
+handler = AppToolHandler(os.environ["DGC_PIPS_SECRET"], tools={unpaid: find_unpaid, dispatch: create_dispatch},
+                         on_approval_requested=lambda e: waiting.__setitem__(e.action_id, e),
+                         on_approval_resolved=lambda e: waiting.pop(e.action_id, None))
+```
+
+```typescript
+const handler = new AppToolHandler(process.env.DGC_PIPS_SECRET!, tools, { definitions,
+  onApprovalRequested: (e) => waiting.set(e.actionId, e), onApprovalResolved: (e) => waiting.delete(e.actionId) });
+```
+
+Python's events are `PipApprovalRequested` and `PipApprovalResolved` (fields as on the wire); TypeScript's have the
+same fields in camelCase (`actionId`, `actionDigest`, `pipName`, `expiresAt`, `movesMoney`). A callback that raises
+answers 500, and DGC tries again. An async callback needs `asgi` (or `handle_async`) in Python.
+
+**Deciding.** A person on your admin screen decides; your app passes it on:
+
+```python
+s.pips.decide(event.action_id, "accept", expected_digest=event.action_digest, approved=True)
+# what waits now, with digests (one app's with app="shop"):
+for approval in s.pips.pending()["approvals"]:
+    print(approval["summary"], approval["action_digest"])
+```
+
+```typescript
+await session.pips.decide(event.actionId, "reject", event.actionDigest, { approved: true });
+const { approvals } = await session.pips.pending("shop");
+```
+
+| Command | | Fields |
+| --- | --- | --- |
+| `list_app_approvals` | R | `app?` (one app's). Answers `{approvals}`, oldest first: each `action_id`, `action_digest`, `app`, `tool`, `arguments`, `pip_id`, `pip_name`, `run_id`, `summary`, `created_at`, `expires_at`, `moves_money`, `status`, `decision`, `by`, `decided_at`, `receipt`, `deliveries`. |
+| `decide_app_approval` | M | `action_id`, `decision` (`accept` or `reject`), `expected_digest` (its `action_digest`). Answers `{approval, decided}`. |
+
+`decide` is `accept_pip_app_action` / `reject_pip_app_action` decided by your app: its `by` is `app`. An accepted
+change is called once, at your address, before `decide` returns (your web server must answer other requests
+meanwhile, as Flask's own server does). Exactly once: an approval already decided, by your app or in DGC, answers
+`decided: false` with what was decided, and nothing runs again. A wrong `expected_digest` is refused
+(`action_conflict`). Your app decides as you, on this computer: call `decide` from a person's choice on your screen,
+never from code alone, above all for a change that moves money.
+
+On DGC's side the card and your app decide one thing. Allow takes the same approval; Edit withdraws it (your app hears
+`rejected`, by `dgc`) and runs the edited change under a new `action_id`; Don't rejects it. When your app decides
+first, the card settles with one line: "Shop app accepted create_dispatch".
 
 ## Parameters that pin a review
 

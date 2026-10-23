@@ -326,6 +326,15 @@ listing doesn't name; its `succeeded` receipt's `meaning` is "The app answered t
 both requests before API 61 ("Update DGC to see your own apps.") and an older CLI is asked for neither. Registering,
 changing and removing an app are SDK calls the view doesn't make. No event and no event field changes.
 
+**Approvals in your app** (API 62). The app can decide a Pip's change too. When it does first, the change's connector
+draft is `prepared` with the action the app decided; the view reads that action once (`get_pip_app_action`, its
+`resolved_by` `app:<name>`) and shows one line in place of the card ("Shop app accepted create_dispatch", "Decided in
+Shop app. It ran once."), until the user's next message. An Allow whose `prepare_pip_connector_draft` answers an action
+the app already decided, or whose accept observes one, says so and runs nothing more. An app action's
+`get_pip_app_action` also carries `app_deliveries`, which the view doesn't show. `list_app_approvals` and
+`decide_app_approval` are SDK calls the view doesn't make. Before API 62 the view asks nothing new. No event and no
+event field changes.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

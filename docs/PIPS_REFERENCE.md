@@ -420,7 +420,7 @@ An email, calendar event or connector call is an **external action**:
 | `gmail_send` | Composio `GMAIL_SEND_EMAIL` with the chosen account | One recipient (up to 254 bytes, plain address), subject up to 200 bytes, plain-text body up to 12,000 bytes; no CC, BCC, HTML or attachments | The provider accepted the message; delivery is not confirmed |
 | `calendar_create` | Composio `GOOGLECALENDAR_CREATE_EVENT` with the chosen account | Primary calendar, private, busy, no meeting link; guests can't modify, invite or see the guest list; title up to 200 bytes, description up to 8,000; at most seven days long; offsets must match the IANA zone; start still in the future | The provider confirmed creation, checked against the reviewed times, title, guests and series. Invitation delivery and acceptance are not confirmed. |
 | `connector_call` | One tool on a saved `zapier`, `arcade`, `make` or `n8n` connection | Exact tool and arguments (up to 10,000 bytes); the connector manages its own accounts; response up to 32 KiB, kept as a digest and 1 KiB preview | The connector returned a response; downstream completion is not confirmed |
-| `connector_call` on `app:<name>` (API 61) | One change tool of your own app (see Your own app's tools, under Personal Pips) | Exact tool and arguments, checked against its schema when proposed and again before it runs; one signed POST with `action_id` and `action_digest`, 30 seconds; JSON answer up to 256 KB, kept as a digest and 1 KiB preview; a tool marked `moves_money` never gets Always allow and asks at every level | The app answered `ok` (`The app answered that it did this.`). Its own refusal, or no answer, is `unknown` with its words in the receipt (`The shop app said: …. DGC will not retry this action.`) |
+| `connector_call` on `app:<name>` (API 61; decided in the app too from API 62) | One change tool of your own app (see Your own app's tools, under Personal Pips) | Exact tool and arguments, checked against its schema when proposed and again before it runs; one signed POST with `action_id` and `action_digest`, 30 seconds; JSON answer up to 256 KB, kept as a digest and 1 KiB preview; a tool marked `moves_money` never gets Always allow and asks at every level | The app answered `ok` (`The app answered that it did this.`). Its own refusal, or no answer, is `unknown` with its words in the receipt (`The shop app said: …. DGC will not retry this action.`) |
 
 A connector call can invoke any tool the connector exposes; DGC doesn't filter by
 what a tool does. A workflow may keep running after DGC's deadline. A Pip itself
@@ -1747,6 +1747,53 @@ Credentials DGC knows in the address or tools are refused (`secret_detected`).
   with a redirect, which DGC doesn't follow", "the shop app's certificate couldn't be checked, so DGC didn't send the
   call", "the shop app answered with an error (HTTP 503)".
 
+**Approvals in your app** (`pip_sdk_app_approvals`, Pips API 62). When a change on `app:<name>` waits for a person,
+the app hears about it at its `url`, signed exactly as a tool call is, and can decide it; DGC's own card shows it too,
+and whichever answers first wins, once.
+
+- **What waits.** After a Personal Pip's run, once its Always allow grants and its level have had their say
+  (`_run_granted_actions`), each connector draft on `app:<name>` still pending becomes a review DGC opens for the
+  app: a `connector_call` action requested by `pip-app-review` with request key `draft_<draft id>`, tied to that
+  draft (its Allow card). `pip-app-review` only proposes; it can never accept or reject (`local_only`). A review
+  proposed with `propose_pip_connector_action` (or prepared from a draft by the user) waits too. Attention, the
+  pending count and archiving count the draft, not its review again. Expiry is the action's 24 hours.
+- **The events.** `{type: "approval_requested", app, action_id, action_digest, tool, arguments, pip_id, pip_name,
+  run_id, summary, expires_at, moves_money}` when a review on the app opens, except one opened by a grant or a level
+  (those are accepted at once); `{type: "approval_resolved", app, action_id, tool, decision, by, at}` when any action
+  on the app closes, wherever: `decision` `accepted` (pending → dispatching), `rejected` or `expired`; `by` `app`
+  (`resolved_by` `app:<name>`), `always_allow` (`pip-grant:…`), `level` (`pip-level:…`) or `dgc` (anything else,
+  the expiry included). `summary` is "<Pip> asks to run <tool> (<first arguments>) in <App>." (300 characters at
+  most); `moves_money` is the tool's mark, or true when DGC can't find the tool.
+- **Delivery.** Each event is written to the Pips database's `metadata` (`pipapp_outbox:<action_id>:<requested |
+  resolved>`), in the transaction that opens or closes the review, once per action and kind. The supervisor
+  (`dgc pips serve`), each heartbeat, closes app actions past their expiry (so `expired` is heard) and, when something
+  is due, sends on a thread of its own: each event claimed for 60 seconds, so two senders never send one at once;
+  10 seconds a try; a first try, then up to three more 5 s, 30 s and 2 min after a failure. 2xx is delivered; 408,
+  429, 5xx, a timeout or no answer is tried again; any other 4xx, a redirect or a certificate DGC can't check is
+  final. Finished events move to `pipapp_sent:…` with `status` `delivered`, `failed` (with its words: "the shop app
+  didn't answer (4 tries)", "the shop app refused it (HTTP 400)") or `skipped` (an `approval_requested` whose review
+  closed before it was sent). Each try is `{at, outcome}`. `get_pip_app_action` of an app action carries
+  `app_deliveries: [{type, status, tries, delivered_at, error, created_at}]`. A delivery never blocks, delays or
+  rejects the action. A sender that dies mid-send can send an event again after its claim lapses: apps treat
+  `(action_id, type)` as one event.
+- **Deciding in the app.** `decide_app_approval {action_id, decision: "accept" | "reject", expected_digest}` (local
+  only) is `accept_pip_app_action` / `reject_pip_app_action` with `resolved_by` `app:<name>`: the same checks
+  (`_current`, the app's tool and schema, the money floor's attempt-once ledger). It answers `{approval, decided}`;
+  an action already dispatching, succeeded, unknown, rejected or expired answers `decided: false` with that state and
+  runs nothing. A wrong digest is `action_conflict`; an action not on an app is `not_an_app_action`. An accepted
+  one is POSTed (`tool_call`) before the answer, and the Pip carries on as after a plugin action (`app_answer`).
+  `list_app_approvals {app?}` (local only) lists pending, unexpired app actions, oldest first, at most 100: `action_id`,
+  `action_digest`, `app`, `tool`, `arguments`, `pip_id`, `pip_name`, `run_id`, `summary`, `created_at`, `expires_at`,
+  `moves_money`, `status`, `decision`, `by`, `decided_at`, `receipt`, `deliveries`.
+- **The card and the review are one.** `prepare_pip_connector_draft` on a draft with an open review takes that review
+  (the draft becomes `prepared` with it) when the call is the same, or when the review is already closed; with an
+  edited call it rejects the review first (`by` `dgc`) and proposes the edited one. `dismiss_pip_connector_draft`
+  rejects an open review. Closing the review any other way (the app, the expiry, `accept`/`reject_pip_app_action`)
+  prepares its draft with it, in the same transaction. A refusal names the app's decision: "Shop app already accepted
+  this: it ran once.", "Shop app declined this.", "This expired without an answer."
+- **The money floor** is unchanged: a tool marked `moves_money` gets no Always allow and no level, so it always waits,
+  and both the card and `approval_requested` say so.
+
 **Web plans** (`web_plan`):
 
 ```json
@@ -2011,6 +2058,7 @@ Clients check it before using a newer control.
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
 | 61 | Your own app's tools (`pip_sdk_apps`): `register_app`, `update_app`, `accept_app_update`, `list_apps`, `remove_app`, `rotate_app_secret` (local only); the connection `app:<name>` in `list_pip_connections`, `inspect_pip_connection` and `inspect_pip_connector_actions`; version-1 `app_plan`s on it; `connector_call` actions on it, sent as one signed POST; `<app>__<tool>` functions and `app_answer` in a Personal Pip's runs (see Your own app's tools, under Personal Pips) |
+| 62 | Approvals in your app (`pip_sdk_app_approvals`): `approval_requested` and `approval_resolved`, POSTed signed to the app's `url` by the supervisor and recorded on the action (`app_deliveries`); `list_app_approvals` and `decide_app_approval` (local only); the review `pip-app-review` opens for a Pip's change on `app:<name>`, tied to its connector draft (see Approvals in your app, under Personal Pips) |
 | 60 | A live-data Pip: a project Pulse's `live_plan` (`changes.live_plan`, a setup card's `work_kind` `live_data`), run kind `live`, `result.live`, run posts of kind `live` and report cards with outcomes `live_clear` and `live_attention`, `live_plan` on `get_pip` and `list_pips` (see [Live-data commands](#live-data-commands)) |
 | 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |
 | 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |

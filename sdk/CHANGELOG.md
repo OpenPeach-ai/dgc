@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Pips API 62: approvals in your app. `pips.pending(app=None)` lists the changes on your own apps that wait for a
+  person, with their digests (`list_app_approvals`); `pips.decide(action_id, "accept" | "reject",
+  expected_digest=..., approved=True)` is your app's own accept or reject (`decide_app_approval`), exactly once: an
+  approval already decided, in your app or in DGC, answers `decided: false` with what happened and runs nothing.
+  TypeScript: `pips.pending(app?)` and `pips.decide(actionId, decision, expectedDigest, { approved: true })`. Both are
+  refused before API 62 and checked before anything is sent. `AppToolHandler` takes `on_approval_requested` and
+  `on_approval_resolved` (`onApprovalRequested`, `onApprovalResolved`), called with a `PipApprovalRequested` or
+  `PipApprovalResolved` after the same signature, time and nonce checks as a tool call; with no callback the handler
+  answers 204, and a callback that raises answers 500 so DGC tries again.
+
 - Pips API 61: your own app's tools for Personal Pips. `define_pip_tool(name, description, schema, kind,
   moves_money=False)` (TypeScript `definePipTool(name, description, schema, kind, { movesMoney })`) describes a tool;
   `pips.register_app(name, url=..., tools=[...], approved=True)` (`pips.registerApp`) registers the app and answers its
