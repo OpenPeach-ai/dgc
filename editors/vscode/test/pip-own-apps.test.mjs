@@ -32,7 +32,7 @@ const action=(status='pending',c=call,extra={})=>({id:ACTION,pip_id:PIP,workspac
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 const clean=v=>JSON.parse(JSON.stringify(v));
 
-function setup({apps=[shop()],drafts=[draft()],apiVersion=61,actions={}}={}){
+function setup({apps=[shop()],drafts=[draft()],apiVersion=61,actions={},posts=[]}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -53,13 +53,14 @@ function setup({apps=[shop()],drafts=[draft()],apiVersion=61,actions={}}={}){
   list_pip_message_drafts:()=>({drafts:[],next_cursor:null}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),
   list_pip_connector_drafts:()=>({drafts:drafts.map(summary),next_cursor:null}),get_pip_connector_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),
   get_pip_app_action:()=>actions[r.action_id]?{action:actions[r.action_id]}:undefined,
+  list_pip_run_posts:()=>({pip_id:PIP,workspace_id:PW,posts,next_before_id:null}),
   list_pip_routines:()=>({pip_id:PIP,routines:[]}),list_pip_action_grants:()=>({pip_id:PIP,grants:[]}),get_pip_digest:()=>undefined,
   list_pip_plugin_uses:()=>({plugins:[],installed:[]}),list_pip_apps:()=>({apps:[]}),get_pips_limit:()=>({max_pips:100,default:100,maximum:100000,count:1}),
   get_pip_computers:()=>({available:true,reason:'',platform:'linux',setup:{state:'ready',step:'',done:0,total:0,error:'',chrome:'',checked_at:null},computers:[],programs_bytes:0,free_bytes:0})}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
- return {w,d:w.document,sent,answer,requests,drain,click,message,setDrafts:v=>{drafts=v;},setApps:v=>{apps=v;},setActions:v=>{actions=v;}};
+ return {w,d:w.document,sent,answer,requests,drain,click,message,setDrafts:v=>{drafts=v;},setApps:v=>{apps=v;},setActions:v=>{actions=v;},setPosts:v=>{posts=v;}};
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 
@@ -147,6 +148,10 @@ test('a change your app accepted first settles its card with one line saying so'
  assert.equal(x.requests('get_pip_app_action').length,1,'read once');
  x.message({type:'pipsVisibility',visible:true});await x.drain();
  assert.equal(x.requests('get_pip_app_action').length,1,'and not again');
+ // A later run posts in the chat: the line goes, so it never sits under a reply about something else.
+ x.setPosts([{id:'post_1',run_id:'run_'+'6'.repeat(32),pip_id:PIP,kind:'result',outcome:'result',trigger:'you',summary:'Proposed another reminder.',posted_at:'2026-10-24T09:06:00.000Z'}]);
+ x.message({type:'pipsVisibility',visible:true});await x.drain();
+ assert.equal(x.d.querySelector('[data-own-app-decided]'),null,'something newer is in the chat');
  const declined=setup({apiVersion:62,drafts:[draft()]});await openChat(declined);
  declined.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);declined.setActions({[ACTION]:byApp('rejected')});
  declined.message({type:'pipsVisibility',visible:true});await declined.drain();

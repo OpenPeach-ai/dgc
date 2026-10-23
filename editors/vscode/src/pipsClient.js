@@ -2277,11 +2277,14 @@ async function loadOwnAppDecisions(){
   catch{/* the chat says what happened */}
  }
 }
+// Shown under the chat until anything newer is in it (a message, or a run's post), so it never sits under a later
+// reply as if it were about that one.
 function ownAppDecidedCards(){
  if(S.apiVersion<62)return '';
- const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
+ const latest=Math.max(0,...(S.messages||[]).filter(m=>m.intro!==true).map(m=>Date.parse(m.created_at)||0),
+  ...(postsShown()&&S.postsPip===S.selected?S.posts||[]:[]).map(p=>Date.parse(p.posted_at)||0));
  return ownAppSettled().map(d=>{const a=ownAppDecisions.get(d.action_id),decided=a&&ownAppDecision(a);
-  return decided&&(Date.parse(a.resolved_at)||0)>lastUserAt?ownAppDecisionMarkup(d.id,decided,{esc}):'';}).join('');
+  return decided&&(Date.parse(a.resolved_at)||0)>latest?ownAppDecisionMarkup(d.id,decided,{esc}):'';}).join('');
 }
 function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),server=v&&v.payload.action.server;
  const plugin=v&&(S.apiVersion>=61&&ownAppForServer(S.ownApps,server,v.payload.action.call.tool)||pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
