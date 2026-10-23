@@ -490,15 +490,21 @@ def unavailable_reason() -> str:
     return reason.replace("a checker's read-only shell", "a live-data Pip's read-only box") if reason else ""
 
 
-def setup_notice() -> str:
-    """What its card says it does. On a Mac, where the box is Seatbelt's, it also says once, in plain words, what is
-    weaker than on Linux (checker_box.MAC_NOTICE); nowhere else says it louder."""
+def mac_notice() -> str:
+    """On a Mac, where the box is Seatbelt's, what is weaker than on Linux in one plain sentence (checker_box.MAC_NOTICE),
+    for the moment the commands are reviewed: its card, or `dgc pips propose`. "" elsewhere. Nowhere says it louder."""
     import sys
     if sys.platform == "darwin":
         from . import checker_box
         if not checker_box.unavailable_reason():
-            return SETUP_NOTICE + " " + checker_box.MAC_NOTICE
-    return SETUP_NOTICE
+            return checker_box.MAC_NOTICE
+    return ""
+
+
+def setup_notice() -> str:
+    """What its card says it does, with mac_notice() on a Mac."""
+    weaker = mac_notice()
+    return SETUP_NOTICE + (" " + weaker if weaker else "")
 
 
 def run_here_notice(job) -> str | None:

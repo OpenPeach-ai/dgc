@@ -251,6 +251,32 @@ class TroupeStageTests(AgentCase):
         self.assertTrue(made and not any(os.path.exists(folder) for folder in made), "released after the stage")
 
 
+class ProposeOnAMacTests(unittest.TestCase):
+    """`dgc pips propose` is where the CLI reviews the commands: on a Mac it says once what is weaker there."""
+
+    def setUp(self):
+        from test_pip_live_data import CommandLineTests
+        self.fixture = CommandLineTests("test_propose_names_the_exact_lines_and_refuses_a_write")
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+
+    def test_the_review_says_it_once_on_a_mac_and_not_on_linux(self):
+        self.fixture.commit()
+        code, text, _ = self.fixture.cli("create", "Orders watch", "--type", "pulse", "--reviewed-execution", "--goal",
+                                         "Watch unpaid orders", "--json")
+        self.assertEqual(code, 0, text)
+        pip = __import__("json").loads(text)["pip"]
+        propose = ("propose", pip["id"], "--expected-version", "1", "--live-command", "df -h .", "--reason", "Watch")
+        with On():
+            code, text, _ = self.fixture.cli(*propose)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(text.count(checker_box.MAC_NOTICE), 1, text)
+        if not sys.platform.startswith("darwin"):
+            code, text, _ = self.fixture.cli(*propose)
+            self.assertEqual(code, 0, text)
+            self.assertNotIn("sandbox-exec", text, "Linux's review is as it was")
+
+
 # ---- the real box, on a Mac ---------------------------------------------------------------------------------------
 class Echo:
     """A stand-in database on 127.0.0.1: answers each line with "db:" and the line."""

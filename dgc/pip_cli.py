@@ -977,8 +977,9 @@ def _format(value):
         if item.get('verification_plan'):
             lines.append('Exact reviewed plan: ' + json.dumps(item['verification_plan'], ensure_ascii=False, indent=2))
         if item.get('live_plan'):
+            from .pip_live_data import mac_notice
             lines += ['Live data: DGC runs exactly these read-only commands each time, in a read-only box:',
-                      *('  ' + line for line in item['live_plan']['commands'])]
+                      *('  ' + line for line in item['live_plan']['commands']), *([mac_notice()] if mac_notice() else [])]
         if item.get('receipt'):
             lines.append('Receipt: ' + json.dumps(item['receipt'], ensure_ascii=False))
         if item['status'] == 'pending':
@@ -1188,8 +1189,9 @@ def _format(value):
                       *("  " + github_label(read) for read in github["reads"])]
         live = item["definition"].get("live_plan")
         if live:
+            from .pip_live_data import mac_notice
             github = [*(github or ()), "Live data: DGC runs exactly these read-only commands each time, in a read-only box:",
-                      *("  " + line for line in live["commands"])]
+                      *("  " + line for line in live["commands"]), *([mac_notice()] if mac_notice() else [])]
         return "\n".join(["Saved for review; no change is active.", json.dumps(item["definition"], ensure_ascii=False, indent=2),
                           *(github or ()),
                           "Reason: " + item["reason"], "Review expires: " + item.get("expires_at", "Not recorded"),

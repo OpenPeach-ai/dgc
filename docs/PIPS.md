@@ -668,8 +668,9 @@ itself is closed), can't read your home or the project's credential files, reach
 the read-only database, and can't use the Keychain (no stored password, no prompt on your screen), the clipboard,
 Apple Events, Spotlight or another app. What is weaker:
 
-- A line can see the names of the other programs running on the Mac, though it can't signal them or read their
-  details; on Linux it sees only its own.
+- A line can list the names of the other programs running on the Mac (`ps` and `pgrep` don't work in the box, but
+  the names can still be read), though it can't signal them or read their details; on Linux it sees only its own.
+- `localhost:PORT` reaches that port on any of the Mac's own addresses, not only `127.0.0.1`; never another computer.
 - Nothing ends with the box as on Linux: whatever a line leaves running is found by sampling and stopped, with
   Patch and Pulse's 512 MB and 32-process limits.
 - Here-documents (`<<<`) fail, because macOS's own bash writes them to `/var/tmp`; pass text with a pipe instead.

@@ -212,7 +212,8 @@ class BoxTests(Project):
         self.assertEqual(result.stdout.splitlines(), ["db:select 1", "internet: no"], result.stderr)
 
     def test_no_box_here_means_no_shell_and_says_why(self):
-        with patch.object(sandbox, "available", return_value=None), \
+        # Linux's case (a Mac builds its box with Seatbelt: tests/test_checker_box_seatbelt.py).
+        with patch.object(checker_box.sys, "platform", "linux"), patch.object(sandbox, "available", return_value=None), \
                 patch("dgc.browser_setup.userns_restricted", return_value=True), \
                 patch("dgc.pip_execution.Path.exists", return_value=True):
             settings, note = self.box()

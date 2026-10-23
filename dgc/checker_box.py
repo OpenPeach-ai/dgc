@@ -328,8 +328,11 @@ SEATBELT_RULES = (
 )
 # What is weaker than the Linux box, in plain words (docs, and `dgc pips execution`'s style for Patch and Pulse).
 MAC_LIMITATIONS = (
-    "No process namespace: a command can see the names of the other programs running on the Mac (it can't signal "
-    "them or read their arguments or details). On Linux it sees only its own.",
+    "No process namespace: ps and pgrep don't work in the box, but a program can still list the names of the other "
+    "programs running on the Mac (it can't signal them or read their arguments or details). On Linux it sees only "
+    "its own.",
+    "Seatbelt's localhost:PORT is the named port on any of the Mac's own addresses, not only 127.0.0.1 (never "
+    "another computer's).",
     "Nothing ends with the box as a PID namespace does: a live-data line's leftover programs are found by sampling "
     "and stopped (as for Patch and Pulse, with their 512 MB and 32-process limits), and a checker's command by its "
     "process group, so a program that detaches into a session of its own can keep running, still inside the box's "

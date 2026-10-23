@@ -365,8 +365,9 @@ asked, never on events.
   only for its own sandbox, and no `kern.procargs`. `PATH` gains the selected developer tools' `usr/bin` before
   `/usr/bin` (the `python3` and `git` shims can't use their cache in the box) and Homebrew's folders after it. The
   runner's process sampler (as for Patch and Pulse, with its 512 MB and 32-process limits, `resource_limit`) stops
-  whatever a line leaves running. Weaker than Linux, as the Pip's card says: no PID namespace (a line sees other
-  programs' names), stopping is by sampling, `/tmp` is closed (macOS bash 3.2 writes here-documents there, so `<<<`
+  whatever a line leaves running. Weaker than Linux, as the Pip's card says: no PID namespace (`ps` and `pgrep`
+  fail, but a line can still read other programs' names through `sysctl`), Seatbelt's `localhost` is any of the
+  Mac's own addresses (the named ports only), stopping is by sampling, `/tmp` is closed (macOS bash 3.2 writes here-documents there, so `<<<`
   fails), and Apple marks `sandbox-exec` as deprecated. A Troupe checker's shell uses the same box, its commands
   stopped by their process group.
 - **Limits.** 60 seconds and 64 KiB of output a line (`timed_out`, `output_limit`); 4 KiB of each output is kept,
