@@ -5619,10 +5619,13 @@
   $("paste-keep").onclick = () => { pasteBar.hidden = true; syncComposerRail(); input.focus({ preventScroll: true }); };
 
   // One kind of work showing keeps its full row above the box. Two or more fold into one line of chips
-  // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any.
+  // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any. Pip fixes count
+  // as a kind (founder, 24 Oct): a fix's chip beside this chat's changes folds the changes into a chip too, as the
+  // checklist does, so the space above the box stays one line.
   function syncComposerRail() {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
-    const asChips = present.length >= 2;
+    const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
+    const asChips = present.length + fixes.length >= 2;
     composerRail.classList.toggle("as-chips", asChips);
     composerRail.hidden = pasteBar.hidden && (asChips || !present.length);
     composerRail.classList.toggle("has-monitors", !monitorsBar.hidden);
@@ -5630,8 +5633,7 @@
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
-    // Pip fixes are a chip on this line however many rows there are: they have no row of their own.
-    const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
+    // Pip fixes are always a chip on this line: they have no row of their own.
     renderRailChips([...(asChips ? present : []), ...fixes]);
   }
   function setChatChanges(next) {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **One line above the box with a Pip fix.** A Pip fix's chip now counts like the checklist: beside this chat's changes,
+  the changes fold into a chip too, so the space above the prompt box stays one line instead of a chip line over a
+  full row. When the fix's chip goes, the changes get their full row back.
+
 - **A ChatDGC reply keeps running through a window reload.** Reload the window, close it, or reconnect after a
   dropped Remote SSH connection while ChatDGC is writing a reply: the reply carries on, and its tab, when the window
   comes back, shows it finished or still streaming, with nothing lost or shown twice. Its queued messages are still

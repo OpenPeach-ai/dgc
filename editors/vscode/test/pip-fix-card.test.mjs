@@ -204,6 +204,31 @@ test("a reload draws the card with its fix, as live drew it", () => {
   for (const s of [live, replay, listed]) assert.deepEqual(s.errors, []);
 });
 
+test("a Pip fix beside this chat's changes folds them into chips too: one line above the box, like the checklist", () => {
+  const s = panel();
+  const rail = s.doc.getElementById("composer-rail"), chips = s.doc.getElementById("rail-chips");
+  const kinds = () => [...s.doc.querySelectorAll("#rail-chips .rail-chip")].map((n) => n.dataset.kind);
+  s.send({ type: "chat_changes", sessionId: "", total: 3, additions: 40, deletions: 6, files: [{ path: "billing.py" }] });
+  assert.equal(rail.hidden, false, "the changes alone: their full row");
+  assert.equal(rail.classList.contains("as-chips"), false);
+  assert.equal(chips.hidden, true);
+  s.event({ type: "pip_report", report: REPORT });
+  s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
+  assert.deepEqual(kinds(), ["changes", "pipfixes"], "a fix: the changes become a chip beside it");
+  assert.equal(rail.classList.contains("as-chips"), true);
+  assert.equal(rail.hidden, true, "no full row as well: one line");
+  assert.equal(chips.hidden, false);
+  // The fix ends and is looked at: its chip goes, and the changes have their full row back.
+  s.event({ type: "pip_fix", fix: fix({ state: "unchanged", summary: "Nothing to change." }) });
+  s.doc.querySelector('#rail-chips .rail-chip[data-kind="pipfixes"]').click();
+  s.doc.getElementById("rail-pop-close").click();
+  s.event({ type: "pip_fixes", items: [] });
+  assert.deepEqual(kinds(), []);
+  assert.equal(rail.hidden, false, "the changes' full row again");
+  assert.equal(rail.classList.contains("as-chips"), false);
+  assert.deepEqual(s.errors, []);
+});
+
 test("the Pip fixes chip is on the existing chip line, never a row, and lists only Pip fixes", () => {
   const s = panel();
   const rowsBefore = [...s.doc.getElementById("composer-rail").children].map((n) => n.id);
