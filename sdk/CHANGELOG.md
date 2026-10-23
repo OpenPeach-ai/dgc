@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Pips API 61: your own app's tools for Personal Pips. `define_pip_tool(name, description, schema, kind,
+  moves_money=False)` (TypeScript `definePipTool(name, description, schema, kind, { movesMoney })`) describes a tool;
+  `pips.register_app(name, url=..., tools=[...], approved=True)` (`pips.registerApp`) registers the app and answers its
+  signing secret, shown that once; `update_app`, `accept_app_update`, `list_apps`, `remove_app` and
+  `rotate_app_secret` are in both SDKs' closed command sets, refused before API 61, and so is an `app_plan` on
+  `app:<name>`. `AppToolHandler` serves DGC's calls in your app: it checks the signature, refuses a timestamp more
+  than five minutes off and a nonce it has seen (in memory, bounded), checks the arguments against the tool's
+  schema, runs a change only for an action the user accepted, and answers `{ok, result}` or a structured error
+  (`PipToolError` refuses in your own words). Python: `handle(headers, body)`, `flask(request)`, `wsgi` and `asgi`
+  (Starlette and FastAPI), importing a framework only in its own adapter; TypeScript: `handle()`, `express()` and
+  `fetch(Request)`.
+- `sdk/PIPS.md` named Pips API 59 as the CLI's; it is 61.
+
 - Editor protocol: command `set_detach_chatdgc` (the Sessions home's backend keeps a ChatDGC reply running with no
   window; offered as `ready.capabilities.detach.chatdgc`) is in the vendored protocol. An SDK session is never offered
   `detach` and never sends it, so nothing changes for it.

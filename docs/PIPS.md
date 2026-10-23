@@ -999,6 +999,20 @@ or the sign-in link: DGC makes those calls, and the editor opens the link.
 and which Pips use it; **Remove** stops one Pip using the account, which stays connected
 in Composio. Without Composio in Settings, the card says to add it first.
 
+### Your own app
+
+If your business runs on an app of your own (a shop, an ERP, a booking system) and that app uses DGC's SDK, its
+developer can give its tools to your Personal Pips: "find unpaid orders", "create a dispatch". Your Pips use them
+like any other connection. They read freely: "Which orders are unpaid this week?" asks the app and answers with
+what it says. Anything that would change something, like creating a dispatch, is an Allow card in the Pip's chat,
+**Run create_dispatch in Shop app?**, and runs only when you choose **Allow** (or **Always allow** for that Pip). A
+tool that moves money, such as a refund, asks you every time. DGC sends each allowed change once and never repeats
+it; when the app doesn't answer, the Pip says so in plain words.
+
+**Pips settings → Apps** lists your own apps: the app's name, how many read and change tools it has, and its
+address. When the developer adds or changes a tool, the update waits there until you choose **Accept**. The app's
+secret key is shown once, to the developer's code, and never in DGC. For developers: [sdk/PIPS.md](../sdk/PIPS.md#your-own-apps-tools-api-61).
+
 ### App reads
 
 A Personal Pip can read from apps you've connected through Composio (see

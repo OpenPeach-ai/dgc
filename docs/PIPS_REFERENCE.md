@@ -420,6 +420,7 @@ An email, calendar event or connector call is an **external action**:
 | `gmail_send` | Composio `GMAIL_SEND_EMAIL` with the chosen account | One recipient (up to 254 bytes, plain address), subject up to 200 bytes, plain-text body up to 12,000 bytes; no CC, BCC, HTML or attachments | The provider accepted the message; delivery is not confirmed |
 | `calendar_create` | Composio `GOOGLECALENDAR_CREATE_EVENT` with the chosen account | Primary calendar, private, busy, no meeting link; guests can't modify, invite or see the guest list; title up to 200 bytes, description up to 8,000; at most seven days long; offsets must match the IANA zone; start still in the future | The provider confirmed creation, checked against the reviewed times, title, guests and series. Invitation delivery and acceptance are not confirmed. |
 | `connector_call` | One tool on a saved `zapier`, `arcade`, `make` or `n8n` connection | Exact tool and arguments (up to 10,000 bytes); the connector manages its own accounts; response up to 32 KiB, kept as a digest and 1 KiB preview | The connector returned a response; downstream completion is not confirmed |
+| `connector_call` on `app:<name>` (API 61) | One change tool of your own app (see Your own app's tools, under Personal Pips) | Exact tool and arguments, checked against its schema when proposed and again before it runs; one signed POST with `action_id` and `action_digest`, 30 seconds; JSON answer up to 256 KB, kept as a digest and 1 KiB preview; a tool marked `moves_money` never gets Always allow and asks at every level | The app answered `ok` (`The app answered that it did this.`). Its own refusal, or no answer, is `unknown` with its words in the receipt (`The shop app said: …. DGC will not retry this action.`) |
 
 A connector call can invoke any tool the connector exposes; DGC doesn't filter by
 what a tool does. A workflow may keep running after DGC's deadline. A Pip itself
@@ -1691,6 +1692,61 @@ prompt as untrusted reference data. A Pip with a computer also gets each file in
 - Before each read DGC rechecks that the run is live, the Pip is active, the job and
   plan are unchanged, Pips are on and the connection is still saved.
 
+**Your own app's tools** (`pip_sdk_apps`, Pips API 61). An app your code registers with `register_app` (local only)
+is one more connection, `app:<name>`. It is kept in `<Pips state>/apps/apps.json` (0600, its folder 0700): its name
+(`[a-z0-9-]{1,40}`), its `url` (`https://`, or `http://` only for `localhost` and `127.0.0.1`; no user, password or
+`#`), and 1 to 32 tools, each `{name ([A-Za-z][A-Za-z0-9_-]{0,63}), description (1–1,000 characters), input_schema,
+kind (read | change), moves_money (a change only)}`, 30 KB together; the schema is the SDKs' subset (`type`,
+`properties`, `required`, `items`, `enum`, `additionalProperties`, `minLength`, `maxLength`, `minimum`, `maximum`,
+`minItems`, `maxItems`, `description`, `title`, `default`; no `$ref`, `$id` or `$schema`), an object at the top, 8 KiB
+and six levels at most. Up to 16 apps. The request takes the SDKs' own bounds (2,048 values, 12 levels, 32 KiB).
+Credentials DGC knows in the address or tools are refused (`secret_detected`).
+
+- **The secret.** `register_app` makes 32 random bytes, `dgcapp_` and 64 hex digits, and answers it once with the
+  app (`{app, secret, notice}`); `rotate_app_secret` makes a new one, answered once, and the old one stops working.
+  DGC keeps its copy with `plugin_credentials` under the entry `_pipapp.<name>` (the system keychain, or
+  `~/.dgc/plugin-auth/_pipapp.<name>/credentials.json`, 0600), never in the Pips database, the apps file, a note, a
+  log, a Pip's prompt or a run record; `remove_app` forgets it.
+- **Digests.** `connection_digest` = SHA-256 of `{schema_version: 1, kind: "sdk_app", name, url}`; a tool's
+  `schema_digest` = SHA-256 of `{name, description, input_schema, kind, moves_money}` (canonical JSON). A review,
+  an app plan or an Always allow pinned to an earlier address or tool stops matching.
+- **Changing it.** `update_app {name, tools, url?}`: a pure removal applies at once and clears any pending update;
+  anything else (a new tool, a changed one, a new address) is saved as the app's `pending` `{digest, url, url_changed,
+  adds, changes, removes, summary, tools, created_at}`, and nothing changes until `accept_app_update {name,
+  expected_digest}`. A newer `update_app` replaces a pending one.
+- **Where it shows.** `list_pip_connections` has a row `app:<name>` in the connectors' shape (`provider` is its name,
+  "Shop app"; `pip_read_adapter` when it has reads, `pip_action_adapter` when it has changes);
+  `inspect_pip_connection` lists every tool with its `kind`, `moves_money` and `schema_digest`;
+  `inspect_pip_connector_actions` lists its change tools; `list_pip_accounts` refuses it (the app manages its own).
+  Activity records `pip_app_registered`, `pip_app_updated`, `pip_app_update_waiting`, `pip_app_removed` and
+  `pip_app_secret_rotated` with names and counts only.
+- **Reads.** An `app_plan` on `app:<name>` is version 1, `{schema_version: 1, server, connection_digest, calls: [{tool,
+  schema_digest, arguments}]}`, one to four calls, arguments 4 KiB each. `propose_pip_update` checks it against the app
+  as it is now (each call a read, its schema current, its arguments fitting); before each run DGC checks again and
+  makes each read, and the run gets `{server, tool, text, untrusted: true}`, or `{server, tool, error, untrusted:
+  true}` when the app failed (the run goes on and says so). A plan that no longer matches stops the run, as a changed
+  connector's does. In its runs a Personal Pip also has each tool as a function, `<app>__<tool>` (64 characters at
+  most), over the run's socket, while their definitions fit 32 KiB: a read answers at once, at every level, as
+  untrusted data; a change becomes the reply's connector draft (`pip_plugins.offer`), one per reply, and
+  `app_answer` reads what the app answered to the change the user last allowed (half an hour). Careful mode counts
+  them as plugins (its lane, and what a read brings in).
+- **Changes** are `connector_call` actions with `server` `app:<name>` and `account` `connection_managed`, proposed
+  with `propose_pip_connector_action` or prepared from a connector draft, accepted once with `accept_pip_app_action`
+  (or `always_allow_pip_app_action`; grants and levels as for any connector call). A read tool is refused there
+  (`unsupported_app_action`).
+- **The call.** `POST <url>` with `Content-Type: application/json`, `X-DGC-Timestamp` (Unix seconds), `X-DGC-Nonce`
+  (32 hex digits) and `X-DGC-Signature` (`v1=` + hex HMAC-SHA256, keyed by the secret's UTF-8 text, of
+  `<timestamp>.<nonce>.` + the body). The body is `{type: "tool_call", app, tool, arguments, pip_id, run_id, call_id}`,
+  and for a change also `action_id` and `action_digest` (the accepted action's id and digest; `run_id` is the run
+  that proposed it). 15 seconds for a read and 30 for a change, the answer read up to 256 KB; TLS verified; a redirect
+  is never followed; no proxy for `localhost`, `127.0.0.1` or `::1`. The answer must be JSON `{ok: true, result}`;
+  `{ok: false, error: {code, message}}` is the app's refusal. The text the Pip gets is the result as JSON, cleaned of
+  credentials (the app's own secret too) and cut at 32 KiB.
+- **Failures, in the run's words:** "the shop app didn't answer", "the shop app didn't answer in 15 seconds", "the shop
+  app said: …", "the shop app's answer wasn't JSON", "the shop app's answer was over 256 KB", "the shop app answered
+  with a redirect, which DGC doesn't follow", "the shop app's certificate couldn't be checked, so DGC didn't send the
+  call", "the shop app answered with an error (HTTP 503)".
+
 **Web plans** (`web_plan`):
 
 ```json
@@ -1954,6 +2010,7 @@ Clients check it before using a newer control.
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
+| 61 | Your own app's tools (`pip_sdk_apps`): `register_app`, `update_app`, `accept_app_update`, `list_apps`, `remove_app`, `rotate_app_secret` (local only); the connection `app:<name>` in `list_pip_connections`, `inspect_pip_connection` and `inspect_pip_connector_actions`; version-1 `app_plan`s on it; `connector_call` actions on it, sent as one signed POST; `<app>__<tool>` functions and `app_answer` in a Personal Pip's runs (see Your own app's tools, under Personal Pips) |
 | 60 | A live-data Pip: a project Pulse's `live_plan` (`changes.live_plan`, a setup card's `work_kind` `live_data`), run kind `live`, `result.live`, run posts of kind `live` and report cards with outcomes `live_clear` and `live_attention`, `live_plan` on `get_pip` and `list_pips` (see [Live-data commands](#live-data-commands)) |
 | 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |
 | 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |

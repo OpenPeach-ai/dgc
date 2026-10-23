@@ -3,9 +3,10 @@
 SDK 0.7.0 adds `session.pips` to the Python (sync and async) and TypeScript SDKs. It
 lets trusted host code read and manage the Pips of an existing DGC profile through
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
-setups and handoffs, queue runs, chat with a Pip, and review Personal app actions.
+setups and handoffs, queue runs, chat with a Pip, and review Personal app actions. From Pips API 61 it also
+gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)).
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 59** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 61** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -102,7 +103,7 @@ Show the saved record to the user before asking for the second decision.
 
 ### Commands and parameters
 
-Commands form two closed sets: 50 reads and 46 mutations, with a closed field set
+Commands form two closed sets: 92 reads and 100 mutations, with a closed field set
 for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
 exposed. Parameters are plain JSON:
 
@@ -118,7 +119,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 46; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 61; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -169,6 +170,7 @@ job with `create_pip` and a reviewed update.
 | 54 | `get_pip_computer_apps` (R) and `set_pip_computer_apps` (M, `choice` download or not_now): a Pip computer's image editor, document editor and PDF viewer, and the one offer to download the ones this computer lacks. Pips use the whole desktop: its steps reach the timeline and the live view as API 53's pointers. |
 | 59 | Borrowing your own signed-in Chrome, with your consent each time: `list_pip_borrows {pip_id}` (R: `{pip_id, minutes, borrows}`, each card's `status` requested, allowed, declined, replaced, in_use, returned or expired, its `sites`, `why`, whether your Chrome is `reachable`, and `ended`), `allow_pip_borrow`, `decline_pip_borrow` and `stop_pip_borrow` (M, each `{pip_id, borrow_id}`, local only). Allow once lets only the one turn it starts use your Chrome, on the card's sites, in a tab of DGC's own; there is no Always allow. |
 | 60 | A live-data Pip: `changes.live_plan` on `propose_pip_update`, `{schema_version: 1, commands: [...]}` with one to six distinct read-only command lines (or `null` to remove them). Both SDKs refuse it before API 60 and check its shape; the backend refuses a line that writes (`write_command`) or holds a password (`secret_detected`). Its runs (`run_kind` `live`) start with `run_pip` and no Pulse pins; `get_pip_run`'s `result.live` has each line's `status`, `exit_code` and `output`, and the `summary` (`summary_by` `model` or `dgc`) with `attention`. Its run posts have `kind` `live` and `outcome` `live_clear` or `live_attention`. |
+| 61 | Your own app's tools ([below](#your-own-apps-tools-api-61)): `register_app`, `update_app`, `accept_app_update`, `remove_app` and `rotate_app_secret` (M) and `list_apps` (R), all local only; an `app_plan` on `app:<name>`. Both SDKs refuse them before API 61 and check a name, an address and each tool before anything is sent. `define_pip_tool` / `definePipTool` and `AppToolHandler` need no runtime. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -570,6 +572,123 @@ proposal = session.pips.mutate("propose_pip_personal_handoff", {
 Personal results are `get_pip_run` results with `run_kind: "personal_task"` and the
 document in `result.text`. The SDK writes no files; the host decides where to show
 or save them.
+
+### Your own app's tools (API 61)
+
+A developer whose own app (a shop, an ERP, a SaaS backend) uses this SDK can give its tools to the profile's Personal
+Pips. Each tool has a name, a description, a JSON schema in the SDK's schema subset (no `$ref`) and a kind: **read**
+(a Pip uses it freely in its runs, at every level, or as an exact read you approve before each run) or **change** (a
+proposal the user accepts once, or always allows for that Pip). A change that pays, refunds or transfers is marked
+`moves_money`: it asks every time and never gets Always allow. Every Personal Pip of the profile may use a
+registered app, as every plugin turned on in DGC is every Pip's.
+
+```python
+import os
+from dgc_sdk import DGC, define_pip_tool
+
+unpaid = define_pip_tool("find_unpaid_orders", "Orders unpaid after N days",
+                         {"type": "object", "properties": {"days": {"type": "integer"}}, "required": ["days"]},
+                         kind="read")
+dispatch = define_pip_tool("create_dispatch", "Create a dispatch for one order",
+                           {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"]},
+                           kind="change")
+
+with DGC(inherit_user_state=True, sandbox="off") as dgc, dgc.session(cwd=".") as s:
+    app = s.pips.register_app("shop", url="https://shop.example.com/dgc/pips", tools=[unpaid, dispatch], approved=True)
+    secret = app["secret"]          # shown this once: give it to the app
+```
+
+```typescript
+import { DGC, definePipTool } from "@vibedgc/sdk";
+
+const unpaid = definePipTool("find_unpaid_orders", "Orders unpaid after N days",
+  { type: "object", properties: { days: { type: "integer" } }, required: ["days"] }, "read");
+const app = await session.pips.registerApp("shop", { url: "https://shop.example.com/dgc/pips", tools: [unpaid] },
+  { approved: true });
+```
+
+| Command | | Fields |
+| --- | --- | --- |
+| `register_app` | M | `name` (1 to 40 of `a-z`, `0-9`, `-`), `url` (`https://`, or `http://` only for `localhost` or `127.0.0.1`), `tools` (1 to 32: `{name, description, input_schema, kind, moves_money?}`, 30 KB together). Answers `{app, secret, notice}`. |
+| `update_app` | M | `name`, `tools`, `url?`. Removing tools applies at once (`applied: true`); a new tool, a changed one or a new address widens what Pips may do, so it waits as the app's `pending` update (`applied: false`). |
+| `accept_app_update` | M | `name`, `expected_digest` (the pending update's `digest`) |
+| `list_apps` | R | none. Each app: `name`, `server` (`app:<name>`), `display_name`, `url`, `connection_digest`, `summary` ("2 read tools, 1 change tool"), `reads`, `changes`, `tools` (each with its `kind`, `moves_money` and `schema_digest`), `pending`. Never the secret. |
+| `remove_app` | M | `name`. Its secret is forgotten too. |
+| `rotate_app_secret` | M | `name`. Answers a new `secret`, shown that once; the old one stops working. |
+
+Python's `Pips` has `register_app(name, *, url, tools, approved)`, `update_app(name, *, tools, url=None, approved)`,
+`accept_app_update(name, expected_digest, *, approved)` and `list_apps()` (awaitable on `AsyncPips`); TypeScript's has
+`registerApp`, `updateApp`, `acceptAppUpdate` and `listApps`. `tools` takes `define_pip_tool` / `definePipTool`
+values, or the same shape as plain objects.
+
+**The secret** is 32 random bytes (`dgcapp_` and 64 hex digits). DGC keeps its copy where it keeps a plugin's key
+(the system keychain, or a file only you can read), never in the Pips state, a note, a log, a Pip's prompt or a run
+record. Keep yours as you keep any API key, such as in an environment variable.
+
+**The connection.** The app is `app:<name>` in `list_pip_connections`, `inspect_pip_connection` (every tool, with its
+`kind` and `schema_digest`) and `inspect_pip_connector_actions` (its change tools). Its `connection_digest` covers
+its name and address; a tool's `schema_digest` covers its whole definition. A review, a plan or an Always allow made
+for an earlier tool or address stops matching.
+
+- A read in a Pip's reviewed job: `changes.app_plan` `{"schema_version": 1, "server": "app:shop",
+  "connection_digest", "calls": [{"tool", "schema_digest", "arguments"}]}`, one to four reads, each checked against
+  the app as it is now when it is proposed and when it runs.
+- A change: `propose_pip_connector_action` with `server: "app:shop"`, the tool's `schema_digest` and `call: {tool,
+  arguments}`, or the connector draft a Pip's run leaves (`prepare_pip_connector_draft`); then
+  `accept_pip_app_action` (or `always_allow_pip_app_action`) with its digest. One attempt, never retried.
+
+**Serving the calls.** DGC POSTs each call to the app's `url`:
+
+```json
+{"type": "tool_call", "app": "shop", "tool": "create_dispatch", "arguments": {"order_id": "ord_17"},
+ "pip_id": "pip_…", "run_id": "run_…", "call_id": "call_…", "action_id": "appaction_…", "action_digest": "…"}
+```
+
+`action_id` and `action_digest` come only with a change, the action the user accepted. The headers are
+`X-DGC-Timestamp` (Unix seconds), `X-DGC-Nonce` (32 hex digits) and `X-DGC-Signature`: `v1=` and the hex
+HMAC-SHA256, keyed by the secret's text, of `<timestamp>.<nonce>.` followed by the body's bytes. DGC waits 15
+seconds for a read and 30 for a change, reads at most 256 KB, checks TLS, never follows a redirect and uses no proxy
+for this computer. The app answers JSON: `{"ok": true, "result": …}`, or `{"ok": false, "error": {"code",
+"message"}}`, whose message the Pip is told ("the shop app said: …"). What the app answers is data to the Pip,
+never instructions.
+
+`AppToolHandler` does all of this in your app. It checks the signature, refuses a timestamp more than five minutes off
+and a nonce it has seen (kept in memory, bounded), checks the arguments against the tool's schema, runs a change only
+for a call that carries an accepted action, and answers for you. A tool function is `fn(args, ctx)`: `ctx` has `app`,
+`tool`, `kind`, `pip_id`, `run_id`, `call_id` and, for a change, `action_id` and `action_digest` (`approval_id` is
+`action_id`). Return any JSON value; raise `PipToolError("…")` to refuse in your own words. Any other error answers
+"The tool failed." and stays in your app's log.
+
+```python
+from dgc_sdk.pips_app import AppToolHandler, PipToolError
+
+handler = AppToolHandler(os.environ["DGC_PIPS_SECRET"], tools={
+    unpaid: lambda args, ctx: db.unpaid(args["days"]),
+    dispatch: lambda args, ctx: shipping.create(args["order_id"], receipt=ctx.approval_id),
+})
+
+@app.post("/dgc/pips")                      # Flask
+def pips():
+    return handler.flask(request)
+
+# FastAPI or Starlette: app.mount("/dgc/pips", handler.asgi). Any WSGI server: handler.wsgi.
+# Anything else: status, headers, body = handler.handle(request_headers, raw_body)
+```
+
+```typescript
+import { AppToolHandler } from "@vibedgc/sdk";
+
+const handler = new AppToolHandler(process.env.DGC_PIPS_SECRET!, {
+  find_unpaid_orders: (args) => db.unpaid(args.days as number),
+}, { definitions: [unpaid] });
+app.post("/dgc/pips", express.raw({ type: "application/json" }), handler.express());   // Express
+// A web Request: return handler.fetch(request). Anything else: await handler.handle({ headers, body }).
+```
+
+Python keys `tools` by each tool's `define_pip_tool` value (or by name, with those values in `definitions=`);
+TypeScript keys them by name, with the `definePipTool` values in `{ definitions }`. Python imports Flask only in
+`flask()`; `wsgi`, `asgi` and `handle` need no framework. An async tool needs `asgi` (or `handle_async`). In Express,
+mount the handler before any JSON body parser (or with `express.raw`), so it reads the bytes DGC signed.
 
 ## Parameters that pin a review
 

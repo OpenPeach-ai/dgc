@@ -6,6 +6,23 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Pips for your own app: its tools become a Pip's (Pips API 61).** A developer whose business app uses DGC's SDK
+  registers it once (`register_app`, an approved SDK call): a name, the address DGC calls it at, and its tools, each
+  a name, a description, a JSON schema and a kind, read or change (and whether a change moves money). DGC makes a
+  signing secret and gives it once, to the code that registered the app; DGC keeps its own copy where it keeps a
+  plugin's key (the system keychain, or a file only you can read), never in a note, a log, a Pip's prompt or a run's
+  record. The app is then one more connection, `app:<name>`, beside your connected apps, workflow connectors and
+  plugins, and every rule they follow holds: a Personal Pip uses a read tool freely, or as an exact read you approve
+  before each run (an `app_plan`); a change is a proposal, an Allow card you accept once (or Always allow for that
+  Pip), sent exactly once and never retried, with a receipt; a tool that moves money asks every time, at every level.
+  DGC POSTs each call to the app's address, signed (a timestamp, a nonce and an HMAC-SHA256 signature), waits 15
+  seconds for a read and 30 for a change, reads at most 256 KB of JSON, checks TLS, follows no redirect and uses no
+  proxy for this computer. What the app answers is data to the Pip, never instructions, and a failure reaches the run
+  in plain words: "the shop app didn't answer", "the shop app said: ...". `update_app` replaces an app's tools:
+  removing tools applies at once, anything that widens what Pips may do (a new tool, a changed one, a new address)
+  waits until `accept_app_update`; `list_apps`, `remove_app` and `rotate_app_secret` complete the set. All of them work
+  only on this computer.
+
 - **Live-data Pips and Troupe checkers' shell work on a Mac.** They used to need Linux with bubblewrap, so on a Mac a
   live-data Pip said its commands couldn't run and a verifier had no shell. A Mac now has the same read-only box,
   built with Apple's `sandbox-exec`: commands write nothing but a private temporary folder of their own (`$TMPDIR`,

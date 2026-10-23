@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Your own apps in the Pips view.** An app your code connected with DGC's SDK shows on Pips settings → Apps like
+  any connection: **Shop app**, with 2 read tools, 1 change tool and its address. An update to it that would let
+  your Pips do more waits there, in a line, with **Accept**. A change a Pip proposes in it is the Allow card you know
+  from plugins, in plain words: **Run create_dispatch in Shop app?**, with Allow, Always allow (never for a tool that
+  moves money), Edit and Don't. The app's secret is never shown. Needs a DGC CLI with Pips API 61; with an older one,
+  nothing changes.
+
 - **One line above the box with a Pip fix.** A Pip fix's chip now counts like the checklist: beside this chat's changes,
   the changes fold into a chip too, so the space above the prompt box stays one line instead of a chip line over a
   full row. When the fix's chip goes, the changes get their full row back.

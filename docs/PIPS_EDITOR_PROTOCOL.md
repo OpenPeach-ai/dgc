@@ -315,6 +315,17 @@ and start with `run_pip` without Pulse pins; `get_pip_run`'s `result.live` has t
 `commands` `{ok, failed, total}` and `failed_commands`; an older editor leaves out a post or a card it can't read.
 No event and no event field changes.
 
+**Your own apps** (API 61). `list_apps` (a read) answers `{apps: [{name, server, display_name, url,
+connection_digest, summary, reads, changes, tools: [{name, kind, description, input_schema, moves_money,
+schema_digest}], created_at, updated_at, secret_rotated_at, pending}]}`, never a secret; `pending` is null or
+`{digest, url, url_changed, adds, changes, removes, summary, tools, created_at}`, and `accept_app_update {name,
+expected_digest}` applies it. The view lists them on Pips settings → Apps ("Shop app" with its `summary` and `url`,
+and an update that waits with Accept). A connector draft or action whose `server` is `app:<name>` is the plugin-style
+Allow card ("Run create_dispatch in Shop app?"), with no Always allow for a tool that `moves_money` or one the
+listing doesn't name; its `succeeded` receipt's `meaning` is "The app answered that it did this." The host refuses
+both requests before API 61 ("Update DGC to see your own apps.") and an older CLI is asked for neither. Registering,
+changing and removing an app are SDK calls the view doesn't make. No event and no event field changes.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·
