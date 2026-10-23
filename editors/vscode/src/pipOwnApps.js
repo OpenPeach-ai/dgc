@@ -2,7 +2,8 @@
 // app:<name>. Here it reads like the other connections ("Shop app · 2 read tools, 1 change tool", with its address)
 // on Pips settings → Apps, and a change a Pip proposes in it is the plugin-style Allow card: "Run create_dispatch in
 // Shop app?" (Allow, Always allow unless the tool moves money, Don't). Never a secret: DGC shows it once, to the code
-// that registered the app.
+// that registered the app. From Pips API 62 the app can decide that change too (approvals in your app): when it does
+// first, the card settles with what it decided, in one quiet line ("Shop app accepted create_dispatch").
 
 export const OWN_APP = /^app:[a-z0-9-]{1,40}$/;
 const NAME = /^[a-z0-9-]{1,40}$/;
@@ -87,4 +88,31 @@ export function ownAppReadWords(plan) {
       .map(([k, v]) => `${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
     return `${app}: ${String(c?.tool || 'a read')}${args ? ` (${args.length > 120 ? args.slice(0, 119) + '…' : args})` : ''}`;
   });
+}
+
+/** A change your own app decided first (Pips API 62), from its saved action: {name, tool, accepted, words}, or null
+ *  when the app didn't decide it (DGC's card, or nobody yet). */
+export function ownAppDecision(action) {
+  const server = action?.payload?.server;
+  if (!record(action) || !isOwnApp(server) || action.resolved_by !== server) return null;
+  const name = ownAppName(server.slice(4)), tool = String(action.payload.call?.tool || 'the change');
+  const accepted = ['dispatching', 'succeeded', 'unknown'].includes(action.status);
+  if (!accepted && action.status !== 'rejected') return null;
+  const words = !accepted ? 'Nothing ran.' : action.status === 'succeeded' ? 'It ran once.'
+    : action.status === 'unknown' ? `It may not have run: check in ${name}.` : 'It’s running.';
+  return { name, tool, accepted, words };
+}
+
+/** What the app decided, as the card's Allow says it when the app was first. */
+export function ownAppDecisionNotice(decision) {
+  return decision.accepted ? `${decision.name} had already accepted ${decision.tool}. ${decision.words}`
+    : `${decision.name} had already declined ${decision.tool}. ${decision.words}`;
+}
+
+/** The line a settled card leaves: "Shop app accepted create_dispatch · Decided in Shop app. It ran once." */
+export function ownAppDecisionMarkup(id, decision, { esc }) {
+  const title = `${decision.name} ${decision.accepted ? 'accepted' : 'declined'} ${decision.tool}`;
+  return `<div class="app-link own-app-decided" data-state="connected" data-own-app-decided="${esc(id)}" role="status" aria-label="${esc(title)}">`
+    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">${esc(decision.name.slice(0, 1))}</span>`
+    + `<div class="app-link-words"><strong>${esc(title)}</strong><small>Decided in ${esc(decision.name)}. ${esc(decision.words)}</small></div></div></div>`;
 }

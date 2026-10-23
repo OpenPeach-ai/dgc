@@ -31,7 +31,7 @@ import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCard
 import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
 import '../media/pips/plush.js';
-import {ownAppsPage,ownAppForServer,ownAppsMarkup} from './pipOwnApps.js';
+import {ownAppsPage,ownAppForServer,ownAppsMarkup,isOwnApp,ownAppDecision,ownAppDecisionNotice,ownAppDecisionMarkup} from './pipOwnApps.js';
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
 import {outcomeWords,reviewStatusWords,commandLine,executionContextWords,notificationWords,eventWords} from './pipsModel.js';
@@ -2264,6 +2264,25 @@ async function loadPluginDrafts(){
   catch{/* the Review row stays */}
  }
 }
+// Approvals in your app (Pips API 62): a change your app decided before you did. Its card was shown (so its draft is
+// known); once settled, its action says who decided, read once.
+const ownAppDecisions=new Map();
+function ownAppSettled(){return (S.connectorDrafts||[]).filter(d=>d.status==='prepared'&&!d.expired&&d.action_id&&isOwnApp(pluginDrafts.get(d.id+':'+d.digest)?.payload?.action?.server));}
+async function loadOwnAppDecisions(){
+ if(remoteHost||S.apiVersion<62||!personalPip()||!usable())return;
+ const token=scope(),pip=S.selected;
+ for(const d of ownAppSettled().filter(d=>!ownAppDecisions.has(d.action_id)).slice(0,3)){
+  try{const a=messageReview((await send('get_pip_app_action',{action_id:d.action_id})).action,pip,S.workspace.id);if(token!==scope()||S.selected!==pip)return;
+   if(a.id===d.action_id){ownAppDecisions.set(a.id,a);render();}}
+  catch{/* the chat says what happened */}
+ }
+}
+function ownAppDecidedCards(){
+ if(S.apiVersion<62)return '';
+ const lastUserAt=Math.max(0,...(S.messages||[]).filter(m=>m.role==='user'&&m.intro!==true).map(m=>Date.parse(m.created_at)||0));
+ return ownAppSettled().map(d=>{const a=ownAppDecisions.get(d.action_id),decided=a&&ownAppDecision(a);
+  return decided&&(Date.parse(a.resolved_at)||0)>lastUserAt?ownAppDecisionMarkup(d.id,decided,{esc}):'';}).join('');
+}
 function pluginDraft(d){const v=S.apiVersion>=44&&pluginDrafts.get(d.id+':'+d.digest),server=v&&v.payload.action.server;
  const plugin=v&&(S.apiVersion>=61&&ownAppForServer(S.ownApps,server,v.payload.action.call.tool)||pluginForServer(S.plugins,server)||S.apiVersion>=45&&installedForServer(S.pluginsInstalled,server));return v&&plugin?{draft:v,plugin}:null;}
 function pluginCards(){
@@ -2271,6 +2290,7 @@ function pluginCards(){
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
  const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
   .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft)}));
+ actions.push(ownAppDecidedCards());
  const lastReply=Math.max(0,...(S.messages||[]).filter(m=>m.role==='assistant').map(m=>Date.parse(m.created_at)||0));
  const cards=shownPluginCards(S.plugins,Date.now(),lastReply).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
  return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
@@ -2326,12 +2346,18 @@ async function pluginRun(id,always=false){
  if(edit)edit.error='';always=always&&!plugin.money;pluginBusy=id;render();
  try{
   const expected={source_run_id:draft.source_run_id,server:a.server,connection_digest:a.connection_digest,schema_digest:a.schema_digest,call};
-  const action=messageReview((await send('prepare_pip_connector_draft',{draft_id:draft.id,expected_digest:draft.digest,call})).action,pip,S.workspace.id,expected);
+  const prepared=(await send('prepare_pip_connector_draft',{draft_id:draft.id,expected_digest:draft.digest,call})).action;
   if(token!==scope()||S.selected!==pip)return;
+  // Your own app decided it first (Pips API 62): say what it decided; nothing more runs.
+  const first=isOwnApp(a.server)&&prepared?.status!=='pending'&&ownAppDecision(messageReview(prepared,pip,S.workspace.id));
+  if(first){cardEdits.delete(id);ownAppDecisions.set(prepared.id,prepared);S.notice=ownAppDecisionNotice(first);void loadMessages();return;}
+  const action=messageReview(prepared,pip,S.workspace.id,expected);
   const done=await send(always?'always_allow_pip_app_action':'accept_pip_app_action',{action_id:action.id,expected_digest:action.digest});
   if(token!==scope())return;
   cardEdits.delete(id);
-  S.notice=done?.action?.status==='succeeded'
+  const beat=isOwnApp(a.server)&&ownAppDecision(done?.action);
+  if(beat)ownAppDecisions.set(done.action.id,done.action);
+  S.notice=beat?ownAppDecisionNotice(beat):done?.action?.status==='succeeded'
    ?`Done: ${a.call.tool} ran in ${plugin.name}${changed?' with your changes':''}.`+(always?` ${pipName} may run it without asking now; take it back on its page.`:'')
    :`${plugin.name} didn’t confirm ${a.call.tool}. Check it there before you try again.`;
   void loadMessages();   // the Pip reads what it answered and carries on
@@ -2637,7 +2663,7 @@ function showCalendarReview(a){
 }
 async function loadConnectorDrafts(){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;const token=scope(),seq=++connectorDraftSeq;
- try{const result=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20}),S.selected);if(token!==scope()||seq!==connectorDraftSeq)return;S.connectorDrafts=result.drafts;S.connectorDraftError='';render();void loadPluginDrafts();}catch(error){if(token===scope()&&seq===connectorDraftSeq){S.connectorDraftError=errorText(error);render();}}
+ try{const result=connectorDraftsPage(await send('list_pip_connector_drafts',{pip_id:S.selected,limit:20}),S.selected);if(token!==scope()||seq!==connectorDraftSeq)return;S.connectorDrafts=result.drafts;S.connectorDraftError='';render();void loadPluginDrafts();void loadOwnAppDecisions();}catch(error){if(token===scope()&&seq===connectorDraftSeq){S.connectorDraftError=errorText(error);render();}}
 }
 async function openConnectorDraft(id){
  if(remoteHost||S.apiVersion<37||!personalPip()||!usable())return;

@@ -27,12 +27,12 @@ const shop=(extra={})=>({name:'shop',server:'app:shop',display_name:'Shop app',u
 const source={run_id:RUN,pip_id:PIP,workspace_id:PW,job_version:1,lifecycle_revision:0,result_digest:'e'.repeat(64)};
 const call={tool:'create_dispatch',arguments:{order_id:'ord_17'}};
 const draft=(c=call,extra={})=>({id:DRAFT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,created_at:'2026-10-24T09:00:00.000Z',actor:'pip-connector:'+RUN,request_key:'f'.repeat(64),payload:{schema_version:1,source,action:{server:'app:shop',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),call:c}},...extra});
-const action=(status='pending',c=call)=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:3,kind:'connector_call',source,server:'app:shop',connection_digest:'a'.repeat(64),account:'connection_managed',schema_digest:'b'.repeat(64),call:c},
+const action=(status='pending',c=call,extra={})=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',...extra,payload:{schema_version:3,kind:'connector_call',source,server:'app:shop',connection_digest:'a'.repeat(64),account:'connection_managed',schema_digest:'b'.repeat(64),call:c},
  receipt:status==='succeeded'?{provider:'app:shop',tool:c.tool,response_digest:'f'.repeat(64),response_preview:'{"dispatch":"dsp_1"}',meaning:'The app answered that it did this.'}:null});
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 const clean=v=>JSON.parse(JSON.stringify(v));
 
-function setup({apps=[shop()],drafts=[draft()],apiVersion=61}={}){
+function setup({apps=[shop()],drafts=[draft()],apiVersion=61,actions={}}={}){
  const dom=new JSDOM(viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
@@ -52,13 +52,14 @@ function setup({apps=[shop()],drafts=[draft()],apiVersion=61}={}){
   list_apps:()=>({apps}),
   list_pip_message_drafts:()=>({drafts:[],next_cursor:null}),list_pip_calendar_drafts:()=>({drafts:[],next_cursor:null}),
   list_pip_connector_drafts:()=>({drafts:drafts.map(summary),next_cursor:null}),get_pip_connector_draft:()=>({draft:drafts.find(d=>d.id===r.draft_id)}),
+  get_pip_app_action:()=>actions[r.action_id]?{action:actions[r.action_id]}:undefined,
   list_pip_routines:()=>({pip_id:PIP,routines:[]}),list_pip_action_grants:()=>({pip_id:PIP,grants:[]}),get_pip_digest:()=>undefined,
   list_pip_plugin_uses:()=>({plugins:[],installed:[]}),list_pip_apps:()=>({apps:[]}),get_pips_limit:()=>({max_pips:100,default:100,maximum:100000,count:1}),
   get_pip_computers:()=>({available:true,reason:'',platform:'linux',setup:{state:'ready',step:'',done:0,total:0,error:'',chrome:'',checked_at:null},computers:[],programs_bytes:0,free_bytes:0})}[r.type]?.());
  async function drain(){for(let n=0;n<15;n++){await flush();for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=defaults(m.request);if(result!==undefined)answer(m,result);}}}
  message({type:'pipsConnection',apiVersion,generation:1,connected:true,supported:true,enabled:true});
  const click=s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();};
- return {w,d:w.document,sent,answer,requests,drain,click,setDrafts:v=>{drafts=v;},setApps:v=>{apps=v;}};
+ return {w,d:w.document,sent,answer,requests,drain,click,message,setDrafts:v=>{drafts=v;},setApps:v=>{apps=v;},setActions:v=>{actions=v;}};
 }
 async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();}
 
@@ -129,4 +130,50 @@ test('reviews and plans on your own app read as such',()=>{
  assert.deepEqual(own.ownAppForServer([own.ownAppsPage({apps:[shop()]})[0]],'app:shop','create_dispatch'),{name:'Shop app',money:false});
  assert.deepEqual(own.ownAppForServer([],'app:my-shop','x'),{name:'My shop app',money:true},'not known: asks every time');
  assert.equal(own.ownAppForServer([],'zapier','x'),null);
+});
+
+// Approvals in your app (Pips API 62): your app can decide the change too. When it decides first, the card settles with
+// one quiet line saying what the app decided, and an Allow pressed a moment late says so instead of running anything.
+const byApp=(status='succeeded')=>action(status,call,{resolved_by:'app:shop',resolved_at:'2026-10-24T09:05:00.000Z'});
+test('a change your app accepted first settles its card with one line saying so',async()=>{
+ const x=setup({apiVersion:62});await openChat(x);
+ assert.ok(x.d.querySelector(`[data-plugin-action="${DRAFT}"]`),'the card, while it waits');
+ x.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);x.setActions({[ACTION]:byApp()});
+ x.message({type:'pipsVisibility',visible:true});await x.drain();
+ assert.equal(x.d.querySelector(`[data-plugin-action="${DRAFT}"]`),null,'settled');
+ const line=x.d.querySelector(`[data-own-app-decided="${DRAFT}"]`);assert.ok(line,'what the app decided');
+ assert.equal(line.textContent,'SShop app accepted create_dispatchDecided in Shop app. It ran once.');
+ assert.equal(line.querySelectorAll('button').length,0,'nothing to press');
+ assert.equal(x.requests('get_pip_app_action').length,1,'read once');
+ x.message({type:'pipsVisibility',visible:true});await x.drain();
+ assert.equal(x.requests('get_pip_app_action').length,1,'and not again');
+ const declined=setup({apiVersion:62,drafts:[draft()]});await openChat(declined);
+ declined.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);declined.setActions({[ACTION]:byApp('rejected')});
+ declined.message({type:'pipsVisibility',visible:true});await declined.drain();
+ assert.equal(declined.d.querySelector(`[data-own-app-decided="${DRAFT}"]`).textContent,'SShop app declined create_dispatchDecided in Shop app. Nothing ran.');
+ const mine=setup({apiVersion:62});await openChat(mine);
+ mine.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);mine.setActions({[ACTION]:action('succeeded',call,{resolved_by:'editor-user',resolved_at:'2026-10-24T09:05:00.000Z'})});
+ mine.message({type:'pipsVisibility',visible:true});await mine.drain();
+ assert.equal(mine.d.querySelector('[data-own-app-decided]'),null,'your own Allow needs no such line');
+ const old=setup({apiVersion:61});await openChat(old);
+ old.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);old.setActions({[ACTION]:byApp()});
+ old.message({type:'pipsVisibility',visible:true});await old.drain();
+ assert.equal(old.requests('get_pip_app_action').length,0,'an older DGC is asked nothing new');
+});
+
+test('Allow pressed after your app decided says what the app decided, and runs nothing',async()=>{
+ const x=setup({apiVersion:62});await openChat(x);
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ const prep=x.requests('prepare_pip_connector_draft').at(-1);
+ x.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);x.answer(prep,{action:byApp()});await x.drain();
+ assert.equal(x.requests('accept_pip_app_action').length,0,'nothing more runs');
+ assert.match(x.d.body.textContent,/Shop app had already accepted create_dispatch\. It ran once\./);
+ // The app decides in the moment between Allow's prepare and its accept: the accept observes it, and says so.
+ const y=setup({apiVersion:62});await openChat(y);
+ y.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ y.answer(y.requests('prepare_pip_connector_draft').at(-1),{action:action()});await flush();
+ const ok=y.requests('accept_pip_app_action').at(-1);
+ y.setDrafts([draft(call,{status:'prepared',action_id:ACTION})]);y.answer(ok,{action:byApp()});await y.drain();
+ assert.match(y.d.body.textContent,/Shop app had already accepted create_dispatch\. It ran once\./);
+ assert.doesNotMatch(y.d.body.textContent,/Done: create_dispatch ran/);
 });
