@@ -1860,6 +1860,11 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
 - **What it is not.** It does not survive a restart of the computer: a session that was working
   then is opened from disk with Continue. Pips are separate: the Pips runner never stopped for a
   reload.
+- **A ChatDGC reply too.** ChatDGC rides on the side bar's `dgc serve`, and a reply being written
+  keeps it running with no window, under the same rules; the chat's tab shows the reply finished or
+  still streaming when the window comes back. Closing a chat's tab mid-reply asks the same question,
+  and **Settings → Running sessions** lists a chat a closed window left answering. With no reply
+  running, that backend ends with its window as before.
 
 ## Several chats, several folders, in one panel
 
@@ -2647,7 +2652,9 @@ coding sessions) and from Pips. The full guide is
 The DGC side bar has two tabs, **Chat** and **Work**. **New chat** opens a chat in an editor tab, as
 does **DGC: New Chat (ChatDGC)** in the Command Palette. One search box finds a chat by its name or
 anything said in it. Enter sends, Shift+Enter adds a line, Esc stops a reply. A message you send
-while a reply is still being written waits above the box and goes when the reply finishes.
+while a reply is still being written waits above the box and goes when the reply finishes. A reply
+keeps going through a window reload or a closed window, and its tab shows it again when the window
+comes back; closing the tab mid-reply asks once whether to keep it running.
 
 ## What it does
 

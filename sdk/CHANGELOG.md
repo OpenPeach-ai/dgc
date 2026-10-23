@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Editor protocol: command `set_detach_chatdgc` (the Sessions home's backend keeps a ChatDGC reply running with no
+  window; offered as `ready.capabilities.detach.chatdgc`) is in the vendored protocol. An SDK session is never offered
+  `detach` and never sends it, so nothing changes for it.
+
 - Pips API 60: a live-data Pip, a project Pulse whose job is a fixed list of read-only command lines.
   `propose_pip_update` takes `changes.live_plan` (`{schema_version: 1, commands: [...]}`, one to six distinct lines,
   or `null` to remove them); both SDKs refuse it before API 60 and check its shape, and the backend refuses a line

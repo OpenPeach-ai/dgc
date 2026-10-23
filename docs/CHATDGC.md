@@ -17,6 +17,14 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Through a reload.** Reload the window, close it, or lose a Remote SSH connection while a reply is being
+  written: the reply carries on, and when the window comes back its tab shows it finished or still streaming,
+  with nothing lost or shown twice, and your queued messages still waiting. With no window it saves and stops by
+  itself 2 minutes after the reply finishes (12 hours at most). Closing a chat's tab mid-reply asks once: keep it
+  running in the background, or stop it (what it wrote is saved), with **Remember my choice**
+  (`dgc.closingAWorkingTab`, the same as for a Work session). A chat a closed window left answering is listed in
+  **Settings → Running sessions**, with **Stop**. Another window (another folder) has its own DGC and shows a chat as
+  it was last saved: a reply still being written elsewhere is there once it has finished and the chat is opened again.
 - **Dictate.** Press the microphone beside Send and speak. While you speak, the box's bottom row becomes the voice
   bar: ✕ Cancel, a live waveform of your voice with the time, ■ Stop and ↑ Send.
   - **Stop** puts what you said in the box where the caret is, so you can edit it before you send.
@@ -463,6 +471,14 @@ for a long paste. Each may also carry `name`. The user's message keeps `attachme
 
 A message that has other versions carries `versions: {parent, index, count}`: the point it belongs to, which
 version this is (counting from 0), and how many there are.
+
+`chatdgc_open` of a chat whose reply is still being written answers `busy: true` and `reply_id`, and its
+`messages` end with the reply so far: everything its events have said (text, thinking, questions, images, cards,
+files, canvases, widgets, research), so a screen that shows it and then the events after it has each part once.
+That is how a window that reloaded gets a reply back: the Sessions home's backend opts in with
+`set_detach_chatdgc {keep_running}` (offered as `ready.capabilities.detach.chatdgc`), keeps running with no window
+while a ChatDGC reply is being written and for nothing else, and a reloaded window reattaches to it by the home's
+own session id (see the editor protocol's `detach`).
 
 A turn sends its events in this order:
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A ChatDGC reply keeps running through a window reload.** Reload the window, close it, or reconnect after a
+  dropped Remote SSH connection while ChatDGC is writing a reply: the reply carries on, and its tab, when the window
+  comes back, shows it finished or still streaming, with nothing lost or shown twice. Its queued messages are still
+  there. With no window it saves by itself once the reply is done. Needs a DGC CLI with the same feature; with an
+  older one, nothing changes.
+- **Closing a ChatDGC tab mid-reply asks once**, as a session's tab does: keep the reply running in the background,
+  or stop it (what it wrote is saved), with **Remember my choice**. The same setting, `dgc.closingAWorkingTab`.
+- **Settings → Running sessions** lists a ChatDGC chat that a closed window left answering, as a ChatDGC chat, for
+  how long, with **Stop**; it comes back when that folder's window opens again.
+
 - **A new Pip's card shows the Pip once.** When a Pip is created with a first run, the run used to appear as a second
   card inside the first, the Pip's face and name again. Its first run is now the card's own status line ("First run:
   working", then "First run: report ready").

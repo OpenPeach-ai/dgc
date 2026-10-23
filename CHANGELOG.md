@@ -6,6 +6,25 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A ChatDGC reply keeps running through a window reload.** ChatDGC rides on the Sessions home's `dgc serve`, which
+  used to end with its window and stop the reply. For an editor that asks for it, that backend now keeps running
+  while a ChatDGC reply (or deep research) is being written: a reload, a closed window or a dropped connection
+  leaves the reply going, and the window that comes back gets the same backend, with the reply finished or still
+  streaming and every part of it shown once. The same rules as a session: with no window it saves and stops by
+  itself 2 minutes after the reply finishes, and after 12 hours at most; a reply still running in an older DGC after
+  an update is saved where it is and stopped (its Continue is there). With no ChatDGC reply running, the home's
+  backend ends with its window exactly as before: the Pips views, the Sessions list and Settings change nothing.
+- **A chat opened mid-reply shows the reply so far.** Opening a chat while its reply is still being written (again
+  in a tab, or in a window that reloaded) used to show only what came after; it now opens with everything the
+  reply has written, its question cards, pictures, cards and files, and deep research's progress, and goes on from
+  there.
+- **`dgc ps` names the ChatDGC chats a backend is answering** (`chat "…"  (answering)`), and `--json` rows carry
+  `chats` and `scope`.
+- Editor protocol (opt-in, old clients unchanged): command `set_detach_chatdgc {keep_running}`, offered as
+  `ready.capabilities.detach.chatdgc`, opts the Sessions home's backend in with only ChatDGC's replies counting as
+  work; `live_sessions` items say `scope` and `chats` (`[{conversation_id, title}]`). A client that never sends it
+  gets exactly the old behaviour.
+
 - **A Pip for live data.** A project Pulse can now keep an eye on live data instead of running tests: its job is a
   short list of exact read-only command lines you approve (up to six), such as a `SELECT` through a read-only
   database account, `df -h .` or `curl -s http://127.0.0.1:8000/health`. DGC runs only those exact lines, on its
