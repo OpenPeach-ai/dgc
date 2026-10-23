@@ -728,6 +728,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       readAloud: () => this.readAloudService(),
       pluginLogo: (plugin) => this.replyPluginLogo(plugin),
       chatdgcKeepsRunning: () => !!this.processOf(this.backend)?.detach,
+      chatdgcOpenHere: () => this.chatdgcOpenHere(),
     };
     chat.attach(host);
   }
@@ -775,6 +776,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!this.sessionReady || !this.lastReadyEvent || !be.ready) return "starting";
     if (!(this.lastReadyEvent.capabilities as any)?.voice) return "old_cli";
     return be.send(cmd as Parameters<DgcBackend["send"]>[0]) ? "sent" : "starting";
+  }
+
+  /** The side bar's backend holds the chats this window shows and moves one with Open here: it opted in to keep
+   *  ChatDGC running with no window (set_detach_chatdgc), and offers ready.capabilities.detach.chatdgc_open_here. */
+  private chatdgcOpenHere(): boolean {
+    const detach = this.processOf(this.backend)?.detach;
+    return !!detach && Number((detach as any).chatdgc_open_here) >= 1;
   }
 
   /** Never a cached backend: the one this provider holds now, started if it has none. A send to a
@@ -1755,6 +1763,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  nothing of the user's (scope "chatdgc"), so it is not listed. */
   private runningRows(items: any[]): any[] {
     const rows: any[] = [];
+    const openHere = (this.tab?.host ?? this).chatdgcOpenHere();
     for (const row of items) {
       if (!row || row.kind !== "serve" || row.attached !== false || !row.detachable) { continue; }
       const sessions = Array.isArray(row.sessions) ? row.sessions : [];
@@ -1767,8 +1776,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       for (const chat of Array.isArray(row.chats) ? row.chats : []) {
         if (!/^chat_[a-f0-9]{32}$/.test(String(chat?.conversation_id || ""))) { continue; }
+        // Open: in a ChatDGC tab here, taken from that process the way Open here takes it (its reply streams here).
         rows.push({ ...common, kind: "chat", chat: chat.conversation_id, name: String(chat.title || "").slice(0, 200),
-                    cwd: String(sessions[0]?.cwd || ""), working: true });
+                    cwd: String(sessions[0]?.cwd || ""), working: true, openable: openHere });
       }
     }
     return rows;
@@ -6729,8 +6739,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send({ type: "stop_live_session", pid, instance, request_id: this.nextRequestId("stop-live") } as any);
       }
     } else if (msg?.type === "openRunning") {
-      const id = String(msg.session || "");
-      if (this.places && /^[A-Za-z0-9_-]{1,128}$/.test(id)) { this.places.open(id, String(msg.name || "")); }
+      const id = String(msg.session || ""), chat = String(msg.chat || "");
+      if (/^chat_[a-f0-9]{32}$/.test(chat)) { (this.tab?.host ?? this).chatdgc?.open(chat, false, true); }
+      else if (this.places && /^[A-Za-z0-9_-]{1,128}$/.test(id)) { this.places.open(id, String(msg.name || "")); }
     } else if (msg?.type === "copy") {
       const text = String(msg.text || "");
       if (text.length <= 2048) await vscode.env.clipboard.writeText(text);

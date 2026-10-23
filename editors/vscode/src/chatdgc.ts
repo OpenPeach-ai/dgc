@@ -36,6 +36,10 @@ const MAX_ATTACHMENTS = 10;
 /** What one send may carry inline (pasted images and text), under the 4 MiB command frame; a picked file
  *  goes by its path and costs the frame nothing. */
 const MAX_INLINE_CHARS = 3_000_000;
+/** What a tab may not do while another window's DGC writes to its chat: anything that changes the chat. */
+const READ_ONLY_REFUSES = new Set(["send", "continue", "edit", "regenerate", "version", "answer", "compact", "summary", "carry",
+                                   "branch", "research", "researchStart", "steer", "stop", "draftEdit", "actionRun",
+                                   "actionHand", "actionDismiss", "widgetRemove"]);
 
 /** What ChatDGC needs of the side bar: its process, and its home's webview. */
 export interface ChatDGCHost {
@@ -60,6 +64,9 @@ export interface ChatDGCHost {
   /** Its process keeps a ChatDGC reply running when the window goes (set_detach_chatdgc): a tab closed mid-reply
    *  is then asked whether to keep it running. */
   chatdgcKeepsRunning?(): boolean;
+  /** Its process holds the chats this window shows, one window writing to a chat at a time, and moves one with
+   *  Open here (ready.capabilities.detach.chatdgc_open_here, on a backend that opted in with set_detach_chatdgc). */
+  chatdgcOpenHere?(): boolean;
 }
 
 
@@ -84,6 +91,11 @@ interface Tab {
   pickedLibrary?: Set<string>;
   /** A Library file to attach once the tab has its chat (Use in a new chat). */
   waitingAttach?: Record<string, unknown>[];
+  /** Its chat is held by another window's DGC (chatdgc_held): shown read-only, as last saved, with Open here.
+   *  "moved": this window had it, and another took it. */
+  elsewhere?: { state: "elsewhere" | "moved"; pid?: number };
+  /** Opened to be taken here at once (Settings › Running sessions › Open): its first ask is chatdgc_open_here. */
+  take?: boolean;
 }
 
 type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string;
@@ -227,6 +239,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <section id="cd-empty" class="cd-empty" aria-live="polite"></section>
 </div></main>
 <footer class="cd-foot"><div class="cd-column">
+<div id="cd-elsewhere" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="cd-elsewhere-text" class="elsewhere-text"></span><button type="button" id="cd-elsewhere-open" class="act primary" title="Carry on with this chat in this window; the other window shows it read-only">Open here</button></div>
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
 <div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
 <form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
@@ -287,6 +300,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private readonly answering = new Set<string>();
   /** The window is going (a reload, a closed window): a tab's end is not the user closing it. */
   private closing = false;
+  /** The chats this window's tabs show, as last said to its process (chatdgc_shown); "" after a new process. */
+  private shownSaid = "";
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -307,14 +322,43 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     return { dispose: () => { chats.dispose(); widgets.dispose(); docs.dispose(); } };
   }
 
-  /** A conversation in a tab of its own (or the tab it is already in); "" starts a new chat. */
-  open(conversation = "", temporary = false): void {
+  /** A conversation in a tab of its own (or the tab it is already in); "" starts a new chat. `take`: opened to carry
+   *  on with it here (Settings › Running sessions › Open), so a chat another window's DGC holds is taken at once. */
+  open(conversation = "", temporary = false, take = false): void {
     const id = CONVERSATION_ID.test(conversation) ? conversation : "";
     if (id) {
-      for (const tab of this.tabs) { if (tab.conversation === id) { tab.panel.reveal(); return; } }
+      for (const tab of this.tabs) {
+        if (tab.conversation !== id) continue;
+        tab.panel.reveal();
+        if (take && tab.elsewhere) this.openHere(tab);
+        return;
+      }
     }
     const panel = vscode.window.createWebviewPanel(CHATDGC_EDITOR, "New chat", vscode.ViewColumn.Active, this.options());
-    this.adopt(panel, id, temporary);
+    this.adopt(panel, id, temporary, "", take && !!id);
+  }
+
+  /** The backend holds the chats this window shows, and moves one with Open here. */
+  private openHereOffered(): boolean {
+    try { return !!this.host?.chatdgcOpenHere?.(); } catch { return false; }
+  }
+
+  /** Open here: take this tab's chat from the window (or the windowless DGC) holding it. Idle, it opens here from
+   *  disk; mid-reply, the reply goes on where it is and streams here, and the chat is this window's once it ends. */
+  private openHere(tab: Tab): void {
+    if (!tab.conversation || !this.openHereOffered()) return;
+    this.ask({ tab, kind: "open" }, { type: "chatdgc_open_here", conversation_id: tab.conversation });
+  }
+
+  /** Which chats this window's tabs show, said to its process whenever that changes: what it holds, so another window
+   *  shows them read-only, and what it lets go when a tab closes. Only to a backend that holds chats. */
+  private sayShown(): void {
+    if (!this.openHereOffered()) return;
+    const ids = [...new Set([...this.tabs].filter((tab) => !tab.temporary && CONVERSATION_ID.test(tab.conversation))
+      .map((tab) => tab.conversation))].sort();
+    const said = JSON.stringify(ids);
+    if (said === this.shownSaid) return;
+    if (this.host?.chatdgcSend({ type: "chatdgc_shown", conversation_ids: ids }) === "sent") this.shownSaid = said;
   }
 
   /** ChatDGC's own mark (DGC's three slashes in a speech bubble), so its tabs aren't taken for DGC's sessions. */
@@ -811,10 +855,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
 
-  private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = ""): void {
+  private adopt(panel: vscode.WebviewPanel, conversation: string, temporary: boolean, project = "", take = false): void {
     panel.iconPath = this.chatdgcIcon();
     const tab: Tab = { panel, conversation, temporary, held: [], opened: false, picked: new Set(), ...(project ? { project } : {}),
-                       mic: { post: (message) => this.post(tab, message) } };
+                       ...(take ? { take } : {}), mic: { post: (message) => this.post(tab, message) } };
     this.tabs.add(tab);
     panel.onDidDispose(() => {
       this.tabs.delete(tab);
@@ -822,7 +866,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       this.host?.dictation?.()?.release(tab.mic);
       this.host?.readAloud?.()?.release(tab.mic);
       // Closed by the user while its reply is still being written: asked once, as a Work session's tab is.
-      if (!this.closing) this.closedMidReply(tab);
+      if (!this.closing) { this.closedMidReply(tab); this.sayShown(); }
     });
     panel.webview.onDidReceiveMessage((message) => { void this.fromTab(tab, message); });
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
@@ -860,6 +904,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  the reply so far in it; nothing is read from disk while that process holds the chat. */
   backendReady(reattached = false): void {
     this.answering.clear();
+    // A new process knows nothing of what this window shows: said first, so each chat below opens as held or not.
+    this.shownSaid = "";
+    this.sayShown();
     for (const tab of this.tabs) {
       if (reattached && tab.opened && tab.conversation && !tab.held.some((cmd) => cmd.type === "chatdgc_open")) {
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", conversation_id: tab.conversation });
@@ -881,7 +928,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** The side bar's process went away: a reply in progress there has stopped. */
   backendLost(): void {
     this.answering.clear();
-    for (const tab of this.tabs) this.post(tab, { type: "lost", message: "DGC restarted, so this reply stopped. Continue it, or send again." });
+    this.shownSaid = "";
+    for (const tab of this.tabs) {
+      if (!tab.elsewhere) this.post(tab, { type: "lost", message: "DGC restarted, so this reply stopped. Continue it, or send again." });
+    }
   }
 
   /** Q3 for a chat (closingTab.ts, dgc.closingAWorkingTab): its tab closed mid-reply. Kept running, the reply goes on
@@ -889,7 +939,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
    *  process can keep it: an older CLI's reply goes on with the window, as it always did, and nothing is asked. */
   private closedMidReply(tab: Tab): void {
     const conversation = tab.conversation;
-    if (!conversation || !this.answering.has(conversation) || !this.host?.chatdgcKeepsRunning?.()) return;
+    if (!conversation || tab.elsewhere || !this.answering.has(conversation) || !this.host?.chatdgcKeepsRunning?.()) return;
     if ([...this.tabs].some((other) => other.conversation === conversation)) return;     // still shown in another tab
     const name = chatTitle(String(tab.summary?.title || tab.panel.title || "")).slice(0, 80);
     void keepRunningAfterClose({
@@ -906,8 +956,32 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const requestId = typeof ev?.request_id === "string" ? ev.request_id : "";
     const asker = requestId ? this.requests.get(requestId) : undefined;
     const conversation = typeof ev?.conversation_id === "string" ? ev.conversation_id : "";
-    const showing = (id: string) => [...this.tabs].filter((tab) => tab.conversation === id);
+    // A tab whose chat another window's DGC holds shows it as last saved: nothing of a reply reaches it.
+    const showing = (id: string) => [...this.tabs].filter((tab) => tab.conversation === id && !tab.elsewhere);
+    const allShowing = (id: string) => [...this.tabs].filter((tab) => tab.conversation === id);
     switch (ev?.type) {
+      case "chatdgc_held": {
+        // Who writes to this chat: another window ("elsewhere", or "moved" when it took it from here), and its tabs
+        // here are read-only with Open here; or this window ("here"), and a tab that wasn't waiting for that answer
+        // opens it again, as it is now on this window's own backend.
+        if (!CONVERSATION_ID.test(conversation)) return;
+        const state = ev.state === "elsewhere" || ev.state === "moved" ? ev.state : ev.state === "here" ? "here" : "";
+        if (!state) return;
+        const pid = Number.isSafeInteger(ev.pid) && ev.pid > 0 ? Number(ev.pid) : undefined;
+        const answering = asker?.kind === "open" ? asker.tab : undefined;      // its chatdgc_opened follows
+        for (const tab of allShowing(conversation)) {
+          if (state === "here") {
+            tab.elsewhere = undefined;
+            this.post(tab, { type: "elsewhere", state: "none", conversation });
+            if (tab !== answering && tab.opened) this.ask({ tab, kind: "reopen" }, { type: "chatdgc_open", conversation_id: conversation });
+          } else {
+            tab.elsewhere = { state, ...(pid ? { pid } : {}) };
+            this.post(tab, { type: "elsewhere", state, conversation });
+          }
+        }
+        if (state !== "here") this.answering.delete(conversation);        // not this window's reply to keep or stop
+        return;
+      }
       case "chatdgc_chats":
         if (asker?.kind === "projectChats") {
           this.requests.delete(requestId);
@@ -936,6 +1010,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.homeChanged();
           return;
         }
+        if (asker?.kind === "reopen") {
+          // The chat is this window's now: shown as it is here, what you're typing and where you were reading kept.
+          this.requests.delete(requestId);
+          const tab = asker.tab;
+          if (!tab || !this.tabs.has(tab) || tab.conversation !== String(ev.conversation?.id || "")) return;
+          tab.summary = ev.conversation;
+          this.post(tab, { type: "opened", conversation: ev.conversation, messages: ev.messages, earlier: ev.earlier,
+                           busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "", keep: true });
+          return;
+        }
         if (asker?.kind === "fork" || asker?.kind === "version") {
           // A new version, or another one shown: every tab on this chat shows the conversation as it is now. A
           // fork's request stays open: its turn is still to come.
@@ -962,6 +1046,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                          ...(ev.project && typeof ev.project === "object" ? { project: ev.project } : {}) });
         if (waitingAttach.length) this.attachLibrary(tab, waitingAttach);
         for (const waiting of tab.waitingSend?.splice(0) || []) this.post(tab, waiting);
+        this.sayShown();
         this.homeChanged();
         return;
       }
@@ -1002,7 +1087,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.keepWidgetState(id, null);
           void asker.libraryPanel?.webview.postMessage({ type: "changed" });
           // Every tab on that chat hears it: its Widgets list marks it deleted, whether or not its reply is on screen.
-          for (const tab of showing(chat)) this.post(tab, { type: "widgetRemoved", id });
+          for (const tab of allShowing(chat)) this.post(tab, { type: "widgetRemoved", id });
           if (asker.tab) void this.library?.webview.postMessage({ type: "changed" });       // an open Library shows it gone too
         }
         return;
@@ -1173,7 +1258,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       case "chatdgc_changed":
-        for (const tab of showing(conversation)) {
+        for (const tab of allShowing(conversation)) {
           if (ev.summary) { tab.summary = { ...tab.summary, ...ev.summary }; tab.panel.title = chatTitle(ev.summary.title); }
           this.post(tab, { type: "changed", summary: ev.summary });
         }
@@ -1206,15 +1291,28 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private async fromTab(tab: Tab, message: any): Promise<void> {
     if (!message || typeof message !== "object" || typeof message.type !== "string") return;
     const conversation = tab.conversation;
+    if (tab.elsewhere && READ_ONLY_REFUSES.has(message.type)) {
+      // Read-only while another window writes to it (the page offers none of these then; its process refuses them too).
+      this.post(tab, { type: "error", message: "This chat is open in another window. Use Open here to carry on with it in this window." });
+      return;
+    }
     switch (message.type) {
       case "ready": {
         // The webview (re)loaded: it shows what this tab holds, or a new chat. A recording it started is gone with
         // the page that showed it.
         this.host?.dictation?.()?.release(tab.mic);
         this.host?.readAloud?.()?.release(tab.mic);
-        this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
-                                          ...(!conversation && tab.temporary ? { temporary: true } : {}),
-                                          ...(!conversation && tab.project ? { project: tab.project } : {}) });
+        // A reloaded page shows what this tab knows of who holds its chat until its process says again.
+        if (tab.elsewhere) this.post(tab, { type: "elsewhere", state: tab.elsewhere.state, conversation });
+        if (tab.take && conversation && this.openHereOffered()) {
+          // Opened to carry on with it here: taken at once, live if its reply is still being written elsewhere.
+          tab.take = false;
+          this.openHere(tab);
+        } else {
+          this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(conversation ? { conversation_id: conversation } : {}),
+                                            ...(!conversation && tab.temporary ? { temporary: true } : {}),
+                                            ...(!conversation && tab.project ? { project: tab.project } : {}) });
+        }
         this.ask({ tab, kind: "projects" }, { type: "chatdgc_projects" });
         void this.models(tab);
         // A source's favicon, as Work's panel shows one: Google's icon service, asked about the origin only.
@@ -1255,8 +1353,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         tab.temporary = message.temporary === true;
         tab.project = undefined;
         tab.panel.title = "New chat";
+        if (tab.elsewhere) { tab.elsewhere = undefined; this.post(tab, { type: "elsewhere", state: "none" }); }
+        this.sayShown();                     // the chat it showed is let go of
         this.ask({ tab, kind: "open" }, { type: "chatdgc_open", ...(tab.temporary ? { temporary: true } : {}) });
         this.homeChanged();
+        return;
+      case "openHere":
+        // The read-only bar's Open here: this window carries on with the chat.
+        if (tab.elsewhere) this.openHere(tab);
         return;
       case "attach": {
         // Your recent files from the Library first, as ChatGPT's paperclip lists them; with none, the picker.

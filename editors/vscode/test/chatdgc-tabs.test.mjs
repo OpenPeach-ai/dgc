@@ -1503,3 +1503,76 @@ test("a chat's Widgets list: its outline from a backend that offers one, a widge
   panel.say({ type: "widgetRemove", id: WG });
   assert.equal(sent.length, before);
 });
+
+test("Open here for a chat: the tabs' chats are said to the process; one another window holds is read-only, hears none of its reply, and Open here takes it", async () => {
+  host.chatdgcOpenHere = () => true;
+  host.chatdgcKeepsRunning = () => true;
+  chat.open(ID(1));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(1), title: "Count" });
+  assert.deepEqual(last("chatdgc_shown"), { type: "chatdgc_shown", conversation_ids: [ID(1)] }, "what this window shows");
+  // Held by another window: the bar and a locked box on the page, and nothing of a reply reaches it.
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(1), state: "elsewhere", pid: 4242 });
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "elsewhere", conversation: ID(1) });
+  chat.onEvent({ type: "chatdgc_delta", conversation_id: ID(1), message_id: MSG(1), text: "1\n" });
+  chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(1), state: "started", reply_id: MSG(1) });
+  assert.equal(panel.last("delta"), undefined);
+  assert.equal(panel.last("turn"), undefined);
+  const before = sent.length;
+  panel.say({ type: "send", text: "Hello" });
+  panel.say({ type: "regenerate", messageId: MSG(1) });
+  assert.equal(sent.length, before, "a change goes nowhere while another window writes to it");
+  assert.match(panel.last("error").message, /open in another window\. Use Open here/);
+  // Open here: asked once; its answer is "here" with the chat after it, never a second open.
+  panel.say({ type: "openHere" });
+  const take = last("chatdgc_open_here");
+  assert.deepEqual({ ...take, request_id: "" }, { type: "chatdgc_open_here", conversation_id: ID(1), request_id: "" });
+  const opens = sent.filter((c) => c.type === "chatdgc_open").length;
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(1), state: "here", request_id: take.request_id });
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "none", conversation: ID(1) });
+  assert.equal(sent.filter((c) => c.type === "chatdgc_open").length, opens, "the answer's chat is on its way");
+  chat.onEvent({ type: "chatdgc_opened", request_id: take.request_id, conversation: { id: ID(1), title: "Count" },
+                 messages: [{ id: MSG(1), role: "assistant", text: "1\n2\n" }], earlier: 0, busy: true, reply_id: MSG(1) });
+  assert.deepEqual([panel.last("opened").busy, panel.last("opened").replyId], [true, MSG(1)], "the reply so far");
+  chat.onEvent({ type: "chatdgc_delta", conversation_id: ID(1), message_id: MSG(1), text: "3\n" });
+  assert.equal(panel.last("delta").text, "3\n", "and the rest, here");
+  // The reply ended and the chat moved here for good: it is opened again, as it is here, what you type kept.
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(1), state: "here" });
+  const reopen = last("chatdgc_open");
+  assert.equal(sent.filter((c) => c.type === "chatdgc_open").length, opens + 1);
+  assert.equal(reopen.conversation_id, ID(1));
+  chat.onEvent({ type: "chatdgc_opened", request_id: reopen.request_id, conversation: { id: ID(1), title: "Count" },
+                 messages: [], earlier: 0, busy: false });
+  assert.equal(panel.last("opened").keep, true);
+  // Taken back by the other window mid-reply: read-only again, and closing the tab asks nothing.
+  chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(1), state: "started", reply_id: MSG(2) });
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(1), state: "moved", pid: 4242 });
+  assert.equal(panel.last("elsewhere").state, "moved");
+  world.quickPick = ["stop"];
+  panel.dispose();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(world.quickPicks.length, 0, "not this window's reply to keep or stop");
+  assert.deepEqual(last("chatdgc_shown"), { type: "chatdgc_shown", conversation_ids: [] }, "let go of with its tab");
+});
+
+test("Open here: Running sessions' Open takes the chat at once; an older CLI hears nothing of what the tabs show", () => {
+  host.chatdgcOpenHere = () => true;
+  chat.open(ID(2), false, true);
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  assert.equal(last("chatdgc_open"), undefined, "never opened as last saved first");
+  assert.equal(last("chatdgc_open_here").conversation_id, ID(2));
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(2), state: "elsewhere" });
+  chat.open(ID(2), false, true);                         // its tab again: brought forward, and taken
+  assert.equal(panel.revealed, 1);
+  assert.equal(sent.filter((c) => c.type === "chatdgc_open_here").length, 2);
+  // A CLI that doesn't hold chats: no chatdgc_shown, no chatdgc_open_here, the tab opens as it always did.
+  host.chatdgcOpenHere = () => false;
+  sent.length = 0;
+  chat.open(ID(3), false, true);
+  const older = world.panels.at(-1);
+  older.say({ type: "ready" });
+  opened(older, { id: ID(3), title: "Old" });
+  assert.deepEqual(sent.filter((c) => c.type.startsWith("chatdgc_open") || c.type === "chatdgc_shown").map((c) => c.type), ["chatdgc_open"]);
+});

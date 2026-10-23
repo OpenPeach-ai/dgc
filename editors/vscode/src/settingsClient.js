@@ -341,16 +341,18 @@ function renderRunning(main) {
     if (!running.items.length) html += '<p class="empty">Nothing is running without a window.</p>';
     for (const r of running.items) {
         if (r.kind === 'chat') {
-            // A ChatDGC chat the window it was in left answering: it rides on that window's own DGC, so it comes back
-            // when that folder's window opens again. Stop saves what it wrote.
+            // A ChatDGC chat the window it was in left answering. Open shows it in a ChatDGC tab here, its reply
+            // streaming on (the chat moves to this window once the reply ends); Stop saves what it wrote.
             const key = r.pid + ':' + r.chat;
             const title = r.name || 'Chat';
             const folder = String(r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || '';
             html += `<div class="row"><div class="copy"><strong>${esc(title)}</strong>`
                 + `<span class="summary">ChatDGC chat · no window for ${esc(windowlessFor(r.windowless_s))}</span>`
-                + `<span class="description">Writing a reply. It finishes and saves by itself${folder ? '; open ' + esc(folder) + ' again to watch it' : ''}`
+                + `<span class="description">Writing a reply. It finishes and saves by itself`
+                + `${r.openable ? '' : folder ? '; open ' + esc(folder) + ' again to watch it' : ''}`
                 + `${r.version ? ' · DGC ' + esc(r.version) : ''}</span></div>`
-                + `<div class="actions"><button type="button" class="secondary" data-running-stop="${esc(key)}" data-pid="${esc(r.pid)}" data-instance="${esc(r.instance)}"`
+                + `<div class="actions">${r.openable ? `<button type="button" class="secondary" data-running-chat="${esc(r.chat)}" title="Open it in a ChatDGC tab here, as it writes" aria-label="Open: ${esc(title)}">Open</button>` : ''}`
+                + `<button type="button" class="secondary" data-running-stop="${esc(key)}" data-pid="${esc(r.pid)}" data-instance="${esc(r.instance)}"`
                 + `${running.stopping.has(key) ? ' disabled' : ''} title="Stop the reply and save what it wrote" aria-label="Stop: ${esc(title)}">${running.stopping.has(key) ? 'Stopping…' : 'Stop'}</button></div></div>`;
             continue;
         }
@@ -367,6 +369,7 @@ function renderRunning(main) {
     html += '</div><p class="note">In a terminal, <code>dgc ps</code> lists every DGC on this computer and <code>dgc stop</code> stops one.</p>';
     main.innerHTML = html;
     main.querySelectorAll('[data-running-open]').forEach(b => b.onclick = () => send({ type: 'openRunning', session: b.dataset.runningOpen, name: b.dataset.runningName || '' }));
+    main.querySelectorAll('[data-running-chat]').forEach(b => b.onclick = () => send({ type: 'openRunning', chat: b.dataset.runningChat }));
     main.querySelectorAll('[data-running-stop]').forEach(b => b.onclick = () => {
         running.stopping.add(b.dataset.runningStop); running.note = '';
         send({ type: 'stopRunning', pid: Number(b.dataset.pid), instance: b.dataset.instance });

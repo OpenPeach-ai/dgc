@@ -648,17 +648,61 @@ test("the Running sessions page: a chat row says it is a chat, how long, and whe
       work: "a ChatDGC reply is being written", windowless_s: 200, pid: 910, instance: "c0ffee00c0ffee00", version: "0.48.0" },
     { session: SESSION, name: "Fix the login", cwd: "/work/app", working: true, work: "a turn is running", windowless_s: 400,
       pid: 900, instance: "a1b2c3d4e5f60718", version: "0.48.0" }] });
-  const rows = [...w.document.querySelectorAll(".running-sessions .row")];
+  let rows = [...w.document.querySelectorAll(".running-sessions .row")];
   assert.equal(rows.length, 2);
   assert.match(rows[0].textContent, /Count from 1 to 400/);
   assert.match(rows[0].textContent, /ChatDGC chat · no window for 3 minutes/);
-  assert.match(rows[0].textContent, /Writing a reply\. It finishes and saves by itself; open app again to watch it/);
-  assert.equal(rows[0].querySelector("[data-running-open]"), null, "it opens in the window it was in, not here");
+  assert.match(rows[0].textContent, /Writing a reply\. It finishes and saves by itself; open app again to watch it/,
+               "a CLI that can't move one chat: it comes back in the window it was in");
+  assert.equal(rows[0].querySelector("[data-running-chat]"), null);
   assert.ok(rows[1].querySelector("[data-running-open]"), "a session's row still opens here");
   rows[0].querySelector("[data-running-stop]").click();
   assert.deepEqual(JSON.parse(JSON.stringify(sent.at(-1))), { type: "stopRunning", pid: 910, instance: "c0ffee00c0ffee00" });
   assert.equal(w.document.querySelector(".running-sessions .row [data-running-stop]").textContent, "Stopping…");
+  // Open here for a chat: its row opens it in a ChatDGC tab here, and the "open that folder again" sentence goes.
+  message({ type: "running", items: [
+    { kind: "chat", chat: "chat_" + "d".repeat(32), name: "Count to 400", cwd: "/work/app", working: true, openable: true,
+      work: "a ChatDGC reply is being written", windowless_s: 200, pid: 911, instance: "c0ffee00c0ffee01", version: "0.48.0" }] });
+  rows = [...w.document.querySelectorAll(".running-sessions .row")];
+  assert.match(rows[0].textContent, /Writing a reply\. It finishes and saves by itself · DGC 0\.48\.0/);
+  assert.doesNotMatch(rows[0].textContent, /again to watch it/);
+  const open = rows[0].querySelector("[data-running-chat]");
+  assert.equal(open.textContent, "Open");
+  assert.equal(open.getAttribute("aria-label"), "Open: Count to 400");
+  open.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent.at(-1))), { type: "openRunning", chat: "chat_" + "d".repeat(32) });
   w.close();
+});
+
+test("Open here for a chat: Running sessions offers Open where the backend moves one chat, and Open opens it here, taken", async () => {
+  const CHAT = "chat_" + "e".repeat(32);
+  const rows = [
+    { pid: 912, kind: "serve", instance: "c0ffee00c0ffee02", version: "0.48.0", attached: false, detachable: true,
+      windowless_s: 20, uptime_s: 90, work: "a ChatDGC reply is being written", status: "idle", liveness: "live", here: false,
+      scope: "chatdgc", chats: [{ conversation_id: CHAT, title: "Count from 1 to 400" }], sessions: [] },
+  ];
+  const offers = { detach: { ...CHATDGC_DETACH.detach, chatdgc_open_here: 1 }, chatdgc: { version: 1 } };
+  for (const [caps, openable] of [[offers, true], [CHATDGC_DETACH, false]]) {
+    const fixture = fakeServe(`serve-open-here-${openable}`, { caps, rows });
+    command = fixture.path;
+    const provider = sidebar();
+    const pages = [];
+    provider.settingsEditor = { webview: { postMessage: (m) => { pages.push(m); return Promise.resolve(true); } } };
+    const opened = [];
+    provider.chatdgc = { open: (...args) => opened.push(args), backendReady() {}, backendLost() {}, onEvent() {} };
+    const be = provider.ensureBackend();
+    spawned.push(be.childPid);
+    assert.ok(await until(() => be.ready));
+    be.completeHandshake();
+    await provider.onSettingsMessage({ type: "listRunning" });
+    assert.ok(await until(() => pages.some((m) => m.type === "running" && Array.isArray(m.items))));
+    const page = pages.find((m) => m.type === "running" && Array.isArray(m.items));
+    assert.deepEqual(page.items.map((r) => [r.kind, r.chat, r.openable]), [["chat", CHAT, openable]]);
+    await provider.onSettingsMessage({ type: "openRunning", chat: CHAT });
+    await provider.onSettingsMessage({ type: "openRunning", chat: "chat_../../x" });
+    assert.deepEqual(opened, [[CHAT, false, true]], "in a ChatDGC tab, to be taken here at once");
+    be.dispose("restart: test");
+  }
 });
 
 // ---- the webview ---------------------------------------------------------------------------------

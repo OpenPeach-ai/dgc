@@ -50,7 +50,11 @@
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
-                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {}, outline: null };
+                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {}, outline: null,
+                  elsewhere: null };
+  // Another window's DGC writes to this chat (Open here there, or it was open there first): it shows as last saved,
+  // read-only, with Open here, as Work's session does. {state: "elsewhere" | "moved", conversation}.
+  const readOnly = () => !!state.elsewhere && state.elsewhere.conversation === (state.conversation?.id || state.elsewhere.conversation);
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -481,7 +485,7 @@
     const drafted = open ? pick : { value: "", other: "" };       // a pick you didn't send isn't shown after
     const sync = () => {
       other.hidden = !(theirs || drafted.value === OTHER);
-      go.disabled = !open || state.busy || state.compacting || !choice();
+      go.disabled = !open || state.busy || state.compacting || readOnly() || !choice();
     };
     const row = (value, label) => {
       const item = el("label", "cd-option");
@@ -510,7 +514,7 @@
     card.addEventListener("submit", (e) => {
       e.preventDefault();
       const value = choice();
-      if (!open || !value || state.busy || state.compacting) return;
+      if (!open || !value || state.busy || state.compacting || readOnly()) return;
       vscode.postMessage({ type: "answer", messageId: message.id, question: index, choice: value, model: modelPick.value || "",
                            thinking: thinkingPick.value || "", search: searchMode() });
       state.busy = true; controls(); sync();
@@ -557,13 +561,13 @@
     if (open) {
       const go = el("button", "cd-continue cd-question-go", String(q.submit || "") || "Continue");
       go.type = "submit";
-      go.disabled = state.busy || state.compacting;
+      go.disabled = state.busy || state.compacting || readOnly();
       card.append(go);
     } else card.append(el("p", "cd-question-note", sent ? "Answered" : next ? "Not answered" : "Answer when the reply finishes"));
     card.addEventListener("submit", (e) => {
       e.preventDefault();
       const values = pick.values.map((v) => String(v || "").trim());
-      if (!open || values.some((v) => !v) || state.busy || state.compacting) return;
+      if (!open || values.some((v) => !v) || state.busy || state.compacting || readOnly()) return;
       vscode.postMessage({ type: "answer", messageId: message.id, question: index, choice: values[0], choices: values,
                            model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
       state.busy = true; controls();
@@ -896,7 +900,7 @@
   /** A button that starts or changes a turn: off while one runs (controls() keeps every such button in step). */
   function idleOnly(button) {
     button.dataset.whileIdle = "1";
-    button.disabled = state.busy || state.compacting || button.dataset.never === "1";
+    button.disabled = state.busy || state.compacting || readOnly() || button.dataset.never === "1";
     return button;
   }
   /** ‹ 2 / 3 ›: which version of the conversation from this point you're looking at. */
@@ -1012,7 +1016,7 @@
     return list;
   }
   function startResearch(message, extra = {}) {
-    if (state.busy || state.compacting) return;
+    if (state.busy || state.compacting || readOnly()) return;
     delete state.countdowns[message.id];
     state.planEditing = "";
     vscode.postMessage({ type: "researchStart", messageId: message.id, ...extra });
@@ -1793,7 +1797,7 @@
     const compact = el("button", "cd-edit-cancel", state.compacting ? "Summarizing…" : "Compact now");
     compact.type = "button"; compact.dataset.whileIdle = "1";
     if (!c.compactable) compact.dataset.never = "1";
-    compact.disabled = state.busy || state.compacting || !c.compactable;
+    compact.disabled = state.busy || state.compacting || readOnly() || !c.compactable;
     compact.title = "Summarize everything before the last exchange";
     const why = c.compactable || state.compacting ? null : el("p", "cd-pop-note cd-pop-why", state.conversation?.summary
       ? "Everything before your last exchange is already summarized."
@@ -1802,7 +1806,7 @@
     const carry = el("button", "cd-edit-cancel", "Continue in a new chat");
     carry.type = "button"; carry.dataset.whileIdle = "1";
     if (!state.messages.length || state.conversation?.temporary) carry.dataset.never = "1";
-    carry.disabled = state.busy || state.compacting || !state.messages.length || !!state.conversation?.temporary;
+    carry.disabled = state.busy || state.compacting || readOnly() || !state.messages.length || !!state.conversation?.temporary;
     carry.title = "Start a new chat that carries a summary of this one";
     carry.addEventListener("click", () => { vscode.postMessage({ type: "carry" }); state.compacting = true; render(); controls(); popover(); });
     // As main DGC lays out its own: what's used of the window, a bar, what's left, then what fills it. With the
@@ -1837,7 +1841,7 @@
       }
       pick.value = state.windows.includes(c.preset) ? c.preset : "";
       pick.dataset.whileIdle = "1";                  // like Compact now: not while a reply is written
-      pick.disabled = state.busy || state.compacting;
+      pick.disabled = state.busy || state.compacting || readOnly();
       pick.addEventListener("change", () => vscode.postMessage({ type: "window", preset: pick.value }));
       const controls = el("div", "context-size-controls");
       controls.append(pick);
@@ -2234,22 +2238,25 @@
   // ---- the composer
   function controls() {
     for (const button of document.querySelectorAll("[data-while-idle]")) {
-      button.disabled = state.busy || state.compacting || button.dataset.never === "1";
+      button.disabled = state.busy || state.compacting || readOnly() || button.dataset.never === "1";
     }
     const text = input.value;
     // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
     const empty = !text.trim() && !state.pending.length;
-    const offerVoice = !!voiceMode && empty && !state.busy && !!state.conversation && !state.unavailable && !state.compacting;
+    const locked = readOnly();
+    const offerVoice = !!voiceMode && empty && !state.busy && !!state.conversation && !state.unavailable && !state.compacting && !locked;
     if (voiceModeButton) voiceModeButton.hidden = !offerVoice;
     // While it answers, Send stays beside Stop for what you've typed: it queues it (Codex's queue).
     const queueing = busyNow() && !empty;
     send.hidden = offerVoice || (busyNow() && empty);
-    stop.hidden = !state.busy;
-    send.disabled = empty || !state.conversation || !!state.unavailable;
+    stop.hidden = !state.busy || locked;
+    send.disabled = empty || !state.conversation || !!state.unavailable || locked;
     const sendLabel = queueing ? "Queue: sends when the reply finishes" : "Send";
     if (send.title !== sendLabel) { send.title = sendLabel; send.setAttribute("aria-label", queueing ? "Queue message" : "Send"); }
     send.classList.toggle("cd-queueing", queueing);
-    input.disabled = !!state.unavailable;
+    input.disabled = !!state.unavailable || locked;
+    for (const id of ["cd-attach", "cd-research", "cd-study", "cd-mic"]) { const b = $(id); if (b) b.disabled = locked; }
+    $("cd-box")?.classList.toggle("cd-held", locked);
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
     $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
@@ -2364,7 +2371,7 @@
   }
   function submit(spoken = false) {
     const text = input.value;
-    if ((!text.trim() && !state.pending.length) || !state.conversation || state.unavailable) return;
+    if ((!text.trim() && !state.pending.length) || !state.conversation || state.unavailable || readOnly()) return;
     if (state.research && state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
@@ -2456,7 +2463,7 @@
   }
   /** The reply finished: the next queued message goes. */
   function sendNext() {
-    if (busyNow() || state.unavailable || !state.conversation) return;
+    if (busyNow() || state.unavailable || !state.conversation || readOnly()) return;
     const list = queued();
     if (!list.length) return;
     const item = list.shift(); saveQueue(); queueView();
@@ -2506,9 +2513,26 @@
   /** What the box asks for: research, study, a project's new chat, or anything. (Every redraw asks this.) */
   function placeholder() {
     const project = isProjectPage() ? projectOf(state.conversation) : null;
-    input.placeholder = state.research ? "What should I research?" : state.study ? "What do you want to learn?"
+    input.placeholder = readOnly() ? "Open here to carry on in this window"
+      : state.research ? "What should I research?" : state.study ? "What do you want to learn?"
       : project ? `New chat in ${project.name}` : "Ask anything";
   }
+  /** The read-only bar above the box, in Work's words, while another window's DGC writes to this chat. */
+  function elsewhereBar() {
+    const bar = $("cd-elsewhere");
+    if (!bar) return;
+    const on = readOnly();
+    bar.hidden = !on;
+    const button = $("cd-elsewhere-open");
+    if (button) button.disabled = false;
+    if (!on) return;
+    $("cd-elsewhere-text").textContent = state.elsewhere.state === "moved" ? "This chat is open in another window now."
+      : "This chat is open in another window.";
+  }
+  $("cd-elsewhere-open")?.addEventListener("click", (e) => {
+    e.currentTarget.disabled = true;               // one click: the bar goes once this window has it
+    vscode.postMessage({ type: "openHere" });
+  });
   researchToggle.addEventListener("click", () => { researchMode(!state.research); input.focus(); });
   studyToggle.addEventListener("click", () => { studyMode(!state.study); input.focus(); });
   modelPick.addEventListener("change", () => { state.model = modelPick.value; });
@@ -2811,10 +2835,28 @@
       case "speakAudio":
         reader?.receive(msg);
         break;
+      case "elsewhere": {
+        // Another window's DGC writes to this chat now, or this window does again ("none").
+        const kind = String(msg.state || "none");
+        if (kind !== "elsewhere" && kind !== "moved") state.elsewhere = null;
+        else {
+          state.elsewhere = { state: kind, conversation: String(msg.conversation || state.conversation?.id || "") };
+          if (state.busy) {
+            // Taken mid-reply: the reply goes on in the other window, so here it is no longer answering. What was
+            // queued behind it comes back to the box, as after Stop, for you to send once you carry on here.
+            state.busy = false; state.replyId = ""; state.searching = {}; state.stopping = false; state.failed = false;
+            restoreQueue();
+          }
+          if (voiceMode?.active) voiceMode.end();
+        }
+        elsewhereBar(); render(); controls();
+        return;
+      }
       case "opened": {
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.
         const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
+        if (state.elsewhere && state.elsewhere.conversation !== msg.conversation?.id) { state.elsewhere = null; elsewhereBar(); }
         if (state.conversation?.id !== msg.conversation?.id) { state.picks = {}; removedWidgets.clear(); closeWidgets(false); }
         // A long chat opens on its latest pages: the rest of its prompts and widgets come as its outline.
         state.outline = null; seeking = null;

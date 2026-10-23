@@ -3329,3 +3329,50 @@ test("the prompt rail for a very long chat closes its ticks up and shows a windo
     } finally { await s.page.close(); }
   }
 });
+
+test("Open here for a chat: read-only while another window writes to it, in Work's words; Open here once; taken mid-reply, what was queued comes back", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const box = s.page.locator("#cd-input"), bar = s.page.locator("#cd-elsewhere");
+    await s.send({ type: "opened", conversation: conversation({ title: "Count" }),
+                   messages: [{ id: M(1), role: "user", text: "Count to 400" }, { id: M(2), role: "assistant", text: "1\n2\n3" }], earlier: 0, busy: false });
+    assert.equal(await bar.isHidden(), true, "a chat nobody else has open: as today");
+    await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID });
+    assert.equal(await bar.isVisible(), true);
+    assert.equal((await s.page.locator("#cd-elsewhere-text").textContent()).trim(), "This chat is open in another window.");
+    assert.equal(await s.page.locator("#cd-elsewhere .codicon-multiple-windows").count(), 1, "Work's bar and look");
+    assert.equal(await box.isDisabled(), true, "the composer is off");
+    assert.equal(await box.getAttribute("placeholder"), "Open here to carry on in this window");
+    assert.equal(await s.page.locator("#cd-attach").isDisabled(), true);
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), true);
+    await s.page.locator("#cd-elsewhere-open").click();
+    assert.equal(await s.page.locator("#cd-elsewhere-open").isDisabled(), true, "one click");
+    assert.deepEqual((await s.posted("openHere")).length, 1);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-elsewhere.png") });
+    // This window has it now: the box is back.
+    await s.send({ type: "elsewhere", state: "none", conversation: ID });
+    assert.equal(await bar.isHidden(), true);
+    assert.equal(await box.isDisabled(), false);
+    await box.fill("Faster");
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), false);
+    await box.fill("");
+    // Mid-reply here, with a message queued: another window takes it. Not answering here any more, Stop goes, and
+    // the queued message is back in the box (never sent from a read-only chat).
+    await s.send({ type: "turn", state: "started", replyId: M(4) });
+    await box.fill("And then?"); await box.press("Enter");
+    assert.deepEqual(await s.page.locator("#cd-queue .cd-queue-text").allTextContents(), ["And then?"]);
+    await s.send({ type: "elsewhere", state: "moved", conversation: ID });
+    assert.equal((await s.page.locator("#cd-elsewhere-text").textContent()).trim(), "This chat is open in another window now.");
+    assert.equal(await s.page.locator("#cd-stop").isHidden(), true);
+    assert.equal(await s.page.locator("#cd-queue").isHidden(), true);
+    assert.equal(await box.inputValue(), "And then?");
+    await s.send({ type: "turn", state: "ended", replyId: M(4) });
+    assert.deepEqual(await s.posted("send"), [], "nothing goes from a chat another window writes to");
+    // Another chat in this tab: the bar is that chat's alone.
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"b".repeat(32)}`, title: "Other" }), messages: [], earlier: 0, busy: false });
+    assert.equal(await bar.isHidden(), true);
+    assert.equal(await box.isDisabled(), false);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
