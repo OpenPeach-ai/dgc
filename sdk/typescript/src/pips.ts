@@ -17,6 +17,7 @@ export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
+  list_app_approvals: { app?: string };
   list_apps: Record<string, never>;
   list_pip_borrows: { pip_id: string };
   get_pip_level: { pip_id: string };
@@ -111,6 +112,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  decide_app_approval: { action_id: string; decision: "accept" | "reject"; expected_digest: string };
   register_app: { name: string; url: string; tools: readonly (PipTool | PipToolWire)[] };
   update_app: { name: string; url?: string; tools: readonly (PipTool | PipToolWire)[] };
   accept_app_update: { name: string; expected_digest: string };
@@ -217,6 +219,8 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  list_app_approvals: ["app"],
+  decide_app_approval: ["action_id", "decision", "expected_digest"],
   register_app: ["name", "url", "tools"],
   update_app: ["name", "url", "tools"],
   accept_app_update: ["name", "expected_digest"],
@@ -735,6 +739,14 @@ const API61_READS = new Set(["list_apps"]);
 const API61_MUTATIONS = new Set(["register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret"]);
 for (const command of API61_READS) READS.add(command);
 for (const command of API61_MUTATIONS) MUTATIONS.add(command);
+// API 62: approvals in your app (pipsApp.ts's onApprovalRequested and onApprovalResolved). list_app_approvals {app?}
+// lists the changes on your apps that wait for a person, with their digests; decide_app_approval {action_id, decision
+// "accept" | "reject", expected_digest} is your app's own accept or reject, once: what is decided already, here or in
+// DGC, is answered as it was and never run again. Local only.
+const API62_READS = new Set(["list_app_approvals"]);
+const API62_MUTATIONS = new Set(["decide_app_approval"]);
+for (const command of API62_READS) READS.add(command);
+for (const command of API62_MUTATIONS) MUTATIONS.add(command);
 function appUrl(url: unknown): boolean {
   if (typeof url !== "string" || !url || url.length > 2048 || /[\u0000-\u0020\u007f]/.test(url)) return false;
   let parts: URL;
@@ -850,7 +862,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -914,6 +926,18 @@ export class Pips {
         throw new DGCConfigError(`${command} takes name, ${command === "register_app" ? "url and " : ""}tools`);
       }
       if (Object.hasOwn(values, "url") && !appUrl(values.url)) throw new DGCConfigError("url is https://, or http:// only for localhost or 127.0.0.1");
+    }
+    if (command === "list_app_approvals" && Object.hasOwn(values, "app") && !(typeof values.app === "string" && /^[a-z0-9-]{1,40}$/.test(values.app))) {
+      throw new DGCConfigError("app is the app's name, such as shop");
+    }
+    if (command === "decide_app_approval") {
+      if (!(typeof values.action_id === "string" && /^appaction_[a-f0-9]{32}$/.test(values.action_id))) {
+        throw new DGCConfigError("action_id is the approval's, appaction_ and 32 hex digits");
+      }
+      if (values.decision !== "accept" && values.decision !== "reject") throw new DGCConfigError('decision is "accept" or "reject"');
+      if (!(typeof values.expected_digest === "string" && /^[0-9a-f]{64}$/.test(values.expected_digest))) {
+        throw new DGCConfigError("expected_digest is the approval's action_digest, from the event or pending()");
+      }
     }
     if (command === "accept_app_update" && !(typeof values.expected_digest === "string" && /^[0-9a-f]{64}$/.test(values.expected_digest))) {
       throw new DGCConfigError("expected_digest is the pending update's digest, from update_app or list_apps");
@@ -1084,6 +1108,16 @@ export class Pips {
     return this.mutate("accept_app_update", { name, expected_digest: expectedDigest }, approval);
   }
   listApps(): Promise<PipResult> { return this.read("list_apps", {}); }
+  /** The changes on your own apps that wait for a person (Pips API 62), oldest first: `{approvals: [...]}`, each with
+   *  its action_id, action_digest, tool, arguments, Pip, summary, expires_at and moves_money. `app` keeps one app's. */
+  pending(app?: string): Promise<PipResult> { return this.read("list_app_approvals", app === undefined ? {} : { app }); }
+  /** Accept or reject one of your app's approvals (Pips API 62), as your app: DGC's card settles with it, and an
+   *  accepted change is called once, at your app's address. Exactly once: an approval already decided, here or in DGC,
+   *  resolves to `{approval, decided: false}` with what happened, and nothing runs again. */
+  decide(actionId: string, decision: "accept" | "reject", expectedDigest: string,
+    approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("decide_app_approval", { action_id: actionId, decision, expected_digest: expectedDigest }, approval);
+  }
   get(pipId: string): Promise<PipResult> { return this.read("get_pip", { pip_id: pipId }); }
   runs(pipId: string): Promise<PipResult> { return this.read("list_pip_runs", { pip_id: pipId }); }
   /** Read a run; never enqueue work. */

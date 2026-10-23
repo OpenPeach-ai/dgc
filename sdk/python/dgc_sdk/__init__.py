@@ -11,7 +11,8 @@ from .chat import AsyncChat, AsyncChats, Chat, ChatEvent, ChatReply, ChatSource,
 from .client import AsyncDGC, AsyncRunHandle, AsyncSession, DGC
 from .policy import RuntimePolicy
 from .pips import AsyncPips, Pips, PipReadCommand, PipMutationCommand
-from .pips_app import AppToolHandler, PipCallContext, PipTool, PipToolError, define_pip_tool
+from .pips_app import (AppToolHandler, PipApprovalRequested, PipApprovalResolved, PipCallContext, PipTool, PipToolError,
+                       define_pip_tool)
 from .retry import RetryPolicy
 from .usage import Pricing, cost_usd
 from .errors import (
@@ -32,7 +33,8 @@ from .types import (
 __all__ = [
     "AsyncChat", "AsyncChats", "Chat", "ChatEvent", "ChatReply", "ChatSource", "ChatSummary", "Chats",
     "AsyncPips", "Pips", "PipReadCommand", "PipMutationCommand",
-    "AppToolHandler", "PipCallContext", "PipTool", "PipToolError", "define_pip_tool",
+    "AppToolHandler", "PipApprovalRequested", "PipApprovalResolved", "PipCallContext", "PipTool", "PipToolError",
+    "define_pip_tool",
     "PROTOCOL", "REQUIRES_CLI", "__version__",
     "AgentInfo", "Artifact", "AsyncDGC", "AsyncRunHandle", "AsyncSession", "Checkpoint", "ContextBreakdown",
     "ContextItem", "ContextPart", "DGC",

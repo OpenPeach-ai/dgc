@@ -21,6 +21,13 @@ bounded), checks the arguments against the tool's schema, and answers ``{"ok": t
 ``{"ok": false, "error": {"code", "message"}}``. A change tool runs only for a call that carries the action the
 user accepted (``ctx.action_id``, ``ctx.action_digest``); DGC sends each accepted action once and never retries it.
 
+Approvals in your app (Pips API 62): when a Pip's change waits for a person, DGC POSTs a signed
+``approval_requested`` to the same address, and ``approval_resolved`` when it is accepted, rejected or expires
+(wherever that happened). Pass ``on_approval_requested`` and ``on_approval_resolved`` to show them on your own admin
+screen; each gets a :class:`PipApprovalRequested` or :class:`PipApprovalResolved` after the same signature checks.
+Without a callback the handler answers 204, so an app that doesn't care loses nothing. Decide one with
+``session.pips.decide(action_id, "accept" | "reject", expected_digest=..., approved=True)``.
+
 Nothing here imports a web framework until its adapter is used: :meth:`AppToolHandler.handle` is framework-free,
 :meth:`~AppToolHandler.flask` imports Flask, and :meth:`~AppToolHandler.wsgi` and :meth:`~AppToolHandler.asgi`
 (Starlette and FastAPI: ``app.mount("/dgc/pips", handler.asgi)``) need nothing.
@@ -46,7 +53,8 @@ from typing import Any, Literal
 from .errors import DGCConfigError
 from .schema import _ALLOWED as SCHEMA_KEYWORDS, validate as schema_errors
 
-__all__ = ["AppToolHandler", "PipCallContext", "PipTool", "PipToolError", "define_pip_tool", "sign"]
+__all__ = ["AppToolHandler", "PipApprovalRequested", "PipApprovalResolved", "PipCallContext", "PipTool", "PipToolError",
+           "define_pip_tool", "sign"]
 
 PipToolKind = Literal["read", "change"]
 TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
@@ -205,6 +213,68 @@ class PipCallContext:
         return self.action_id
 
 
+@dataclass(frozen=True)
+class PipApprovalRequested:
+    """A Pip's change on your app waits for a person (Pips API 62): show it, and decide it with ``pips.decide``.
+
+    ``moves_money`` is true for a tool you marked so: it always asks a person, and never gets Always allow."""
+
+    app: str
+    action_id: str
+    action_digest: str
+    tool: str
+    arguments: dict
+    pip_id: str
+    pip_name: str
+    run_id: str
+    summary: str
+    expires_at: str
+    moves_money: bool
+    type: Literal["approval_requested"] = "approval_requested"
+
+
+@dataclass(frozen=True)
+class PipApprovalResolved:
+    """How one closed, wherever that happened (Pips API 62): ``decision`` is ``accepted``, ``rejected`` or ``expired``;
+    ``by`` is ``dgc`` (DGC's own card, the CLI or the expiry), ``app`` (you, through ``pips.decide``),
+    ``always_allow`` (the Pip's Always allow) or ``level`` (the Pip's level let it through)."""
+
+    app: str
+    action_id: str
+    tool: str
+    decision: Literal["accepted", "rejected", "expired"]
+    by: str
+    at: str
+    type: Literal["approval_resolved"] = "approval_resolved"
+
+
+ApprovalCallback = Callable[[Any], Any]
+_ACTION_ID = re.compile(r"appaction_[a-f0-9]{32}\Z")
+_DIGEST = re.compile(r"[a-f0-9]{64}\Z")
+
+
+def _approval_event(call: dict) -> PipApprovalRequested | PipApprovalResolved | None:
+    """The approval event DGC sent, checked, or None when it isn't one."""
+    def text(key: str, limit: int = 2048) -> bool:
+        return isinstance(call.get(key), str) and len(call[key]) <= limit
+    if not (text("app", 40) and isinstance(call.get("action_id"), str) and _ACTION_ID.fullmatch(call["action_id"])
+            and text("tool", 64)):
+        return None
+    if call.get("type") == "approval_requested":
+        if not (isinstance(call.get("action_digest"), str) and _DIGEST.fullmatch(call["action_digest"])
+                and isinstance(call.get("arguments"), dict) and type(call.get("moves_money")) is bool
+                and all(text(k) for k in ("pip_id", "pip_name", "run_id", "summary", "expires_at"))):
+            return None
+        return PipApprovalRequested(app=call["app"], action_id=call["action_id"], action_digest=call["action_digest"],
+                                    tool=call["tool"], arguments=call["arguments"], pip_id=call["pip_id"],
+                                    pip_name=call["pip_name"], run_id=call["run_id"], summary=call["summary"],
+                                    expires_at=call["expires_at"], moves_money=call["moves_money"])
+    if call.get("decision") not in ("accepted", "rejected", "expired") or not text("by", 32) or not text("at", 64):
+        return None
+    return PipApprovalResolved(app=call["app"], action_id=call["action_id"], tool=call["tool"], decision=call["decision"],
+                               by=call["by"], at=call["at"])
+
+
 class PipToolError(Exception):
     """Raise it in a tool to refuse with a message DGC shows the Pip ("the shop app said: ..."). Any other exception
     is answered as "the tool failed", and logged here, so its details stay in your app."""
@@ -232,9 +302,15 @@ class AppToolHandler:
     ``tools`` maps each tool to its function, ``fn(args, ctx)``: keyed by its :class:`PipTool` (from
     :func:`define_pip_tool`), or by its name with the same PipTool values in ``definitions``. A function returns
     what DGC gives the Pip (any JSON value), or raises :class:`PipToolError` to refuse in words.
+
+    ``on_approval_requested(event)`` and ``on_approval_resolved(event)`` (Pips API 62) are called with a
+    :class:`PipApprovalRequested` or :class:`PipApprovalResolved` once its signature, time and nonce check out; the
+    handler answers 200 (or 500 if the callback raises, and DGC tries again). Without one it answers 204.
     """
 
     def __init__(self, secret: str, tools: Mapping[Any, ToolFunction], *, definitions: list[PipTool] | None = None,
+                 on_approval_requested: ApprovalCallback | None = None,
+                 on_approval_resolved: ApprovalCallback | None = None,
                  max_skew_seconds: int = MAX_SKEW_SECONDS, max_body: int = MAX_BODY, max_nonces: int = 50_000,
                  clock: Callable[[], float] = time.time):
         if not isinstance(secret, str) or not SECRET.fullmatch(secret.strip()):
@@ -254,6 +330,10 @@ class AppToolHandler:
             if not callable(fn):
                 raise DGCConfigError(f"{definition.name}'s function is not callable")
             self._tools[definition.name] = (definition, fn)
+        for name, callback in (("on_approval_requested", on_approval_requested), ("on_approval_resolved", on_approval_resolved)):
+            if callback is not None and not callable(callback):
+                raise DGCConfigError(f"{name} is not callable")
+        self._approvals = {"approval_requested": on_approval_requested, "approval_resolved": on_approval_resolved}
         self.max_skew = int(max_skew_seconds)
         self.max_body = int(max_body)
         self.max_nonces = int(max_nonces)
@@ -299,6 +379,11 @@ class AppToolHandler:
             call = json.loads(bytes(body).decode("utf-8"))
         except (UnicodeError, ValueError):
             return _refuse(400, "invalid_request", "The call isn't JSON.")
+        if isinstance(call, dict) and call.get("type") in ("approval_requested", "approval_resolved"):
+            event = _approval_event(call)
+            if event is None:
+                return _refuse(400, "invalid_request", "The approval event isn't one DGC sends.")
+            return _Approval(event, self._approvals[call["type"]])
         if (not isinstance(call, dict) or call.get("type") != "tool_call" or not isinstance(call.get("tool"), str)
                 or not isinstance(call.get("arguments"), dict)
                 or any(not isinstance(call.get(k), str) for k in ("app", "pip_id", "run_id", "call_id"))):
@@ -337,9 +422,26 @@ class AppToolHandler:
 
     # -- the framework-free core ---------------------------------------------------------------------------------
 
+    @staticmethod
+    def _approved(approval: "_Approval", outcome: Callable[[], Any]) -> tuple[int, dict[str, str], bytes]:
+        if approval.callback is None:
+            return 204, {"Cache-Control": "no-store"}, b""
+        try:
+            value = outcome()
+        except Exception:  # noqa: BLE001 -- DGC tries again; the details stay in your app
+            _log.exception("Pip approval callback for %s failed", approval.event.action_id)
+            return _refuse(500, "callback_failed", "The app couldn't take this approval event.")
+        if inspect.isawaitable(value):
+            if inspect.iscoroutine(value):
+                value.close()
+            return _refuse(500, "async_callback", "This approval callback is async: serve it with handler.asgi.")
+        return _answer(200, {"ok": True})
+
     def handle(self, headers: Mapping[str, Any], body: bytes) -> tuple[int, dict[str, str], bytes]:
         """One call: ``(status, headers, body)``. ``headers`` may be any mapping (names in any case)."""
         checked = self._check(headers, body)
+        if isinstance(checked, _Approval):
+            return self._approved(checked, lambda: checked.callback(checked.event))
         if len(checked) == 3 and isinstance(checked[0], int):
             return checked
         fn, args, context = checked
@@ -354,8 +456,22 @@ class AppToolHandler:
         return self._result(value)
 
     async def handle_async(self, headers: Mapping[str, Any], body: bytes) -> tuple[int, dict[str, str], bytes]:
-        """As :meth:`handle`, awaiting an async tool; a plain function runs in a worker thread."""
+        """As :meth:`handle`, awaiting an async tool or approval callback; a plain function runs in a worker thread."""
         checked = self._check(headers, body)
+        if isinstance(checked, _Approval):
+            if checked.callback is None:
+                return self._approved(checked, lambda: None)
+            try:
+                if inspect.iscoroutinefunction(checked.callback):
+                    await checked.callback(checked.event)
+                else:
+                    value = await asyncio.to_thread(checked.callback, checked.event)
+                    if inspect.isawaitable(value):
+                        await value
+            except Exception:  # noqa: BLE001 -- DGC tries again; the details stay in your app
+                _log.exception("Pip approval callback for %s failed", checked.event.action_id)
+                return _refuse(500, "callback_failed", "The app couldn't take this approval event.")
+            return _answer(200, {"ok": True})
         if len(checked) == 3 and isinstance(checked[0], int):
             return checked
         fn, args, context = checked
@@ -442,5 +558,11 @@ class AppToolHandler:
         await send({"type": "http.response.body", "body": body})
 
 
-_REASONS = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 405: "Method Not Allowed",
+@dataclass(frozen=True)
+class _Approval:
+    event: Any
+    callback: ApprovalCallback | None
+
+
+_REASONS = {200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 405: "Method Not Allowed",
             413: "Payload Too Large", 422: "Unprocessable Entity", 500: "Internal Server Error"}

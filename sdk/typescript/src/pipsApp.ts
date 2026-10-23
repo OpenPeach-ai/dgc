@@ -13,6 +13,12 @@
  * nonce it has seen (kept in memory, bounded), checks the arguments against the tool's schema, and answers
  * `{ok: true, result}` or `{ok: false, error: {code, message}}`. A change runs only for a call that carries the
  * action the user accepted (`ctx.actionId`, `ctx.actionDigest`); DGC sends each accepted action once, never again.
+ *
+ * Approvals in your app (Pips API 62): when a Pip's change waits for a person, DGC POSTs a signed `approval_requested`
+ * to the same address, and `approval_resolved` when it is accepted, rejected or expires (wherever that happened). Pass
+ * `onApprovalRequested` and `onApprovalResolved` to show them on your own admin screen; each gets the event once the
+ * same signature checks pass. Without a callback the handler answers 204, so an app that doesn't care loses nothing.
+ * Decide one with `session.pips.decide(actionId, "accept" | "reject", actionDigest, { approved: true })`.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { DGCConfigError } from "./errors.ts";
@@ -151,6 +157,33 @@ export class PipToolError extends Error {
   }
 }
 
+/** A Pip's change on your app waits for a person (Pips API 62): show it, and decide it with `pips.decide`.
+ *  `movesMoney` is true for a tool you marked so: it always asks a person, and never gets Always allow. */
+export type PipApprovalRequested = Readonly<{
+  type: "approval_requested";
+  app: string;
+  actionId: string;
+  actionDigest: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  pipId: string;
+  pipName: string;
+  runId: string;
+  summary: string;
+  expiresAt: string;
+  movesMoney: boolean;
+}>;
+/** How one closed, wherever that happened (Pips API 62). `by` is "dgc" (DGC's own card, the CLI or the expiry), "app"
+ *  (you, through `pips.decide`), "always_allow" (the Pip's Always allow) or "level" (the Pip's level let it through). */
+export type PipApprovalResolved = Readonly<{
+  type: "approval_resolved";
+  app: string;
+  actionId: string;
+  tool: string;
+  decision: "accepted" | "rejected" | "expired";
+  by: string;
+  at: string;
+}>;
 export type AppToolFunction = (args: Record<string, unknown>, ctx: PipCallContext) => unknown | Promise<unknown>;
 export type AppToolResponse = { status: number; headers: Record<string, string>; body: string };
 export type AppToolHandlerOptions = {
@@ -163,6 +196,10 @@ export type AppToolHandlerOptions = {
   clock?: () => number;
   /** Called when a tool throws something other than PipToolError (default: console.error). */
   onError?: (error: unknown, ctx: PipCallContext) => void;
+  /** A change waits for a person (Pips API 62). Without it the handler answers 204. */
+  onApprovalRequested?: (event: PipApprovalRequested) => unknown | Promise<unknown>;
+  /** A change was accepted, rejected or expired (Pips API 62). Without it the handler answers 204. */
+  onApprovalResolved?: (event: PipApprovalResolved) => unknown | Promise<unknown>;
 };
 type HeaderBag = Headers | Record<string, string | string[] | undefined>;
 const HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
@@ -172,6 +209,21 @@ function answer(status: number, value: unknown): AppToolResponse {
 }
 function refuse(status: number, code: string, message: string): AppToolResponse {
   return answer(status, { ok: false, error: { code, message } });
+}
+const text = (value: unknown, limit = 2048): value is string => typeof value === "string" && value.length <= limit;
+/** The approval event DGC sent, checked, or null when it isn't one. */
+function approvalEvent(call: Record<string, unknown>): PipApprovalRequested | PipApprovalResolved | null {
+  if (!text(call.app, 40) || !(typeof call.action_id === "string" && /^appaction_[a-f0-9]{32}$/.test(call.action_id)) || !text(call.tool, 64)) return null;
+  if (call.type === "approval_requested") {
+    if (!(typeof call.action_digest === "string" && /^[a-f0-9]{64}$/.test(call.action_digest)) || !isRecord(call.arguments)
+      || typeof call.moves_money !== "boolean" || !["pip_id", "pip_name", "run_id", "summary", "expires_at"].every((key) => text(call[key]))) return null;
+    return Object.freeze({ type: "approval_requested", app: call.app, actionId: call.action_id, actionDigest: call.action_digest,
+      tool: call.tool, arguments: call.arguments as Record<string, unknown>, pipId: call.pip_id as string, pipName: call.pip_name as string,
+      runId: call.run_id as string, summary: call.summary as string, expiresAt: call.expires_at as string, movesMoney: call.moves_money });
+  }
+  if (!["accepted", "rejected", "expired"].includes(call.decision as string) || !text(call.by, 32) || !text(call.at, 64)) return null;
+  return Object.freeze({ type: "approval_resolved", app: call.app, actionId: call.action_id, tool: call.tool,
+    decision: call.decision as "accepted" | "rejected" | "expired", by: call.by, at: call.at });
 }
 function header(headers: HeaderBag, name: string): string {
   if (typeof (headers as Headers).get === "function") return (headers as Headers).get(name) ?? "";
@@ -191,6 +243,7 @@ export class AppToolHandler {
   private readonly maxNonces: number;
   private readonly clock: () => number;
   private readonly onError: (error: unknown, ctx: PipCallContext) => void;
+  private readonly onApproval: Record<string, ((event: any) => unknown) | undefined>;
 
   constructor(secret: string, tools: Record<string, AppToolFunction>, options: AppToolHandlerOptions) {
     if (typeof secret !== "string" || !SECRET.test(secret.trim())) {
@@ -210,6 +263,10 @@ export class AppToolHandler {
     this.maxNonces = options?.maxNonces ?? 50_000;
     this.clock = options?.clock ?? (() => Date.now() / 1000);
     this.onError = options?.onError ?? ((error, ctx) => console.error(`Pip tool ${ctx.tool} failed:`, error));
+    for (const key of ["onApprovalRequested", "onApprovalResolved"] as const) {
+      if (options?.[key] !== undefined && typeof options[key] !== "function") throw new DGCConfigError(`${key} is not a function`);
+    }
+    this.onApproval = { approval_requested: options?.onApprovalRequested, approval_resolved: options?.onApprovalResolved };
   }
 
   private seen(nonce: string, now: number): boolean {
@@ -238,6 +295,22 @@ export class AppToolHandler {
     if (this.seen(nonce, now)) return refuse(401, "replayed", "This call was already received.");
     let call: Record<string, unknown>;
     try { call = JSON.parse(raw.toString("utf8")); } catch { return refuse(400, "invalid_request", "The call isn't JSON."); }
+    if (isRecord(call) && (call.type === "approval_requested" || call.type === "approval_resolved")) {
+      const event = approvalEvent(call);
+      if (!event) return refuse(400, "invalid_request", "The approval event isn't one DGC sends.");
+      const callback = this.onApproval[call.type];
+      if (!callback) return { status: 204, headers: { "Cache-Control": "no-store" }, body: "" };
+      try {
+        await callback(event);
+      } catch (error) {
+        // DGC tries again; the details stay in your app.
+        this.onError(error, Object.freeze({ app: event.app, tool: event.tool, kind: "change", pipId: event.type === "approval_requested" ? event.pipId : "",
+          runId: event.type === "approval_requested" ? event.runId : "", callId: "", timestamp: Number(timestamp), nonce,
+          actionId: event.actionId, actionDigest: event.type === "approval_requested" ? event.actionDigest : null, approvalId: event.actionId }));
+        return refuse(500, "callback_failed", "The app couldn't take this approval event.");
+      }
+      return answer(200, { ok: true });
+    }
     if (!isRecord(call) || call.type !== "tool_call" || typeof call.tool !== "string" || !isRecord(call.arguments)
       || ["app", "pip_id", "run_id", "call_id"].some((key) => typeof call[key] !== "string")) {
       return refuse(400, "invalid_request", "The call isn't a DGC tool call.");
@@ -309,6 +382,6 @@ export class AppToolHandler {
     }
     const body = new Uint8Array(await request.arrayBuffer());
     const out = await this.handle({ headers: request.headers, body });
-    return new Response(out.body, { status: out.status, headers: out.headers });
+    return new Response(out.status === 204 ? null : out.body, { status: out.status, headers: out.headers });
   }
 }

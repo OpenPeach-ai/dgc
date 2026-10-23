@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_app_approvals",
     "list_apps",
     "list_pip_borrows",
     "get_pip_level",
@@ -77,6 +78,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "decide_app_approval",
     "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "set_pip_level",
@@ -311,7 +313,18 @@ API61_MUTATIONS = frozenset({'register_app', 'update_app', 'accept_app_update', 
 READ_COMMANDS |= API61_READS
 MUTATION_COMMANDS |= API61_MUTATIONS
 APP_NAME = re.compile(r"[a-z0-9-]{1,40}\Z")
+# API 62: approvals in your app (pips_app's on_approval_requested and on_approval_resolved). list_app_approvals
+# {app?} lists the changes on your apps that wait for a person, with their digests; decide_app_approval {action_id,
+# decision "accept" | "reject", expected_digest} is your app's own accept or reject, once: what is decided already,
+# here or in DGC, is answered as it was and never run again. Local only.
+API62_READS = frozenset({'list_app_approvals'})
+API62_MUTATIONS = frozenset({'decide_app_approval'})
+READ_COMMANDS |= API62_READS
+MUTATION_COMMANDS |= API62_MUTATIONS
+APP_ACTION_ID = re.compile(r"appaction_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'list_app_approvals': frozenset({'app'}),
+    'decide_app_approval': frozenset({'action_id', 'decision', 'expected_digest'}),
     'register_app': frozenset({'name', 'url', 'tools'}),
     'update_app': frozenset({'name', 'url', 'tools'}),
     'accept_app_update': frozenset({'name', 'expected_digest'}),
@@ -671,7 +684,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API61_READS | API61_MUTATIONS:
+        if command in API62_READS | API62_MUTATIONS:
+            minimum = 62
+        elif command in API61_READS | API61_MUTATIONS:
             minimum = 61
         elif command in API59_READS | API59_MUTATIONS:
             minimum = 59
@@ -811,6 +826,16 @@ class Pips:
                 raise DGCConfigError(f"{command} takes name, {'url and ' if command == 'register_app' else ''}tools")
             if 'url' in values and not _app_url(values['url']):
                 raise DGCConfigError("url is https://, or http:// only for localhost or 127.0.0.1")
+        if command == 'list_app_approvals' and 'app' in values and not (isinstance(values['app'], str)
+                                                                       and APP_NAME.fullmatch(values['app'])):
+            raise DGCConfigError("app is the app's name, such as shop")
+        if command == 'decide_app_approval':
+            if not (isinstance(values.get('action_id'), str) and APP_ACTION_ID.fullmatch(values['action_id'])):
+                raise DGCConfigError("action_id is the approval's, appaction_ and 32 hex digits")
+            if values.get('decision') not in ('accept', 'reject'):
+                raise DGCConfigError('decision is "accept" or "reject"')
+            if not (isinstance(values.get('expected_digest'), str) and re.fullmatch(r"[0-9a-f]{64}", values['expected_digest'])):
+                raise DGCConfigError("expected_digest is the approval's action_digest, from the event or pending()")
         if command == 'accept_app_update' and not (isinstance(values.get('expected_digest'), str)
                                                    and re.fullmatch(r"[0-9a-f]{64}", values['expected_digest'])):
             raise DGCConfigError("expected_digest is the pending update's digest, from update_app or list_apps")
@@ -937,6 +962,20 @@ class Pips:
     def list_apps(self) -> dict[str, Any]:
         return self.read("list_apps", {})
 
+    def pending(self, app: str | None = None) -> dict[str, Any]:
+        """The changes on your own apps that wait for a person (Pips API 62), oldest first: ``{"approvals": [...]}``,
+        each with its ``action_id``, ``action_digest``, ``tool``, ``arguments``, Pip, ``summary``, ``expires_at`` and
+        ``moves_money``. ``app`` keeps one app's."""
+        return self.read("list_app_approvals", {} if app is None else {"app": app})
+
+    def decide(self, action_id: str, decision: Literal["accept", "reject"], *, expected_digest: str,
+               approved: bool = False) -> dict[str, Any]:
+        """Accept or reject one of your app's approvals (Pips API 62), as your app: DGC's card settles with it, and
+        an accepted change is called once, at your app's address. Exactly once: an approval already decided, here or
+        in DGC, answers ``{"approval", "decided": False}`` with what happened, and nothing runs again."""
+        return self.mutate("decide_app_approval", {"action_id": action_id, "decision": decision,
+                                                   "expected_digest": expected_digest}, approved=approved)
+
     def get(self, pip_id: str) -> dict[str, Any]:
         return self.read("get_pip", {"pip_id": pip_id})
 
@@ -1009,6 +1048,14 @@ class AsyncPips:
 
     async def list_apps(self) -> dict[str, Any]:
         return await self.read("list_apps", {})
+
+    async def pending(self, app: str | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.pending, app)
+
+    async def decide(self, action_id: str, decision: Literal["accept", "reject"], *, expected_digest: str,
+                     approved: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.decide, action_id, decision, expected_digest=expected_digest,
+                                       approved=approved)
 
     async def get(self, pip_id: str) -> dict[str, Any]:
         return await self.read("get_pip", {"pip_id": pip_id})
