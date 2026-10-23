@@ -1196,19 +1196,27 @@ test("move to project from a chat's menu: a project, a new one, or out of the on
   const [panel] = world.panels;
   panel.say({ type: "ready" });
   opened(panel, { id: ID(5), title: "Beaches", project: PROJ("a") });
+  // The menu asks for the projects, and so may the home's own refresh (250 ms after a change, which a loaded
+  // machine can land in the middle of this): answer every projects request since the menu opened, not just the last.
+  const answerProjects = (since, projects) => {
+    for (const asked of sent.slice(since).filter((c) => c.type === "chatdgc_projects")) {
+      chat.onEvent({ type: "chatdgc_projects", request_id: asked.request_id, projects });
+    }
+  };
   world.pick = ["move", PROJ("b")];
+  let since = sent.length;
   panel.say({ type: "menu" });
   await tick();
-  chat.onEvent({ type: "chatdgc_projects", request_id: last("chatdgc_projects").request_id,
-                 projects: [{ id: PROJ("a"), name: "Goa", chats: 1 }, { id: PROJ("b"), name: "Kerala", chats: 0 }] });
+  answerProjects(since, [{ id: PROJ("a"), name: "Goa", chats: 1 }, { id: PROJ("b"), name: "Kerala", chats: 0 }]);
   await tick(); await tick();
   assert.deepEqual(world.picks.at(-1), [PROJ("b"), "new", ""], "not the one it's in; a new one; out of it");
   assert.deepEqual([last("chatdgc_move").conversation_id, last("chatdgc_move").project_id], [ID(5), PROJ("b")]);
   world.pick = ["move", "new"];
   world.input = "Tax 2026";
+  since = sent.length;
   panel.say({ type: "menu" });
   await tick();
-  chat.onEvent({ type: "chatdgc_projects", request_id: last("chatdgc_projects").request_id, projects: [] });
+  answerProjects(since, []);
   await tick(); await tick();
   const made = last("chatdgc_project");
   assert.deepEqual([made.op, made.name], ["create", "Tax 2026"]);
