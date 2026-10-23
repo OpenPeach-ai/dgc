@@ -210,7 +210,7 @@ class FrontendOriginTests(unittest.TestCase):
         facade._run_delegated_turn = self.failing if fails else self.observe
         for name in ("_cancel_auxiliary", "_foreground_aux_barrier", "_flush_text",
                      "_settle_running_tools", "_flush_unsaved_todo_clear", "_invalidate",
-                     "_pause_pane", "_maybe_notify", "_schedule_auxiliary"):
+                     "_pause_pane", "_maybe_notify", "_schedule_auxiliary", "_mark_turn_end"):
             setattr(facade, name, noop)
         return facade, sess
 

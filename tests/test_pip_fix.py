@@ -434,7 +434,9 @@ class QueueAndLifecycleTests(FixScene):
             self.assertFalse(backend._busy(), "and no turn holds the chat")
             release.set()
             self.ended(run)
-        self.assertEqual(serve_detach.chat_work(backend).progressing, [])
+        # The fix's record ends before its sub-agent's job is let go on that job's own thread: the work clears
+        # a moment later, and must clear (a windowless backend then exits as it would with no fix).
+        wait_for(lambda: serve_detach.chat_work(backend).progressing == [], what="the fix's work to clear")
 
     def test_a_fix_still_getting_ready_is_already_work(self):
         # Before its sub-agent exists (the copy made ready, dependencies installing) a fix is work too: a window
