@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
 import { tabIcon } from "./tabIcon";
+import { keepRunningAfterClose } from "./closingTab";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 
 /**
@@ -56,6 +57,9 @@ export interface ChatDGCHost {
   readAloud?(): ReadAloud | undefined;
   /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
   pluginLogo?(plugin: string): string;
+  /** Its process keeps a ChatDGC reply running when the window goes (set_detach_chatdgc): a tab closed mid-reply
+   *  is then asked whether to keep it running. */
+  chatdgcKeepsRunning?(): boolean;
 }
 
 
@@ -279,6 +283,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private homeShown = HOME_FIRST;
   private homeHeld = false;
   private homeTimer?: ReturnType<typeof setTimeout>;
+  /** The chats with a reply being written, as the process said (chatdgc_turn, chatdgc_opened). */
+  private readonly answering = new Set<string>();
+  /** The window is going (a reload, a closed window): a tab's end is not the user closing it. */
+  private closing = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -813,6 +821,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       for (const [id, asker] of this.requests) { if (asker.tab === tab) this.requests.delete(id); }
       this.host?.dictation?.()?.release(tab.mic);
       this.host?.readAloud?.()?.release(tab.mic);
+      // Closed by the user while its reply is still being written: asked once, as a Work session's tab is.
+      if (!this.closing) this.closedMidReply(tab);
     });
     panel.webview.onDidReceiveMessage((message) => { void this.fromTab(tab, message); });
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, ...name.split("/"))).toString();
@@ -845,9 +855,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     else if (asker.home) this.homeHeld = true;
   }
 
-  /** The side bar's process finished its handshake: whatever waited for it goes now. */
-  backendReady(): void {
+  /** The side bar's process finished its handshake: whatever waited for it goes now. `reattached`: it is the process
+   *  this window left running (a ChatDGC reply kept it), so every chat already on screen is opened again from it,
+   *  the reply so far in it; nothing is read from disk while that process holds the chat. */
+  backendReady(reattached = false): void {
+    this.answering.clear();
     for (const tab of this.tabs) {
+      if (reattached && tab.opened && tab.conversation && !tab.held.some((cmd) => cmd.type === "chatdgc_open")) {
+        this.ask({ tab, kind: "open" }, { type: "chatdgc_open", conversation_id: tab.conversation });
+      }
       const held = tab.held.splice(0);
       for (const cmd of held) this.deliver({ tab, kind: "held" }, cmd);
       // A tab opened before the backend was ready asked for models too early: its picker showed nothing chosen.
@@ -864,7 +880,25 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   /** The side bar's process went away: a reply in progress there has stopped. */
   backendLost(): void {
+    this.answering.clear();
     for (const tab of this.tabs) this.post(tab, { type: "lost", message: "DGC restarted, so this reply stopped. Continue it, or send again." });
+  }
+
+  /** Q3 for a chat (closingTab.ts, dgc.closingAWorkingTab): its tab closed mid-reply. Kept running, the reply goes on
+   *  and is saved (with no window too, set_detach_chatdgc); stopped, what it wrote so far is saved. Only where the
+   *  process can keep it: an older CLI's reply goes on with the window, as it always did, and nothing is asked. */
+  private closedMidReply(tab: Tab): void {
+    const conversation = tab.conversation;
+    if (!conversation || !this.answering.has(conversation) || !this.host?.chatdgcKeepsRunning?.()) return;
+    if ([...this.tabs].some((other) => other.conversation === conversation)) return;     // still shown in another tab
+    const name = chatTitle(String(tab.summary?.title || tab.panel.title || "")).slice(0, 80);
+    void keepRunningAfterClose({
+      title: `“${name}” was still answering when you closed its tab`,
+      keep: "The reply carries on and is saved, with no window too. Open the chat again from Chat to see it.",
+      stop: "The reply stops now; what it wrote so far is saved.",
+    }).then((keep) => {
+      if (!keep && this.answering.has(conversation)) this.host?.chatdgcSend({ type: "chatdgc_cancel", conversation_id: conversation });
+    }, () => { /* no answer: it goes on, as a dismissed question leaves it */ });
   }
 
   /** Every chatdgc_* event the side bar's process sends. */
@@ -892,6 +926,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       case "chatdgc_opened": {
+        { const id = String(ev.conversation?.id || "");
+          if (id) { if (ev.busy === true) this.answering.add(id); else this.answering.delete(id); } }
         if (asker?.kind === "branch") {
           // Branch in new chat: it opens in a tab of its own, as ChatGPT opens one; the chat it came from stays.
           this.requests.delete(requestId);
@@ -1017,6 +1053,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "chatdgc_turn":
         if (ev.state === "ended" && requestId) this.requests.delete(requestId);
+        if (conversation) { if (ev.state === "started") this.answering.add(conversation); else this.answering.delete(conversation); }
         for (const tab of showing(conversation)) this.post(tab, { type: "turn", state: ev.state, replyId: ev.reply_id });
         return;
       case "chatdgc_delta":
@@ -1895,6 +1932,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   dispose(): void {
+    this.closing = true;
     if (this.homeTimer) clearTimeout(this.homeTimer);
     this.tabs.clear();
     this.requests.clear();

@@ -66,6 +66,8 @@ export interface DetachCapability {
   waiting_exit_s?: number;
   max_windowless_s?: number;
   elsewhere?: { session_id: string; pid: number; reason: string; version?: string };
+  /** set_detach_chatdgc is understood: the Sessions home's backend keeps a ChatDGC reply running, and nothing else. */
+  chatdgc?: number;
 }
 
 /** How a spawn asks to reattach: a reload (`restore`, which waits briefly for an old window to fall
@@ -223,6 +225,9 @@ export class DgcBackend extends EventEmitter {
   /** Set by the owner before start(): a window that goes should leave this backend's work running (a
    *  session's tab). Off, it is today's backend: the window going ends it. */
   keepWorkRunning = false;
+  /** Set by the Sessions home before start(): its backend carries ChatDGC, and a window that goes should leave a
+   *  ChatDGC reply running (set_detach_chatdgc), and only that. A CLI that does not offer it: today's home backend. */
+  keepChatdgcRunning = false;
   /** Set once this backend opted in to running with no window (ready offered `detach` and the owner
    *  wants it); undefined otherwise. Only then does a window's teardown say `detach` instead of stopping. */
   detach: DetachCapability | undefined;
@@ -604,6 +609,10 @@ export class DgcBackend extends EventEmitter {
         this.attached = attached && typeof attached === "object" && Array.isArray(attached.chats) ? attached : undefined;
         this.detach = this.detachOffer && this.keepWorkRunning ? this.detachOffer : undefined;
         if (this.detach) { this.sendSetup({ type: "set_detach", keep_running: true } as DgcCommand); }
+        else if (this.detachOffer && this.keepChatdgcRunning && Number(this.detachOffer.chatdgc) >= 1) {
+          this.detach = this.detachOffer;
+          this.sendSetup({ type: "set_detach_chatdgc", keep_running: true } as DgcCommand);
+        }
         // Renderer-sourced liveness, and deliberately NOT a replacement for the timer above. That
         // timer says "this extension host is alive", which is exactly what an orphaned host also
         // says -- true, useless for a takeover, and still the right signal for the backend's

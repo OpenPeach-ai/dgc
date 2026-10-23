@@ -302,13 +302,14 @@ test("a chat the reattached process kept is adopted: claimed with a ping, never 
 
 // ---- the panel -----------------------------------------------------------------------------------
 
-function sidebar() {
+function sidebar(state) {
   const provider = new DgcViewProvider({
     extension: { packageJSON: { version: "0.32.0", dgcCliVersion: "0.0.1" } },
     extensionUri: { fsPath: "/ext" }, subscriptions: [], logUri: { fsPath: mkdtempSync(join(scratch, "log-")) },
     secrets: { async get() {}, async store() {}, async delete() {} },
     globalState: { get() {}, async update() {} },
-    workspaceState: { get() {}, async update() {} },
+    workspaceState: state ? { get: (key) => state[key], async update(key, value) { state[key] = value; } }
+                          : { get() {}, async update() {} },
   });
   provider.post = () => {};
   providers.push(provider);
@@ -523,6 +524,141 @@ test("Settings -> Running sessions lists what runs with no window, and Stop asks
   assert.equal(list.items[0].windowless, "a turn is running");
   assert.equal("windowless" in list.items[1], false, "shown in a window: not marked");
   be.dispose("restart: test");
+});
+
+// ---- the Sessions home's backend: it carries ChatDGC ------------------------------------------------
+
+const CHATDGC_DETACH = { detach: { ...DETACH.detach, chatdgc: 1 }, chatdgc: { version: 1 } };
+
+test("the home's backend keeps a ChatDGC reply running: set_detach_chatdgc where offered, never set_detach", async () => {
+  const home = fakeServe("serve-home-chatdgc", { caps: CHATDGC_DETACH });
+  const be = new DgcBackend(scratch, home.path, undefined, undefined);
+  be.keepChatdgcRunning = true;
+  be.start();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => be.ready));
+  be.completeHandshake();
+  assert.ok(await until(() => home.types().includes("set_detach_chatdgc")), "opted in for ChatDGC");
+  assert.deepEqual(home.commands().find((c) => c.type === "set_detach_chatdgc"), { type: "set_detach_chatdgc", keep_running: true });
+  assert.equal(home.types().includes("set_detach"), false, "its own chat's work is not kept: only ChatDGC's");
+  const pid = be.childPid;
+  be.dispose(PANEL_DISPOSED);
+  assert.ok(await until(() => home.types().includes("detach")), "a window going says detach");
+  await pause(450);
+  assert.equal(home.types().includes("shutdown"), false);
+  assert.equal(home.signals(), 0);
+  assert.ok(alive(pid));
+  // A CLI whose detach predates it (layer 1): the home's backend ends with its window, as before.
+  const older = fakeServe("serve-home-layer1", { caps: DETACH });
+  const old = new DgcBackend(scratch, older.path, undefined, undefined);
+  old.keepChatdgcRunning = true;
+  old.start();
+  spawned.push(old.childPid);
+  assert.ok(await until(() => old.ready));
+  old.completeHandshake();
+  await pause(150);
+  assert.equal(older.types().some((t) => t.startsWith("set_detach")), false, "never sent a command it would refuse");
+  old.dispose(PANEL_DISPOSED);
+  assert.ok(await until(() => older.types().includes("shutdown")));
+});
+
+test("the home asks for its own backend back after a reload, and remembers the one it gets", async () => {
+  const state = { "dgc.homeBackend.v1": { scope: "", session: "20261023-home-old" } };
+  const fixture = fakeServe("serve-home-reattach", { caps: CHATDGC_DETACH, session: "20261023-home-new" });
+  command = fixture.path;
+  const provider = sidebar(state);
+  provider.home = true;
+  state["dgc.homeBackend.v1"].scope = provider.draftScope();
+  const be = provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => fixture.starts().length));
+  assert.deepEqual(fixture.starts().map((s) => [s.attach_session, s.attach]), [["20261023-home-old", "restore"]],
+                   "its first start after the window opens is a reload's");
+  assert.equal(be.keepChatdgcRunning, true);
+  assert.equal(be.keepWorkRunning, false);
+  assert.ok(await until(() => state["dgc.homeBackend.v1"].session === "20261023-home-new"), "the backend it has now");
+  assert.ok(await until(() => fixture.types().includes("set_detach_chatdgc")));
+  be.dispose("restart: test");
+  await until(() => fixture.types().includes("shutdown"));
+  // Another folder's remembered backend is not this window's.
+  const other = { "dgc.homeBackend.v1": { scope: "another-folder", session: "20261023-home-old" } };
+  const plain = fakeServe("serve-home-other-scope", { caps: CHATDGC_DETACH });
+  command = plain.path;
+  const second = sidebar(other);
+  second.home = true;
+  const be2 = second.ensureBackend();
+  spawned.push(be2.childPid);
+  assert.ok(await until(() => plain.starts().length));
+  assert.deepEqual(plain.starts().map((s) => [s.attach_session, s.attach]), [["", ""]]);
+  be2.dispose("restart: test");
+});
+
+test("Settings -> Running sessions lists a ChatDGC chat answering with no window as a chat, not the home's own session", async () => {
+  const CHAT = "chat_" + "c".repeat(32);
+  const rows = [
+    { pid: 910, kind: "serve", instance: "c0ffee00c0ffee00", version: "0.48.0", attached: false, detachable: true,
+      windowless_s: 200, uptime_s: 900, work: "a ChatDGC reply is being written", status: "idle", liveness: "live", here: false,
+      scope: "chatdgc", chats: [{ conversation_id: CHAT, title: "Count from 1 to 400" }, { conversation_id: "../x", title: "bad" }],
+      sessions: [{ session_id: "20261023-home", name: "", cwd: "/work/app", status: "idle" }] },
+  ];
+  const fixture = fakeServe("serve-running-chat", { caps: { ...CHATDGC_DETACH }, rows });
+  command = fixture.path;
+  const provider = sidebar();
+  const pages = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => { pages.push(m); return Promise.resolve(true); } } };
+  const be = provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => be.ready));
+  be.completeHandshake();
+  await provider.onSettingsMessage({ type: "listRunning" });
+  assert.ok(await until(() => pages.some((m) => m.type === "running" && Array.isArray(m.items))));
+  const page = pages.find((m) => m.type === "running" && Array.isArray(m.items));
+  assert.deepEqual(page.items.map((r) => [r.kind, r.chat, r.name, r.cwd, r.working, r.windowless_s, r.pid]),
+    [["chat", CHAT, "Count from 1 to 400", "/work/app", true, 200, 910]]);
+  // The Sessions list marks none of it: the home's own session is nobody's.
+  provider.home = true;
+  provider.places = { current: () => undefined, open: () => undefined, openSessions: () => new Set(), changed() {} };
+  provider.webviewReady = true;
+  const home = [];
+  provider.post = (m) => home.push(m);
+  provider.postSessionItems([{ path: "20261023-home.json", name: "x" }]);
+  assert.equal("windowless" in home.find((m) => m.type === "sessions_list").items[0], false);
+  be.dispose("restart: test");
+});
+
+test("the Running sessions page: a chat row says it is a chat, how long, and where to watch it; Stop asks its process", async () => {
+  const { JSDOM } = await import("jsdom");
+  const src = join(here, "../src/");
+  const client = await build({ entryPoints: [src + "settingsClient.js"], bundle: true, write: false, format: "iife",
+                               loader: { ".css": "empty", ".ico": "dataurl", ".png": "dataurl", ".svg": "dataurl" } });
+  const view = await build({ entryPoints: [src + "settingsView.ts"], bundle: true, write: false, platform: "node", format: "cjs" });
+  const mod = { exports: {} };
+  new Function("module", "exports", view.outputFiles[0].text)(mod, mod.exports);
+  const dom = new JSDOM(mod.exports.settingsDocument(), { runScripts: "outside-only" });
+  const w = dom.window;
+  const sent = [];
+  w.acquireVsCodeApi = () => ({ postMessage: (m) => sent.push(m) });
+  w.eval(client.outputFiles[0].text);
+  const message = (m) => w.dispatchEvent(new w.MessageEvent("message", { data: m }));
+  message({ type: "event", event: { type: "config", model: "m", mode: "default", think: "off" } });
+  w.document.querySelector("[data-nav=running]").click();
+  assert.ok(sent.some((m) => m.type === "listRunning"));
+  message({ type: "running", items: [
+    { kind: "chat", chat: "chat_" + "c".repeat(32), name: "Count from 1 to 400", cwd: "/work/app", working: true,
+      work: "a ChatDGC reply is being written", windowless_s: 200, pid: 910, instance: "c0ffee00c0ffee00", version: "0.48.0" },
+    { session: SESSION, name: "Fix the login", cwd: "/work/app", working: true, work: "a turn is running", windowless_s: 400,
+      pid: 900, instance: "a1b2c3d4e5f60718", version: "0.48.0" }] });
+  const rows = [...w.document.querySelectorAll(".running-sessions .row")];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].textContent, /Count from 1 to 400/);
+  assert.match(rows[0].textContent, /ChatDGC chat · no window for 3 minutes/);
+  assert.match(rows[0].textContent, /Writing a reply\. It finishes and saves by itself; open app again to watch it/);
+  assert.equal(rows[0].querySelector("[data-running-open]"), null, "it opens in the window it was in, not here");
+  assert.ok(rows[1].querySelector("[data-running-open]"), "a session's row still opens here");
+  rows[0].querySelector("[data-running-stop]").click();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent.at(-1))), { type: "stopRunning", pid: 910, instance: "c0ffee00c0ffee00" });
+  assert.equal(w.document.querySelector(".running-sessions .row [data-running-stop]").textContent, "Stopping…");
+  w.close();
 });
 
 // ---- the webview ---------------------------------------------------------------------------------

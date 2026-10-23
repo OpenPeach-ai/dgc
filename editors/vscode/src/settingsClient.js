@@ -325,7 +325,7 @@ function windowlessFor(seconds) {
 function renderRunning(main) {
     clearTimeout(running.timer);
     running.timer = setTimeout(() => { if (section === 'running') send({ type: 'listRunning' }); }, 30000);
-    let html = '<h2>Running sessions</h2><p class="sub">A session keeps working when its window goes: a reload, a closed window, '
+    let html = '<h2>Running sessions</h2><p class="sub">A session, or a ChatDGC reply, keeps working when its window goes: a reload, a closed window, '
         + 'or a tab you closed with Keep running. Open it again and it picks up where it is. With no window it stops '
         + 'by itself, saved: 2 minutes after its work finishes, after 1 hour waiting on your answer, and after 12 hours at most.</p>';
     if (running.note) html += `<div class="banner" role="status"><p>${esc(running.note)}</p></div>`;
@@ -340,6 +340,20 @@ function renderRunning(main) {
     html += '<div class="card running-sessions">';
     if (!running.items.length) html += '<p class="empty">Nothing is running without a window.</p>';
     for (const r of running.items) {
+        if (r.kind === 'chat') {
+            // A ChatDGC chat the window it was in left answering: it rides on that window's own DGC, so it comes back
+            // when that folder's window opens again. Stop saves what it wrote.
+            const key = r.pid + ':' + r.chat;
+            const title = r.name || 'Chat';
+            const folder = String(r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || '';
+            html += `<div class="row"><div class="copy"><strong>${esc(title)}</strong>`
+                + `<span class="summary">ChatDGC chat · no window for ${esc(windowlessFor(r.windowless_s))}</span>`
+                + `<span class="description">Writing a reply. It finishes and saves by itself${folder ? '; open ' + esc(folder) + ' again to watch it' : ''}`
+                + `${r.version ? ' · DGC ' + esc(r.version) : ''}</span></div>`
+                + `<div class="actions"><button type="button" class="secondary" data-running-stop="${esc(key)}" data-pid="${esc(r.pid)}" data-instance="${esc(r.instance)}"`
+                + `${running.stopping.has(key) ? ' disabled' : ''} title="Stop the reply and save what it wrote" aria-label="Stop: ${esc(title)}">${running.stopping.has(key) ? 'Stopping…' : 'Stop'}</button></div></div>`;
+            continue;
+        }
         const key = r.pid + ':' + r.session;
         const title = r.name || r.session;
         const what = r.working ? (r.work || 'working') : 'idle; it stops by itself soon';
@@ -1054,7 +1068,7 @@ window.addEventListener('message', event => {
         running.unsupported = msg.unsupported === true;
         if (Array.isArray(msg.items)) {
             running.items = msg.items;
-            const live = new Set(msg.items.map(r => r.pid + ':' + r.session));
+            const live = new Set(msg.items.map(r => r.pid + ':' + (r.kind === 'chat' ? r.chat : r.session)));
             for (const key of [...running.stopping]) if (!live.has(key)) running.stopping.delete(key);
         }
         if (typeof msg.message === 'string' && msg.message) { running.note = msg.message; running.stopping.clear(); }

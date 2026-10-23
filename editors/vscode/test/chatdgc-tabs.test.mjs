@@ -60,6 +60,7 @@ globalThis.__DGC_TEST_VSCODE = {
   Range: class { constructor(start, end) { this.start = start; this.end = end; } },
   WorkspaceEdit: class { constructor() { this.edits = []; } replace(uri, range, text) { this.edits.push({ uri, range, text }); } },
   commands: { executeCommand: async (...args) => { world.commands.push(args); } },
+  ConfigurationTarget: { Global: 3 },
   QuickPickItemKind: { Separator: -1 },
   env: { clipboard: { writeText: async (text) => { world.clipboard = text; } }, openExternal: async (uri) => { world.opened.push(uri.toString()); return true; } },
   window: {
@@ -74,6 +75,25 @@ globalThis.__DGC_TEST_VSCODE = {
     },
     showErrorMessage: async (message) => { world.errors.push(String(message)); return undefined; },
     showInputBox: async () => world.input,
+    // The question a tab closed mid-reply asks (closingTab.ts): world.quickPick is what the user does, in order.
+    createQuickPick: () => {
+      const handlers = { accept: [], hide: [] };
+      const pick = { items: [], activeItems: [], selectedItems: [], title: "", placeholder: "", ignoreFocusOut: false,
+        onDidAccept: (fn) => handlers.accept.push(fn), onDidHide: (fn) => handlers.hide.push(fn),
+        show() {
+          const steps = (world.quickPick || ["keep"]).slice();
+          setTimeout(() => {
+            for (const step of steps) {
+              if (step === "hide") { handlers.hide.forEach((fn) => fn()); return; }
+              pick.selectedItems = [pick.items.find((item) => item.id === step)];
+              handlers.accept.forEach((fn) => fn());
+            }
+          }, 5);
+        },
+        hide() { handlers.hide.forEach((fn) => fn()); }, dispose() {} };
+      world.quickPicks.push(pick);
+      return pick;
+    },
     showOpenDialog: async () => world.chosen,
     showSaveDialog: async (options) => { world.saveAsked = options; return world.saveTo; },
     showInformationMessage: async (message) => { world.infos.push(String(message)); return undefined; },
@@ -104,7 +124,10 @@ globalThis.__DGC_TEST_VSCODE = {
       return true;
     },
     onDidChangeTextDocument: (listener) => world.changes.event(listener),
-    getConfiguration: () => ({ get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons : fallback) }),
+    getConfiguration: () => ({
+      get: (key, fallback) => (key === "linkFavicons" && world.favicons !== undefined ? world.favicons
+        : key === "closingAWorkingTab" && world.closingSetting !== undefined ? world.closingSetting : fallback),
+      async update(key, value, target) { world.updates.push({ key, value, target }); if (key === "closingAWorkingTab") world.closingSetting = value; } }),
     fs: { writeFile: async (uri, bytes) => { world.written.push({ path: uri.fsPath ?? String(uri), bytes: Buffer.from(bytes) }); },
       createDirectory: async () => undefined,
       stat: async (uri) => {
@@ -132,7 +155,8 @@ let chat, host, sent;
 beforeEach(() => {
   Object.assign(world, { panels: [], serializers: [], warnings: [], answer: undefined, picks: [], pick: undefined, input: undefined, opened: [], clipboard: "",
                          chosen: undefined, sizes: {}, infos: [], saveTo: undefined, saveAsked: undefined, errors: [],
-                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [], tabs: [] });
+                         shown: [], visible: [], active: undefined, docs: [], commands: [], choose: undefined, written: [], tabs: [],
+                         quickPicks: [], quickPick: undefined, closingSetting: undefined, updates: [] });
   sent = [];
   host = { outcome: "sent", home: [], models: { ids: ["qwen3:32b", "fixture"], current: "fixture" }, offers: { version: 1 },
     chatdgcOffers() { return this.offers; },
@@ -827,6 +851,72 @@ test("a chat's tab revived after a reload gets the mark itself, even one behind 
   const fresh = fakePanel(CHATDGC_EDITOR, "x");
   await serializer.deserializeWebviewPanel(fresh, undefined);         // a new chat's tab: no state saved
   assert.equal(drawn(fresh.iconPath.dark), mark("dark"));
+});
+
+test("a tab closed mid-reply asks once, as a session's tab does: Stop stops the reply, Keep leaves it running", async () => {
+  host.keeps = true;
+  host.chatdgcKeepsRunning = function () { return this.keeps; };
+  const tick = () => new Promise((r) => setTimeout(r, 30));
+  const answering = (n, title) => {
+    chat.open(ID(n));
+    const panel = world.panels.at(-1);
+    panel.say({ type: "ready" });
+    opened(panel, { id: ID(n), title }, { busy: true, reply_id: MSG(n) });
+    return panel;
+  };
+  world.quickPick = ["stop"];
+  answering(1, "Count to 400").dispose();
+  await tick();
+  assert.equal(world.quickPicks.length, 1, "asked once");
+  assert.equal(world.quickPicks[0].title, "“Count to 400” was still answering when you closed its tab");
+  assert.deepEqual(world.quickPicks[0].items.map((i) => i.id), ["keep", "stop", "remember"], "the same three as Work");
+  assert.deepEqual(last("chatdgc_cancel"), { type: "chatdgc_cancel", conversation_id: ID(1) }, "Stop: the reply stops, saved");
+  world.quickPick = ["remember", "keep"];
+  answering(2, "Trip").dispose();
+  await tick();
+  assert.equal(world.quickPicks.length, 2);
+  assert.equal(sent.filter((c) => c.type === "chatdgc_cancel").length, 1, "Keep: it goes on");
+  assert.deepEqual(world.updates, [{ key: "closingAWorkingTab", value: "keepRunning", target: 3 }], "the same setting");
+  answering(3, "Remembered").dispose();
+  await tick();
+  assert.equal(world.quickPicks.length, 2, "remembered: not asked again");
+  world.closingSetting = "ask";
+  // A reply that ended, a tab with nothing running, and a CLI that can't keep it: nothing is asked.
+  const ended = answering(4, "Done");
+  chat.onEvent({ type: "chatdgc_turn", conversation_id: ID(4), state: "ended", reply_id: MSG(4) });
+  ended.dispose();
+  host.keeps = false;
+  answering(5, "Older CLI").dispose();
+  await tick();
+  assert.equal(world.quickPicks.length, 2);
+  // The window going (a reload, a closed window): never asked; the reply goes on with no window.
+  host.keeps = true;
+  const kept = answering(6, "Reload");
+  chat.dispose();
+  kept.dispose();
+  await tick();
+  assert.equal(world.quickPicks.length, 2, "a reload never asks");
+  assert.equal(sent.filter((c) => c.type === "chatdgc_cancel").length, 1);
+});
+
+test("the process this window left answering comes back: each chat on screen opens again from it", () => {
+  chat.open(ID(7));
+  const [shown] = world.panels;
+  shown.say({ type: "ready" });
+  opened(shown, { id: ID(7), title: "Long" }, { busy: true, reply_id: MSG(7) });
+  chat.backendLost();                                    // the window's own dgc serve (a relay) went
+  assert.match(shown.last("lost").message, /restarted/);
+  sent.length = 0;
+  chat.backendReady(true);
+  assert.deepEqual(sent.filter((c) => c.type === "chatdgc_open").map((c) => c.conversation_id), [ID(7)],
+                   "opened again from the process that kept it, the reply so far in it");
+  const reopened = sent.find((c) => c.type === "chatdgc_open");
+  chat.onEvent({ type: "chatdgc_opened", request_id: reopened.request_id, conversation: { id: ID(7), title: "Long" },
+                 messages: [{ id: MSG(7), role: "assistant", text: "1\n2\n" }], earlier: 0, busy: true, reply_id: MSG(7) });
+  assert.deepEqual([shown.last("opened").busy, shown.last("opened").replyId], [true, MSG(7)]);
+  sent.length = 0;
+  chat.backendReady(false);                              // a new process: it has nothing of this window's
+  assert.equal(sent.filter((c) => c.type === "chatdgc_open").length, 0);
 });
 
 test("rename, pin and archive from the tab's menu", async () => {

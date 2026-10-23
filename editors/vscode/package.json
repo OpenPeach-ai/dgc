@@ -654,11 +654,11 @@
           "enum": ["ask", "keepRunning", "stop"],
           "enumDescriptions": [
             "Ask each time, and remember the answer if you tick Remember my choice.",
-            "Keep the session running in the background. Settings › Running sessions shows it, with Stop.",
-            "Stop the session's turn, as closing a tab always did."
+            "Keep it running in the background: a session (Settings › Running sessions shows it, with Stop), or a ChatDGC reply, which is saved when it finishes.",
+            "Stop it: the session's turn, or the ChatDGC reply, stops and is saved."
           ],
           "default": "ask",
-          "markdownDescription": "What happens when you close a session's tab while it is working. A window reload or a closed window always keeps the work running, and the session comes back when you open it again (up to 12 hours with no window; it saves and stops 2 minutes after its work finishes)."
+          "markdownDescription": "What happens when you close a session's tab while it is working, or a ChatDGC chat's tab while it is writing a reply. A window reload or a closed window always keeps the work running, and it comes back when you open it again (up to 12 hours with no window; it saves and stops 2 minutes after its work finishes)."
         },
         "dgc.contextSize": {
           "type": "number",

@@ -10,6 +10,7 @@ import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
+import { keepRunningAfterClose } from "./closingTab";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
 import { offerVoiceInstall } from "./voiceInstall";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
@@ -94,6 +95,8 @@ const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
 /** Whether the side bar's last backend offered ChatDGC: the next window shows Chat | Work at once, not when its
  *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
 const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
+/** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
+const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
 const VOICE_OFFERED_KEY = "dgc.voiceOffered.v1";
 /** What voice costs to turn on, as `dgc setup` says it: Moonshine (111 MB) and Kitten (68 MB), with the engine. */
@@ -724,6 +727,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       dictation: () => this.dictationService(),
       readAloud: () => this.readAloudService(),
       pluginLogo: (plugin) => this.replyPluginLogo(plugin),
+      chatdgcKeepsRunning: () => !!this.processOf(this.backend)?.detach,
     };
     chat.attach(host);
   }
@@ -888,7 +892,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Sessions a backend is running with no window, by id: what it is doing. */
   private windowlessSessions(): Map<string, string> {
     const found = new Map<string, string>();
-    for (const row of this.runningRows(this.liveSessionRows)) { found.set(row.session, row.work || ""); }
+    for (const row of this.runningRows(this.liveSessionRows)) { if (row.session) found.set(row.session, row.work || ""); }
     return found;
   }
 
@@ -1508,6 +1512,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.composerScope;
   }
 
+  /** The Sessions home's own backend, by its chat's session id: the one a reload asks for back (ChatDGC replies it
+   *  keeps running with no window, set_detach_chatdgc). Kept per workspace, as the window's remembered chat is. */
+  private rememberHomeBackend(): void {
+    if (!this.home || !/^[A-Za-z0-9_-]{1,128}$/.test(this.currentSessionId)) { return; }
+    try {
+      void Promise.resolve(this.context.workspaceState.update(HOME_BACKEND_KEY, { scope: this.draftScope(), session: this.currentSessionId }))
+        .catch(() => { /* only a reload's reattach is lost: the chats are on disk */ });
+    } catch { /* the same */ }
+  }
+
+  private keptHomeBackend(): string {
+    try {
+      const kept = this.context.workspaceState.get<{ scope?: string; session?: string }>(HOME_BACKEND_KEY);
+      return kept?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(String(kept.session || "")) ? String(kept.session) : "";
+    } catch { return ""; }
+  }
+
   private rememberSession(): void {
     if (!this.currentSessionId) { return; }
     // A tab's session is kept by the tab itself (sessionTabs.ts): the window's one remembered chat is
@@ -1554,7 +1575,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
     be.completeHandshake();
-    this.chatdgc?.backendReady();
+    this.chatdgc?.backendReady(reattached);
     if (this.chatdgc) {
       const offered = !!(this.lastReadyEvent?.capabilities as any)?.chatdgc;
       if (this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) !== offered) void this.context.globalState.update(CHATDGC_SEEN_KEY, offered);
@@ -1729,17 +1750,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.home && this.lastSessionItems) { this.postSessionItems(this.lastSessionItems, this.lastSessionError); }
   }
 
-  /** What Settings -> Running sessions lists: each session a backend is running with no window. */
+  /** What Settings -> Running sessions lists: each session a backend is running with no window, and each ChatDGC
+   *  chat a Sessions home's backend is answering with no window (`kind: "chat"`). That backend's own session holds
+   *  nothing of the user's (scope "chatdgc"), so it is not listed. */
   private runningRows(items: any[]): any[] {
     const rows: any[] = [];
     for (const row of items) {
       if (!row || row.kind !== "serve" || row.attached !== false || !row.detachable) { continue; }
-      for (const session of Array.isArray(row.sessions) ? row.sessions : []) {
+      const sessions = Array.isArray(row.sessions) ? row.sessions : [];
+      const common = { pid: row.pid, instance: String(row.instance || ""), version: String(row.version || ""),
+                       work: String(row.work || ""), windowless_s: Number(row.windowless_s) || 0 };
+      for (const session of row.scope === "chatdgc" ? [] : sessions) {
         if (!/^[A-Za-z0-9_-]{1,128}$/.test(String(session?.session_id || ""))) { continue; }
-        rows.push({ pid: row.pid, instance: String(row.instance || ""), version: String(row.version || ""),
-                    session: session.session_id, name: String(session.name || ""), cwd: String(session.cwd || ""),
-                    working: session.status === "working", work: String(row.work || ""),
-                    windowless_s: Number(row.windowless_s) || 0 });
+        rows.push({ ...common, session: session.session_id, name: String(session.name || ""), cwd: String(session.cwd || ""),
+                    working: session.status === "working" });
+      }
+      for (const chat of Array.isArray(row.chats) ? row.chats : []) {
+        if (!/^chat_[a-f0-9]{32}$/.test(String(chat?.conversation_id || ""))) { continue; }
+        rows.push({ ...common, kind: "chat", chat: chat.conversation_id, name: String(chat.title || "").slice(0, 200),
+                    cwd: String(sessions[0]?.cwd || ""), working: true });
       }
     }
     return rows;
@@ -2805,13 +2834,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.processEpochs.set(be, this.processEpoch);
       this.logProcess(be as DgcBackend);
       // A session's chat keeps its work running when the window goes (a reload, a closed window), and a
-      // window that comes back reattaches to it. The Sessions home's own backend does not: it holds no
-      // session of its own.
+      // window that comes back reattaches to it. The Sessions home's own backend holds no session of its own,
+      // but it carries ChatDGC: it keeps a ChatDGC reply running, and nothing else (set_detach_chatdgc).
       (be as DgcBackend).keepWorkRunning = !this.home;
+      (be as DgcBackend).keepChatdgcRunning = this.home;
       // The session this chat is about to restore may still be running in a backend whose window went:
       // a CLI that kept it running relays this spawn to it (dgc/serve_relay.py), and an older one ignores it.
       const session = /^[A-Za-z0-9_-]{1,128}$/.test(this.sessionRestoreCandidate) ? this.sessionRestoreCandidate : "";
       if (session && !this.home) { (be as DgcBackend).attach = { session, mode: this.attachMode }; }
+      // The home asks for its own last backend back, by its chat's session (remembered at each ready): one this
+      // window left writing a ChatDGC reply is still running it. Its first start after the window opens is a
+      // reload's; any later one (a crash's recovery) asks automatically.
+      const kept = this.home ? this.keptHomeBackend() : "";
+      if (kept) { (be as DgcBackend).attach = { session: kept, mode: this.attachMode === "steal" ? "auto" : this.attachMode }; }
     }
     this.attachMode = "auto";
     this.wireSlotBackend(slot, be, host);
@@ -3391,6 +3426,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.currentSessionId = String(ev.session_id || "");
         this.currentSessionName = String(ev.session_name || "");
         this.currentSessionSaved = false;           // a fresh backend's chat has no file yet
+        this.rememberHomeBackend();
         this.turnActive = this.confirmedTurnActive = this.monitorTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
@@ -7705,63 +7741,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Q3 (founder, 19 Oct 2026): a session's tab closed while it works is asked about once, "keep it
    *  running in the background, or stop it", and the answer is remembered if ticked
-   *  (dgc.closingAWorkingTab). Until it is answered the work goes on; dismissed, it keeps running, where
-   *  Settings -> Running sessions and the Sessions list show it, with Stop. */
+   *  (dgc.closingAWorkingTab, closingTab.ts). Until it is answered the work goes on; dismissed, it keeps running,
+   *  where Settings -> Running sessions and the Sessions list show it, with Stop. */
   private static async askAboutClosedTab(be: DgcBackend, name: string): Promise<void> {
-    const setting = String(vscode.workspace.getConfiguration("dgc").get<string>("closingAWorkingTab", "ask") || "ask");
-    let keep = setting !== "stop";
-    if (setting === "ask") {
-      const answer = await DgcViewProvider.askKeepRunning(name);
-      keep = answer.keep;
-      if (answer.remember) {
-        try {
-          await vscode.workspace.getConfiguration("dgc").update("closingAWorkingTab", keep ? "keepRunning" : "stop",
-            vscode.ConfigurationTarget.Global);
-        } catch { /* the choice still applies this time */ }
-      }
-    }
-    try { be.dispose(keep ? PANEL_DISPOSED_CAUSE : `${STOP_CAUSE}its tab was closed`); } catch { /* already gone */ }
-  }
-
-  /** The one question: a quick pick with Keep running, Stop, and a Remember my choice tick. */
-  private static askKeepRunning(name: string): Promise<{ keep: boolean; remember: boolean }> {
-    return new Promise((resolve) => {
-      type Item = vscode.QuickPickItem & { id: string };
-      const pick = vscode.window.createQuickPick<Item>();
-      let remember = false;
-      let done = false;
-      const items = (): Item[] => [
-        { id: "keep", label: "$(play) Keep it running in the background",
-          detail: "It carries on with no window. Open it again from Sessions; Settings › Running sessions can stop it." },
-        { id: "stop", label: "$(debug-stop) Stop it", detail: "Its turn stops now, and the session is saved." },
-        { id: "remember", label: `${remember ? "$(pass-filled)" : "$(circle-large-outline)"} Remember my choice`,
-          alwaysShow: true },
-      ];
-      const finish = (keep: boolean) => {
-        if (done) { return; }
-        done = true;
-        pick.hide();
-        pick.dispose();
-        resolve({ keep, remember });
-      };
-      pick.title = `“${name}” was still working when you closed its tab`;
-      pick.placeholder = "Keep it running, or stop it?";
-      pick.ignoreFocusOut = true;
-      pick.items = items();
-      pick.onDidAccept(() => {
-        const chosen = pick.selectedItems[0];
-        if (!chosen) { return; }
-        if (chosen.id === "remember") {
-          remember = !remember;
-          pick.items = items();
-          pick.activeItems = [pick.items[2]];
-          return;
-        }
-        finish(chosen.id === "keep");
-      });
-      pick.onDidHide(() => finish(true));           // dismissed: it keeps running, where Settings shows it
-      pick.show();
+    const keep = await keepRunningAfterClose({
+      title: `“${name}” was still working when you closed its tab`,
+      keep: "It carries on with no window. Open it again from Sessions; Settings › Running sessions can stop it.",
+      stop: "Its turn stops now, and the session is saved.",
     });
+    try { be.dispose(keep ? PANEL_DISPOSED_CAUSE : `${STOP_CAUSE}its tab was closed`); } catch { /* already gone */ }
   }
 
   // ---- html ----------------------------------------------------------------
