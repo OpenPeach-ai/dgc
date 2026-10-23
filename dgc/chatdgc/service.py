@@ -31,6 +31,111 @@ FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
 CLOSE_GRACE_S = 5.0
 
+# Open here for a chat (one window writes to a chat at a time; the founder, 23 Oct 2026). A window's process holds the
+# chats its tabs show and the ones it is writing, and says so in its note (dgc/peers.py, "chatdgc_held"); another
+# window's process finds it there and asks it over its socket (dgc/serve_detach.py) to let one chat go.
+TAKE_ANSWER_S = 40.0          # how long a take waits for the holder's answer (its chat's name and follow-ups land first)
+SETTLE_S = 30.0               # how long a holder waits for what follows a reply (name, follow-ups, a look back)
+AWAY_CHECK_S = 3.0            # how often a chat another window holds is looked at again, to be this one's once it's free
+GIVEN_GRACE_S = 15.0          # a chat just let go stays read-only here this long while its new holder's note is written
+LINK_LINE_BYTES = 12 * 1024 * 1024    # one event on a link: a frame is at most 4 MiB on the wire, escaped here
+MAX_HELD_COMMANDS = 32
+CHAT_ID_CHARS = 37
+# What changes a chat: while another window holds it, refused here; while this window takes it mid-reply, held until
+# the reply ends and the chat is this window's (a message typed meanwhile goes then, as ChatDGC's queue sends it).
+WRITES = frozenset({"chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate", "chatdgc_version",
+                    "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_compact", "chatdgc_summary",
+                    "chatdgc_carry", "chatdgc_branch", "chatdgc_draft", "chatdgc_action"})
+# What a window that took a chat mid-reply asks of the process writing the reply: what it has now (open), Stop, a
+# steer for research, what a widget shows. Anything else it reads from disk itself.
+THROUGH = frozenset({"chatdgc_open", "chatdgc_cancel", "chatdgc_research_steer", "chatdgc_widget_report"})
+
+
+def _writes(cmd: dict) -> bool:
+    kind = cmd.get("type")
+    return (kind in WRITES or (kind == "chatdgc_canvas" and cmd.get("op") == "restore")
+            or (kind == "chatdgc_widgets" and cmd.get("op") == "remove"))
+
+
+def _chat_id(value) -> bool:
+    return (isinstance(value, str) and len(value) == CHAT_ID_CHARS and value.startswith("chat_")
+            and all(c in "0123456789abcdef" for c in value[5:]))
+
+
+class _Link:
+    """The writer's end of a chat another window took mid-reply: every event of the chat goes down this socket, and what
+    that window asks of the reply as it is now (THROUGH) comes up it. Once the reply and what follows it are done, the
+    writer says "end" and the chat is the other window's for good. A send that fails ends the link (never the reply)."""
+
+    def __init__(self, sock, conversation_id: str, sanitize=None):
+        self.sock, self.conversation_id, self._sanitize = sock, conversation_id, sanitize
+        self._lock = threading.Lock()
+        self.dead = False
+
+    def send(self, value: dict) -> bool:
+        line = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        with self._lock:
+            if self.dead:
+                return False
+            try:
+                self.sock.sendall(line)
+                return True
+            except OSError:
+                self.dead = True
+        self.close()
+        return False
+
+    def event(self, event: str, fields: dict) -> bool:
+        frame = {"type": event, **fields}
+        if callable(self._sanitize):
+            try:
+                frame = self._sanitize(frame)          # redacted as this process's own wire is
+            except Exception:                          # noqa: BLE001 -- never unredacted: dropped
+                return False
+        return self.send({"k": "event", "event": frame})
+
+    def close(self) -> None:
+        self.dead = True
+        import socket as _socket
+        try:
+            self.sock.shutdown(_socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+class _Remote:
+    """This window's end of a chat it took mid-reply: the reply goes on in the process that was writing it, its events come
+    down the socket and go out on this wire as this process's own, and what this window does in the chat goes up it
+    (THROUGH) or, if it would change the chat, waits here for the move (``held``)."""
+
+    def __init__(self, sock, conversation_id: str, pid=None):
+        self.sock, self.conversation_id, self.pid = sock, conversation_id, pid
+        self.lock = threading.RLock()                  # taken after the wire's dispatch lock, never before it
+        self.held: list[dict] = []
+        self.ended = False
+        self.closed_here = False
+        self._send_lock = threading.Lock()
+
+    def forward(self, cmd: dict) -> bool:
+        line = (json.dumps({"k": "command", "command": cmd}, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        with self._send_lock:
+            try:
+                self.sock.sendall(line)
+                return True
+            except OSError:
+                return False
+
+    def close(self) -> None:
+        import socket as _socket
+        try:
+            self.sock.shutdown(_socket.SHUT_RDWR)
+        except OSError:
+            pass
+
 
 def summary(chat: dict) -> dict:
     """A conversation without its messages: what the list and an opened chat's header show."""
@@ -250,7 +355,10 @@ class _Live:
 
 class ChatService:
     def __init__(self, emit, config, engine: ChatEngine | None = None):
-        self.emit = emit
+        # Every event goes through _out: a chat another window took mid-reply has its events sent down that window's
+        # link instead of this wire (Open here).
+        self._wire = emit
+        self.emit = self._out
         self.engine = engine or ChatEngine(config)
         self._turns: dict[str, dict] = {}
         self._naming: set[threading.Thread] = set()     # chats being named after their first reply
@@ -267,6 +375,19 @@ class ChatService:
         self._history_wanted = False
         self.watching = False                            # a screen that shows a Work session's "Remembered" line
         self.on_turns_changed = None                     # the Host's: the process's note follows the replies
+        # Open here (one window writes to a chat at a time). Until the window says which chats it shows
+        # (chatdgc_shown), nothing is held: an older editor's chats behave exactly as before.
+        self.sanitize = None                             # the Host's: what goes down a link is redacted as the wire is
+        self.dispatch_lock = None                        # the wire's (dgc/serve_detach.py): commands run one at a time
+        self._hold_lock = threading.RLock()
+        self._holding = False
+        self._shown: set[str] = set()                    # the chats this window's tabs show
+        self._away: dict[str, dict] = {}                 # of those, the ones another window holds: {state, pid}
+        self._links: dict[str, _Link] = {}               # chats this process writes for another window that took them
+        self._remote: dict[str, _Remote] = {}            # chats this window took mid-reply from another process
+        self._via = threading.local()                    # a link's command being run: its answers go back down it
+        self._given: dict[str, float] = {}               # chats just let go: read-only here until (monotonic)
+        self._watching_away = False
 
     # -- the router's door
 
@@ -277,6 +398,12 @@ class ChatService:
         if problem:
             return self._error(f"invalid command: {problem}", request_id, None)
         conversation_id = cmd.get("conversation_id")
+        if _chat_id(conversation_id) and kind not in ("chatdgc_open_here", "chatdgc_shown"):
+            if self._through(conversation_id, cmd):
+                return                                   # the process writing its reply answers it, or it waits
+            if self._refused_here(conversation_id, cmd):
+                return self._error("This chat is open in another window. Use Open here to carry on with it in this "
+                                   "window.", request_id, conversation_id)
         try:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_outline": self._outline, "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
@@ -291,6 +418,7 @@ class ChatService:
              "chatdgc_context": lambda cmd: self._context_later(cmd["conversation_id"]),
              "chatdgc_context_breakdown": self._breakdown,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
+             "chatdgc_shown": self._shown_now, "chatdgc_open_here": self._open_here,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory,
              "memory_history": self._memory_history, "memory_undo": self._memory_undo,
@@ -370,8 +498,562 @@ class ChatService:
         if cmd.get("widget_reports"):
             # Said by the screen as it opens a chat; it answers for every chat (shown: false where none shows it).
             self._widget_screen = True
-        self._opened(chat, cmd["request_id"])
+        state = None
+        if self._via_link() is None and not chat.get("temporary"):
+            with self._hold_lock:
+                was = chat["id"] in self._away
+                newly = chat["id"] not in self._shown
+                self._shown.add(chat["id"])              # this window shows it now (chatdgc_shown says so again)
+            state = self._holder_state(chat["id"]) if cmd.get("conversation_id") else None
+            if state is None and was:
+                self._held(chat["id"], {"state": "here"}, cmd["request_id"])     # free again: this window's
+            if self._holding and (newly or was):
+                self._turns_changed()                    # the note names what this window holds now
+        if state is not None:
+            # Another window's DGC writes to it: as last saved, read-only here until Open here.
+            self._send_opened(chat, cmd["request_id"], None, None)
+            self._held(chat["id"], state)
+        else:
+            self._opened(chat, cmd["request_id"])
         self._context_later(chat["id"])
+
+    # -- Open here: one window writes to a chat at a time
+
+    def _via_link(self):
+        """The link whose command this thread is running (its answers go back down it), or None."""
+        return getattr(self._via, "link", None)
+
+    def _out(self, event: str, /, **fields) -> None:
+        """Every event of this service: down the link of the window that took its chat mid-reply, else on this wire."""
+        via = self._via_link()
+        if via is not None:
+            via.event(event, fields)                     # an answer to that window's own command, never this one's
+            return
+        conversation_id = fields.get("conversation_id")
+        link = self._links.get(conversation_id) if self._links and isinstance(conversation_id, str) else None
+        if link is not None:
+            if link.event(event, fields):
+                if event == "chatdgc_changed":
+                    self._wire(event, **fields)          # its name and preview in this window's list too
+                return
+            self._link_lost(conversation_id, link)
+        self._wire(event, **fields)
+
+    def _held(self, conversation_id: str, state: dict, request_id: str | None = None) -> None:
+        """Tell this window who writes to the chat now (chatdgc_held): never down a link, it is this window's news."""
+        fields = {"conversation_id": conversation_id, "state": state.get("state") or "here"}
+        pid = state.get("pid")
+        if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+            fields["pid"] = pid
+        if request_id:
+            fields["request_id"] = request_id
+        self._wire("chatdgc_held", **fields)
+
+    def held_here(self) -> list[str] | None:
+        """The chats this process holds: the ones its window shows that no other window holds, the ones it is writing
+        (and finishing: a name, follow-ups), and the ones its window took mid-reply. What its note says (chatdgc_held)
+        for another window's DGC to find. None until its window says what it shows: an older editor holds nothing."""
+        if not self._holding:
+            return None
+        with self._lock:
+            found = list(self._turns) + [getattr(t, "dgc_chat", "") for t in self._naming if t.is_alive()]
+        with self._hold_lock:
+            found += [c for c in sorted(self._shown) if c not in self._away and c not in self._links] + list(self._remote)
+        out: list[str] = []
+        for conversation_id in found:
+            if _chat_id(conversation_id) and conversation_id not in out:
+                out.append(conversation_id)
+        return out[:64]
+
+    def _holders(self, conversation_id: str) -> list[dict]:
+        """The other DGC processes holding this chat, by their notes; the one writing it first."""
+        from .. import peers
+        try:
+            records = peers.others(here=False)
+        except Exception:                                # noqa: BLE001 -- no notes: nobody else holds it
+            return []
+        found = []
+        for record in records:
+            if record.get("kind") != "serve" or record.get("chatdgc_take") != 1:
+                continue
+            if not record.get("socket") or not record.get("instance") or record.get("liveness") == "gone":
+                continue
+            held = record.get("chatdgc_held")
+            if isinstance(held, list) and conversation_id in held:
+                found.append(record)
+
+        def writing(record) -> bool:
+            listed = record.get("chatdgc") if isinstance(record.get("chatdgc"), list) else []
+            return any(isinstance(c, dict) and c.get("conversation_id") == conversation_id for c in listed)
+        found.sort(key=lambda record: 0 if writing(record) else 1)
+        return found
+
+    def _holder_state(self, conversation_id: str) -> dict | None:
+        """Who writes to this chat, as this window sees it: None when this window does (or may), else {state, pid}
+        ("elsewhere", or "moved" when another window took it from here), kept until it is this window's again."""
+        if not self._holding:
+            return None
+        with self._lock:
+            writing = conversation_id in self._turns
+        with self._hold_lock:
+            link = self._links.get(conversation_id)
+            if link is not None:                         # another window took it mid-reply: it shows it now
+                state = self._away.get(conversation_id) or {"state": "moved", "pid": getattr(link, "pid", None)}
+                if conversation_id in self._shown:
+                    self._away[conversation_id] = state
+                return dict(state)
+            if writing or conversation_id in self._remote:
+                self._away.pop(conversation_id, None)
+                return None
+            was = self._away.get(conversation_id)
+        holders = self._holders(conversation_id)
+        with self._hold_lock:
+            if not holders:
+                if time.monotonic() < self._given.get(conversation_id, 0.0):
+                    state = was or {"state": "moved", "pid": None}      # just let go: its new holder's note is on its way
+                    if conversation_id in self._shown:
+                        self._away[conversation_id] = state
+                    return dict(state)
+                self._given.pop(conversation_id, None)
+                self._away.pop(conversation_id, None)
+                return None
+            state = {"state": (was or {}).get("state") or "elsewhere", "pid": holders[0].get("pid")}
+            if conversation_id in self._shown:
+                self._away[conversation_id] = state
+        self._watch_away()
+        return dict(state)
+
+    def _refused_here(self, conversation_id: str, cmd: dict) -> bool:
+        """A change to a chat another window writes to, from this window: refused (its screen is read-only)."""
+        if self._via_link() is not None:
+            return False
+        if not (_writes(cmd) or cmd.get("type") in ("chatdgc_cancel", "chatdgc_research_steer")):
+            return False
+        with self._hold_lock:
+            return conversation_id in self._away or conversation_id in self._links
+
+    def _through(self, conversation_id: str, cmd: dict) -> bool:
+        """A command for a chat this window took mid-reply: to the process writing the reply (THROUGH), or held for the
+        move (a change); False when it is answered here, from disk, as any other chat's is."""
+        if self._via_link() is not None:
+            return False
+        with self._hold_lock:
+            remote = self._remote.get(conversation_id)
+        if remote is None:
+            return False
+        with remote.lock:
+            if remote.ended:
+                return False
+            if cmd.get("type") in THROUGH:
+                if remote.forward(cmd):
+                    return True
+            elif not _writes(cmd):
+                return False
+            if len(remote.held) >= MAX_HELD_COMMANDS:
+                self._error("Too much is waiting for this chat to move here. Wait for its reply to finish.",
+                            cmd.get("request_id") if isinstance(cmd.get("request_id"), str) else None, conversation_id)
+                return True
+            remote.held.append(dict(cmd))
+            return True
+
+    def _shown_now(self, cmd: dict) -> None:
+        """chatdgc_shown: the chats this window's tabs show, all of them. A chat no longer shown is let go (a link taken
+        for it closes; its writer goes on); one newly shown is held here unless another window holds it."""
+        ids = {c for c in (cmd.get("conversation_ids") or [])[:256] if _chat_id(c)}
+        with self._hold_lock:
+            self._holding = True
+            before = set(self._shown)
+            self._shown = ids
+            for conversation_id in before - ids:
+                self._away.pop(conversation_id, None)
+            closing = [remote for conversation_id, remote in self._remote.items() if conversation_id not in ids]
+        for remote in closing:
+            remote.closed_here = True
+            remote.close()
+        for conversation_id in sorted(ids - before):
+            state = self._holder_state(conversation_id)
+            if state is not None:
+                self._held(conversation_id, state)
+        self._turns_changed()
+
+    def window_gone(self) -> None:
+        """The window went (dgc/serve_detach.py): it shows nothing now. What this process writes it still holds, and a
+        chat its window took mid-reply goes on moving here (a reloaded window gets it back)."""
+        with self._hold_lock:
+            self._shown.clear()
+            self._away.clear()
+
+    def _open_here(self, cmd: dict) -> None:
+        """Open here: take a chat from the window (or the windowless DGC) holding it. Answered by chatdgc_held "here"
+        and chatdgc_opened: from disk if it was idle there, or with its reply so far if not, the rest of it streaming
+        here and the chat this process's once it ends."""
+        conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+        self.engine.open(conversation_id)                # an unknown chat is refused here, not on the thread
+        with self._hold_lock:
+            self._holding = True
+            self._shown.add(conversation_id)
+        if self._through(conversation_id, {"type": "chatdgc_open", "request_id": request_id,
+                                           "conversation_id": conversation_id}):
+            return                                       # this window has it already, through its writer
+        threading.Thread(target=self._take, args=(conversation_id, request_id), daemon=True,
+                         name=f"dgc-chatdgc-take-{conversation_id[5:13]}").start()
+
+    def _take(self, conversation_id: str, request_id: str) -> None:
+        try:
+            self._take_now(conversation_id, request_id)
+        except (ChatEngineError, ChatStoreError) as exc:
+            self._error(str(exc), request_id, conversation_id)
+        except Exception as exc:                         # noqa: BLE001 -- said, never lost
+            self._error(f"This chat couldn't be opened here: {' '.join(str(exc).split())[:300] or type(exc).__name__}",
+                        request_id, conversation_id)
+
+    def _take_now(self, conversation_id: str, request_id: str) -> None:
+        with self._lock:
+            mine = conversation_id in self._turns
+        refused = ""
+        if not mine:
+            for holder in self._holders(conversation_id):
+                outcome, sock, answer = self._ask(holder, conversation_id, request_id)
+                if outcome == "linked":
+                    return self._follow_from(sock, conversation_id, holder.get("pid"), request_id)
+                if outcome == "released":
+                    break
+                if outcome == "refused" and answer.get("reason") not in ("through", "instance", "exiting", "not_here"):
+                    refused = str(answer.get("reason") or "no")
+                    break
+                # unreachable, or not the one to ask: the next holder, if any
+        if refused:
+            return self._error({
+                "version": "Another window's DGC, a different version, is writing this chat's reply. It opens here once "
+                           "that reply finishes.",
+                "busy": "This chat is busy in another window (a summary, or a card being sent). Try again in a moment.",
+            }.get(refused, "The other window didn't let this chat go. Try again in a moment."), request_id, conversation_id)
+        with self._hold_lock:
+            self._away.pop(conversation_id, None)
+            self._given.pop(conversation_id, None)
+            self._shown.add(conversation_id)
+        self._turns_changed()
+        self._held(conversation_id, {"state": "here"}, request_id)
+        self._opened(self.engine.open(conversation_id), request_id)
+        self._context_later(conversation_id)
+        if not mine:
+            # What the other window would have looked back over, once quiet, is looked back over here now.
+            threading.Thread(target=self._review_after, args=(conversation_id,), daemon=True,
+                             name=f"dgc-chatdgc-review-{conversation_id[5:13]}").start()
+
+    def _ask(self, holder: dict, conversation_id: str, request_id: str):
+        """Ask one holder for the chat over its socket: ("released" | "linked" | "refused" | "unreachable", the
+        socket when linked, its answer)."""
+        import os
+        from .. import __version__, session_socket
+        from ..editor_protocol import PROTOCOL_VERSION
+        try:
+            sock = session_socket.connect(str(holder.get("socket") or ""), expect_pid=holder.get("pid"), timeout=10.0)
+        except (OSError, ValueError, TypeError):
+            return "unreachable", None, {}
+        try:
+            session_socket.send_line(sock, {"type": "chatdgc_take", "instance": holder.get("instance"),
+                                            "conversation_id": conversation_id, "request_id": request_id,
+                                            "pid": os.getpid(), "version": __version__,
+                                            "protocol_version": PROTOCOL_VERSION})
+            sock.settimeout(TAKE_ANSWER_S)
+            answer = session_socket.read_line(sock) or {}
+        except OSError:
+            sock.close()
+            return "unreachable", None, {}
+        kind = answer.get("type")
+        if kind == "linked":
+            sock.settimeout(None)
+            session_socket.set_send_timeout(sock, 30.0)
+            return "linked", sock, answer
+        sock.close()
+        return ("released" if kind == "released" else "refused" if kind == "refused" else "unreachable"), None, answer
+
+    def _follow_from(self, sock, conversation_id: str, pid, request_id: str) -> None:
+        """This window took the chat mid-reply: it is this window's from now on (its note says so), and the reply's
+        events come down the link until it ends."""
+        remote = _Remote(sock, conversation_id, pid if isinstance(pid, int) else None)
+        with self._hold_lock:
+            self._remote[conversation_id] = remote
+            self._away.pop(conversation_id, None)
+            self._given.pop(conversation_id, None)
+            self._shown.add(conversation_id)
+        self._turns_changed()
+        self._held(conversation_id, {"state": "here"}, request_id)      # before the chat itself, which follows
+        self._follow(remote)
+
+    def _follow(self, remote: _Remote) -> None:
+        reason = "lost"
+        reader = None
+        try:
+            reader = remote.sock.makefile("rb")
+            while True:
+                line = reader.readline(LINK_LINE_BYTES + 1)
+                if not line or len(line) > LINK_LINE_BYTES:
+                    break
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(message, dict):
+                    continue
+                if message.get("k") == "end":
+                    reason = str(message.get("reason") or "done")[:32]
+                    break
+                frame = message.get("event") if message.get("k") == "event" else None
+                if not isinstance(frame, dict):
+                    continue
+                kind = frame.pop("type", None)
+                for key in ("seq", "chat_id"):
+                    frame.pop(key, None)
+                if not isinstance(kind, str) or not (kind.startswith("chatdgc_") or kind == "context_breakdown"):
+                    continue
+                if frame.get("conversation_id", remote.conversation_id) != remote.conversation_id:
+                    continue
+                try:
+                    self._wire(kind, **frame)            # this process's own event now: its seq, its checks
+                except Exception:                        # noqa: BLE001 -- one this wire refuses is dropped, not the link
+                    pass
+        except (OSError, ValueError):
+            pass
+        finally:
+            for closing in (reader, remote.sock):
+                try:
+                    if closing is not None:
+                        closing.close()
+                except OSError:
+                    pass
+            self._moved_here(remote, "closed" if remote.closed_here else reason)
+
+    def _moved_here(self, remote: _Remote, reason: str) -> None:
+        """The link ended. "done": the reply and what follows it are saved, and the chat is this window's for good: the
+        screen opens it again from here, and what waited for the move goes now. "taken": a third window took it.
+        Anything else: the writer went, or goes on without this window, and the chat is whoever's holds it now."""
+        import contextlib
+        conversation_id = remote.conversation_id
+        with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
+            with remote.lock:
+                remote.ended = True
+                held, remote.held = remote.held, []
+                with self._hold_lock:
+                    if self._remote.get(conversation_id) is remote:
+                        del self._remote[conversation_id]
+                if reason == "closed":
+                    self._turns_changed()                # this window let it go: its tab closed
+                    return
+                if reason == "taken":
+                    state = {"state": "moved", "pid": None}
+                    with self._hold_lock:
+                        if conversation_id in self._shown:
+                            self._away[conversation_id] = state
+                else:
+                    state = self._holder_state(conversation_id)
+                self._turns_changed()
+                if state is not None:
+                    self._held(conversation_id, state)
+                    for cmd in held:
+                        self._error("This chat is open in another window now. Use Open here to carry on with it in "
+                                    "this window.", cmd.get("request_id") if isinstance(cmd.get("request_id"), str)
+                                    else None, conversation_id)
+                    self._watch_away()
+                    return
+                self._held(conversation_id, {"state": "here"})
+                for cmd in held:
+                    try:
+                        self.dispatch(cmd)
+                    except Exception:                    # noqa: BLE001 -- the next one still goes
+                        pass
+        if reason == "done":
+            self._review_after(conversation_id)
+
+    # The holder's side: another window's DGC asks for a chat this process holds.
+
+    def take(self, sock, hello: dict) -> bool:
+        """chatdgc_take over this process's socket (dgc/serve_detach.py), from another window's Open here. Idle, the chat
+        is let go once what follows its last reply has landed: "released". Mid-reply, the socket becomes that chat's
+        link: "linked", its reply so far as a chatdgc_opened, then every event of it, until the reply ends and the chat
+        is that window's for good. Either way this window's screen hears chatdgc_held "moved". True when it linked."""
+        import os
+        from .. import __version__, session_socket
+        from ..editor_protocol import PROTOCOL_VERSION
+
+        def answer(**fields) -> bool:
+            try:
+                session_socket.send_line(sock, fields)
+                return True
+            except OSError:
+                return False
+
+        conversation_id = hello.get("conversation_id")
+        request_id = str(hello.get("request_id") or "")[:128]
+        taker = hello.get("pid") if isinstance(hello.get("pid"), int) and not isinstance(hello.get("pid"), bool) else None
+        if not _chat_id(conversation_id) or not request_id or self._closing:
+            answer(type="refused", reason="invalid" if not self._closing else "exiting")
+            return False
+        with self._hold_lock:
+            through = self._remote.get(conversation_id)
+        if through is not None:                          # this window watches it through its writer: ask that one
+            answer(type="refused", reason="through", pid=through.pid or 0)
+            return False
+        moved = {"state": "moved", "pid": taker}
+        for _ in range(3):
+            with self._lock:
+                turn = self._turns.get(conversation_id)
+            if turn is None:
+                with self._hold_lock:
+                    with self._lock:
+                        if conversation_id in self._turns:
+                            continue                     # a reply started meanwhile: take it mid-reply instead
+                        shown = conversation_id in self._shown
+                        if shown:
+                            self._away[conversation_id] = dict(moved)     # nothing starts here from now on
+                        self._given[conversation_id] = time.monotonic() + GIVEN_GRACE_S + SETTLE_S
+                self._settle(conversation_id)
+                with self._hold_lock:
+                    self._given[conversation_id] = time.monotonic() + GIVEN_GRACE_S
+                answer(type="released", pid=os.getpid())
+                if shown:
+                    self._held(conversation_id, moved)
+                    self._watch_away()
+                self._turns_changed()
+                return False
+            live = turn.get("live")
+            if live is None:
+                answer(type="refused", reason="busy")     # a summary, or a card being sent: no reply to show as it goes
+                return False
+            if hello.get("version") != __version__ or hello.get("protocol_version") != PROTOCOL_VERSION:
+                answer(type="refused", reason="version", version=__version__)
+                return False
+            link = _Link(sock, conversation_id, self.sanitize)
+            link.pid = taker
+            with live.lock:                              # no part of the reply between the snapshot and the link
+                with self._lock:
+                    if self._turns.get(conversation_id) is not turn:
+                        continue
+                if not answer(type="linked", pid=os.getpid()):
+                    return False
+                with self._hold_lock:
+                    old = self._links.get(conversation_id)
+                    self._links[conversation_id] = link
+                    shown = conversation_id in self._shown
+                    if shown:
+                        self._away[conversation_id] = dict(moved)
+                self._via.link = link
+                try:
+                    self._opened(self.engine.open(conversation_id), request_id)
+                except (ChatEngineError, ChatStoreError) as exc:
+                    self._error(str(exc), request_id, conversation_id)
+                finally:
+                    self._via.link = None
+            if old is not None:
+                old.send({"k": "end", "reason": "taken"})
+                old.close()
+            if shown:
+                self._held(conversation_id, moved)
+            self._turns_changed()
+            self._serve(link)
+            return True
+        answer(type="refused", reason="busy")
+        return False
+
+    def _serve(self, link: _Link) -> None:
+        """A link's commands (THROUGH), each run as this window's own would be, its answers going back down the link."""
+        import contextlib
+        reader = None
+        try:
+            reader = link.sock.makefile("rb")
+            while True:
+                line = reader.readline(LINK_LINE_BYTES + 1)
+                if not line or len(line) > LINK_LINE_BYTES:
+                    break
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue
+                cmd = message.get("command") if isinstance(message, dict) and message.get("k") == "command" else None
+                if (not isinstance(cmd, dict) or cmd.get("type") not in THROUGH
+                        or cmd.get("conversation_id") != link.conversation_id):
+                    continue
+                self._via.link = link
+                try:
+                    with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
+                        self.dispatch(cmd)
+                except Exception:                        # noqa: BLE001 -- one command never ends the link
+                    pass
+                finally:
+                    self._via.link = None
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                if reader is not None:
+                    reader.close()
+            except OSError:
+                pass
+            self._link_lost(link.conversation_id, link)
+
+    def _link_lost(self, conversation_id: str, link: _Link) -> None:
+        with self._hold_lock:
+            gone = self._links.get(conversation_id) is link
+            if gone:
+                del self._links[conversation_id]
+        link.close()
+        if gone:
+            self._turns_changed()
+
+    def _end_link(self, conversation_id: str, link: _Link) -> None:
+        """The reply the other window took is saved: once what follows it has landed, the chat is that window's."""
+        self._settle(conversation_id)
+        link.send({"k": "end", "reason": "done"})
+        self._link_lost(conversation_id, link)
+
+    def _settle(self, conversation_id: str) -> None:
+        """What follows a reply here (its chat's name, follow-ups, a look back: each writes the chat) lands before the
+        chat goes to another window, and no look back is left waiting to write it later."""
+        deadline = time.monotonic() + SETTLE_S
+        with self._lock:
+            after = [t for t in self._naming if getattr(t, "dgc_chat", "") == conversation_id]
+        for thread in after:
+            if thread is not threading.current_thread():
+                thread.join(max(0.0, deadline - time.monotonic()))
+        self._reviews.settle(conversation_id, max(0.0, deadline - time.monotonic()))
+
+    def _watch_away(self) -> None:
+        """While a chat this window shows is held elsewhere, look again now and then: once nobody else holds it, it is
+        this window's, as a chat nobody else has open always is."""
+        with self._hold_lock:
+            if self._watching_away or not self._away or self._closing:
+                return
+            self._watching_away = True
+        threading.Thread(target=self._away_loop, daemon=True, name="dgc-chatdgc-away").start()
+
+    def _away_loop(self) -> None:
+        import contextlib
+        from ..serve_detach import time_scale
+        every = max(0.2, AWAY_CHECK_S * time_scale())
+        try:
+            while not self._closing:
+                time.sleep(every)
+                with self._hold_lock:
+                    if not self._away:
+                        return
+                    waiting = [c for c in self._away if c not in self._links]
+                for conversation_id in waiting:
+                    if time.monotonic() < self._given.get(conversation_id, 0.0) or self._holders(conversation_id):
+                        continue
+                    with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
+                        with self._hold_lock:
+                            if conversation_id not in self._away or conversation_id in self._links:
+                                continue
+                            del self._away[conversation_id]
+                        self._turns_changed()
+                        self._held(conversation_id, {"state": "here"})    # the screen opens it again, here
+        finally:
+            with self._hold_lock:
+                self._watching_away = False
+                again = bool(self._away) and not self._closing
+            if again:
+                self._watch_away()
 
     def _widget_report(self, cmd: dict) -> None:
         """What a widget shows, from the screen: to the reply waiting for it (if it still is)."""
@@ -1120,7 +1802,14 @@ class ChatService:
                     self.emit("chatdgc_turn", conversation_id=conversation_id, state="ended",
                               reply_id=turn["reply_id"], request_id=request_id)
             self._turns_changed()
-            if turn.get("look_back"):
+            with self._hold_lock:
+                link = self._links.get(conversation_id)
+            if link is not None:
+                # Another window took this chat mid-reply: once what follows the reply has landed, it is that
+                # window's for good, and it looks back over it there.
+                threading.Thread(target=self._end_link, args=(conversation_id, link), daemon=True,
+                                 name=f"dgc-chatdgc-moved-{conversation_id[5:13]}").start()
+            elif turn.get("look_back"):
                 # After the turn has ended on the wire: what decides when to look back never holds a reply up.
                 self._review_after(conversation_id)
 
@@ -1136,7 +1825,9 @@ class ChatService:
             finally:
                 with self._lock:
                     self._naming.discard(threading.current_thread())
+                self._turns_changed()                     # the note stops naming the chat as being finished here
         thread = threading.Thread(target=name, daemon=True, name=f"dgc-chatdgc-name-{conversation_id[5:13]}")
+        thread.dgc_chat = conversation_id                 # what Open here waits for before it lets the chat go
         with self._lock:
             if self._closing:
                 return
@@ -1156,7 +1847,9 @@ class ChatService:
             finally:
                 with self._lock:
                     self._naming.discard(threading.current_thread())
+                self._turns_changed()
         thread = threading.Thread(target=suggest, daemon=True, name=f"dgc-chatdgc-next-{conversation_id[5:13]}")
+        thread.dgc_chat = conversation_id
         with self._lock:
             if self._closing:
                 return

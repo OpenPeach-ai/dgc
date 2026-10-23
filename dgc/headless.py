@@ -8803,6 +8803,11 @@ class Host:
                 # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running
                 # sessions name the chats it is answering, and a backend with no window is kept for them.
                 self._chatdgc.on_turns_changed = self.announce_peers
+                # Open here: a chat another window took mid-reply has its events sent down a link, redacted as this
+                # wire's are, and that window's commands for it run one at a time with this window's.
+                self._chatdgc.sanitize = self._sanitize
+                board = self.switchboard
+                self._chatdgc.dispatch_lock = getattr(board, "dispatch_lock", None) if board is not None else None
             return self._chatdgc
 
     def start(self) -> None:

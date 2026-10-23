@@ -18,6 +18,12 @@ its own. It opts in with ``set_detach_chatdgc`` instead (offered as ``ready.capa
 the same rules, but only a ChatDGC reply is work that keeps it running with no window. With none, a window
 that goes ends it, exactly as before.
 
+Open here for a ChatDGC chat (``ready.capabilities.detach.chatdgc_open_here``) moves one chat, never the
+process, which carries its window's Pips, Sessions and Settings too: one window writes to a chat at a time.
+The note names the chats a process holds (``chatdgc_held``: its window shows them, or it is writing them),
+and another window's process asks for one over this socket (``chatdgc_take``, dgc/chatdgc/service.py). Idle,
+it is let go; mid-reply, the socket becomes that one chat's link until the reply ends.
+
 How long a windowless backend lives (the founder's decisions, 19 Oct 2026):
 
 * no work: it saves and exits ``IDLE_EXIT_S`` (2 minutes) after its work finished -- at once when
@@ -231,7 +237,8 @@ SCOPE_ALL, SCOPE_CHATDGC = "", "chatdgc"
 
 
 def chatdgc_work(host) -> Work:
-    """ChatDGC's work: a reply (or deep research, a summary, a card being sent) under way in any chat."""
+    """ChatDGC's work: a reply (or deep research, a summary, a card being sent) under way in any chat; a chat this
+    window took mid-reply, still on its way here; a window of another DGC that took one of this process's chats."""
     work = Work()
     chatdgc = getattr(host, "_chatdgc", None)
     try:
@@ -239,6 +246,10 @@ def chatdgc_work(host) -> Work:
         if turns:
             work.progressing.append("a ChatDGC reply is being written" if turns == 1
                                     else f"{turns} ChatDGC replies are being written")
+        if chatdgc is not None and getattr(chatdgc, "_remote", None):
+            work.progressing.append("a ChatDGC chat is moving here from another window")
+        if chatdgc is not None and getattr(chatdgc, "_links", None):
+            work.standing.append("another window is showing a ChatDGC reply written here")
     except Exception:
         work.progressing.append("ChatDGC state is unreadable")
     return work
@@ -362,9 +373,10 @@ class Switchboard:
 
     def capability(self) -> dict:
         # chatdgc: set_detach_chatdgc is understood (the Sessions home's backend keeps a ChatDGC reply running).
+        # chatdgc_open_here: chatdgc_shown and chatdgc_open_here are (one window writes to a chat at a time).
         return {"version": 1, "idle_exit_s": int(self.idle_exit_s),
                 "waiting_exit_s": int(self.waiting_exit_s),
-                "max_windowless_s": int(self.max_windowless_s), "chatdgc": 1}
+                "max_windowless_s": int(self.max_windowless_s), "chatdgc": 1, "chatdgc_open_here": 1}
 
     def work(self) -> Work:
         """This process's work, as the window that opted in counts it."""
@@ -451,6 +463,15 @@ class Switchboard:
             answering = []
         if answering:
             fields["chatdgc"] = answering             # the chats it is answering: dgc ps, Running sessions
+        try:
+            held = chatdgc.held_here() if chatdgc is not None and self.opted_in and self.socket_path else None
+        except Exception:
+            held = None
+        if held is not None:
+            # The chats it holds (Open here): another window's DGC shows them read-only and asks for one over the
+            # socket (chatdgc_take). Only once its window said what it shows: an older editor holds nothing.
+            fields["chatdgc_held"] = held
+            fields["chatdgc_take"] = 1
         return fields
 
     # -------------------------------------------------------------------------- the wire ---
@@ -514,6 +535,12 @@ class Switchboard:
             self.windowless_cause = cause
             self._idle_since = self._waiting_since = None
             self._attached_at = None
+        chatdgc = getattr(self.host, "_chatdgc", None)
+        if chatdgc is not None and hasattr(chatdgc, "window_gone"):
+            try:
+                chatdgc.window_gone()                  # its tabs show nothing now: only what it writes is held
+            except Exception:
+                pass
         if conn.kind == "stdio":
             self._redirect_stdio()
         else:
@@ -616,6 +643,9 @@ class Switchboard:
             if kind == "attach":
                 self._attach(sock, hello)
                 return
+            if kind == "chatdgc_take":
+                self._chatdgc_take(sock, hello)     # it closes the socket itself once the chat is let go
+                return
             if kind == "stop":
                 self._stop(sock, hello)
             elif kind == "status":
@@ -661,6 +691,24 @@ class Switchboard:
             from .headless import TAKEOVER_SILENCE_S
             on_screen = (closed is None or closed < last) and quiet < TAKEOVER_SILENCE_S
         return on_screen, quiet
+
+    def _chatdgc_take(self, sock: socket.socket, hello: dict) -> None:
+        """Another window's Open here asks for one ChatDGC chat this process holds (dgc/chatdgc/service.py)."""
+        chatdgc = getattr(self.host, "_chatdgc", None)
+        try:
+            if hello.get("instance") != self.instance:
+                session_socket.send_line(sock, {"type": "refused", "reason": "instance"})
+            elif not self.opted_in or self.exit.is_set():
+                session_socket.send_line(sock, {"type": "refused", "reason": "exiting"})
+            elif chatdgc is None or not hasattr(chatdgc, "take"):
+                session_socket.send_line(sock, {"type": "refused", "reason": "not_here"})
+            else:
+                session_socket.set_send_timeout(sock, SEND_TIMEOUT_S)
+                chatdgc.take(sock, hello)
+        except OSError:
+            pass
+        finally:
+            self._close(sock)
 
     def _stop(self, sock: socket.socket, hello: dict) -> None:
         if hello.get("instance") != self.instance:

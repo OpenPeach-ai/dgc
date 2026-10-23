@@ -331,6 +331,15 @@ class Reviews:
                 if self._running.get(key) is threading.current_thread():
                     del self._running[key]
 
+    def settle(self, key: str, timeout: float = 5.0) -> None:
+        """No look back at ``key`` from here on: its wait is cancelled, and one running now is waited for (a ChatDGC
+        chat going to another window's DGC, which looks back over it from then on)."""
+        self.started(key)
+        with self._lock:
+            thread = self._running.get(key)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(max(0.0, timeout))
+
     def busy(self) -> bool:
         with self._lock:
             return any(t.is_alive() for t in self._running.values())

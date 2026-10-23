@@ -949,6 +949,20 @@ COMMAND_FIELDS["set_detach"] = {"keep_running": _B(False)}
 # list_live_sessions' items then say `scope` ("chatdgc" for such a backend) and `chats` [{conversation_id, title}],
 # the chats it is answering.
 COMMAND_FIELDS["set_detach_chatdgc"] = {"keep_running": _B(False)}
+# Open here for a ChatDGC chat, offered as ready.capabilities.detach.chatdgc_open_here = 1 by such a backend: one window
+# writes to a chat at a time, and Open here moves one chat, never the process. `chatdgc_shown` says which chats this
+# window's tabs show (all of them, whenever that changes); until it is sent nothing is held, as before. A chat another
+# window's DGC holds then opens as last saved (`chatdgc_opened`), followed by `chatdgc_held` {state "elsewhere", pid}:
+# read-only, and a change to it is refused. `chatdgc_open_here` takes it: answered by `chatdgc_held` {state "here",
+# request_id} and `chatdgc_opened` (request_id), while the window it came from hears `chatdgc_held` {state "moved"}.
+# Taken mid-reply, the reply goes on in the process writing it and its events come through this one, the reply so far
+# in that `chatdgc_opened` (busy); a change meanwhile waits. Once the reply ends the chat is this process's for good,
+# said by `chatdgc_held` {state "here"} with no request_id, which is also how a chat its holder lets go becomes this
+# window's by itself: open it again to show it as it is now.
+COMMAND_FIELDS["chatdgc_shown"] = {"conversation_ids": _A()}
+COMMAND_FIELDS["chatdgc_open_here"] = {"request_id": _S(), "conversation_id": _S()}
+EVENT_FIELDS["chatdgc_held"] = {"conversation_id": _S(), "state": _f("string", enum=("here", "elsewhere", "moved")),
+                                "pid": _I(False), "request_id": _S(False)}
 COMMAND_FIELDS["detach"] = {}
 COMMAND_FIELDS["list_live_sessions"] = {"request_id": _S()}
 COMMAND_FIELDS["stop_live_session"] = {"pid": _I(), "instance": _S(), "request_id": _S()}
