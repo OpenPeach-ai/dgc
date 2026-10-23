@@ -779,6 +779,9 @@ test("the webview: read-only elsewhere, nothing that would change the session lo
   x.send({ type: "session_elsewhere", state: "moved", reason: "opened_elsewhere" });
   for (const [name, node] of Object.entries(changing())) assert.deepEqual(off(node), [true, "true"], `${name}: off, and said to be off`);
   assert.deepEqual(off($('.response-actions [data-act="copy"]')), [false, null], "Copy stays");
+  // The box says what to do here, not an agent page's words.
+  assert.equal($(".cinput").getAttribute("data-locked"), "Open here to carry on in this window");
+  assert.equal($("#send").getAttribute("aria-label"), "Open here to carry on in this window");
   // The approval the moved turn was waiting on is the other window's now: settled here, and said to be off.
   for (const node of x.doc.querySelectorAll('.card[data-request-id="req-1"] button, .card[data-request-id="req-1"] textarea')) {
     assert.deepEqual(off(node), [true, "true"]);

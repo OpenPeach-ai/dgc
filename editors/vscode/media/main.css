@@ -1308,7 +1308,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
    Back/Escape restores it exactly, while the separate Stop control remains usable for a live run. */
 #cbox.agent-page-locked .cinput { cursor: not-allowed; }
 #cbox.agent-page-locked .cinput #input { visibility: hidden; }
-#cbox.agent-page-locked .cinput::after { content: "Return to the chat to send a message"; position: absolute;
+#cbox.agent-page-locked .cinput::after { content: attr(data-locked); position: absolute;
   inset: var(--sp-3) var(--sp-3) auto var(--sp-3); color: var(--faint);
   font: var(--w-reg) var(--t-chat)/1.6 var(--sans); pointer-events: none; }
 #cbox.agent-page-locked #send { cursor: not-allowed; opacity: .55; }

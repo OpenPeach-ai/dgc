@@ -4,6 +4,8 @@
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const composerPlaceholder = input.dataset.placeholder;
   let composerLocked = false;
+  // What the locked box says, and its Send: an agent's page ("Return to the chat…"), or a session open elsewhere.
+  let composerLockWords = "Return to the chat to send a message";
 
   // ---- the composer's five primitives ----------------------------------------------------
   // Everything that touches the draft goes through these, and nothing else reads `input.value`
@@ -7431,7 +7433,7 @@
     // Stop, and Queue and the follow-up hint have nothing to act on. The footer itself stays.
     const docked = askCardDocked();
     const hasDraft = hasComposerInput() && !docked, stop = streaming && !hasDraft;
-    const label = composerLocked ? "Return to the chat to send a message"
+    const label = composerLocked ? composerLockWords
       : stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
     // This runs on every keystroke. Replacing a node's children while typing closes Chromium's open
     // typing step, which made each Ctrl+Z take back one character, so write only what changed.
@@ -10749,6 +10751,9 @@
       : elsewhereLock ? "Message DGC unavailable: this session is open in another window" : "Message DGC");
     input.dataset.placeholder = agentPageLock ? "Return to the chat to send a message"
       : elsewhereLock ? "Open here to carry on in this window" : composerPlaceholder;
+    // The locked box shows these words in place of the box (main.css); a session open elsewhere says Open here.
+    composerLockWords = agentPageLock ? "Return to the chat to send a message" : "Open here to carry on in this window";
+    box?.querySelector(".cinput")?.setAttribute("data-locked", composerLockWords);
     $("btn-add").disabled = locked;
     $("btn-cmd").disabled = locked;
     if (locked) hidePop();
