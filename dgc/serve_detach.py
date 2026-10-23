@@ -22,7 +22,9 @@ Open here for a ChatDGC chat (``ready.capabilities.detach.chatdgc_open_here``) m
 process, which carries its window's Pips, Sessions and Settings too: one window writes to a chat at a time.
 The note names the chats a process holds (``chatdgc_held``: its window shows them, or it is writing them),
 and another window's process asks for one over this socket (``chatdgc_take``, dgc/chatdgc/service.py). Idle,
-it is let go; mid-reply, the socket becomes that one chat's link until the reply ends.
+it is let go; mid-reply, the socket becomes that one chat's link until the reply ends. A process holds a chat
+only while it holds that chat's lock (dgc/chatdgc/held.py, ``chatdgc_locks`` in its note), so two windows that
+open one chat in the same instant can't both have it.
 
 How long a windowless backend lives (the founder's decisions, 19 Oct 2026):
 
@@ -472,6 +474,13 @@ class Switchboard:
             # socket (chatdgc_take). Only once its window said what it shows: an older editor holds nothing.
             fields["chatdgc_held"] = held
             fields["chatdgc_take"] = 1
+            try:
+                if chatdgc.locking():
+                    # It holds each of them by its lock (dgc/chatdgc/held.py). A note without this is one that holds
+                    # chats by the note alone (an older DGC, or none could be locked): it counts even beside a lock.
+                    fields["chatdgc_locks"] = 1
+            except Exception:
+                pass
         return fields
 
     # -------------------------------------------------------------------------- the wire ---

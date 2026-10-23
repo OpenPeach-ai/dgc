@@ -8808,6 +8808,8 @@ class Host:
                 self._chatdgc.sanitize = self._sanitize
                 board = self.switchboard
                 self._chatdgc.dispatch_lock = getattr(board, "dispatch_lock", None) if board is not None else None
+                # A chat's lock that can't be made (Open here falls back to the notes) is said once, in serve.log.
+                self._chatdgc.log = getattr(board, "log", None) if board is not None else None
             return self._chatdgc
 
     def start(self) -> None:

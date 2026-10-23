@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 from ..editor_protocol import command_error
 from .engine import ChatEngine, ChatEngineError
-from .store import ChatStoreError
+from .held import HeldLocks
+from .store import ChatStoreError, default_root
 
 WIDGET_REPORT_SECONDS = 6.0        # how long a reply waits to hear what its widget shows
 WIDGET_REPORT_CHARS = 4_000
@@ -33,12 +35,17 @@ CLOSE_GRACE_S = 5.0
 
 # Open here for a chat (one window writes to a chat at a time; the founder, 23 Oct 2026). A window's process holds the
 # chats its tabs show and the ones it is writing, and says so in its note (dgc/peers.py, "chatdgc_held"); another
-# window's process finds it there and asks it over its socket (dgc/serve_detach.py) to let one chat go.
+# window's process finds it there and asks it over its socket (dgc/serve_detach.py) to let one chat go. Holding a chat
+# means holding its lock (dgc/chatdgc/held.py; the founder, 24 Oct 2026): notes are written now and then, and two windows
+# opening one chat in that gap both read "nobody holds it". The kernel's lock lets exactly one of them have it.
 TAKE_ANSWER_S = 40.0          # how long a take waits for the holder's answer (its chat's name and follow-ups land first)
 SETTLE_S = 30.0               # how long a holder waits for what follows a reply (name, follow-ups, a look back)
 AWAY_CHECK_S = 3.0            # how often a chat another window holds is looked at again, to be this one's once it's free
 GIVEN_GRACE_S = 15.0          # a chat just let go stays read-only here this long while its new holder's note is written
 LINK_LINE_BYTES = 12 * 1024 * 1024    # one event on a link: a frame is at most 4 MiB on the wire, escaped here
+TAKE_LOCK_S = 2.0             # how long a window taking a chat tries for its lock while the holder drops it
+HELD_ELSEWHERE = "This chat is open in another window. Use Open here to carry on with it in this window."
+BEATEN = "Another window took this chat at the same moment. Use Open here again to carry on with it in this window."
 MAX_HELD_COMMANDS = 32
 CHAT_ID_CHARS = 37
 # What changes a chat: while another window holds it, refused here; while this window takes it mid-reply, held until
@@ -49,6 +56,10 @@ WRITES = frozenset({"chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc
 # What a window that took a chat mid-reply asks of the process writing the reply: what it has now (open), Stop, a
 # steer for research, what a widget shows. Anything else it reads from disk itself.
 THROUGH = frozenset({"chatdgc_open", "chatdgc_cancel", "chatdgc_research_steer", "chatdgc_widget_report"})
+
+
+class _HeldElsewhere(ChatEngineError):
+    """A change to a chat whose lock another window's DGC holds: refused, and the chat is read-only here from now on."""
 
 
 def _writes(cmd: dict) -> bool:
@@ -388,6 +399,12 @@ class ChatService:
         self._via = threading.local()                    # a link's command being run: its answers go back down it
         self._given: dict[str, float] = {}               # chats just let go: read-only here until (monotonic)
         self._watching_away = False
+        # A held chat's lock: the shown ones held here, the ones being written (and finished) here, the ones another
+        # window took mid-reply until their reply ends. Taken where this window decides it holds a chat, let go as soon
+        # as it doesn't (_release_unwanted).
+        self.log = None                                  # the Host's: serve.log
+        store_root = getattr(getattr(self.engine, "store", None), "root", None)
+        self._locks = HeldLocks((Path(store_root) if store_root else default_root()) / "held", log=self._log_line)
 
     # -- the router's door
 
@@ -402,8 +419,7 @@ class ChatService:
             if self._through(conversation_id, cmd):
                 return                                   # the process writing its reply answers it, or it waits
             if self._refused_here(conversation_id, cmd):
-                return self._error("This chat is open in another window. Use Open here to carry on with it in this "
-                                   "window.", request_id, conversation_id)
+                return self._error(HELD_ELSEWHERE, request_id, conversation_id)
         try:
             {"chatdgc_list": self._list, "chatdgc_open": self._open, "chatdgc_earlier": self._earlier,
              "chatdgc_outline": self._outline, "chatdgc_send": self._send, "chatdgc_continue": self._continue, "chatdgc_cancel": self._cancel,
@@ -423,6 +439,9 @@ class ChatService:
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory,
              "memory_history": self._memory_history, "memory_undo": self._memory_undo,
              "memory_watch": self._memory_watch}[kind](cmd)
+        except _HeldElsewhere as exc:
+            self._error(str(exc), request_id, conversation_id)
+            self._lost_hold(conversation_id)
         except (ChatEngineError, ChatStoreError) as exc:
             self._error(str(exc), request_id, conversation_id)
 
@@ -558,12 +577,23 @@ class ChatService:
         with self._lock:
             found = list(self._turns) + [getattr(t, "dgc_chat", "") for t in self._naming if t.is_alive()]
         with self._hold_lock:
-            found += [c for c in sorted(self._shown) if c not in self._away and c not in self._links] + list(self._remote)
+            locking = self._locks.usable                 # a chat it shows is held once its lock is
+            found += [c for c in sorted(self._shown) if c not in self._away and c not in self._links
+                      and (not locking or self._locks.holds(c))] + list(self._remote)
         out: list[str] = []
         for conversation_id in found:
             if _chat_id(conversation_id) and conversation_id not in out:
                 out.append(conversation_id)
         return out[:64]
+
+    def locking(self) -> bool:
+        """Whether this process holds its chats by their locks (its note says so, chatdgc_locks), not by its note alone."""
+        return self._locks.usable
+
+    def _log_line(self, line: str) -> None:
+        hook = self.log
+        if callable(hook):
+            hook(line)
 
     def _holders(self, conversation_id: str) -> list[dict]:
         """The other DGC processes holding this chat, by their notes; the one writing it first."""
@@ -604,9 +634,15 @@ class ChatService:
                 return dict(state)
             if writing or conversation_id in self._remote:
                 self._away.pop(conversation_id, None)
+                if writing:
+                    self._locks.take(conversation_id)    # a reply begun before its window said what it shows
                 return None
             was = self._away.get(conversation_id)
         holders = self._holders(conversation_id)
+        if holders and self._locks.holds(conversation_id):
+            # This window has its lock: a note naming another holder is one about to be written again (a window that
+            # just let it go). Only a DGC that holds chats by its note alone, locking none, still counts.
+            holders = [h for h in holders if h.get("chatdgc_locks") != 1]
         with self._hold_lock:
             if not holders:
                 if time.monotonic() < self._given.get(conversation_id, 0.0):
@@ -614,14 +650,47 @@ class ChatService:
                     if conversation_id in self._shown:
                         self._away[conversation_id] = state
                     return dict(state)
-                self._given.pop(conversation_id, None)
-                self._away.pop(conversation_id, None)
-                return None
-            state = {"state": (was or {}).get("state") or "elsewhere", "pid": holders[0].get("pid")}
+                if self._locks.take(conversation_id) is not False:
+                    self._given.pop(conversation_id, None)
+                    self._away.pop(conversation_id, None)
+                    return None                          # this window's: its lock is held (or none can be made here)
+                # Another window has its lock and its note doesn't say so yet: read-only, its holder named once it does.
+                state = {"state": (was or {}).get("state") or "elsewhere", "pid": (was or {}).get("pid")}
+            else:
+                state = {"state": (was or {}).get("state") or "elsewhere", "pid": holders[0].get("pid")}
+                self._locks.release(conversation_id)     # another holds it by its note: not this window's to keep
             if conversation_id in self._shown:
                 self._away[conversation_id] = state
         self._watch_away()
         return dict(state)
+
+    def _lost_hold(self, conversation_id) -> None:
+        """A change refused because another window's DGC has the chat's lock: read-only here, as such a chat is."""
+        if not _chat_id(conversation_id):
+            return
+        state = self._holder_state(conversation_id)
+        if state is not None:
+            self._turns_changed()
+            self._held(conversation_id, state)
+
+    def _hold_to_write(self, conversation_id: str, chat: dict) -> None:
+        """A reply, a summary or a card being sent writes the chat: this process holds its lock while it does, and it is
+        refused when another window's DGC holds it (its lock says so before its note can). Called with self._lock held."""
+        if not self._holding or chat.get("temporary") or self._via_link() is not None:
+            return
+        if self._locks.take(conversation_id) is False:
+            raise _HeldElsewhere(HELD_ELSEWHERE)
+
+    def _release_unwanted(self) -> None:
+        """Let go of the lock of every chat this process no longer holds: one its window stopped showing, or another
+        window took, or whose reply (and what follows it) is done here."""
+        if not self._locks.held():
+            return
+        with self._hold_lock:
+            with self._lock:                             # held to the end: a reply taking its lock waits for this
+                wanted = set(self._turns) | {getattr(t, "dgc_chat", "") for t in self._naming}
+                wanted |= set(self._links) | {c for c in self._shown if c not in self._away and c not in self._remote}
+                self._locks.keep_only(wanted)
 
     def _refused_here(self, conversation_id: str, cmd: dict) -> bool:
         """A change to a chat another window writes to, from this window: refused (its screen is read-only)."""
@@ -661,8 +730,9 @@ class ChatService:
         for it closes; its writer goes on); one newly shown is held here unless another window holds it."""
         ids = {c for c in (cmd.get("conversation_ids") or [])[:256] if _chat_id(c)}
         with self._hold_lock:
+            first = not self._holding                    # chats it opened before it said: held (or not) now
             self._holding = True
-            before = set(self._shown)
+            before = set() if first else set(self._shown)
             self._shown = ids
             for conversation_id in before - ids:
                 self._away.pop(conversation_id, None)
@@ -682,6 +752,7 @@ class ChatService:
         with self._hold_lock:
             self._shown.clear()
             self._away.clear()
+        self._release_unwanted()
 
     def _open_here(self, cmd: dict) -> None:
         """Open here: take a chat from the window (or the windowless DGC) holding it. Answered by chatdgc_held "here"
@@ -736,6 +807,8 @@ class ChatService:
                            "that reply finishes.",
                 "busy": "This chat is busy in another window (a summary, or a card being sent). Try again in a moment.",
             }.get(refused, "The other window didn't let this chat go. Try again in a moment."), request_id, conversation_id)
+        if not mine and self._locks.take_within(conversation_id, TAKE_LOCK_S) is False:
+            return self._beaten(conversation_id, request_id)
         with self._hold_lock:
             self._away.pop(conversation_id, None)
             self._given.pop(conversation_id, None)
@@ -748,6 +821,20 @@ class ChatService:
             # What the other window would have looked back over, once quiet, is looked back over here now.
             threading.Thread(target=self._review_after, args=(conversation_id,), daemon=True,
                              name=f"dgc-chatdgc-review-{conversation_id[5:13]}").start()
+
+    def _beaten(self, conversation_id: str, request_id: str) -> None:
+        """Open here didn't get the chat's lock: another window took it at the same moment (or holds it, its note not yet
+        written). Read-only here, with Open here, and its holder named as soon as its note says."""
+        holders = self._holders(conversation_id)
+        pid = holders[0].get("pid") if holders else None
+        state = {"state": "elsewhere", "pid": pid if isinstance(pid, int) else None}
+        with self._hold_lock:
+            if conversation_id in self._shown:
+                self._away[conversation_id] = dict(state)
+        self._turns_changed()
+        self._held(conversation_id, state)               # the bar again, its Open here back
+        self._error(BEATEN, request_id, conversation_id)
+        self._watch_away()
 
     def _ask(self, holder: dict, conversation_id: str, request_id: str):
         """Ask one holder for the chat over its socket: ("released" | "linked" | "refused" | "unreachable", the
@@ -839,6 +926,10 @@ class ChatService:
         Anything else: the writer went, or goes on without this window, and the chat is whoever's holds it now."""
         import contextlib
         conversation_id = remote.conversation_id
+        if reason == "done" and not remote.closed_here:
+            # The writer let go of the chat's lock as it said "done": this window's, once it has it (before the wire's
+            # lock is taken, so nothing waits on the moment it takes).
+            self._locks.take_within(conversation_id, TAKE_LOCK_S)
         with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
             with remote.lock:
                 remote.ended = True
@@ -919,6 +1010,10 @@ class ChatService:
                 self._settle(conversation_id)
                 with self._hold_lock:
                     self._given[conversation_id] = time.monotonic() + GIVEN_GRACE_S
+                    with self._lock:
+                        writing = conversation_id in self._turns
+                    if not writing:
+                        self._locks.release(conversation_id)     # before the answer: the taker takes it next
                 answer(type="released", pid=os.getpid())
                 if shown:
                     self._held(conversation_id, moved)
@@ -1012,8 +1107,18 @@ class ChatService:
     def _end_link(self, conversation_id: str, link: _Link) -> None:
         """The reply the other window took is saved: once what follows it has landed, the chat is that window's."""
         self._settle(conversation_id)
+        with self._hold_lock:
+            gone = self._links.get(conversation_id) is link
+            if gone:
+                del self._links[conversation_id]
+                with self._lock:
+                    writing = conversation_id in self._turns
+                if not writing:
+                    self._locks.release(conversation_id)     # before "done": the other window takes it next
         link.send({"k": "end", "reason": "done"})
-        self._link_lost(conversation_id, link)
+        link.close()
+        if gone:
+            self._turns_changed()
 
     def _settle(self, conversation_id: str) -> None:
         """What follows a reply here (its chat's name, follow-ups, a look back: each writes the chat) lands before the
@@ -1027,8 +1132,9 @@ class ChatService:
         self._reviews.settle(conversation_id, max(0.0, deadline - time.monotonic()))
 
     def _watch_away(self) -> None:
-        """While a chat this window shows is held elsewhere, look again now and then: once nobody else holds it, it is
-        this window's, as a chat nobody else has open always is."""
+        """While a chat this window shows is held elsewhere, look again now and then: once nobody else holds it (no note
+        names it, and its lock is free), it is this window's, as a chat nobody else has open always is. One whose
+        holder had its lock before its note named it gets its holder named."""
         with self._hold_lock:
             if self._watching_away or not self._away or self._closing:
                 return
@@ -1047,12 +1153,18 @@ class ChatService:
                         return
                     waiting = [c for c in self._away if c not in self._links]
                 for conversation_id in waiting:
-                    if time.monotonic() < self._given.get(conversation_id, 0.0) or self._holders(conversation_id):
+                    if time.monotonic() < self._given.get(conversation_id, 0.0):
+                        continue
+                    holders = self._holders(conversation_id)
+                    if holders:
+                        self._name_holder(conversation_id, holders[0].get("pid"))
                         continue
                     with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
                         with self._hold_lock:
                             if conversation_id not in self._away or conversation_id in self._links:
                                 continue
+                            if self._locks.take(conversation_id) is False:
+                                continue                 # another window has it, its note still to come
                             del self._away[conversation_id]
                         self._turns_changed()
                         self._held(conversation_id, {"state": "here"})    # the screen opens it again, here
@@ -1062,6 +1174,24 @@ class ChatService:
                 again = bool(self._away) and not self._closing
             if again:
                 self._watch_away()
+
+    def _name_holder(self, conversation_id: str, pid) -> None:
+        """A chat read-only here whose holder wasn't named (its lock said so before its note did): named now."""
+        import contextlib
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            return
+        with self._hold_lock:
+            state = self._away.get(conversation_id)
+            if state is None or state.get("pid"):
+                return
+        with (self.dispatch_lock if self.dispatch_lock is not None else contextlib.nullcontext()):
+            with self._hold_lock:
+                state = self._away.get(conversation_id)
+                if state is None or state.get("pid") or conversation_id in self._links:
+                    return
+                state["pid"] = pid
+                named = dict(state)
+            self._held(conversation_id, named)
 
     def _widget_report(self, cmd: dict) -> None:
         """What a widget shows, from the screen: to the reply waiting for it (if it still is)."""
@@ -1146,13 +1276,14 @@ class ChatService:
         callable, runs once the chat is free again: a screen that acts on the news at once (Edit the summary just
         made) is never told the chat is still answering."""
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
-        self.engine.open(conversation_id)
+        chat = self.engine.open(conversation_id)
         cancel = threading.Event()
         with self._lock:
             if self._closing:
                 raise ChatEngineError("DGC is shutting down.")
             if conversation_id in self._turns:
                 raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+            self._hold_to_write(conversation_id, chat)
             slot = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None}
 
         def run():
@@ -1335,7 +1466,7 @@ class ChatService:
         meanwhile (its save would overwrite the card's outcome) and Stop has nothing to cut short."""
         conversation_id, request_id, op = cmd["conversation_id"], cmd["request_id"], cmd["op"]
         message_id, action_id = cmd["message_id"], cmd["action_id"]
-        self.engine.open(conversation_id)
+        chat = self.engine.open(conversation_id)
         if op == "dismiss":
             with self._lock:
                 if conversation_id in self._turns:
@@ -1353,6 +1484,7 @@ class ChatService:
                 raise ChatEngineError("DGC is shutting down.")
             if conversation_id in self._turns:
                 raise ChatEngineError("Let the reply finish first.")
+            self._hold_to_write(conversation_id, chat)
             slot = self._turns[conversation_id] = {"cancel": threading.Event(), "reply_id": None, "thread": None}
 
         def run():
@@ -1672,6 +1804,7 @@ class ChatService:
                 raise ChatEngineError("DGC is shutting down.")
             if conversation_id in self._turns:
                 raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
+            self._hold_to_write(conversation_id, chat)
             turn = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None,
                                                    "live": _Live(self.emit), "title": chat.get("title")}
         self._reviews.started(conversation_id)       # it isn't quiet any more
@@ -1936,6 +2069,10 @@ class ChatService:
 
     def _turns_changed(self) -> None:
         """A reply started or ended: the process's note says so (on_turns_changed is the Host's announce_peers)."""
+        try:
+            self._release_unwanted()                  # before the note: never named while its lock is let go
+        except Exception:                             # noqa: BLE001 -- the kernel lets go of it at exit anyway
+            pass
         hook = self.on_turns_changed
         if callable(hook):
             try:
@@ -1962,3 +2099,4 @@ class ChatService:
         for thread in naming:
             if thread is not threading.current_thread():
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        self._locks.close()                          # the process's exit would; a service closed in-process too
