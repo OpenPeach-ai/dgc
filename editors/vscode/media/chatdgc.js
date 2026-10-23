@@ -2256,7 +2256,6 @@
     send.classList.toggle("cd-queueing", queueing);
     input.disabled = !!state.unavailable || locked;
     for (const id of ["cd-attach", "cd-research", "cd-study", "cd-mic"]) { const b = $(id); if (b) b.disabled = locked; }
-    $("cd-box")?.classList.toggle("cd-held", locked);
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
     $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
