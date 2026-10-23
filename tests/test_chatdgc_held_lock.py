@@ -138,6 +138,26 @@ class HeldLocksTests(unittest.TestCase):
         self.assertIn("No locks available", self.lines[0])
 
 
+class SaidInOrderTests(unittest.TestCase):
+    def test_here_is_never_said_after_another_window_took_the_chat(self):
+        """A window that just had a chat can lose it to another's Open here before it says "here": what it says
+        then is what is true, so the "moved" it hears is never followed by a stale "here"."""
+        from types import SimpleNamespace
+        from dgc.chatdgc.service import ChatService
+        base = Path(tempfile.mkdtemp(prefix="dgc-held-said-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        said = []
+        engine = SimpleNamespace(store=SimpleNamespace(root=base / "chat"), unreviewed_chars=lambda *a, **k: 0)
+        service = ChatService(lambda kind, **fields: said.append({"type": kind, **fields}),
+                              SimpleNamespace(get=lambda key, default=None: default), engine=engine)
+        service._shown.add(A_CHAT)
+        service._held(A_CHAT, {"state": "here"}, "h1")
+        service._away[A_CHAT] = {"state": "moved", "pid": 4242}         # taken a moment later
+        service._held(A_CHAT, {"state": "here"}, "h2")
+        self.assertEqual([(e["state"], e.get("pid"), e.get("request_id")) for e in said],
+                         [("here", None, "h1"), ("moved", 4242, "h2")])
+
+
 @unittest.skipUnless(POSIX_SOCKETS, "a backend holds chats for its window on Linux and macOS")
 class ChatDGCLockIntegrationTests(unittest.TestCase):
     maxDiff = None
@@ -249,18 +269,31 @@ class ChatDGCLockIntegrationTests(unittest.TestCase):
                 serve.send({"type": "chatdgc_open_here", "request_id": request_id, "conversation_id": chat})
             outcome = {}
             for serve in racers:
-                answer = serve.wait(lambda e: e.get("request_id") == request_id and (
-                    held(e, "here", chat) or e.get("type") == "chatdgc_error"), 40)
-                outcome[serve] = "here" if answer["type"] == "chatdgc_held" else answer["message"]
-            won = [serve for serve in racers if outcome[serve] == "here"]
-            self.assertEqual(len(won), 1, f"round {round_}: one Open here wins: {list(outcome.values())}")
-            winner, = won
-            loser, = [serve for serve in racers if serve is not winner]
-            self.assertIn("at the same moment", outcome[loser])
-            loser.wait(lambda e: held(e, "elsewhere", chat) and e["seq"] > mark[loser], 10)     # the bar, Open here back
-            holder.wait(lambda e: held(e, "moved", chat) and e["seq"] > mark[holder], 30)
-            wait_until(lambda: self.holders(world, chat, (a, b, c)) == [winner], timeout=20,
-                       what=f"round {round_}: the notes to name the winner alone")
+                answer = serve.wait(lambda e: e.get("request_id") == request_id and e.get("type") in (
+                    "chatdgc_held", "chatdgc_error"), 40)
+                outcome[serve] = answer["state"] if answer["type"] == "chatdgc_held" else answer["message"]
+
+            def last_said(serve):
+                said = [e["state"] for e in serve.events if e.get("type") == "chatdgc_held"
+                        and e.get("conversation_id") == chat and e["seq"] > mark[serve]]
+                return said[-1] if said else None
+
+            def settled():
+                # One window has it, by its note, and what every window heard last is what is true: here there,
+                # read-only in the other two. Both pressed at once: one won and the other is told it lost. Or one
+                # pressed a moment later, once the first one's note named it: it took it from that one ("moved").
+                holding = self.holders(world, chat, (a, b, c))
+                if len(holding) != 1 or holding[0] not in racers:
+                    return None
+                won, = holding
+                lost, = [serve for serve in racers if serve is not won]
+                said = (last_said(won), last_said(lost), last_said(holder))
+                return (won, lost) if said in (("here", "elsewhere", "moved"), ("here", "moved", "moved")) else None
+            winner, loser = wait_until(settled, timeout=20, what=f"round {round_}: one holder, every window told so")
+            self.assertEqual(outcome[winner], "here")
+            if outcome[loser] not in ("here", "moved"):
+                self.assertIn("at the same moment", outcome[loser])
+            self.assertIs(try_lock(world.home / ".dgc" / "chat" / "held" / f"{chat}.lock"), False)
             self.send(loser, f"x{round_}", chat, "CHAT_COUNT 1")
             self.refused(loser, f"x{round_}")
             self.send(holder, f"y{round_}", chat, "CHAT_COUNT 1")
