@@ -13,6 +13,11 @@ followed by every open approval again, with the same ids.
 Old clients are unchanged: an editor that never sends ``set_detach`` -- an older extension, the
 SDK, ACP -- gets exactly the old behaviour, where end-of-input or ``shutdown`` ends the process.
 
+The Sessions home's backend carries ChatDGC, Pips, the Sessions list and Settings, and holds no session of
+its own. It opts in with ``set_detach_chatdgc`` instead (offered as ``ready.capabilities.detach.chatdgc``):
+the same rules, but only a ChatDGC reply is work that keeps it running with no window. With none, a window
+that goes ends it, exactly as before.
+
 How long a windowless backend lives (the founder's decisions, 19 Oct 2026):
 
 * no work: it saves and exits ``IDLE_EXIT_S`` (2 minutes) after its work finished -- at once when
@@ -220,17 +225,32 @@ def chat_work(chat) -> Work:
     return work
 
 
-def host_work(host) -> Work:
+# What a backend that opted in counts as its work: everything (a session's backend), or only ChatDGC's
+# replies (the Sessions home's, set_detach_chatdgc).
+SCOPE_ALL, SCOPE_CHATDGC = "", "chatdgc"
+
+
+def chatdgc_work(host) -> Work:
+    """ChatDGC's work: a reply (or deep research, a summary, a card being sent) under way in any chat."""
+    work = Work()
+    chatdgc = getattr(host, "_chatdgc", None)
+    try:
+        turns = len(getattr(chatdgc, "_turns", None) or {}) if chatdgc is not None else 0
+        if turns:
+            work.progressing.append("a ChatDGC reply is being written" if turns == 1
+                                    else f"{turns} ChatDGC replies are being written")
+    except Exception:
+        work.progressing.append("ChatDGC state is unreadable")
+    return work
+
+
+def host_work(host, scope: str = SCOPE_ALL) -> Work:
+    if scope == SCOPE_CHATDGC:
+        return chatdgc_work(host)
     work = Work()
     for chat in list(getattr(host, "chats", {}).values()):
         work.merge(chat_work(chat))
-    chatdgc = getattr(host, "_chatdgc", None)
-    try:
-        if chatdgc is not None and getattr(chatdgc, "_turns", None):
-            work.progressing.append("a ChatDGC reply is being written")
-    except Exception:
-        pass
-    return work
+    return work.merge(chatdgc_work(host))
 
 
 def _duration(seconds: float) -> str:
@@ -316,6 +336,7 @@ class Switchboard:
         self.stdio = Connection("stdio", stdout if stdout is not None else sys.stdout)
         self.current: Connection | None = self.stdio
         self.opted_in = False
+        self.scope = SCOPE_ALL                      # what counts as work once opted in (set_detach_chatdgc)
         self.windowless_since: float | None = None
         self.windowless_wall: float | None = None
         self.windowless_cause = ""
@@ -340,19 +361,27 @@ class Switchboard:
         return dgc_home()
 
     def capability(self) -> dict:
+        # chatdgc: set_detach_chatdgc is understood (the Sessions home's backend keeps a ChatDGC reply running).
         return {"version": 1, "idle_exit_s": int(self.idle_exit_s),
                 "waiting_exit_s": int(self.waiting_exit_s),
-                "max_windowless_s": int(self.max_windowless_s)}
+                "max_windowless_s": int(self.max_windowless_s), "chatdgc": 1}
 
-    def opt_in(self, keep_running: bool = True) -> bool:
-        """``set_detach``: from now on a window that goes leaves this process running."""
+    def work(self) -> Work:
+        """This process's work, as the window that opted in counts it."""
+        return host_work(self.host, self.scope)
+
+    def opt_in(self, keep_running: bool = True, scope: str = SCOPE_ALL) -> bool:
+        """``set_detach``: from now on a window that goes leaves this process running. ``set_detach_chatdgc``
+        is the same with ``scope`` "chatdgc": only a ChatDGC reply keeps it running."""
         with self.lock:
             if not keep_running:
                 self.opted_in = False
+                self.scope = SCOPE_ALL
                 self._close_listener()
                 self.host.announce_peers()
                 return True
             if self.opted_in:
+                self.scope = scope
                 return True
             if not offered():
                 return False
@@ -363,6 +392,7 @@ class Switchboard:
             self.listener, path = bound
             self.socket_path = str(path)
             self.opted_in = True
+            self.scope = scope
         # Out of the editor's process group: a window that goes must not take us with a group kill.
         if self.new_session:
             try:
@@ -408,10 +438,19 @@ class Switchboard:
             fields.update(socket=self.socket_path, instance=self.instance)
         if not attached and since is not None:
             fields["windowless_since"] = since
+        if self.opted_in and self.scope:
+            fields["detach_scope"] = self.scope
         try:
-            fields["work"] = host_work(self.host).reason()
+            fields["work"] = self.work().reason()
         except Exception:
             fields["work"] = ""
+        chatdgc = getattr(self.host, "_chatdgc", None)
+        try:
+            answering = chatdgc.answering() if chatdgc is not None else []
+        except Exception:
+            answering = []
+        if answering:
+            fields["chatdgc"] = answering             # the chats it is answering: dgc ps, Running sessions
         return fields
 
     # -------------------------------------------------------------------------- the wire ---
@@ -479,7 +518,7 @@ class Switchboard:
             self._redirect_stdio()
         else:
             conn.close()
-        work = host_work(self.host)
+        work = self.work()
         self.log(f"windowless: {cause}; work: {work.reason() or 'none'}")
         self.host.announce_peers()
         if work.kind() == "none":
@@ -515,15 +554,16 @@ class Switchboard:
     def command(self, conn: Connection, cmd: dict) -> bool:
         """The connection-level commands. True when ``cmd`` was one (and is handled)."""
         kind = cmd.get("type")
-        if kind not in ("set_detach", "detach"):
+        if kind not in ("set_detach", "set_detach_chatdgc", "detach"):
             return False
         from .editor_protocol import command_error
         problem = command_error(cmd)
         if problem:
             self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             return True
-        if kind == "set_detach":
-            if not self.opt_in(bool(cmd.get("keep_running", True))):
+        if kind in ("set_detach", "set_detach_chatdgc"):
+            scope = SCOPE_CHATDGC if kind == "set_detach_chatdgc" else SCOPE_ALL
+            if not self.opt_in(bool(cmd.get("keep_running", True)), scope):
                 self._reject(cmd, "unsupported", "this backend cannot keep running without a window here")
             return True
         if not self.opted_in:
@@ -592,7 +632,7 @@ class Switchboard:
             pass
 
     def status(self) -> dict:
-        work = host_work(self.host)
+        work = self.work()
         with self.lock:
             windowless = self.current is None
             since = self.windowless_since
@@ -728,7 +768,7 @@ class Switchboard:
                 if lock is not None:
                     stack.enter_context(lock)
             states = [(chat, self.live_state(chat)) for chat in chats]
-            work = host_work(host)
+            work = self.work()
             payload = chosen._ready_payload()
             payload.update(chosen._chat_fields())
             caps = dict(payload.get("capabilities") or {})
@@ -837,10 +877,10 @@ class Switchboard:
         if elapsed >= self.max_windowless_s:
             rule = f"it ran {_duration(elapsed)} with no window open, the most a session may"
             self.log(f"windowless exit: the {_duration(self.max_windowless_s)} limit for a session with no "
-                     f"window, after {_duration(elapsed)}; work: {host_work(self.host).reason() or 'none'}")
+                     f"window, after {_duration(elapsed)}; work: {self.work().reason() or 'none'}")
             self.request_exit(rule, self.shutdown_grace)
             return "max_windowless"
-        work = host_work(self.host)
+        work = self.work()
         kind = work.kind()
         if kind in ("progressing", "standing"):
             self._idle_since = self._waiting_since = None
@@ -886,6 +926,10 @@ class Switchboard:
         except Exception:
             return ""
         if silence < self.silent_window_s:
+            return ""
+        if self.scope and self.work().kind() == "none" and host_work(self.host).kind() != "none":
+            # The Sessions home's backend with work of a session's kind but no ChatDGC reply: as before it opted in,
+            # a silent window does not end it while that work runs (_EditorLiveness.working); once it ends, it does.
             return ""
         self.go_windowless(conn, f"{why} for {_duration(silence)}",
                            farewell=("session_moved", {"reason": "no_window"}))
@@ -1006,6 +1050,11 @@ def live_processes(*, here: int | None = None, now: float | None = None) -> list
                              "status": str(place.get("status") or "idle")})
         since = record.get("windowless_since")
         started = record.get("started_at")
+        chats = []
+        for item in (record.get("chatdgc") if isinstance(record.get("chatdgc"), list) else [])[:16]:
+            if isinstance(item, dict) and str(item.get("conversation_id") or ""):
+                chats.append({"conversation_id": str(item["conversation_id"])[:64],
+                              "title": str(item.get("title") or "")[:200]})
         rows.append({
             "pid": record["pid"], "kind": str(record.get("kind") or ""),
             "instance": str(record.get("instance") or ""),
@@ -1019,6 +1068,10 @@ def live_processes(*, here: int | None = None, now: float | None = None) -> list
             "liveness": str(record.get("liveness") or ""),
             "here": here is not None and record["pid"] == here,
             "sessions": sessions,
+            # The Sessions home's backend ("chatdgc"): its own session holds nothing of yours; `chats` are the
+            # ChatDGC chats it is answering.
+            "scope": str(record.get("detach_scope") or "")[:32],
+            "chats": chats,
         })
     return rows
 

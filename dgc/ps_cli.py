@@ -45,6 +45,9 @@ def format_rows(rows: list[dict]) -> str:
             name = f"\"{session['name']}\"" if session["name"] else session["session_id"]
             lines.append(f"{'':<8} session {name}  {session['cwd']}"
                          + ("  (working)" if session["status"] == "working" else ""))
+        for chat in row.get("chats") or []:
+            # A ChatDGC chat the Sessions home's backend is answering (with no window, it is kept for it).
+            lines.append(f"{'':<8} chat \"{chat['title'] or chat['conversation_id']}\"  (answering)")
     return "\n".join(lines)
 
 

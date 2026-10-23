@@ -2986,8 +2986,7 @@ class Backend:
             # An editor that keeps work running without a window: standing down mid-work is exactly
             # what lost the turn before, so while work runs this never stands down. A window of the
             # same DGC reattaches instead (dgc/serve_relay.py); anything else is told how to stop it.
-            from .serve_detach import host_work
-            work = host_work(host)
+            work = board.work()
             ask_on_screen = getattr(watch, "renderer_on_screen", None)
             on_screen = (not board.windowless and callable(ask_on_screen) and bool(ask_on_screen()))
             if work.kind() != "none" and not on_screen:     # on screen: refused below, in its own words
@@ -8801,6 +8800,9 @@ class Host:
             if self._chatdgc is None:
                 from .chatdgc.service import ChatService
                 self._chatdgc = ChatService(self.core.emit, self.default.config)
+                # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running
+                # sessions name the chats it is answering, and a backend with no window is kept for them.
+                self._chatdgc.on_turns_changed = self.announce_peers
             return self._chatdgc
 
     def start(self) -> None:

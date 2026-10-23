@@ -683,6 +683,120 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual("".join(d.get("text", "") for d in deltas), "a" * 500)
         self.assertLess(len(deltas), 50, "not one frame per token")
 
+    # -- a chat opened mid-reply: a window that reloaded while the reply went on with no window (dgc/serve_detach.py),
+    #    or a tab opened on it again. What it opens with, then every part after it: each once.
+
+    def open_again(self, chat, request_id):
+        self.service.dispatch({"type": "chatdgc_open", "request_id": request_id, "conversation_id": chat})
+        return self.wire.wait(lambda f: f["type"] == "chatdgc_opened" and f["request_id"] == request_id)
+
+    def streamed(self, reply_id, after=None, key="text"):
+        return "".join(f.get(key, "") for f in self.wire.of("chatdgc_delta")
+                       if f["message_id"] == reply_id and (after is None or f["seq"] > after["seq"]))
+
+    def test_a_chat_opened_mid_reply_has_the_reply_so_far_and_then_the_rest_once(self):
+        chat = self.new()
+        self.model.gate.clear()
+        asked = {"question": "Which city?", "options": ["Pune", "Goa"], "prompt": "I mean {answer}."}
+        self.model.script += [{"thinking": ["Counting."], "parts": ["Depends. "], "calls": [("ask_user", asked)]},
+                              {"parts": [f"line {n}\n" for n in range(40)], "hold_at": 20}]
+        self.send(chat, "Count for me")
+        self.assertTrue(self.model.reached.wait(5))
+        time.sleep(0.2)                                    # the batch written before the hold reaches the wire
+        opened = self.open_again(chat, "again")
+        reply_id = self.wire.of("chatdgc_turn")[0]["reply_id"]
+        self.assertEqual((opened["busy"], opened["reply_id"]), (True, reply_id))
+        shown = opened["messages"][-1]
+        self.assertEqual((shown["id"], shown["role"]), (reply_id, "assistant"), "the reply so far is in the chat")
+        self.assertEqual(opened["messages"][-2]["text"], "Count for me")
+        self.assertTrue(shown["text"].startswith("Depends. "))
+        self.assertIn("line 19\n", shown["text"])
+        self.assertEqual(shown["thinking"], "Counting.")
+        self.assertEqual(shown["questions"], [self.wire.of("chatdgc_question")[0]["question"]],
+                         "the question it asked comes back on its card")
+        self.model.gate.set()
+        self.ended()
+        self.assertEqual(shown["text"] + self.streamed(reply_id, opened), self.streamed(reply_id),
+                         "what it opened with, then the rest: as a screen that watched the whole reply has it")
+        self.assertEqual(shown["thinking"] + self.streamed(reply_id, opened, "thinking"),
+                         self.streamed(reply_id, key="thinking"))
+        final = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertIn("line 39\n", final["text"])
+        self.open_again(chat, "after")
+        self.assertFalse(self.wire.of("chatdgc_opened")[-1]["busy"])
+
+    def test_a_chat_opened_mid_continue_has_what_the_reply_had_and_what_it_wrote_since(self):
+        chat = self.new()
+        self.model.gate.clear()
+        self.model.script.append({"parts": ["Once ", "upon"], "hold_at": 1})
+        self.send(chat, "A story")
+        self.assertTrue(self.model.reached.wait(5))
+        self.service.dispatch({"type": "chatdgc_cancel", "conversation_id": chat})
+        self.model.gate.set()
+        self.ended()
+        stopped = self.wire.of("chatdgc_message")[-1]["message"]
+        self.model.reached.clear()
+        self.model.gate.clear()
+        self.model.script.append({"parts": ["upon ", "a ", "time."], "hold_at": 2})
+        self.service.dispatch({"type": "chatdgc_continue", "request_id": "r2", "conversation_id": chat,
+                               "message_id": stopped["id"]})
+        self.assertTrue(self.model.reached.wait(5))
+        time.sleep(0.2)
+        opened = self.open_again(chat, "again")
+        shown = [m for m in opened["messages"] if m["id"] == stopped["id"]]
+        self.assertEqual(len(shown), 1, "one reply, continued: not a second one")
+        self.assertEqual(shown[0]["text"], "Once upon a ")
+        self.assertNotEqual(shown[0].get("finish"), "cancelled", "it is being continued, as a screen shows it")
+        self.model.gate.set()
+        self.ended("r2")
+        self.assertEqual(shown[0]["text"] + self.streamed(stopped["id"], opened), "Once upon a time.")
+
+    def test_research_opened_mid_report_has_its_progress_and_the_report_so_far(self):
+        chat = self.new()
+        self.model.script.append({"calls": [("research_plan", {"title": "Paris weather", "steps": ["Today's forecast"]})]})
+        self.service.dispatch({"type": "chatdgc_research", "request_id": "p1", "conversation_id": chat,
+                               "text": "Weather in Paris?"})
+        self.ended("p1")
+        planned = self.wire.of("chatdgc_message")[-1]["message"]
+        self.model.gate.clear()
+        self.model.script += [{"calls": [("next_searches", {"enough": False, "searches": ["paris weather"]})]},
+                              {"calls": [("page_note", {"relevant": True, "note": "- Sunny, 24 degrees"})]},
+                              {"calls": [("next_searches", {"enough": True, "searches": []})]},
+                              {"parts": ["# Paris\n\n", "Sunny today [1]."], "hold_at": 1},
+                              {"calls": [("citation_check", {"verdicts": [{"id": 1, "supported": True}]})]}]
+        self.service.dispatch({"type": "chatdgc_research_start", "request_id": "r1", "conversation_id": chat,
+                               "message_id": planned["id"], "plan": {"title": "Paris", "steps": ["Today's forecast"]}})
+        self.assertTrue(self.model.reached.wait(10))
+        time.sleep(0.2)
+        opened = self.open_again(chat, "again")
+        shown = opened["messages"][-1]
+        self.assertEqual(shown["id"], planned["id"])
+        self.assertEqual(shown["research"]["status"], "writing")
+        self.assertEqual(len(shown["research"]["notes"]), 1, "what it found so far")
+        self.assertEqual(shown["text"], "# Paris\n\n", "the plan's words gave way to the report as it is written")
+        self.model.gate.set()
+        self.ended("r1")
+        self.assertEqual(shown["text"] + self.streamed(planned["id"], opened), "# Paris\n\nSunny today [1].")
+
+    def test_once_the_reply_is_saved_an_open_shows_the_saved_chat(self):
+        chat = self.new()
+        self.model.script.append({"parts": ["Saved."]})
+        self.send(chat, "Hi")
+        self.ended()
+        saved = self.wire.of("chatdgc_message")[-1]["message"]
+        live = service_module._Live(lambda *_a, **_k: None)       # the reply as its turn held it, at the end
+        live.start(saved["id"], None)
+        live.said("chatdgc_delta", conversation_id=chat, message_id=saved["id"], text="Sav")
+        live.finish()
+        self.service._turns[chat] = {"cancel": threading.Event(), "reply_id": saved["id"], "thread": None, "live": live}
+        try:
+            opened = self.open_again(chat, "late")
+        finally:
+            del self.service._turns[chat]
+        self.assertTrue(opened["busy"], "its turn has not said it ended yet")
+        self.assertEqual([m["text"] for m in opened["messages"] if m["id"] == saved["id"]], ["Saved."],
+                         "the saved reply, not the half the turn held")
+
 
 class HostTests(unittest.TestCase):
     """The router: chatdgc_* goes to the process, whatever session the editor has open."""
@@ -752,6 +866,20 @@ class HostTests(unittest.TestCase):
         self.host.dispatch({"type": "chatdgc_list", "request_id": "l2", "chat_id": opened["chat_id"]})
         self.assertEqual(self.wait_for(lambda f: f["type"] == "chatdgc_chats")["total"], 1,
                          "the same list from any session")
+
+    def test_the_processs_note_follows_the_replies(self):
+        said = []
+        self.host.announce_peers = lambda: said.append(len(self.host.chatdgc()._turns))
+        self.host.dispatch({"type": "chatdgc_open", "request_id": "o"})
+        conversation = self.wait_for(lambda f: f["type"] == "chatdgc_opened")["conversation"]["id"]
+        self.model.script.append({"parts": ["Hello."]})
+        self.host.dispatch({"type": "chatdgc_send", "request_id": "s", "conversation_id": conversation, "text": "Hi"})
+        self.wait_for(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and said[-1:] != [0]:
+            time.sleep(0.02)
+        self.assertEqual((said[0], said[-1]), (1, 0), "said as the reply starts, and again once it has ended")
+        self.assertEqual(self.host.chatdgc().answering(), [])
 
     def test_close_stops_a_reply_and_keeps_what_was_written(self):
         self.host.dispatch({"type": "chatdgc_open", "request_id": "o"})

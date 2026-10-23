@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -328,6 +329,116 @@ class AttachModeTests(unittest.TestCase):
         self.assertFalse(self.board._on_screen("auto")[0], "a view its host closed shows nothing")
 
 
+# ------------------------------------------------ the Sessions home's backend: ChatDGC only ---
+class FakeChatDGC:
+    """ChatDGC's service as the switchboard reads it: its turns, and the chats it is answering."""
+
+    def __init__(self):
+        self._turns = {}
+
+    def answering(self):
+        return [{"conversation_id": cid, "title": f"Chat {cid[-1]}"} for cid in self._turns]
+
+
+class ChatDGCScopeTests(unittest.TestCase):
+    """set_detach_chatdgc: the Sessions home's backend keeps running with no window for a ChatDGC reply, and for
+    nothing else -- with no ChatDGC work, a window that goes ends it exactly as before."""
+
+    def setUp(self):
+        self.clock = Clock()
+        self.chat = FakeChat()
+        self.host = FakeHost(self.chat)
+        self.host._chatdgc = FakeChatDGC()
+        self.board, home = board_for(self.host, self.clock)
+        self.board.opted_in = False
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        self.addCleanup(self.board.close)
+        if POSIX_SOCKETS:
+            self.board.new_session = False
+            self.assertTrue(self.board.command(self.board.stdio, {"type": "set_detach_chatdgc", "keep_running": True}))
+        else:
+            self.board.opted_in, self.board.scope = True, serve_detach.SCOPE_CHATDGC
+
+    def windowless(self):
+        return self.board.go_windowless(self.board.stdio, "test window went")
+
+    def test_it_is_offered_and_opting_in_says_what_counts(self):
+        self.assertEqual(self.board.capability()["chatdgc"], 1)
+        self.assertTrue(self.board.opted_in)
+        self.assertEqual(self.board.scope, "chatdgc")
+        self.assertIsNone(ep.command_error({"type": "set_detach_chatdgc", "keep_running": True}))
+        self.assertIsNotNone(ep.command_error({"type": "set_detach_chatdgc", "keep_running": "yes"}))
+
+    def test_only_a_chatdgc_reply_is_work(self):
+        self.chat.busy = True                                 # a turn in the home's own chat...
+        self.chat.monitors_running = 1
+        self.assertEqual(self.board.work().kind(), "none", "...is not the home's to keep running")
+        self.assertEqual(serve_detach.host_work(self.host).kind(), "progressing", "a session's backend counts it")
+        self.host._chatdgc._turns["chat_1"] = {}
+        self.assertEqual(self.board.work().kind(), "progressing")
+        self.assertEqual(self.board.work().reason(), "a ChatDGC reply is being written")
+        self.host._chatdgc._turns["chat_2"] = {}
+        self.assertEqual(self.board.work().reason(), "2 ChatDGC replies are being written")
+
+    def test_with_no_chatdgc_reply_the_window_going_ends_it_as_before(self):
+        self.chat.busy = True
+        self.assertFalse(self.windowless())
+        self.assertTrue(self.board.exit.is_set())
+        self.assertIn("nothing running", self.board.ending.cause)
+
+    def test_a_reply_keeps_it_then_the_same_rules_as_a_session(self):
+        self.host._chatdgc._turns["chat_1"] = {}
+        self.assertTrue(self.windowless())
+        self.clock.now += 3600
+        self.assertEqual(self.board.check(), "", "a reply being written: no idle clock")
+        del self.host._chatdgc._turns["chat_1"]               # it finished, with no window
+        self.chat.busy = True                                 # the home's own chat is no reason to stay
+        self.assertEqual(self.board.check(), "")
+        self.clock.now += serve_detach.IDLE_EXIT_S + 1
+        self.assertEqual(self.board.check(), "idle", "2 minutes after the reply, saved and gone")
+        self.board.exit.clear()
+        self.board.ending = None
+        self.board.current = self.board.stdio
+        self.host._chatdgc._turns["chat_1"] = {}
+        self.assertTrue(self.windowless())
+        self.clock.now += serve_detach.MAX_WINDOWLESS_S + 1
+        self.assertEqual(self.board.check(), "max_windowless", "12 hours at most")
+
+    def test_the_note_names_the_chats_it_is_answering(self):
+        self.assertNotIn("chatdgc", self.board.note_fields())
+        self.host._chatdgc._turns["chat_1"] = {}
+        fields = self.board.note_fields()
+        self.assertEqual(fields["chatdgc"], [{"conversation_id": "chat_1", "title": "Chat 1"}])
+        self.assertEqual(fields["detach_scope"], "chatdgc")
+        self.assertEqual(fields["work"], "a ChatDGC reply is being written")
+
+    def test_a_silent_window_leaves_work_of_a_sessions_kind_as_the_watchdog_did(self):
+        self.silence = (serve_detach.SILENT_WINDOW_S + 1, "its editor stopped answering")
+        self.host._editor_liveness = SimpleNamespace(window_silence=lambda: self.silence)
+        self.chat.busy = True
+        self.assertEqual(self.board.check(), "", "the watchdog never ended a backend whose chat works")
+        self.chat.busy = False
+        self.assertEqual(self.board.check(), "silent_window")
+        self.assertTrue(self.board.exit.is_set())
+
+    def test_dgc_ps_and_running_sessions_read_it_from_the_note(self):
+        from dgc import peers
+        home = Path(tempfile.mkdtemp(prefix="dgc-detach-ps-"))
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        record = {"pid": os.getpid(), "kind": "serve", "session": "/x/s-home.json", "attached": False,
+                  "socket": "/x/s.sock", "instance": "ab", "detach_scope": "chatdgc", "windowless_since": time.time() - 60,
+                  "work": "a ChatDGC reply is being written",
+                  "chatdgc": [{"conversation_id": "chat_" + "a" * 32, "title": "Count to 400"}, "junk"]}
+        with unittest.mock.patch.object(peers, "peers_dir", lambda: home):
+            (home / f"{os.getpid()}.json").write_text(json.dumps(record))
+            rows = serve_detach.live_processes(here=os.getpid())
+        self.assertEqual(rows[0]["scope"], "chatdgc")
+        self.assertEqual(rows[0]["chats"], [{"conversation_id": "chat_" + "a" * 32, "title": "Count to 400"}])
+        from dgc import ps_cli
+        text = ps_cli.format_rows(rows)
+        self.assertIn('chat "Count to 400"  (answering)', text)
+
+
 class _FakeSocket:
     def __init__(self):
         self.closed = False
@@ -401,7 +512,9 @@ class ReleaseWhileWorkingTests(unittest.TestCase):
         chat = FakeChat(session="one")
         chat.agent.session_file = "/s/one.json"
         chat.busy = busy
-        host = SimpleNamespace(chats={"c0": chat}, switchboard=SimpleNamespace(opted_in=True, windowless=windowless))
+        host = SimpleNamespace(chats={"c0": chat})
+        host.switchboard = SimpleNamespace(opted_in=True, windowless=windowless,
+                                           work=lambda: serve_detach.host_work(host))
         watch = SimpleNamespace(stood_down=False, renderer_on_screen=lambda: on_screen,
                                 editor_gone_for_takeover=lambda: (True, 0.0))
 
@@ -772,8 +885,8 @@ class Serve:
 
 
 class World:
-    def __init__(self, test, scale):
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+    def __init__(self, test, scale, handler=None):
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler or Model)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = Path(tempfile.mkdtemp(prefix="dgc-detach-", dir="/tmp"))
         self.home, self.work = self.base / "home", self.base / "work"
@@ -1132,6 +1245,164 @@ class DetachIntegrationTests(unittest.TestCase):
         b.send({"type": "detach"})
         b.proc.wait(timeout=30)
         self.assertNotIn("windowless", world.serve_log())
+
+
+# ------------------------------------------------- a ChatDGC reply through a reload (the home) ---
+class ChatModel(Model):
+    """Model's Work turns, and ChatDGC's: a reply to "CHAT_COUNT n" counts from 1 to n, a line a number, slowly;
+    the calls around a reply (does it need the web, its name, follow-ups) are answered at once with nothing."""
+
+    delay = 0.04
+
+    def do_POST(self):
+        from dgc.chatdgc.engine import FOLLOW_UP, LOOK_UP, NAME_PROMPT
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}"
+        body = json.loads(raw)
+        msgs = body.get("messages") or []
+        last = msgs[-1] if msgs else {}
+        asked = str(last.get("content") or "") if last.get("role") == "user" else ""
+        if "CHAT_COUNT" not in asked:
+            self.rfile = io.BytesIO(raw)
+            return super().do_POST()
+        first = str((msgs[0] or {}).get("content") or "")
+        self._start()
+        try:
+            if first.startswith((LOOK_UP[:60], FOLLOW_UP[:60], NAME_PROMPT[:40])):
+                answer = "Counting" if first.startswith(NAME_PROMPT[:40]) else "{}"
+                return self._write(sse({"content": answer}) + sse({}, "stop") + "data: [DONE]\n\n")
+            count = int(asked.split("CHAT_COUNT", 1)[1].split()[0])
+            for number in range(1, count + 1):
+                self._write(sse({"content": f"{number}\n"}))
+                time.sleep(self.delay)
+            self._write(sse({}, "stop") + "data: [DONE]\n\n")
+        except OSError:
+            return
+
+
+def chat_lines(text):
+    return [line for line in text.split("\n") if line]
+
+
+@unittest.skipUnless(POSIX_SOCKETS, "a backend runs without a window on Linux and macOS")
+class ChatDGCReloadIntegrationTests(unittest.TestCase):
+    """The Sessions home's backend (it carries ChatDGC) opts in with set_detach_chatdgc: a ChatDGC reply keeps
+    going through a reload, in the same backend, and the reopened chat shows every line of it once."""
+
+    maxDiff = None
+
+    def home(self, world, name, extra_env=None):
+        serve = Serve(world, extra_env, name=name)
+        ready = serve.wait(lambda e: e.get("type") == "ready", 90)
+        serve.send({"type": "set_detach_chatdgc", "keep_running": True})
+        return serve, ready
+
+    def open_chat(self, serve, request_id, conversation_id=None):
+        serve.send({"type": "chatdgc_open", "request_id": request_id,
+                    **({"conversation_id": conversation_id} if conversation_id else {})})
+        return serve.wait(lambda e: e.get("type") == "chatdgc_opened" and e.get("request_id") == request_id, 60)
+
+    def test_a_reply_keeps_streaming_through_a_reload_and_every_line_shows_once(self):
+        world = World(self, scale=0.01, handler=ChatModel)
+        a, ready = self.home(world, "home-a")
+        self.assertEqual(ready["capabilities"]["detach"]["chatdgc"], 1)
+        home_session = ready["session_id"]
+        chat = self.open_chat(a, "o1")["conversation"]["id"]
+        a.send({"type": "chatdgc_send", "request_id": "s1", "conversation_id": chat, "text": "CHAT_COUNT 150"})
+        a.wait(lambda e: e.get("type") == "chatdgc_delta" and "12\n" in e.get("text", ""), 60)
+        backend = a.proc.pid
+        a.send({"type": "detach"})
+        a.close_stdin()
+        wait_until(lambda: (world.note(backend) or {}).get("attached") is False, timeout=20,
+                   what="the note to say the home's backend has no window")
+        self.assertTrue(alive(backend), "the reply kept its backend running")
+        note = world.note(backend)
+        self.assertEqual(note["detach_scope"], "chatdgc")
+        self.assertEqual([c["conversation_id"] for c in note["chatdgc"]], [chat])
+        row = next(r for r in json.loads(world.dgc("ps", "--json").stdout) if r["pid"] == backend)
+        self.assertEqual((row["scope"], [c["conversation_id"] for c in row["chats"]]), ("chatdgc", [chat]))
+        self.assertIn("ChatDGC", row["work"])
+        self.assertIn('chat "CHAT_COUNT 150"  (answering)', world.dgc("ps").stdout)
+
+        # The window reloads: its home asks for its own backend back, and gets the same one.
+        b, ready_b = self.home(world, "home-b", {"DGC_ATTACH_SESSION": home_session, "DGC_ATTACH": "restore"})
+        self.assertEqual(b.events[0]["type"], "ready")
+        self.assertEqual(ready_b["capabilities"]["attached"]["pid"], backend, "the same backend")
+        self.assertNotEqual(b.proc.pid, backend)
+        opened = self.open_chat(b, "o2", chat)
+        self.assertTrue(opened["busy"])
+        reply_id = opened["reply_id"]
+        shown = opened["messages"][-1]
+        self.assertEqual((shown["id"], shown["role"]), (reply_id, "assistant"), "the reply so far is in the chat")
+        self.assertEqual(chat_lines(shown["text"])[:12], [str(n) for n in range(1, 13)])
+        b.wait(lambda e: e.get("type") == "chatdgc_turn" and e.get("state") == "ended", 90)
+        after = "".join(e.get("text", "") for e in b.events
+                        if e.get("type") == "chatdgc_delta" and e.get("message_id") == reply_id
+                        and e["seq"] > opened["seq"])
+        lines = chat_lines(shown["text"] + after)
+        self.assertEqual(lines, [str(n) for n in range(1, 151)], "every line once: what it opened with, then the rest")
+        final = [e["message"] for e in b.events if e.get("type") == "chatdgc_message"
+                 and e["message"]["id"] == reply_id][-1]
+        self.assertEqual(chat_lines(final["text"]), lines, "the screen equals the saved chat")
+        for serve in (a, b):
+            for event in serve.events:
+                self.assertIsNone(ep.event_error(event), event)
+        # Its work done, the window going now ends it at once, as it always did.
+        b.send({"type": "detach"})
+        b.close_stdin()
+        wait_until(lambda: not alive(backend), timeout=40, what="the exit")
+        saved = json.loads(next((world.home / ".dgc" / "chat").rglob(f"{chat}.json")).read_text())
+        self.assertEqual(chat_lines(saved["messages"][-1]["text"]), lines)
+
+    def test_a_window_closed_mid_reply_finds_it_finished_and_saved(self):
+        world = World(self, scale=0.05, handler=ChatModel)                # 2 minutes are 6s
+        a, ready = self.home(world, "home-a")
+        chat = self.open_chat(a, "o1")["conversation"]["id"]
+        a.send({"type": "chatdgc_send", "request_id": "s1", "conversation_id": chat, "text": "CHAT_COUNT 60"})
+        a.wait(lambda e: e.get("type") == "chatdgc_delta", 60)
+        backend = a.proc.pid
+        a.send({"type": "detach"})
+        a.close_stdin()
+        wait_until(lambda: not alive(backend), timeout=60, what="the reply to finish, then the idle exit")
+        self.assertIn("windowless exit: no work for", world.serve_log())
+        b = Serve(world, {"DGC_ATTACH_SESSION": ready["session_id"], "DGC_ATTACH": "restore"}, name="reopened")
+        ready_b = b.wait(lambda e: e.get("type") == "ready", 90)
+        self.assertNotIn("attached", ready_b["capabilities"], "nothing to attach to: a normal start")
+        opened = self.open_chat(b, "o2", chat)
+        self.assertFalse(opened["busy"])
+        reply = opened["messages"][-1]
+        self.assertEqual((chat_lines(reply["text"]), reply["finish"]), ([str(n) for n in range(1, 61)], "stop"))
+
+    def test_with_no_chatdgc_reply_the_homes_window_going_ends_it_as_before(self):
+        world = World(self, scale=1.0, handler=ChatModel)
+        a, _ready = self.home(world, "home-a")
+        a.send({"type": "prompt", "text": "TURN_FOREVER go", "request_id": "p1"})   # the home's own chat works
+        a.wait(lambda e: e.get("type") == "text_delta", 60)
+        backend = a.proc.pid
+        a.send({"type": "detach"})
+        a.close_stdin()
+        wait_until(lambda: not alive(backend), timeout=40, what="the exit")
+        self.assertIn("with nothing running", world.serve_log())
+
+    def test_an_older_dgc_still_answering_is_saved_stopped_and_opened_here(self):
+        world = World(self, scale=1.0, handler=ChatModel)
+        a, ready = self.home(world, "home-old")
+        chat = self.open_chat(a, "o1")["conversation"]["id"]
+        a.send({"type": "chatdgc_send", "request_id": "s1", "conversation_id": chat, "text": "CHAT_COUNT 2000"})
+        a.wait(lambda e: e.get("type") == "chatdgc_delta" and "5\n" in e.get("text", ""), 60)
+        backend = a.proc.pid
+        a.send({"type": "detach"})
+        a.close_stdin()
+        wait_until(lambda: (world.note(backend) or {}).get("attached") is False, timeout=20, what="windowless")
+        path = world.home / ".dgc" / "peers" / f"{backend}.json"
+        note = json.loads(path.read_text())
+        note["version"] = "0.47.1"
+        path.write_text(json.dumps(note))
+        b, ready_b = self.home(world, "home-new", {"DGC_ATTACH_SESSION": ready["session_id"], "DGC_ATTACH": "restore"})
+        self.assertNotIn("attached", ready_b["capabilities"], "never attached across versions")
+        self.assertFalse(alive(backend), "the older one saved and stopped first")
+        reply = self.open_chat(b, "o2", chat)["messages"][-1]
+        self.assertEqual(reply["finish"], "cancelled", "stopped where it was, saved, and Continue is offered")
+        self.assertEqual(chat_lines(reply["text"])[:5], ["1", "2", "3", "4", "5"])
 
 
 if __name__ == "__main__":

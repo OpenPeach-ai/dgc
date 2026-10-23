@@ -10662,6 +10662,26 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "set_detach_chatdgc"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "keep_running": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "detach"
             },
             "chat_id": {

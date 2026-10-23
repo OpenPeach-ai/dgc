@@ -943,6 +943,12 @@ EVENT_FIELDS["chat_closed"] = {"request_id": _S(False),
 # liveness, here, sessions: [{session_id, name, cwd, status}]}); `stop_live_session` asks one to save
 # and stop, and is answered by `live_sessions` again (with a `message`).
 COMMAND_FIELDS["set_detach"] = {"keep_running": _B(False)}
+# The Sessions home's backend (it carries ChatDGC) opts in with `set_detach_chatdgc {keep_running}` instead, offered
+# as ready.capabilities.detach.chatdgc = 1: the same rules, but only a ChatDGC reply is work that keeps it running with
+# no window. A reattached window's `chatdgc_open` of a chat mid-reply carries the reply so far in `messages`.
+# list_live_sessions' items then say `scope` ("chatdgc" for such a backend) and `chats` [{conversation_id, title}],
+# the chats it is answering.
+COMMAND_FIELDS["set_detach_chatdgc"] = {"keep_running": _B(False)}
 COMMAND_FIELDS["detach"] = {}
 COMMAND_FIELDS["list_live_sessions"] = {"request_id": _S()}
 COMMAND_FIELDS["stop_live_session"] = {"pid": _I(), "instance": _S(), "request_id": _S()}
