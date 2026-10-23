@@ -49,7 +49,8 @@ Pips on or starts the runner. Never expose `mutate` to a model as an unattended 
 
 `read("get_pip_chat_context", {"pip_id": ..., "context_size": ...})` (a Personal Pip, on this computer) says how
 much of the window its next reply takes. From this release its result also carries `breakdown`, a plain dict in
-the shape `context_breakdown()` returns (`window`, `used`, `source`, `compact_at`, `categories`, `buffer`, `free`):
+the wire shape behind `context_breakdown()` (`window`, `used`, `source`, `compact_at`, `categories`, `buffer`, `free`;
+`ContextBreakdown` calls `categories` `parts`):
 what its last reply measured besides the chat (`system_prompt`, `tools` with each tool, `instructions` for its
 job, `memory`, `skills`, `plugins` for its connected apps, `data` for its references), then `summary` (its
 conversation brief) and `messages`, as the next reply sends them. A Pip that hasn't replied since shows those last
