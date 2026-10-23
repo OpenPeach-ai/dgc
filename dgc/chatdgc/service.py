@@ -975,7 +975,7 @@ class ChatService:
 
     def _start(self, cmd: dict, run, *, refresh: bool = False) -> None:
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
-        self.engine.open(conversation_id)            # an unknown chat is refused here, not on the thread
+        chat = self.engine.open(conversation_id)     # an unknown chat is refused here, not on the thread
         cancel = threading.Event()
         with self._lock:
             if self._closing:
@@ -983,7 +983,7 @@ class ChatService:
             if conversation_id in self._turns:
                 raise ChatEngineError("This chat is still answering. Stop it or wait for it to finish.")
             turn = self._turns[conversation_id] = {"cancel": cancel, "reply_id": None, "thread": None,
-                                                   "live": _Live(self.emit)}
+                                                   "live": _Live(self.emit), "title": chat.get("title")}
         self._reviews.started(conversation_id)       # it isn't quiet any more
         turn["refresh"] = refresh
         thread = threading.Thread(target=self._turn, args=(conversation_id, request_id, cancel, run, turn),
@@ -1010,6 +1010,7 @@ class ChatService:
                 stream["value"] = _Stream(say, conversation_id, reply_id)
                 self.emit("chatdgc_turn", conversation_id=conversation_id, state="started", reply_id=reply_id,
                           request_id=request_id)
+            self._turns_changed()                     # the note names the chat as its first message did
             if turn.get("refresh"):
                 # A new version: the conversation from the fork point on is what it is now, on every screen.
                 self._opened(self.engine.open(conversation_id), request_id)
