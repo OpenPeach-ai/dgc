@@ -42,6 +42,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   same; Copy, Read aloud, links and files stay. **Settings → Running sessions** gives a chat a closed window left
   answering an **Open**, which shows it live here the same way. With an older CLI, or another window's DGC that
   doesn't offer it, a chat opens as before.
+- **Only one window has a ChatDGC chat, even at the same instant.** Two windows that opened the same chat, or pressed
+  Open here on it, within a moment of each other could both take it and both write to it. Each window's DGC now
+  holds a chat with a lock of its own (under `~/.dgc/chat/held/`), so exactly one has it: the other shows it
+  read-only with Open here, and of two Open heres pressed together one wins and the other stays read-only and says
+  so. A DGC that exits or is killed lets go of its chats at once, so another window can take one straight away.
+  Where no lock can be made (a home folder on a filesystem without file locks), chats behave as before and
+  `serve.log` says so once.
 - **`dgc ps` names the ChatDGC chats a backend is answering** (`chat "…"  (answering)`), and `--json` rows carry
   `chats` and `scope`.
 - Editor protocol (opt-in, old clients unchanged): command `set_detach_chatdgc {keep_running}`, offered as

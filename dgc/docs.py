@@ -1871,7 +1871,8 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
 - **One window writes to a ChatDGC chat.** A chat open in another window shows read-only, as it
   was last saved, under the same bar, with **Open here**. Open here moves that one chat, not the
   other window's DGC (its Pips, Sessions and Settings stay): mid-reply, the reply streams on here and
-  the chat is this window's once it ends.
+  the chat is this window's once it ends. Two windows opening one chat, or pressing Open here on it,
+  at the same moment can't both have it: one does, and the other stays read-only and says so.
 
 ## Several chats, several folders, in one panel
 

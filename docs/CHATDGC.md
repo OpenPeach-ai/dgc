@@ -30,7 +30,9 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   where they are), and the other window goes read-only with an Open here of its own. If the reply is still being
   written, it carries on where it is and streams here from what it has written so far, every part once; a message
   you type meanwhile waits and goes when the reply finishes, and from then on the chat is this window's. A chat the
-  other window closes becomes this window's by itself.
+  other window closes becomes this window's by itself. Two windows opening one chat, or pressing Open here on it, at
+  the same moment can't both have it: one does, and the other stays read-only and says so. A window whose DGC exits
+  or is killed lets go of its chats at once.
 - **Dictate.** Press the microphone beside Send and speak. While you speak, the box's bottom row becomes the voice
   bar: ✕ Cancel, a live waveform of your voice with the time, ■ Stop and ↑ Send.
   - **Stop** puts what you said in the box where the caret is, so you can edit it before you send.
