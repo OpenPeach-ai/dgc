@@ -97,6 +97,8 @@ test('Pips settings → Apps: your own app reads like a connection, an update wa
  assert.match(x.d.body.textContent,/Your own apps.*Apps your code connected with DGC’s SDK/);
  assert.match(x.d.body.textContent,/An update waits for you: adds refund_order2 read tools, 2 change tools/);
  assert.ok(!x.d.body.innerHTML.includes('dgcapp_'),'never a secret');
+ assert.match(x.d.body.textContent,/No connected accounts yet\. When a Pip needs one/,'never "No apps yet" under your own apps');
+ assert.doesNotMatch(x.d.body.textContent,/No apps yet/);
  x.click('[data-own-app-accept="shop"]');await flush();
  const accept=x.requests('accept_app_update').at(-1);
  assert.deepEqual(clean(accept.request),{type:'accept_app_update',name:'shop',expected_digest:'7'.repeat(64)});
@@ -105,6 +107,7 @@ test('Pips settings → Apps: your own app reads like a connection, an update wa
  assert.equal(x.d.querySelector('[data-own-app-accept]'),null);
  const none=setup({apps:[]});await none.drain();none.click('#pips-settings-open');await none.drain();none.click('[data-pips-settings="apps"]');await none.drain();
  assert.equal(none.d.querySelector('[aria-label="Your own apps"]'),null,'nothing when you have none');
+ assert.match(none.d.body.textContent,/No apps yet\./,'as before');
  assert.throws(()=>own.ownAppsPage({apps:[{...shop(),secret:SECRET}]}),/didn’t load/,'a listing with a secret is refused');
 });
 

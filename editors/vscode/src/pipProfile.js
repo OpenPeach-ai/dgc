@@ -154,12 +154,12 @@ export function computersMarkup(value, { esc, busy = false, error = '', formatDa
 }
 
 /** Settings → Apps: every account your Pips use, and which Pips; take one Pip off, or manage accounts. */
-export function appsMarkup(apps, { esc, busy = false, error = '' }) {
+export function appsMarkup(apps, { esc, busy = false, error = '', ownApps = false }) {
   const off = busy ? ' disabled' : '';
   if (error && !apps) return `<p class="error" role="alert">${esc(error)}</p>`;
   if (!apps) return '<p class="muted" role="status">Loading…</p>';
   const list = apps.length ? apps.map(a => `<section class="pip-page-group"><div class="pip-page-row static"><span class="app-link-mark" aria-hidden="true">${esc(a.app.slice(0, 1))}</span><span class="row-words"><strong>${esc(a.app)}</strong><small>${esc(a.label || 'Connected')}</small></span></div>`
     + `<ul class="pip-page-list">${a.pips.map(p => `<li class="pip-page-row static sub"><span class="row-words"><span>${esc(p.name)} can use it</span></span><button type="button" class="quiet pill" data-app-remove="${esc(p.link_id)}" data-app-remove-pip="${esc(p.pip_id)}"${off}>Remove</button></li>`).join('')}</ul></section>`).join('')
-    : '<section class="pip-page-group"><p class="pip-page-empty">No apps yet. When a Pip needs one, like Gmail, it asks in its chat. An account you already connected is reused: the Pip only asks to use it.</p></section>';
+    : `<section class="pip-page-group"><p class="pip-page-empty">${ownApps ? 'No connected accounts yet.' : 'No apps yet.'} When a Pip needs one, like Gmail, it asks in its chat. An account you already connected is reused: the Pip only asks to use it.</p></section>`;
   return `${list}<section class="pip-page-group"><div class="pip-page-row static"><span class="row-words"><strong>Accounts</strong><small>${apps.length ? 'Remove stops that Pip using the account; it stays connected for your other Pips. ' : ''}Sign in or out of accounts in DGC Settings → Plugins.</small></span><button type="button" class="quiet pill" data-open-plugins${off}>Open Plugins</button></div></section>${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}`;
 }
