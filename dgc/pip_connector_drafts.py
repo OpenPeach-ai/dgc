@@ -26,8 +26,10 @@ NOTICE=('Workflow connectors (Zapier, Arcade, Make or n8n) the user set up in DG
 
 def validate(value):
     apps.bounded(value,12000)
+    from .pip_sdk_apps import is_app
     if (not isinstance(value,dict) or set(value)!={'server','connection_digest','schema_digest','call'}
-            or not isinstance(value['server'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',value['server'])):
+            or not isinstance(value['server'],str)
+            or not (re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',value['server']) or is_app(value['server']))):
         raise RegistryError('invalid_connector_draft','Choose one discovered connector tool.')
     from .pip_app_sends import HASH
     for field in ('connection_digest','schema_digest'):

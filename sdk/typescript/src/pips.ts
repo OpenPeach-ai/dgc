@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { DGCCommandRejectedError, DGCConfigError, DGCProtocolError, DGCUnsupportedError } from "./errors.ts";
 import type { Frame } from "./transport.ts";
+import { pipToolsWire, type PipTool, type PipToolWire } from "./pipsApp.ts";
 
 export type PipCalendarEvent = { summary: string; description: string; start_datetime: string; end_datetime: string; timezone: string } & (
   { attendees?: never; repeat?: never; send_invitations?: never } |
@@ -16,6 +17,7 @@ export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
+  list_apps: Record<string, never>;
   list_pip_borrows: { pip_id: string };
   get_pip_level: { pip_id: string };
   get_pip_working_notes: { pip_id: string };
@@ -109,6 +111,11 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  register_app: { name: string; url: string; tools: readonly (PipTool | PipToolWire)[] };
+  update_app: { name: string; url?: string; tools: readonly (PipTool | PipToolWire)[] };
+  accept_app_update: { name: string; expected_digest: string };
+  remove_app: { name: string };
+  rotate_app_secret: { name: string };
   set_pip_level: { pip_id: string; level: PipLevel };
   allow_pip_borrow: { pip_id: string; borrow_id: string };
   decline_pip_borrow: { pip_id: string; borrow_id: string };
@@ -210,6 +217,12 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  register_app: ["name", "url", "tools"],
+  update_app: ["name", "url", "tools"],
+  accept_app_update: ["name", "expected_digest"],
+  list_apps: [],
+  remove_app: ["name"],
+  rotate_app_secret: ["name"],
   get_pip_level: ["pip_id"],
   set_pip_level: ["pip_id", "level"],
   list_pip_borrows: ["pip_id"],
@@ -713,6 +726,22 @@ const API59_READS = new Set(["list_pip_borrows"]);
 const API59_MUTATIONS = new Set(["allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow"]);
 for (const command of API59_READS) READS.add(command);
 for (const command of API59_MUTATIONS) MUTATIONS.add(command);
+// API 61: your own app's tools for Personal Pips (pipsApp.ts). register_app saves an app (a name, the address DGC POSTs
+// its signed calls to, and its tools from definePipTool) and answers its signing secret, that once; update_app replaces
+// its tools (anything that widens waits until accept_app_update with the pending update's digest); list_apps,
+// remove_app and rotate_app_secret. The app is the connection app:<name>: its reads go in an app_plan and its changes
+// are proposals accepted once (accept_pip_app_action). Local only.
+const API61_READS = new Set(["list_apps"]);
+const API61_MUTATIONS = new Set(["register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret"]);
+for (const command of API61_READS) READS.add(command);
+for (const command of API61_MUTATIONS) MUTATIONS.add(command);
+function appUrl(url: unknown): boolean {
+  if (typeof url !== "string" || !url || url.length > 2048 || /[\u0000-\u0020\u007f]/.test(url)) return false;
+  let parts: URL;
+  try { parts = new URL(url); } catch { return false; }
+  if (parts.username || parts.password || parts.hash || !parts.hostname) return false;
+  return parts.protocol === "https:" || (parts.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parts.hostname.toLowerCase()));
+}
 function checkLoginSave(values: Record<string, unknown>): void {
   for (const key of ["pip_id", "username", "password"]) {
     if (typeof values[key] !== "string") throw new DGCConfigError("save_pip_login takes pip_id, username and password as strings");
@@ -752,6 +781,10 @@ for (const command of API31_MUTATIONS) MUTATIONS.add(command);
 const MAX_BYTES = 32768;
 /** Images sent with a Pip message travel outside that budget: 4 data URIs, 2 MiB of image in all. */
 const MAX_IMAGE_URI_CHARS = 2_800_000;
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 function detach(input: unknown): Record<string, PipJson> {
   let nodes = 0, budget = MAX_BYTES;
@@ -817,7 +850,7 @@ export class Pips {
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -868,7 +901,28 @@ export class Pips {
       const { data: _sent, ...rest } = params as Record<string, unknown>;
       params = rest;
     }
+    if ((command === "register_app" || command === "update_app") && isRecordValue(params) && Object.hasOwn(params, "tools")) {
+      // definePipTool values become their wire shape (checked) before the JSON-only bounds below.
+      params = { ...params, tools: pipToolsWire((params as Record<string, unknown>).tools) };
+    }
     const values = detach(params);
+    if (API61_MUTATIONS.has(command) && !(typeof values.name === "string" && /^[a-z0-9-]{1,40}$/.test(values.name))) {
+      throw new DGCConfigError("name is the app's name: 1 to 40 lowercase letters, digits or hyphens, such as shop");
+    }
+    if (command === "register_app" || command === "update_app") {
+      if (!Object.hasOwn(values, "tools") || (command === "register_app" && !Object.hasOwn(values, "url"))) {
+        throw new DGCConfigError(`${command} takes name, ${command === "register_app" ? "url and " : ""}tools`);
+      }
+      if (Object.hasOwn(values, "url") && !appUrl(values.url)) throw new DGCConfigError("url is https://, or http:// only for localhost or 127.0.0.1");
+    }
+    if (command === "accept_app_update" && !(typeof values.expected_digest === "string" && /^[0-9a-f]{64}$/.test(values.expected_digest))) {
+      throw new DGCConfigError("expected_digest is the pending update's digest, from update_app or list_apps");
+    }
+    const ownPlan = (values.changes as Record<string, unknown> | undefined)?.app_plan as Record<string, unknown> | undefined;
+    if (command === "propose_pip_update" && typeof ownPlan?.server === "string" && ownPlan.server.startsWith("app:")
+      && (this.caps.pips_api_version as number) < 61) {
+      throw new DGCUnsupportedError("Reads on your own app require Pips API 61 or newer");
+    }
     const calendarEvent = values.event;
     if (["propose_pip_calendar_action", "prepare_pip_calendar_draft"].includes(command) && calendarEvent && typeof calendarEvent === "object"
       && ["attendees", "repeat", "send_invitations"].some(key => Object.hasOwn(calendarEvent, key)) && (this.caps.pips_api_version as number) < 38)
@@ -1014,6 +1068,22 @@ export class Pips {
   }
 
   list(workspaceId: string): Promise<PipResult> { return this.read("list_pips", { workspace_id: workspaceId }); }
+  /** Register your app's tools for Personal Pips (Pips API 61): `tools` are definePipTool values. Resolves to
+   *  `{app, secret, notice}`: the signing secret is shown this once; give it to your app's AppToolHandler. */
+  registerApp(name: string, options: { url: string; tools: readonly (PipTool | PipToolWire)[] },
+    approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("register_app", { name, url: options.url, tools: options.tools }, approval);
+  }
+  /** Replace your app's tools (and its address, given one). Removing tools applies at once; anything that widens
+   *  waits as the app's `pending` update until acceptAppUpdate with its digest. */
+  updateApp(name: string, options: { url?: string; tools: readonly (PipTool | PipToolWire)[] },
+    approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("update_app", { name, tools: options.tools, ...(options.url !== undefined ? { url: options.url } : {}) }, approval);
+  }
+  acceptAppUpdate(name: string, expectedDigest: string, approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("accept_app_update", { name, expected_digest: expectedDigest }, approval);
+  }
+  listApps(): Promise<PipResult> { return this.read("list_apps", {}); }
   get(pipId: string): Promise<PipResult> { return this.read("get_pip", { pip_id: pipId }); }
   runs(pipId: string): Promise<PipResult> { return this.read("list_pip_runs", { pip_id: pipId }); }
   /** Read a run; never enqueue work. */

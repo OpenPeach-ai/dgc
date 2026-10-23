@@ -15,6 +15,8 @@ export { Chat, Chats, CHAT_THINKING, type ChatAnswerOptions, type ChatEvent, typ
 export { Pips, type PipReadCommand, type PipMutationCommand, type PipReadParams, type PipMutationParams,
   type PipResult, type PipJson, type PipChatOptions, type PipCalendarEvent } from "./pips.ts";
 export { defineTool, type ToolSpec } from "./tools.ts";
+export { AppToolHandler, PipToolError, definePipTool, pipToolsWire, sign as signPipCall, type AppToolFunction, type AppToolHandlerOptions,
+  type AppToolResponse, type PipCallContext, type PipTool, type PipToolKind, type PipToolWire } from "./pipsApp.ts";
 export { assertSupported, extractJson, validate } from "./schema.ts";
 export {
   DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError, DGCTimeoutError,

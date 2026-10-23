@@ -111,21 +111,24 @@ def _bounded_pips_command(cmd):
         from .pip_computer_files import bound_bulk
         request, bulk = bound_bulk(request.get("type"), request)
     pending, count, chars = [(request, 0)], 0, 0
+    # An app's tools (register_app, update_app: Pips API 61) are schemas: the SDKs' own bounds, 2,048 values and 12 levels.
+    tools = cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in ("register_app", "update_app")
+    most, deepest = (2048, 12) if tools else (256, 8)
     while pending:
         value, depth = pending.pop()
         count += 1
-        if count > 256 or depth > 8:
+        if count > most or depth > deepest:
             raise RegistryError("invalid_request", "Pips requests must be small, shallow JSON objects.")
         if isinstance(value, str):
             chars += len(value)
             if chars > _MAX_PIPS_REQUEST_BYTES:
                 raise RegistryError("invalid_request", "Pips requests must fit within 32 KiB.")
         elif isinstance(value, dict):
-            if len(value) > 64 or any(not isinstance(key, str) for key in value):
+            if len(value) > (128 if tools else 64) or any(not isinstance(key, str) for key in value):
                 raise RegistryError("invalid_request", "Pips request objects contain unsupported fields.")
             pending.extend((item, depth + 1) for pair in value.items() for item in pair)
         elif isinstance(value, list):
-            if len(value) > 64:
+            if len(value) > (256 if tools else 64):
                 raise RegistryError("invalid_request", "Pips request lists are too large.")
             pending.extend((item, depth + 1) for item in value)
         elif type(value) in (int, float):
@@ -311,7 +314,17 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # summary, summary_by "model" | "dgc", attention, notes, verification}. Its run posts have kind "live" and outcome
 # "live_clear" or "live_attention" with summary, summary_by, commands {ok, failed, total} and failed_commands; so do
 # its pip_report cards. get_pip and list_pips carry `live_plan` (null for other Pips).
-PIPS_API_VERSION = 60
+# API 61: your own app's tools for Personal Pips (pip_sdk_apps). register_app {name, url, tools} saves an app (its tools
+# each {name, description, input_schema, kind read | change, moves_money?}) and answers {app, secret, notice}: the
+# signing secret, shown this once; update_app {name, url?, tools} replaces its tools (removing applies at once; anything
+# that widens waits as `pending` until accept_app_update {name, expected_digest}); list_apps, remove_app {name} and
+# rotate_app_secret {name} (a new secret, once). All local only. The app is the connection app:<name> in
+# list_pip_connections, inspect_pip_connection (every tool, with its kind and schema_digest) and
+# inspect_pip_connector_actions (its change tools); an app_plan of version 1 on app:<name> names exact reads, and
+# propose_pip_connector_action and connector drafts name its changes, accepted once with accept_pip_app_action (Always
+# allow too, except for a tool that moves money). DGC POSTs each call, signed (X-DGC-Timestamp, X-DGC-Nonce,
+# X-DGC-Signature v1=HMAC-SHA256 of "<timestamp>.<nonce>." + body), to the app's url.
+PIPS_API_VERSION = 61
 
 
 def _pips_platform_supported() -> bool:

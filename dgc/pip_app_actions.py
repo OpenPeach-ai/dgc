@@ -100,7 +100,10 @@ def validate(payload):
     # use it, is checked against today's settings before anything runs (propose, _current).
     account_valid = (payload['account']=='connection_managed' and isinstance(payload['server'],str)
                      if is_connector else isinstance(payload['account'],str) and sends.ACCOUNT.fullmatch(payload['account']))
-    if (not isinstance(payload['server'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',payload['server']) or not account_valid):
+    from .pip_sdk_apps import is_app
+    # A connector call may also name your own app, app:<name> (Pips API 61).
+    if (not isinstance(payload['server'],str) or not account_valid
+            or not (re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',payload['server']) or (is_connector and is_app(payload['server'])))):
         raise RegistryError('invalid_app_action','Select the saved connection and the account binding supported by this action.')
     _adapter(payload['kind']).arguments(payload[content])
     return json.loads(json.dumps(payload,ensure_ascii=False))
@@ -127,6 +130,12 @@ def _source(store, run_id):
 
 
 def _plugin_allowed(store,payload,config):
+    from . import pip_sdk_apps
+    if payload['kind']=='connector_call' and pip_sdk_apps.is_app(payload['server']):
+        # Your own app (Pips API 61): still registered, the same address, its change tool with the same schema,
+        # and inputs that fit it. Checked when it is proposed and again before it runs.
+        pip_sdk_apps.check_action(payload)
+        return
     # A plugin's server is a Pip's while the plugin is installed and turned on in Settings → Plugins (pip_plugins).
     if payload['kind']=='connector_call' and payload['server'] not in connector.PROVIDERS:
         from .pip_plugins import require_server
@@ -174,7 +183,8 @@ def _row(store, action_id):
         result['notice']=('Creation unconfirmed. Do not repeat this action; check the calendar or Composio log first.'
                           if result['delivery_unconfirmed'] else 'Preparing an event does not create it. Approval authorizes one exact creation attempt, including the reviewed guests and series. Invitation delivery and acceptance are not confirmed.')
     if result['payload']['kind']=='connector_call':
-        result['notice']=connector.NOTICE
+        from . import pip_sdk_apps
+        result['notice']=pip_sdk_apps.NOTICE if pip_sdk_apps.is_app(result['payload']['server']) else connector.NOTICE
     return result
 
 
@@ -258,6 +268,11 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None):
     if value['status']!='pending':raise RegistryError('action_resolved','This action review is no longer pending.')
     payload=value['payload']
     adapter=_adapter(payload['kind'])
+    from . import pip_sdk_apps
+    if prepare is None and payload['kind']=='connector_call' and pip_sdk_apps.is_app(payload['server']):
+        # Your own app: one signed POST that carries this action's id and digest (Pips API 61).
+        from functools import partial
+        prepare=partial(pip_sdk_apps.prepared,action_id=action_id,action_digest=value['digest'])
     prepare=prepare or adapter.prepared
     def authorize():_current(store,payload,config)
     authorize()
@@ -272,6 +287,10 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None):
             store.db.execute("UPDATE pip_app_actions SET status='dispatching',resolved_by=?,resolved_at=? WHERE id=?",(actor,store.registry.clock(),action_id))
         try:
             receipt=adapter.validate_receipt(send());apps.bounded(receipt,2048);status='succeeded'
+        except pip_sdk_apps.AppCallError as exc:
+            # Your own app's words, cleaned of credentials when they were made: "the shop app said: ..." or that it
+            # didn't answer. Either way the outcome is the app's to confirm, and DGC never retries.
+            receipt={'meaning':exc.meaning[:1500]};status='unknown'
         except Exception:
             # Error text from providers may include message content or secrets.
             receipt={'meaning':('The connector action is unconfirmed. Check its execution log; it may still be running. DGC will not retry.' if payload['kind']=='connector_call' else 'Creation is unconfirmed. Check the calendar or Composio log. DGC will not retry this action.' if payload['kind']=='calendar_create' else 'Delivery is unconfirmed. Check Gmail Sent or the Composio execution log. DGC will not retry this action.')};status='unknown'
@@ -297,7 +316,9 @@ def history(store, pip_id, before_id=None, limit=20):
         value=get(store,row['id']);payload=value['payload']
         values.append({key:value[key] for key in ('id','pip_id','status','digest','created_at','expires_at','delivery_unconfirmed')})
         event=payload.get('event')
+        from . import pip_sdk_apps
+        own=payload['kind']=='connector_call' and pip_sdk_apps.is_app(payload['server'])
         values[-1].update(kind=payload['kind'],server=payload['server'],account=payload['account'],
                          subject=payload['call']['tool'] if payload['kind']=='connector_call' else event['summary'] if event else payload['message']['subject'],
-                         recipient='Connection-managed account' if payload['kind']=='connector_call' else 'Primary calendar' if event else payload['message']['recipient_email'])
+                         recipient=pip_sdk_apps.display(pip_sdk_apps.name_of(payload['server'])) if own else 'Connection-managed account' if payload['kind']=='connector_call' else 'Primary calendar' if event else payload['message']['recipient_email'])
     return {'actions':values,'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None}

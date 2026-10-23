@@ -335,6 +335,7 @@ def read(config, app, tool, arguments, *, manager_factory=None, authorize=lambda
 # --------------------------------------------------------------------------- the run's socket
 
 TOOLS = ("connect_app", "read_app", "web_search")
+SDK_APP_OPS = ("app_tool", "app_answer")    # your own apps' tools (pip_sdk_apps), by the worker's function name
 MAX_QUERY = 400
 
 
@@ -408,6 +409,8 @@ class RunSocket:
         self.taint, self.said = None, ""   # careful mode: what it read from apps, and the user's own words this turn
         from .pip_plugins import Session
         self.plugins = Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
+        from . import pip_sdk_apps          # your own apps' tools (Pips API 61)
+        self.sdk_apps = pip_sdk_apps.Session(config, pip_id, workspace_id, run_id, unattended=unattended)
         self.borrow = None           # borrowing the user's own Chrome (pip_borrow.Session): asking, and the one turn lent it
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-apps-run", daemon=True).start()
@@ -421,6 +424,12 @@ class RunSocket:
                 plugins = []                      # a broken plugin list never stops the Pip's apps
         pin = {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
                "composio": composio_server(self.config) is not None}
+        try:
+            own = self.sdk_apps.pin()
+        except Exception:
+            own = []                              # a broken apps file never stops the Pip's other tools
+        if own:
+            pin["sdk_apps"] = own
         lent = self.borrow.pin() if self.borrow is not None else None
         if lent is not None:
             pin["borrow"] = lent
@@ -445,6 +454,15 @@ class RunSocket:
                 return f"error: that did not work ({type(exc).__name__})."
         try:
             with WorkspaceRegistry(self.directory) as registry:
+                if op in SDK_APP_OPS:
+                    # Your own apps (pip_sdk_apps): as plugins' tools, in careful mode's plugins lane.
+                    refused = self.lane("plugins") if self.lane is not None and op == "app_tool" else None
+                    if refused:
+                        return refused
+                    said = self.sdk_apps.call(registry, op, args)
+                    if isinstance(said, str) and not said.startswith("error"):
+                        self._read(said)
+                    return said
                 if op in PLUGIN_TOOLS:
                     refused = self.lane("plugins") if self.lane is not None and op != "plugin_answer" else None
                     if refused:
@@ -518,7 +536,7 @@ class RunSocket:
                         op = str(message.get("op", ""))
                         from .pip_plugins import TOOLS as PLUGIN_TOOLS
                         from .pip_borrow import TOOLS as BORROW_TOOLS
-                        answer = (self.call(op, message.get("args") or {}) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS
+                        answer = (self.call(op, message.get("args") or {}) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
                                   else "error: unknown app operation")
                         reply = answer if isinstance(answer, dict) else {"text": answer}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")

@@ -29,6 +29,9 @@ def provider(name):
 
 
 def supported(name, spec):
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(name):
+        return pip_sdk_apps.supported(spec)          # your own app (Pips API 61)
     if name not in PROVIDERS:
         # A plugin's hosted server, exactly as the plugin registered it (pip_plugins). Whether this
         # Pip may use it is checked with the Pip (pip_app_actions), not here.
@@ -114,6 +117,9 @@ def catalog(manager, name):
 
 
 def inspect(config, name, *, manager_factory=_manager, clock=time.monotonic, deadline=None):
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(name):
+        return pip_sdk_apps.inspect_actions(name)    # your own app's change tools (Pips API 61)
     spec, fingerprint = apps.connection(config, name)
     if not supported(name, spec):
         raise RegistryError('unsupported_connector', 'Choose a saved Zapier, Arcade, Make or n8n connector, or a plugin, from Settings.')
@@ -135,6 +141,9 @@ def inspect(config, name, *, manager_factory=_manager, clock=time.monotonic, dea
 
 
 def validate_receipt(value):
+    from . import pip_sdk_apps
+    if isinstance(value, dict) and pip_sdk_apps.is_app(value.get('provider')):
+        return pip_sdk_apps.validate_receipt(value)
     if (not isinstance(value, dict) or set(value) != {'provider', 'tool', 'response_digest', 'response_preview', 'meaning'}
             or not isinstance(value['provider'], str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', value['provider'])
             or value['meaning'] != MEANING

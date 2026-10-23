@@ -43,6 +43,10 @@ def _what(kind, payload) -> tuple[str, str]:
         return f"Add “{e.get('summary', 'an event')}” to your calendar?", _when(e)
     a = payload.get("action") or payload
     call = a.get("call") or {}
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(a.get("server")):
+        # Your own app (Pips API 61): "Run create_dispatch in Shop app?"
+        return f"Run {call.get('tool', 'an action')} in {pip_sdk_apps.display(pip_sdk_apps.name_of(a['server']))}?", ""
     from .pip_plugins import owner
     try:
         found = owner(a.get("server"))

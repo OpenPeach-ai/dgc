@@ -456,11 +456,15 @@ def after_action(store, config, action) -> bool:
                                  (action["id"], pip_id, _call_digest(payload["server"], payload["call"]), text, utc_now()))
         if store.run(payload["source"]["run_id"])["manifest"].get("run_kind") != "conversation":
             return False
-        found = owner(payload["server"])
+        from . import pip_sdk_apps
+        own = pip_sdk_apps.is_app(payload["server"])           # your own app (Pips API 61): read with app_answer
+        found = None if own else owner(payload["server"])
+        name = (pip_sdk_apps.display(pip_sdk_apps.name_of(payload["server"])) if own
+                else found["display_name"] if found else payload["server"])
         from .pip_chat import continue_after_plugin_action
-        continue_after_plugin_action(store, pip_id, action["id"], found["display_name"] if found else payload["server"],
-                                     payload["call"]["tool"], config, confirmed=action["status"] == "succeeded",
-                                     answered=bool(text))
+        continue_after_plugin_action(store, pip_id, action["id"], name, payload["call"]["tool"], config,
+                                     confirmed=action["status"] == "succeeded", answered=bool(text),
+                                     answer_tool=pip_sdk_apps.ANSWER_TOOL if own else "plugin_answer")
         return True
     except Exception:
         return False

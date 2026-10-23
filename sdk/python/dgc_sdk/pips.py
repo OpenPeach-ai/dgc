@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_apps",
     "list_pip_borrows",
     "get_pip_level",
     "get_pip_working_notes", "list_pip_daily_log",
@@ -76,6 +77,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "set_pip_level",
     "set_pip_working_notes",
@@ -299,7 +301,23 @@ API59_MUTATIONS = frozenset({'allow_pip_borrow', 'decline_pip_borrow', 'stop_pip
 READ_COMMANDS |= API59_READS
 MUTATION_COMMANDS |= API59_MUTATIONS
 BORROW_ID = re.compile(r"pipborrow_[a-f0-9]{32}\Z")
+# API 61: your own app's tools for Personal Pips (pips_app). register_app saves an app (a name, the address DGC POSTs
+# its signed calls to, and its tools from define_pip_tool) and answers its signing secret, that once; update_app
+# replaces its tools (anything that widens waits until accept_app_update with the pending update's digest);
+# list_apps, remove_app and rotate_app_secret. The app is the connection app:<name>: its reads go in an app_plan and
+# its changes are proposals accepted once (accept_pip_app_action). Local only.
+API61_READS = frozenset({'list_apps'})
+API61_MUTATIONS = frozenset({'register_app', 'update_app', 'accept_app_update', 'remove_app', 'rotate_app_secret'})
+READ_COMMANDS |= API61_READS
+MUTATION_COMMANDS |= API61_MUTATIONS
+APP_NAME = re.compile(r"[a-z0-9-]{1,40}\Z")
 COMMAND_FIELDS = {
+    'register_app': frozenset({'name', 'url', 'tools'}),
+    'update_app': frozenset({'name', 'url', 'tools'}),
+    'accept_app_update': frozenset({'name', 'expected_digest'}),
+    'list_apps': frozenset(),
+    'remove_app': frozenset({'name'}),
+    'rotate_app_secret': frozenset({'name'}),
     'list_pip_borrows': frozenset({'pip_id'}),
     'allow_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
     'decline_pip_borrow': frozenset({'pip_id', 'borrow_id'}),
@@ -602,6 +620,21 @@ def _check_login_save(values: Mapping[str, Any]) -> None:
         raise DGCConfigError('pips is "only" (this Pip) or "all"')
 
 
+def _app_url(url: Any) -> bool:
+    """register_app's url: https://, or http:// only for localhost or 127.0.0.1 (the runtime checks it too)."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str) or not url or len(url) > 2048 or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return False
+    try:
+        parts = urlsplit(url)
+        parts.port
+    except ValueError:
+        return False
+    if parts.username or parts.password or parts.fragment or not parts.hostname:
+        return False
+    return parts.scheme == "https" or (parts.scheme == "http" and parts.hostname.lower() in ("localhost", "127.0.0.1"))
+
+
 class Pips:
     """Controls for an already enabled Pips installation.
 
@@ -638,7 +671,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API59_READS | API59_MUTATIONS:
+        if command in API61_READS | API61_MUTATIONS:
+            minimum = 61
+        elif command in API59_READS | API59_MUTATIONS:
             minimum = 59
         elif command in API58_READS | API58_MUTATIONS:
             minimum = 58
@@ -739,6 +774,10 @@ class Pips:
                     or not file_data.isascii() or len(file_data) > MAX_IMAGE_URI_CHARS):
                 raise DGCConfigError('data must be one data URI of 2 MB or less')
             params = {key: value for key, value in params.items() if key != 'data'}
+        if command in ('register_app', 'update_app') and isinstance(params, Mapping) and 'tools' in params:
+            # define_pip_tool values become their wire shape (checked) before the JSON-only bounds below.
+            from .pips_app import wire_tools
+            params = {**params, 'tools': wire_tools(params['tools'])}
         values = _detach(params)
         if API52_FIELDS.get(command, frozenset()) & set(values):
             if version < 52:
@@ -765,6 +804,16 @@ class Pips:
             _check_login_save(values)
         if command == 'set_pip_level' and values.get('level') not in PIP_LEVELS:
             raise DGCConfigError('level must be ask, approve or full')
+        if command in API61_MUTATIONS and not (isinstance(values.get('name'), str) and APP_NAME.fullmatch(values['name'])):
+            raise DGCConfigError("name is the app's name: 1 to 40 lowercase letters, digits or hyphens, such as shop")
+        if command in ('register_app', 'update_app'):
+            if 'tools' not in values or (command == 'register_app' and 'url' not in values):
+                raise DGCConfigError(f"{command} takes name, {'url and ' if command == 'register_app' else ''}tools")
+            if 'url' in values and not _app_url(values['url']):
+                raise DGCConfigError("url is https://, or http:// only for localhost or 127.0.0.1")
+        if command == 'accept_app_update' and not (isinstance(values.get('expected_digest'), str)
+                                                   and re.fullmatch(r"[0-9a-f]{64}", values['expected_digest'])):
+            raise DGCConfigError("expected_digest is the pending update's digest, from update_app or list_apps")
         if command in API59_MUTATIONS and not (isinstance(values.get('borrow_id'), str) and BORROW_ID.fullmatch(values['borrow_id'])):
             raise DGCConfigError('borrow_id is the card\'s id, pipborrow_ and 32 hex digits')
         if command == 'grant_pip_login' and not (values.get('pips') == 'all' or (
@@ -798,6 +847,9 @@ class Pips:
                 raise DGCUnsupportedError("A live-data Pip's commands require Pips API 60 or newer")
             _check_live_plan(values['changes']['live_plan'])
         plan = values.get('changes', {}).get('app_plan') if isinstance(values.get('changes'), dict) else None
+        if (command == 'propose_pip_update' and isinstance(plan, dict) and isinstance(plan.get('server'), str)
+                and plan['server'].startswith('app:') and version < 61):
+            raise DGCUnsupportedError("Reads on your own app require Pips API 61 or newer")
         if command == 'propose_pip_update' and isinstance(plan, dict) and plan.get('schema_version') == 3 and version < 39:
             raise DGCUnsupportedError('Additional app searches require Pips API 39 or newer')
         if command == 'propose_pip_update' and isinstance(plan, dict) and plan.get('schema_version') == 2 and version < 33:
@@ -864,6 +916,27 @@ class Pips:
     def list(self, workspace_id: str) -> dict[str, Any]:
         return self.read("list_pips", {"workspace_id": workspace_id})
 
+    def register_app(self, name: str, *, url: str, tools: Any, approved: bool = False) -> dict[str, Any]:
+        """Register your app's tools for Personal Pips (Pips API 61): ``tools`` are define_pip_tool values.
+
+        Answers ``{"app", "secret", "notice"}``: the signing secret is shown this once. Give it to your app's
+        :class:`~dgc_sdk.pips_app.AppToolHandler`; DGC keeps its own copy in this profile's secret store."""
+        return self.mutate("register_app", {"name": name, "url": url, "tools": tools}, approved=approved)
+
+    def update_app(self, name: str, *, tools: Any, url: str | None = None, approved: bool = False) -> dict[str, Any]:
+        """Replace your app's tools (and its address, given one). Removing tools applies at once; anything that
+        widens waits as the app's ``pending`` update until :meth:`accept_app_update` with its digest."""
+        params: dict[str, Any] = {"name": name, "tools": tools}
+        if url is not None:
+            params["url"] = url
+        return self.mutate("update_app", params, approved=approved)
+
+    def accept_app_update(self, name: str, expected_digest: str, *, approved: bool = False) -> dict[str, Any]:
+        return self.mutate("accept_app_update", {"name": name, "expected_digest": expected_digest}, approved=approved)
+
+    def list_apps(self) -> dict[str, Any]:
+        return self.read("list_apps", {})
+
     def get(self, pip_id: str) -> dict[str, Any]:
         return self.read("get_pip", {"pip_id": pip_id})
 
@@ -924,6 +997,18 @@ class AsyncPips:
 
     async def list(self, workspace_id: str) -> dict[str, Any]:
         return await self.read("list_pips", {"workspace_id": workspace_id})
+
+    async def register_app(self, name: str, *, url: str, tools: Any, approved: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.register_app, name, url=url, tools=tools, approved=approved)
+
+    async def update_app(self, name: str, *, tools: Any, url: str | None = None, approved: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.update_app, name, tools=tools, url=url, approved=approved)
+
+    async def accept_app_update(self, name: str, expected_digest: str, *, approved: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.accept_app_update, name, expected_digest, approved=approved)
+
+    async def list_apps(self) -> dict[str, Any]:
+        return await self.read("list_apps", {})
 
     async def get(self, pip_id: str) -> dict[str, Any]:
         return await self.read("get_pip", {"pip_id": pip_id})

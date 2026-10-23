@@ -55,9 +55,14 @@ def require_can_always(payload) -> None:
 
 
 def _asks_every_time(payload) -> str:
-    """A payment plugin's name when this action is one of its: those ask every time."""
+    """A payment plugin's name when this action is one of its, or your own app's tool that moves money ("Shop app's
+    refund_order", Pips API 61): those ask every time."""
     if payload.get("kind") != "connector_call":
         return ""
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(payload.get("server")):
+        call = payload.get("call") if isinstance(payload.get("call"), dict) else {}
+        return pip_sdk_apps.moves_money(payload["server"], call.get("tool"))
     from .pip_plugins import owner
     found = owner(payload.get("server"))
     return found["display_name"] if found and found["money"] else ""
@@ -97,7 +102,10 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
         if len(list_grants(store.registry, pip_id)) >= MAX_PER_PIP:
             raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
         grant_id = identifier("grant")
-        label = LABEL[payload["kind"]] + (f" {pins['tool']}" if payload["kind"] == "connector_call" else "") + f" with {payload['server']}"
+        from . import pip_sdk_apps
+        where = (pip_sdk_apps.display(pip_sdk_apps.name_of(payload["server"])) if pip_sdk_apps.is_app(payload["server"])
+                 else payload["server"])
+        label = LABEL[payload["kind"]] + (f" {pins['tool']}" if payload["kind"] == "connector_call" else "") + f" with {where}"
         record = {**pins, "label": label[:200], "created_at": store.registry.clock(), "created_by": actor, "from_action": action_id}
         store.registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(pip_id, grant_id), json.dumps(record, ensure_ascii=False)))
         store.registry.event(payload["source"]["workspace_id"], "pip_action_granted", pip_id=pip_id,
@@ -250,7 +258,10 @@ def ran_on_their_own(registry, limit=20) -> list:
         elif p.get("kind") == "calendar_create":
             what = f"added \u201c{p['event'].get('summary', '')}\u201d to your calendar"
         else:
-            what = f"ran {p.get('call', {}).get('tool', '')} with {p.get('server', '')}"
+            from . import pip_sdk_apps
+            server = str(p.get('server', ''))
+            what = f"ran {p.get('call', {}).get('tool', '')} with " + (
+                pip_sdk_apps.display(pip_sdk_apps.name_of(server)) if pip_sdk_apps.is_app(server) else server)
         how = (", as its level allows (" + {"approve": "Approve for me", "full": "Full access"}.get(resolved_by.split(":", 1)[1], "") + ")."
                if str(resolved_by).startswith("pip-level:") else ", as you always allow.")
         said.append((action_id, f"{name} {what}" + (" (not confirmed)" if status == "unknown" else "") + how))

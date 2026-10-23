@@ -506,7 +506,9 @@ def decide_send(registry, pip_id, value, kind, content, *, money=False) -> dict 
         said = words(tool, list((call.get("arguments") or {}).keys()))
         if _find(PAYMENT, said) or _find(r"charge|refund|invoice|payout|withdraw|deposit|swap|trade|order|orders", said):
             return None                      # a payment, by its own name, at every level
-        what = f"Ran {tool} with {content.get('server', '')}"
+        from . import pip_sdk_apps
+        server = str(content.get('server', ''))
+        what = f"Ran {tool} with {pip_sdk_apps.display(pip_sdk_apps.name_of(server)) if pip_sdk_apps.is_app(server) else server}"
         if value == FULL:
             return {"what": what}
         if _find(CONSEQUENTIAL + r"|create|update|delete|archive|move|write|set|add", said) and not _find(r"draft|drafts", said):
@@ -594,7 +596,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 draft = drafts.get(store, draft_id, kind=draft_kind)
                 field = "action" if draft_kind == "connector" else "event" if draft_kind == "calendar" else "message"
                 content = draft["payload"][field]
-                money = draft_kind == "connector" and bool(_asks_every_time({"kind": "connector_call", "server": content.get("server")}))
+                money = draft_kind == "connector" and bool(_asks_every_time({"kind": "connector_call", "server": content.get("server"),
+                                                                             "call": content.get("call")}))
                 if decide_send(registry, row[0], chosen, draft_kind, content, money=money) is None:
                     continue
                 if draft_kind == "connector":

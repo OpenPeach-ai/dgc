@@ -743,11 +743,15 @@ def continue_after_plugin(store, pip_id, card, config):
     return send(store, pip_id, PLUGIN_ALLOWED.format(plugin=str(card["name"])[:80]), key, "local-apps", config, _intro=True)
 
 
-def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config, *, confirmed, answered):
-    """The chat's next turn once a plugin action the Pip prepared has run on the user's Allow."""
+def continue_after_plugin_action(store, pip_id, action_id, plugin, tool, config, *, confirmed, answered,
+                                 answer_tool="plugin_answer"):
+    """The chat's next turn once a plugin action the Pip prepared has run on the user's Allow (or a change on the
+    user's own app, read with app_answer)."""
     key = PLUGINS_KEY + re.sub(r"[^A-Za-z0-9_-]", "", str(action_id))[:100]
     plugin, tool = str(plugin)[:80], str(tool)[:160]
     outcome = (PLUGIN_DONE if confirmed and answered else PLUGIN_ERROR if answered else PLUGIN_UNKNOWN).format(plugin=plugin)
+    if answer_tool != "plugin_answer":
+        outcome = outcome.replace("plugin_answer", answer_tool)
     text = PLUGIN_RAN.format(tool=tool, plugin=plugin, outcome=outcome)
     return send(store, pip_id, text, key, "local-apps", config, _intro=True)
 

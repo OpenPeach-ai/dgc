@@ -31,6 +31,10 @@ def bounded(value,limit):
     return value
 
 def connection(config,name):
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(name):
+        # Your own app (Pips API 61): kept by DGC, not in Settings' servers; its digest is its name and address.
+        return pip_sdk_apps.connection(name)
     specs=config.get('mcp_servers',{}) or {}
     spec=specs.get(name)
     if not isinstance(spec,dict) or spec.get('enabled') is False:
@@ -45,7 +49,7 @@ def supported(spec):
     except (ValueError,KeyError):return False
 
 def connections(config):
-    from . import pip_connector_actions
+    from . import pip_connector_actions, pip_sdk_apps
     result=[]
     for name,spec in list((config.get('mcp_servers',{}) or {}).items())[:64]:
         if not isinstance(spec,dict):continue
@@ -54,7 +58,8 @@ def connections(config):
             'pip_read_adapter':supported(spec),'pip_action_adapter':pip_connector_actions.supported(name,spec),'sign_in_again':False,
             'notice':'Uses the accounts exposed by this existing server; access is reviewed per Pip.' if supported(spec)
                      else pip_connector_actions.NOTICE if pip_connector_actions.supported(name,spec) else 'Available to main DGC. A scoped Pip adapter for this connection is not available yet.'})
-    return result
+    # Your own apps (Pips API 61) as connections app:<name>, in the same shape.
+    return (result+pip_sdk_apps.connections())[:64]
 
 class DeadlineCancellation:
     """MCP cancellation interface; no polling thread and no sleep in tests."""
@@ -109,6 +114,10 @@ def saved_servers(config):
 def validate(plan):
     if plan is None:return None
     bounded(plan,MAX_PLAN)
+    from . import pip_sdk_apps
+    if isinstance(plan,dict) and pip_sdk_apps.is_app(plan.get('server')):
+        # Exact reads on your own app (Pips API 61): their shape here; that each is a read, and current, when it runs.
+        return pip_sdk_apps.validate_plan(plan)
     if (not isinstance(plan,dict) or set(plan)!={'schema_version','server','connection_digest','calls'}
             or plan['schema_version'] not in (1,2,3) or type(plan['schema_version']) is not int
             or not isinstance(plan['server'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',plan['server'])
@@ -181,6 +190,9 @@ def _routes(manager,name,cancel=None):
 
 
 def inspect(config,name,*,manager_factory=_manager,clock=time.monotonic):
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(name):
+        return pip_sdk_apps.inspect(name)
     _,fingerprint=connection(config,name)
     cancel=DeadlineCancellation(clock()+30,clock=clock)
     manager=manager_factory(config,name,cancel)
@@ -196,9 +208,15 @@ def inspect(config,name,*,manager_factory=_manager,clock=time.monotonic):
                       'This server exposes no supported direct read tools. Its generic setup/execution tools remain available in main DGC; scoped Pip access is not yet supported.')}
     finally:manager.stop_all()
 
-def execute(config,plan,*,authorize,cancel=None,manager_factory=_manager,servers_reader=None,deadline=None,clock=time.monotonic,wall_clock=lambda:datetime.now(timezone.utc)):
+def execute(config,plan,*,authorize,cancel=None,manager_factory=_manager,servers_reader=None,deadline=None,clock=time.monotonic,wall_clock=lambda:datetime.now(timezone.utc),context=None):
     plan=validate(plan)
     if plan is None:return []
+    from . import pip_sdk_apps
+    if pip_sdk_apps.is_app(plan['server']):
+        # Your own app: one signed POST a read, the run's pip_id and run_id with each (context).
+        if not isinstance(context,dict) or not {'pip_id','run_id'}<=set(context):
+            raise RegistryError('invalid_app_plan','Reads on your own app run only inside a Pip run.')
+        return pip_sdk_apps.execute_plan(config,plan,authorize=authorize,context=context,deadline=deadline)
     cancel=DeadlineCancellation(min(deadline or float("inf"),clock()+30),cancel,clock)
     def check():
         authorize()
