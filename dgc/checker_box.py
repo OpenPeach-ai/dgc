@@ -298,6 +298,7 @@ def release(settings) -> None:
     seat = settings.get("seatbelt") if isinstance(settings, dict) else None
     if isinstance(seat, dict) and seat.get("tmp"):
         _remove_tree(seat["tmp"])
+        _RUN_FOLDERS.discard(seat["tmp"])
 
 
 # ---- macOS: the Seatbelt box --------------------------------------------------------------------------------------
@@ -346,6 +347,12 @@ MAC_LIMITATIONS = (
 MAC_NOTICE = ("On a Mac the box is Apple's sandbox-exec, a little weaker than Linux's: a command can see which other "
               "programs are running, though it can't touch them, and Apple marks it as deprecated.")
 _SEATBELT_PROBE: dict = {}
+_RUN_FOLDERS: set = set()           # the Mac box's run folders not yet released, removed at exit if DGC stops first
+
+
+def _remove_left_folders():
+    for folder in list(_RUN_FOLDERS):
+        _remove_tree(folder)
 
 
 def seatbelt_confines() -> bool:
@@ -389,8 +396,11 @@ def _remove_tree(path) -> None:
 def _prepare_seatbelt(settings, database):
     """prepare()'s Mac half: the run's private folder, and the database's port (no relay: Seatbelt filters by port)."""
     folder = os.path.realpath(tempfile.mkdtemp(prefix="dgc-box-"))           # 0700: only this user
-    import atexit
-    atexit.register(_remove_tree, folder)
+    if not _RUN_FOLDERS:
+        import atexit
+        atexit.unregister(_remove_left_folders)
+        atexit.register(_remove_left_folders)
+    _RUN_FOLDERS.add(folder)
     settings["seatbelt"] = {"tmp": folder, "ports": []}
     note = ""
     if database is not None:
@@ -463,21 +473,23 @@ def _seatbelt_wrap(command: str, root: Path, box: dict) -> list[str] | None:
             f"TEMP={temporary}", "PATH=" + _seatbelt_path(), "/bin/bash", "-o", "pipefail", "-c", command]
 
 
-_DEVELOPER: list = []
+_DEVELOPER: dict = {}
 
 
 def _seatbelt_path() -> str:
     """The box's PATH: the caller's, with the selected developer tools' own bin just before /usr/bin and Homebrew's
     after it. /usr/bin/python3 and /usr/bin/git are xcrun shims, which in the box can't read or write their cache in
     the per-user temporary folder: each call would print an error and run xcodebuild (pip_execution's lesson)."""
-    if not _DEVELOPER:
+    import time
+    if not _DEVELOPER.get("path") and time.monotonic() - _DEVELOPER.get("checked", -1e9) >= 60:
+        _DEVELOPER["checked"] = time.monotonic()        # found once; when there are none, asked again after a minute
         try:
             from .pip_execution import _developer_directory
-            _DEVELOPER[:] = [str(_developer_directory() / "usr" / "bin")]       # found once; looked for again if not
+            _DEVELOPER["path"] = str(_developer_directory() / "usr" / "bin")
         except Exception:                        # noqa: BLE001 - no developer tools: the shims stay as they are
             pass
     path = [part for part in os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin").split(os.pathsep) if part]
-    developer = _DEVELOPER[0] if _DEVELOPER else ""
+    developer = _DEVELOPER.get("path", "")
     if developer and os.path.isdir(developer) and developer not in path:
         at = path.index("/usr/bin") if "/usr/bin" in path else 0
         path.insert(at, developer)

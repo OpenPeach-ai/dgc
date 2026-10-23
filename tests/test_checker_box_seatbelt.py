@@ -65,8 +65,11 @@ class On:
     """sys.platform as a Mac's, with a sandbox-exec that confines (the profile and wiring, checked anywhere)."""
 
     def __enter__(self):
+        import time
         self.patches = [patch.object(checker_box.sys, "platform", "darwin"),
-                        patch.object(checker_box, "seatbelt_confines", return_value=True)]
+                        patch.object(checker_box, "seatbelt_confines", return_value=True),
+                        # No developer-tools lookup while the platform is stood in for (it would run xcode-select).
+                        patch.dict(checker_box._DEVELOPER, {"path": "", "checked": time.monotonic()})]
         for item in self.patches:
             item.start()
         return self
