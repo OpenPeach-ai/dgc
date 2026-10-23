@@ -220,8 +220,9 @@ def pending_count(registry, now) -> int:
         except Exception:
             pass
     try:
-        total += registry.db.execute("SELECT count(*) FROM pip_app_actions WHERE status='pending' AND expires_at>?",
-                                     (now,)).fetchone()[0]
+        # A review DGC opened for your own app (pip_sdk_app_approvals) is counted as its draft.
+        total += registry.db.execute("SELECT count(*) FROM pip_app_actions WHERE status='pending' AND expires_at>? "
+                                     "AND requested_by<>'pip-app-review'", (now,)).fetchone()[0]
     except Exception:
         pass
     return total

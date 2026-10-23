@@ -99,8 +99,9 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             for row in rows(f"SELECT id,pip_id,payload,created_at,expires_at FROM {table} WHERE status='pending' AND expires_at>? "
                             f"AND actor LIKE 'pip-%' AND {mine} ORDER BY created_at DESC", now, ids):
                 add(kind, row["id"], row["pip_id"], row["created_at"], row["expires_at"], *_what(kind, _json(row["payload"])))
+        # A review DGC opened for your own app (pip_sdk_app_approvals) is the same change as its draft's card above.
         for row in rows(f"SELECT id,pip_id,payload,created_at,expires_at FROM pip_app_actions WHERE status='pending' AND expires_at>? "
-                        f"AND {mine} ORDER BY created_at DESC", now, ids):
+                        f"AND requested_by<>'pip-app-review' AND {mine} ORDER BY created_at DESC", now, ids):
             payload = _json(row["payload"])
             add("app_action", row["id"], row["pip_id"], row["created_at"], row["expires_at"],
                 *_what(APP_KINDS.get(payload.get("kind"), "action"), payload))

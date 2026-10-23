@@ -178,6 +178,14 @@ def history(store,pip_id,before_id=None,limit=20,*,kind='email'):
     return {'drafts':values,'next_cursor':rows[limit-1][0] if len(rows)>limit else None}
 
 
+def _decided_words(store,value,kind):
+    """A connector draft your own app decided first (Pips API 62): what it decided, in words, or ''."""
+    if kind!='connector' or not value.get('action_id'):return ''
+    from .pip_sdk_app_approvals import closed_words
+    try:return closed_words(actions._row(store,value['action_id']))
+    except RegistryError:return ''
+
+
 def dismiss(store,draft_id,expected_digest,actor,*,kind='email'):
     table,prefix,content,actor_kind=_spec(kind)
     actions._actor(actor)
@@ -185,7 +193,12 @@ def dismiss(store,draft_id,expected_digest,actor,*,kind='email'):
         value=get(store,draft_id,kind=kind)
         if value['digest']!=expected_digest:raise RegistryError('conflict','Review the exact saved draft.')
         if value['status']=='dismissed':return value
-        if value['status']!='pending':raise RegistryError('conflict','This draft already has an external-action review.')
+        if value['status']!='pending':raise RegistryError('conflict',_decided_words(store,value,kind) or 'This draft already has an external-action review.')
+        if kind=='connector':
+            # Don't on a change your own app could decide too (Pips API 62): its review closes as rejected by DGC.
+            from .pip_sdk_app_approvals import review_for_draft, withdraw
+            review=review_for_draft(store,draft_id)
+            if review is not None:withdraw(store,review,actor)
         store.db.execute(f"UPDATE {table} SET status='dismissed' WHERE id=?",(draft_id,))
     return get(store,draft_id,kind=kind)
 
@@ -196,13 +209,24 @@ def prepare(store,draft_id,expected_digest,server,connection_digest,account,sche
     with store.registry.transaction():
         draft=get(store,draft_id,kind=kind)
         if draft['digest']!=expected_digest:raise RegistryError('conflict','Review the exact saved draft.')
+        wanted=[('server',server),('connection_digest',connection_digest),('account',account),('schema_digest',schema_digest),('call' if kind=='connector' else content,message)]
         if draft['status']=='prepared':
             saved=actions.get(store,draft['action_id']);p=saved['payload']
-            if any(p[k]!=v for k,v in [('server',server),('connection_digest',connection_digest),('account',account),('schema_digest',schema_digest),('call' if kind=='connector' else content,message)]):
-                raise RegistryError('conflict','This draft already has a different saved external-action review. Open External action reviews.')
+            if any(p[k]!=v for k,v in wanted):
+                raise RegistryError('conflict',_decided_words(store,draft,kind) or 'This draft already has a different saved external-action review. Open External action reviews.')
             return saved
         if draft['status']!='pending' or draft['expired']:raise RegistryError('expired','This draft is no longer available for preparation.')
         if actions._source(store,draft['source_run_id'])!=draft['payload']['source']:raise RegistryError('stale_source','The Pip or result changed after this draft.')
+        if kind=='connector':
+            # A change on your own app already has the review DGC opened for the app (Pips API 62): Allow takes that
+            # same review, so the app and this card decide one thing; an edit withdraws it (the app hears rejected).
+            from .pip_sdk_app_approvals import review_for_draft, take_for_draft, withdraw
+            review=review_for_draft(store,draft_id)
+            if review is not None:
+                if all(review['payload'][k]==v for k,v in wanted) or review['status']!='pending':
+                    take_for_draft(store,draft_id,review)
+                    return actions.get(store,review['id'])
+                withdraw(store,review,actor)
         saved=actions.propose(store,draft['source_run_id'],server,connection_digest,account,schema_digest,message,'draft_'+draft_id,actor,config,kind='connector_call' if kind=='connector' else 'calendar_create' if kind=='calendar' else 'gmail_send')
         store.db.execute(f"UPDATE {table} SET status='prepared',action_id=? WHERE id=?",(saved['id'],draft_id))
     return saved

@@ -55,7 +55,14 @@ def _actor(actor):
 
 def _acting(actor, store=None, payload=None):
     """The user, a Pip's Always-allow grant covering exactly this action (pip_action_grants), or its level
-    (pip_levels). Only the runner acts as a grant or a level; every control request is the user's (handle_control)."""
+    (pip_levels). Only the runner acts as a grant or a level; every control request is the user's (handle_control).
+    DGC itself opens the review for a Pip's change on your own app, so the app can decide it too (Pips API 62): it
+    only proposes, never decides (_review)."""
+    from .pip_sdk_app_approvals import REVIEWER, is_app_action
+    if actor == REVIEWER:
+        if payload is not None and not is_app_action(payload):
+            raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
+        return
     if isinstance(actor, str) and actor.startswith('pip-grant:'):
         from .pip_action_grants import ACTOR, check
         if not ACTOR.fullmatch(actor):
@@ -192,9 +199,19 @@ def get(store, action_id):
     value=_row(store,action_id)
     if value['status']=='pending' and value['expires_at']<=store.registry.clock():
         with nullcontext() if store.db.in_transaction else store.registry.transaction():
-            store.db.execute("UPDATE pip_app_actions SET status='expired',resolved_by='expiry',resolved_at=? WHERE id=? AND status='pending'",
-                             (store.registry.clock(),action_id))
+            at=store.registry.clock()
+            changed=store.db.execute("UPDATE pip_app_actions SET status='expired',resolved_by='expiry',resolved_at=? WHERE id=? AND status='pending'",
+                             (at,action_id)).rowcount
+            if changed:
+                # Your own app hears that it expired (pip_sdk_app_approvals, Pips API 62).
+                from .pip_sdk_app_approvals import resolved
+                resolved(store,value,'expired','expiry',at)
         value=_row(store,action_id)
+    if value['payload']['kind']=='connector_call':
+        from .pip_sdk_app_approvals import deliveries, is_app_action
+        if is_app_action(value['payload']):
+            # What DGC told your app about it, try by try (Pips API 62).
+            value['app_deliveries']=deliveries(store.db,action_id)
     return value
 
 
@@ -242,30 +259,52 @@ def propose(store,source_run_id,server,connection_digest,account,schema_digest,m
             (aid,source['pip_id'],source['workspace_id'],source_run_id,request_key,actor,request_digest,
              json.dumps(payload,ensure_ascii=False,separators=(',',':')),apps.digest(payload),now,expiry,'pending',None,None,None))
         store.registry.event(source['workspace_id'],'pip_app_action_proposed',pip_id=source['pip_id'],payload={'action_id':aid})
+        if not str(actor).startswith(('pip-grant:','pip-level:')):
+            # A review on your own app waits for a person: the app hears it too (pip_sdk_app_approvals, Pips API 62).
+            # Always allow and a level decide at once, so the app hears only how it was decided.
+            from .pip_sdk_app_approvals import requested
+            requested(store,aid,payload,apps.digest(payload),expiry)
     return get(store,aid)
 
 
 def _review(store, action_id, expected_digest, actor):
+    from .pip_sdk_app_approvals import REVIEWER
+    if actor==REVIEWER:raise RegistryError('local_only','External action reviews are available only in the local CLI and extension.')
     _acting(actor);value=get(store,action_id);_acting(actor,store,value['payload'])
     if not isinstance(expected_digest,str) or expected_digest!=value['digest']:
         raise RegistryError('action_conflict','Review this exact saved action before deciding.')
     return value
 
 
-def reject(store, action_id, expected_digest, actor):
-    _actor(actor)                       # rejecting is always the user's
+def _closed(value, default):
+    from .pip_sdk_app_approvals import closed_words
+    return RegistryError('action_resolved', closed_words(value) or default)
+
+
+def reject(store, action_id, expected_digest, actor, *, by=None, outcome=None):
+    """Reject a pending review. ``by`` is ``app:<name>`` when your own app decided its own action (Pips API 62); the
+    user's actor still authorizes it. ``outcome['decided']`` says whether this call decided it."""
+    _actor(actor)                       # rejecting is always the user's (or their own app's)
     with store.registry.transaction():
         value=_review(store,action_id,expected_digest,actor)
         if value['status']=='rejected':return value
-        if value['status']!='pending':raise RegistryError('action_resolved','This action review is already resolved or attempted.')
-        store.db.execute("UPDATE pip_app_actions SET status='rejected',resolved_by=?,resolved_at=? WHERE id=?",(actor,store.registry.clock(),action_id))
+        if value['status']!='pending':raise _closed(value,'This action review is already resolved or attempted.')
+        from .pip_sdk_app_approvals import decider, resolved
+        who=decider(by,value['payload'],actor);at=store.registry.clock()
+        store.db.execute("UPDATE pip_app_actions SET status='rejected',resolved_by=?,resolved_at=? WHERE id=?",(who,at,action_id))
+        resolved(store,value,'rejected',who,at)      # your own app hears it (Pips API 62)
+        if outcome is not None:outcome['decided']=True
     return get(store,action_id)
 
 
-def accept(store, action_id, expected_digest, actor, config, *, prepare=None):
+def accept(store, action_id, expected_digest, actor, config, *, prepare=None, by=None, outcome=None):
+    """Accept a pending review: one attempt, ever. ``by`` is ``app:<name>`` when your own app decided its own action
+    (Pips API 62); the user's actor still authorizes it. ``outcome['decided']`` says whether this call decided it."""
     value=_review(store,action_id,expected_digest,actor)
     if value['status'] in ('dispatching','succeeded','unknown'):return value  # observe, never retry a send
-    if value['status']!='pending':raise RegistryError('action_resolved','This action review is no longer pending.')
+    if value['status']!='pending':raise _closed(value,'This action review is no longer pending.')
+    from .pip_sdk_app_approvals import decider, resolved
+    who=decider(by,value['payload'],actor)
     payload=value['payload']
     adapter=_adapter(payload['kind'])
     from . import pip_sdk_apps
@@ -280,11 +319,14 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None):
         with store.registry.transaction():
             current=_review(store,action_id,expected_digest,actor)
             if current['status'] in ('dispatching','succeeded','unknown'):return current
-            if current['status']!='pending':raise RegistryError('action_resolved','The action was rejected or expired during preparation.')
+            if current['status']!='pending':raise _closed(current,'The action was rejected or expired during preparation.')
             authorize()
             # Commit BEFORE calling the provider. A crash can lose the receipt,
             # but cannot make this same action eligible for a second attempt.
-            store.db.execute("UPDATE pip_app_actions SET status='dispatching',resolved_by=?,resolved_at=? WHERE id=?",(actor,store.registry.clock(),action_id))
+            at=store.registry.clock()
+            store.db.execute("UPDATE pip_app_actions SET status='dispatching',resolved_by=?,resolved_at=? WHERE id=?",(who,at,action_id))
+            resolved(store,current,'accepted',who,at)    # your own app hears it (Pips API 62)
+            if outcome is not None:outcome['decided']=True
         try:
             receipt=adapter.validate_receipt(send());apps.bounded(receipt,2048);status='succeeded'
         except pip_sdk_apps.AppCallError as exc:
@@ -296,7 +338,7 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None):
             receipt={'meaning':('The connector action is unconfirmed. Check its execution log; it may still be running. DGC will not retry.' if payload['kind']=='connector_call' else 'Creation is unconfirmed. Check the calendar or Composio log. DGC will not retry this action.' if payload['kind']=='calendar_create' else 'Delivery is unconfirmed. Check Gmail Sent or the Composio execution log. DGC will not retry this action.')};status='unknown'
         with store.registry.transaction():
             store.db.execute('UPDATE pip_app_actions SET status=?,resolved_by=?,resolved_at=?,receipt=? WHERE id=? AND status=\'dispatching\'',
-                (status,actor,store.registry.clock(),json.dumps(receipt,ensure_ascii=False,separators=(',',':')),action_id))
+                (status,who,store.registry.clock(),json.dumps(receipt,ensure_ascii=False,separators=(',',':')),action_id))
             store.registry.event(payload['source']['workspace_id'],'pip_app_action_finished',pip_id=payload['source']['pip_id'],payload={'action_id':action_id,'status':status})
     return get(store,action_id)
 

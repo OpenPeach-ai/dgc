@@ -202,6 +202,16 @@ def _computer_tick(registry, config) -> None:
         print(f"[pip computers] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 
+def _app_approvals_tick(registry, config) -> None:
+    """Your own apps hear what waits for them and how it was decided (pip_sdk_app_approvals, Pips API 62): what ran
+    out expires, and what is due is sent on a thread of its own. Never stops the supervisor."""
+    try:
+        from . import pip_sdk_app_approvals
+        pip_sdk_app_approvals.tick(registry, config)
+    except Exception as exc:                      # noqa: BLE001 - isolated by design
+        print(f"[pip app approvals] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
+
+
 def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     """Foreground heartbeat/queue supervision; Event.wait is injectable for tests."""
     from . import pips
@@ -258,6 +268,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                         routine_tick = RoutineTick(runtime_config, directory, clock)
                         routine_tick.start()
                     _computer_tick(registry, runtime_config)
+                    _app_approvals_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
                     _notify(notifier, registry)
                     _check_controller(directory)

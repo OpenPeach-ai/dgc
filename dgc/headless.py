@@ -324,7 +324,14 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # propose_pip_connector_action and connector drafts name its changes, accepted once with accept_pip_app_action (Always
 # allow too, except for a tool that moves money). DGC POSTs each call, signed (X-DGC-Timestamp, X-DGC-Nonce,
 # X-DGC-Signature v1=HMAC-SHA256 of "<timestamp>.<nonce>." + body), to the app's url.
-PIPS_API_VERSION = 61
+# API 62: approvals in your app (pip_sdk_app_approvals). A Pip's change on app:<name> that waits for a person is a review
+# the app hears about at its url, signed as its tool calls are: {type: approval_requested, app, action_id, action_digest,
+# tool, arguments, pip_id, pip_name, run_id, summary, expires_at, moves_money}, and when it closes {type:
+# approval_resolved, app, action_id, tool, decision accepted | rejected | expired, by dgc | app | always_allow | level,
+# at}. list_app_approvals {app?} lists what waits (with digests); decide_app_approval {action_id, decision accept |
+# reject, expected_digest} is the app's own accept or reject, exactly once (what is decided already is answered, not
+# run again). get_pip_app_action of an app action carries app_deliveries. Local only.
+PIPS_API_VERSION = 62
 
 
 def _pips_platform_supported() -> bool:

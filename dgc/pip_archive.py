@@ -144,7 +144,8 @@ def _require_idle(store,pip_id,now):
     if store.db.execute("SELECT 1 FROM pip_handoffs WHERE (source_pip_id=? OR target_pip_id=?) AND status='pending' AND expires_at>? LIMIT 1",
             (pip_id,pip_id,now)).fetchone():
         raise RegistryError('pending_review','Resolve incoming and outgoing handoff proposals before archiving this Pip.')
-    if store.db.execute("SELECT 1 FROM pip_app_actions WHERE pip_id=? AND status='pending' AND expires_at>? LIMIT 1",(pip_id,now)).fetchone():
+    # A review DGC opened for your own app (pip_sdk_app_approvals) waits as its draft does, which never held archiving.
+    if store.db.execute("SELECT 1 FROM pip_app_actions WHERE pip_id=? AND status='pending' AND expires_at>? AND requested_by<>'pip-app-review' LIMIT 1",(pip_id,now)).fetchone():
         raise RegistryError('pending_review','Resolve pending message reviews before archiving this Pip.')
 
 
