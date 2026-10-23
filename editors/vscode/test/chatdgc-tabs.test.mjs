@@ -164,6 +164,8 @@ beforeEach(() => {
     chatdgcSend(cmd) { if (this.outcome === "sent") sent.push(cmd); return this.outcome; },
     async chatdgcModels() { return this.models; },
     postHome(message) { this.home.push(message); } };
+  // The last test's chats let go first: a list refresh it left timed (250 ms) must not land in this test's commands.
+  chat?.dispose();
   chat = new ChatDGC({ extensionUri: "ext" });
   chat.attach(host);
 });
@@ -1575,4 +1577,20 @@ test("Open here: Running sessions' Open takes the chat at once; an older CLI hea
   older.say({ type: "ready" });
   opened(older, { id: ID(3), title: "Old" });
   assert.deepEqual(sent.filter((c) => c.type.startsWith("chatdgc_open") || c.type === "chatdgc_shown").map((c) => c.type), ["chatdgc_open"]);
+});
+
+test("Open here: a read-only chat's menu offers only Export; its own again, the whole menu", async () => {
+  host.chatdgcOpenHere = () => true;
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(5), title: "Held" });
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(5), state: "elsewhere", pid: 7 });
+  panel.say({ type: "menu" });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(world.picks.at(-1), ["export"], "only what leaves the chat as it is");
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(5), state: "here" });
+  panel.say({ type: "menu" });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(world.picks.at(-1), ["rename", "pin", "archive", "move", "export", "delete"]);
 });

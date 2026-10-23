@@ -245,19 +245,19 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
-<button type="button" id="cd-attach" class="cd-icon" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
+<button type="button" id="cd-attach" class="cd-icon" data-changes="1" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
 <span class="cd-picks" hidden><select id="cd-model" tabindex="-1" aria-hidden="true"></select><select id="cd-thinking" tabindex="-1" aria-hidden="true">
 <option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select></span>
-<button type="button" id="cd-research" class="cd-tool" aria-pressed="false" aria-label="Deep research" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span class="cd-tool-label">Deep research</span></button>
-<button type="button" id="cd-study" class="cd-tool" aria-pressed="false" aria-label="Study" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span class="cd-tool-label">Study</span></button>
-<label id="cd-temp-toggle" class="cd-toggle" title="Temporary: this chat isn't saved or listed"><input type="checkbox" id="cd-temporary" aria-label="Temporary chat"><span class="codicon codicon-comment-draft cd-toggle-icon" aria-hidden="true"></span><span class="cd-tool-label">Temporary</span></label>
+<button type="button" id="cd-research" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Deep research" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span class="cd-tool-label">Deep research</span></button>
+<button type="button" id="cd-study" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Study" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span class="cd-tool-label">Study</span></button>
+<label id="cd-temp-toggle" class="cd-toggle" title="Temporary: this chat isn't saved or listed"><input type="checkbox" id="cd-temporary" aria-label="Temporary chat" data-changes="1"><span class="codicon codicon-comment-draft cd-toggle-icon" aria-hidden="true"></span><span class="cd-tool-label">Temporary</span></label>
 <span class="cd-spacer"></span>
 <div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
-<div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
+<div class="cd-picker"><button type="button" id="cd-model-pill" class="cd-model-pill" data-changes="1" aria-haspopup="dialog" aria-expanded="false" hidden><span id="cd-model-name" class="cd-model-name">Model</span><svg class="cd-pill-arc" viewBox="0 0 16 10" aria-hidden="true"><path class="cd-arc-track" d="M2 9 A6 6 0 0 1 14 9"></path><path id="cd-pill-arc-fill" class="cd-arc-fill" d=""></path></svg><span class="codicon codicon-chevron-up cd-model-chevron" aria-hidden="true"></span></button>
 <div id="cd-model-menu" class="cd-model-menu" role="dialog" aria-label="Model and thinking" hidden></div></div>
-<button type="button" id="cd-mic" class="cd-icon cd-mic" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
-<button type="button" id="cd-voicemode" class="cd-send cd-voicemode" title="Voice mode: talk with ChatDGC" aria-label="Voice mode" hidden><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>
-<button type="submit" id="cd-send" class="cd-send" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
+<button type="button" id="cd-mic" class="cd-icon cd-mic" data-changes="1" title="Dictate" aria-label="Dictate"><span class="codicon codicon-mic" aria-hidden="true"></span></button>
+<button type="button" id="cd-voicemode" class="cd-send cd-voicemode" data-changes="1" title="Voice mode: talk with ChatDGC" aria-label="Voice mode" hidden><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>
+<button type="submit" id="cd-send" class="cd-send" data-changes="1" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
 <button type="button" id="cd-stop" class="cd-send cd-stop" title="Stop (Esc)" aria-label="Stop" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button></div>
 </div><div id="cd-voice" class="cd-voice"></div></form>
 <p class="cd-fine">ChatDGC answers with your own model. Check what matters.</p>
@@ -1862,7 +1862,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const conversation = tab.conversation;
     if (!conversation || tab.temporary) return;      // a new chat that was never sent says so if asked
     const pinned = tab.summary?.pinned === true;
-    const picks = [
+    const all = [
       { label: "$(edit) Rename", id: "rename" },
       { label: pinned ? "$(pinned) Unpin" : "$(pin) Pin", id: "pin" },
       { label: "$(archive) Archive", id: "archive" },
@@ -1870,6 +1870,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       { label: "$(export) Export…", id: "export" },
       { label: "$(trash) Delete", id: "delete" },
     ];
+    // Read-only while another window writes to it: only what leaves the chat as it is.
+    const picks = tab.elsewhere ? all.filter((pick) => pick.id === "export") : all;
     const choice = await vscode.window.showQuickPick(picks, { placeHolder: chatTitle(tab.summary?.title) });
     if (!choice) return;
     if (choice.id === "rename") {

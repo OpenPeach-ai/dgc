@@ -3376,3 +3376,84 @@ test("Open here for a chat: read-only while another window writes to it, in Work
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+
+test("Open here for a chat: while it's read-only nothing that would change it looks usable, in the chat or the box; copy and files stay; all of it comes back", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const card = { id: "act_" + "1".repeat(32), plugin: "gcal", plugin_name: "Google Calendar", money: false, server: "gcal",
+                   tool: "create_event", arguments: { title: "Lunch" }, recurring: false, status: "waiting", at: 0 };
+    const file = { id: "att_" + "f".repeat(32), name: "plan.docx", kind: "document", mime: "application/msword", size: 2048, format: "docx", made: true };
+    await s.send({ type: "models", ids: ["fixture"], current: "fixture" });
+    await s.send({ type: "opened", conversation: conversation({ title: "Trip" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan a trip", versions: { parent: "root", index: 0, count: 2 } },
+      { id: M(2), role: "assistant", finish: "stop", actions: [card], files: [file],
+        text: "Here is the note.\n\n```email\nTo: anya@example.com\nSubject: Trip\n\nShall we go on Friday?\n```" },
+      { id: M(3), role: "user", text: "And then?" },
+      { id: M(4), role: "assistant", text: "Which way? 1 - Goa", finish: "length", followups: ["Tell me more"],
+        questions: [{ at: 10, question: "Which way?", options: ["By train", "By air"], prompt: "{answer}" }] }] });
+    await s.frame();
+    // What would change the chat, and what wouldn't, by what it does.
+    const changing = {
+      "your message's Edit": `.cd-msg[data-id="${M(1)}"] .cd-action[aria-label="Edit"]`,
+      "Next version": `.cd-msg[data-id="${M(1)}"] .cd-action[aria-label="Next version"]`,
+      "Try again": `.cd-msg[data-id="${M(2)}"] .cd-action[aria-label="Try again"]`,
+      "Branch in new chat": `.cd-msg[data-id="${M(2)}"] .cd-action[aria-label="Branch in new chat"]`,
+      "a draft's Edit": ".cd-draft-tool:has-text('Edit')",
+      "a card's Send it now": ".cd-card-actions button:has-text('Send it now')",
+      "a card's Hand it to a Pip": ".cd-card-actions button:has-text('Hand it to a Pip')",
+      "a card's Edit": ".cd-card-actions button:has-text('Edit')",
+      "a card's Don't": ".cd-card-actions button:has-text(\"Don't\")",
+      "a question's choice": ".cd-question input[type=radio] >> nth=0",
+      "a question's Continue": ".cd-question-go",
+      "Continue": ".cd-end .cd-continue",
+      "a follow-up": ".cd-followup",
+      "attach": "#cd-attach", "Deep research": "#cd-research", "Study": "#cd-study", "the model": "#cd-model-pill",
+      "the mic": "#cd-mic", "Send": "#cd-send",
+    };
+    const staying = {
+      "Copy": `.cd-msg[data-id="${M(2)}"] .cd-action[aria-label="Copy"]`,
+      "a draft's Copy": ".cd-draft-tool:has-text('Copy')",
+      "Open in mail app": ".cd-draft-tool:has-text('Open in mail app')",
+      "a file's Open": ".cd-file-open",
+      "a file's Save a copy": ".cd-file-save",
+    };
+    const looks = (selector) => s.page.locator(selector).first().evaluate((n) => ({
+      disabled: n.disabled === true, aria: n.getAttribute("aria-disabled"), opacity: Number(getComputedStyle(n).opacity),
+      focusable: n.tabIndex >= 0 && !n.disabled }));
+    await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID });
+    await s.frame();
+    for (const [name, selector] of Object.entries(changing)) {
+      assert.equal(await s.page.locator(selector).count() > 0, true, `${name} is on screen`);
+      const l = await looks(selector);
+      assert.deepEqual([l.disabled, l.aria, l.focusable], [true, "true", false], `${name}: off, said to be off, out of the tab order`);
+      assert.ok(l.opacity < 0.75, `${name}: the muted look (opacity ${l.opacity})`);
+    }
+    for (const [name, selector] of Object.entries(staying)) {
+      const l = await looks(selector);
+      assert.deepEqual([l.disabled, l.aria], [false, null], `${name} stays usable`);
+    }
+    assert.equal(await s.page.locator(".cd-option").first().evaluate((n) => getComputedStyle(n).cursor), "default");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-read-only-controls.png") });
+    // Nothing goes, whatever is clicked; a file still opens.
+    for (const selector of [".cd-followup", ".cd-question-go", ".cd-card-actions button:has-text('Send it now')"]) {
+      await s.page.locator(selector).first().click({ force: true });
+    }
+    const posted = (await s.posted()).map((m) => m.type);
+    for (const type of ["send", "answer", "actionRun", "continue"]) assert.equal(posted.includes(type), false, `${type} never goes`);
+    await s.page.locator(".cd-file-open").click();
+    assert.equal((await s.posted("fileOpen")).length, 1);
+    // This window's again: each one back as it was.
+    await s.send({ type: "elsewhere", state: "none", conversation: ID });
+    await s.frame();
+    for (const [name, selector] of Object.entries(changing)) {
+      if (name === "a question's Continue" || name === "Send") continue;      // they wait for a choice, and for words
+      const l = await looks(selector);
+      assert.deepEqual([l.disabled, l.aria], [false, null], `${name} is back`);
+      assert.equal(l.opacity, 1, `${name}: its own look again`);
+    }
+    await s.page.locator("#cd-input").fill("Faster");
+    assert.equal(await s.page.locator("#cd-send").isDisabled(), false);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});

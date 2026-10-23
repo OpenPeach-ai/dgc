@@ -55,6 +55,26 @@
   // Another window's DGC writes to this chat (Open here there, or it was open there first): it shows as last saved,
   // read-only, with Open here, as Work's session does. {state: "elsewhere" | "moved", conversation}.
   const readOnly = () => !!state.elsewhere && state.elsewhere.conversation === (state.conversation?.id || state.elsewhere.conversation);
+  /** A control that would change this chat (send, answer, edit, retry, a card's choice, a widget's delete…): off while
+   *  the chat is read-only. Copy, read aloud, opening links, files and widgets are not marked: they stay usable. */
+  const changes = (node) => { node.dataset.changes = "1"; return node; };
+  /** Every control that would change the chat, held off while it is read-only: disabled (out of the tab order, and
+   *  aria-disabled said too) in the page's muted look; a field you typed in stays readable, read-only. Released, each
+   *  is as it was, and controls() and a redraw work out the rest again. */
+  function holdChanges(root, locked) {
+    for (const node of root.querySelectorAll(locked ? "[data-changes], [data-while-idle]" : '[data-held="1"]')) {
+      const text = node.tagName === "TEXTAREA" || (node.tagName === "INPUT" && !["radio", "checkbox"].includes(node.type));
+      if (locked) {
+        if (node.dataset.held !== "1") { node.dataset.held = "1"; node.dataset.heldWas = (text ? node.readOnly : node.disabled) ? "1" : ""; }
+        if (text) node.readOnly = true; else node.disabled = true;
+        node.setAttribute("aria-disabled", "true");
+      } else {
+        if (text) node.readOnly = node.dataset.heldWas === "1"; else node.disabled = node.dataset.heldWas === "1";
+        node.removeAttribute("aria-disabled");
+        delete node.dataset.held; delete node.dataset.heldWas;
+      }
+    }
+  }
   const PASTE_AS_FILE = 5000;          // characters: a longer paste becomes an attachment, as in the coding chat
   const IMAGE_SIDE = 2048;             // a pasted image is scaled to this, so it fits one frame
   const KIND_ICON = { image: "file-media", document: "file-text", text: "file-text", file: "file" };
@@ -332,10 +352,10 @@
                                                                                  subject: plainDraft(d.subject), body: plainDraft(d.body) })));
       }
       if (!live && !message.partial) {
-        tools.append(tool("edit", "Edit", () => {
+        tools.append(changes(tool("edit", "Edit", () => {
           state.draftEdit[key] = { ...d, subject: plainDraft(d.subject), body: plainDraft(d.body) };   // as it reads
           update(message.id);
-        }));
+        })));
       }
     }
     head.append(tools);
@@ -349,7 +369,7 @@
         const subject = el("input", "cd-field cd-draft-subject-input");
         subject.id = `${id}-subject`; label.htmlFor = subject.id; subject.value = editing.subject; subject.dataset.keep = subject.id;
         subject.addEventListener("input", () => { editing.subject = subject.value; });
-        form.append(label, subject);
+        form.append(label, changes(subject));
       }
       const label = el("label", "cd-field-label", kind === "email" ? "Message" : "Draft");
       const text = el("textarea", "cd-field cd-draft-text");
@@ -357,7 +377,7 @@
       text.rows = Math.min(18, Math.max(4, editing.body.split("\n").length + 1));
       text.addEventListener("input", () => { editing.body = text.value; });
       const buttons = el("div", "cd-draft-buttons");
-      const save = el("button", "cd-continue", editing.saving ? "Saving…" : "Save");
+      const save = changes(el("button", "cd-continue", editing.saving ? "Saving…" : "Save"));
       save.type = "button"; save.disabled = !!editing.saving;
       save.addEventListener("click", () => {
         if (!editing.body.trim()) { showNotice("A draft can't be empty.", "info"); return; }
@@ -368,7 +388,7 @@
       cancel.type = "button"; cancel.disabled = !!editing.saving;
       cancel.addEventListener("click", () => { delete state.draftEdit[key]; update(message.id); });
       buttons.append(save, cancel);
-      form.append(label, text, buttons);
+      form.append(label, changes(text), buttons);
       box.append(form);
     } else {
       if (kind === "email" && d.subject) box.append(el("div", "cd-draft-subject", plainDraft(d.subject)));
@@ -478,9 +498,9 @@
     const list = el("div", "cd-options");
     list.setAttribute("role", "radiogroup");
     list.setAttribute("aria-labelledby", title.id);
-    const go = el("button", "cd-continue cd-question-go", "Continue");
+    const go = changes(el("button", "cd-continue cd-question-go", "Continue"));
     go.type = "submit";
-    const other = el("input", "cd-other");
+    const other = changes(el("input", "cd-other"));
     const choice = () => (pick.value === OTHER ? pick.other.trim() : pick.value);
     const drafted = open ? pick : { value: "", other: "" };       // a pick you didn't send isn't shown after
     const sync = () => {
@@ -489,7 +509,7 @@
     };
     const row = (value, label) => {
       const item = el("label", "cd-option");
-      const radio = el("input");
+      const radio = changes(el("input"));
       radio.type = "radio"; radio.name = title.id; radio.value = value;
       radio.checked = said !== null ? (value === OTHER ? theirs : value === said) : drafted.value === value;
       radio.disabled = !open;
@@ -547,7 +567,7 @@
       list.setAttribute("aria-labelledby", title.id);
       for (const option of options(item)) {
         const row = el("label", "cd-option");
-        const radio = el("input");
+        const radio = changes(el("input"));
         radio.type = "radio"; radio.name = `cd-f-${message.id}-${index}-${n}`; radio.value = option;
         radio.checked = sent ? sent[n] === option : open && pick.values[n] === option;
         radio.disabled = !open;
@@ -559,7 +579,7 @@
       card.append(group);
     });
     if (open) {
-      const go = el("button", "cd-continue cd-question-go", String(q.submit || "") || "Continue");
+      const go = changes(el("button", "cd-continue cd-question-go", String(q.submit || "") || "Continue"));
       go.type = "submit";
       go.disabled = state.busy || state.compacting || readOnly();
       card.append(go);
@@ -751,7 +771,7 @@
     if ((finish === "length" || finish === "cancelled") && last && !state.busy) {
       const note = el("p", "cd-end");
       note.append(el("span", "", finish === "length" ? "The model reached its length limit here." : "Stopped."));
-      const go = el("button", "cd-continue", "Continue");
+      const go = changes(el("button", "cd-continue", "Continue"));
       go.type = "button";
       go.addEventListener("click", () => { go.disabled = true; vscode.postMessage({ type: "continue", messageId: message.id }); });
       note.append(go);
@@ -920,11 +940,11 @@
   /** Your message as a box to change: Send makes a new version from here; the old one stays a click away. */
   function editor(message) {
     const form = el("form", "cd-edit");
-    const box = el("textarea", "cd-input cd-edit-input"); box.value = message.text || ""; box.rows = 3;
+    const box = changes(el("textarea", "cd-input cd-edit-input")); box.value = message.text || ""; box.rows = 3;
     box.setAttribute("aria-label", "Edit your message");
     const row = el("div", "cd-edit-actions");
     const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
-    const go = el("button", "cd-continue", "Send"); go.type = "submit";
+    const go = changes(el("button", "cd-continue", "Send")); go.type = "submit";
     row.append(cancel, go);
     form.append(box, row);
     const done = () => { state.editing = ""; render(); input.focus(); };
@@ -935,7 +955,7 @@
     });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      if (!box.value.trim() && !(message.attachments || []).length) return;
+      if (readOnly() || (!box.value.trim() && !(message.attachments || []).length)) return;
       vscode.postMessage({ type: "edit", messageId: message.id, text: box.value, model: modelPick.value || "",
                            thinking: thinkingPick.value || "", search: searchMode() });
       state.editing = ""; state.busy = true; controls();
@@ -1042,11 +1062,11 @@
     const plan = message.research.plan || {};
     const form = el("form", "cd-plan-edit");
     const field = (label, control) => { const row = el("label", "cd-plan-field"); row.append(el("span", "", label), control); return row; };
-    const title = el("input", "cd-plan-input"); title.value = plan.title || ""; title.maxLength = 200;
-    const steps = el("textarea", "cd-plan-input"); steps.value = (plan.steps || []).join("\n"); steps.rows = Math.max(4, (plan.steps || []).length + 1);
-    const sites = el("input", "cd-plan-input"); sites.value = (plan.sites || []).join(", "); sites.placeholder = "Any site (or, for example: rbi.org.in, gov.uk)";
+    const title = changes(el("input", "cd-plan-input")); title.value = plan.title || ""; title.maxLength = 200;
+    const steps = changes(el("textarea", "cd-plan-input")); steps.value = (plan.steps || []).join("\n"); steps.rows = Math.max(4, (plan.steps || []).length + 1);
+    const sites = changes(el("input", "cd-plan-input")); sites.value = (plan.sites || []).join(", "); sites.placeholder = "Any site (or, for example: rbi.org.in, gov.uk)";
     const was = DEPTHS[message.research.depth] ? message.research.depth : "standard";
-    const depth = el("select", "cd-plan-input");
+    const depth = changes(el("select", "cd-plan-input"));
     for (const value of Object.keys(DEPTHS)) {
       const option = el("option", "", depthWords(value, message.research.depths?.[value])); option.value = value; depth.append(option);
     }
@@ -1055,7 +1075,7 @@
     depth.dataset.keep = `plan-depth-${message.id}`;
     const row = el("div", "cd-edit-actions");
     const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
-    const go = el("button", "cd-continue", "Start research"); go.type = "submit";
+    const go = changes(el("button", "cd-continue", "Start research")); go.type = "submit";
     row.append(cancel, go);
     form.append(field("Title", title), field("Steps, one a line", steps), field("Only these sites", sites), field("How deep", depth), row);
     cancel.addEventListener("click", () => { state.planEditing = ""; update(message.id); });
@@ -1071,16 +1091,16 @@
   }
   function steerForm(message) {
     const form = el("form", "cd-steer");
-    const box = el("input", "cd-steer-input");
+    const box = changes(el("input", "cd-steer-input"));
     box.placeholder = "Add to the research: it reads this next"; box.maxLength = 1000; box.value = state.steerDraft;
     box.setAttribute("aria-label", "Add to the research"); box.dataset.keep = `steer-${message.id}`;
     box.addEventListener("input", () => { state.steerDraft = box.value; });
-    const add = el("button", "cd-edit-cancel", "Add"); add.type = "submit";
+    const add = changes(el("button", "cd-edit-cancel", "Add")); add.type = "submit";
     form.append(box, add);
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = box.value.trim();
-      if (!text) return;
+      if (!text || readOnly()) return;
       vscode.postMessage({ type: "steer", messageId: message.id, text });
       state.steerDraft = ""; box.value = "";
       announce("Added to the research.");
@@ -1113,9 +1133,9 @@
           const row = el("div", "cd-research-actions");
           const deadline = state.countdowns[message.id];
           if (deadline) row.append(el("span", "cd-countdown", `Starting in ${Math.max(1, Math.ceil((deadline - Date.now()) / 1000))}s`));
-          const edit = el("button", "cd-edit-cancel", "Edit"); edit.type = "button";
+          const edit = changes(el("button", "cd-edit-cancel", "Edit")); edit.type = "button";
           edit.addEventListener("click", () => { delete state.countdowns[message.id]; state.planEditing = message.id; update(message.id); });
-          const go = el("button", "cd-continue", deadline ? "Start now" : "Start research"); go.type = "button";
+          const go = changes(el("button", "cd-continue", deadline ? "Start now" : "Start research")); go.type = "button";
           go.addEventListener("click", () => startResearch(message));
           row.append(edit, go);
           card.append(row);
@@ -1158,11 +1178,11 @@
       if (last && !state.busy) {
         const row = el("div", "cd-research-actions");
         if ((r.notes || []).length) {
-          const write = el("button", "cd-continue", `Write the report from ${r.notes.length} source${r.notes.length === 1 ? "" : "s"}`);
+          const write = changes(el("button", "cd-continue", `Write the report from ${r.notes.length} source${r.notes.length === 1 ? "" : "s"}`));
           write.type = "button"; write.addEventListener("click", () => startResearch(message, { write: true }));
           row.append(write);
         }
-        const more = el("button", "cd-edit-cancel", "Keep researching"); more.type = "button";
+        const more = changes(el("button", "cd-edit-cancel", "Keep researching")); more.type = "button";
         more.addEventListener("click", () => startResearch(message));
         row.append(more);
         card.append(row);
@@ -1625,7 +1645,7 @@
       cardFields(card.arguments).forEach((f, i) => {
         const label = el("label", "cd-field-label", f.key === null ? "Inputs (JSON)" : f.key + (f.kind === "json" ? " (JSON)" : ""));
         const long = f.kind === "json" || f.kind === "text" && (f.value.length > 80 || f.value.includes("\n"));
-        const input = el(long ? "textarea" : "input", "cd-field");
+        const input = changes(el(long ? "textarea" : "input", "cd-field"));
         input.id = `cd-card-${card.id}-${i}`; label.htmlFor = input.id;
         if (long) input.rows = f.kind === "json" ? 4 : 3;
         input.value = editing.values[i] ?? f.value;
@@ -1675,7 +1695,7 @@
         vscode.postMessage({ type: "actionDismiss", messageId: message.id, actionId: card.id }); });
       // Something recurring, or that has to wait, is a Pip's: that choice comes first.
       row.append(...(card.recurring ? [pip, send] : [send, pip]), ...(Object.keys(card.arguments || {}).length ? [edit] : []), no);
-      for (const b of row.querySelectorAll("button")) b.disabled = off;
+      for (const b of row.querySelectorAll("button")) { b.disabled = off; changes(b); }
       box.append(row);
       if (live) box.append(el("p", "cd-card-note", "You can choose once the reply is finished."));
     } else {
@@ -1700,7 +1720,7 @@
     const box = el("div", "cd-followups");
     box.setAttribute("role", "group"); box.setAttribute("aria-label", "Suggested follow-ups");
     for (const text of list.slice(0, 3)) {
-      const button = el("button", "cd-followup");
+      const button = changes(el("button", "cd-followup"));
       button.type = "button"; button.title = "Send this";
       button.append(icon("arrow-right"), el("span", "", text));
       button.addEventListener("click", () => sendText(text));
@@ -1710,7 +1730,7 @@
   }
   /** Send words that aren't in the box (a follow-up): the box keeps whatever you were typing. */
   function sendText(text) {
-    if (!text.trim() || state.busy || !state.conversation || state.unavailable) return;
+    if (!text.trim() || state.busy || !state.conversation || state.unavailable || readOnly()) return;
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
     state.lastSent = { text, research: false, pending: [], followup: true };
     state.busy = true;
@@ -1729,14 +1749,14 @@
     const label = el("summary", "cd-summary-label", "Earlier messages summarized" + (summary.edited ? " (edited by you)" : ""));
     box.append(label);
     if (state.editingSummary) {
-      const area = el("textarea", "cd-input cd-edit-input"); area.value = summary.text || ""; area.rows = 6;
+      const area = changes(el("textarea", "cd-input cd-edit-input")); area.value = summary.text || ""; area.rows = 6;
       area.setAttribute("aria-label", "Edit the summary");
       const row = el("div", "cd-edit-actions");
       const cancel = el("button", "cd-edit-cancel", "Cancel"); cancel.type = "button";
-      const save = el("button", "cd-continue", "Save"); save.type = "button";
+      const save = changes(el("button", "cd-continue", "Save")); save.type = "button";
       cancel.addEventListener("click", () => { state.editingSummary = false; render(); });
       save.addEventListener("click", () => {
-        if (!area.value.trim()) return;
+        if (!area.value.trim() || readOnly()) return;
         vscode.postMessage({ type: "summary", text: area.value });
         state.editingSummary = false;
       });
@@ -1854,6 +1874,7 @@
     compact.className = "context-action"; carry.className = "context-action cd-pop-second";
     pop.replaceChildren(head, ...(drawn ? [drawn] : [track, split, rows]), ...(state.windows.length ? [size] : []), note,
                         ...(why ? [why] : []), compact, carry);
+    if (readOnly()) holdChanges(pop, true);
   }
   $("cd-context").addEventListener("click", () => {
     const pop = $("cd-context-pop");
@@ -1989,20 +2010,20 @@
     else if (widgetConfirm === w.id) {
       const sure = el("span", "cd-wconfirm", "Delete it?");
       acts.append(sure,
-        button("cd-wbtn cd-wdanger", `Delete ${w.title}`, "Delete", "", () => {
+        changes(button("cd-wbtn cd-wdanger", `Delete ${w.title}`, "Delete", "", () => {
           widgetConfirm = ""; widgetDeleting.add(w.id);
           vscode.postMessage({ type: "widgetRemove", id: w.id });
           widgetsChrome(); widgetsPanel?.focus();
           announce(`Deleting ${w.title}.`);
-        }),
+        })),
         button("cd-wbtn cd-wcancel", "Keep it", "Cancel", "", () => { widgetConfirm = ""; widgetsChrome(); focusW(`${w.id}:cd-wdel`); }));
     } else {
       acts.append(button("cd-wbtn cd-wopen", `Open ${w.title} beside the chat`, "Open", "", () => openWidget(w)),
                   button("cd-wicon cd-wgo", `Show ${w.title} in the chat`, undefined, "arrow-right", () => showWidgetInChat(w)));
       if (!state.conversation?.temporary) {
-        acts.append(button("cd-wicon cd-wdel", `Delete ${w.title}`, undefined, "trash", () => {
+        acts.append(changes(button("cd-wicon cd-wdel", `Delete ${w.title}`, undefined, "trash", () => {
           widgetConfirm = w.id; widgetsChrome(); focusW(`${w.id}:cd-wdanger`);
-        }));
+        })));
       }
     }
     row.append(acts);
@@ -2030,6 +2051,7 @@
       parts.push(foot);
     }
     widgetsPanel.replaceChildren(...parts);
+    if (readOnly()) holdChanges(widgetsPanel, true);
     if (had) focusW(had);
     placeWidgets();
   }
@@ -2175,6 +2197,7 @@
         if (twin) { if (twin !== document.activeElement) twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
       }
       redraw.clear();
+      if (readOnly()) holdChanges(log, true);
       document.body.classList.remove("cd-blank");
       $("cd-empty").hidden = true;
       widgetsChrome();
@@ -2237,6 +2260,7 @@
 
   // ---- the composer
   function controls() {
+    if (!readOnly()) holdChanges(document, false);      // as they were, then worked out again below
     for (const button of document.querySelectorAll("[data-while-idle]")) {
       button.disabled = state.busy || state.compacting || readOnly() || button.dataset.never === "1";
     }
@@ -2250,12 +2274,11 @@
     const queueing = busyNow() && !empty;
     send.hidden = offerVoice || (busyNow() && empty);
     stop.hidden = !state.busy || locked;
-    send.disabled = empty || !state.conversation || !!state.unavailable || locked;
+    send.disabled = empty || !state.conversation || !!state.unavailable;
     const sendLabel = queueing ? "Queue: sends when the reply finishes" : "Send";
     if (send.title !== sendLabel) { send.title = sendLabel; send.setAttribute("aria-label", queueing ? "Queue message" : "Send"); }
     send.classList.toggle("cd-queueing", queueing);
     input.disabled = !!state.unavailable || locked;
-    for (const id of ["cd-attach", "cd-research", "cd-study", "cd-mic"]) { const b = $(id); if (b) b.disabled = locked; }
     const fresh = !state.conversation || (!state.messages.length && !state.earlier);
     // A chat carried over isn't thrown away, and a project's chat is kept: neither can be temporary.
     $("cd-temp-toggle").hidden = !fresh || !!state.conversation?.carried || !!state.conversation?.project;
@@ -2263,6 +2286,7 @@
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
     $("cd-menu").hidden = !state.conversation || !!state.conversation.temporary || fresh;
+    if (locked) holdChanges(document, true);            // the box's own too: attach, research, study, model, mic, send
   }
   function grow() {
     input.style.height = "auto";
@@ -2566,7 +2590,7 @@
   const TEXT_FILE = /\.(txt|md|markdown|csv|tsv|json|log|ya?ml|xml|html?|css|js|ts|py|sh|sql|toml|ini)$/i;
   const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].some((t) => t === "Files" || /uri-list/.test(t));
   document.addEventListener("dragover", (e) => {
-    if (!carriesFiles(e) || state.unavailable) return;
+    if (!carriesFiles(e) || state.unavailable || readOnly()) return;
     e.preventDefault();
     document.body.classList.add("cd-dropping");
   });
@@ -2575,6 +2599,7 @@
     if (!carriesFiles(e)) return;
     e.preventDefault();
     document.body.classList.remove("cd-dropping");
+    if (readOnly()) return;                            // nothing is attached to a chat another window writes to
     const listed = e.dataTransfer.getData("application/vnd.code.uri-list") || e.dataTransfer.getData("text/uri-list") || "";
     let uris = [];
     try { uris = listed.trim().startsWith("[") ? JSON.parse(listed) : listed.split(/\r?\n/); } catch { uris = []; }
@@ -2847,6 +2872,8 @@
             restoreQueue();
           }
           if (voiceMode?.active) voiceMode.end();
+          state.countdowns = {};                     // a new research plan never starts by itself from here
+          widgetConfirm = "";
         }
         elsewhereBar(); render(); controls();
         return;
@@ -3036,6 +3063,7 @@
       case "sendFromEditor": {
         // Asked from a canvas (Ask ChatDGC, a shortcut): sent as if typed here, with this tab's model and thinking.
         if (typeof msg.text !== "string" || !msg.text.trim()) return;
+        if (readOnly()) { showNotice("This chat is open in another window. Use Open here to carry on with it in this window.", "info"); return; }
         if (state.busy || !state.conversation || state.unavailable) { showNotice("Let the reply finish first, then ask again.", "info"); return; }
         const picked = msg.canvasSelection && typeof msg.canvasSelection === "object" ? msg.canvasSelection : null;
         vscode.postMessage({ type: "send", text: msg.text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode(),

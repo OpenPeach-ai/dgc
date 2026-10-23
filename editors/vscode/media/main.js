@@ -10762,6 +10762,7 @@
     const button = $("elsewhere-open");
     if (state !== "moved" && state !== "elsewhere") {
       bar.hidden = true; elsewhereLock = false; if (button) button.disabled = false;
+      holdWork(false);                     // each as it was, then the box works out its own again
       applyComposerLock();
       return;
     }
@@ -10774,6 +10775,43 @@
     if (state === "moved" && turn) { releaseHeldEvents(); endTurn("moved"); setSending(false); }
     elsewhereLock = true;
     applyComposerLock();
+    holdWork(true);
+  }
+  // Read-only while this session is open in another window: every control that would change it is off (disabled,
+  // aria-disabled, out of the tab order, the muted look), in the transcript and the box alike. Copy, read aloud,
+  // links, files and what only shows more stay usable. What the transcript draws meanwhile is held as it comes.
+  const WORK_HOLDS = [
+    ...["up", "down", "branch", "pip", "retry", "edit"].map((act) => `.response-actions [data-act="${act}"]`),  // a reply's own
+    ...["button", "textarea", "input", "select"].map((tag) => `.card[data-request-id] ${tag}`),      // a tool, a plan, a server's input
+    "section.ask button", "section.ask input", "section.ask textarea",                              // a question in the box
+    ".recovery-card .act.primary", ".task-interrupted button", ".ts-undo", ".learn-actions button",  // Continue, run again, Undo, Save
+    ".steer-now", ".steer-all", ".pip-report-fix", ".pip-report-fix-slim", "#tasks-clear",
+    "#btn-add", "#btn-cmd", "#btn-mode", "#btn-model", "#btn-goal", "#btn-mic", "#ctx-compact", "#ctx-size",
+    "#ctx-size-custom", "#queue-send", "#send",
+  ].join(", ");
+  let workHeldWatch = null;
+  function holdWork(locked) {
+    for (const node of document.querySelectorAll(locked ? WORK_HOLDS : '[data-held="1"]')) {
+      const text = node.tagName === "TEXTAREA" || (node.tagName === "INPUT" && !["radio", "checkbox"].includes(node.type));
+      if (locked) {
+        if (node.dataset.held !== "1") { node.dataset.held = "1"; node.dataset.heldWas = (text ? node.readOnly : node.disabled) ? "1" : ""; }
+        if (text) node.readOnly = true; else node.disabled = true;
+        node.setAttribute("aria-disabled", "true");
+      } else {
+        if (text) node.readOnly = node.dataset.heldWas === "1"; else node.disabled = node.dataset.heldWas === "1";
+        node.removeAttribute("aria-disabled");
+        delete node.dataset.held; delete node.dataset.heldWas;
+      }
+    }
+    if (locked && !workHeldWatch) {
+      let due = false;
+      workHeldWatch = new MutationObserver(() => {
+        if (due) return;
+        due = true;
+        setTimeout(() => { due = false; if (elsewhereLock) holdWork(true); }, 0);
+      });
+      workHeldWatch.observe(document.body, { childList: true, subtree: true });
+    } else if (!locked && workHeldWatch) { workHeldWatch.disconnect(); workHeldWatch = null; }
   }
   $("elsewhere-open")?.addEventListener("click", (e) => {
     e.currentTarget.disabled = true;

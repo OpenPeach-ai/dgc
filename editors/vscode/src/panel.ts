@@ -95,6 +95,13 @@ const PIPS_ATTENTION_KEY = "dgc.pipsAttention.v1";
 /** Whether the side bar's last backend offered ChatDGC: the next window shows Chat | Work at once, not when its
  *  backend has started (seconds, with the user's MCP servers and plugins starting first). */
 const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
+/** What a Work chat's page may not do while its session is open in another window (session_elsewhere): anything that
+ *  changes the session, its turn or its settings. */
+const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel", "setMode", "setModel", "setReasoningProfile",
+  "setContextSize", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
+  "options_response", "mcp_input_response", "askSkip", "steerQueued", "rerunTask", "learnSave", "clear_todos", "undoTurn",
+  "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
+  "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
@@ -4435,6 +4442,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private promptPipRequests = new Map<string, {backend: ChatBackend; session: string; generation: number}>();
   private async onMessage(msg: any): Promise<void> {
+    if (this.sessionElsewhere && WORK_READ_ONLY_REFUSES.has(String(msg?.type || ""))) {
+      // Read-only while the session is open in another window: the page offers none of these then, and nothing here
+      // changes a session another window holds. The page is shown read-only again, in case it lost track.
+      this.post({ type: "session_elsewhere", ...this.sessionElsewhere });
+      return;
+    }
     const be = this.ensureBackend();
     switch (msg.type) {
       case "list_prompt_pips": {

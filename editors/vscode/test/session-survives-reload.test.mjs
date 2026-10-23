@@ -399,6 +399,27 @@ test("moved: the chat goes read-only with Open here, and Open here takes the ses
   h.provider.backend?.dispose("restart: test");
 });
 
+test("moved: a read-only chat changes nothing of the session, and starts no backend for it", async () => {
+  const fixture = fakeServe("serve-moved-refuses", { caps: { ...DETACH, history_snapshot: true } });
+  command = fixture.path;
+  const h = tab(SESSION, { restored: false });
+  const be = h.provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => h.provider.sessionReady));
+  be.send({ type: "prompt", text: `emit ${JSON.stringify({ type: "session_moved", reason: "opened_elsewhere" })}` });
+  assert.ok(await until(() => h.posted.some((m) => m.type === "session_elsewhere" && m.state === "moved")));
+  const told = h.posted.filter((m) => m.type === "session_elsewhere").length;
+  for (const msg of [{ type: "prompt", text: "And again", request_id: "p9" }, { type: "setMode", mode: "auto" },
+                     { type: "rateResponse", rating: "up", prompt: "x" }, { type: "permission_response", id: "req-1", decision: "once" },
+                     { type: "resumeTurn" }, { type: "undoTurn", prompt: "x", files: [] }, { type: "branchChat", prompt: "x" }]) {
+    await h.provider.onMessage(msg);
+  }
+  await pause(300);
+  assert.equal(h.provider.backend, undefined, "no backend was started for a session another window holds");
+  assert.equal(fixture.starts().length, 1);
+  assert.equal(h.posted.filter((m) => m.type === "session_elsewhere").length, told + 7, "the page is shown read-only again");
+});
+
 test("a turn stopped while no window was open is offered Continue once", async () => {
   const fixture = fakeServe("serve-interrupted", { caps: { ...DETACH, resume_turn: true } });
   command = fixture.path;
@@ -733,6 +754,49 @@ test("the webview: read-only with Open here while the session is elsewhere, and 
   assert.equal(x.doc.getElementById("send").disabled, false);
   x.send({ type: "session_elsewhere", state: "moved", reason: "no_window" });
   assert.match(x.doc.getElementById("elsewhere-text").textContent, /stopped answering/);
+  assert.deepEqual(x.errors, []);
+});
+
+test("the webview: read-only elsewhere, nothing that would change the session looks usable, in the transcript or the box; copy stays; it comes back", async () => {
+  const x = makeDom();
+  const tick = () => new Promise((r) => x.dom.window.setTimeout(r, 5));
+  x.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  x.send({ type: "session_ready", sessionId: SESSION });
+  x.send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Plan it" } });
+  x.send({ type: "event", event: { type: "text_delta", text: "A plan in three steps." } });
+  x.send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 10 } });
+  x.send({ type: "event", event: { type: "turn_start", turn_id: "t2", prompt: "Run the tests" } });
+  x.send({ type: "event", event: { type: "permission_request", id: "req-1", name: "bash", args: { command: "npm test" },
+    command: "npm test", summary: "npm test", suggested_rule: "Bash(npm test:*)" } });
+  const $ = (selector) => x.doc.querySelector(selector);
+  const off = (node) => [node.disabled === true || node.readOnly === true, node.getAttribute("aria-disabled")];
+  const changing = () => ({
+    "Good response": $('.response-actions [data-act="up"]'), "Poor response": $('.response-actions [data-act="down"]'),
+    "Branch": $('.response-actions [data-act="branch"]'), "Run again": $('.response-actions [data-act="retry"]'),
+    "Edit": $('.response-actions [data-act="edit"]'), "add": $("#btn-add"), "commands": $("#btn-cmd"), "mode": $("#btn-mode"), "model": $("#btn-model"), "mic": $("#btn-mic"),
+    "Send": $("#send"), "Compact": $("#ctx-compact"), "window size": $("#ctx-size") });
+  for (const [name, node] of Object.entries(changing())) assert.ok(node, `${name} is on the page`);
+  x.send({ type: "session_elsewhere", state: "moved", reason: "opened_elsewhere" });
+  for (const [name, node] of Object.entries(changing())) assert.deepEqual(off(node), [true, "true"], `${name}: off, and said to be off`);
+  assert.deepEqual(off($('.response-actions [data-act="copy"]')), [false, null], "Copy stays");
+  // The approval the moved turn was waiting on is the other window's now: settled here, and said to be off.
+  for (const node of x.doc.querySelectorAll('.card[data-request-id="req-1"] button, .card[data-request-id="req-1"] textarea')) {
+    assert.deepEqual(off(node), [true, "true"]);
+  }
+  // What the transcript draws while it is read-only (a history replay) is held as it comes.
+  x.send({ type: "event", event: { type: "permission_request", id: "req-2", name: "bash", args: { command: "npm run lint" },
+    command: "npm run lint", summary: "npm run lint", suggested_rule: "Bash(npm run lint:*)" } });
+  await tick();
+  assert.deepEqual(off($('.card[data-request-id="req-2"] button[data-d="once"]')), [true, "true"]);
+  // This window's again: each one back, the box's too.
+  x.send({ type: "session_elsewhere", state: "none" });
+  for (const [name, node] of Object.entries(changing())) {
+    if (name === "Send") continue;
+    assert.deepEqual(off(node), [false, null], `${name} is back`);
+  }
+  assert.equal($("#send").getAttribute("aria-disabled"), null);
+  assert.equal($("#send").disabled, false);
+  assert.deepEqual(off($('.card[data-request-id="req-2"] button[data-d="once"]')), [false, null]);
   assert.deepEqual(x.errors, []);
 });
 

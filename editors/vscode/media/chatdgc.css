@@ -828,3 +828,7 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .md-math-display { display: block; margin: var(--sp-2) 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
 .md-math .katex { font-size: 1.08em; }
 .md-math .katex-error { color: var(--vscode-errorForeground, #f14c4c); }
+
+/* Read-only while another window writes to this chat (Open here): the muted look is main.css's; an option's words too. */
+.cd-option:has(input[data-held="1"]) { color: var(--muted); cursor: default; }
+.cd-option:has(input[data-held="1"]):hover { background: transparent; }

@@ -18,6 +18,11 @@
   you type meanwhile waits and goes when the reply finishes. The other window goes read-only with an Open here of
   its own, and a chat it closes is yours by itself. Needs a DGC CLI with the same feature; with an older one, a chat
   opens as before.
+- **Read-only means read-only.** While a chat or a Work session is open in another window, nothing that would change
+  it looks usable: Send, attach, Deep research, Study, the model and the mic in the box, and in the transcript a
+  card's choices, Edit, Try again, Continue, follow-ups, ratings, an approval's buttons and a widget's Delete are all
+  shown off (and said to be off to a screen reader). Copy, Read aloud, links and files stay usable, and everything
+  comes back once it is this window's again.
 
 - **A new Pip's card shows the Pip once.** When a Pip is created with a first run, the run used to appear as a second
   card inside the first, the Pip's face and name again. Its first run is now the card's own status line ("First run:

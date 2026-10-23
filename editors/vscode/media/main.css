@@ -1843,6 +1843,12 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 .elsewhere-bar[hidden] { display: none; }
 .elsewhere-bar > .codicon { flex: none; color: var(--muted); }
 .elsewhere-bar .elsewhere-text { flex: 1 1 14em; min-width: 0; overflow-wrap: anywhere; }
+/* Read-only while it is open in another window (a Work session, or a ChatDGC chat): every control that would change it
+   is off, in the muted look of a disabled action, with no hover to suggest otherwise. A field stays readable. */
+button[data-held="1"], select[data-held="1"], input[type="radio"][data-held="1"], input[type="checkbox"][data-held="1"] {
+  opacity: .45; cursor: default; pointer-events: none;
+}
+textarea[data-held="1"], input[data-held="1"]:not([type="radio"]):not([type="checkbox"]) { opacity: .7; }
 
 /* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request.
    No margin of its own: it only ever sits in the log's column, whose gap spaces it like every other

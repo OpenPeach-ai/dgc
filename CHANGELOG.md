@@ -37,7 +37,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   Sessions and Settings: an idle chat opens here from disk, and the other window goes read-only with an Open here of
   its own; mid-reply, the reply carries on where it is being written and streams here from the reply so far, every
   part once, and when it ends the chat is this window's own (a message typed meanwhile goes then). A chat the other
-  window closes becomes this window's by itself. **Settings → Running sessions** gives a chat a closed window left
+  window closes becomes this window's by itself. While read-only, nothing that would change the chat looks usable
+  (the box's controls, a card's choices, Edit, Try again, Continue), and a Work session open in another window gets the
+  same; Copy, Read aloud, links and files stay. **Settings → Running sessions** gives a chat a closed window left
   answering an **Open**, which shows it live here the same way. With an older CLI, or another window's DGC that
   doesn't offer it, a chat opens as before.
 - **`dgc ps` names the ChatDGC chats a backend is answering** (`chat "…"  (answering)`), and `--json` rows carry
