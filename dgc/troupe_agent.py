@@ -14,6 +14,7 @@ Locally served models get one agent at a time (one GPU); remote ones as many as 
 """
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 
@@ -58,17 +59,27 @@ WORKER_DATABASE = (
     "only reads, never an admin or owner account.")
 
 
-def verifier_role(*, shell: bool, database: bool, note: str = "") -> str:
-    """A verifier's role as things are for this run: with its boxed shell (and the database) or without one, and why."""
+# On a Mac the box is Seatbelt's (dgc/checker_box.py): the project at its own path, and a private $TMPDIR, not /tmp.
+_MAC_BOX = ("the project is your working folder, at its own path, and read only, the only place you can write is a "
+            "private temporary folder ($TMPDIR; /tmp itself is closed, so here-documents (<<) fail: use -c or a pipe)")
+
+
+def verifier_role(*, shell: bool, database: bool, note: str = "", seatbelt: bool = False) -> str:
+    """A verifier's role as things are for this run: with its boxed shell (and the database) or without one, and why.
+    SEATBELT: the box is the Mac's, whose project and writable folder are elsewhere."""
     if not shell:
         return ROLE["verifier"].replace("You have no shell:", "You have no shell" + (f" ({note})" if note else "") + ":")
     said = VERIFIER_SHELL.format(database=VERIFIER_DATABASE if database else VERIFIER_NO_DATABASE)
+    if seatbelt:
+        said = said.replace("the project is at /mnt and read only, the only place you can write is a private /tmp",
+                            _MAC_BOX)
     return said + (f" ({note}.)" if note else "")
 
 
 def abilities(project_root) -> dict:
     """What each kind can do in this project on this computer, in the words the troupe tool's schema and the start
-    message use: the verifier's box depends on bubblewrap here, and its database on `dgc readonly-db`."""
+    message use: the verifier's box depends on bubblewrap here (Seatbelt on a Mac), and its database on
+    `dgc readonly-db`."""
     from . import checker_box, readonly_database
     found = dict(troupe.ABILITIES)
     database = readonly_database.configured(project_root)
@@ -77,7 +88,8 @@ def abilities(project_root) -> dict:
         found["verifier"] = ("reads files and the web; no shell on this computer (" + reason.split(":")[0]
                              + "), so it answers unsure for what it would have to run")
     else:
-        found["verifier"] = ("a read-only shell in a sealed box (the project read only, writes only to a private /tmp, "
+        found["verifier"] = ("a read-only shell in a sealed box (the project read only, writes only to a private "
+                             + ("temporary folder" if sys.platform == "darwin" else "/tmp") + ", "
                              "credential files hidden, no network" + (
                                  " but this project's database through a read-only account, "
                                  "$DGC_READONLY_DATABASE_URL)" if database else
@@ -168,7 +180,9 @@ class TroupeRunner(troupe.Runner):
             if box is not None:
                 tools = troupe.READ_TOOLS | {"bash"}
                 secrets = tuple(box.get("secrets") or ())
-            role = verifier_role(shell=box is not None, database=relay is not None, note=note)
+            from .readonly_database import ENV
+            role = verifier_role(shell=box is not None, database=ENV in ((box or {}).get("env") or {}), note=note,
+                                 seatbelt=bool(box and box.get("seatbelt")))
         elif writes and self.database() is not None:
             from .readonly_database import ENV, url_for
             url = url_for(self.database())
@@ -198,6 +212,9 @@ class TroupeRunner(troupe.Runner):
         finally:
             if relay is not None:
                 relay.close()
+            if box is not None:
+                from . import checker_box
+                checker_box.release(box)
         if secrets:
             # The journal and the woken chat get the reply: never the account's password.
             from .redaction import redact_text

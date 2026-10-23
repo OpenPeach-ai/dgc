@@ -797,8 +797,8 @@ def source_scope(policy):
 
 def live_scope(plan):
     """A live-data card's scope line (pip_live_data), with the read-only database account when it reads one."""
-    from .pip_live_data import SETUP_NOTICE, DATABASE_TIP, reads_a_database
-    return SETUP_NOTICE + (' ' + DATABASE_TIP if reads_a_database(plan) else '')
+    from .pip_live_data import setup_notice, DATABASE_TIP, reads_a_database
+    return setup_notice() + (' ' + DATABASE_TIP if reads_a_database(plan) else '')
 
 
 def pulse_scope(plan):

@@ -16,7 +16,8 @@ applied "AUTO-OK" fixes to a live database as superuser (ERP session review, 202
 - **Where they run.** In a Troupe checker's box (``checker_box``): the computer's files read only, the project at
   its own folder as it is now (not a committed copy: the data is live), its credential files hidden, a private
   /tmp, no network but the local ports its lines name (localhost:PORT) and the project's read-only database, which
-  a line reaches as ``$DGC_READONLY_DATABASE_URL``. Linux with bubblewrap; elsewhere it says why it can't run.
+  a line reaches as ``$DGC_READONLY_DATABASE_URL``. Linux with bubblewrap, or macOS with Seatbelt (a little weaker:
+  ``checker_box.MAC_LIMITATIONS``, said once on its card); elsewhere it says why it can't run.
 - **The summary.** Each line's output (bounded, credentials redacted) goes to the Pip's model as data, with the
   approved goal, for two or three sentences and whether anything needs the user. Every number it writes must be in
   that output (``ungrounded``); a summary that isn't is asked for once more and otherwise left out, and DGC says
@@ -489,6 +490,17 @@ def unavailable_reason() -> str:
     return reason.replace("a checker's read-only shell", "a live-data Pip's read-only box") if reason else ""
 
 
+def setup_notice() -> str:
+    """What its card says it does. On a Mac, where the box is Seatbelt's, it also says once, in plain words, what is
+    weaker than on Linux (checker_box.MAC_NOTICE); nowhere else says it louder."""
+    import sys
+    if sys.platform == "darwin":
+        from . import checker_box
+        if not checker_box.unavailable_reason():
+            return SETUP_NOTICE + " " + checker_box.MAC_NOTICE
+    return SETUP_NOTICE
+
+
 def run_here_notice(job) -> str | None:
     """Why this live-data Pip can't run on this computer, or None."""
     if not isinstance(job, dict) or job.get("live_plan") is None:
@@ -541,18 +553,11 @@ def run(project_root, commands, *, approved, cancelled=None, secrets=(), databas
         raise RegistryError("execution_unavailable", "The commands can't run on this computer: " + note + ".")
     relays = [relay] if relay is not None else []
     secrets = tuple(secrets) + tuple(settings.get("secrets") or ())
+    # On a Mac the box runs at the project's own path (no /mnt; on Linux bubblewrap moves into it itself), and with no
+    # PID namespace to end with it, the runner's process sampler (pip_execution) stops whatever a line left running.
+    mac = {"cwd": str(Path(project_root).resolve()), "monitor": True} if settings.get("seatbelt") is not None else {}
     try:
-        taken = {int(settings["forward"]["port"])} if settings.get("forward") else set()
-        forwards = []
-        for port in local_ports(allowed):
-            if port in taken:
-                continue
-            extra = checker_box.Relay("127.0.0.1", port)
-            relays.append(extra)
-            forwards.append({"socket_dir": extra.directory, "port": port})
-            taken.add(port)
-        if forwards:
-            settings["forwards"] = forwards
+        relays += checker_box.reach(settings, local_ports(allowed))
         env = process_env(_Shim(settings), agent=False)
         env.setdefault("LANG", "C.UTF-8")
         out, stopped = [], False
@@ -575,7 +580,8 @@ def run(project_root, commands, *, approved, cancelled=None, secrets=(), databas
             if argv is None:
                 raise RegistryError("execution_unavailable", "The commands can't run on this computer: no read-only box.")
             started = time.monotonic()
-            captured = _capture(argv, maximum=CAPTURE_BYTES, timeout=COMMAND_SECONDS, env=env, cancelled=cancelled)
+            captured = _capture(argv, maximum=CAPTURE_BYTES, timeout=COMMAND_SECONDS, env=env, cancelled=cancelled,
+                                **mac)
             seconds = time.monotonic() - started
             text, truncated = _kept(captured["data"], secrets)
             status = captured["status"]
@@ -585,13 +591,16 @@ def run(project_root, commands, *, approved, cancelled=None, secrets=(), databas
                 continue
             mapped = {"passed": "ok", "failed": "failed", "timed_out": "timed_out", "output_limit": "output_limit"}.get(status, "failed")
             note = ("It ran for more than a minute, so DGC stopped it." if mapped == "timed_out" else
-                    "It printed more than 64 KB, so DGC stopped it and kept the start." if mapped == "output_limit" else "")
+                    "It printed more than 64 KB, so DGC stopped it and kept the start." if mapped == "output_limit" else
+                    "It used more than 512 MB of memory or 32 processes, so DGC stopped it."
+                    if status == "resource_limit" else "")
             out.append(_outcome(index, command, mapped, exit_code=captured["exit_code"] if mapped in ("ok", "failed") else None,
                                 output=text, truncated=truncated or captured["truncated"], seconds=seconds, note=note))
         return out
     finally:
         for item in relays:
             item.close()
+        checker_box.release(settings)
 
 
 # ---- the outcome, as DGC says it --------------------------------------------------------------------------------

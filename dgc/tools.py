@@ -2246,7 +2246,9 @@ def _explain_sandbox_denial(rendered: str, returncode: int, sandboxed: bool, *, 
     if checker:
         # A Troupe checker's box (dgc/checker_box.py) refuses every write by design: not a fault, not the user's.
         return rendered + (
-            "\n\n[dgc] That was your read-only box working: only /tmp is writable, credential files are hidden and"
+            "\n\n[dgc] That was your read-only box working: only "
+            + ("your private temporary folder ($TMPDIR)" if sys.platform == "darwin" else "/tmp")
+            + " is writable, credential files are hidden and"
             " there is no network (except the project's read-only database, when one is set). Check the claim"
             " another way, or answer unsure.")
     return rendered + (

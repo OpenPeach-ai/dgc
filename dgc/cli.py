@@ -2075,6 +2075,20 @@ def pips_sandbox_note() -> str:
         return ""
 
 
+def pips_box_row() -> str:
+    """On a Mac, `dgc doctor`'s row for the read-only box that live-data Pips' commands and Troupe checkers' shell run
+    in (dgc/checker_box.py): Seatbelt, or why it can't run. "" elsewhere: Linux's says so with Pulse's sandbox."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        from .checker_box import unavailable_reason
+        reason = unavailable_reason()
+    except Exception as exc:     # noqa: BLE001 - a diagnostic, never the reason doctor fails
+        reason = f"{type(exc).__name__}: {exc}"
+    return ("Seatbelt (sandbox-exec): live-data Pips' commands and Troupe checkers' shell run read only"
+            if not reason else "unavailable: " + reason)
+
+
 def run_doctor(config: Config) -> int:
     """`dgc doctor` — verify the endpoint is reachable and the model is available.
 
@@ -2127,6 +2141,9 @@ def run_doctor(config: Config) -> int:
     pips_note = pips_sandbox_note()
     if pips_note:
         c.print(f"  [yellow]![/yellow] {_markup_literal(pips_note)}", highlight=False, soft_wrap=True)
+    box_row = pips_box_row()
+    if box_row:
+        c.print(f"  read-only box {terminal_safe_text(box_row)}", markup=False, highlight=False, soft_wrap=True)
     c.print("")
     # Ask DGC to fix keeps one copy of each project it fixed (dgc/pip_fix.py). Their size is said here
     # and nowhere else; a copy nobody used for 14 days is removed by itself.
