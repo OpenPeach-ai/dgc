@@ -4903,6 +4903,41 @@ class TUI:
         except Exception:
             pass
 
+    def _answer_start(self) -> int | None:
+        """Where this turn's final answer starts in the transcript: the first of the Markdown entries that end
+        it, when a tool step of this turn comes before them. None when the turn ended on a step (no answer), or
+        no step comes between the prompt (or a message sent mid-turn) and the answer."""
+        blocks = self.blocks
+        start = len(blocks)
+        while start and isinstance(blocks[start - 1], dict) and blocks[start - 1].get("kind") == "md":
+            start -= 1
+        if start == len(blocks):
+            return None
+        for block in reversed(blocks[:start]):
+            kind = block.get("kind") if isinstance(block, dict) else None
+            if kind == "user":
+                return None
+            if kind == "tool":
+                return start
+        return None
+
+    def _mark_turn_end(self, verb: str, seconds: float) -> None:
+        """A finished turn that used tools gets "· Worked for 43s · 5 tools" above its answer, the editor's words
+        for the same moment, and Codex's place for it in a terminal: the steps stay on screen above the line,
+        and the answer under it stands on its own. Any other end (stopped, failed, paused, an answer with no
+        steps, steps with no answer) keeps the line under the turn: "· done · 3s"."""
+        th = style_mod.theme()
+        count = self._tool_count
+        tools = f" · {count} tool" + ("" if count == 1 else "s") if count else ""
+        at = self._answer_start() if verb == "done" and count else None
+        if at is None:
+            self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {seconds:.0f}s{tools}[/]"))
+            return
+        self.blocks.insert(at, self._rich(f"[{th.faint}]{glyphs.MIDDOT} Worked for {int(seconds)}s{tools}[/]"))
+        if self._follow:
+            self._scroll_off = 0
+        self._invalidate()
+
     def _flush_text(self) -> None:
         self._flush_think()
         if self._buf.strip():
@@ -8983,13 +9018,10 @@ class TUI:
                     hub.policy.note_turn_end()
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
-                th = style_mod.theme()
                 verb = ("stopped" if self._cancel.is_set() else
                         "failed" if not succeeded else
                         "paused" if getattr(sess.agent, "_last_turn_pause", "") else "done")
-                self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
-                                        + (f" · {self._tool_count} tool" +
-                                           ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
+                self._mark_turn_end(verb, el)
                 if sess is not self.active and not self._cancel.is_set():   # a background agent finished
                     self._flash(f"⧉ {sess.name or 'agent'} finished — ^\\ to view")
                 self._invalidate()

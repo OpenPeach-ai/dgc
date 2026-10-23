@@ -61,6 +61,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
   everything you need from them.
 
+- **"Worked for 43s" in the terminal.** A finished turn that used tools says `· Worked for 43s · 5 tools` above its
+  answer, the editor's words for the same moment; the steps stay on screen above it. A reply with no tools, and a
+  turn that was stopped, failed or paused, still ends with `· done · 3s` under it. `dgc --classic` keeps its line
+  under the turn: it prints into your scrollback, and can't put a line above an answer it has already printed.
+
 - **Ask DGC to fix runs in the background.** On a Pip report's card it starts a helper in the chat's own session,
   with no turn and no message from you, so the chat stays free while it works (`start_pip_fix`). It reads the whole
   report (every finding with its evidence), fixes what is real in a copy of the project and runs the project's tests

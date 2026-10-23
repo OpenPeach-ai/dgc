@@ -2538,7 +2538,8 @@ DGC ends an answer with what it changed and what you can do about it.
   next prompt has its answer. What you still need stays on screen: a detailed message (a diagnosis,
   a plan), a message you sent mid-turn, question and approval cards, notices, and the answer with
   what it changed. A turn that was stopped or failed does not fold. A reload or a resumed chat
-  draws the same fold. The terminal keeps every line in its transcript.
+  draws the same fold. The terminal keeps every line on screen: a turn that used tools says
+  **· Worked for 43s · 5 tools** above its answer, and any other turn ends with **· done · 3s**.
 - **A summary of the files this turn touched**, each with its additions and deletions, and each
   opening its own diff. **Review** opens every change this chat has made.
 - **Undo** puts those files back as they were before the turn and rewinds the conversation with
