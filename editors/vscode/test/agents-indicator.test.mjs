@@ -376,12 +376,20 @@ test("announcements: a batch speaks once when it starts and once when it ends; w
 });
 
 test("a backend exit marks working agents stopped without a word; the new backend's snapshot wins", () => {
-  const { $, doc, send, event, start, pill, advance, mapOpen, agentRows, errors } = view({ clock: true });
+  const { $, dom, doc, send, event, start, pill, advance, mapOpen, agentRows, errors } = view({ clock: true });
   start(sid(1)); start(sid(2));
   advance(800);
   doc.getElementById("announcer").textContent = "";
   $("agents-pill").click();
-  send({ type: "backend_exit", code: 1, recovering: true, resumes: "offer" });
+  // A busy machine: the wall clock moves between any two reads. The agents stopped together all the same.
+  const wallNow = dom.window.Date.now;
+  let wall = wallNow.call(dom.window.Date);
+  dom.window.Date.now = () => (wall += 3);
+  try {
+    send({ type: "backend_exit", code: 1, recovering: true, resumes: "offer" });
+  } finally {
+    dom.window.Date.now = wallNow;
+  }
   assert.equal(pill().state, "idle");
   assert.equal(pill().label, "0 agents", "none working");
   assert.equal(mapOpen(), false, "the map closes");

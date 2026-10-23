@@ -12433,12 +12433,15 @@
     if (mapWasOpen) input.focus();
   }
   function agentsBackendExit() {
+    // One moment for all of them: they stopped together, so the map keeps them in the order they started. Read per
+    // agent, a millisecond between two of them put the later one first on a busy machine.
+    const endedAt = agentNow(), endedWall = Date.now();
     for (const record of agentRecords.values()) {
       if (!AGENT_ACTIVE.has(record.state)) continue;
       record.state = "stopped";
-      record.endedAt = agentNow();
+      record.endedAt = endedAt;
       record.message = "DGC's backend stopped";
-      record.endedWall = Date.now();
+      record.endedWall = endedWall;
       delete record.waiting_for; delete record.activity; delete record.duration_ms;
     }
     agentActiveExtra = 0;
