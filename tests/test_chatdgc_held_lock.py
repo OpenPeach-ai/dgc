@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import json
 import os
 import shutil
 import signal
@@ -292,6 +293,48 @@ class ChatDGCLockIntegrationTests(unittest.TestCase):
         self.assertIs(try_lock(lock), False, "B's DGC holds it now")
         self.send(b, "s1", chat, "CHAT_COUNT 1")
         self.ended(b, "s1")
+        self.assert_valid(b)
+
+    def test_held_before_any_note_says_so_read_only_and_its_holder_named_once_one_does(self):
+        world = World(self, scale=0.05, handler=ChatModel)
+        b = self.home(world, "home-b")
+        chat = self.a_saved_chat(world, b)
+        b.send({"type": "chatdgc_shown", "conversation_ids": []})
+        wait_until(lambda: not self.holds(world, b, chat), timeout=30, what="B to let it go")
+
+        # Another holder has the chat's lock and no note names it yet (this test process, standing in for a window).
+        locks = HeldLocks(world.home / ".dgc" / "chat" / "held")
+        self.addCleanup(locks.close)
+        self.assertIs(locks.take(chat), True)
+        mark = self.last_seq(b)
+        self.open_chat(b, "o1", chat)
+        b.send({"type": "chatdgc_shown", "conversation_ids": [chat]})
+        gap = b.wait(lambda e: held(e, "elsewhere", chat) and e["seq"] > mark, 30)
+        self.assertNotIn("pid", gap, "nobody named yet: just 'open in another window'")
+        self.send(b, "s1", chat, "CHAT_COUNT 1")
+        self.refused(b, "s1")
+        self.assertFalse(self.holds(world, b, chat))
+
+        # Its note comes: B asks again shortly and names it.
+        from dgc import peers
+        note = world.home / ".dgc" / "peers" / f"{os.getpid()}.json"
+        self.addCleanup(lambda: note.unlink(missing_ok=True))
+        note.write_text(json.dumps({
+            "pid": os.getpid(), "proc_start": peers._proc_start(os.getpid()), "kind": "serve", "heartbeat": time.time(),
+            "socket": str(world.base / "nobody.sock"), "instance": "test", "chatdgc_take": 1, "chatdgc_locks": 1,
+            "chatdgc_held": [chat]}))
+        named = b.wait(lambda e: held(e, "elsewhere", chat) and e.get("pid") == os.getpid(), 30)
+        self.assertGreater(named["seq"], gap["seq"])
+
+        # It lets go: B's by itself, as a chat nobody else has open always is.
+        note.unlink()
+        locks.release(chat)
+        here = b.wait(lambda e: held(e, "here", chat) and e["seq"] > named["seq"], 30)
+        self.assertNotIn("request_id", here)
+        wait_until(lambda: self.holds(world, b, chat), timeout=20, what="B's note")
+        self.assertIs(locks.take(chat), False, "B's lock now")
+        self.send(b, "s2", chat, "CHAT_COUNT 1")
+        self.ended(b, "s2")
         self.assert_valid(b)
 
     def test_where_no_lock_can_be_made_the_notes_decide_as_before(self):

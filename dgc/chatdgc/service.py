@@ -399,6 +399,7 @@ class ChatService:
         self._via = threading.local()                    # a link's command being run: its answers go back down it
         self._given: dict[str, float] = {}               # chats just let go: read-only here until (monotonic)
         self._watching_away = False
+        self._held_order = threading.Lock()              # chatdgc_held is said one at a time, as it is true then
         # A held chat's lock: the shown ones held here, the ones being written (and finished) here, the ones another
         # window took mid-reply until their reply ends. Taken where this window decides it holds a chat, let go as soon
         # as it doesn't (_release_unwanted).
@@ -559,14 +560,22 @@ class ChatService:
         self._wire(event, **fields)
 
     def _held(self, conversation_id: str, state: dict, request_id: str | None = None) -> None:
-        """Tell this window who writes to the chat now (chatdgc_held): never down a link, it is this window's news."""
-        fields = {"conversation_id": conversation_id, "state": state.get("state") or "here"}
-        pid = state.get("pid")
-        if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
-            fields["pid"] = pid
-        if request_id:
-            fields["request_id"] = request_id
-        self._wire("chatdgc_held", **fields)
+        """Tell this window who writes to the chat now (chatdgc_held): never down a link, it is this window's news.
+        "here" is said only if it is still true as it is said: another window's Open here may have taken the chat a
+        moment after this window had it, and its "moved" must be the last word this window hears, never a stale here."""
+        with self._held_order:
+            if (state.get("state") or "here") == "here":
+                with self._hold_lock:
+                    now = self._away.get(conversation_id)
+                if now is not None:
+                    state = dict(now)
+            fields = {"conversation_id": conversation_id, "state": state.get("state") or "here"}
+            pid = state.get("pid")
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+                fields["pid"] = pid
+            if request_id:
+                fields["request_id"] = request_id
+            self._wire("chatdgc_held", **fields)
 
     def held_here(self) -> list[str] | None:
         """The chats this process holds: the ones its window shows that no other window holds, the ones it is writing
@@ -813,8 +822,10 @@ class ChatService:
             self._away.pop(conversation_id, None)
             self._given.pop(conversation_id, None)
             self._shown.add(conversation_id)
-        self._turns_changed()
+        # This window hears it is its own before its note says so: another window learns it from the note, and its
+        # Open here (this window then hears "moved") must never arrive here first.
         self._held(conversation_id, {"state": "here"}, request_id)
+        self._turns_changed()
         self._opened(self.engine.open(conversation_id), request_id)
         self._context_later(conversation_id)
         if not mine:
@@ -873,8 +884,8 @@ class ChatService:
             self._away.pop(conversation_id, None)
             self._given.pop(conversation_id, None)
             self._shown.add(conversation_id)
+        self._held(conversation_id, {"state": "here"}, request_id)      # before the chat itself, and before the note
         self._turns_changed()
-        self._held(conversation_id, {"state": "here"}, request_id)      # before the chat itself, which follows
         self._follow(remote)
 
     def _follow(self, remote: _Remote) -> None:
@@ -947,6 +958,8 @@ class ChatService:
                             self._away[conversation_id] = state
                 else:
                     state = self._holder_state(conversation_id)
+                if state is None:
+                    self._held(conversation_id, {"state": "here"})      # before the note says so
                 self._turns_changed()
                 if state is not None:
                     self._held(conversation_id, state)
@@ -956,7 +969,6 @@ class ChatService:
                                     else None, conversation_id)
                     self._watch_away()
                     return
-                self._held(conversation_id, {"state": "here"})
                 for cmd in held:
                     try:
                         self.dispatch(cmd)
@@ -1166,8 +1178,8 @@ class ChatService:
                             if self._locks.take(conversation_id) is False:
                                 continue                 # another window has it, its note still to come
                             del self._away[conversation_id]
-                        self._turns_changed()
                         self._held(conversation_id, {"state": "here"})    # the screen opens it again, here
+                        self._turns_changed()                             # then the note says so
         finally:
             with self._hold_lock:
                 self._watching_away = False
