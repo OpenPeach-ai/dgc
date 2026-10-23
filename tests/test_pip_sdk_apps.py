@@ -601,6 +601,20 @@ class ChangeTests(AppWorld, unittest.TestCase):
         with self.assertRaises(RegistryError) as raised:
             self.control("accept_pip_app_action", action_id=action["id"], expected_digest=action["digest"])
         self.assertEqual(raised.exception.code, "connector_schema_changed")
+        racing = self.propose(key="race")
+
+        def changed_meanwhile(payload):
+            # The app goes in the moment between the action's last check and its call: once it is dispatching.
+            state = self.registry.db.execute("SELECT status FROM pip_app_actions WHERE id=?", (racing["id"],)).fetchone()[0]
+            if state == "dispatching":
+                raise RegistryError("app_not_registered", "Shop app isn't registered with DGC now.")
+            return real_check(payload)
+        real_check = pip_sdk_apps.check_action
+        with patch.object(pip_sdk_apps, "check_action", side_effect=changed_meanwhile):
+            done = self.control("accept_pip_app_action", action_id=racing["id"], expected_digest=racing["digest"])["action"]
+        self.assertEqual((done["status"], done["receipt"]["meaning"]), ("unknown",
+                         "DGC didn't call the shop app: Shop app isn't registered with DGC now. DGC will not retry this action."),
+                         "removed in the moment before the call: nothing was sent, and the receipt says so")
         fresh = self.propose(key="two")
         self.control("remove_app", name="shop")
         with self.assertRaises(RegistryError) as raised:

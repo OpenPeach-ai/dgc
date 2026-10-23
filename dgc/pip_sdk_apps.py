@@ -918,8 +918,12 @@ def prepared(config, payload, authorize, *, action_id, action_digest, opener=Non
     app = require(payload["server"])
 
     def send():
-        authorize()
-        check_action(payload)
+        try:
+            authorize()
+            check_action(payload)
+        except RegistryError as exc:
+            # Changed in the moment between the review's last check and the call: nothing was sent, said so.
+            raise AppCallError(app["name"], f"DGC didn't call {phrase(app['name'])}: {exc}", "app_not_called") from None
         from .pip_plugins import remember
         try:
             answer = call(app, tool, payload["call"]["arguments"], pip_id=payload["source"]["pip_id"],
