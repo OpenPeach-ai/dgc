@@ -233,6 +233,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "server_window",
     # Pip reports: a client asking for them, or dismissing a card, is not a user acting on the chat.
     "watch_pip_reports", "pip_report_dismiss",
+    # Which of this chat's Pips are running: asked once, then sent as it changes.
+    "watch_pip_runs",
     # Ask DGC to fix: reading a chat's fixes or one file a fix changed.
     "list_pip_fixes", "get_pip_fix_change",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
@@ -389,7 +391,7 @@ _BUSY_MUTATIONS = {
     # beside the turn -- Codex draws the same line.
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
-    "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss",
+    "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
@@ -2418,6 +2420,9 @@ class Backend:
                           # (start_pip_fix, pip_fix, list_pip_fixes, undo_pip_fix, get_pip_fix_change;
                           # dgc/pip_fix.py): no turn, its card is its status, Review and Undo after.
                           "pip_fix": 1,
+                          # Which of this chat's Pips are running now (the chip above the box): once the client
+                          # sends watch_pip_runs, a pip_runs_running event, then another whenever that changes.
+                          "pip_runs_running": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -5365,6 +5370,10 @@ class Backend:
                     self._look_for_pip_reports(force=force)
                 except Exception:           # a report is never worth the chat
                     pass
+                try:
+                    self._look_for_pip_runs(force=force)
+                except Exception:           # nor is the chip that says a Pip is at work
+                    pass
                 force = wake.wait(self._PIP_REPORT_POLL_S)
                 wake.clear()
 
@@ -5397,6 +5406,26 @@ class Backend:
         if idle and state.pending_write():
             self._flush_pip_reports()
         return len(shown)
+
+    def _look_for_pip_runs(self, *, force: bool = False, request_id: str | None = None) -> bool:
+        """Tell a client that asked (watch_pip_runs) which of this chat's Pips are running, when that changed."""
+        if (getattr(self, "_pips_closing", False) or getattr(self.agent, "stopping", False) is True
+                or not getattr(self, "_pip_runs_on", False)):
+            return False
+        state = self.__dict__.get("_pip_runs_watch")
+        if state is None:
+            from .pip_report_delivery import RunningWatch
+            state = self.__dict__.setdefault("_pip_runs_watch", RunningWatch())
+        session = getattr(self.agent, "session_file", None)
+        items = state.look(self.agent, self.config, force=force, answer=request_id is not None)
+        if items is None:
+            return False
+        with self._dispatch_guard():
+            if getattr(self.agent, "session_file", None) != session:
+                state.reset()               # another chat now: it is told its own on the next look
+                return False
+            self.em.emit("pip_runs_running", items=items, **_request_fields(request_id))
+        return True
 
     def _flush_pip_reports(self) -> None:
         """Write shown reports into the transcript and save it. Only where the transcript may change:
@@ -7225,6 +7254,11 @@ class Backend:
             # _look_for_pip_reports). Until a client says so none is sent, and none is taken.
             self._pip_reports_on = True
             self._kick_pip_reports()
+        elif t == "watch_pip_runs":
+            # This client draws the chip that says one of this chat's Pips is running: answered now, then sent
+            # again whenever that changes. Until a client asks, none is sent (an older editor, the SDK, ACP).
+            self._pip_runs_on = True
+            self._look_for_pip_runs(force=True, request_id=request_id or "")
         elif t == "pip_report_dismiss":
             # The card goes at once in the panel; here it is marked in the transcript, and saved now
             # or, while a turn runs, when that turn ends.

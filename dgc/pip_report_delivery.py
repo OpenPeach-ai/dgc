@@ -341,6 +341,120 @@ def pending(registry, session_id: str, *, exclude=(), now: datetime | None = Non
     return out
 
 
+# ---- which of this chat's Pips are running now (pip_runs_running) ---------------------------------
+# The chat a Pip reports to learns that it is at work before its card arrives: a one-line chip above the box ("Billing
+# audit running · 0:42"). Pip runs happen in the Pips runner, not in the chat's session, so the chat reads the registry
+# as it does for cards: the runs going now of the Pips that report here (attached, or set up here) and the runs this
+# chat started (run_pip_now), and only those whose end is a card here (a source review, a Pulse check, a live-data
+# run). A chat reply in a Pip's own chat, a draft and Patch work are not reports, and say nothing here.
+MAX_RUNNING = 16
+RUNNING_TRIGGERS = ("schedule", "event", "you", "chat", "handoff", "setup")
+
+
+def _running_trigger(manifest: dict, key) -> str:
+    """How a run started, in the words the editor uses: its schedule, an event, you, a DGC chat, a handoff, or its
+    setup card's first run (accept_pip_setup queues it under the key "setup-<setup id>")."""
+    trigger = manifest.get("trigger")
+    if trigger == "manual" and isinstance(key, str) and key.startswith("setup-"):
+        return "setup"
+    return {"schedule": "schedule", "event": "event", "main_chat": "chat", "handoff": "handoff"}.get(trigger, "you")
+
+
+def running(registry, session_id: str) -> list[dict]:
+    """``pip_runs_running``'s items for this chat, oldest first: ``{run_id, pip_id, name, pip_type, started_at,
+    trigger}`` for each run going now whose card comes to this chat. Reads only."""
+    if not isinstance(session_id, str) or not session_id:
+        return []
+    identity = registry.session_identity(session_id)
+    if identity is None:
+        return []
+    workspace_id = identity["workspace_id"]
+    links = _links(registry.db, session_id, workspace_id)
+    requester = chat_identity(session_id)
+    marks = ",".join("?" for _ in links) or "NULL"
+    rows = registry.db.execute(f"""SELECT id,pip_id,
+            CASE WHEN length(CAST(started_at AS BLOB))<=40 THEN started_at END AS started_at,
+            CASE WHEN length(CAST(created_at AS BLOB))<=40 THEN created_at END AS created_at,
+            CASE WHEN length(CAST(idempotency_key AS BLOB))<=512 THEN idempotency_key END AS idempotency_key,
+            CASE WHEN length(CAST(manifest AS BLOB))<=131072 THEN manifest END AS manifest
+        FROM pip_runs WHERE workspace_id=? AND status IN ('running','cancelling')
+          AND (pip_id IN ({marks}) OR requested_by=?)
+        ORDER BY started_at,id LIMIT ?""", (workspace_id, *links, requester, MAX_RUNNING)).fetchall()
+    out = []
+    for row in rows:
+        if not _RUN.match(row["id"] or "") or not _PIP.match(row["pip_id"] or ""):
+            continue
+        try:
+            manifest = json.loads(row["manifest"]) if row["manifest"] else None
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        kind = manifest.get("run_kind", "audit")
+        if not (kind in ("audit", "live") or kind == "test" and "pulse_verification" in manifest):
+            continue                                     # not a report: a reply, a draft, Patch work, a handoff's test
+        pip = _pip(registry.db, row["pip_id"])
+        started = row["started_at"] or row["created_at"]
+        if pip is None or not isinstance(started, str):
+            continue
+        out.append({"run_id": row["id"], "pip_id": row["pip_id"], **pip, "started_at": started,
+                    "trigger": _running_trigger(manifest, row["idempotency_key"])})
+    return out
+
+
+class RunningWatch:
+    """What this chat was last told about its running Pips: ``look`` answers the items to send when they changed (or
+    always, to ``answer`` a client that asked), else None. The registry's file stat gates the read, as ChatReports
+    does, unless ``force``."""
+
+    def __init__(self):
+        self.sent = None
+        self._signature = None
+        self._lock = threading.Lock()
+
+    def reset(self) -> None:
+        with self._lock:
+            self.sent = None
+            self._signature = None
+
+    def look(self, agent, config, *, force: bool = False, answer: bool = False) -> list[dict] | None:
+        if config.get("pips_enabled", False) is not True or not in_use():
+            items, session_id = [], None
+        else:
+            session = getattr(agent, "session_file", None)
+            session_id = session.stem if session is not None and getattr(agent, "_session_exists", False) else None
+            with self._lock:
+                signature = (session_id, *(_stat(name) for name in ("registry.sqlite3", "registry.sqlite3-wal")))
+                if not (force or answer) and signature == self._signature:
+                    return None
+                self._signature = signature
+            items = []
+            if session_id is not None:
+                try:
+                    with WorkspaceRegistry() as registry:
+                        registry.db.execute("BEGIN")
+                        items = running(registry, session_id)
+                except (RegistryError, OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+                    with self._lock:
+                        self._signature = None      # look again next time
+                    return None
+            items = redact_value(items, secret_values(config))
+        with self._lock:
+            told = (session_id, items)
+            if not answer and told == self.sent:
+                return None
+            self.sent = told
+        return items
+
+
+def _stat(name: str):
+    try:
+        info = (state_directory() / name).stat()
+        return info.st_mtime_ns, info.st_size
+    except OSError:
+        return None
+
+
 def record(registry, session_id: str, entries) -> int:
     """Enter runs in this chat's ledger: once each, whatever happens later."""
     rows = [entry for entry in entries if _RUN.match(str(entry.get("run_id") or ""))]
