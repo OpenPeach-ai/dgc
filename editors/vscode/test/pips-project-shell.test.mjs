@@ -110,6 +110,7 @@ test('a Project Pip gets the Personal Pips page: the paged list, then its top ba
   await x.click(`[data-job="${AUDIT}"]`);
   assert.ok(x.$('.pip-topbar #simple-back'),'back to the list');
   assert.equal(pill(x),'Billing audit');
+  assert.equal(x.$('.pip-topbar .pip-pill').title,'Rook · Code review','its kind of work, as the old header said it, on hover');
   assert.ok(x.$('.pip-topbar #pip-run-now'),'Run now');
   assert.ok(x.$('.pip-topbar .pip-menu'),'its menu');
   assert.equal(x.$('#pip-computer-open'),null,'a computer is a Personal Pip’s');
