@@ -658,6 +658,26 @@ MODEL_CATALOG: list[tuple[str, int]] = [
 SUBAGENT_WINDOWS = (8_192, 16_384, 32_768, 65_536, 131_072, 262_144)
 
 
+def bound_provider_key(config, secret_key: str, base_url: str) -> str:
+    """The saved provider key ``secret_key`` (api_key, subagent_api_key, fallback_api_key) when ``base_url`` is the
+    endpoint it is bound to, else "". A sub-agent or fallback key with no host of its own is bound to the main host,
+    and "" for ``base_url`` means that inherited host, as the route resolves it. Endpoints compare as the binding
+    does: canonical spelling, never a prefix or the same host on another path."""
+    endpoint_key = _PROVIDER_SECRET_ENDPOINTS.get(secret_key)
+    if endpoint_key is None:
+        return ""
+    try:
+        key = config.get(secret_key, "")        # "" already when the stored binding no longer holds
+    except Exception:                           # noqa: BLE001 -- a stub config: no saved key
+        return ""
+    data = getattr(config, "data", None)
+    if not isinstance(key, str) or not key or not isinstance(data, dict):
+        return ""
+    bound = _provider_secret_identity(data, secret_key)
+    asked = _provider_secret_identity({**data, endpoint_key: str(base_url or "").strip()}, secret_key)
+    return key if bound and bound == asked else ""
+
+
 def subagent_window_arg(text: str) -> int | None:
     """``/subagent context N``: a token count of at least 2048, a size like ``64k``, or 0 for the
     main model's window. None when it is neither."""

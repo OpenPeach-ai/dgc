@@ -21,6 +21,7 @@ import { contextSizeHint, contextSizeShown, renderFields } from './settingsField
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
+import { createModelBoxes, modelBoxMarkup } from './settingsModelBox.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -48,8 +49,34 @@ const ui = {
     inp: (id, value, type = 'text') => `<input id="${id}" type="${type}" value="${esc(value ?? '')}" autocomplete="off" spellcheck="false">`,
     area: (id, value, placeholder = '', max = 1500) => `<textarea id="${id}" rows="4" maxlength="${max}" placeholder="${esc(placeholder)}" spellcheck="true">${esc(value ?? '')}</textarea>`,
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
-    card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`
+    card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`,
+    // A Model box: a list of the models at its card's own host from a CLI that answers list_models_at, else text.
+    model: (id, label, hint, value) => draft.models_at ? modelBoxMarkup(id, label, hint, value)
+        : ui.field(label, hint, ui.inp(id, value))
 };
+// Which host each Model box lists, and the fields of its card that make it list again: [role, host, transport, key].
+// The Pips box lists DGC's main connection, which Pips use.
+const MODEL_ROUTES = { model: ['main', 'base_url', 'api_mode', 'api_key'],
+    subagent_model: ['subagent', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key'],
+    fallback_model: ['fallback', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key'],
+    pips_model: ['main', 'base_url', 'api_mode', 'api_key'] };
+/** A field's value as typed: from the page when it is on it, else from what was typed on another page. */
+const typedValue = id => String($(id) ? $(id).value : (draft[id] ?? '')).trim();
+const sameHost = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase();
+/** What a Model box lists now: its card's host (a blank one is the main host), transport and a key typed beside it. */
+function modelRoute(id) {
+    const [role, urlId, modeId, keyId] = MODEL_ROUTES[id] || [];
+    if (!role) return null;
+    const mainUrl = typedValue('base_url');
+    const url = typedValue(urlId) || (role === 'main' ? '' : mainUrl);
+    if (!url) return null;
+    // "Inherit" is the main transport on the main host, and Auto anywhere else (as the route resolves it).
+    const mode = typedValue(modeId) || (sameHost(url, mainUrl) ? typedValue('api_mode') || 'auto' : 'auto');
+    const key = typedValue(keyId);
+    return { role, base_url: url, api_mode: mode, ...(key ? { api_key: key } : {}) };
+}
+const modelBoxes = createModelBoxes({ send: m => vscode.postMessage(m), route: modelRoute,
+    fields: id => (MODEL_ROUTES[id] || []).slice(1) });
 const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '' };
 function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
     $('save-status').textContent = saveStatus; }
@@ -76,6 +103,9 @@ function applyConfig(ev) {
     draft.budget_settable = 'turn_token_budget' in ev;
     // The sub-agents' window, from a CLI that answers it: 0 is the main model's, shown (and kept) as blank.
     draft.subagent_window_settable = 'subagent_context_size' in ev;
+    // Each Model box lists its own card's host, from a CLI that answers list_models_at (the extension adds it from
+    // the handshake; not a protocol field). Without it they stay text boxes.
+    draft.models_at = ev.list_models_at === true;
     if (!dirty.has('subagent_context_size'))
         draft.subagent_context_size = Number(ev.subagent_context_size) > 0 ? String(ev.subagent_context_size) : '';
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).
@@ -190,6 +220,7 @@ function render() {
         return;
     }
     renderFields(section, main, draft, providers, ui);
+    if (draft.models_at) modelBoxes.bind(main);
     const save = $('save');
     save.disabled = saving || (section === 'web' && !draft.search_settable) || (section === 'chatdgc' && !draft.chatdgc_settable);
     save.insertAdjacentHTML('afterend', ' <span class="save-status" id="save-status" role="status">' + esc(saveStatus) + '</span>');
@@ -215,6 +246,7 @@ function render() {
             el.onchange = () => { const p = providers.find(x => x.id === el.value); if (p) {
                 $(urlId).value = p.url;
                 setDraft(urlId, p.url);
+                $(urlId).dispatchEvent(new Event('input', { bubbles: true }));    // its Model box lists the new host
             } };
     }
 }
@@ -1044,6 +1076,9 @@ window.addEventListener('message', event => {
         if (msg.name === connectingPlugin && msg.error) updateConnection('error');
         if (['plugins', 'mcp'].includes(section))
             render();
+    }
+    else if (msg.type === 'modelsAt') {
+        modelBoxes.receive(msg);
     }
     else if (msg.type === 'searchKeyRemoved') {
         // Settings -> Web search -> Remove: that provider's own key, cleared at once by its own name.

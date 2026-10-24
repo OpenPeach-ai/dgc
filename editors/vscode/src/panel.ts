@@ -3408,6 +3408,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (["pips_result", "pips_status"].includes(ev.type)) return;
     // A session that keeps running with no window (dgc/serve_detach.py): the panel's own business.
     if (ev.type === "session_live") return;          // ready.capabilities.attached has already said it
+    if (ev.type === "models_at") return;             // Settings' Model boxes: answered to their own request
     if (ev.type === "session_moved") { this.sessionMoved(String((ev as any).reason || "")); return; }
     if (ev.type === "turn_interrupted") { this.offerTurnStoppedWithoutWindow(ev); return; }
     if (ev.type === "live_sessions") { this.liveSessionsArrived(ev); return; }
@@ -3856,7 +3857,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                                               ollama_keep_alive: this.cacheSettings.ollama_keep_alive,
                                                               cache_settable: true } : {}),
                                    // Not a protocol field either: the last server_window event, for Context size.
-                                   ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}) } : ev;
+                                   ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}),
+                                   // Nor this: the CLI lists the models at a host as typed (list_models_at).
+                                   list_models_at: this.listsModelsAt() } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6667,6 +6670,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** The CLI lists the models at a host Settings has typed (ready.capabilities.list_models_at). */
+  private listsModelsAt(): boolean {
+    return (this.lastReadyEvent?.capabilities as any)?.list_models_at === 1;
+  }
+
+  /** Settings -> a Model box: the models at its card's own host, as typed. Only what the page typed goes: the host,
+   *  the transport, and a key typed in the form. The CLI decides whether a saved key may go with it (only to the host
+   *  it is bound to); the extension never adds one. The page hears the ids or a short reason, by its token. */
+  private async listModelsAt(msg: any): Promise<void> {
+    const token = String(msg?.token || "").slice(0, 64);
+    const role = ["main", "subagent", "fallback"].includes(msg?.role) ? String(msg.role) : "";
+    const reply = (fields: Record<string, unknown>) =>
+      this.settingsEditor?.webview.postMessage({ type: "modelsAt", token, role, ...fields });
+    if (!token || !role) return;
+    if (!this.listsModelsAt()) { reply({ ids: [], unsupported: true }); return; }
+    const baseUrl = typeof msg.base_url === "string" ? msg.base_url.trim().slice(0, 4096) : "";
+    const mode = ["", "auto", "ollama", "anthropic", "chat_completions", "responses"].includes(String(msg.api_mode ?? ""))
+      ? String(msg.api_mode ?? "") : "";
+    const typedKey = typeof msg.api_key === "string" ? msg.api_key.trim().slice(0, 16384) : "";
+    try {
+      const ev: any = await this.ensureBackend().request({
+        type: "list_models_at", request_id: this.nextRequestId("models-at"), role: role as any, base_url: baseUrl,
+        api_mode: mode as any, ...(typedKey ? { api_key: typedKey } : {}),
+      } as any, "models_at", 30000);
+      const ids = Array.isArray(ev.ids) ? ev.ids.filter((id: unknown) => typeof id === "string").slice(0, 4096) : [];
+      reply({ ids, ...(typeof ev.error === "string" && ev.error ? { error: ev.error.slice(0, 200) } : {}) });
+    } catch {
+      reply({ ids: [], error: "DGC didn't answer" });
+    }
+  }
+
   /** The web search providers this CLI's set_config takes: ready.capabilities.search_providers (Ollama came with it),
    *  else the four every CLI that takes the search from Settings knows. One it doesn't know refuses the whole save. */
   private searchProviders(): string[] {
@@ -6766,6 +6800,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.showEditorSettings();
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {});
+    } else if (msg?.type === "listModelsAt") {
+      await this.listModelsAt(msg);
     } else if (msg?.type === "removeSearchKey") {
       await this.removeSearchKey(String(msg.provider || ""));
     } else if (msg?.type === "listRunning") {

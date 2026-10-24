@@ -76,7 +76,7 @@ export function contextSizeShown(c) {
 }
 
 export function renderFields(section, main, config, providers, ui) {
-    const { field, sel, inp, bool, card } = ui;
+    const { field, sel, inp, bool, card, model } = ui;
     function renderGeneral(main) {
         const c = config;
         const think = c.subscription_engine ? (c.subscription_effort || "off") : (c.think || "off");
@@ -103,7 +103,7 @@ export function renderFields(section, main, config, providers, ui) {
             + card("Connection", field("Provider preset", "Fills the host below.", sel("provider", [["", "Choose a preset"]].concat(presets), ""))
                 + field("Host URL", "", inp("base_url", c.base_url || ""))
                 + field("API key", "Leave blank to keep the saved key.", inp("api_key", c.api_key || "", "password"))
-                + field("Model", "", inp("model", c.model || "")))
+                + model("model", "Model", "", c.model || ""))
             + card("Subscription", field("Engine", "Run turns through a subscription CLI.", sel("subscription_engine", [["", "Off"], ["claude", "Claude"], ["codex", "Codex"], ["qwen", "Qwen"], ["kimi", "Kimi"], ["copilot", "Copilot"]], c.subscription_engine || ""))
                 + field("Subscription model", "Optional. Blank uses that CLI's default.", inp("subscription_model", c.subscription_model || ""))
                 + field("Reasoning effort", "", sel("subscription_effort", [["", "Default"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], c.subscription_effort || "")))
@@ -127,13 +127,13 @@ export function renderFields(section, main, config, providers, ui) {
         const c = config;
         main.innerHTML = '<h2>Agents</h2><p class="sub">Sub-agents and the fallback route. Blank fields inherit the main model.</p>'
             + card("Sub-agents", field("Provider preset", "Fills the sub-agent host below.", sel("subagent_provider", [["", "Choose a preset"]].concat(providers.map(p => [p.id, p.label])), ""))
-                + field("Model", "", inp("subagent_model", c.subagent_model || ""))
+                + model("subagent_model", "Model", "", c.subagent_model || "")
                 + field("Host URL", "", inp("subagent_base_url", c.subagent_base_url || ""))
                 + field("Transport", "", sel("subagent_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.subagent_api_mode || ""))
                 + field("API key", "Leave blank to keep the saved key.", inp("subagent_api_key", c.subagent_api_key || "", "password"))
                 + field("Context size", c.subagent_window_settable ? "Tokens each sub-agent holds before it compacts." : "Update the DGC CLI to set this here.",
                     inp("subagent_context_size", subagentWindowShown(c), "number")))
-            + card("Fallback", field("Model", "", inp("fallback_model", c.fallback_model || ""))
+            + card("Fallback", model("fallback_model", "Model", "", c.fallback_model || "")
                 + field("Host URL", "", inp("fallback_base_url", c.fallback_base_url || ""))
                 + field("Transport", "", sel("fallback_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.fallback_api_mode || ""))
                 + field("API key", "", inp("fallback_api_key", c.fallback_api_key || "", "password")))

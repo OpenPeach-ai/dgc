@@ -995,3 +995,146 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
   x.click('[data-nav=general]');x.click('#save');
   assert.equal(saves().at(-1).values.subagent_context_size,'32768');
 });
+
+// ---- Model boxes: each lists the models at its own card's host (list_models_at) ------------------------------
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const asks=x=>x.sent.filter(m=>m.type==='listModelsAt');
+const answer=(x,ask,fields)=>x.message({type:'modelsAt',token:ask.token,role:ask.role,...fields});
+const openList=(x,id)=>x.d.querySelector(`[data-model-open=${id}]`).dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+const optionsOf=(x,id)=>[...x.d.querySelectorAll(`#${id}-list [role=option]`)].map(li=>li.textContent);
+
+test('Model boxes stay text boxes with a CLI that can\'t list a host\'s models',()=>{
+  const x=setup();
+  for(const [nav,ids] of [['models',['model']],['agents',['subagent_model','fallback_model']]]){
+    x.click(`[data-nav=${nav}]`);
+    for(const id of ids){
+      const box=x.d.querySelector('#'+id);
+      assert.equal(box.tagName,'INPUT');
+      assert.equal(box.getAttribute('role'),null,`${id}: no list to offer`);
+      assert.equal(x.d.querySelector(`[data-model-open=${id}]`),null);
+    }
+  }
+  assert.deepEqual(asks(x),[],'and nothing is asked of the CLI');
+});
+
+test('Models: the Model box lists the models at the host as typed, and still takes any name',async()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama'}});
+  x.click('[data-nav=models]');
+  const box=x.d.querySelector('#model');
+  assert.equal(box.getAttribute('role'),'combobox');
+  const first=asks(x).at(-1);
+  assert.deepEqual({role:first.role,base_url:first.base_url,api_mode:first.api_mode,key:'api_key' in first},
+    {role:'main',base_url:'https://model.example/v1',api_mode:'ollama',key:false},'the saved host, and no key: none was typed');
+  answer(x,first,{ids:['glm-5.3:cloud','original','qwen3:8b']});
+  openList(x,'model');
+  assert.deepEqual(optionsOf(x,'model'),['glm-5.3:cloud','original','qwen3:8b'],'opened on a listed name: every model, to pick another');
+  assert.equal(x.d.querySelector('#model-list [aria-selected=true]').textContent,'original');
+  assert.equal(box.getAttribute('aria-expanded'),'true');
+  x.d.querySelector('#model-list [data-model="qwen3:8b"]').dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+  assert.equal(box.value,'qwen3:8b');
+  assert.equal(x.d.querySelector('#model-list').hidden,true);
+  // Typing filters; a name it doesn't list is kept.
+  x.input('#model','glm');
+  assert.deepEqual(optionsOf(x,'model'),['glm-5.3:cloud']);
+  x.input('#model','my-own-model');
+  assert.deepEqual(optionsOf(x,'model'),[]);
+  assert.match(x.d.querySelector('#model-list').textContent,/Keep typing to use that name/);
+  x.click('#save');
+  assert.equal(x.sent.filter(m=>m.type==='saveSettings').pop().values.model,'my-own-model');
+  x.message({type:'settingsSaved',ok:true});
+
+  // Another host typed: listed again after a pause, without saving, and with no saved key.
+  const before=asks(x).length;
+  x.input('#base_url','http://127.0.0.1:11434/v1');
+  x.input('#base_url','http://127.0.0.1:11434/v1/');
+  assert.equal(asks(x).length,before,'not on every keystroke');
+  await pause(750);
+  assert.equal(asks(x).length,before+1,'once, after the pause');
+  const local=asks(x).at(-1);
+  assert.equal(local.base_url,'http://127.0.0.1:11434/v1/');
+  assert.equal('api_key' in local,false);
+  assert.equal(x.sent.filter(m=>m.type==='saveSettings').length,1,'nothing was saved to list it');
+  // A key typed in the form goes with it; a transport chosen lists again.
+  x.input('#api_key','typed-key');
+  await pause(750);
+  assert.equal(asks(x).at(-1).api_key,'typed-key');
+  x.d.querySelector('#api_mode').value='chat_completions';
+  x.d.querySelector('#api_mode').dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  await pause(750);
+  assert.equal(asks(x).at(-1).api_mode,'chat_completions');
+  // A late answer to an older request is not this box's any more.
+  answer(x,local,{ids:['stale-model']});
+  answer(x,asks(x).at(-1),{ids:[],error:'it needs an API key (HTTP 401)'});
+  const status=x.d.querySelector('#model-status');
+  assert.equal(status.hidden,false);
+  assert.equal(status.textContent,"Couldn't list the models at this host: it needs an API key (HTTP 401).");
+  x.input('#model','');
+  openList(x,'model');
+  assert.doesNotMatch(x.d.querySelector('#model-list').textContent,/stale-model/);
+});
+
+test('Models: the Model box works from the keyboard',()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,list_models_at:true}});
+  x.click('[data-nav=models]');
+  answer(x,asks(x).at(-1),{ids:['a-model','b-model','original']});
+  const box=x.d.querySelector('#model');
+  const key=k=>box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
+  box.focus();
+  key('ArrowDown');
+  assert.equal(x.d.querySelector('#model-list').hidden,false,'Down opens it');
+  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-0');
+  key('ArrowDown');
+  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-1');
+  key('Enter');
+  assert.equal(box.value,'b-model');
+  assert.equal(x.d.querySelector('#model-list').hidden,true);
+  key('ArrowUp');
+  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-2');
+  key('Escape');
+  assert.equal(x.d.querySelector('#model-list').hidden,true,'Esc closes it');
+  assert.equal(box.value,'b-model','and keeps what is there');
+});
+
+test('Agents: each Model box lists its own card\'s host; Subscription model stays text',async()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',fallback_base_url:'',subagent_api_mode:'chat_completions'}});
+  x.click('[data-nav=agents]');
+  const of=role=>asks(x).filter(m=>m.role===role).at(-1);
+  assert.deepEqual([of('subagent').base_url,of('subagent').api_mode],['https://agent.example/v1','chat_completions']);
+  assert.deepEqual([of('fallback').base_url,of('fallback').api_mode],['https://model.example/v1','ollama'],
+    'a blank host is the main one, with its transport ("Inherit")');
+  answer(x,of('subagent'),{ids:['agent','worker-7b']});
+  answer(x,of('fallback'),{ids:['backup','original']});
+  openList(x,'subagent_model');
+  assert.deepEqual(optionsOf(x,'subagent_model'),['agent','worker-7b']);
+  openList(x,'fallback_model');
+  assert.deepEqual(optionsOf(x,'fallback_model'),['backup','original']);
+  // The fallback gets a host of its own: its box lists that one, and only that box asks again.
+  const before=asks(x).length;
+  x.input('#fallback_base_url','https://other.example/v1');
+  await pause(750);
+  const fresh=asks(x).slice(before);
+  assert.deepEqual(fresh.map(m=>[m.role,m.base_url,m.api_mode]),[['fallback','https://other.example/v1','auto']],
+    'another host is Auto when the transport is Inherit');
+  x.input('#subagent_api_key','sub-typed');
+  await pause(750);
+  assert.equal(asks(x).at(-1).role,'subagent');
+  assert.equal(asks(x).at(-1).api_key,'sub-typed');
+  x.click('[data-nav=models]');
+  assert.equal(x.d.querySelector('#subscription_model').getAttribute('role'),null,'a subscription CLI has no list');
+});
+
+test('a provider preset lists the host it fills in',async()=>{
+  const x=setup();
+  x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'}]});
+  x.message({type:'event',event:{...x.config,list_models_at:true}});
+  x.click('[data-nav=models]');
+  const before=asks(x).length;
+  const preset=x.d.querySelector('#provider');
+  preset.value='ollama';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  await pause(750);
+  assert.equal(asks(x).length,before+1);
+  assert.equal(asks(x).at(-1).base_url,'http://127.0.0.1:11434/v1');
+});

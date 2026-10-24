@@ -6,6 +6,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Settings can list a host's models before you save it.** `list_models_at {request_id, role, base_url, api_mode?,
+  api_key?}` lists the models at a host as the editor has it typed (Ollama's `/api/tags`, `:cloud` models included; an
+  OpenAI-compatible or Anthropic host's `/models`) and answers with `models_at`: the ids, or a short reason it couldn't
+  ("it needs an API key (HTTP 401)", "nothing answered at that address"), never the URL, a key or what the host said.
+  A saved API key only ever goes to the host it is bound to: the main key to the main host, the sub-agents' and the
+  fallback's keys to theirs (the main host when they have none of their own). Any other host is asked with no key, or
+  with a key typed beside it in the form, which is never kept. Redirects are not followed, so a key can't go on to
+  another host. Offered as `ready.capabilities.list_models_at`.
+
 - **A Pip's own chat says what Ask DGC to fix did (Pips API 65).** When a Work chat fixes what a Project Pip reported,
   the run's message in the Pip's own chat on the Pips page now says so, read from DGC: DGC is fixing this, Fixed
   · 3 files, the fix didn't finish (with Ask DGC to fix again), or back to Ask DGC to fix once it is undone. It

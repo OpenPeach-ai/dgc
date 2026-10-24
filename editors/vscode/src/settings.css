@@ -73,3 +73,15 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 /* `.field>span` (0,1,1) would otherwise stretch the control: these name it under .field to win. */
 .field>.search-key-control{display:flex;align-items:center;gap:8px;flex:none;max-width:60%}.field>.search-key-control input{width:210px;min-width:0}
 @media(max-width:620px){.field>.search-key-control{width:100%;max-width:none}.field>.search-key-control input{flex:1;width:auto}}
+/* A Model box: the models at its card's own host in a list under the box; any name can still be typed. */
+.field>.model-box{position:relative;display:flex;align-items:center;width:210px;max-width:48%;flex:none}
+.model-box input{width:100%;padding-right:30px}
+.model-box-open{position:absolute;right:3px;top:50%;transform:translateY(-50%);width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:6px;background:transparent;color:var(--muted)}
+.model-box-open:hover{background:var(--surface2);color:var(--text)}.model-box-open svg{width:14px;height:14px}
+.model-box-list{position:absolute;z-index:5;top:calc(100% + 4px);right:0;min-width:100%;width:max-content;max-width:min(360px,calc(100vw - 32px));max-height:260px;overflow:auto;margin:0;padding:4px;list-style:none;border:1px solid var(--border-strong);border-radius:8px;background:#282828;box-shadow:0 8px 28px #0005}
+.model-box-list [role=option]{padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-box-list [role=option]:hover,.model-box-list [role=option].active{background:#3a3a3a}.model-box-list [aria-selected=true]{color:var(--text-strong);font-weight:500}
+.model-box-note{padding:6px 8px;color:var(--muted);white-space:normal}
+.field .model-box-status{color:#ffc4bf}
+@media(max-width:850px){.field>.model-box{width:175px}}
+@media(max-width:620px){.field>.model-box{width:100%;max-width:none}.model-box-list{left:0;right:auto}}

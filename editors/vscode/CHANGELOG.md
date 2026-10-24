@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Every Model box in Settings lists the models at its own host.** Models → Connection, and Agents → Sub-agents and
+  Fallback: open the box (or press Down) for the models that card's host has, a local Ollama's `:cloud` models
+  included, or keep typing any name: a host that can't list, or a model it doesn't list, still works. It lists again a
+  moment after you change that card's Host URL, Transport or API key, before you save, and a provider preset lists the
+  host it fills in. When it can't, it says why under the box ("Couldn't list the models at this host: it needs an API
+  key (HTTP 401)."). A saved key is only ever sent to the host it was saved for: type another host and it is asked
+  with no key, or with the key you type beside it. The Subscription model stays a text box. Needs a DGC CLI that
+  offers it (0.48); with an older one the boxes stay as they were.
 - **Settings → Agents: the sub-agents' context window.** The Sub-agents card has **Context size**: how many tokens
   each sub-agent holds before it compacts. Blank (or 0) reads **Same as the main model** and keeps the main model's
   window; otherwise 2,048 to 16,777,216 tokens, checked as the main Context size is. Save writes it, which it could

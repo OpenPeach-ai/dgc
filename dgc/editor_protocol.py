@@ -1018,6 +1018,28 @@ COMMAND_FIELDS["server_window"] = {"request_id": _S(False)}
 EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window": _I(),
                                   "server": _S(False), "trained": _I(False)}
 
+# ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
+# Each Model box in the editor's Settings lists the models at its own card's host, before anything is
+# saved. Advertised as ready.capabilities.list_models_at = 1. `role` says whose saved key may go with
+# the request, and a saved key goes only to the host it is bound to: `api_key` to `base_url`,
+# `subagent_api_key` to `subagent_base_url`, `fallback_api_key` to `fallback_base_url` (a blank one
+# being the main host), and for a sub-agent or the fallback with no key of its own, the main key to the
+# main host, as the route itself would send it. Any other host is asked with no key, or with `api_key`
+# when the command carries one (a key typed in the form, never kept). `base_url` "" is the main host
+# for "subagent" and "fallback"; `api_mode` "" inherits as the route does. Redirects are not followed.
+# The answer is one `models_at` naming the request: `ids`, the transport that listed them (`api_mode`),
+# or `error`, a short reason that holds no URL, key or response body. A client that never asks never
+# gets one.
+LIST_MODELS_AT_ROLES = ("main", "subagent", "fallback")
+COMMAND_FIELDS["list_models_at"] = {
+    "request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES), "base_url": _S(),
+    "api_mode": _f("string", required=False,
+                   enum=("", "auto", "ollama", "anthropic", "chat_completions", "responses")),
+    "api_key": _S(False),
+}
+EVENT_FIELDS["models_at"] = {"request_id": _S(), "role": _f("string", enum=LIST_MODELS_AT_ROLES),
+                             "ids": _A(), "api_mode": _S(False), "error": _S(False)}
+
 # ---- ChatDGC: chats of their own, the same in every folder ----------------------------------------
 # The process's, never a session's: the router answers every chatdgc_* command itself and none of
 # their events carries the envelope's chat_id (that name is the session router's), so a conversation

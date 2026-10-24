@@ -21,6 +21,7 @@ import os
 import queue
 import time
 import traceback
+import urllib.parse
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -223,7 +224,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
 # wake-up waits one wake delay after it -- and never starts while the command is being handled.
 _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_chat_changes", "get_chat_change", "get_workspace_changes", "get_workspace_change",
-    "list_models", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
+    "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
@@ -483,6 +484,32 @@ _CONFIG_INTEGER_RANGES = {
 # Ollama's keep_alive: a Go duration ("30m", "1h30m", "90s"), a number of seconds, a negative value
 # (keep the model loaded until Ollama stops), 0 (unload at once), or "" (send none: Ollama's default).
 _KEEP_ALIVE_RE = re.compile(r"(?:-?\d{1,9}|-1|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})")
+
+
+def _models_at_reason(exc, sent_key: bool) -> str:
+    """Why a host's model list couldn't be read, in a few words: never its URL, a key or what it answered."""
+    import requests
+    from .llm import LLMError, ModelListRedirect
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) if isinstance(exc, requests.exceptions.HTTPError) else None
+    if status is None and isinstance(exc, LLMError) and not isinstance(exc, ModelListRedirect):
+        found = re.match(r"HTTP (\d{3})\b", str(exc))
+        status = int(found.group(1)) if found else None
+    if isinstance(exc, ModelListRedirect):
+        return "it answered with a redirect to somewhere else"
+    if status in (401, 403):
+        return f"it refused the API key (HTTP {status})" if sent_key else f"it needs an API key (HTTP {status})"
+    if status == 404:
+        return "it has no model list there (HTTP 404)"
+    if status is not None:
+        return f"it answered HTTP {status}"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "its certificate wasn't accepted"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "it didn't answer in time"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "nothing answered at that address"
+    return "it didn't answer with a model list"
 
 
 def _keep_alive_ok(value) -> bool:
@@ -2409,6 +2436,9 @@ class Backend:
                           # server_window is understood: the window a vLLM, SGLang or llama.cpp server was
                           # started with, asked once and then sent as it changes.
                           "server_window": 1,
+                          # list_models_at is understood: the models at a host as Settings has it typed, with a
+                          # saved key only for the host it is bound to (models_at answers).
+                          "list_models_at": 1,
                           # The web search providers set_config's search_provider takes (Settings -> Web search
                           # offers only these): an older CLI refuses the whole save on one it doesn't know.
                           "search_providers": list(SEARCH_PROVIDERS),
@@ -4566,6 +4596,99 @@ class Backend:
                      errors=errors, total=len(tasks), **_request_fields(request_id))
 
     _config_fields: frozenset = frozenset()     # opt-in config fields this client asked for
+
+    # ---- Settings: the models at a host as it is typed (list_models_at) -----------------------------
+    # Each role's saved key and the config keys of its route. A sub-agent or the fallback with no key of its own
+    # sends the main key only to the main host (Agent._route_api_key); every other host gets none.
+    _MODELS_AT_ROUTES = {"main": ("api_key", "base_url", "api_mode"),
+                         "subagent": ("subagent_api_key", "subagent_base_url", "subagent_api_mode"),
+                         "fallback": ("fallback_api_key", "fallback_base_url", "fallback_api_mode")}
+
+    def _list_models_at(self, cmd: dict) -> None:
+        """One Model box's list: the models at its card's host, before anything is saved. One request per role runs
+        at a time; a newer one for the same role replaces one still waiting (answered as replaced), so typing a host
+        never piles up requests. The reply never holds the URL, a key or what the host said."""
+        request_id = str(cmd.get("request_id") or "")
+        role = str(cmd.get("role") or "")
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command="list_models_at", reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+
+        def answer(ids=(), api_mode="", error=""):
+            self.em.emit("models_at", request_id=request_id, role=role, ids=list(ids),
+                         **({"api_mode": api_mode} if api_mode else {}), **({"error": error} if error else {}))
+
+        typed_url = str(cmd.get("base_url") or "").strip()
+        typed_key = str(cmd.get("api_key") or "").strip()
+        if len(typed_url) > 4096 or len(typed_key) > 16_384:
+            answer(error="the host URL or key is too long")
+            return
+        secret, endpoint, mode_key = self._MODELS_AT_ROUTES[role]
+        config = self.config
+        main_url = str(config.get("base_url", "") or "").strip()
+        url = typed_url or ("" if role == "main" else main_url)
+        try:
+            parts = urllib.parse.urlsplit(url)
+            valid = parts.scheme in ("http", "https") and bool(parts.hostname)
+            _ = parts.port
+        except ValueError:
+            valid = False
+        if not valid:
+            answer(error="enter a host URL that starts with http:// or https://")
+            return
+        if parts.username or parts.password:
+            answer(error="take the user name and password out of the host URL")
+            return
+        from .config import bound_provider_key
+        # A key typed beside the host goes to that host, as the user asked. Otherwise only a saved key bound to it.
+        key = typed_key or bound_provider_key(config, secret, typed_url)
+        if not key and role != "main":
+            key = bound_provider_key(config, "api_key", url)
+        mode = str(cmd.get("api_mode") or "").strip().lower()
+        if not mode:
+            same_host = url.rstrip("/").lower() == main_url.rstrip("/").lower()
+            mode = str(config.get("api_mode", "auto") or "auto") if role == "main" or same_host else "auto"
+        job = (request_id, role, url, key, mode, answer)
+        lock = self.__dict__.setdefault("_models_at_lock", threading.Lock())
+        with lock:
+            slot = self.__dict__.setdefault("_models_at_slots", {}).setdefault(role, {"busy": False, "next": None})
+            if slot["busy"]:
+                replaced, slot["next"] = slot["next"], job
+                if replaced is not None:
+                    replaced[-1](error="a newer request replaced this one")
+                return
+            slot["busy"] = True
+        threading.Thread(target=self._models_at_worker, args=(role, job), daemon=True,
+                         name="dgc-models-at").start()
+
+    def _models_at_worker(self, role: str, job) -> None:
+        while job is not None:
+            try:
+                self._models_at_answer(*job)
+            finally:
+                with self._models_at_lock:
+                    slot = self._models_at_slots[role]
+                    job, slot["next"] = slot["next"], None
+                    if job is None:
+                        slot["busy"] = False
+
+    def _models_at_answer(self, request_id, role, url, key, mode, answer) -> None:
+        from .llm import LLMClient
+        secrets = [*secret_values(self.config), *([key] if key else [])]
+        try:
+            client = LLMClient(url, key, "", read_timeout=10, api_mode=mode)
+            listed = client.list_models(redirects=False)
+        except Exception as exc:                # noqa: BLE001 -- said in a few words, never the host's own
+            answer(error=_models_at_reason(exc, bool(key)))
+            return
+        ids = []
+        for item in listed[:4096] if isinstance(listed, list) else []:
+            if isinstance(item, str) and item and item != "?":
+                shown = redact_value(item, secrets)[:512]
+                if shown == item and shown not in ids:
+                    ids.append(shown)
+        answer(ids=ids, api_mode=str(getattr(client, "api_mode", "") or ""))
 
     def _emit_cache_settings(self, request_id: str | None = None) -> None:
         """Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time (cache_settings)."""
@@ -6829,6 +6952,8 @@ class Backend:
                 finally:
                     lock.release()
             threading.Thread(target=discover_models, daemon=True).start()
+        elif t == "list_models_at":
+            self._list_models_at(cmd)
         elif t == "set_think":
             level = str(cmd.get("level", "off"))
             config_get = getattr(self.config, "get", None)

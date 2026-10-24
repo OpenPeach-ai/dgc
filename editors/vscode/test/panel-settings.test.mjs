@@ -904,6 +904,61 @@ test("the sub-agents' context window goes only to a CLI that answered it, blank 
   }
 });
 
+test("a Model box's listing goes to list_models_at with only what the page typed, and its answer comes back by token", async () => {
+  const posted = [], sent = [];
+  const { provider, secretValues } = harness({ initialSecrets: { "dgc.apiKey": "saved-secret-in-secretstorage",
+                                                                  "dgc.apiKey.endpoint": "https://old.invalid/v1" } });
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  let answer = (command) => ({ type: "models_at", request_id: command.request_id, role: command.role,
+                               ids: ["qwen3:8b", "glm-5.3:cloud", 7], api_mode: "ollama" });
+  provider.ensureBackend = () => ({ ready: true, async request(command, responseType) {
+    sent.push({ command: JSON.parse(JSON.stringify(command)), responseType });
+    return answer(command);
+  } });
+  // An older CLI: the page is told, and nothing is sent.
+  provider.lastReadyEvent = { capabilities: {} };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "model-1", role: "main", base_url: "https://old.invalid/v1", api_mode: "auto" });
+  assert.deepEqual(sent, []);
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "model-1", role: "main", ids: [], unsupported: true });
+
+  provider.lastReadyEvent = { capabilities: { list_models_at: 1 } };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "model-2", role: "main", base_url: " http://127.0.0.1:11434/v1 ", api_mode: "ollama" });
+  assert.equal(sent.length, 1);
+  const { command, responseType } = sent[0];
+  assert.equal(responseType, "models_at");
+  assert.deepEqual({ ...command, request_id: undefined },
+    { type: "list_models_at", request_id: undefined, role: "main", base_url: "http://127.0.0.1:11434/v1", api_mode: "ollama" },
+    "the host typed, and no key: the extension never adds a saved one");
+  assert.match(command.request_id, /^models-at/);
+  assert.equal(JSON.stringify(sent).includes("saved-secret-in-secretstorage"), false);
+  assert.ok(secretValues.has("dgc.apiKey"), "(the saved key is really there)");
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "model-2", role: "main", ids: ["qwen3:8b", "glm-5.3:cloud"] });
+
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "sub-3", role: "subagent", base_url: "https://x.example/v1", api_mode: "bogus", api_key: " typed " });
+  assert.deepEqual([sent[1].command.role, sent[1].command.api_mode, sent[1].command.api_key], ["subagent", "", "typed"],
+    "a key typed in the form goes as typed; an unknown transport is Inherit");
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "x", role: "admin", base_url: "https://x.example/v1" });
+  assert.equal(sent.length, 2, "only the three roles");
+  answer = (command) => ({ type: "models_at", request_id: command.request_id, role: command.role, ids: [], error: "it needs an API key (HTTP 401)" });
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "fb-4", role: "fallback", base_url: "", api_mode: "" });
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "fb-4", role: "fallback", ids: [], error: "it needs an API key (HTTP 401)" });
+  answer = () => { throw new Error("timed out"); };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "fb-5", role: "fallback", base_url: "", api_mode: "" });
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "fb-5", role: "fallback", ids: [], error: "DGC didn't answer" });
+});
+
+test("the config the settings page gets says whether the CLI lists a host's models", () => {
+  const posted = [];
+  const { provider } = harness();
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.lastReadyEvent = { capabilities: {} };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal(posted.filter((m) => m.type === "event").at(-1).event.list_models_at, false);
+  provider.lastReadyEvent = { capabilities: { list_models_at: 1 } };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal(posted.filter((m) => m.type === "event").at(-1).event.list_models_at, true);
+});
+
 test("Settings asks the CLI for the sub-agents' context window", () => {
   // An opt-in config field (an older editor rejects a field it doesn't know): it reaches the page only when asked.
   const commands = [];

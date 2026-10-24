@@ -2633,7 +2633,9 @@ remembers, with its **History** and **Undo**), **Voice**, **Running sessions** (
 with no window), **Token usage** (what this machine counted), **Security** (sandbox confinement and
 plan-mode limits), **Plugins** (installed packages, the apps they reach, and the directory) and
 **MCP servers**. Everything is a row: what it is on the left,
-the control on the right, the explanation beneath. Skills, lifecycle hooks, permission rules,
+the control on the right, the explanation beneath. Each **Model** box lists the models at its own
+card's host as you type it (Ollama's `:cloud` models included), and still takes any name; a saved key
+only ever goes to the host it was saved for. Skills, lifecycle hooks, permission rules,
 project memory and these docs each open as their own panel from the command menu.
 See **Plugins, apps and MCP**.
 
