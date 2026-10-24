@@ -2748,7 +2748,12 @@ def main(argv: list[str] | None = None) -> int | None:
         for warning in cfg.credential_warnings:
             print(f"warning: {warning}", file=sys.stderr)
         if raw_argv[0] == "setup":
-            run_setup(cfg)
+            try:
+                run_setup(cfg)
+            except KeyboardInterrupt:
+                # Ctrl+C is how a person leaves a questionnaire: say so, never a traceback. Exit 130, as for SIGINT.
+                print("\nSetup cancelled. Run dgc setup again when you're ready.", file=sys.stderr)
+                raise SystemExit(130) from None
             return
         # The exit code is the whole point of `doctor` in a script.
         raise SystemExit(run_doctor(cfg))

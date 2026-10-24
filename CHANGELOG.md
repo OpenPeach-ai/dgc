@@ -154,6 +154,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
   everything you need from them.
 
+- **Ctrl+C in `dgc setup` just cancels it.** It printed a Python traceback; now it says "Setup cancelled" and
+  exits with status 130.
+
 - **A long-running DGC no longer collects open files.** Each chat opened and closed in an editor window kept the
   project's notes database open until DGC exited: one more open file per chat, all day. Closing a chat lets it go.
   The notes store also works from every thread now: a note written from another thread than the one that opened
