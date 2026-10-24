@@ -1196,6 +1196,8 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(2) { animation-delay: 0.6s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(3) { animation-delay: 1.2s; }
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
+/* A running Pip's name is the chip's number: a long one is cut, its whole name is on the chip's tooltip. */
+.rail-chip[data-kind="piprunning"] .chip-num { min-width: 0; max-width: 18em; overflow: hidden; text-overflow: ellipsis; }
 /* Needs you: the reason in words, in the colours the rows had before the chip line (the founder, 19 Oct): blocked
    or failed in --err-text with the icon, waiting or an alert in --need-text (4.5:1). No dot, no outline. */
 .rail-chip[data-need] { color: var(--text); }
