@@ -61,7 +61,19 @@ def _linger_state():
     return done.returncode == 0 and done.stdout.decode(errors="replace").strip() == "yes"
 
 
+NO_SYSTEMD = ("This computer has no systemd (a container, say), so DGC can't start the runner when you log in here. "
+              "Run dgc pips serve --server under the supervisor you already use instead: Docker's restart policy, for "
+              "example (docs/PIPS.md, Pips on a server).")
+
+
+def _has_systemd() -> bool:
+    """User services need systemd's own systemctl, which a container image (Debian slim, say) doesn't have."""
+    return os.path.exists("/usr/bin/systemctl")
+
+
 def _linux_status(home, options):
+    if not _has_systemd():
+        return _unsupported(NO_SYSTEMD)
     value = pip_service.status(home, **options)
     on = bool(value["installed"]) and value.get("enabled_state") == "enabled"
     linger = _linger_state() if on else False
@@ -323,6 +335,8 @@ def set_on(enabled, *, runner_online, dgc_home=None, **options) -> dict:
         return _wsl_on(spec, runner_online) if enabled else _wsl_off(spec)
     if sys.platform.startswith("linux"):
         home = _home(dgc_home)
+        if not _has_systemd():
+            raise RegistryError("service_unsupported", NO_SYSTEMD)
         return _linux_on(home, options, runner_online) if enabled else _linux_off(home, options)
     if sys.platform == "darwin":
         spec = _agent_spec(_home(dgc_home), **options)
@@ -388,6 +402,11 @@ def for_schedule(registry, *, runner_online, dgc_home=None, **options):
     if not _account_home():
         # A login service belongs to the account's own HOME; for any other (a test, a sandbox) there is
         # nothing to turn on and nothing to say, and the service manager is never asked.
+        return None
+    from .pip_server import is_server_runner
+    if runner_online and is_server_runner(registry):
+        # A runner in server mode (dgc pips serve --server: a container, a systemd unit, a supervisor of your own)
+        # already keeps this home's Pips running; a login service is nothing to it.
         return None
     try:
         if choice(registry) == "off":

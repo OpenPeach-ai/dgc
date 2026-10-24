@@ -5,8 +5,8 @@ record is ever signalled. The existing pips-runner lease still owns actual work.
 """
 from __future__ import annotations
 
+import contextlib
 import json
-import sys
 import os
 import signal
 import sys
@@ -212,9 +212,13 @@ def _app_approvals_tick(registry, config) -> None:
         print(f"[pip app approvals] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 
-def serve(config, *, enable=False, stop_event=None, clock=utc_now):
-    """Foreground heartbeat/queue supervision; Event.wait is injectable for tests."""
+def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False):
+    """Foreground heartbeat/queue supervision; Event.wait is injectable for tests.
+
+    ``server`` (``dgc pips serve --server``, pip_server): no desktop notifications or borrowed Chrome, a Pip on a
+    personal subscription refused, and one plain line on stdout per event."""
     from . import pips
+    from . import pip_server
     from .pip_schedules import ScheduleTick, has_due_schedule
     from .pip_event_triggers import EventTick, has_due_trigger
     from .pip_routines import RoutineTick, has_due as has_due_routine
@@ -226,6 +230,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     lease = named_process_lock("pips-supervisor", str(directory))
     if not lease.acquire(blocking=False):
         raise RegistryError("runner_running", "A Pips supervisor is already running for this local state directory.")
+    mode = contextlib.ExitStack()
+    if server:
+        mode.enter_context(pip_server.server_mode())     # the runs this process starts read it
     event = stop_event if stop_event is not None else threading.Event()
     handlers = {}
     schedule_tick = None
@@ -238,15 +245,21 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
             pips.clear_drain_failure(directory)
             runtime_config = config.clone_for_root(config.project_root)
             record = {"schema_version": 1, "instance_id": identifier("supervisor"),
-                      "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "status": "running"}
+                      "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "status": "running",
+                      **({"mode": pip_server.MODE} if server else {})}
+            log = pip_server.EventLog(registry) if server else None
             with registry.transaction():
                 _write(registry, SUPERVISOR_KEY, record)
+            if log is not None:
+                pip_server.started(log, directory)
             if stop_event is None and threading.current_thread() is threading.main_thread():
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     handlers[sig] = signal.getsignal(sig)
                     signal.signal(sig, lambda *_: event.set())
-            from .pip_desktop import Notifier
-            notifier = Notifier(runtime_config)
+            notifier = None
+            if not server:                   # a server has no desktop to notify
+                from .pip_desktop import Notifier
+                notifier = Notifier(runtime_config)
             try:
                 while not event.is_set() and not is_runtime_paused(registry):
                     _check_controller(directory)
@@ -270,7 +283,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                     _computer_tick(registry, runtime_config)
                     _app_approvals_tick(registry, runtime_config)
                     pips.start_queued(runtime_config)
-                    _notify(notifier, registry)
+                    if notifier is not None:
+                        _notify(notifier, registry)
+                    _log_events(log, registry)
                     _check_controller(directory)
                     stopping = event.wait(HEARTBEAT_SECONDS)
                     _check_controller(directory)
@@ -306,6 +321,11 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
                 if failure:
                     record["error"] = failure
                 _heartbeat(registry, record, "stopped")
+                _log_events(log, registry)
+                if log is not None:
+                    error = record.get("error") if isinstance(record.get("error"), dict) else {}
+                    log.say("runner_stopped", str(error.get("message") or ""),
+                            reason=error.get("code") or ("emergency_stop" if is_runtime_paused(registry) else None))
                 _check_controller(directory)
                 if schedule_failure is not None:
                     raise schedule_failure
@@ -313,7 +333,18 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now):
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
+        mode.close()
         lease.release()
+
+
+def _log_events(log, registry):
+    """Server mode's one line per event; a failure here never stops the runner."""
+    if log is None:
+        return
+    try:
+        log.tick(registry)
+    except Exception as exc:              # noqa: BLE001 -- the log is for people, never a reason to stop
+        print(f"dgc pips: the event log could not be read: {type(exc).__name__}", file=sys.stderr, flush=True)
 
 
 def _notify(notifier, registry):

@@ -137,8 +137,11 @@ def _quote(value):
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
 
 
-def preview(dgc_home=None, *, unit_directory=None, python_executable=None, package_root=None):
-    """Pure preview; does not create state, units, registry entries, or subprocesses."""
+def preview(dgc_home=None, *, unit_directory=None, python_executable=None, package_root=None, server=False):
+    """Pure preview; does not create state, units, registry entries, or subprocesses.
+
+    ``server``: the same unit (one per DGC home) running ``pips serve --service --server``, for a server with no
+    desktop (pip_server): no desktop notifications or borrowed Chrome, and Pips on a personal subscription refused."""
     if sys.platform != "linux":
         _error("service_unsupported", "Pips service management currently supports Linux user systemd only. Use dgc pips serve in the foreground here.")
     home = _path(dgc_home if dgc_home is not None else os.environ.get("DGC_HOME", str(Path.home())), "DGC home")
@@ -172,12 +175,14 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
     name = "dgc-pips-" + key + ".service"
     env = ["HOME=" + str(home), "DGC_HOME=" + str(home), "PATH=/usr/bin:/bin", "LANG=C.UTF-8",
            "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1"]
-    argv = ["/usr/bin/env", "-i", *env, str(python), "-I", "-B", "-c", _BOOTSTRAP, str(source), "pips", "serve", "--service"]
+    argv = ["/usr/bin/env", "-i", *env, str(python), "-I", "-B", "-c", _BOOTSTRAP, str(source), "pips", "serve", "--service",
+            *(["--server"] if server else [])]
     # Format 2 restarts the runner when it fails. `serve --service` exits 0 when Pips are off,
     # stopped or already running, so those never loop.
     content = (_HEADER + str(FORMAT) + "\n"
                "# DGC_HOME sha256: " + hashlib.sha256(os.fsencode(home)).hexdigest() + "\n"
-               "[Unit]\nDescription=DGC Pips local supervisor\n\n[Service]\nType=exec\n"
+               "[Unit]\nDescription=" + ("DGC Pips server runner" if server else "DGC Pips local supervisor")
+               + "\n\n[Service]\nType=exec\n"
                "WorkingDirectory=/\n"
                "ExecStart=" + " ".join(_quote(part) for part in argv) + "\n"
                "UMask=0077\nNoNewPrivileges=yes\nKillMode=mixed\nTimeoutStopSec=90\n"
@@ -185,13 +190,25 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
                "[Install]\nWantedBy=default.target\n")
     if len(content.encode("utf-8")) > MAX_UNIT_BYTES:
         _error("service_limit", "The generated service unit exceeds its size limit.")
+    notes = ["Install does not start the service or enable Pips.",
+             "Start never clears the emergency stop or changes job permissions.",
+             "The service reads the selected DGC home's private configuration; inherited environment credentials are not forwarded.",
+             "User systemd must be available. Login persistence is explicit; lingering is not configured by DGC."]
+    if server:
+        notes.append("Server mode: no desktop notifications or borrowed Chrome; a Pip on a personal Claude Code or Codex "
+                     "plan is refused; one line per event in the journal (journalctl --user -u " + name + ").")
     return {"unit_name": name, "unit_path": str(directory / name), "dgc_home": str(home),
             "argv": argv, "content": content, "sha256": hashlib.sha256(content.encode()).hexdigest(),
-            "platform": "linux", "supported": True,
-            "notes": ["Install does not start the service or enable Pips.",
-                      "Start never clears the emergency stop or changes job permissions.",
-                      "The service reads the selected DGC home's private configuration; inherited environment credentials are not forwarded.",
-                      "User systemd must be available. Login persistence is explicit; lingering is not configured by DGC."]}
+            "platform": "linux", "supported": True, "server": bool(server), "notes": notes}
+
+
+def _ours(dgc_home, options):
+    """This home's unit as installed, and the other variant: the server one when its exact bytes are there, else the
+    desktop one (also what a new install writes)."""
+    desktop = preview(dgc_home, **options)
+    server = preview(dgc_home, server=True, **options)
+    value = _read_unit(Path(desktop["unit_path"]))
+    return (server, desktop) if value == server["content"].encode() else (desktop, server)
 
 
 def _read_unit(path):
@@ -224,7 +241,7 @@ def _older_ours(value, spec):
     return 0 < version < FORMAT and lines[1] == spec["content"].split("\n", 2)[1]
 
 
-def _check_file(spec, *, required=True, upgrade=False):
+def _check_file(spec, *, required=True, upgrade=False, other=None):
     path = Path(spec["unit_path"])
     if (path.parent / (path.name + ".d")).exists() or (path.parent / (path.name + ".d")).is_symlink():
         _error("service_conflict", "This service has overrides. Remove or review them before using DGC service management.")
@@ -234,6 +251,8 @@ def _check_file(spec, *, required=True, upgrade=False):
             _error("service_not_installed", "Install the reviewed service unit before controlling it.")
         return False
     if value != spec["content"].encode():
+        if other is not None and value == other["content"].encode():
+            return "other"                    # the other variant of this same unit (server or desktop)
         if upgrade and _older_ours(value, spec):
             return "older"
         _error("service_conflict", "The existing service unit differs from this preview. Review it explicitly; DGC will not overwrite or control it.")
@@ -302,7 +321,7 @@ def _loaded(spec):
 
 def _public(spec, **extra):
     return {"unit_name": spec["unit_name"], "unit_path": spec["unit_path"],
-            "dgc_home": spec["dgc_home"], "sha256": spec["sha256"], **extra}
+            "dgc_home": spec["dgc_home"], "sha256": spec["sha256"], "server": spec["server"], **extra}
 
 
 @contextlib.contextmanager
@@ -354,12 +373,19 @@ def _publish(spec):
                 staged.unlink()
 
 
-def install(dgc_home=None, *, upgrade=False, **options):
-    """Write the unit; with ``upgrade``, replace an earlier format of this same managed unit."""
-    spec = preview(dgc_home, **options)
+def install(dgc_home=None, *, upgrade=False, server=None, **options):
+    """Write the unit; with ``upgrade``, replace an earlier format of this same managed unit.
+
+    ``server`` True or False writes that variant, replacing the other one of this same unit; None (Keep Pips running,
+    or ``install`` without ``--server``) keeps the variant installed, so a server unit is never turned back into a
+    desktop one by itself."""
+    if server is None:
+        spec, other = _ours(dgc_home, options)
+    else:
+        spec, other = preview(dgc_home, server=server, **options), preview(dgc_home, server=not server, **options)
     with _lock(spec, create=True):
-        present = _check_file(spec, required=False, upgrade=upgrade)
-        if present == "older":
+        present = _check_file(spec, required=False, upgrade=upgrade, other=other)
+        if present in ("older", "other"):
             Path(spec["unit_path"]).unlink()
             present = False
         if not present:
@@ -372,14 +398,14 @@ def install(dgc_home=None, *, upgrade=False, **options):
 
 
 def status(dgc_home=None, **options):
-    spec = preview(dgc_home, **options)
+    spec, _ = _ours(dgc_home, options)
     if not _check_file(spec, required=False, upgrade=True):
         return _public(spec, installed=False, active_state="not_installed", enabled_state="disabled")
     return _public(spec, installed=True, **_loaded(spec))
 
 
 def _control(operation, dgc_home, options):
-    spec = preview(dgc_home, **options)
+    spec, _ = _ours(dgc_home, options)       # the server unit or the desktop one: both are this home's
     with _lock(spec):
         _check_file(spec, upgrade=True)       # an earlier DGC format is still ours to control
         before = _loaded(spec)

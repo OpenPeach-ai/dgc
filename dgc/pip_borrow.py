@@ -929,8 +929,11 @@ class Session:
     reply; borrowed_chrome works only in the reply the user's Allow started, through a BorrowedTab."""
 
     def __init__(self, directory, config, pip_id, workspace_id, run_id, *, unattended=False, grant=None, level="ask",
-                 careful=True, taint=None, said="", folders=None, reach=None):
+                 careful=True, taint=None, said="", folders=None, reach=None, refused=""):
         self.directory, self.config, self.pip_id, self.workspace_id, self.run_id = directory, config, pip_id, workspace_id, run_id
+        # Why borrowing can't happen here at all (a runner in server mode, pip_server.NO_CHROME): no card is saved and
+        # no Chrome is looked for; both tools answer with it.
+        self.refused = str(refused or "")
         self.unattended, self.level, self.careful, self.taint, self.said = unattended, level, careful, taint, said
         self.folders, self.reach = folders, reach
         self.grant = grant if isinstance(grant, dict) and grant.get("id") else None
@@ -954,7 +957,10 @@ class Session:
             self._ready.set()
 
     def pin(self) -> dict | None:
-        """What the worker is told: the sites it was lent and for how long, or that its Allow was missed."""
+        """What the worker is told: the sites it was lent and for how long, that its Allow was missed, or that
+        borrowing can't happen here (then the Pip is neither offered borrow_chrome nor told about it)."""
+        if self.refused:
+            return {"refused": True}
         if self.grant is not None:
             return {"id": self.grant["id"], "sites": [shown(o) for o in self.grant["sites"]], "minutes": MINUTES}
         if self.missed:
@@ -1071,6 +1077,8 @@ class Session:
         return "error: unknown operation"
 
     def ask(self, args: dict) -> str:
+        if self.refused:
+            return "error: " + self.refused
         if self.grant is not None and not self.ended:
             with WorkspaceRegistry(self.directory) as registry:
                 written = _written(registry, self.pip_id)
@@ -1106,6 +1114,8 @@ class Session:
         return TOLD.get(self.ended, TOLD[LOST])
 
     def use(self, args: dict) -> str:
+        if self.refused:
+            return "error: " + self.refused
         if self.grant is None:
             return not_lent(self.missed)
         op = str(args.get("op", "")).strip().lower()

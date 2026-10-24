@@ -505,12 +505,19 @@ def parser():
         item = service_actions.add_parser(action, allow_abbrev=False)
         item.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         item.add_argument("--unit-directory", help="explicit owner-private service directory; use preview to review the exact unit first")
+        if action in ("preview", "install"):
+            item.add_argument("--server", action="store_true",
+                              help="the unit runs dgc pips serve --server: for a server with no desktop")
     serve = command("serve", "run the foreground supervisor; keep this terminal open")
     serve.add_argument("--enable", action="store_true")
+    serve.add_argument("--server", action="store_true",
+                       help="for a server with no desktop: no desktop notifications or borrowed Chrome, Pips on a "
+                            "personal Claude Code or Codex plan refused, one plain line per event on stdout")
     # Started by the user service or LaunchAgent: Pips off, stopped or already running is a clean
     # exit (status 0), so the service manager does not restart it every few seconds.
     serve.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     command("status", "show runner status as JSON")
+    command("health", "is the runner online and running? Exit 0 if so, else 1 with one line saying why (for probes)")
     keep = command("keep-running", "start the runner when you log in and after a restart: show, or turn on or off")
     keep.add_argument("state", nargs="?", choices=("on", "off"))
     rate = command("feedback", "rate a Pip's result up or down, with an optional note its later runs read")
@@ -1740,7 +1747,7 @@ def _starter_command(config, args):
 _AGENT_SHELL_READS = {"export", "starters", "digest", "outcomes", "execution", "models", "connections", "accounts",
                       "inspect-connection", "types", "workspaces", "list", "show", "messages", "runs",
                       "report", "capacity", "export-run", "checkpoints", "adaptations", "approvals",
-                      "versions", "activity", "status", "stop"}
+                      "versions", "activity", "status", "health", "stop"}
 _AGENT_SHELL_READ_ACTIONS = {
     "email-draft": ("email_action", {"list", "show"}), "calendar-draft": ("calendar_action", {"list", "show"}),
     "connector-draft": ("connector_draft_action", {"list", "show"}),
@@ -1805,17 +1812,26 @@ def handle_command(config, argv, *, in_chat=False):
         elif args.command == "serve":
             if in_chat:
                 raise RegistryError("separate_terminal", "Keep the supervisor separate from chat: run dgc pips serve in another terminal.")
-            if not args.service:
+            if not args.service and not args.server:
                 print("Starting the foreground Pips supervisor. Keep this terminal open; Ctrl+C stops its work.", file=sys.stderr, flush=True)
+            clean = ("runner_running", "disabled", "runtime_paused")      # Pips off, stopped, or another runner
             try:
-                result = pip_daemon.serve(config, enable=args.enable)
+                result = pip_daemon.serve(config, enable=args.enable, server=args.server)
             except RegistryError as exc:
                 if exc.code == "dgc_updated" and _restart_on_new_code():
                     raise AssertionError("unreachable: the process was replaced")
-                if not args.service or exc.code not in ("runner_running", "disabled", "runtime_paused"):
+                if args.server:
+                    # One plain line on stdout, as every server-mode event: docker logs and journald show why.
+                    from .pip_server import say
+                    say("runner_not_started" if exc.code in clean else "runner_failed",
+                        redact_value(str(exc), secret_values(config)), reason=exc.code)
+                    return 0 if args.service and exc.code in clean else 1
+                if not args.service or exc.code not in clean:
                     raise
                 print(f"dgc pips serve: not started: {exc}", file=sys.stderr)
                 return 0
+            if args.server:
+                return 0                     # its lines (runner_stopped last) are already on stdout
         elif args.command == "stop":
             if not args.yes:
                 if not sys.stdin.isatty():
@@ -1829,6 +1845,14 @@ def handle_command(config, argv, *, in_chat=False):
         elif args.command == "status":
             with WorkspaceRegistry() as registry:
                 result = pip_daemon.runner_status(registry)
+        elif args.command == "health":
+            # Read-only and cheap, for a probe every few seconds: exit 0 only when the runner is online and running.
+            from .pip_server import health
+            value = health(config)
+            text = (json.dumps(value, ensure_ascii=False) if args.json else
+                    "dgc pips health: " + ("healthy" if value["healthy"] else "unhealthy") + ": " + value["message"])
+            print(terminal_safe_text(redact_value(text, secret_values(config))), flush=True)
+            return 0 if value["healthy"] else 1
         elif args.command == "execution" and getattr(args, "fix", False):
             if in_chat:
                 raise RegistryError("separate_terminal", "Fix this computer from your own terminal: run dgc pips execution --fix there.")
@@ -1867,7 +1891,10 @@ def handle_command(config, argv, *, in_chat=False):
             from . import pip_service
             if in_chat and args.service_action not in ("preview", "status"):
                 raise RegistryError("separate_terminal", "Manage the service from a separate terminal with dgc pips service; chat cannot install or control user services.")
-            result = getattr(pip_service, args.service_action)(unit_directory=args.unit_directory)
+            options = {"unit_directory": args.unit_directory}
+            if getattr(args, "server", False):
+                options["server"] = True
+            result = getattr(pip_service, args.service_action)(**options)
         else:
             request = _request(args)
             if config.get("pips_enabled", False) is not True:

@@ -2761,8 +2761,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     lent = lent if isinstance(lent, dict) else None
 
     def _borrow_schemas():
-        """Borrowing the user's own Chrome (pip_borrow): any chat reply may ask; only the reply it was lent to uses it."""
-        if not personal or conversation is None or apps_pin is None:
+        """Borrowing the user's own Chrome (pip_borrow): any chat reply may ask; only the reply it was lent to uses it.
+        On a server (pip_server) there is no Chrome of the user's, and the Pip isn't offered it."""
+        if not personal or conversation is None or apps_pin is None or (lent or {}).get('refused'):
             return []
         return [pip_borrow.ASK_SCHEMA] + ([pip_borrow.USE_SCHEMA] if lent is not None and lent.get('id') else [])
 
@@ -3010,7 +3011,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if personal and manifest.get('computer_paused') is True:
                     from .pip_careful import PAUSED_NOTE
                     base_instructions += '\n' + PAUSED_NOTE
-                if apps_pin is not None and conversation is not None:
+                if apps_pin is not None and conversation is not None and not (lent or {}).get('refused'):
                     # Borrowing the user's own Chrome (pip_borrow): how to ask, and, in the reply it was lent to, how to use it.
                     base_instructions += '\n' + pip_borrow.NOTICE
                     if lent is not None and lent.get('id'):
@@ -3997,6 +3998,10 @@ def _execute_run(registry, row, config):
         PipStore(registry).cancel(row["id"], "runner-stop")
         raise RegistryError("cancelled", "The runner stopped before execution.")
     manifest = json.loads(row["manifest"])
+    # On a server (dgc pips serve --server), a personal Claude Code or Codex plan is never a Pip's model: the run is
+    # refused here, before anything starts, in words that say how to change it (pip_server).
+    from .pip_server import refuse_subscription
+    refuse_subscription(registry, row, manifest.get("model_settings"))
     from .pip_commit_paths import validate_parent as validate_path_parent
     validate_path_parent(registry, row, manifest)
     from . import pip_pulse_plans
@@ -4224,12 +4229,14 @@ def _execute_run(registry, row, config):
         if manifest.get('run_kind') == 'conversation':
             # Borrowing the user's own Chrome (pip_borrow): any chat reply may ask with a card; only the turn the user's
             # Allow once started has it, claimed for this run alone, and it is given back when the run ends (close).
-            from . import pip_borrow, pip_careful, pip_levels
+            # On a server there is no Chrome of the user's: nothing is claimed or reached, and the Pip isn't offered it.
+            from . import pip_borrow, pip_careful, pip_levels, pip_server
+            server = pip_server.active()
             app_socket.borrow = pip_borrow.Session(
                 registry.directory, config, row['pip_id'], row['workspace_id'], row['id'],
-                unattended=row['requested_by'] in UNATTENDED, grant=pip_borrow.claim(registry, row),
+                unattended=row['requested_by'] in UNATTENDED, grant=None if server else pip_borrow.claim(registry, row),
                 level=pip_levels.level(registry, row['pip_id']), careful=pip_careful.is_on(registry, row['pip_id']),
-                taint=taint, said=app_socket.said)
+                taint=taint, said=app_socket.said, refused=pip_server.NO_CHROME if server else "")
         manifest = {**manifest, 'app_socket': app_socket.pin()}
     if personal and manifest.get('run_kind') in ('personal_task', 'conversation'):
         # How much it asks (pip_levels): the worker is only told, for the Pip's words; the supervisor decides.
