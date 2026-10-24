@@ -164,8 +164,10 @@ test('a reload while it runs draws the live post again, from the run itself',asy
 });
 
 test('how it started: first run, waiting to start, and a run of a kind that never posts shows nothing',async()=>{
-  const first=setup();running(first,{status:'queued'});await openChat(first);
-  assert.equal(text(live(first.d).querySelector('.run-post-started')),'First run','its only run, started on its setup card');
+  const first=setup();first.state.pip.created_at=iso(NOW-42000);running(first,{status:'queued'});await openChat(first);
+  assert.equal(text(live(first.d).querySelector('.run-post-started')),'First run','its only run, queued with the Pip by its setup card');
+  const later=setup();later.state.pip.created_at=iso(NOW-HOUR);running(later);await openChat(later);
+  assert.equal(text(live(later.d).querySelector('.run-post-started')),'Started by you','Run now on a Pip that never ran: you started it');
   assert.equal(text(live(first.d).querySelector('.run-post-doing')),'Waiting to start');
   assert.equal(live(first.d).querySelector('.run-post-clock'),null,'no clock before it starts');
   const handoff=setup();running(handoff,{kind:'patch',trigger:'handoff'});await openChat(handoff);

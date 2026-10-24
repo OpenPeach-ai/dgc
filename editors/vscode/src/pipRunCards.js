@@ -4,6 +4,8 @@ import {active, record, pulseProgress, activityPage} from './pipsModel.js';
 import {latestActivity, activityText} from './pipRunActivity.js';
 
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
+// How often a run at work is read again: its line and the agent map's row say what it is doing, live enough to follow.
+const TICK_MS=2500;
 const id=(value,prefix)=>typeof value==='string'&&new RegExp(`^${prefix}_[a-f0-9]{32}$`).test(value);
 export function mountRunCards(options) {
  const doc=options.document, entries=new Map();
@@ -84,7 +86,7 @@ export function mountRunCards(options) {
    const quiet=cls=>node('span',cls);
    const e={id:runId,pipId,root:into,face:quiet('pip-run-avatar'),title:quiet('pip-run-title'),status:into,detail:quiet('pip-run-detail'),
             open:node('button','pip-run-open'),refresh:node('button','pip-run-refresh'),uid:`pip-run-face-${++sequence}`,loading:false,inline:true};
-   entries.set(runId,e);if(timer===null)timer=(options.setInterval||setInterval)(tick,5000);
+   entries.set(runId,e);if(timer===null)timer=(options.setInterval||setInterval)(tick,TICK_MS);
    paint(e);if(connected)load(e);else options.ready?.();return;
   }
   if(entries.size>=12){parent.append(node('p','pip-run-detail','Open Pips to see more.'));return;}
@@ -94,7 +96,7 @@ export function mountRunCards(options) {
   const open=node('button','pip-run-open agent-name'),refresh=node('button','pip-run-refresh','Retry');open.type=refresh.type='button';
   open.append(title);root.append(face,open,status,detail,refresh);parent.append(root);
   const e={id:runId,pipId,root,face,title,status,detail,open,refresh,uid:`pip-run-face-${++sequence}`,loading:false};entries.set(runId,e);
-  if(timer===null)timer=(options.setInterval||setInterval)(tick,5000);
+  if(timer===null)timer=(options.setInterval||setInterval)(tick,TICK_MS);
   open.onclick=()=>{if(e.run&&connected)options.onOpen?.({pip:e.pipId,section:'runs',run:e.id});};
   refresh.onclick=()=>load(e);paint(e);if(connected)load(e);else options.ready?.();
  }

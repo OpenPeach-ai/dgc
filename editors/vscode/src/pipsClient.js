@@ -457,8 +457,13 @@ function liveCandidate(){
   const run={...(S.runs.find(r=>r.id===a.id)||{}),...a};
   return postingRun(run)?run:null;
 }
-// "First run": the Pip has no run before this one (its setup card's run once you create it), and nobody else started it.
-function firstRun(run){return S.runs.length<40&&['manual',undefined].includes(run.manifest?.trigger)&&!S.runs.some(r=>r.id!==run.id&&(r.manifest?.run_kind||'audit')!=='conversation');}
+// "First run": its setup card's run, queued as the card made the Pip -- its only run, started with the Pip itself. A Run
+// now pressed later on a Pip that never ran is "Started by you".
+function firstRun(run){
+  const made=Date.parse(S.pip?.created_at||''),queued=Date.parse(run.created_at||'');
+  return S.runs.length<40&&['manual',undefined].includes(run.manifest?.trigger)&&Number.isFinite(made)&&Number.isFinite(queued)&&Math.abs(queued-made)<10000
+    &&!S.runs.some(r=>r.id!==run.id&&(r.manifest?.run_kind||'audit')!=='conversation');
+}
 function dropLive(){liveSeq++;window.clearTimeout(liveTimer);liveTimer=0;liveLoading=false;S.live=null;}
 function syncLive(){
   if(S.live?.routine)return;                      // a routine's live post follows its chat (syncRoutineLive)
