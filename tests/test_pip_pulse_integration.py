@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -241,8 +242,8 @@ class PulseIntegrationTests(unittest.TestCase):
         from dgc.pip_export import export_run
         run=self.execute(self.planned());before='\n'.join(self.registry.db.iterdump())
         destination=self.base/'pulse.jsonl'
-        if not os.path.isdir('/proc/self/fd'):
-            # Documented: the pinned read-only export needs Linux procfs. It must refuse, not degrade.
+        if not os.path.isdir('/proc/self/fd') and sys.platform != 'darwin':
+            # Documented: the pinned read-only export needs Linux procfs or macOS. Elsewhere it must refuse, not degrade.
             with self.assertRaises(RegistryError) as refused:
                 export_run(self.cfg,run['id'],destination,directory=self.registry.directory)
             self.assertEqual(refused.exception.code,'unsupported_platform')
