@@ -4416,6 +4416,9 @@ class Backend:
             # killed only at process exit, so closing its tab left a dev server holding its port
             # until every chat in the window had closed.
             self.agent.close_tool_resources()
+            close_notes = getattr(self.agent, "close_notes", None)
+            if callable(close_notes):
+                close_notes()
         return outcome
 
     def _editor_image_mentions(self, context, images):

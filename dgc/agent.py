@@ -9644,6 +9644,13 @@ class Agent(GoalLifecycle):
                                     redact_secrets=self._secret_values())
         return self._notes
 
+    def close_notes(self) -> None:
+        """Let go of the note store's database. A chat closed in a backend that keeps running must: each one held
+        the project's notes.sqlite open until the process exited, one more file for every chat opened that day."""
+        store = self.__dict__.get("_notes")
+        if store is not None:
+            store.close()
+
     #: The tools whose outcome is worth remembering, and the argument naming their subject.
     _NOTE_TOOLS = {"bash": "command", "python": "code", "write_file": "path", "edit_file": "path",
                    "multi_edit": "path", "apply_patch": "path"}

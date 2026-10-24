@@ -179,6 +179,28 @@ class OpenChatTest(unittest.TestCase):
         self.host.dispatch({"type": "name_session", "request_id": "after", "name": "z", "chat_id": chat_id})
         self.assertEqual(self.wait_for(lambda f: f.get("request_id") == "after")["reason"], "unknown_chat")
 
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "counts the process's open files through /proc")
+    def test_chats_opened_and_closed_leave_no_files_open(self):
+        # A backend lives for the whole session: each chat opened and closed in it held the project's notes.sqlite
+        # open until the process exited, one more file per chat (measured 2026-10-24: 30 chats, 30 files).
+        def open_files():
+            return len(os.listdir("/proc/self/fd"))
+
+        def cycle(n):
+            opened = self.open_b(f"open-{n}")
+            self.host.chats[opened["chat_id"]].agent.notes()          # what a turn does: the notes store opens
+            self.host.chats[opened["chat_id"]].agent.notes().add("fact", "the build uses make", tool="bash")
+            self.host.dispatch({"type": "close_chat", "request_id": f"close-{n}", "chat_id": opened["chat_id"]})
+            self.wait_for(lambda f: f["type"] == "chat_closed" and f.get("request_id") == f"close-{n}")
+            deadline = time.monotonic() + 5
+            while opened["chat_id"] in self.host.chats and time.monotonic() < deadline:
+                time.sleep(0.02)
+        cycle(0)                                                       # whatever the first chat sets up once
+        before = open_files()
+        for n in range(1, 11):
+            cycle(n)
+        self.assertLessEqual(open_files() - before, 1, "ten chats opened and closed left files open")
+
     def test_the_default_chat_cannot_be_closed(self):
         self.open_b()
         self.host.dispatch({"type": "close_chat", "request_id": "d", "chat_id": self.host.default.chat_id})

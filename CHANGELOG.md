@@ -139,6 +139,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   may fold away once the answer arrives (the editor folds them into its "Worked for" row), so the answer has to carry
   everything you need from them.
 
+- **A long-running DGC no longer collects open files.** Each chat opened and closed in an editor window kept the
+  project's notes database open until DGC exited: one more open file per chat, all day. Closing a chat lets it go.
+
 - **A Pip's "Routine added" card goes away.** A routine the Pip suggested and you added showed "Routine added" in its
   chat for a while, but an email or calendar routine, checked every few minutes, kept it there for good: each check
   counted as a change to the routine. Checks no longer do.
