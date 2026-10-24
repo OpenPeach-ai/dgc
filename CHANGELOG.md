@@ -6,6 +6,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Pips on a server.** Your app and DGC's Pips can now run on a server with no VS Code and no desktop.
+  `dgc pips serve --server` is the runner without the desktop: no desktop notifications, no borrowing a signed-in
+  Chrome, and one plain line per event on stdout for `docker logs` and journald (`runner_started`, each run queued,
+  started, succeeded or failed with its reason, `runner_stopped`). `dgc pips service install --server` writes the same
+  as this home's systemd unit; Keep Pips running keeps a server unit as it is. On a server, Pips run on an API key or
+  a self-hosted model only: a Pip on your Claude Code or Codex plan is refused, its run marked with words that say why
+  and how to change it, and its model is never switched by itself. `dgc pips health` exits 0 when the runner is online
+  and running, and 1 with one line saying why when it isn't (Pips off, Pips stopped, no runner, a stale heartbeat, or
+  state it can't read); `--json` gives the same for probes. It only reads, so every 10 seconds is fine. A second runner
+  on the same home is refused, as before, and now says so on one line. `deploy/docker` has an image recipe (Debian
+  slim, Python 3.12, DGC from its release archive at a pinned version, the Python SDK, the DGC home on a `/data`
+  volume, `dgc pips health` as its health check) and `with-pips`, which runs your app with the runner beside it. In a
+  container, Pip computers and Pulse and Patch commands now say that the container's options keep bubblewrap from
+  running, instead of suggesting an Ubuntu fix.
+
 - **Your app's events start your Pips (Pips API 63).** A Personal Pip's routine can now run when your own app sends an
   event: "when the shop app sends order.created, check the order and propose a dispatch". Add it in the Pip's
   Settings (Routines, When my app sends an event), accept the Pip's suggestion in its chat, or add it through the SDK.

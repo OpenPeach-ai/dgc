@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Docs: Pips on a server ([PIPS.md](PIPS.md#pips-on-a-server)). Your app and DGC's runner on a server with no VS Code:
+  `dgc pips serve --server` or its systemd unit, the Docker image in `deploy/docker`, `dgc pips health` for probes, the
+  rule that Pips there run on an API key or a self-hosted model only, and where secrets live. Nothing in the SDK's API
+  changes.
+
 - Pips API 63: events from your app. `pips.trigger(app, event, payload=None, idempotency_key=...)` (TypeScript:
   `pips.trigger(app, event, payload, { idempotencyKey })`) tells DGC your app's event happened, and every Personal Pip
   routine waiting on it (`trigger` `{kind: "app", app, event}`) gets one run, with the payload as untrusted data. It

@@ -843,6 +843,40 @@ E is an event: neither a read nor an approved mutation. Send it with `pips.trigg
 idempotency_key)` (TypeScript: `pips.trigger(app, event, payload, { idempotencyKey })`); read with `pips.events(app,
 limit=None)` (`pips.events(app, { limit })`). `AsyncPips` has both.
 
+## Pips on a server
+
+Your app and DGC's Pips can run on a server with no VS Code and no desktop. The SDK starts its own `dgc serve` with
+`inherit_user_state=True`, so your app and the runner share one machine or container and one DGC home. Nothing in the
+SDK changes for it: no new command, and no new Pips API version.
+
+**The runner.** Run `dgc pips serve --server` beside your app. It is the same runner without the desktop: no desktop
+notifications, no borrowing a signed-in Chrome, and one plain line per event on stdout for `docker logs` and journald.
+A second runner on the same home is refused: it stops at once and says why.
+
+- **systemd:** `dgc pips service install --server`, then `dgc pips service start` and `dgc pips service enable`
+  (`preview --server` shows the unit first). The unit passes no environment variables, so keep the model's key in
+  DGC's own settings.
+- **Docker:** [deploy/docker](../deploy/docker/README.md) has the image recipe: Debian slim with Python 3.12, DGC from
+  its release archive at a pinned version, this SDK, the DGC home on a `/data` volume, `dgc pips serve --server` as its
+  command and `dgc pips health` as its health check. Your app runs in the image beside the runner (`with-pips`), or in
+  a second container on the same volume.
+
+**Health.** `dgc pips health` exits 0 when the runner is online and running, and 1 with one line saying why when it
+isn't: Pips are off, Pips are stopped, no runner runs, its heartbeat is stale, or the state can't be read.
+`dgc pips health --json` is the same as one object (`healthy`, `state`, `message`, `heartbeat_age_seconds`,
+`server_mode`, ...) for your own probes. It only reads, so every 10 seconds is fine.
+
+**The guardrail.** On a server, Pips run on an API key or a self-hosted model only. A Pip whose model is a personal
+Claude Code or Codex plan, chosen for it or followed through "Same as DGC", is refused when it runs under `--server`:
+its run fails with `server_subscription` and words that say why and how to change it, and its model is never switched
+by itself. Give such a Pip an API-key or self-hosted model (`propose_pip_update` with a `model_choice`, or its
+Settings).
+
+**Where secrets live.** In the DGC home, owner-only: the model's key in DGC's secret store (`.dgc/secrets.json`, 0600)
+or `DGC_API_KEY` in the runner's and your app's environment; your app's signing secret, DGC's copy, in its credential
+store (`.dgc/plugin-auth/_pipapp.<name>/credentials.json`, 0600) where there is no system keychain. In the Docker image
+the home is the `/data` volume. Your app keeps its own copy of the signing secret, which `register_app` gives once.
+
 ## Parameters that pin a review
 
 The SDK passes these through unchanged. Read them from the record the user saw.

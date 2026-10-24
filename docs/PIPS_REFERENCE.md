@@ -624,13 +624,89 @@ default `.config/systemd/user`).
   your shell, including API keys, are not passed on: save credentials in DGC's own
   settings.
 - It sets `UMask=0077`, `NoNewPrivileges=yes`, `KillMode=mixed`,
-  `TimeoutStopSec=90` and `Restart=no`, so it never restarts itself after an
-  emergency stop.
+  `TimeoutStopSec=90` and `Restart=on-failure` (after 30 seconds). `serve --service`
+  exits 0 when Pips are off, stopped or already running, so an emergency stop never
+  turns into a restart loop.
 - `install` writes the unit (0600) and reloads systemd but doesn't start or enable
   it. `start`, `stop`, `enable` (start at login) and `disable` are separate.
   `uninstall` needs the service stopped. DGC changes only a unit whose bytes match
   what it generated, and never configures lingering.
 - The DGC home's `.dgc` folder, `config.json` and `secrets.json` must be owner-only.
+
+### Pips on a server
+
+A developer runs their app and the runner on a server with no VS Code and no desktop. The
+app's SDK starts its own `dgc serve` with `inherit_user_state=True`, so the app and the
+runner share one machine (or container) and one DGC home; there is no remote control
+plane. Everything here is the CLI's: no command or Pips API version is added.
+
+**Server mode.** `dgc pips serve --server` is the foreground supervisor with a server
+profile:
+
+- No desktop notifications, and no borrowing a signed-in Chrome: a chat reply isn't offered
+  `borrow_chrome`, and nothing looks for a Chrome. Pip computers stay where their bubblewrap
+  box runs headless; where it doesn't, the runner's first lines say why (in a container:
+  the container's options), and so does each Pip computer.
+- One plain line per event on stdout, for `docker logs` and journald:
+  `<UTC time> <event>[ pip=…][ run=…][ by=…][: detail]`. It starts with `runner_started`
+  and `pip_computers`, ends with `runner_stopped` (`reason=emergency_stop` after one),
+  and has each event of the activity feed in between, except a run's progress steps. A
+  failed or cancelled run's line carries its error's code and words. When the runner
+  can't start, its one line is `runner_not_started reason=<code>: <why>` (`disabled`,
+  `runtime_paused` or `runner_running`) and it exits with status 1, or 0 under
+  `--service`.
+- **The guardrail.** Pips run on an API key or a self-hosted model only. A run whose pinned
+  model is the user's Claude Code or Codex plan (chosen for the Pip, or followed through
+  "Same as DGC") is refused before anything starts: it fails with `server_subscription`
+  and words that say why and how to change it (`dgc pips propose PIP --expected-version N
+  --model MODEL`, or DGC's own model for a Pip that follows it). The Pip's model is never
+  switched by itself.
+- The supervisor record says `mode: server`, so `dgc pips health` reports `server_mode`, and
+  accepting a schedule or routine through the SDK doesn't try to turn on Keep Pips running
+  while a server runner is online. Without systemd (a container), Keep Pips running says
+  it's unavailable here and writes no unit.
+
+**systemd.** `dgc pips service install --server` writes this home's unit (the same
+`dgc-pips-<24 hex digits>.service`) running `pips serve --service --server`, replacing
+the desktop one if that was installed; `preview --server` shows it first. `install`
+without `--server`, and Keep Pips running, keep whichever kind is installed. `start`,
+`stop`, `enable`, `disable` and `uninstall` work on either, and `status` says which
+(`server`). Its lines are in the journal: `journalctl --user -u <unit>`.
+
+**Docker.** [deploy/docker](../deploy/docker/README.md) has the image recipe: Debian slim
+with Python 3.12, DGC from its release archive (`install.sh`, version pinned by
+`--build-arg DGC_VERSION`), the Python SDK, bubblewrap, `/data` as the DGC home on a
+volume, `dgc pips serve --server` as its command and `dgc pips health` as its
+`HEALTHCHECK`. Your app runs in the image beside the runner (`with-pips`, a small
+supervisor), or in a second container on the same volume and user. A second runner on a
+home that has one is refused by the supervisor lease (`runner_running`), across containers
+too.
+
+**Health.** `dgc pips health` exits 0 when the runner is online and running and holds its
+lease; otherwise 1, with one line: `dgc pips health: unhealthy: <why>`. `--json` gives
+`{healthy, state, message, status, online, paused, heartbeat_at, heartbeat_age_seconds,
+started_at, server_mode, counts, lease_held}` (fewer when there is no state to read).
+
+| `state` | When |
+| --- | --- |
+| `running` | Healthy: a fresh heartbeat and the lease held. |
+| `off` | `pips_enabled` is off in this home's settings. |
+| `stopped` | The emergency stop is on. |
+| `no_runner` | No registry or no runner record yet, the last runner stopped, or a fresh heartbeat with no lease held (it stopped a moment ago). |
+| `heartbeat_stale` | The heartbeat is older than 15 seconds, unreadable or in the future. |
+| `state_unreadable` | The registry, a runner record or the lease can't be read. |
+
+It only reads: the registry is opened read-only (`mode=ro`, never created, upgraded or
+written, whichever DGC version made it), and the lease is looked at only while a fresh
+heartbeat says a runner already holds it, so a probe never meets a runner that is
+starting. A chat's shell may run it. Safe every 10 seconds.
+
+**Secrets.** On a server they live in the DGC home: the model's key in DGC's secret store
+(`.dgc/secrets.json`, 0600, saved with `dgc setup`), or `DGC_API_KEY` in the runner's and
+the app's environment (the systemd unit passes no environment, so there use DGC's own
+settings); your app's signing secret in DGC's credential store
+(`.dgc/plugin-auth/_pipapp.<name>/credentials.json`, 0600, where there is no system
+keychain). In the Docker image the home is the `/data` volume, owned by its one user.
 
 **Platforms.** Queueing and running work needs a POSIX system, so Windows can't run
 Pips work. Audits, Quill drafts, conversations and Personal tasks run on Linux and
@@ -2024,8 +2100,8 @@ ask need `--yes` there.
 
 | Area | Commands |
 | --- | --- |
-| Runner | `enable`, `serve [--enable]`, `status`, `stop [--yes]`, `resume`, `execution` |
-| Linux service | `service preview\|install\|status\|start\|stop\|enable\|disable\|uninstall` |
+| Runner | `enable`, `serve [--enable] [--server]`, `status`, `health [--json]`, `stop [--yes]`, `resume`, `execution` |
+| Linux service | `service preview\|install [--server]`, `service status\|start\|stop\|enable\|disable\|uninstall` |
 | Workspaces | `workspaces`, `workspace show\|sessions\|backfill\|rebind\|migrate-session`, `activity` |
 | Pips | `types`, `models`, `list`, `create`, `show`, `pause`, `resume-job`, `archive`, `restore`, `starters`, `starter` |
 | Digest | `digest [--keep]`, `notify PIP [--min-severity] [--alerts]`, `outcomes PIP` |

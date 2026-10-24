@@ -2734,7 +2734,10 @@ Open the Pips view with the Pips button in the DGC chat view's title bar, or ask
 Pips run on your computer, in the **runner**, with no Pips account and no hosted service. **Keep Pips
 running** (the Pips view's runner controls, or `dgc pips keep-running on`) starts the runner when you
 log in, so a morning schedule still runs after a restart; DGC turns it on the first time a Pip gets a
-schedule, a commit trigger or a routine. Up to four Pips work at once, with no daily token limit.
+schedule, a commit trigger or a routine. Up to four Pips work at once, with no daily token limit. On a
+server with no desktop, run `dgc pips serve --server` (or the Docker image in `deploy/docker`) beside
+your app, and `dgc pips health` says whether it is running; there, Pips use an API key or a
+self-hosted model, never your Claude Code or Codex plan.
 
 - **A Pip speaks for its runs.** Each finished run is a message from the Pip in its own chat, in
   short first-person words made from the run's report alone, so every number, file and title it says

@@ -277,6 +277,16 @@ Otherwise:
 `dgc pips status` shows whether the runner is online and how much work is queued.
 The runner does one run at a time.
 
+**On a server**, with no VS Code and no desktop, beside your own app: `dgc pips serve
+--server`, or the same as a systemd unit (`dgc pips service install --server`), or the
+Docker image in [deploy/docker](../deploy/docker/README.md). It shows no desktop
+notifications, never borrows a Chrome, and prints one plain line per event for `docker
+logs` and journald. There, Pips run on an API key or a self-hosted model only: a Pip on
+your Claude Code or Codex plan is refused, with a reason that says how to change it.
+`dgc pips health` exits 0 when the runner is online and running, and 1 with one line
+saying why when it isn't; `--json` is for probes. See **Pips on a server** in the
+[reference](PIPS_REFERENCE.md#pips-on-a-server).
+
 **Platforms.**
 
 | | Linux | macOS | Windows (DGC inside WSL 2) |
