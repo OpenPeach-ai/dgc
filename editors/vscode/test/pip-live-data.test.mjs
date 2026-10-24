@@ -60,7 +60,7 @@ test('the docked card says how many read-only commands and that it changes nothi
   cards.receive({type:'pipsReply',id:sent.find(m=>m.request?.type==='get_pip_setup').id,ok:true,result:{setup:setup()}});
   for(let i=0;i<16;i++)await Promise.resolve();
   const card=docked[0];assert.ok(card,'it docks above the chat box like any Pulse');
-  assert.deepEqual([...card.querySelectorAll('.pip-dock-chip')].map(c=>c.textContent),['Every 60 minutes','Runs once now','3 read-only commands','Changes nothing','Your DGC model']);
+  assert.deepEqual([...card.querySelectorAll('.pip-dock-chip')].map(c=>c.textContent),['Every 60 minutes','Runs once now','3 read-only commands','Changes nothing','Default model']);
   const facts=[...w.document.querySelectorAll('.pip-setup-fact')].map(f=>[f.querySelector('dt').textContent,f.querySelector('dd').textContent]);
   assert.deepEqual(facts.filter(([k])=>k==='Command').map(([,v])=>v),PLAN.commands);
   assert.ok(facts.some(([k,v])=>k==='Runs'&&/its model summarizes/.test(v)));

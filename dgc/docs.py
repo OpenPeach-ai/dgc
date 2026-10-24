@@ -2627,13 +2627,18 @@ numbered list instead.
 
 The gear opens twelve pages: **General** (permission mode, thinking, context size, tool profile),
 **Models** (a local host, a provider, or your own subscription CLI; for Anthropic, **Cache
-lifetime**, and for a local Ollama, **Keep the model loaded**), **Agents** (the model and host that
-sub-agents and the fallback route use), **Web search**, **ChatDGC**, **Memory** (what DGC
+lifetime**, and for a local Ollama, **Keep the model loaded**), **Agents** (the model, host and context
+window sub-agents use, how many run at once, the fallback route, and the model for Pips), **Web search**, **ChatDGC**, **Memory** (what DGC
 remembers, with its **History** and **Undo**), **Voice**, **Running sessions** (sessions working
 with no window), **Token usage** (what this machine counted), **Security** (sandbox confinement and
 plan-mode limits), **Plugins** (installed packages, the apps they reach, and the directory) and
-**MCP servers**. Everything is a row: what it is on the left,
-the control on the right, the explanation beneath. Skills, lifecycle hooks, permission rules,
+**MCP servers**. Settings follows your VS Code theme. Everything is a row: what it is on the left,
+the control on the right, a one-line hint beneath, and the rest behind the **?** beside its name.
+Advanced settings fold away under **Advanced**. One **Save all** at the foot of every settings page
+saves every page's changes and names the pages that have them. Each **Model** box lists the models at
+its own card's host as you type it (Ollama's `:cloud` models included), and still takes any name; a
+saved key only ever goes to the host it was saved for. An MCP server's **Forget saved sign-in** and
+**Remove server** each ask first. Skills, lifecycle hooks, permission rules,
 project memory and these docs each open as their own panel from the command menu.
 See **Plugins, apps and MCP**.
 
@@ -3596,7 +3601,7 @@ exceeds the model's reported output limit or half the context window, so a 32K w
 effort, and makes the main agent a lead: it locates each part of the request, gives every part
 that changes different files its own worker (or an explorer for an area to map) in one parallel
 batch — one `task` call that lists them all in `tasks`, up to 8 at once under Ultra, or the
-`max_parallel_tasks` width if you set one (default 4 outside Ultra, at most 8; concurrent in auto
+`max_parallel_tasks` width if you set one (default 4 outside Ultra, at most 32; concurrent in auto
 mode) — then
 integrates and runs the tests. A sub-agent starts cold, so it only saves time beside others: a
 single part, parts that share files or one investigation, and edits the lead already knows stay
@@ -3989,6 +3994,9 @@ Useful keys:
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
   Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
   redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
+- `pips_model` — the model every Pip on Default uses, on DGC's own connection; empty (the default)
+  follows DGC: its model, or its subscription CLI. Settings → Agents → Pips sets it in the editor, and
+  the Pips runner picks a change up without a restart while its connection is unchanged.
 - `subagent_context_size` — each sub-agent's context window in tokens, as `context_size` is the main
   model's (0, the default, uses the main window). A named agent's own `context_size:` frontmatter
   wins. `/subagent context 64k` sets it; so does Settings → Agents in the editor. The sub-agent
@@ -4007,10 +4015,13 @@ Useful keys:
 - `fleet_worktree_root` — optional private storage for automatically isolated TUI agents; empty uses
   `~/.dgc/fleet-worktrees`. Conversation resume state remains scoped to the source project, and
   changed managed checkouts are retained rather than force-removed.
-- `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 8; set 1 to disable). In a
+- `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 32; set 1 to disable). Each
+  sub-agent is its own checkout of the project and its own stream of model requests: a cloud API
+  rate-limits a wide fan-out, and a local Ollama serves only `OLLAMA_NUM_PARALLEL` at once while the
+  rest wait. In a
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
   from one parent baseline, run concurrently, and integrated in call order. One `task` call can also
-  list 2-8 helpers in `tasks` (each with its own `description`, `prompt` and `agent`): they start
+  list 2-32 helpers in `tasks` (each with its own `description`, `prompt` and `agent`): they start
   together the same way, past this width the rest wait for a free worker, and the call returns every
   helper's result in the order listed (with `background: true`, at once with every helper's id;
   background helpers past the width wait queued for a slot). Hooks, interactive

@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **Settings, redesigned on every page, and in your VS Code theme.** Every page and the side list now follow the VS
+  Code theme, light and high contrast included; Settings was always dark before. Each page is a short title and one
+  line, then a few groups of rows. A row's hint is one line; the rest is behind a small **?** beside its name, and a
+  page's longer introduction is behind the **?** after its first line. Advanced settings fold away (Models: Transport,
+  Responses state, Recheck refused features; General: Tool profile; an MCP server: your own sign-in app and what it
+  logs). There is one **Save all** at the foot of every settings page, which saves every page's changes and says which
+  pages have them ("Unsaved changes on Models and Agents"). In a narrow tab the side list becomes a page picker with
+  every page's name. Pages, in short:
+  - General: Turns (Permission mode, Thinking, DGC Ultra, Token cap per turn, Context window), What you see.
+  - Models: Connection (Host with its Presets beside it, API key, Model), Subscription (Run turns on; its model and
+    effort only when one is on), Cache.
+  - Agents: Sub-agents (Model, **Run at once**, which moved here from General's Parallel sub-agents, Context window,
+    and Another host), Fallback, Pips. A blank box says what blank means ("Same as the main model", "None").
+  - Security: Sandbox (Run commands in a sandbox; its network switch works only with the sandbox on) and Previews,
+    in plain words.
+  - Web search keeps the search; **Search the web** for ChatDGC moved to the ChatDGC page, beside its other replies'
+    settings.
+  - MCP servers: plain words ("A command on this computer", "A URL", "NAME=value is kept privately"); **Forget saved
+    sign-in** and **Remove server** sit in a "Can't be undone" area and each asks first. The "Clear stored credentials"
+    checkbox beside everyday fields is gone. The Plugins page no longer has an MCPs tab: MCP servers has one page.
+  - Plugins: the install review and a plugin's page no longer show DGC's own test notes; a plugin's details hide what
+    its package doesn't provide; directory cards drop the package jargon.
+  - Memory, Voice, Running sessions and Token usage: one line under each title, the rest behind **?**.
+- **Every Model box in Settings lists the models at its own host.** Models → Connection, and Agents → Sub-agents and
+  Fallback: open the box (or press Down) for the models that card's host has, a local Ollama's `:cloud` models
+  included, or keep typing any name: a host that can't list, or a model it doesn't list, still works. It lists again a
+  moment after you change that card's Host URL, Transport or API key, before you save, and a provider preset lists the
+  host it fills in. When it can't, it says why under the box ("Couldn't list the models at this host: it needs an API
+  key (HTTP 401)."). A saved key is only ever sent to the host it was saved for: type another host and it is asked
+  with no key, or with the key you type beside it. The Subscription model stays a text box. Needs a DGC CLI that
+  offers it (0.48); with an older one the boxes stay as they were.
+- **Settings → Agents: the sub-agents' context window.** The Sub-agents card has **Context size**: how many tokens
+  each sub-agent holds before it compacts. Blank (or 0) reads **Same as the main model** and keeps the main model's
+  window; otherwise 2,048 to 16,777,216 tokens, checked as the main Context size is. Save writes it, which it could
+  not before. Needs DGC CLI 0.41.6 or later; with an older one the box says to update.
 - **New Pip: a big face with a list beside it.** The grid of seven character tiles is gone. **New Pip** shows the
   character's face on the left and a dropdown beside it, and the face changes as soon as you pick. For a Project Pip
   the dropdown asks **What should it do?** and lists the jobs in plain words, with the character's name beside each:

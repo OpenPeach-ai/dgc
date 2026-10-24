@@ -67,7 +67,7 @@ test('with a dock a waiting Pip docks above the chat box; Later and Review move 
  const x=harness(t,{dock}),s=setup();await x.loaded(s);
  assert.equal(docked.length,1);const card=docked[0];assert.ok(card.classList.contains('pip-dock'));
  assert.equal(card.querySelector('.pip-dock-title').textContent,'New Pip: Daily review');
- assert.deepEqual([...card.querySelectorAll('.pip-dock-chip')].map(c=>c.textContent),['When you ask','Reads committed code','Your DGC model']);
+ assert.deepEqual([...card.querySelectorAll('.pip-dock-chip')].map(c=>c.textContent),['When you ask','Reads committed code','Default model']);
  assert.deepEqual([...card.querySelectorAll('.pip-dock-foot button')].map(b=>b.textContent),['Not now','Details','Create Pip']);
  assert.match(x.d.querySelector('.pip-setup-line').textContent,/Waiting for you above the chat box/);
  assert.equal(x.d.querySelector('.pip-setup-line .pip-setup-primary'),null,'decided on the card, not twice');

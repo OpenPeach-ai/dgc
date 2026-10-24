@@ -205,10 +205,10 @@ def _put(registry, key: str, value) -> None:
 
 
 def _pip_model(store, pip_id: str, config) -> str:
-    from .pip_models import _model_id
+    from .pip_models import _model_id, default_model
     pip = store._job(pip_id)
     choice = pip.get("model_choice") or {"mode": "default"}
-    return _model_id(choice["model"] if choice.get("mode") == "model" else config.get("model", ""))
+    return _model_id(choice["model"] if choice.get("mode") == "model" else default_model(config))
 
 
 def status(store, pip_id: str, config) -> dict:

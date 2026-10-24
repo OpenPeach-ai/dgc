@@ -6,6 +6,34 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The plugin catalog's own test notes stay out of Settings.** `verification` and `audited_on` (what DGC's
+  maintainers checked, and when) are no longer sent to the editor in the plugin list or the install review; they stay
+  in the catalog for maintainers.
+
+- **Up to 32 sub-agents at once.** `max_parallel_tasks` now goes to 32 (it stopped at 8, a cautious choice rather
+  than a technical limit), and 32 really run at the same time: one `task` call can list up to 32 helpers in `tasks`,
+  and a reply of up to 32 `task` calls runs side by side, each in its own checkout. The default stays 4 and Ultra's
+  own width 8; a number you choose is kept, under Ultra too. More costs more: each sub-agent is its own copy of the
+  project and its own stream of requests, cloud APIs rate-limit, and a local Ollama serves only `OLLAMA_NUM_PARALLEL`
+  at once while the rest wait. The TUI's settings say 1–32.
+
+- **One model for every Pip on Default.** The new `pips_model` setting is the model every Pip set to Default
+  uses, on DGC's own connection; empty (the default) follows DGC as before: its model, or its Claude Code or Codex.
+  Set, it wins over DGC's subscription default, so a Project Pip on Default works while DGC itself runs on a
+  subscription. `list_pip_models` says it in its existing `default_model` (no Pips API change), runs are pinned to it,
+  and new Pips start on Default. The Pips runner picks a saved change up on its next tick, without a restart, while
+  config.json names the connection it started with. Settings reads it in a new `pips_settings` event (asked for with
+  get_config's `fields`, sent before `config`) and writes it with set_config `pips_model`.
+
+- **Settings can list a host's models before you save it.** `list_models_at {request_id, role, base_url, api_mode?,
+  api_key?}` lists the models at a host as the editor has it typed (Ollama's `/api/tags`, `:cloud` models included; an
+  OpenAI-compatible or Anthropic host's `/models`) and answers with `models_at`: the ids, or a short reason it couldn't
+  ("it needs an API key (HTTP 401)", "nothing answered at that address"), never the URL, a key or what the host said.
+  A saved API key only ever goes to the host it is bound to: the main key to the main host, the sub-agents' and the
+  fallback's keys to theirs (the main host when they have none of their own). Any other host is asked with no key, or
+  with a key typed beside it in the form, which is never kept. Redirects are not followed, so a key can't go on to
+  another host. Offered as `ready.capabilities.list_models_at`.
+
 - **A Pip's own chat says what Ask DGC to fix did (Pips API 65).** When a Work chat fixes what a Project Pip reported,
   the run's message in the Pip's own chat on the Pips page now says so, read from DGC: DGC is fixing this, Fixed
   · 3 files, the fix didn't finish (with Ask DGC to fix again), or back to Ask DGC to fix once it is undone. It

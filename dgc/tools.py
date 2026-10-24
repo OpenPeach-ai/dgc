@@ -572,7 +572,7 @@ TOOL_SCHEMAS = [
         "Git project each works in a private checkout, then integrates only its conflict-free delta; "
         "conflicting or incomplete work is preserved without overwriting the caller. A helper starts "
         "cold, so it saves time only beside other helpers: to run several helpers at once, pass them "
-        "all in ONE call as `tasks` (2-8, each with its own description, prompt and agent). They "
+        "all in ONE call as `tasks` (2-32, each with its own description, prompt and agent). They "
         "start together (in auto mode, in a Git project) and the call returns every result, in the "
         "order you listed them. For one helper, pass description and prompt instead. Never put parts "
         "that depend on each other or edit the same files in one batch. The user does not see the "
@@ -583,7 +583,7 @@ TOOL_SCHEMAS = [
                     "project-relative paths, constraints, what is known, what to return. Omit when "
                     "you pass tasks"},
          "agent": {"type": "string", "description": _TASK_AGENT_DESCRIPTION},
-         "tasks": {"type": "array", "minItems": 2, "maxItems": 8,
+         "tasks": {"type": "array", "minItems": 2, "maxItems": 32,
                    "description": "Several helpers that start together, one item each: the way to "
                                   "fan out. Instead of description and prompt",
                    "items": {"type": "object", "additionalProperties": False,

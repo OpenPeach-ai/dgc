@@ -188,7 +188,8 @@ export function chatContinuity(value,pip,workspace){
  return value;
 }
 // API 55: a Personal Pip can run on the user's own Claude Code or Codex (pip_brain). `subscriptions` lists the ones
-// signed in here; `default_engine` is the one "Same as DGC" follows when DGC's default is a subscription.
+// signed in here; `default_engine` is the one Default follows when DGC's default is a subscription (and no Pips
+// default model is set in Settings: `default_model` is then that model).
 export const SUBSCRIPTION_NAMES={claude:'Claude Code',codex:'Codex'};
 export function pipModels(value) {
   if(!record(value)||typeof value.default_model!=='string'||!Array.isArray(value.models)||value.models.length>500||!value.models.every(m=>record(m)&&typeof m.id==='string'&&m.id&&typeof m.name==='string')||new Set(value.models.map(m=>m.id)).size!==value.models.length)throw new Error('Models didn’t load. You can still use the same model as DGC.');
@@ -201,15 +202,15 @@ export function modelChoice(value,models,subscriptions=[]) {
   if(value==='default')return{mode:'default'};
   if(typeof value==='string'&&value.startsWith('subscription:')){
     const engine=value.slice(13);
-    if(!subscriptions.some(s=>s.engine===engine))throw new Error('Choose Same as DGC or a model from the list.');
+    if(!subscriptions.some(s=>s.engine===engine))throw new Error('Choose Default or a model from the list.');
     return{mode:'subscription',engine};
   }
   const id=typeof value==='string'&&value.startsWith('model:')?value.slice(6):'';
-  if(!id||!models.some(m=>m.id===id))throw new Error('Choose Same as DGC or a model from the list.');
+  if(!id||!models.some(m=>m.id===id))throw new Error('Choose Default or a model from the list.');
   return{mode:'model',model:id};
 }
 export const modelValue=choice=>record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:'default';
-export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:'Same as DGC';
+export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:'Default';
 // Said once, where a subscription is chosen for a Pip: its scheduled runs use the user's own plan.
 export const subscriptionUsage=name=>`Its replies and routines use your ${name} plan’s usage.`;
 export function presentation(pip, runs, connected, runnerState) {

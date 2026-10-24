@@ -564,14 +564,14 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
             "terms_url": entry.get("terms_url") or entry.get("license_url") or "",
             "privacy_url": entry.get("privacy_url") or "",
             "skills": _skill_summaries(None if skill_names else source, skill_names, disabled_names),
-            **{key: value for key, value in metadata.items() if value},
+            **{key: value for key, value in metadata.items() if value and key not in MAINTAINER_NOTES},
             # Package metadata cannot override DGC's compatibility decision.
             "install": entry.get("install") or "allow",
             "block_reason": entry.get("block_reason") or "",
             "compatibility_url": entry.get("compatibility_url") or "",
-            "verification": entry.get("verification") or "",
+            # The catalog's own `verification` and `audited_on` are notes for DGC's maintainers (what was checked,
+            # when); they never go to the editor, which once showed them in the install review.
             "requirements": entry.get("requirements") or "",
-            "audited_on": entry.get("audited_on") or "",
             # The cloud banner is a disclosure, so the flag has to travel the list path too, not
             # only the install review's raw entry. It sits below the metadata spread with the rest
             # of DGC's compatibility decisions: a package must not be able to un-declare it.
@@ -1309,6 +1309,10 @@ def _relocate_spec(spec: dict, old: str, new: str) -> dict:
     return result
 
 
+# Catalog fields for DGC's maintainers only (what was checked, and when): never part of what the editor is sent.
+MAINTAINER_NOTES = frozenset({"verification", "audited_on"})
+
+
 def _preview(entry: dict, source: Path | None) -> dict:
     metadata = _package_metadata(source) if source else dict(entry.get('metadata', {}))
     warnings = []
@@ -1326,7 +1330,8 @@ def _preview(entry: dict, source: Path | None) -> dict:
     if metadata.get('apps') and not specs:
         warnings.append('This package declares ChatGPT apps without a standalone MCP server. DGC cannot use those hosted connections.')
     supported = bool(skills or specs or entry.get('connector'))
-    return {**entry, **{k:v for k,v in metadata.items() if v}, 'metadata':metadata,
+    public = {k: v for k, v in entry.items() if k not in MAINTAINER_NOTES}
+    return {**public, **{k:v for k,v in metadata.items() if v and k not in MAINTAINER_NOTES}, 'metadata':metadata,
             'skills':skills, 'server_specs':specs, 'warnings':warnings, 'supported':supported,
             'compatibility_reason': '' if supported else 'No supported skills or MCP servers in this package. ' + ' '.join(warnings)}
 

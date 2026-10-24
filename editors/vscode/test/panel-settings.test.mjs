@@ -887,6 +887,139 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
   }
 });
 
+test("the sub-agents' context window goes only to a CLI that answered it, blank or 0 as the main model's", async () => {
+  // Settings -> Agents -> Sub-agents -> Context size. The host built `values` without it unless the page posted it,
+  // and the page never did: Save could not write it at all.
+  const older = harness();
+  await older.provider.saveSettings(settings({ subagent_context_size: "65536" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "subagent_context_size" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [typed, sent] of [["65536", 65536], ["", 0], ["0", 0], [0, 0], ["100", 2048], ["99999999", 16777216],
+                               ["lots", 0], ["131072.9", 131072]]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "config", model: "m", mode: "default", subagent_context_size: 0 });
+    await provider.saveSettings(settings({ subagent_context_size: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "subagent_context_size" in (c.values || {}));
+    assert.equal(config?.values.subagent_context_size, sent, String(typed));
+  }
+});
+
+test("a Model box's listing goes to list_models_at with only what the page typed, and its answer comes back by token", async () => {
+  const posted = [], sent = [];
+  const { provider, secretValues } = harness({ initialSecrets: { "dgc.apiKey": "saved-secret-in-secretstorage",
+                                                                  "dgc.apiKey.endpoint": "https://old.invalid/v1" } });
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  let answer = (command) => ({ type: "models_at", request_id: command.request_id, role: command.role,
+                               ids: ["qwen3:8b", "glm-5.3:cloud", 7], api_mode: "ollama" });
+  provider.ensureBackend = () => ({ ready: true, async request(command, responseType) {
+    sent.push({ command: JSON.parse(JSON.stringify(command)), responseType });
+    return answer(command);
+  } });
+  // An older CLI: the page is told, and nothing is sent.
+  provider.lastReadyEvent = { capabilities: {} };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "model-1", role: "main", base_url: "https://old.invalid/v1", api_mode: "auto" });
+  assert.deepEqual(sent, []);
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "model-1", role: "main", ids: [], unsupported: true });
+
+  provider.lastReadyEvent = { capabilities: { list_models_at: 1 } };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "model-2", role: "main", base_url: " http://127.0.0.1:11434/v1 ", api_mode: "ollama" });
+  assert.equal(sent.length, 1);
+  const { command, responseType } = sent[0];
+  assert.equal(responseType, "models_at");
+  assert.deepEqual({ ...command, request_id: undefined },
+    { type: "list_models_at", request_id: undefined, role: "main", base_url: "http://127.0.0.1:11434/v1", api_mode: "ollama" },
+    "the host typed, and no key: the extension never adds a saved one");
+  assert.match(command.request_id, /^models-at/);
+  assert.equal(JSON.stringify(sent).includes("saved-secret-in-secretstorage"), false);
+  assert.ok(secretValues.has("dgc.apiKey"), "(the saved key is really there)");
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "model-2", role: "main", ids: ["qwen3:8b", "glm-5.3:cloud"] });
+
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "sub-3", role: "subagent", base_url: "https://x.example/v1", api_mode: "bogus", api_key: " typed " });
+  assert.deepEqual([sent[1].command.role, sent[1].command.api_mode, sent[1].command.api_key], ["subagent", "", "typed"],
+    "a key typed in the form goes as typed; an unknown transport is Inherit");
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "x", role: "admin", base_url: "https://x.example/v1" });
+  assert.equal(sent.length, 2, "only the three roles");
+  answer = (command) => ({ type: "models_at", request_id: command.request_id, role: command.role, ids: [], error: "it needs an API key (HTTP 401)" });
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "fb-4", role: "fallback", base_url: "", api_mode: "" });
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "fb-4", role: "fallback", ids: [], error: "it needs an API key (HTTP 401)" });
+  answer = () => { throw new Error("timed out"); };
+  await provider.onSettingsMessage({ type: "listModelsAt", token: "fb-5", role: "fallback", base_url: "", api_mode: "" });
+  assert.deepEqual(posted.at(-1), { type: "modelsAt", token: "fb-5", role: "fallback", ids: [], error: "DGC didn't answer" });
+});
+
+test("the config the settings page gets says whether the CLI lists a host's models", () => {
+  const posted = [];
+  const { provider } = harness();
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.lastReadyEvent = { capabilities: {} };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal(posted.filter((m) => m.type === "event").at(-1).event.list_models_at, false);
+  provider.lastReadyEvent = { capabilities: { list_models_at: 1 } };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal(posted.filter((m) => m.type === "event").at(-1).event.list_models_at, true);
+});
+
+test("Model for Pips goes only to a CLI that answered pips_settings, as a model's name or blank", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ pips_model: "glm-5.3:cloud" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "pips_model" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [typed, sent] of [["glm-5.3:cloud", "glm-5.3:cloud"], ["  qwen3:8b ", "qwen3:8b"], ["", ""]]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "pips_settings", model: "old" });
+    await provider.saveSettings(settings({ pips_model: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "pips_model" in (c.values || {}));
+    assert.equal(config?.values.pips_model, sent, typed || "blank");
+  }
+  for (const bad of ["http://host/v1", "two words"]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "pips_settings", model: "" });
+    await provider.saveSettings(settings({ pips_model: bad }));
+    assert.equal(commands.some((c) => c.type === "set_config"), false, `${bad}: nothing is saved`);
+    assert.match(notices.errors.concat(notices.warnings).join(" "), /Model for Pips/);
+  }
+});
+
+test("the settings page hears the Pips default with the config, from a CLI that sent pips_settings", () => {
+  const posted = [];
+  const { provider } = harness();
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal("pips_settable" in posted.at(-1).event, false);
+  provider.onEvent({ type: "pips_settings", model: "glm-5.3:cloud" });
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.deepEqual([posted.at(-1).event.pips_model, posted.at(-1).event.pips_settable], ["glm-5.3:cloud", true]);
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("agents");
+  assert.ok(commands.find((c) => c.type === "get_config").fields.includes("pips_settings"));
+});
+
+test("the host keeps up to 32 parallel sub-agents on Save, and never rewrites a stored width downward", async () => {
+  // The host clamped to 8: a width of 32 set in config.json came back as 8 on the next unrelated Save.
+  for (const [typed, sent] of [["32", 32], [32, 32], ["20", 20], ["64", 32], ["12.7", 12], ["", 4], ["0", 1], ["lots", 1]]) {
+    const { provider, commands } = harness();
+    await provider.saveSettings(settings({ max_parallel_tasks: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "max_parallel_tasks" in (c.values || {}));
+    assert.equal(config?.values.max_parallel_tasks, sent, String(typed));
+  }
+});
+
+test("Settings asks the CLI for the sub-agents' context window", () => {
+  // An opt-in config field (an older editor rejects a field it doesn't know): it reaches the page only when asked.
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("agents");
+  const read = commands.find((c) => c.type === "get_config");
+  assert.ok(read?.fields.includes("subagent_context_size"), JSON.stringify(read));
+});
+
 test("the cache lifetime and keep-loaded time go only to a CLI that answered cache_settings", async () => {
   const sent = (commands, key) => commands.filter((c) => c.type === "set_config" && key in (c.values || {}));
   const older = harness();

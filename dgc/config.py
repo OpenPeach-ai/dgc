@@ -35,6 +35,10 @@ def dgc_home() -> Path:
     (scheduler._lock_directory): they protect the user's project files, which every DGC shares."""
     return _user_home_root() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
+# The most sub-agents that may run at once (max_parallel_tasks). A cautious bound, not a technical one: each is its
+# own checkout of the project and its own stream of model requests, so the cost is disk, rate limits and a server's
+# own parallelism (a local Ollama serves OLLAMA_NUM_PARALLEL at once; the rest wait). Every clamp reads this.
+MAX_PARALLEL_TASKS = 32
 USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
@@ -487,6 +491,8 @@ DEFAULTS: dict = {
                                                 #   (partial output is continued, not discarded); 0 = off
     "pips_enabled": True,                      # Pips: personal and project agents beside the chat
     "pips_parallel_runs": 4,                   # Pips running at once, one run per Pip (pips.parallel_runs)
+    "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
+                                               #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
     "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load
@@ -540,7 +546,7 @@ DEFAULTS: dict = {
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "subagent_link_paths": [],                   # opt-in: ignored dirs shared INTO task checkouts (e.g. node_modules)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
-    "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
+    "max_parallel_tasks": 4,                     # 1 disables; up to MAX_PARALLEL_TASKS concurrent isolated workers
     "max_subagent_depth": 1,                     # how deep `task` may nest; 1 = a child cannot delegate (0-8)
     "trash_mode": "dgc",                        # /files deletes: dgc (~/.dgc/trash, 30-day) | os (system trash)
     "eta": True,                                # show a calibrated "~2–4 min left" range while a turn runs
@@ -656,6 +662,26 @@ MODEL_CATALOG: list[tuple[str, int]] = [
 
 # The windows a sub-agent picker offers, as the editor's context menu does for the main model.
 SUBAGENT_WINDOWS = (8_192, 16_384, 32_768, 65_536, 131_072, 262_144)
+
+
+def bound_provider_key(config, secret_key: str, base_url: str) -> str:
+    """The saved provider key ``secret_key`` (api_key, subagent_api_key, fallback_api_key) when ``base_url`` is the
+    endpoint it is bound to, else "". A sub-agent or fallback key with no host of its own is bound to the main host,
+    and "" for ``base_url`` means that inherited host, as the route resolves it. Endpoints compare as the binding
+    does: canonical spelling, never a prefix or the same host on another path."""
+    endpoint_key = _PROVIDER_SECRET_ENDPOINTS.get(secret_key)
+    if endpoint_key is None:
+        return ""
+    try:
+        key = config.get(secret_key, "")        # "" already when the stored binding no longer holds
+    except Exception:                           # noqa: BLE001 -- a stub config: no saved key
+        return ""
+    data = getattr(config, "data", None)
+    if not isinstance(key, str) or not key or not isinstance(data, dict):
+        return ""
+    bound = _provider_secret_identity(data, secret_key)
+    asked = _provider_secret_identity({**data, endpoint_key: str(base_url or "").strip()}, secret_key)
+    return key if bound and bound == asked else ""
 
 
 def subagent_window_arg(text: str) -> int | None:

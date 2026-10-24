@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Editor protocol: event `pips_settings` (the model every Pip on Default uses, for the editor's Settings; sent only to
+  a client whose get_config `fields` named it) is in the vendored protocol and the TypeScript SDK's known events. An
+  SDK session never asks, so it never gets one. `list_pip_models`' `default_model` is now that model when one is set;
+  nothing else in the Pips API changes.
+
+- Editor protocol: command `list_models_at` and event `models_at` (the models at a host as the editor's Settings has it
+  typed; offered as `ready.capabilities.list_models_at`) are in the vendored protocol and the TypeScript SDK's known
+  events, so neither SDK drops them. An SDK session never sends the command, so it never gets the event.
+
 - Pips API 65: `pips.run_fixes(pip_id)` (TypeScript `runFixes(pipId)`, a read: `list_pip_run_fixes {pip_id}`) says
   what Ask DGC to fix did for each of a Pip's runs: `{pip_id, workspace_id, fixes}`, the latest fix of each run,
   newest first, each with its `state` (`queued`, `preparing`, `running` or `applying` while it works; `applied`,

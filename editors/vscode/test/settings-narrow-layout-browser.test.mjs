@@ -80,7 +80,11 @@ async function open(width, section, opts = {}) {
   await p.route("https://settings.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
   await p.goto("https://settings.test/view");
   await p.waitForSelector("#ultra_mode");
-  if (section !== "general") await p.click(`[data-nav=${section}]`);
+  // A tab narrower than 620px has the page picker in place of the side list.
+  if (section !== "general") {
+    if (await p.isVisible(`[data-nav=${section}]`)) await p.click(`[data-nav=${section}]`);
+    else await p.selectOption("#page-picker", section);
+  }
   return { p, close: () => context.close() };
 }
 // A text run's lines and width, beside the room its card (or the page) has for it.
@@ -111,13 +115,16 @@ const noSideways = async (p) => {
   assert.ok(main.scroll <= main.client, `the page scrolls sideways (${main.scroll}px in ${main.client}px)`);
 };
 
-test("General at 270px: DGC Ultra's words keep a readable column and its switch wraps underneath", async (t) => {
+test("General at 270px: DGC Ultra's words keep a readable column, its switch beside them or underneath", async (t) => {
   if (skipOrFail(t)) return;
   const { p, close } = await open(270, "general");
   try {
+    // A narrow tab now has a page picker instead of the side list, so the words have room beside the switch;
+    // what must never come back is the crushed column (readable: 150px or more, three lines at most).
     const hint = '.field:has(#ultra_mode) .hint';
     readable(await run(p, hint), 3);
-    assert.ok((await placement(p, ".field:has(#ultra_mode)>span", "#ultra_mode")).under, "the switch sits under its words");
+    const where = await placement(p, ".field:has(#ultra_mode)>span", "#ultra_mode");
+    assert.ok(where.under || where.beside, "the switch sits beside its words or under them, never over them");
     await noSideways(p);
   } finally { await close(); }
 });
@@ -137,7 +144,9 @@ test("Memory at 270px: the switch's words and the empty list read in a full colu
     readable(await run(p, ".memory-facts .row .copy strong"), 3);
     assert.ok((await placement(p, ".memory-facts .row .copy", ".memory-facts .row .actions")).under, "Edit and Delete sit under the fact");
     readable(await run(p, ".row:has([data-memory-project]) .copy strong"), 2);
-    assert.ok((await placement(p, ".row:has([data-memory-project]) .copy", "[data-memory-project]")).under, "a project's switch sits under its words");
+    // The side list gave way to the page picker, so a project's switch may now fit beside its readable words.
+    const project = await placement(p, ".row:has([data-memory-project]) .copy", "[data-memory-project]");
+    assert.ok(project.under || project.beside, "a project's switch sits beside its words or under them");
     await p.click("[data-memory-edit]");
     const edit = await p.$eval("#memory-edit", (el) => Math.round(el.getBoundingClientRect().width));
     assert.ok(edit >= 150, `the box to edit a fact is ${edit}px wide`);
@@ -184,9 +193,13 @@ test("MCP servers at 270px: a server's words stay beside its mark, and its switc
     await p.waitForSelector('[data-mcp-toggle="local-files"]');
     const row = 'article.row:has([data-mcp-toggle="local-files"])';
     assert.ok((await placement(p, `${row} .mark`, `${row} .copy`)).beside, "the words beside the server's mark");
-    assert.ok((await placement(p, `${row} .copy`, `${row} .actions`)).under, "the switch and gear under the words");
+    // With the page picker in place of the side list there may be room for the switch and gear beside the words;
+    // either way the words keep a readable column.
+    const controls = await placement(p, `${row} .copy`, `${row} .actions`);
     const words = await run(p, `${row} .copy strong`);
-    assert.ok(words.width >= words.room - 52, `"${words.text}" gets ${words.width}px of the ${words.room - 50}px beside its mark`);
+    // Beside its mark, less the list's own 14px row padding each side (the rows sit in one bordered list now).
+    if (controls.under) assert.ok(words.width >= words.room - 52 - 28, `"${words.text}" gets ${words.width}px of the ${words.room - 50 - 28}px beside its mark`);
+    else assert.ok(controls.beside && words.width >= 120, `beside the switch and gear, "${words.text}" still gets ${words.width}px`);
     await noSideways(p);
   } finally { await close(); }
 });

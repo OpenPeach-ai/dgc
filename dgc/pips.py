@@ -586,7 +586,8 @@ def _model_settings(config, model_choice=None, *, _prepared=None, personal=False
             raise RegistryError('conflict', 'The prepared model no longer matches this Pip setup.')
         validate_pinned_connection(config, _prepared['settings'])
         model = _prepared['settings'].get('model')
-        if model != (choice['model'] if choice['mode'] == 'model' else config.get('model', '')):
+        from .pip_models import default_model
+        if model != (choice['model'] if choice['mode'] == 'model' else default_model(config)):
             raise RegistryError('conflict', 'The model changed after preparing this Pip setup. Review it again.')
     base = _text(config.get("base_url", ""), "configured model endpoint", 2048)
     url = urlsplit(base)

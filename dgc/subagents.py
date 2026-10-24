@@ -704,7 +704,7 @@ class SubagentRegistry:
 # them. The agent runs them under these ids, the transcript replays them under these ids, and a
 # rewind or a reopened chat pairs records with them the same way, so the three can never disagree.
 TASK_BATCH_MIN = 2
-TASK_BATCH_MAX = 8
+TASK_BATCH_MAX = 32         # one `task` call's helpers: as many as may run at once (config.MAX_PARALLEL_TASKS)
 
 
 def task_batch_child_id(call_id, place: int) -> str:

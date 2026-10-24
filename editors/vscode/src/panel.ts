@@ -155,7 +155,22 @@ const SEARCH_KEY_PROVIDERS = ["brave", "tavily", "ollama"];
 // Ollama's keep_alive as the CLI takes it (dgc/headless.py _KEEP_ALIVE_RE): a duration, seconds, -1, or "".
 const KEEP_ALIVE_RE = /^(?:|-?\d{1,9}|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})$/;
 
+// The most sub-agents that may run at once (dgc/config.py MAX_PARALLEL_TASKS); a Save never writes a wider one.
+const MAX_PARALLEL_TASKS = 32;
+// A model id as Pips take one (dgc/pip_models.py _MODEL_ID).
+const PIPS_MODEL_RE = /^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
+
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
+
+// The sub-agents' context window as the CLI keeps it (dgc/config.py subagent_window_arg): 0 is the main model's,
+// otherwise 2,048 to 16,777,216 tokens. Blank, 0 or anything unreadable saves 0; a number outside is brought inside.
+const SUBAGENT_WINDOW_MIN = 2_048;
+const SUBAGENT_WINDOW_MAX = 16_777_216;
+function subagentWindow(value: unknown): number {
+  const tokens = Math.floor(Number(String(value ?? "").trim() || 0));
+  if (!Number.isFinite(tokens) || tokens <= 0) { return 0; }
+  return Math.min(SUBAGENT_WINDOW_MAX, Math.max(SUBAGENT_WINDOW_MIN, tokens));
+}
 
 /** ready.capabilities.search_keys -> which providers have a key of their own saved; undefined from an older CLI. */
 function searchKeysFromHandshake(offered: any): Map<string, boolean> | undefined {
@@ -504,10 +519,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private chatdgcSettable = false;
   /** The CLI takes the per-turn token cap from Settings (its config answered turn_token_budget). */
   private budgetSettable = false;
+  /** The CLI takes the sub-agents' context window from Settings (its config answered subagent_context_size). */
+  private subagentWindowSettable = false;
   /** Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time, from a CLI that answers
    *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
    *  refuse a save that carried them. */
   private cacheSettings?: { prompt_cache: boolean; prompt_cache_ttl: string; ollama_keep_alive: string };
+  /** Settings -> Agents -> Pips: the model every Pip on Default uses ("" follows DGC), from a CLI that answers
+   *  get_config's "pips_settings" with an event of that name (0.48). Undefined: an older CLI, which would refuse a
+   *  save that carried it. */
+  private pipsSettings?: { model: string };
   /** The window a vLLM, SGLang or llama.cpp server was started with (server_window, 0.48), for Settings -> General.
    *  Undefined until a CLI that offers it answers; `window` 0 when DGC sizes the window itself. */
   private serverWindow?: { model: string; window: number; server: string; trained: number };
@@ -3396,6 +3417,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (["pips_result", "pips_status"].includes(ev.type)) return;
     // A session that keeps running with no window (dgc/serve_detach.py): the panel's own business.
     if (ev.type === "session_live") return;          // ready.capabilities.attached has already said it
+    if (ev.type === "models_at") return;             // Settings' Model boxes: answered to their own request
     if (ev.type === "session_moved") { this.sessionMoved(String((ev as any).reason || "")); return; }
     if (ev.type === "turn_interrupted") { this.offerTurnStoppedWithoutWindow(ev); return; }
     if (ev.type === "live_sessions") { this.liveSessionsArrived(ev); return; }
@@ -3573,6 +3595,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.serverWindow = { model: String((ev as any).model || ""), window: Math.max(0, Math.floor(Number((ev as any).window) || 0)),
                               server: String((ev as any).server || ""), trained: Math.max(0, Math.floor(Number((ev as any).trained) || 0)) };
         break;
+      case "pips_settings":
+        this.pipsSettings = { model: String((ev as any).model ?? "").slice(0, 256) };
+        break;
       case "cache_settings":
         this.cacheSettings = {
           prompt_cache: (ev as any).prompt_cache !== false,
@@ -3627,6 +3652,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         if ("chatdgc_personality" in ev) { this.chatdgcSettable = true; }
         if ("turn_token_budget" in ev) { this.budgetSettable = true; }
+        if ("subagent_context_size" in ev) { this.subagentWindowSettable = true; }
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
@@ -3843,7 +3869,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                                               ollama_keep_alive: this.cacheSettings.ollama_keep_alive,
                                                               cache_settable: true } : {}),
                                    // Not a protocol field either: the last server_window event, for Context size.
-                                   ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}) } : ev;
+                                   ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}),
+                                   // Nor this: the CLI lists the models at a host as typed (list_models_at).
+                                   list_models_at: this.listsModelsAt(),
+                                   // Nor these: the pips_settings event that came just before.
+                                   ...(this.pipsSettings ? { pips_model: this.pipsSettings.model, pips_settable: true } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6654,6 +6684,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** The CLI lists the models at a host Settings has typed (ready.capabilities.list_models_at). */
+  private listsModelsAt(): boolean {
+    return (this.lastReadyEvent?.capabilities as any)?.list_models_at === 1;
+  }
+
+  /** Settings -> a Model box: the models at its card's own host, as typed. Only what the page typed goes: the host,
+   *  the transport, and a key typed in the form. The CLI decides whether a saved key may go with it (only to the host
+   *  it is bound to); the extension never adds one. The page hears the ids or a short reason, by its token. */
+  private async listModelsAt(msg: any): Promise<void> {
+    const token = String(msg?.token || "").slice(0, 64);
+    const role = ["main", "subagent", "fallback"].includes(msg?.role) ? String(msg.role) : "";
+    const reply = (fields: Record<string, unknown>) =>
+      this.settingsEditor?.webview.postMessage({ type: "modelsAt", token, role, ...fields });
+    if (!token || !role) return;
+    if (!this.listsModelsAt()) { reply({ ids: [], unsupported: true }); return; }
+    const baseUrl = typeof msg.base_url === "string" ? msg.base_url.trim().slice(0, 4096) : "";
+    const mode = ["", "auto", "ollama", "anthropic", "chat_completions", "responses"].includes(String(msg.api_mode ?? ""))
+      ? String(msg.api_mode ?? "") : "";
+    const typedKey = typeof msg.api_key === "string" ? msg.api_key.trim().slice(0, 16384) : "";
+    try {
+      const ev: any = await this.ensureBackend().request({
+        type: "list_models_at", request_id: this.nextRequestId("models-at"), role: role as any, base_url: baseUrl,
+        api_mode: mode as any, ...(typedKey ? { api_key: typedKey } : {}),
+      } as any, "models_at", 30000);
+      const ids = Array.isArray(ev.ids) ? ev.ids.filter((id: unknown) => typeof id === "string").slice(0, 4096) : [];
+      reply({ ids, ...(typeof ev.error === "string" && ev.error ? { error: ev.error.slice(0, 200) } : {}) });
+    } catch {
+      reply({ ids: [], error: "DGC didn't answer" });
+    }
+  }
+
   /** The web search providers this CLI's set_config takes: ready.capabilities.search_providers (Ollama came with it),
    *  else the four every CLI that takes the search from Settings knows. One it doesn't know refuses the whole save. */
   private searchProviders(): string[] {
@@ -6679,7 +6740,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
                        "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                       "cache_settings"] });
+                       "subagent_context_size", "cache_settings", "pips_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -6753,6 +6814,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.showEditorSettings();
     } else if (msg?.type === "saveSettings") {
       await this.saveSettings(msg.values || {});
+    } else if (msg?.type === "listModelsAt") {
+      await this.listModelsAt(msg);
     } else if (msg?.type === "removeSearchKey") {
       await this.removeSearchKey(String(msg.provider || ""));
     } else if (msg?.type === "listRunning") {
@@ -7149,7 +7212,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         artifact_in_plan: v.artifact_in_plan === true,
         tool_profile: v.tool_profile === "full" ? "full"
           : v.tool_profile === "adaptive" ? "adaptive" : "standard",
-        max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
+        max_parallel_tasks: Math.max(1, Math.min(MAX_PARALLEL_TASKS, Math.floor(Number(v.max_parallel_tasks || 4)) || 1)),
         // General → Thinking is the composer dial. On a subscription route it maps to
         // subscription_effort; native thinking stays the last native value so a Save does not
         // overwrite it with the vendor effort.
@@ -7206,11 +7269,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           values.ollama_keep_alive = v.ollama_keep_alive.trim();
         }
       }
-      if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {
-        values.subagent_context_size = Math.max(0, Math.floor(Number(v.subagent_context_size) || 0));
+      // The sub-agents' window: blank or 0 is the main model's. Only to a CLI that answered it (an older one
+      // refuses the whole save on a key it doesn't know).
+      if (this.subagentWindowSettable && v.subagent_context_size !== undefined) {
+        values.subagent_context_size = subagentWindow(v.subagent_context_size);
       }
       if (v.capability_cache_ttl_s) {
         values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
+      }
+      // The model every Pip on Default uses ("" follows DGC). Only to a CLI that answered pips_settings.
+      if (this.pipsSettings && typeof v.pips_model === "string") {
+        const pipsModel = v.pips_model.trim();
+        if (pipsModel && (pipsModel.length > 256 || !PIPS_MODEL_RE.test(pipsModel) || pipsModel.includes("://"))) {
+          throw new Error("Model for Pips takes a model's name, like qwen3:8b, or nothing to use DGC's.");
+        }
+        values.pips_model = pipsModel;
       }
 
       const saveConfig = async (prefix: string, configValues: any): Promise<void> => {

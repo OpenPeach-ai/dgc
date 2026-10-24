@@ -149,10 +149,10 @@ def controls(store, pip_id, config):
     # provider discovery or contact a model endpoint on the editor command thread.
     try:
         from .llm import LLMClient
-        from .pip_models import _connection, _model_id
+        from .pip_models import _connection, _model_id, default_model
         base, mode = _connection(config)
         choice = pip.get('model_choice', {'mode': 'default'})
-        model = _model_id(choice['model'] if choice.get('mode') == 'model' else config.get('model', ''))
+        model = _model_id(choice['model'] if choice.get('mode') == 'model' else default_model(config))
         client = LLMClient(base, '', model, api_mode=mode,
                            provider_capabilities=config.get('provider_capabilities', {}))
         if client.capability_snapshot().get('reasoning_control') == 'instructions':

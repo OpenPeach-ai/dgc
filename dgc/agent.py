@@ -85,7 +85,10 @@ class _IntegrateLater(Exception):
 # How much a mode does without asking: a reopened session may bring back a lower one, never a higher.
 _MODE_RANK = {"plan": 0, "default": 1, "acceptEdits": 2, "auto": 3}
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
-_MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
+# Task calls one reply (or one batch call's helpers) may run side by side: a private checkout each, prepared under
+# one lease. The width's own ceiling (config.MAX_PARALLEL_TASKS), so a max_parallel_tasks of 32 really runs 32 at
+# once; a larger batch than this still bounds the checkouts and runs one after another.
+from .config import MAX_PARALLEL_TASKS as _MAX_PARALLEL_TASK_BATCH
 _CLEANUP_LEASE_WAIT_S = 5.0  # bounded wait for the write lease before REMOVING a finished checkout
 _FINISHED_JOBS_KEPT = 8      # detached outcomes kept addressable by id after the job entry is gone
 _STOPPED_BY_USER = "stopped by the user"   # a foreground child the user stopped alone (agent_control)

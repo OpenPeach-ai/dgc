@@ -742,6 +742,10 @@ class LLMError(Exception):
     pass
 
 
+class ModelListRedirect(LLMError):
+    """A model list asked with ``redirects=False`` was answered with a redirect, which was not followed."""
+
+
 class ModelStallError(LLMError):
     """A model request produced nothing within its window, on every allowed attempt.
 
@@ -2308,9 +2312,20 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, redirects: bool = True) -> list[str]:
+        """The model ids this host lists. ``redirects=False`` asks only the host as given: a redirect is refused
+        (ModelListRedirect) rather than followed, so a key sent with the request can't go on to another host --
+        requests drops Authorization on a cross-host redirect, but not Anthropic's x-api-key."""
+        def get(url, headers, **kwargs):
+            r = requests.get(url, headers=headers, allow_redirects=redirects, **kwargs)
+            if not redirects and r.is_redirect:
+                status = r.status_code
+                _close_response(r)
+                raise ModelListRedirect(f"HTTP {status}: the host answered with a redirect")
+            return r
+
         if self.api_mode == "ollama":
-            r = requests.get(f"{self._ollama_root}/api/tags", headers=self._headers(), timeout=10)
+            r = get(f"{self._ollama_root}/api/tags", self._headers(), timeout=10)
             if r.status_code == 200:
                 return sorted(str(m.get("model") or m.get("name") or "?")
                               for m in r.json().get("models", []))
@@ -2319,8 +2334,7 @@ class LLMClient:
             self._mark_rejected("native_chat")
             self.api_mode = "chat_completions"
         if self.api_mode == "anthropic":
-            r = requests.get(f"{self.base_url}/models?limit=1000",
-                             headers=self._anthropic_headers(), stream=True, timeout=(2, 2))
+            r = get(f"{self.base_url}/models?limit=1000", self._anthropic_headers(), stream=True, timeout=(2, 2))
             if r.status_code == 200:
                 value = _bounded_json_response(
                     r, _MAX_MODEL_METADATA_BYTES, "Anthropic model catalog",
@@ -2342,7 +2356,7 @@ class LLMClient:
             _close_response(r)
             self._mark_rejected("anthropic_messages")
             self.api_mode = "chat_completions"
-        r = requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=10)
+        r = get(f"{self.base_url}/models", self._headers(), timeout=10)
         r.raise_for_status()
         return sorted(m.get("id", "?") for m in r.json().get("data", []))
 

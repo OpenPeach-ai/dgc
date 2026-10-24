@@ -12,11 +12,10 @@ def enabled(config) -> bool:
 
 
 # Ultra's fan-out width when the user has not chosen one. Ultra means "run more of the turn at once
-# and pay for it in tokens", so it uses the whole range the rest of DGC already allows instead of the
-# conservative default. The CEILING is deliberately NOT raised: 8 is hard-coded in seven independent
-# places (headless.py _CONFIG_INTEGER_RANGES, agent.py, tui.py's settings label, the VS Code panel,
-# protocol.generated.ts, docs.py), and the panel rewrites a stored value above its own clamp on the
-# next settings Save -- a silent downgrade. Raising it is a separate coordinated change.
+# and pay for it in tokens", so it runs twice the conservative default. The CEILING a chosen width may
+# reach is config.MAX_PARALLEL_TASKS (32), which every clamp reads -- headless.py
+# _CONFIG_INTEGER_RANGES, this module, agent.py's batch bound -- and the editor's Settings and its
+# host hold to the same number, so a Save never rewrites a stored width downward.
 ULTRA_WORKERS = 8
 
 
@@ -40,15 +39,15 @@ def worker_limit(config, *, on_error: int = 4) -> int:
     to 1 so that its own ``limit < 2`` check keeps the batch serial. Swallowing both into one
     internal fallback would quietly turn an unreadable config into a 4-wide fan-out.
     """
-    from .config import DEFAULTS
+    from .config import DEFAULTS, MAX_PARALLEL_TASKS
     shipped = DEFAULTS.get("max_parallel_tasks", 4)
     raw = config.get("max_parallel_tasks", shipped)
     try:
-        width, pinned = max(1, min(8, int(raw))), int(raw) != int(shipped)
+        width, pinned = max(1, min(MAX_PARALLEL_TASKS, int(raw))), int(raw) != int(shipped)
     except (TypeError, ValueError):
         return on_error         # a value we could not read is not a width you chose
     if enabled(config) and not pinned:
-        return max(width, min(8, ULTRA_WORKERS))
+        return max(width, min(MAX_PARALLEL_TASKS, ULTRA_WORKERS))
     return width
 
 
@@ -123,7 +122,8 @@ def summary(config) -> str:
     width = worker_limit(config)
     try:
         # Derived, not restated: worker_limit differing from the plain clamp IS "Ultra widened it".
-        widened = bool(depth) and width != max(1, min(8, int(config.get("max_parallel_tasks", 4))))
+        from .config import MAX_PARALLEL_TASKS
+        widened = bool(depth) and width != max(1, min(MAX_PARALLEL_TASKS, int(config.get("max_parallel_tasks", 4))))
     except (TypeError, ValueError):
         widened = bool(depth)
     agents = (f"up to {width} parallel agents" if depth

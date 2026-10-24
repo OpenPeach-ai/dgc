@@ -190,9 +190,9 @@ dgc pips setup accept SETUP_ID --expected-digest DIGEST
 A Personal Pip can think with the Claude Code or Codex you are already signed in to, on
 your own plan. Open its chat, choose the model under the chat box, and pick **Claude
 Code** or **Codex** under **Your subscriptions**. Only the ones installed and signed in on
-this computer are listed. **Same as DGC** follows DGC: when DGC's own default is Claude Code
-or Codex, the Pip uses it too, with DGC's model and effort for it. The Pip's thinking
-setting in its chat box becomes the CLI's effort.
+this computer are listed. **Default** follows DGC: when DGC's own default is Claude Code
+or Codex, the Pip uses it too, with DGC's model and effort for it (unless a model for Pips
+is set in Settings, below). The Pip's thinking setting in its chat box becomes the CLI's effort.
 
 Its replies and its routines use your plan's usage, as your own chats in that app do; the
 picker says so once when you choose it. Nothing else changes: there are no new settings. From
@@ -1001,6 +1001,15 @@ running on this computer. A Pip made before routines that has a schedule shows i
 with **Change**.
 
 ## Pips settings
+
+**One model for every Pip on Default.** DGC **Settings → Agents → Pips → Model for Pips** is the
+model every Pip set to **Default** uses, on DGC's own connection (the host under **Models**); the
+box lists that host's models, and any name can be typed. Blank, it is the same as DGC: DGC's own
+model, or the Claude Code or Codex DGC runs on. New Pips start on Default, and a Pip's model menu
+reads **Default (the model it runs)**. A Pip with a model of its own keeps it. The runner picks a
+change up without a restart while its connection is the one it started with; after changing the
+connection itself, restart the runner (stop it and start it again), as before. It is the `pips_model`
+setting (`/set pips_model glm-5.3:cloud`; empty follows DGC).
 
 The gear on **Your Pips** opens settings for all of them:
 

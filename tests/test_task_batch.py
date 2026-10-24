@@ -68,7 +68,8 @@ class TaskBatchSchemaTests(unittest.TestCase):
         params = task["parameters"]
         self.assertEqual(params["required"], [], "the batch form has no top-level description or prompt")
         tasks = params["properties"]["tasks"]
-        self.assertEqual((tasks["type"], tasks["minItems"], tasks["maxItems"]), ("array", 2, 8))
+        self.assertEqual((tasks["type"], tasks["minItems"], tasks["maxItems"]), ("array", 2, 32),
+                         "as many helpers as may run at once (config.MAX_PARALLEL_TASKS)")
         self.assertEqual(tasks["items"]["required"], ["description", "prompt"])
         self.assertEqual(set(tasks["items"]["properties"]), {"description", "prompt", "agent"})
         for one in ("description", "prompt", "agent", "background"):
@@ -85,7 +86,7 @@ class TaskBatchSchemaTests(unittest.TestCase):
             "nothing": ({}, "needs a prompt"),
             "not a list": ({"tasks": "a, b"}, "must be a list"),
             "one": ({"tasks": [helper(1)]}, "at least 2"),
-            "nine": ({"tasks": [helper(n) for n in range(9)]}, "at most 8"),
+            "thirty-three": ({"tasks": [helper(n) for n in range(33)]}, "at most 32"),
             "no prompt": ({"tasks": [helper(1), {"description": "b"}]}, "tasks[2] needs prompt"),
             "no description": ({"tasks": [{"prompt": "a"}, helper(2)]}, "tasks[1] needs description"),
             "not an object": ({"tasks": [helper(1), "map b"]}, "tasks[2] must be an object"),

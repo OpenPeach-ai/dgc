@@ -255,15 +255,20 @@ extension sends neither request.
 
 **Your own Claude Code or Codex** (API 55). A Personal Pip's `model_choice` may be `{mode:
 "subscription", engine: "claude" | "codex"}` in `create_pip`, `propose_pip_update` and
-`revise_pip_setup`, and "Same as DGC" follows DGC's subscription default. `list_pip_models`
+`revise_pip_setup`, and Default follows DGC's subscription default (when no Pips default model is
+set: then `default_model` is that model, and no `default_engine` is sent). `list_pip_models`
 adds `subscriptions` `[{engine, name}]` (installed and signed in here) and, when DGC's
 default is a subscription, `default_engine` `{engine, name, available, reason?}`. The Pip's
 chat box model list shows them under **Your subscriptions** for a Personal Pip only, names
-the subscription beside **Same as DGC**, and says once, where one is chosen, "Its replies and
+the subscription as **Default (Codex)**, and says once, where one is chosen, "Its replies and
 routines use your NAME plan's usage." No event changes: the run streams the same
 `pip_run_progress` rows and its computer the same frames. The host refuses a subscription
 `model_choice` before sending to a CLI below API 55 ("Update DGC to run a Pip on your own
 Claude Code or Codex."); an older editor shows such a Pip's model as **Same as DGC**.
+
+**A Pips default model** (no API change). `default_model` in `list_pip_models` is what a Pip on
+`{mode: "default"}` runs: the `pips_model` setting when set, else DGC's own model. The editor's
+model menus read **Default (that model)**.
 
 **Saved logins** (API 56). Four `pips_control` requests: `list_pip_logins {pip_id?}`,
 `save_pip_login {pip_id, username, password, totp?, pips?: "only" | "all", site | action_id +
