@@ -1749,6 +1749,8 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   which Pips use it.
 - An app card for an account another of your Pips already uses says so (`known_label`): the user
   is asked to let this Pip use it, and Connect reuses it without a sign-in.
+- A Pip's app cards are listed newest first even when it asked for two apps in the same millisecond;
+  they came back in a random order on a fast Mac.
 - A schedule in an old zone name, such as `Asia/Calcutta` (VS Code's Chromium still reports it on an
   Indian computer), is accepted and saved as its current name (`Asia/Kolkata`). Ubuntu 24.04 installs
   the old names only with `tzdata-legacy`, so every daily schedule or routine set from such an editor

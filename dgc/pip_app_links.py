@@ -106,8 +106,9 @@ def _set(registry, link_id, **fields):
 
 
 def listing(registry, pip_id) -> list[dict]:
-    """The Pip's cards, newest first: every app it asked for, at most one card per app."""
-    rows = registry.db.execute("SELECT * FROM pip_app_links WHERE pip_id=? ORDER BY updated_at DESC, id DESC LIMIT 64",
+    """The Pip's cards, newest first: every app it asked for, at most one card per app. Cards changed in the same
+    millisecond (two apps asked for at once) keep the order they were made in; a card's random id said nothing."""
+    rows = registry.db.execute("SELECT * FROM pip_app_links WHERE pip_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 64",
                                (pip_id,)).fetchall()
     seen, out = set(), []
     for row in rows:

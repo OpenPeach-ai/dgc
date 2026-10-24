@@ -2,6 +2,7 @@
 import json
 import socket
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -63,6 +64,18 @@ class AppLinkTests(unittest.TestCase):
         for bad in ("", "../etc", "x" * 60, "gmail; rm -rf /"):
             with self.subTest(app=bad), self.assertRaises(RegistryError):
                 self.ask(bad)
+
+    def test_apps_asked_for_in_the_same_millisecond_are_listed_newest_first(self):
+        # A fast machine asks for two apps within a millisecond: the cards tied on their time and came back in the
+        # order of their random ids, oldest first half the time (the Mac Studio, 2026-10-24). Here each new card's
+        # id sorts before the last one's.
+        ids = (uuid.UUID(int=n) for n in range(2 ** 120, 0, -1))
+        with patch.object(links, "utc_now", lambda: "2026-10-24T00:00:00.000Z"), \
+                patch.object(links.uuid, "uuid4", lambda: next(ids)):
+            for app in ("gmail", "googlecalendar", "slack"):
+                self.ask(app)
+        self.assertEqual([i["toolkit"] for i in links.listing(self.registry, self.pip["id"])],
+                         ["slack", "googlecalendar", "gmail"])
 
     def test_connect_lists_first_then_starts_a_sign_in_and_only_the_user_may(self):
         card = self.ask()
