@@ -19945,11 +19945,23 @@ def main():
         unit_dir = tmp / "unit"   # keep .dgc markers out of the e2e project roots
         unit_dir.mkdir()
         unit_tests(unit_dir)
-        import unittest
-        goal_suite = unittest.defaultTestLoader.discover(str(PROJECT / "tests"), pattern="test_*.py")
-        goal_result = unittest.TextTestRunner(stream=sys.stdout, verbosity=1).run(goal_suite)
-        check(f"goal lifecycle, editor state and delegated stream regressions ({goal_result.testsRun} tests)",
-              goal_result.wasSuccessful())
+        # The unittest files run in a process of their own. In this one, what thousands of them leave open (backends a
+        # test never shut down) piled up past descriptor 1024, and prompt_toolkit's input, which waits with
+        # select(), then failed the real-terminal checks that run later here ("filedescriptor out of range in
+        # select()", measured 2026-10-24: 734 open, the highest 1151). A child's leftovers go when it exits.
+        import re
+        child = subprocess.Popen([sys.executable, "-m", "unittest", "discover", "-s", str(PROJECT / "tests"),
+                                  "-p", "test_*.py"], cwd=str(PROJECT), stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, errors="replace")
+        ran = 0
+        for line in child.stdout:
+            sys.stdout.write(line)
+            found = re.match(r"Ran (\d+) tests? in ", line)
+            if found:
+                ran = int(found.group(1))
+        sys.stdout.flush()
+        check(f"goal lifecycle, editor state and delegated stream regressions ({ran} tests)",
+              child.wait() == 0 and ran > 0)
         test_mono_markdown()
         test_logo_stays_in_family()
         test_trust()
