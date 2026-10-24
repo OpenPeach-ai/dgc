@@ -238,5 +238,5 @@ export function mountSetupCards(options) {
  function reset(){emails.reset();runs.reset();if(dockView){options.dock?.hide(dockView.root);dockView=null;}epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The conversation changed.'));}pending.clear();for(const e of entries.values())for(const v of e.views){v.dispose?.();v.root.remove();}entries.clear();}
  // The host's dock was taken by a question (yieldDock) or is free again (dockFree).
  function yieldDock(){if(dockView){const old=dockView;dockView=null;options.dock?.hide(old.root);repaint(old.entry);}}
- return {receive,toolResult,finish,reset,yieldDock,dockFree:()=>refreshDock(),runs:()=>runs.list(),openRun:id=>runs.open(id),dispose(){reset();runs.dispose();disposed=true;}};
+ return {receive,toolResult,finish,reset,yieldDock,dockFree:()=>refreshDock(),runs:()=>runs.list(),openRun:id=>runs.open(id),stopRun:id=>runs.stop(id),dispose(){reset();runs.dispose();disposed=true;}};
 }

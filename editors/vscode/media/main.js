@@ -11614,9 +11614,14 @@
       label: "troupe", ms: 0, stoppable: running && !troupeStopping.has(id), stopping: troupeStopping.has(id), ev,
       meta: ["troupe", troupeSummary(ev).text] };
   }
+  // A Pip run this chat started: live while it works -- what it is doing now (its own activity), its clock and Stop.
   function amPipTask(run) {
-    return { key: `pip:${run.id}`, kind: "pip", id: run.id, running: run.active === true, name: String(run.name || "Pip"),
-      word: String(run.label || "Working"), label: "Pip run", ms: 0, run, meta: ["Pip run", String(run.label || "")].filter(Boolean) };
+    const key = `pip:${run.id}`, running = run.active === true;
+    const ms = amTaskMs(key, Number(run.startedAt), running);
+    const word = running && run.status === "running" && run.activity ? String(run.activity) : String(run.label || "Working");
+    return { key, kind: "pip", id: run.id, running, name: String(run.name || "Pip"), word, label: "Pip run", ms,
+      stoppable: running && run.stoppable === true, stopping: run.status === "cancelling", run,
+      meta: ["Pip run", word, ms ? amDuration(ms) : ""].filter(Boolean) };
   }
   function amPreviewTask(preview) {
     const key = `preview:${preview.id}`, running = preview.state !== "stopped";
@@ -12160,6 +12165,13 @@
       if (task.kind === "monitor") vscode.postMessage({ type: "stopMonitor", id: task.id });
       else if (task.kind === "shell") vscode.postMessage({ type: "stopBackgroundShell", id: task.id });
       else if (task.kind === "preview") vscode.postMessage({ type: "stopArtifact", id: task.id });
+      else if (task.kind === "pip") {
+        const key = task.key;
+        Promise.resolve(pipSetupCards?.stopRun?.(task.id)).then((ok) => {
+          if (ok !== true && taskStopping.get(key) === "stopping") taskStopping.set(key, "failed");
+          renderAgentMap();
+        }, () => { taskStopping.set(key, "failed"); renderAgentMap(); });
+      }
     }
     renderAgentMap();
   }
@@ -12199,7 +12211,7 @@
       const actions = host.appendChild(el("div", "am-actions"));
       if (task.kind === "preview") n.open = amButton(actions, "Open in browser", () => amOpenTask(amTaskFor(amCard.key)));
       if (task.kind === "pip") n.open = amButton(actions, "Open in Pips", () => amOpenTask(amTaskFor(amCard.key)));
-      if (task.kind !== "pip") n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
+      n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
       if (task.rerun) n.rerun = amButton(actions, "Run again", () => {
         n.rerun.disabled = true;
         vscode.postMessage({ type: "rerunTask", key: task.rerun, how: "again" });
