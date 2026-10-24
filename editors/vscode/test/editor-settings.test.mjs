@@ -973,7 +973,7 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
   assert.equal(size().disabled,false);
   assert.equal(size().value,'','0 is shown as blank');
   assert.equal(size().placeholder,'Same as the main model');
-  assert.equal(size().closest('.card').querySelector('h3').textContent,'Sub-agents');
+  assert.equal(size().closest('.group').querySelector('h3').textContent,'Sub-agents');
   x.message({type:'event',event:{...x.config,subagent_context_size:65536}});
   assert.equal(size().value,'65536');
 
@@ -1142,8 +1142,8 @@ test('a provider preset lists the host it fills in',async()=>{
 test('Agents: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
   const older=setup();
   older.click('[data-nav=agents]');
-  const card=[...older.d.querySelectorAll('.card')].find(c=>c.querySelector('h3').textContent==='Pips');
-  assert.ok(card,'a Pips card');
+  const card=[...older.d.querySelectorAll('.group')].find(c=>c.querySelector('h3').textContent==='Pips');
+  assert.ok(card,'a Pips group');
   assert.equal(card.querySelector('#pips_model').disabled,true,'a CLI that never answered pips_settings would refuse the save');
   assert.match(card.textContent,/Model for Pips/);
   assert.match(card.textContent,/Update the DGC CLI/);
@@ -1173,16 +1173,20 @@ test('Agents: Model for Pips, a Pips-wide default that every Pip on Default foll
   assert.equal(box().placeholder,'Same as DGC (Codex)');
 });
 
-test('General: Parallel sub-agents takes up to 32 and says plainly what more costs',()=>{
+test('Agents: sub-agents Run at once takes up to 32 and says plainly what more costs',()=>{
+  // It was General's "Parallel sub-agents"; the direction puts it with the sub-agents it counts.
   const x=setup();
   x.click('[data-nav=general]');
+  assert.equal(x.d.querySelector('#max_parallel_tasks'),null,'one place for it');
+  x.click('[data-nav=agents]');
   const box=x.d.querySelector('#max_parallel_tasks');
+  assert.equal(box.closest('.group').querySelector('h3').textContent,'Sub-agents');
   assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
   const hint=box.closest('.field').querySelector('.hint').textContent;
-  assert.match(hint,/up to 32/);
+  assert.match(hint,/Up to 32/);
   assert.match(hint,/its own copy of the project/);
   assert.match(hint,/Cloud APIs rate-limit/);
-  assert.match(hint,/OLLAMA_NUM_PARALLEL at once; the rest wait/);
+  assert.match(hint,/OLLAMA_NUM_PARALLEL at once and the rest wait/);
   const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
   x.input('#max_parallel_tasks','33');
   x.click('#save');
@@ -1193,7 +1197,63 @@ test('General: Parallel sub-agents takes up to 32 and says plainly what more cos
   x.message({type:'settingsSaved',ok:true});
   // Under Ultra: what it runs, and that a chosen number (wider than Ultra's 8 too) is kept.
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:4}});
-  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Ultra is on, so this runs 8\. Set any other number, up to 32, to pin it/);
+  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Ultra is on, so 8 run\. Set any other number, up to 32, to pin it/);
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:20}});
-  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/this pins it to the number here/);
+  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Pinned here; Ultra would run 8/);
+});
+
+test('the direction (Models, Agents): every setting still reachable, detail one click away',()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,list_models_at:true,cache_settable:true,subagent_context_size:0,pips_settable:true,pips_model:''}});
+  x.click('[data-nav=models]');
+  assert.ok(x.d.querySelector('#page').classList.contains('v2'),'Models wears the direction');
+  for(const id of ['base_url','provider','api_key','model','subscription_engine','subscription_model','subscription_effort','prompt_cache','api_mode','provider_state','prompt_cache_ttl','capability_cache_ttl_s'])
+    assert.ok(x.d.querySelector('#'+id),`Models still has ${id}`);
+  const advanced=x.d.querySelector('details[data-more=models-advanced]');
+  assert.equal(advanced.open,false,'Advanced starts closed');
+  for(const id of ['api_mode','provider_state','capability_cache_ttl_s','prompt_cache_ttl'])
+    assert.ok(advanced.contains(x.d.querySelector('#'+id)),`${id} is under Advanced for a host that isn't Anthropic`);
+  // A subscription's model and effort show only when one is on.
+  const subs=x.d.querySelector('[data-when-engine]');
+  assert.equal(subs.hidden,true);
+  const engine=x.d.querySelector('#subscription_engine');
+  engine.value='codex';engine.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(subs.hidden,false);
+  // Advanced stays open through a redraw (a config reply re-renders the page).
+  advanced.open=true;advanced.dispatchEvent(new x.w.Event('toggle'));
+  x.message({type:'event',event:{...x.config,list_models_at:true,cache_settable:true}});
+  assert.equal(x.d.querySelector('details[data-more=models-advanced]').open,true);
+  // An Anthropic host: its cache lifetime is a Cache row, not Advanced.
+  x.message({type:'event',event:{...x.config,base_url:'https://api.anthropic.com/v1',cache_settable:true}});
+  assert.equal(x.d.querySelector('details[data-more=models-advanced]').contains(x.d.querySelector('#prompt_cache_ttl')),false);
+  // A preset fills the host and goes back to reading "Presets".
+  x.message({type:'providers',providers:[{id:'ollama',label:'Ollama (local)',url:'http://127.0.0.1:11434/v1'}]});
+  const preset=x.d.querySelector('#provider');
+  preset.value='ollama';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('#base_url').value,'http://127.0.0.1:11434/v1');
+  assert.equal(preset.value,'');
+  assert.equal(preset.selectedOptions[0].textContent,'Presets');
+
+  x.click('[data-nav=agents]');
+  assert.ok(x.d.querySelector('#page').classList.contains('v2'));
+  for(const id of ['subagent_model','max_parallel_tasks','subagent_context_size','subagent_provider','subagent_base_url','subagent_api_mode','subagent_api_key','fallback_model','fallback_base_url','fallback_api_mode','fallback_api_key','pips_model'])
+    assert.ok(x.d.querySelector('#'+id),`Agents still has ${id}`);
+  // The sub-agents' own host is here (it is set); the fallback has none, so its host waits one click away.
+  const subHost=x.d.querySelector('details[data-more=subagent-host]'),fbHost=x.d.querySelector('details[data-more=fallback-host]');
+  assert.equal(subHost.open,true);
+  assert.match(subHost.querySelector('summary').textContent,/Another host · agent\.example/);
+  assert.equal(fbHost.open,false);
+  assert.equal(x.d.querySelector('#fallback_base_url').placeholder,'Same as the main host');
+  assert.equal(x.d.querySelector('#subagent_model').placeholder,'Same as the main model');
+  assert.equal(x.d.querySelector('#fallback_model').placeholder,'None');
+  assert.match(x.d.querySelector('#fallback_model').closest('.field').textContent,/If the main model fails or stalls/);
+  // Save stays in a bar of its own, and still saves every page's edits.
+  assert.ok(x.d.querySelector('.save-bar #save'));
+  x.input('#fallback_model','backup-2');
+  x.click('#save');
+  const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.equal(saved.fallback_model,'backup-2');
+  assert.equal(saved.base_url,'http://127.0.0.1:11434/v1','the Models page\'s edit goes with it');
+  x.click('[data-nav=security]');
+  assert.equal(x.d.querySelector('#page').classList.contains('v2'),false,'the other pages wait for the founder\'s choice');
 });

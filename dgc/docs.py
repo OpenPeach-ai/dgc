@@ -2628,7 +2628,7 @@ numbered list instead.
 The gear opens twelve pages: **General** (permission mode, thinking, context size, tool profile),
 **Models** (a local host, a provider, or your own subscription CLI; for Anthropic, **Cache
 lifetime**, and for a local Ollama, **Keep the model loaded**), **Agents** (the model, host and context
-window sub-agents use, and the fallback route), **Web search**, **ChatDGC**, **Memory** (what DGC
+window sub-agents use, how many run at once, the fallback route, and the model for Pips), **Web search**, **ChatDGC**, **Memory** (what DGC
 remembers, with its **History** and **Undo**), **Voice**, **Running sessions** (sessions working
 with no window), **Token usage** (what this machine counted), **Security** (sandbox confinement and
 plan-mode limits), **Plugins** (installed packages, the apps they reach, and the directory) and

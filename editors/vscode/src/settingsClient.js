@@ -170,6 +170,8 @@ function render() {
     usage = null;
     document.querySelectorAll('[data-nav]').forEach(b => { b.classList.toggle('active', b.dataset.nav === section); b.setAttribute('aria-current', b.dataset.nav === section ? 'page' : 'false'); });
     const main = $('page');
+    // The direction (24 Oct): Models and Agents in the chat panel's tokens and the new layout (settings.css .v2).
+    main.classList.toggle('v2', section === 'models' || section === 'agents');
     if (section === 'plugins') {
         renderPlugins(main);
         return;
@@ -249,6 +251,7 @@ function render() {
                 $(urlId).value = p.url;
                 setDraft(urlId, p.url);
                 $(urlId).dispatchEvent(new Event('input', { bubbles: true }));    // its Model box lists the new host
+                el.value = '';                       // a preset only fills the host: the menu never shows a stale one
             } };
     }
 }

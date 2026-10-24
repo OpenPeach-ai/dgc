@@ -2,8 +2,18 @@
 
 ## Unreleased
 
-- **Settings → General → Parallel sub-agents goes to 32.** It stopped at 8, and Save rewrote a wider number set
-  elsewhere back to 8; both now take up to 32. The hint says what more costs: each sub-agent is its own copy of the
+- **Settings → Models and Agents, a new layout (the direction for every Settings page).** Each page is a short title
+  and a few groups of rows in one quiet border, with fewer, shorter words; detail is one click away, and Save stays
+  at the foot of the tab. Models: Connection (Host with its Presets beside it, API key, Model), Subscription (Run
+  turns on; its model and effort show only when one is on), Cache, and **Advanced** for Transport, Responses state,
+  Recheck refused features and, for a host that isn't Anthropic, Cache lifetime. Agents: Sub-agents (Model, Run at
+  once, Context size, and **Another host** for their own Host, Presets, Transport and key, open by itself when one is
+  set), Fallback (what it is, in one line; Another host the same way) and Pips. A blank box says what it means: "Same
+  as the main model", "Same as the main host", "None". These two pages now follow the VS Code theme, light included,
+  with the chat panel's own colours; the other pages and the side list keep their look until the direction is
+  applied to them.
+- **Sub-agents that run at once go to 32** (Settings → Agents → Sub-agents → Run at once; it was General → Parallel
+  sub-agents). It stopped at 8, and Save rewrote a wider number set elsewhere back to 8; both now take up to 32. The hint says what more costs: each sub-agent is its own copy of the
   project, cloud APIs rate-limit, and a local Ollama runs only its OLLAMA_NUM_PARALLEL at once while the rest wait.
 - **Settings → Agents → Pips: one model for every Pip on Default.** **Model for Pips** lists the models at DGC's
   own connection (the host under Models) and takes any name; blank reads **Same as DGC (its model)** and follows DGC

@@ -13,12 +13,15 @@ function keepAliveChoices(current) {
 function parallelHint(c) {
     const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
     // What more costs, said plainly: the number is cheap to raise and expensive to run.
-    const cost = "Each one is its own copy of the project. Cloud APIs rate-limit, and a local Ollama runs only its OLLAMA_NUM_PARALLEL at once; the rest wait.";
-    if (c.ultra_mode !== true) { return `How many sub-agents may run at once, up to 32. Ultra raises this to 8 unless you set a number here. ${cost}`; }
+    const cost = "Each is its own copy of the project. Cloud APIs rate-limit; a local Ollama runs its OLLAMA_NUM_PARALLEL at once and the rest wait.";
+    if (c.ultra_mode !== true) { return `Up to 32; 1 runs them one at a time. Ultra runs 8 unless you set a number. ${cost}`; }
     return pinned
-        ? `Ultra would run 8; this pins it to the number here. Set it back to 4 to let Ultra choose again. ${cost}`
-        : `Ultra is on, so this runs 8. Set any other number, up to 32, to pin it — 1 disables parallel sub-agents. ${cost}`;
+        ? `Pinned here; Ultra would run 8. Set 4 to let Ultra choose. ${cost}`
+        : `Ultra is on, so 8 run. Set any other number, up to 32, to pin it. ${cost}`;
 }
+// Remembered across redraws: which "Advanced" and "Another host" disclosures are open.
+const OPEN = new Set();
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 
 // Ollama's keep_alive values Settings offers, in plain words. "" sends none (Ollama's own default, 5 minutes).
 export const KEEP_ALIVE_CHOICES = [["5m", "5 minutes"], ["15m", "15 minutes"], ["30m", "30 minutes"], ["1h", "1 hour"],
@@ -94,7 +97,6 @@ export function renderFields(section, main, config, providers, ui) {
             + card("Behavior", field("Permission mode", "What DGC may do without asking again.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"))
                 + field("Thinking", "Applies to the next model round.", sel("think", [["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], think))
                 + field("DGC Ultra", "Extra guidance and bounded sub-agents. Permissions stay as set.", bool("ultra_mode", c.ultra_mode === true))
-                + field("Parallel sub-agents", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
                 + field("Token cap per turn", c.budget_settable ? "Tokens one turn may spend, sub-agents included. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work. 0 means no cap." : "Update the DGC CLI to set this here.", inp("turn_token_budget", c.turn_token_budget ?? 0, "number"))
                 + field("Context size", contextSizeHint(c), inp("context_size", contextSizeShown(c), "number"))
                 + field("Show thinking", "Inline, collapsed, or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
@@ -105,50 +107,75 @@ export function renderFields(section, main, config, providers, ui) {
         const cap = main.querySelector("#turn_token_budget");
         if (cap) { cap.min = "0"; cap.step = "1000"; if (!c.budget_settable) cap.disabled = true; }
     }
+    // ---- The direction (24 Oct 2026), Models and Agents: groups under a plain title, one row per setting, short
+    // words, detail one click away (Advanced, Another host), and a Save that stays in reach. The page wears the
+    // chat panel's own tokens (settings.css .v2), so it follows the VS Code theme.
+    const TRANSPORTS = [["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]];
+    const head = (title, sub) => `<h2>${title}</h2><p class="sub">${sub}</p>`;
+    const group = (title, body, note = "") => `<section class="group"><h3>${title}</h3>${note ? `<p class="group-note">${note}</p>` : ""}<div class="rows">${body}</div></section>`;
+    // A disclosure that remembers being open across redraws; open by itself when what it holds is set.
+    const more = (key, summary, body, set) => `<details class="more" data-more="${key}"${OPEN.has(key) || set ? " open" : ""}><summary>${summary}</summary>${body}</details>`;
+    // A host with its presets beside it: picking one fills the host (settingsClient lists its models again).
+    const hostRow = (id, presetId, value, placeholder) => `<div class="field host-field"><span><label class="name" for="${id}">Host</label></span>`
+        + `<span class="host-control">${inp(id, value)}${presetId ? sel(presetId, [["", "Presets"]].concat(providers.map((p) => [p.id, p.label])), "") : ""}</span></div>`;
+    const saveBar = '<div class="save-bar"><button type="button" class="save" id="save" title="Saves every page\'s changes, for every workspace on this computer">Save</button></div>';
+    const hostName = (url) => { try { return new URL(url).host; } catch { return String(url || ""); } };
+    function wireMore(main) {
+        main.querySelectorAll("details.more[data-more]").forEach((d) => d.addEventListener("toggle", () => { if (d.open) OPEN.add(d.dataset.more); else OPEN.delete(d.dataset.more); }));
+        // A preset's select is only a way to fill the host: it never shows a stale choice.
+        main.querySelectorAll(".host-control select").forEach((el) => { el.setAttribute("aria-label", "Fill the host from a preset"); el.title = "Fill the host from a preset"; });
+    }
     function renderModels(main) {
         const c = config;
-        const presets = providers.map((p) => [p.id, p.label]);
-        main.innerHTML = '<h2>Models</h2><p class="sub">Where a turn is sent.</p>'
-            + card("Connection", field("Provider preset", "Fills the host below.", sel("provider", [["", "Choose a preset"]].concat(presets), ""))
-                + field("Host URL", "", inp("base_url", c.base_url || ""))
-                + field("API key", "Leave blank to keep the saved key.", inp("api_key", c.api_key || "", "password"))
+        const engine = String(c.subscription_engine || "");
+        const anthropic = /(^|\.)anthropic\.com/i.test(hostName(c.base_url)) || c.api_mode === "anthropic";
+        const cacheLife = field("Cache lifetime", c.cache_settable ? "How long Anthropic keeps it. 1 hour suits replies further apart; each write costs more." : "Update the DGC CLI to set this here.",
+            sel("prompt_cache_ttl", [["5m", "5 minutes"], ["1h", "1 hour"]], c.prompt_cache_ttl === "1h" ? "1h" : "5m"));
+        main.innerHTML = head("Models", "The model that answers your turns, and the host it runs on.")
+            + group("Connection", hostRow("base_url", "provider", c.base_url || "")
+                + field("API key", "Blank keeps the saved key.", inp("api_key", c.api_key || "", "password"))
                 + model("model", "Model", "", c.model || ""))
-            + card("Subscription", field("Engine", "Run turns through a subscription CLI.", sel("subscription_engine", [["", "Off"], ["claude", "Claude"], ["codex", "Codex"], ["qwen", "Qwen"], ["kimi", "Kimi"], ["copilot", "Copilot"]], c.subscription_engine || ""))
-                + field("Subscription model", "Optional. Blank uses that CLI's default.", inp("subscription_model", c.subscription_model || ""))
-                + field("Reasoning effort", "", sel("subscription_effort", [["", "Default"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], c.subscription_effort || "")))
-            + card("Runtime", field("API transport", "", sel("api_mode", [["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.api_mode || "auto"))
-                + field("Responses state", "", sel("provider_state", [["stateless", "Stateless"], ["server", "Server stored"]], c.provider_state || "stateless"))
-                + field("Prompt cache", "", bool("prompt_cache", c.prompt_cache !== false))
-                + field("Cache lifetime", c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "Update the DGC CLI to set this here.", sel("prompt_cache_ttl", [["5m", "5 minutes"], ["1h", "1 hour"]], c.prompt_cache_ttl === "1h" ? "1h" : "5m"))
-                + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "For this long after the last reply, so the next one starts at once and reuses what is already read. A loaded model keeps its memory in use." : "Update the DGC CLI to set this here.", sel("ollama_keep_alive", keepAliveChoices(c.ollama_keep_alive), String(c.ollama_keep_alive ?? "30m"))) : "")
-                + field("Capability retry TTL", "Seconds.", inp("capability_cache_ttl_s", c.capability_cache_ttl_s ?? "", "number")))
-            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+            + group("Subscription", field("Run turns on", "Your own Claude Code, Codex and others, on your plan.",
+                    sel("subscription_engine", [["", "Off: the model above"], ["claude", "Claude Code"], ["codex", "Codex"], ["qwen", "Qwen Code"], ["kimi", "Kimi Code"], ["copilot", "Copilot"]], engine))
+                + `<div data-when-engine${engine ? "" : " hidden"}>`
+                + field("Model", "Blank uses the CLI's own.", inp("subscription_model", c.subscription_model || ""))
+                + field("Effort", "", sel("subscription_effort", [["", "Default"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], c.subscription_effort || ""))
+                + "</div>")
+            + group("Cache", field("Prompt cache", "Reuses what the model has already read.", bool("prompt_cache", c.prompt_cache !== false))
+                + (anthropic ? cacheLife : "")
+                + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "How long after the last reply, so the next one starts at once. It keeps its memory in use." : "Update the DGC CLI to set this here.",
+                    sel("ollama_keep_alive", keepAliveChoices(c.ollama_keep_alive), String(c.ollama_keep_alive ?? "30m"))) : ""))
+            + `<section class="group group-more"><div class="rows">${more("models-advanced", "Advanced",
+                field("Transport", "How DGC talks to the host. Auto suits almost every one.", sel("api_mode", TRANSPORTS, c.api_mode || "auto"))
+                + field("Responses state", "OpenAI's Responses API only.", sel("provider_state", [["stateless", "Stateless"], ["server", "Server stored"]], c.provider_state || "stateless"))
+                + (anthropic ? "" : cacheLife)
+                + field("Recheck refused features", "Seconds before DGC tries again a feature the host turned down.", inp("capability_cache_ttl_s", c.capability_cache_ttl_s ?? "", "number")), false)}</div></section>`
+            + saveBar;
         if (!c.cache_settable) for (const id of ["prompt_cache_ttl", "ollama_keep_alive"]) { const el = main.querySelector("#" + id); if (el) el.disabled = true; }
-        const preset = document.getElementById("provider");
-        if (preset)
-            preset.onchange = () => {
-                const found = providers.find((p) => p.id === preset.value);
-                if (found && found.url)
-                    document.getElementById("base_url").value = found.url;
-            };
+        const pick = main.querySelector("#subscription_engine"), rows = main.querySelector("[data-when-engine]");
+        if (pick && rows) pick.addEventListener("change", () => { rows.hidden = !pick.value; });
+        const box = main.querySelector("#subscription_model");
+        if (box) box.placeholder = "The CLI's default";
+        wireMore(main);
     }
     function renderAgents(main) {
         const c = config;
-        main.innerHTML = '<h2>Agents</h2><p class="sub">Sub-agents and the fallback route. Blank fields inherit the main model.</p>'
-            + card("Sub-agents", field("Provider preset", "Fills the sub-agent host below.", sel("subagent_provider", [["", "Choose a preset"]].concat(providers.map(p => [p.id, p.label])), ""))
-                + model("subagent_model", "Model", "", c.subagent_model || "")
-                + field("Host URL", "", inp("subagent_base_url", c.subagent_base_url || ""))
-                + field("Transport", "", sel("subagent_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.subagent_api_mode || ""))
-                + field("API key", "Leave blank to keep the saved key.", inp("subagent_api_key", c.subagent_api_key || "", "password"))
-                + field("Context size", c.subagent_window_settable ? "Tokens each sub-agent holds before it compacts." : "Update the DGC CLI to set this here.",
-                    inp("subagent_context_size", subagentWindowShown(c), "number")))
-            + card("Fallback", model("fallback_model", "Model", "", c.fallback_model || "")
-                + field("Host URL", "", inp("fallback_base_url", c.fallback_base_url || ""))
-                + field("Transport", "", sel("fallback_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.fallback_api_mode || ""))
-                + field("API key", "", inp("fallback_api_key", c.fallback_api_key || "", "password")))
-            + card("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it, on the connection under Models. Blank uses DGC's own."
-                : "Update the DGC CLI to set this here.", c.pips_model || ""))
-            + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+        const subHost = String(c.subagent_base_url || ""), fallbackHost = String(c.fallback_base_url || "");
+        const routeRows = (prefix, presetId, set) => hostRow(`${prefix}_base_url`, presetId, c[`${prefix}_base_url`] || "")
+            + field("Transport", "Inherit uses the main one on the main host.", sel(`${prefix}_api_mode`, [["", "Inherit"]].concat(TRANSPORTS), c[`${prefix}_api_mode`] || ""))
+            + field("API key", "Only for this host. Blank keeps the saved key.", inp(`${prefix}_api_key`, c[`${prefix}_api_key`] || "", "password"));
+        main.innerHTML = head("Agents", "Helpers that take parts of a turn, a model to fall back on, and your Pips.")
+            + group("Sub-agents", model("subagent_model", "Model", "", c.subagent_model || "")
+                + field("Run at once", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"))
+                + field("Context size", c.subagent_window_settable ? "Tokens each one holds before it compacts." : "Update the DGC CLI to set this here.",
+                    inp("subagent_context_size", subagentWindowShown(c), "number"))
+                + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost))
+            + group("Fallback", model("fallback_model", "Model", "If the main model fails or stalls, DGC tries this one.", c.fallback_model || "")
+                + more("fallback-host", fallbackHost ? `Another host · ${escapeHtml(hostName(fallbackHost))}` : "Another host", routeRows("fallback", ""), !!fallbackHost))
+            + group("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it." : "Update the DGC CLI to set this here.", c.pips_model || ""))
+            + saveBar;
+        const placeholders = { subagent_model: "Same as the main model", fallback_model: "None", subagent_base_url: "Same as the main host", fallback_base_url: "Same as the main host" };
+        for (const [id, text] of Object.entries(placeholders)) { const el = main.querySelector("#" + id); if (el) el.placeholder = text; }
         const pipsBox = main.querySelector("#pips_model");
         if (pipsBox) {
             pipsBox.placeholder = "Same as DGC" + (followed(c) ? ` (${followed(c)})` : "");
@@ -163,6 +190,7 @@ export function renderFields(section, main, config, providers, ui) {
             check();
             if (!c.subagent_window_settable) window.disabled = true;
         }
+        wireMore(main);
     }
     function renderSecurity(main) {
         const c = config;
