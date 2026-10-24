@@ -6,6 +6,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Your app's code keeps its Pips (Pips API 64).** An app that uses DGC's SDK can declare its Personal Pips in code,
+  each a template: a name and instructions, a model, how much it asks, the app's tools it may use, its routines (on a
+  schedule or on the app's events) and the changes it may run without asking. On each deploy, `ensure_pip_template`
+  (the SDK's `pips.ensure_all`) makes a Pip that doesn't exist yet and brings the others up to date, and answers what
+  it did: `created`, `applied`, `waiting`, `unchanged`, the same template twice answering `unchanged`. Changes that
+  only narrow or reword a Pip apply by themselves (its text and model, a tool, routine or Always allow taken away, a
+  lower level, a routine's time). Anything that would let it do more (a new change tool, its own computer, a higher
+  level, a new Always allow, a routine on the app's event) waits as one change on the Pip's page for a person to accept,
+  unless the app passes `accept_widening`, and so takes responsibility for it. A tool that moves money is never allowed
+  without asking this way. What a person changed on the Pip in DGC is kept and reported as a conflict, unless the app
+  passes `overwrite_user_changes`; a paused or archived Pip stays so. `prune_pip_templates` pauses, never deletes, the
+  Pips the app no longer declares. A Pip made from a template uses only the app tools its template lists; every other
+  Pip keeps every registered app, as before. On a server, a template's Pip never runs on a personal Claude Code or
+  Codex plan. An older DGC still opens your Pips.
+
 - **Pips on a server.** Your app and DGC's Pips can now run on a server with no VS Code and no desktop.
   `dgc pips serve --server` is the runner without the desktop: no desktop notifications, no borrowing a signed-in
   Chrome, and one plain line per event on stdout for `docker logs` and journald (`runner_started`, each run queued,

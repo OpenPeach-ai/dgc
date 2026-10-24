@@ -1038,6 +1038,17 @@ The app's own events can start a Pip, too: give a Pip a routine **When my app se
 time the app sends that event, the Pip runs the routine once, with what the app sent. The app can't add a routine or
 give a Pip anything new: it only starts what you set up. For developers: [Events from your app](../sdk/PIPS.md#events-from-your-app-api-63).
 
+The app's code can also keep Pips of its own, declared in code: a **Dunning** Pip that lists unpaid orders every
+weekday, a **Dispatch** Pip that checks each new order. Such a Pip says **From your code** on its page ("Your app keeps
+Dunning from its template, dunning"), and it uses only the tools of your app that its template lists. When the
+developer's code changes, the next start of the app brings the Pip up to date by itself if the change only narrows it
+or rewords it (a new time for a routine, a tool taken away). Anything that would let it do more (a new change tool, its
+own computer, asking less, running a change without asking, a routine on your app's event) waits on its page as **Your
+code asks to let Dunning do more**, listed in plain words, with **Accept** and **Not now**. Not now isn't asked again for
+the same thing. Whatever you change on such a Pip yourself (its name, how much it asks, a routine, an Always allow you
+stopped) stays as you set it, and the app is told. A Pip the app no longer declares is paused, never deleted. For
+developers: [Pips in code](../sdk/PIPS.md#pips-in-code-api-64).
+
 ### App reads
 
 A Personal Pip can read from apps you've connected through Composio (see

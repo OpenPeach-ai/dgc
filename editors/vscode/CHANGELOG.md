@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Pips your code keeps.** A Personal Pip that your own app's code keeps from a template says so at the top of its
+  page: **From your code**, "Your app keeps Dunning from its template, dunning. What you change here stays as you set
+  it." When the app's new code would let the Pip do more (use a new change tool, ask less, run a change without asking,
+  a routine on the app's event), the same place shows one card, **Your code asks to let Dunning do more**, each thing
+  in plain words, with **Accept** and **Not now**. Nothing of it applies until you accept it. Needs a DGC CLI with Pips
+  API 64; with an older one, nothing changes.
+
 - **A routine on your own app's event.** In a Personal Pip's Settings, Routines, choose **When my app sends an
   event**, pick your app, and type the event or pick one it sent lately: "When the shop app sends order.created". The
   Pip runs it once for each event, with what the app sent. The choice shows when you have an app registered through

@@ -5,10 +5,11 @@ lets trusted host code read and manage the Pips of an existing DGC profile throu
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions. From Pips API 61 it also
 gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)), from API 62
-your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)), and from API 63
-your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)).
+your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)), from API 63
+your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)), and from API 64 your
+app declares its Pips in code and keeps them as declared on each deploy ([Pips in code](#pips-in-code-api-64)).
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 63** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 64** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -78,8 +79,13 @@ try {
 | `get_run(run_id)` | `getRun(runId)` | `get_pip_run` |
 | `trigger(app, event, payload=None, *, idempotency_key)` | `trigger(app, event, payload, { idempotencyKey })` | `trigger_app_event` (API 63; no `approved`) |
 | `events(app, *, limit=None)` | `events(app, { limit })` | `list_app_events` (API 63) |
+| `ensure(template, *, approved, accept_widening=False, overwrite_user_changes=False)` | `ensure(template, { approved, acceptWidening, overwriteUserChanges })` | `ensure_pip_template` (API 64) |
+| `ensure_all(templates, *, prune=False, approved, accept_widening=False, overwrite_user_changes=False)` | `ensureAll(templates, { approved, prune, acceptWidening, overwriteUserChanges })` | `ensure_pip_template` for each, then `prune_pip_templates` (API 64) |
+| `templates(pip_id=None)` | `templates(pipId)` | `list_pip_templates` (API 64) |
+| `decide_template_change(change_id, decision, *, expected_digest, approved)` | `decideTemplateChange(changeId, decision, expectedDigest, { approved })` | `decide_pip_template_change` (API 64) |
 
-Python exports `Pips`, `AsyncPips`, `PipReadCommand` and `PipMutationCommand`.
+Python exports `Pips`, `AsyncPips`, `PipReadCommand`, `PipMutationCommand` and `PipTemplate`; TypeScript also exports
+`definePipTemplate` and the `PipTemplate` types.
 TypeScript exports `Pips`, `PipReadCommand`, `PipMutationCommand`, `PipReadParams`,
 `PipMutationParams`, `PipResult`, `PipJson`, `PipChatOptions` and
 `PipCalendarEvent`. In TypeScript, `read` always takes a params object (use `{}`
@@ -108,7 +114,7 @@ Show the saved record to the user before asking for the second decision.
 
 ### Commands and parameters
 
-Commands form closed sets: 94 reads, 101 mutations and one event (`trigger_app_event`, your app's event,
+Commands form closed sets: 95 reads, 104 mutations and one event (`trigger_app_event`, your app's event,
 API 63), with a closed field set for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
 exposed. Parameters are plain JSON:
 
@@ -124,7 +130,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 63; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 64; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -178,6 +184,7 @@ job with `create_pip` and a reviewed update.
 | 61 | Your own app's tools ([below](#your-own-apps-tools-api-61)): `register_app`, `update_app`, `accept_app_update`, `remove_app` and `rotate_app_secret` (M) and `list_apps` (R), all local only; an `app_plan` on `app:<name>`. Both SDKs refuse them before API 61 and check a name, an address and each tool before anything is sent. `define_pip_tool` / `definePipTool` and `AppToolHandler` need no runtime. |
 | 62 | Approvals in your app ([below](#approvals-in-your-app-api-62)): `list_app_approvals` (R) and `decide_app_approval` (M), local only; `pips.pending()` and `pips.decide()` in both SDKs, refused before API 62 and checked before anything is sent. `AppToolHandler`'s approval callbacks need no runtime. `get_pip_app_action` of an app action carries `app_deliveries`. |
 | 63 | Events from your app ([below](#events-from-your-app-api-63)): `trigger_app_event` (an event, sent with `pips.trigger()`: no `approved`, refused in plan mode) and `list_app_events` (R), local only; a routine's trigger `{kind: "app", app, event}` in `add_pip_routine` and `update_pip_routine`; `app_events` on `list_pip_routines`. Both SDKs refuse them before API 63 and check the app, the event's name, the idempotency key and the payload (32 KB of JSON, sent outside the 32 KiB request budget) before anything is sent. |
+| 64 | Pip templates in code ([below](#pips-in-code-api-64)): `ensure_pip_template`, `prune_pip_templates` and `decide_pip_template_change` (M) and `list_pip_templates` (R), local only; `pips.ensure()`, `pips.ensure_all()`, `pips.templates()` and `pips.decide_template_change()` in both SDKs, refused before API 64. `PipTemplate` / `definePipTemplate` check a template before anything is sent and need no runtime. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -842,6 +849,188 @@ tools. The Pip's reply appears in its chat as its own message.
 E is an event: neither a read nor an approved mutation. Send it with `pips.trigger(app, event, payload=None, *,
 idempotency_key)` (TypeScript: `pips.trigger(app, event, payload, { idempotencyKey })`); read with `pips.events(app,
 limit=None)` (`pips.events(app, { limit })`). `AsyncPips` has both.
+
+### Pips in code (API 64)
+
+Your app can declare its Personal Pips in code, one `PipTemplate` each, and make the real Pips match on every deploy:
+`ensure_all` creates the ones that don't exist yet and brings the others up to date, safely. A template says what the
+Pip is (its name and instructions), what it may use (your app's tools), how much it asks, and what it does on its own
+(its routines).
+
+**A worked example: the shop.** The shop's own web app registers its tools once, serves DGC's calls and approvals at
+`/dgc/pips`, tells DGC when an order is placed, and keeps two Pips: **Dunning**, which lists unpaid orders every weekday
+morning, and **Dispatch**, which reads each new order and proposes its dispatch.
+
+```python
+import os
+from flask import Flask, jsonify, request
+from dgc_sdk import DGC, DGCCommandRejectedError, PipTemplate, define_pip_tool
+from dgc_sdk.pips_app import AppToolHandler
+
+# 1. The app's tools: two reads, two changes.
+UNPAID = define_pip_tool("find_unpaid_orders", "Orders still unpaid after N days: id, customer, total, days unpaid",
+                         {"type": "object", "properties": {"days": {"type": "integer", "minimum": 1}},
+                          "required": ["days"], "additionalProperties": False}, kind="read")
+ORDER = define_pip_tool("get_order", "One order by its id: customer, items, total, address and whether it is paid",
+                        {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"],
+                         "additionalProperties": False}, kind="read")
+DISPATCH = define_pip_tool("create_dispatch", "Create the dispatch (a courier pickup) for one paid order",
+                           {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"],
+                            "additionalProperties": False}, kind="change")
+REMIND = define_pip_tool("send_reminder", "Email the customer one polite payment reminder for an unpaid order",
+                         {"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"],
+                          "additionalProperties": False}, kind="change")
+TOOLS = [UNPAID, ORDER, DISPATCH, REMIND]
+
+# 2. The app's Pips, in code.
+WEEKDAYS_9_30 = {"schedule": {"type": "cron", "cron": "30 9 * * 1-5", "timezone": "Asia/Kolkata"}}
+TEMPLATES = [
+    PipTemplate(key="dunning", name="Dunning", model="deepseek-v4.1-flash:cloud",
+                instructions="Chase unpaid orders. List each one with its customer and total; never promise a refund.",
+                tools=["app:shop/find_unpaid_orders"],
+                routines=[{"title": "Unpaid orders", "when": WEEKDAYS_9_30,
+                           "prompt": "Find the orders unpaid for 7 days or more and list them for me."}]),
+    PipTemplate(key="dispatch", name="Dispatch", model="deepseek-v4.1-flash:cloud",
+                instructions="Get paid orders dispatched. Read the order first; a dispatch always waits for my Allow.",
+                tools=["app:shop/get_order", "app:shop/create_dispatch"],
+                routines=[{"title": "New orders", "when": {"app": "shop", "event": "order.created"},
+                           "prompt": "Read the new order with get_order. If it is paid, propose one create_dispatch."}]),
+]
+
+dgc = DGC(inherit_user_state=True, sandbox="off")
+s = dgc.session(cwd=".")
+
+# 3. The deploy step: the app's tools, then its Pips.
+def deploy():
+    try:
+        app = s.pips.register_app("shop", url="http://127.0.0.1:5005/dgc/pips", tools=TOOLS, approved=True)
+        print("Keep this secret for DGC_PIPS_SECRET:", app["secret"])        # shown this once
+    except DGCCommandRejectedError as exc:
+        if exc.reason != "app_exists":
+            raise
+        s.pips.update_app("shop", tools=TOOLS, approved=True)   # a new tool waits for a person
+    done = s.pips.ensure_all(TEMPLATES, prune=True, approved=True)
+    for pip in done["pips"]:
+        print(pip["notice"])       # "Made Dunning from its template." / "Dispatch already matches its template."
+
+# 4. DGC's calls, the approvals it sends, and the shop's own pages.
+waiting = {}
+handler = AppToolHandler(os.environ["DGC_PIPS_SECRET"], tools={
+    UNPAID: lambda args, ctx: db.unpaid(args["days"]),
+    ORDER: lambda args, ctx: db.order(args["order_id"]),
+    DISPATCH: lambda args, ctx: shipping.dispatch(args["order_id"], receipt=ctx.approval_id),
+    REMIND: lambda args, ctx: mail.reminder(args["order_id"], receipt=ctx.approval_id),
+}, on_approval_requested=lambda e: waiting.__setitem__(e.action_id, e),
+   on_approval_resolved=lambda e: waiting.pop(e.action_id, None))
+
+web = Flask(__name__)
+
+@web.post("/dgc/pips")
+def pips():
+    return handler.flask(request)
+
+@web.post("/orders")
+def place_order():
+    order = db.add(request.get_json())
+    s.pips.trigger("shop", "order.created", {"order_id": order.id, "total": order.total}, idempotency_key=order.id)
+    return jsonify(id=order.id)
+
+@web.post("/admin/approvals/<action_id>")
+def decide(action_id):      # a person's choice on the shop's admin screen
+    event = waiting[action_id]
+    s.pips.decide(action_id, request.form["decision"], expected_digest=event.action_digest, approved=True)
+    return "", 204
+```
+
+`deploy()` runs at every start. The first time it makes both Pips (`created: true`); after that it answers `unchanged:
+true` until the code changes. Move Dunning's routine to 10:00 and the next deploy applies it. Add
+`"app:shop/send_reminder"`, a change, to Dunning's `tools` and the next deploy saves it as a change that waits for a
+person on Dunning's page in DGC (`waiting`); once accepted there, Dunning may propose reminders, each one an Allow card. When a customer orders, `trigger` runs Dispatch's routine: it reads the order and
+proposes `create_dispatch`, which waits as an Allow card in DGC and as an approval on the shop's admin screen.
+
+The same templates in TypeScript:
+
+```typescript
+import { definePipTemplate } from "@vibedgc/sdk";
+
+const templates = [
+  definePipTemplate({ key: "dunning", name: "Dunning", model: "deepseek-v4.1-flash:cloud",
+    instructions: "Chase unpaid orders. List each one with its customer and total; never promise a refund.",
+    tools: ["app:shop/find_unpaid_orders"],
+    routines: [{ title: "Unpaid orders", when: { schedule: { type: "cron", cron: "30 9 * * 1-5", timezone: "Asia/Kolkata" } },
+      prompt: "Find the orders unpaid for 7 days or more and list them for me." }] }),
+  definePipTemplate({ key: "dispatch", name: "Dispatch", model: "deepseek-v4.1-flash:cloud",
+    instructions: "Get paid orders dispatched. Read the order first; a dispatch always waits for my Allow.",
+    tools: ["app:shop/get_order", "app:shop/create_dispatch"],
+    routines: [{ title: "New orders", when: { app: "shop", event: "order.created" },
+      prompt: "Read the new order with get_order. If it is paid, propose one create_dispatch." }] }),
+];
+const done = await session.pips.ensureAll(templates, { approved: true, prune: true });
+```
+
+**A template.**
+
+| Field | |
+| --- | --- |
+| `key` | Its stable id: 1 to 40 of `a-z`, `0-9`, `-`, unique in the profile. DGC keeps it on the Pip, so the same key is always the same Pip, whatever its name. |
+| `name`, `instructions` | Its name (one line, up to 120 characters) and its job (up to 4,000). |
+| `model` | A model id from `list_pip_models`, or none for DGC's own default. Never a personal Claude Code or Codex plan; and when the runner runs with `--server`, DGC's default may not be one either ([Pips on a server](#pips-on-a-server)). |
+| `level` | How much it asks: `ask` (the default for a template), `approve` or `full`. A payment asks at every level. |
+| `tools` | Up to 64: your apps' tools as `app:<name>/<tool>`, and `computer` for its own computer. A Pip's other connections (Gmail, Calendar, plugins, connectors) need a person's own sign-in or consent: a template can't name them. |
+| `routines` | Up to 10 `{title, prompt, when}`: `when` is a schedule (`{"schedule": {...}}`, the schedule shapes of [PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md#schedules-and-event-triggers)) or one of your app's events (`{"app": "shop", "event": "order.created"}`). A routine is known by its title. |
+| `always_allow` | Change tools in `tools` it may run without asking (`alwaysAllow` in TypeScript). Never a read, and never a tool marked `moves_money`: DGC refuses the template (`asks_every_time`), with `accept_widening` too. |
+
+`PipTemplate` (Python) and `definePipTemplate` (TypeScript) check all of this where the template is made. DGC checks
+it again, against your apps as they are now.
+
+**What `tools` means.** Every Personal Pip may use every registered app ([Your own app's tools](#your-own-apps-tools-api-61)). A Pip made from a template
+may use only the app tools its template lists: its runs are given those, and a call to another is refused before your
+app is called. That way your code decides exactly what each of its Pips may call, and a new change tool is a decision
+someone sees. Every other Pip keeps every registered app, as before. A listed tool your app doesn't have now (not
+registered, or its update still waits in Pips settings → Apps) is left out and said in `unavailable`; the first ensure
+after it exists adds it, as the rules below say.
+
+**Bringing a Pip to its template.** Each difference is applied, or it waits:
+
+- **Applied at once** (narrowing or neutral): its name, instructions and model; a tool, a routine or an Always allow
+  taken away; a lower level; a routine's prompt, or its time; a new routine on a schedule; a new read tool.
+- **Waits for a person** (widening): a new change tool, its own computer, a higher level, a new Always allow, and a
+  routine that newly runs on your app's event. They wait together as one change on the Pip's page in DGC, **Your code
+  asks to let Dunning do more**, with **Accept** and **Not now**; its id is in `waiting`. The same template again keeps
+  the same change; a template that asks for something else replaces it; one that no longer asks withdraws it. A change
+  a person turned down isn't asked again while the template asks for exactly it (its id is in `declined`).
+- **`accept_widening=True`** applies the widening in the same call, without a person. Your app then takes
+  responsibility for what the Pip may do: use it for a Pip whose growth you have already agreed with its owner, not to
+  get past the card. A tool that moves money is never Always allowed, either way.
+
+A new Pip is made as its template says, with one exception: its Always allow, which only a person has given so far,
+waits like any widening (unless `accept_widening`).
+
+**Changes a person made in DGC are kept.** DGC remembers what ensure last applied. A field that differs from it now was
+changed by a person in DGC (its name, its level, a routine, an Always allow they stopped, its computer): ensure leaves
+it as they set it and lists it in `conflicts`, `{field, item?, pip, template, words}`, every time, until the template
+agrees or `overwrite_user_changes=True`. Overwriting still never widens on its own: giving back more than the person
+left waits for them like any widening. A Pip someone paused or archived stays so: ensure never resumes a Pip a person
+paused.
+
+**The answer.** `{pip_id, key, name, created, applied: [{field, item?, words}], waiting: [change ids], declined: [change
+ids], unchanged, conflicts, unavailable: [{tool or routine, words}], notice}`. `unchanged` is true when this call made,
+applied, saved and withdrew nothing. `notice` says it all in words.
+
+**Deploys.** `ensure_all(templates, prune=False)` checks every template first (each key once), ensures each in order,
+and answers `{pips: [each answer], pruned, waiting, unchanged}`. DGC refusing one stops there, before anything is
+pruned. With `prune=True`, every Pip made from a template whose key is no longer listed is paused, never deleted, and
+listed in `pruned`; a key that comes back resumes its Pip.
+
+| Command | | Fields |
+| --- | --- | --- |
+| `ensure_pip_template` | M | `template`, `accept_widening?`, `overwrite_user_changes?`. Answers as above. Refused `invalid_template`, `asks_every_time`, `model_not_available` or `server_subscription` before anything changes. |
+| `prune_pip_templates` | M | `keep` (the keys to keep, up to 100). Answers `{pruned: [{pip_id, key, name, status, words}], already, kept, notice}`. |
+| `list_pip_templates` | R | `pip_id?`. Answers `{templates: [{key, pip_id, name, status, pruned, level, tools, always_allow, routines, created_at, updated_at, waiting, declined}]}`; `waiting` and `declined` are a change `{id, pip_id, key, status, digest, items: [{kind, ..., words}], words, created_at, decided_at, decided_by}` or null. |
+| `decide_pip_template_change` | M | `change_id`, `decision` (`accept` or `reject`), `expected_digest` (its `digest`). Exactly once: a change already answered, or withdrawn, answers `decided: false`. Answers `{change, decided, applied, notice}`. |
+
+`decide_template_change` is the same decision as DGC's card. Call it from a person's choice on your own screen, never
+from code alone: `accept_widening` is how code decides, and says so.
 
 ## Pips on a server
 

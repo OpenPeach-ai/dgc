@@ -1915,6 +1915,55 @@ a third kind of "when" beside a schedule and a Gmail or Calendar event.
   `gone`, told, run_id, created_at, updated_at), made with `CREATE TABLE IF NOT EXISTS` in the transaction of an app's
   first event. The registry's schema stays 46.
 
+**Pip templates in code** (`pip_templates`, Pips API 64). Your app declares its Personal Pips in code and keeps them
+as declared (the SDKs' `PipTemplate`, `pips.ensure` and `pips.ensure_all`; [Pips in code](../sdk/PIPS.md#pips-in-code-api-64)).
+
+- **The template.** `{key, name, instructions, model?, level?, tools?, routines?, always_allow?}`, refused
+  `invalid_template` otherwise: `key` `[a-z0-9-]{1,40}`, unique in the profile; `name` one line of 1 to 120 characters;
+  `instructions` 1 to 4,000 (the Pip's goal); `model` a model id or none (`model_choice` `{mode: "model", model}` or
+  `{mode: "default"}`); `level` `ask` (the default), `approve` or `full`; `tools` up to 64 of `app:<name>/<tool>` and
+  `computer`, each once; `routines` up to 10 `{title, prompt, when}` with distinct titles, `when` a `schedule` or an
+  `app` trigger (a Gmail or Calendar one is refused: it needs that app connected by a person); `always_allow` app tools
+  in `tools`. A template holding a saved credential is refused (`secret_detected`). Requests carry 32 KiB.
+- **Ensure.** `ensure_pip_template {template, accept_widening?, overwrite_user_changes?}` (local only). The model is
+  checked before the transaction when it would be kept: offered by the model connection (`model_not_available`), and,
+  when the supervisor record says the runner runs with `--server`, DGC's default not a personal plan
+  (`server_subscription`). Then, in one transaction: no Pip has the key, so one is made in the Personal workspace
+  (`pip_type` `rook`, a computer only with `computer`), at the template's level, with its routines on (one on an
+  unregistered app is left out and said) and its available app tools; its Always allow waits. Otherwise each field is
+  compared with what the last ensure applied and with the Pip now. A field the Pip has differently from what was
+  applied was changed by a person: it is kept and reported (`conflicts`), unless `overwrite_user_changes`. Else it is
+  brought to the template: name, instructions and model as a new job version (actor the caller, reason "From your code
+  (template KEY)", older reviews superseded as an accept does); a lower level; a removed app tool, computer, routine (by
+  title) or Always allow (the template's own grant revoked); a routine's title, prompt or schedule; a new schedule
+  routine; a new read tool. Widening is one change in `pip_template_changes` (`tmplchange_<32 hex>`, `waiting`): a new
+  change tool (pinned to its `schema_digest`), `computer`, a higher level, a new Always allow (pinned to the tool's
+  `connection_digest` and `schema_digest`; refused `asks_every_time` for a tool that moves money, `invalid_template` for
+  a read), and a routine whose `when` becomes an app event or is turned back on with one. Its digest covers the Pip,
+  the key and the items: the same widening keeps the waiting change, another replaces it (`withdrawn`), none withdraws
+  it, and one a person `declined` is not proposed again. `accept_widening` applies the items in the same transaction.
+  A Pip that is archived changes nothing (a conflict says so); one that is paused stays paused unless the template
+  paused it (prune), which ensure undoes. Answers `{pip_id, key, name, created, applied, waiting, declined, unchanged,
+  conflicts, unavailable, notice}`.
+- **What a template Pip may use.** `allowed_tools` reads the applied `tools`: a run's app tools (`pip_sdk_apps.pin`) are
+  only those, and a call to another app tool answers that it isn't one of the Pip's tools, before the app is called. A
+  Pip with no template record keeps every registered app. An app tool that no longer exists is kept in the record and
+  said in `unavailable`; it is not given to runs while it is missing.
+- **Decide.** `decide_pip_template_change {change_id, decision accept | reject, expected_digest}` (local only): a change
+  that isn't `waiting` answers `decided: false`; a wrong digest is `template_conflict`; an item whose tool changed since
+  is `template_changed` (ensure again). Accept applies every item in one transaction (an Always allow is a grant of kind
+  `connector_call`, account `connection_managed`, `from_template` its key), the change `accepted`; reject makes it
+  `declined`. Both record `decided_at` and `decided_by`.
+- **Prune.** `prune_pip_templates {keep}` (local only, up to 100 keys) pauses each active template Pip whose key isn't in
+  `keep` (`pruned`), never deletes one, and leaves alone one already paused or archived (`already`).
+- **Reading.** `list_pip_templates {pip_id?}`: `{templates: [{key, pip_id, name, status, pruned, level, tools,
+  always_allow, routines, created_at, updated_at, waiting, declined}]}`, each change with its items' `words`.
+- **Where.** `pip_templates` (pip_id, key unique, applied: the last-applied name, instructions, model, level, tools,
+  Always allow grant ids, routine ids by title and status; pruned, created_at, updated_at) and `pip_template_changes`
+  (id, pip_id, key, items, digest, status `waiting` | `accepted` | `declined` | `withdrawn`, created_at, decided_at,
+  decided_by), made with `CREATE TABLE IF NOT EXISTS` in the transaction of the first ensure. The registry's schema
+  stays 46.
+
 **Web plans** (`web_plan`):
 
 ```json
@@ -2038,6 +2087,7 @@ passed on. Personal Pips can't hand off to project Pips.
 | Markdown export | 128 KiB |
 | Runner heartbeat | Every 2 seconds; offline after 15 seconds |
 | Your app's events (API 63) | 60 a minute per app; payload 32 KB of JSON; 20 waiting per Pip; an idempotency key kept 30 days |
+| Pip templates (API 64) | A key 1 to 40 characters; 64 tools and 10 routines a template; a request 32 KiB; one change waiting per Pip; 100 keys a prune |
 
 ## Main-chat tools
 
@@ -2181,6 +2231,7 @@ Clients check it before using a newer control.
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
 | 61 | Your own app's tools (`pip_sdk_apps`): `register_app`, `update_app`, `accept_app_update`, `list_apps`, `remove_app`, `rotate_app_secret` (local only); the connection `app:<name>` in `list_pip_connections`, `inspect_pip_connection` and `inspect_pip_connector_actions`; version-1 `app_plan`s on it; `connector_call` actions on it, sent as one signed POST; `<app>__<tool>` functions and `app_answer` in a Personal Pip's runs (see Your own app's tools, under Personal Pips) |
 | 62 | Approvals in your app (`pip_sdk_app_approvals`): `approval_requested` and `approval_resolved`, POSTed signed to the app's `url` by the supervisor and recorded on the action (`app_deliveries`); `list_app_approvals` and `decide_app_approval` (local only); the review `pip-app-review` opens for a Pip's change on `app:<name>`, tied to its connector draft (see Approvals in your app, under Personal Pips) |
+| 64 | Pip templates in code (`pip_templates`): `ensure_pip_template`, `prune_pip_templates`, `list_pip_templates` and `decide_pip_template_change` (local only); a Pip made from a template is given only the app tools its template lists (see Pip templates in code, under Personal Pips) |
 | 63 | Events from your app (`pip_sdk_app_events`): a routine's `trigger` `{kind: "app", app, event}`; `trigger_app_event` (no approval) and `list_app_events` (local only); `app_events` on `list_pip_routines`; the `add_routine` tool's app kind (see Events from your app, under Personal Pips) |
 | 60 | A live-data Pip: a project Pulse's `live_plan` (`changes.live_plan`, a setup card's `work_kind` `live_data`), run kind `live`, `result.live`, run posts of kind `live` and report cards with outcomes `live_clear` and `live_attention`, `live_plan` on `get_pip` and `list_pips` (see [Live-data commands](#live-data-commands)) |
 | 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |

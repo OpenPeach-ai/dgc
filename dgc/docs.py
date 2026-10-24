@@ -2756,6 +2756,12 @@ self-hosted model, never your Claude Code or Codex plan.
   order.created"): once for each event, with what the app sent as data, never as instructions. It
   suggests one as a card; nothing runs until you add it. Your app's code sends the event with the
   SDK's `pips.trigger`, which only starts what you set up.
+- **Pips your code keeps.** Your own app's code can declare Personal Pips in code (the SDK's
+  `PipTemplate` and `pips.ensure_all`) and keep them as declared on every deploy. Such a Pip says
+  **From your code** on its page and uses only the app tools its template lists. Narrowing changes
+  apply by themselves; anything that lets it do more (a new change tool, asking less, Always allow, a
+  routine on your app's event) waits on its page as **Your code asks to let it do more**, with
+  **Accept** and **Not now**. What you change on the Pip yourself stays as you set it.
 - **Live data.** A Pulse can keep an eye on live data instead of running tests: a short list of exact
   read-only command lines you approve (a `SELECT` through a read-only database account, `df -h .`,
   `curl -s http://127.0.0.1:8000/health`). DGC runs only those lines, in a read-only box in your

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Pips API 64: Pip templates in code. `PipTemplate(key, name, instructions, model=None, level="ask", tools=(),
+  routines=(), always_allow=())` (TypeScript: `definePipTemplate({..., alwaysAllow})`) describes a Personal Pip, checked
+  where it is made: `tools` are your apps' tools as `app:<name>/<tool>` and `computer`; `routines` run on a schedule or
+  on your app's event. `pips.ensure(template, approved=True, accept_widening=False, overwrite_user_changes=False)`
+  (`ensure(template, { approved, acceptWidening, overwriteUserChanges })`) makes the Pip or brings the one with that key
+  to it: narrowing applies, widening waits for a person in DGC (or applies with `accept_widening`), a person's own
+  changes are kept and listed in `conflicts`; the answer has `created`, `applied`, `waiting`, `declined`, `unchanged`,
+  `conflicts`, `unavailable` and `notice`. `pips.ensure_all(templates, prune=False, ...)` (`ensureAll`) checks every
+  template first, ensures each, and with `prune` pauses the Pips whose key is gone. `pips.templates(pip_id=None)` and
+  `pips.decide_template_change(change_id, decision, expected_digest=..., approved=True)` (`templates`,
+  `decideTemplateChange`) read them and decide a change as a person would. `AsyncPips` has them all. All refused before
+  API 64.
+
 - Docs: Pips on a server ([PIPS.md](PIPS.md#pips-on-a-server)). Your app and DGC's runner on a server with no VS Code:
   `dgc pips serve --server` or its systemd unit, the Docker image in `deploy/docker`, `dgc pips health` for probes, the
   rule that Pips there run on an API key or a self-hosted model only, and where secrets live. Nothing in the SDK's API

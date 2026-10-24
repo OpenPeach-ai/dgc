@@ -344,6 +344,16 @@ suggestions. It saves with `add_pip_routine` and `update_pip_routine`, as other 
 SDK call the view doesn't make. Before API 63 the view asks nothing new and offers no such choice. No event and no
 event field changes.
 
+**Pips your code keeps** (API 64). On a Personal Pip's page the view sends `list_pip_templates {pip_id}`. With no
+template, nothing more is shown. With one, a section **From your code** says "Your app keeps NAME from its template,
+KEY. What you change here stays as you set it."; when its `waiting` change is set, the section holds one card, "Your
+code asks to let NAME do more", each item's `words` as a row, with **Accept** and **Not now**, which send
+`decide_pip_template_change {change_id, decision: "accept" | "reject", expected_digest}`. The answer's `notice` is the
+notice; the Pip, its routines, its level and what it may do without asking are loaded again. The host refuses both
+requests before API 64 ("Update DGC to see what your code keeps for a Pip.") and an older CLI is asked for neither.
+`ensure_pip_template` and `prune_pip_templates` are SDK calls the view doesn't make. No event and no event field
+changes.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·
