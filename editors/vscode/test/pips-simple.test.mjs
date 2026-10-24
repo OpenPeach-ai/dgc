@@ -70,8 +70,10 @@ test('New Pip is a character and a name: no name, no Pip; then it is made and sa
  const x=setup({jobs:[core]});await x.drain();
  assert.ok(x.d.querySelector(`[data-job="${core.id}"]`));assert.match(x.d.querySelector('.pip-rows').textContent,/Core/);
  x.click('#simple-new');
- const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);assert.equal(dialog.querySelectorAll('[data-new-character]').length,7,'every character but Core');
- x.click('[data-new-character="quill"]');assert.equal(x.d.querySelector('[data-new-character="quill"]').getAttribute('aria-checked'),'true');
+ // The character is picked from its dropdown (the founder, 24 Oct: a big face with a dropdown beside it).
+ const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);assert.equal(dialog.querySelectorAll('#new-pip-character-list [role=option]').length,7,'every character but Core');
+ x.click('#new-pip-character');x.click('#new-pip-character-list [data-pick="quill"]');
+ assert.equal(x.d.querySelector('#new-pip-character-list [data-pick="quill"]').getAttribute('aria-selected'),'true');
  x.click('#review-confirm');assert.equal(x.requests('create_pip').length,0);assert.match(x.d.querySelector('[role=dialog]').textContent,/Give it a name/);
  x.input('#newPipName','  Gmail ');x.click('#review-confirm');
  const create=x.requests('create_pip')[0];assert.equal(create.request.pip_type,'quill');assert.equal(create.request.name,'Gmail');assert.equal(create.request.goal,'');

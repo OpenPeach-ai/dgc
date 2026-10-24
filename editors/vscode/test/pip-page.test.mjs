@@ -113,11 +113,12 @@ test('a routine the Pip suggests is a card under its message: Add routine or Not
 test('its face and colour: choose, Save, and Reset to default',async()=>{
  const x=setup();await openPage(x);
  x.click('[data-pip-page="character"]');await flush();
- assert.equal(x.d.querySelectorAll('[data-pip-body]').length,8,'the eight Pip faces');
+ // Its face is picked as New Pip picks a character: the big face and a dropdown of the faces.
+ assert.equal(x.d.querySelectorAll('#pip-face-list [role=option]').length,8,'the eight Pip faces');
  assert.ok(x.d.querySelector('[data-pip-character-save]').disabled,'nothing to save yet');
- x.click('[data-pip-body="lens"]');x.click('[data-pip-color="mint"]');
- assert.equal(x.d.querySelector('.pip-character-preview .avatar').dataset.tint,'mint');
- assert.equal(x.d.querySelector('.pip-character-preview .avatar').dataset.character,'lens');
+ x.click('#pip-face');x.click('#pip-face-list [data-pick="lens"]');x.click('[data-pip-color="mint"]');
+ assert.equal(x.d.querySelector('.pip-character .pip-picker-face .avatar').dataset.tint,'mint');
+ assert.equal(x.d.querySelector('.pip-character .pip-picker-face .avatar').dataset.character,'lens');
  x.click('[data-pip-character-save]');await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'lens',color:'mint'});
  x.state.row=pip({profile:{title:'',body:'lens',color:'mint',notify:true}});

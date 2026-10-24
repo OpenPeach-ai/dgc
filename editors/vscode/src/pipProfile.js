@@ -1,6 +1,7 @@
 // A Personal Pip's own page, as on Grok's bots: its face and name at the top, then Info (Instructions,
 // Routines, Notifications, Share as template), Links, Media and Files. The backend keeps the look,
 // title and notifications (pip_profile); nothing here grants or changes what the Pip can do.
+import { pickerMarkup } from './pipPicker.js';
 
 export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
 // A colour is a tint over the plush: grey it, warm it (sepia), turn the hue, then saturate.
@@ -97,13 +98,14 @@ export function instructionsMarkup({ esc, goal, busy = false, error = '', pipNam
     + `<div class="actions"><button type="submit" class="primary pill"${off}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-setup-chat${off}>Change it in the chat instead</button></div></form>`;
 }
 
-/** Choose its face (one of the eight Pips) and a colour; Reset to default puts both back. */
+/** Choose its face (one of the eight Pips) and a colour; Reset to default puts both back. The face is picked as New Pip
+ * picks a Personal Pip's character: its big face, in the colour chosen, and a dropdown of the faces with their names. */
 export function characterMarkup({ esc, avatarFor, body, color, busy = false, changed = false }) {
   const off = busy ? ' disabled' : '';
-  const faces = BODIES.map(id => `<button type="button" class="character-choice" role="radio" aria-checked="${body === id}" data-pip-body="${id}" aria-label="${esc(id[0].toUpperCase() + id.slice(1))}"${off}>${avatarFor(id, color, `face-${id}`)}</button>`).join('');
+  const faces = pickerMarkup({ id: 'pip-face', label: 'Face', value: body, size: 'large', disabled: busy, face: avatarFor(body, color, 'face-preview', 'listening'),
+    options: BODIES.map(id => ({ value: id, label: id[0].toUpperCase() + id.slice(1), face: avatarFor(id, color, `face-${id}`) })) });
   const swatches = [['', 'Its own', '', ''], ...COLORS].map(([id, label, swatch]) => `<button type="button" class="swatch" role="radio" aria-checked="${(color || '') === id}" data-pip-color="${id}" title="${label}" aria-label="${label}"${off}><span style="${swatch ? `background:${swatch}` : ''}"${swatch ? '' : ' class="swatch-own"'}></span></button>`).join('');
-  return `<section class="pip-character" aria-label="Edit its face"><div class="pip-character-preview">${avatarFor(body, color, 'face-preview', 'listening')}</div>`
-    + `<h3 class="pip-page-label">Face</h3><div class="character-grid compact" role="radiogroup" aria-label="Face">${faces}</div>`
+  return `<section class="pip-character" aria-label="Edit its face">${faces}`
     + `<h3 class="pip-page-label">Colour</h3><div class="swatches" role="radiogroup" aria-label="Colour">${swatches}</div>`
     + `<div class="actions"><button type="button" class="primary pill" data-pip-character-save${off || !changed ? ' disabled' : ''}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-pip-character-reset${off}>Reset to default</button></div></section>`;
 }
