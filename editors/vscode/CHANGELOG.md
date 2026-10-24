@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A finished Pip fix is one line.** "Fixed · 6 files changed +314 −13", its time, and Review, Undo and Watch. Its
+  files, tests and summary open under that line with a click, and stay open while the card updates.
+- **No thick accent bar down a card's left edge.** Pip report cards, monitor events and artifact cards lost theirs;
+  their border and their own words say what they are.
+
 - **Pips your code keeps.** A Personal Pip that your own app's code keeps from a template says so at the top of its
   page: **From your code**, "Your app keeps Dunning from its template, dunning. What you change here stays as you set
   it." When the app's new code would let the Pip do more (use a new change tool, ask less, run a change without asking,

@@ -9300,6 +9300,9 @@
   }
   // Paint one card from its fix. The fix area is its own line under the card's two, shown open or closed, and the card
   // leaves a folded group of reports: a running fix is never out of sight behind "3 Pip reports".
+  // A finished fix is one line (founder, 24 Oct): what it did, the totals, its time, Review / Undo / Watch. What it changed,
+  // its tests and summary open under that line with a click on it, and stay as the user left them while the card repaints.
+  const pipFixOpen = new Set();
   function paintPipFixCard(card, fix) {
     if (!card || !fix) return;
     const group = card.parentElement?.closest(".pip-report-group");
@@ -9411,6 +9414,27 @@
     }
     if (fix.summary && !pipFixActive(fix) && fix.state !== "undone") {      // undone, "Put back 2 files." says it all
       const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); p.title = p.textContent; body.push(p);
+    }
+    const details = body.slice(1);
+    if (!pipFixActive(fix) && details.length) {
+      const open = pipFixOpen.has(fix.fix_id);
+      const toggle = el("button", "pip-fix-toggle"); toggle.type = "button";
+      const box = el("div", "pip-fix-details");
+      box.id = `pip-fix-details-${String(fix.fix_id).replace(/[^\w-]/g, "")}`;
+      box.hidden = !open;
+      box.append(...details);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-controls", box.id);
+      toggle.title = open ? "Hide what the fix changed" : "Show what the fix changed, its tests and its summary";
+      toggle.append(mark, text, el("span", `pip-fix-chevron codicon codicon-chevron-${open ? "down" : "right"}`));
+      toggle.onclick = (event) => {
+        event.stopPropagation(); fix._seen = true;
+        if (pipFixOpen.has(fix.fix_id)) pipFixOpen.delete(fix.fix_id); else pipFixOpen.add(fix.fix_id);
+        paintPipFixCard(card, pipFixes.get(fix.run_id) || fix);
+      };
+      line.prepend(toggle);
+      body.length = 1;
+      body.push(box);
     }
     const keepFocus = area.contains(document.activeElement) && !ask.contains(document.activeElement)
       ? document.activeElement.className : "";

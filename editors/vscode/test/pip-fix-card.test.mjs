@@ -123,6 +123,36 @@ test("a permission the fix needs is asked on its card, and the agents pill says 
   assert.deepEqual(s.errors, []);
 });
 
+test("finished, the fix is one line; its files, tests and summary open under it and stay open across repaints", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
+  assert.equal(area(s).querySelector(".pip-fix-toggle"), null, "working, nothing to fold");
+  const done = fix({ state: "applied", started_at: now() - 72, ended_at: now(),
+    files: [{ path: "app/gst.py", kind: "edited", additions: 3, deletions: 1, counted: true }],
+    tests: { state: "passed", command: "npm test" }, summary: "Added the cess to the GST total.", undo: { state: "available" } });
+  s.event({ type: "pip_fix", fix: done });
+  const toggle = () => area(s).querySelector(".pip-fix-toggle");
+  const details = () => area(s).querySelector(".pip-fix-details");
+  assert.equal(toggle().getAttribute("aria-expanded"), "false", "closed by default");
+  assert.equal(details().hidden, true);
+  assert.equal(toggle().textContent, "Fixed · 1 file changed");
+  assert.ok(area(s).querySelector(".pip-fix-line .pip-fix-totals"), "the totals stay on the line");
+  assert.deepEqual(actions(s), ["Review", "Undo"], "and so do the actions");
+  assert.ok(details().contains(area(s).querySelector(".pip-fix-files")), "the files are inside the fold");
+  assert.ok(details().contains(area(s).querySelector(".pip-fix-tests")));
+  assert.ok(details().contains(area(s).querySelector(".pip-fix-summary")));
+  assert.equal(toggle().getAttribute("aria-controls"), details().id);
+  toggle().click();
+  assert.equal(toggle().getAttribute("aria-expanded"), "true");
+  assert.equal(details().hidden, false);
+  s.event({ type: "pip_fix", fix: { ...done, summary: "Added the cess to the GST total. Tests pass." } });
+  assert.equal(details().hidden, false, "a repaint keeps it open");
+  toggle().click();
+  assert.equal(details().hidden, true, "and a second click closes it");
+  assert.deepEqual(s.errors, []);
+});
+
 test("finished: what changed, whether tests ran in the fix copy, Review and Undo", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
