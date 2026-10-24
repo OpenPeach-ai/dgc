@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A Project Pip has the Personal Pips page.** A project's Pips are the same list as your Personal ones, with a
+  search, **New Pip**, and a **…** beside it for the project's context and notifications; new Pips the DGC chat set up
+  wait above it. A Project Pip opens in its chat under the same top bar: back, its face and name with what its last run
+  found, **Run now** (the play button: an audit, a draft, or the commands it runs; **Running…** while it works, which
+  opens the run in History) and a **…** menu with History, Settings, Schedule, Handoffs, Changes, Memory, Context and
+  Notifications. A change waiting for you stays in its chat and above each section, and new Pips waiting for you stay
+  under the top bar. **New Pip** is the character picker, where a Project Pip's character is its kind of work, then
+  its job, branch or commit and model; it makes the same Pip the old form did. Describing the job to DGC, a common
+  job and **Import a shared Pip…** are one click from there. Needs a DGC CLI with Pips API 51 or later; with an older
+  one, and in the remote view, a Project Pip keeps the earlier page.
 - **A Project Pip's chat is the same as a Personal Pip's.** It looks and answers the same way: the Pip at work with its
   face, its name, what it is doing and its clock; its reply written into short bubbles as it comes, instead of typing
   dots and a "Still writing" block; time marks between messages; your message on the accent colour; the buttons under a

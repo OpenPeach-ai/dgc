@@ -2744,8 +2744,9 @@ self-hosted model, never your Claude Code or Codex plan.
   is the report's: "I found 4 issues, 3 of them serious." All-clear runs in a row fold into one
   message that updates itself. Reply to it there. After **Ask DGC to fix**, that message says how the
   fix is going: DGC is fixing this, Fixed · 3 files (a click opens its card in the Work chat, with
-  Review and Undo), or that it didn't finish, with Ask DGC to fix again. A Project Pip's chat looks and
-  answers like a Personal Pip's.
+  Review and Undo), or that it didn't finish, with Ask DGC to fix again. A Project Pip's page is a
+  Personal Pip's: its chat under a top bar with **Run now**, and History, Settings, Schedule, Handoffs,
+  Changes, Memory, Context and Notifications in its **…** menu.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
   reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
   **Ask DGC to fix** starts a helper in the chat's session without starting a turn, so you keep
