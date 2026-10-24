@@ -787,7 +787,8 @@
     },
     "prosemirror-markdown": {
       "markdown-it": "$markdown-it"
-    }
+    },
+    "@azure/msal-node": "7.1.1"
   },
   "dgcCliVersion": "0.48.0"
 }
