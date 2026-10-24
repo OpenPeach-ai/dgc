@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Editor protocol: command `watch_pip_runs` and event `pip_runs_running` (which of a chat's Pips are running now;
+  offered as `ready.capabilities.pip_runs_running`) are in the vendored protocol and the TypeScript SDK's known events,
+  so neither SDK drops them. An SDK session never sends the command, so it never gets the event. No Pips API change.
+
 - Editor protocol: event `pips_settings` (the model every Pip on Default uses, for the editor's Settings; sent only to
   a client whose get_config `fields` named it) is in the vendored protocol and the TypeScript SDK's known events. An
   SDK session never asks, so it never gets one. `list_pip_models`' `default_model` is now that model when one is set;

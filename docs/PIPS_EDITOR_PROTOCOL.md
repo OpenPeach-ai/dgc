@@ -45,6 +45,14 @@ capabilities object, so strict older clients still accept the handshake.
   failure reason), and history replays it as `{"role": "pip_report", "report": {...}}`
   after the turn it arrived in. `{"type": "pip_report_dismiss", "run_id": "run_…"}`
   removes one; it is saved with the chat. A report never starts a turn.
+- `pip_runs_running: 1` means the chat can say which of its Pips are running now (the chip above
+  the box). A client that draws it sends `{"type": "watch_pip_runs"}`; the answer is
+  `{"type": "pip_runs_running", "items": [...]}`, and another is sent, unasked, whenever the list
+  changes. Each item is an open object: `run_id`, `pip_id`, `name`, `pip_type`, `started_at` and
+  `trigger` (`schedule`, `event`, `you`, `chat`, `handoff` or `setup`), for the runs going now
+  whose card comes to this chat (the Pips attached to it or set up in it, and the runs it started
+  with `run_pip_now`; source reviews, Pulse checks and live-data runs). A client that never asks
+  is sent none.
 
 ## Commands and events
 

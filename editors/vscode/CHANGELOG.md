@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **A running Pip is seen while it runs.**
+  - **In its own chat:** from the moment a run starts, the Pip's chat has one post for it: its face at work, what it
+    is doing now ("Reading billing.py", "Waiting for the model"), a clock, **Stop**, and how it started ("Started by
+    you", "On schedule · 9:00 AM", "From a new commit", "Asked by DGC", "First run"). When the run ends, that same
+    post becomes its report, in the same place. It covers Run now, a schedule, an event, a DGC chat's `run_pip_now`
+    and a setup card's first run, for Project and Personal Pips; a Personal Pip's routine runs as one too, and its
+    reply takes its place. A window reload while it runs draws it again. A run you stop posts nothing, and the chat
+    says so.
+  - **In a Work chat:** while a Pip that reports to this chat runs, a chip above the box says so: "Billing audit
+    running · 0:42", or "2 Pips running". A click opens that Pip's chat on the Pips page, at the run (with two or
+    more, a list to pick from). It goes when the run ends, and the report card arrives as before. Pips that report to
+    other chats show nothing. Needs a DGC CLI that offers it; an older one shows no chip.
+  - **In the agent map:** the row for a Pip run this chat started stays live: what the Pip is doing, its clock, and
+    Stop on its card (before, it said "Working" with no time and had no Stop).
+
 - **Settings, redesigned on every page, and in your VS Code theme.** Every page and the side list now follow the VS
   Code theme, light and high contrast included; Settings was always dark before. Each page is a short title and one
   line, then a few groups of rows. A row's hint is one line; the rest is behind a small **?** beside its name, and a
