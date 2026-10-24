@@ -60,18 +60,29 @@ class RoutineTests(unittest.TestCase):
                 pip_routines.validate_trigger(bad)
 
     def test_an_old_zone_name_from_the_editor_is_saved_as_its_current_name(self):
-        """VS Code's Chromium said Asia/Calcutta; Ubuntu 24.04 has only Asia/Kolkata (tzdata-legacy)."""
+        """VS Code's Chromium said Asia/Calcutta; Ubuntu 24.04 has only Asia/Kolkata (tzdata-legacy).
+
+        A runner that still has the old name (macOS, or Linux with tzdata-legacy) keeps it as it is, so this plays
+        one without the old names, as Ubuntu 24.04 is: on a Mac the test failed while DGC was right."""
+        from dgc import pip_schedules
         from dgc.pip_schedules import canonical_zone, validate_schedule
-        self.assertEqual(canonical_zone("Asia/Calcutta"), "Asia/Kolkata")
-        self.assertEqual(canonical_zone("Asia/Kolkata"), "Asia/Kolkata")
-        spec = validate_schedule({"type": "daily", "time": "09:00", "timezone": "Asia/Calcutta"})
-        self.assertEqual(spec["timezone"], "Asia/Kolkata")
-        routine = pip_routines.add(self.store, self.pip["id"], "Weekday plan", "Plan my day.",
-                                   {"kind": "schedule", "schedule": {"type": "cron", "cron": "0 9 * * 1-5", "timezone": "Asia/Calcutta"}})
-        self.assertEqual(routine["trigger"]["schedule"]["timezone"], "Asia/Kolkata")
-        self.assertIsNotNone(routine["next_due_at"])
-        with self.assertRaises(RegistryError):
-            validate_schedule({"type": "daily", "time": "09:00", "timezone": "Mars/Olympus"})
+        loads = pip_schedules.ZoneInfo
+
+        def without_old_names(key):
+            if key in pip_schedules._OLD_ZONES:
+                raise pip_schedules.ZoneInfoNotFoundError(f"No time zone found with key {key}")
+            return loads(key)
+        with patch.object(pip_schedules, "ZoneInfo", without_old_names):
+            self.assertEqual(canonical_zone("Asia/Calcutta"), "Asia/Kolkata")
+            self.assertEqual(canonical_zone("Asia/Kolkata"), "Asia/Kolkata")
+            spec = validate_schedule({"type": "daily", "time": "09:00", "timezone": "Asia/Calcutta"})
+            self.assertEqual(spec["timezone"], "Asia/Kolkata")
+            routine = pip_routines.add(self.store, self.pip["id"], "Weekday plan", "Plan my day.",
+                                       {"kind": "schedule", "schedule": {"type": "cron", "cron": "0 9 * * 1-5", "timezone": "Asia/Calcutta"}})
+            self.assertEqual(routine["trigger"]["schedule"]["timezone"], "Asia/Kolkata")
+            self.assertIsNotNone(routine["next_due_at"])
+            with self.assertRaises(RegistryError):
+                validate_schedule({"type": "daily", "time": "09:00", "timezone": "Mars/Olympus"})
 
     # ---------------------------------------------------------------- the user's routines
 

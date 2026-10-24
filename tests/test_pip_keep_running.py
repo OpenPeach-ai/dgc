@@ -136,7 +136,11 @@ class MacSwitchTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         base = Path(temp.name)
         self.home = base / "home"; self.home.mkdir(mode=0o700)
-        self.options = {"agent_directory": base / "LaunchAgents"}
+        # This Python by its folder's link-free spelling, as DGC's installer gives it (install.sh resolves the folder):
+        # the agent refuses a link on the way to its interpreter, and a test run's own Python can sit under one (on
+        # the Mac Studio, a venv in /tmp, which is a link to /private/tmp, failed all five tests here).
+        python = Path(os.path.realpath(os.path.dirname(sys.executable))) / os.path.basename(sys.executable)
+        self.options = {"agent_directory": base / "LaunchAgents", "python_executable": python}
         self.loaded, self.disabled, self.calls = False, False, []
         for target, value in (("platform", "darwin"),):
             p = patch.object(sys, target, value); p.start(); self.addCleanup(p.stop)

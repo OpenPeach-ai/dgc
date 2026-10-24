@@ -10,6 +10,7 @@ import os
 import shutil
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -484,7 +485,10 @@ class RunTests(Borrow):
 
     def test_asked_allowed_once_used_in_its_own_tab_and_given_back(self):
         home = Path(os.environ["HOME"])
-        fake = FakeChrome(shop_pages(), folder=home / ".config" / "google-chrome")
+        # Where Chrome keeps its profile on this platform (browser_user.profile_folders), so the run finds it.
+        folder = (home / "Library" / "Application Support" / "Google" / "Chrome" if sys.platform == "darwin"
+                  else home / ".config" / "google-chrome")
+        fake = FakeChrome(shop_pages(), folder=folder)
         self.addCleanup(fake.close)
         pip_chat.send(self.store, self.pip["id"], "Find my mug order on shop.example", "mugs-1", "editor-user", self.cfg)
         asked = self.turn()

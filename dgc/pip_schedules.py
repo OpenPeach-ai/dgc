@@ -149,7 +149,8 @@ def _compile_cron(expression):
 
 # Old names for zones, such as Asia/Calcutta for Asia/Kolkata: browsers still report them (VS Code's
 # Chromium said Asia/Calcutta on an Indian machine), and Ubuntu 24.04+ installs them only with
-# tzdata-legacy, so a routine at 09:00 was refused. An old name is accepted and saved as its current one.
+# tzdata-legacy, so a routine at 09:00 was refused. An old name the system can't load is accepted and saved as its
+# current one; one it still has (macOS, or Linux with tzdata-legacy) is kept as it came.
 _OLD_ZONES = {"Asia/Calcutta": "Asia/Kolkata", "Asia/Saigon": "Asia/Ho_Chi_Minh", "Asia/Katmandu": "Asia/Kathmandu",
               "Asia/Rangoon": "Asia/Yangon", "Asia/Dacca": "Asia/Dhaka", "Asia/Thimbu": "Asia/Thimphu",
               "Europe/Kiev": "Europe/Kyiv", "America/Buenos_Aires": "America/Argentina/Buenos_Aires",

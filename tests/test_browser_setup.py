@@ -352,10 +352,12 @@ class LiveBrowserTests(unittest.TestCase):
             lines = session.snapshot()["lines"]
             self.assertIn('- heading level=1 "25:00" [e1]', lines)
             self.assertIn('- button "Start" [e2]', lines)
-            # Whichever way it started (its own sandbox, or in DGC's box), every page is sandboxed: Chrome says so.
-            session.navigate("chrome://sandbox")
-            self.assertTrue(any("You are adequately sandboxed." in line for line in session.snapshot()["lines"]),
-                            session.snapshot()["lines"])
+            # Whichever way it started (its own sandbox, or in DGC's box), every page is sandboxed: Chrome says so. That
+            # page is Linux's: Chrome on a Mac has no chrome://sandbox (ERR_INVALID_URL), and always runs in Seatbelt.
+            if sys.platform.startswith("linux"):
+                session.navigate("chrome://sandbox")
+                self.assertTrue(any("You are adequately sandboxed." in line for line in session.snapshot()["lines"]),
+                                session.snapshot()["lines"])
         finally:
             session.close()
         time.sleep(1.0)

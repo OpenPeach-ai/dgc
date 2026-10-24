@@ -1,5 +1,6 @@
 """Offline hostile contract and real disposable Git tests; no observer writes."""
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -206,9 +207,18 @@ class GitComparisonTests(unittest.TestCase):
 
     def test_non_utf8_committed_filename_is_unavailable(self):
         before=self.commit()
-        fd=os.open(os.fsencode(self.root)+b'/z-\xff',os.O_CREAT|os.O_WRONLY,0o600)
-        os.close(fd)
-        after=self.save();result=self.compare(before,after)
+        try:
+            fd=os.open(os.fsencode(self.root)+b'/z-\xff',os.O_CREAT|os.O_WRONLY,0o600)
+            os.close(fd)
+            after=self.save()
+        except OSError as error:
+            # A Mac's APFS refuses a file name that isn't UTF-8 (EILSEQ), but such a name still reaches a Mac in a
+            # commit made elsewhere: put it straight into a commit, as a clone from Linux carries it.
+            if error.errno!=errno.EILSEQ:raise
+            blob=self.git('hash-object','-w',os.devnull)
+            self.git('update-index','--add','--cacheinfo','100644,'+blob+','+os.fsdecode(b'z-\xff'))
+            self.git('commit','-qm','changed');after=self.git('rev-parse','HEAD')
+        result=self.compare(before,after)
         self.assertEqual(result['status'],'unavailable');self.assertEqual(result['reason'],'unsupported_path')
 
     def test_complete_record_limit_accepts_10000_and_refuses_10001(self):

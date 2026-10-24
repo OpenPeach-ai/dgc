@@ -6868,7 +6868,10 @@ def test_worktree_git_runner():
     fake_external.chmod(0o700)
     os.environ["PATH"] = str(external_bin) + os.pathsep + old_path
     try:
-        timed = _worktree._git(["status"], root, timeout=0.2)
+        # Long enough for the stand-in to print its child's pid before the deadline: a Mac's first start of a new
+        # script took longer than 0.2s, so Git was killed before it printed anything and the check saw no child
+        # (measured on the Mac Studio, 2026-10-24: nothing by 0.2s, both lines by 0.5s).
+        timed = _worktree._git(["status"], root, timeout=2.0)
     finally:
         os.environ["PATH"] = old_path
     child_match = __import__("re").search(r"CHILD=(\d+)", timed.stdout)

@@ -1,5 +1,6 @@
 """Hostile current-tree snapshots: real files, deterministic mutations, no processes."""
 import copy
+import errno
 import json
 import os
 from pathlib import Path
@@ -319,7 +320,14 @@ class TreeSnapshotTests(unittest.TestCase):
             self.assert_refused('unsafe_snapshot')
             file.unlink()
         bad = os.fsencode(self.root) + b'/invalid-\xff'
-        descriptor = os.open(bad, os.O_CREAT | os.O_WRONLY, 0o600); os.close(descriptor)
+        try:
+            descriptor = os.open(bad, os.O_CREAT | os.O_WRONLY, 0o600)
+        except OSError as error:
+            if error.errno != errno.EILSEQ:
+                raise
+            self.skipTest("this filesystem refuses file names that aren't UTF-8 (a Mac's APFS), so a snapshot of "
+                          "it never meets one; the names above were refused")
+        os.close(descriptor)
         self.assert_refused('unsafe_snapshot')
 
 

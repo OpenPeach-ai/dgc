@@ -1752,7 +1752,8 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
 - A Pip's app cards are listed newest first even when it asked for two apps in the same millisecond;
   they came back in a random order on a fast Mac.
 - A schedule in an old zone name, such as `Asia/Calcutta` (VS Code's Chromium still reports it on an
-  Indian computer), is accepted and saved as its current name (`Asia/Kolkata`). Ubuntu 24.04 installs
+  Indian computer), is accepted, and saved as its current name (`Asia/Kolkata`) where the system lacks
+  the old one (a Mac, which still has it, keeps the name as it came). Ubuntu 24.04 installs
   the old names only with `tzdata-legacy`, so every daily schedule or routine set from such an editor
   was refused with "Timezone unavailable". Found by the battle test.
 - A Personal Pip knows the user's local time and time zone in its chat, so "in two minutes" and
