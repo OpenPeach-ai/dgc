@@ -6,6 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The plugin catalog's own test notes stay out of Settings.** `verification` and `audited_on` (what DGC's
+  maintainers checked, and when) are no longer sent to the editor in the plugin list or the install review; they stay
+  in the catalog for maintainers.
+
 - **Up to 32 sub-agents at once.** `max_parallel_tasks` now goes to 32 (it stopped at 8, a cautious choice rather
   than a technical limit), and 32 really run at the same time: one `task` call can list up to 32 helpers in `tasks`,
   and a reply of up to 32 `task` calls runs side by side, each in its own checkout. The default stays 4 and Ultra's

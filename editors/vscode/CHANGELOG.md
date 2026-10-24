@@ -2,24 +2,29 @@
 
 ## Unreleased
 
-- **Settings → Models and Agents, a new layout (the direction for every Settings page).** Each page is a short title
-  and a few groups of rows in one quiet border, with fewer, shorter words; detail is one click away, and Save stays
-  at the foot of the tab. Models: Connection (Host with its Presets beside it, API key, Model), Subscription (Run
-  turns on; its model and effort show only when one is on), Cache, and **Advanced** for Transport, Responses state,
-  Recheck refused features and, for a host that isn't Anthropic, Cache lifetime. Agents: Sub-agents (Model, Run at
-  once, Context size, and **Another host** for their own Host, Presets, Transport and key, open by itself when one is
-  set), Fallback (what it is, in one line; Another host the same way) and Pips. A blank box says what it means: "Same
-  as the main model", "Same as the main host", "None". These two pages now follow the VS Code theme, light included,
-  with the chat panel's own colours; the other pages and the side list keep their look until the direction is
-  applied to them.
-- **Sub-agents that run at once go to 32** (Settings → Agents → Sub-agents → Run at once; it was General → Parallel
-  sub-agents). It stopped at 8, and Save rewrote a wider number set elsewhere back to 8; both now take up to 32. The hint says what more costs: each sub-agent is its own copy of the
-  project, cloud APIs rate-limit, and a local Ollama runs only its OLLAMA_NUM_PARALLEL at once while the rest wait.
-- **Settings → Agents → Pips: one model for every Pip on Default.** **Model for Pips** lists the models at DGC's
-  own connection (the host under Models) and takes any name; blank reads **Same as DGC (its model)** and follows DGC
-  as before. Every Pip set to Default uses it, and a Pip's model menu now reads **Default (the model it runs)**
-  instead of Same as DGC; a Pip with a model of its own keeps it. A Pip's setup card says **Default model**. Needs
-  DGC CLI 0.48; with an older one the box says to update.
+- **Settings, redesigned on every page, and in your VS Code theme.** Every page and the side list now follow the VS
+  Code theme, light and high contrast included; Settings was always dark before. Each page is a short title and one
+  line, then a few groups of rows. A row's hint is one line; the rest is behind a small **?** beside its name, and a
+  page's longer introduction is behind the **?** after its first line. Advanced settings fold away (Models: Transport,
+  Responses state, Recheck refused features; General: Tool profile; an MCP server: your own sign-in app and what it
+  logs). There is one **Save all** at the foot of every settings page, which saves every page's changes and says which
+  pages have them ("Unsaved changes on Models and Agents"). In a narrow tab the side list becomes a page picker with
+  every page's name. Pages, in short:
+  - General: Turns (Permission mode, Thinking, DGC Ultra, Token cap per turn, Context window), What you see.
+  - Models: Connection (Host with its Presets beside it, API key, Model), Subscription (Run turns on; its model and
+    effort only when one is on), Cache.
+  - Agents: Sub-agents (Model, **Run at once**, which moved here from General's Parallel sub-agents, Context window,
+    and Another host), Fallback, Pips. A blank box says what blank means ("Same as the main model", "None").
+  - Security: Sandbox (Run commands in a sandbox; its network switch works only with the sandbox on) and Previews,
+    in plain words.
+  - Web search keeps the search; **Search the web** for ChatDGC moved to the ChatDGC page, beside its other replies'
+    settings.
+  - MCP servers: plain words ("A command on this computer", "A URL", "NAME=value is kept privately"); **Forget saved
+    sign-in** and **Remove server** sit in a "Can't be undone" area and each asks first. The "Clear stored credentials"
+    checkbox beside everyday fields is gone. The Plugins page no longer has an MCPs tab: MCP servers has one page.
+  - Plugins: the install review and a plugin's page no longer show DGC's own test notes; a plugin's details hide what
+    its package doesn't provide; directory cards drop the package jargon.
+  - Memory, Voice, Running sessions and Token usage: one line under each title, the rest behind **?**.
 - **Every Model box in Settings lists the models at its own host.** Models → Connection, and Agents → Sub-agents and
   Fallback: open the box (or press Down) for the models that card's host has, a local Ollama's `:cloud` models
   included, or keep typing any name: a host that can't list, or a model it doesn't list, still works. It lists again a

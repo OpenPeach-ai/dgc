@@ -10,8 +10,8 @@ const escape = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;'
 
 /** The markup: the field's words on the left; the box, its open button and its list on the right. */
 export function modelBoxMarkup(id, label, hint, value) {
-    return `<div class="field model-field" data-model-field="${id}"><span><label class="name" for="${id}">${label}</label>`
-        + `<span class="hint" id="${id}-hint">${hint}</span><span class="hint model-box-status" id="${id}-status" role="status" hidden></span></span>`
+    return `<div class="field model-field" data-model-field="${id}"><span class="words"><span class="name-line"><label class="name" for="${id}">${label}</label></span>`
+        + `<span class="hint" id="${id}-hint"${hint ? '' : ' hidden'}>${hint}</span><span class="hint model-box-status" id="${id}-status" role="status" hidden></span></span>`
         + `<span class="model-box"><input id="${id}" type="text" value="${escape(value)}" autocomplete="off" spellcheck="false" role="combobox"`
         + ` aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-list" aria-describedby="${id}-hint ${id}-status">`
         + `<button type="button" class="model-box-open" tabindex="-1" data-model-open="${id}" aria-label="Show the models at this host" title="Show the models at this host">${CHEVRON}</button>`

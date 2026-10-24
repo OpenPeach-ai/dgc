@@ -139,7 +139,7 @@ class VendorCatalogTests(unittest.TestCase):
                     self.assertNotIn("command", server)
                 if entry["auth"] != "none":
                     self.assertTrue(entry.get("terms_url") and entry.get("privacy_url"))
-                # Settings prints "Checked <audited_on>." before this text: say what was checked, once.
+                # A maintainers' note (never sent to the editor): say what was checked, once.
                 self.assertTrue(entry["verification"] and not entry["verification"].startswith("Checked"), entry["verification"])
 
     def test_payment_plugins_say_money_moves_and_are_marked(self):
@@ -155,8 +155,10 @@ class VendorCatalogTests(unittest.TestCase):
              patch.object(plugins, "_source", side_effect=plugins.PluginError("not cached")):
             rows = {r["name"]: r for r in plugins.catalog_for_editor()}
         self.assertEqual(rows["granola"]["category"], "Documents And Files")
-        self.assertIn("opens Airtable's own login page", rows["airtable"]["verification"])
-        self.assertEqual(rows["airtable"]["audited_on"], "2026-10-07")
+        # What was checked and when stays in the catalog for maintainers; the editor gets what a user needs.
+        self.assertNotIn("verification", rows["airtable"])
+        self.assertNotIn("audited_on", rows["airtable"])
+        self.assertIn("An Airtable account", rows["airtable"]["requirements"])
         self.assertEqual(rows["brevo"]["auth"], "pat")
 
 

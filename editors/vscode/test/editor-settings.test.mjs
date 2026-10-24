@@ -10,6 +10,10 @@ const code=result.outputFiles[0].text;
 const view=await build({entryPoints:[src+'settingsView.ts'],bundle:true,write:false,platform:'node',format:'cjs'});
 const module={exports:{}};new Function('module','exports',view.outputFiles[0].text)(module,module.exports);
 const windows=[];after(()=>windows.forEach(w=>w.close()));
+// A row's words: its one-line hint and the detail behind its "?", which settings keep one click away.
+const rowHint=el=>el.closest('.field').querySelector('.hint').textContent;
+const rowDetail=el=>el.closest('.field').querySelector('.detail')?.textContent||'';
+const rowSaid=el=>rowHint(el)+' '+rowDetail(el);
 function setup(){const dom=new JSDOM(module.exports.settingsDocument(),{runScripts:'outside-only'});const {window:w}=dom;windows.push(w);const sent=[];w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m)});w.eval(code);const message=m=>w.dispatchEvent(new w.MessageEvent('message',{data:m}));const config={type:'config',base_url:'https://model.example/v1',model:'original',mode:'default',think:'high',subscription_engine:'',subagent_base_url:'https://agent.example/v1',subagent_model:'agent',fallback_model:'backup',sandbox:true,sandbox_network:false,prompt_cache:false,capability_cache_ttl_s:300,context_size:65536};message({type:'event',event:config});return{w,d:w.document,sent,message,config,click:s=>w.document.querySelector(s).click(),input:(s,value)=>{const e=w.document.querySelector(s);e.value=value;e.dispatchEvent(new w.Event('input',{bubbles:true}));}};}
 const plugin={name:'fixture',display_name:'Fixture',summary:'Package description',installed:true,apps:[{id:'service',name:'Declared service'}],mcps:[{name:'fixture',url:'https://mcp.example/mcp'}],skills:[{name:'first',description:'First frontmatter',enabled:true},{name:'second',description:'Second frontmatter',enabled:false}]};
 test('Save says it applies to every workspace, which is where it writes',()=>{
@@ -69,7 +73,7 @@ test('a backend config never populates a secret field in the webview',()=>{
 test('Save from General retains routes and false/zero values from other pages',()=>{const x=setup();x.message({type:'event',event:{...x.config,capability_cache_ttl_s:0}});x.click('#ultra_mode');x.click('#save');const values=x.sent.at(-1).values;assert.equal(values.subagent_model,'agent');assert.equal(values.subagent_base_url,'https://agent.example/v1');assert.equal(values.fallback_model,'backup');assert.equal(values.prompt_cache,false);assert.equal(values.capability_cache_ttl_s,0);assert.equal(values.sandbox,true);assert.equal(values.ultra_mode,true);assert.equal(values.base_url,x.config.base_url);});
 test('unsaved edits survive navigation and background config responses',()=>{const x=setup();x.click('[data-nav=models]');x.input('#model','edited');x.input('#api_key','not-persisted-by-ui');x.click('[data-nav=security]');x.click('#sandbox_network');x.message({type:'event',event:x.config});x.click('[data-nav=models]');assert.equal(x.d.querySelector('#model').value,'edited');assert.equal(x.d.querySelector('#api_key').value,'not-persisted-by-ui');x.click('#save');assert.equal(x.sent.at(-1).values.sandbox_network,true);x.message({type:'settingsSaved',ok:true});assert.equal(x.d.querySelector('#api_key').value,'');});
 test('installed switch enables mixed skills consistently without opening details',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-plugin=fixture]');const messages=x.sent.filter(m=>m.type==='skillToggle');assert.deepEqual(messages.map(m=>[m.name,m.enabled]),[['second',true]]);assert.ok(!x.d.querySelector('#back'));x.click('[data-open=fixture]');assert.ok(x.d.querySelector('#back'));assert.match(x.d.body.textContent,/First frontmatter/);});
-test('Apps and MCPs show their declared entries, not duplicate package titles',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.equal(x.d.querySelector('#plugin-list strong').textContent,'Declared service');assert.match(x.d.querySelector('#plugin-list').textContent,/Uses MCP/);x.click('[data-lane=mcp]');assert.equal(x.d.querySelector('h1').textContent,'MCP servers');assert.equal(x.sent.at(-1).type,'listMcp');});
+test('Apps and MCPs show their declared entries, not duplicate package titles',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.equal(x.d.querySelector('#plugin-list strong').textContent,'Declared service');assert.match(x.d.querySelector('#plugin-list').textContent,/Uses MCP/);assert.equal(x.d.querySelector('[data-lane=mcp]'),null,'one door to MCP servers: its own page');x.click('[data-nav=mcp]');assert.equal(x.d.querySelector('#page>h2').textContent,'MCP servers');assert.equal(x.sent.at(-1).type,'listMcp');});
 test('Save and connect on an MCP server says to finish in the browser, beside the button',()=>{
   // Found recording the remote sign-in (2026-10-15): the form stays up while the server connects, and the signin
   // message never redrew it, so after Save and connect nothing on the page said a browser was waiting.
@@ -128,7 +132,7 @@ test('one-colour logos sit on their own plate, others on none',()=>{
 test('unavailable plugins are absent from browsing and old installs have removal controls only',()=>{
  const x=setup();const blocked={...plugin,name:'figma',display_name:'Figma',installed:false,install:'block',block_reason:'DGC approval is required'};
  x.message({type:'plugins',items:[plugin,blocked]});x.click('[data-nav=plugins]');x.click('#browse-directory');
- assert.equal(x.d.querySelectorAll('.directory-card').length,1);assert.equal(x.d.querySelector('#show-unavailable'),null);assert.equal(x.d.querySelector('[data-open=figma]'),null);assert.match(x.d.querySelector('.directory-status').textContent,/1 of 1/);
+ assert.equal(x.d.querySelectorAll('.directory-card').length,1);assert.equal(x.d.querySelector('#show-unavailable'),null);assert.equal(x.d.querySelector('[data-open=figma]'),null);assert.equal(x.d.querySelector('.directory-status').textContent,'','no count until a search narrows the list');x.input('#directory-search','zzz');assert.match(x.d.querySelector('.directory-status').textContent,/0 of 1/,'the blocked one is not counted');x.input('#directory-search','');
  x.message({type:'plugins',items:[plugin,{...blocked,installed:true}]});assert.equal(x.d.querySelector('[data-open=figma]'),null);
  x.click('#directory-back');assert.equal(x.d.querySelector('#plugin-list [data-open=figma]'),null);
  const retired=x.d.querySelector('.retired-plugins');assert.ok(retired);assert.equal(retired.open,false);retired.open=true;
@@ -210,15 +214,15 @@ test('Composio detail retains branded account review and dashboard management',(
 test('MCP lists manual servers only while plugin detail retains toggle, configure and reconnect',()=>{
  const x=setup();const linear={...plugin,name:'linear',display_name:'Linear',server_names:['linear--remote'],mcps:[{name:'linear--remote',url:'https://mcp.linear.app/mcp'}]};
  x.message({type:'plugins',items:[linear]});x.message({type:'event',event:{type:'mcp_servers',items:[{name:'linear--remote',url:'https://mcp.linear.app/mcp',transport:'remote',enabled:true,state:'connected'},{name:'local',command:'node',enabled:true,state:'configured'}]}});
- x.click('[data-nav=mcp]');assert.equal(x.d.querySelectorAll('[data-mcp-toggle]').length,1);assert.equal(x.d.querySelector('[data-mcp-toggle="linear--remote"]'),null);assert.equal(x.d.querySelector('[data-lane=mcp]').textContent,'MCPs 1');
+ x.click('[data-nav=mcp]');assert.equal(x.d.querySelectorAll('[data-mcp-toggle]').length,1);assert.equal(x.d.querySelector('[data-mcp-toggle="linear--remote"]'),null);assert.match(x.d.querySelector('.section-head h3').textContent,/Your servers · 1/);
  x.click('[data-nav=plugins]');x.click('[data-open=linear]');assert.ok(x.d.querySelector('.plugin-connections'));x.click('[data-mcp-toggle="linear--remote"]');assert.equal(x.sent.at(-1).type,'mcpToggle');assert.equal(x.sent.at(-1).name,'linear--remote');
  x.click('[data-mcp-edit="linear--remote"]');assert.equal(x.d.querySelector('#mcp-back').textContent,'Linear');assert.equal(x.d.querySelector('#mcp-target').value,'https://mcp.linear.app/mcp');
- x.click('#mcp-reconnect');assert.equal(x.sent.at(-1).type,'mcpReconnect');x.click('#mcp-cancel');assert.equal(x.d.querySelector('h1').textContent,'Linear');
+ x.click('#mcp-reconnect');assert.equal(x.sent.at(-1).type,'mcpReconnect');x.click('#mcp-cancel');assert.equal(x.d.querySelector('.hero h2').textContent,'Linear');
  x.click('[data-nav=mcp]');assert.equal(x.d.querySelector('[data-mcp-toggle="linear--remote"]'),null);
 });
 test('plugin-only MCP connections leave a truthful empty manual-server list',()=>{
  const x=setup();x.message({type:'plugins',items:[{...composioPlugin,installed:true,connected:true,server_names:['composio']}]});x.message({type:'event',event:{type:'mcp_servers',items:[{name:'composio',state:'connected'}]}});
- x.click('[data-nav=mcp]');assert.equal(x.d.querySelectorAll('[data-mcp-toggle]').length,0);assert.match(x.d.body.textContent,/No servers added manually/);assert.equal(x.d.querySelector('[data-lane=mcp]').textContent,'MCPs 0');
+ x.click('[data-nav=mcp]');assert.equal(x.d.querySelectorAll('[data-mcp-toggle]').length,0);assert.match(x.d.body.textContent,/No servers added manually/);assert.match(x.d.querySelector('.section-head h3').textContent,/Your servers · 0/);
 });
 
 test('plugin connection form keeps edits across server and catalog refreshes',()=>{
@@ -331,7 +335,7 @@ test('n8n retains token choice from public state and connector-owned MCP stays o
  x.message({type:'plugins',items:[row]});x.message({type:'event',event:{type:'mcp_servers',items:[{name:'n8n',url:row.mcps[0].url,auth_env:'DGC_MCP_BEARER_TOKEN',state:'connected',enabled:true}]}});
  x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.match(x.d.querySelector('[aria-label="n8n connector"]').textContent,/Connected/);x.click('[data-connector-setup=n8n]');assert.equal(x.d.querySelector('#connector-auth').value,'token');assert.equal(x.d.querySelector('#connector-url').value,row.mcps[0].url);x.click('#dialog-cancel');
  x.click('[data-connector-manage=n8n]');assert.equal(x.sent.at(-1).type,'connectorManage');x.click('[data-uninstall=n8n]');assert.equal(x.sent.at(-1).type,'uninstallPlugin');x.message({type:'pluginOperationCancelled'});
- x.click('[data-lane=mcp]');assert.equal(x.d.querySelector('[data-mcp-edit=n8n]'),null);
+ x.click('[data-nav=mcp]');assert.equal(x.d.querySelector('[data-mcp-edit=n8n]'),null);
 });
 
 
@@ -365,7 +369,9 @@ test('Web search: the one search Work, ChatDGC and Pips share, set here; its key
   x.click('[data-nav=web]');
   // A CLI that can't take the search from here never answers search_api_key_set.
   assert.match(x.d.querySelector('#page').textContent,/Update the DGC CLI/);
-  assert.equal(x.d.querySelector('#save').disabled,true,'nothing to save into');
+  // One Save covers every page, so it stays: this page's fields are what an older CLI can't take, and they are off.
+  assert.equal(x.d.querySelector('#save').disabled,false,'Save all still saves the other pages');
+  assert.ok([...x.d.querySelectorAll('#page .rows input,#page .rows select')].every(e=>e.disabled),'nothing here can be changed into a refused save');
   assert.equal(x.d.querySelector('#search_provider').disabled,true);
   x.message({type:'event',event:{...x.config,search:'duckduckgo',search_url:'',search_api_key_set:false}});
   const shown=()=>[...x.d.querySelectorAll('[data-search-for]')].filter(r=>!r.hidden).map(r=>r.querySelector('input').id);
@@ -402,12 +408,14 @@ test('Web search: Ollama, from a CLI that takes it, with its optional key saved 
   x.message({type:'event',event:{...x.config,search:'duckduckgo',search_url:'',search_api_key_set:false,search_providers:offered}});
   assert.deepEqual(options(),offered);
   assert.equal(x.d.querySelector('#search_provider option[value=ollama]').textContent,'Ollama (sign-in or key)');
-  assert.match(x.d.querySelector('#page .sub').textContent,/Ollama uses your Ollama sign-in or a key/);
+  assert.match(x.d.querySelector('#page .page-detail').textContent,/Ollama uses your Ollama sign-in or a key/,'behind the page\'s "?"');
   const pick=x.d.querySelector('#search_provider');
   pick.value='ollama';pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
   assert.deepEqual(shown(),['search_api_key'],'Ollama: its key field');
-  assert.match(hint(),/^Optional\. Signed in to Ollama on this computer\? Nothing to add\./);
-  assert.match(hint(),/ollama\.com → Settings → API keys/,'where to get one');
+  const said=()=>rowSaid(x.d.querySelector('#search_api_key'));
+  assert.equal(hint(),'Optional when Ollama here is signed in.');
+  assert.match(said(),/Signed in to Ollama on this computer\? Nothing to add\./);
+  assert.match(said(),/ollama\.com → Settings → API keys/,'where to get one');
   assert.equal(x.d.querySelector('#search_api_key').type,'password');
   x.input('#search_api_key','ollama-key-123');
   x.click('#save');
@@ -418,7 +426,7 @@ test('Web search: Ollama, from a CLI that takes it, with its optional key saved 
   x.message({type:'event',event:{...x.config,search:'ollama',search_url:'',search_api_key_set:true,search_providers:offered}});
   assert.equal(x.d.querySelector('#search_provider').value,'ollama');
   assert.equal(x.d.querySelector('#search_api_key').value,'','a saved key is never painted back');
-  assert.match(hint(),/A key is saved, used when Ollama on this computer isn't signed in/);
+  assert.match(said(),/A key is saved.*used when Ollama on this computer isn't signed in/);
   const repainted=x.d.querySelector('#search_provider');
   repainted.value='brave';repainted.dispatchEvent(new x.w.Event('change',{bubbles:true}));
   assert.equal(hint(),'A key is saved. Leave blank to keep it.','Brave keeps its own words');
@@ -444,7 +452,8 @@ test('Web search: from a CLI that keeps a key per provider, the field shows the 
   pick('ollama');
   assert.equal(key().placeholder,'','Ollama: none of its own, so the field is empty');
   assert.equal(remove().hidden,true,'nothing of Ollama\'s to remove');
-  assert.match(hint(),/^Optional\. Signed in to Ollama on this computer\?/);
+  assert.equal(hint(),'Optional when Ollama here is signed in.');
+  assert.match(rowDetail(key()),/^Signed in to Ollama on this computer\?/);
   pick('tavily');
   assert.equal(key().placeholder,'');
   assert.equal(hint(),'Tavily needs a key of its own.');
@@ -508,15 +517,15 @@ test('Web search: an older CLI keeps its one key for every provider, shown as it
   assert.equal(hint(),'A key is saved. Leave blank to keep it.','its one key, for Tavily too');
   assert.equal(x.d.querySelector('#search_api_key').value,'typed-1','as before');
   pick('ollama');
-  assert.match(hint(),/^A key is saved, used when Ollama on this computer isn't signed in/);
+  assert.match(rowSaid(x.d.querySelector('#search_api_key')),/^A key is saved.*used when Ollama on this computer isn't signed in/);
 });
 
 test('ChatDGC: a personality and custom instructions, saved for every chat; hidden from a CLI that cannot take them',()=>{
   const x=setup();
   x.click('[data-nav=chatdgc]');
   assert.match(x.d.querySelector('#page').textContent,/Update the DGC CLI/);
-  assert.equal(x.d.querySelector('#save').disabled,true);
-  assert.equal(x.d.querySelector('#chatdgc_about').disabled,true);
+  assert.equal(x.d.querySelector('#save').disabled,false,'Save all still saves the other pages');
+  assert.equal(x.d.querySelector('#chatdgc_about').disabled,true,'this page\'s own fields an older CLI would refuse');
   x.message({type:'event',event:{...x.config,chatdgc_about:'I run a bakery in Pune.',chatdgc_style:'',chatdgc_personality:'candid'}});
   assert.equal(x.d.querySelector('#save').disabled,false);
   assert.equal(x.d.querySelector('#chatdgc_about').value,'I run a bakery in Pune.');
@@ -585,7 +594,11 @@ test('Memory: what DGC remembers, edited, deleted and added; projects switched; 
 test('Web search: ChatDGC searches on its own unless this switch turns it off, saved with the page', () => {
   const x = setup();
   x.message({ type: 'event', event: { ...x.config, search_provider: 'duckduckgo', search_api_key_set: false, search_url: '', chatdgc_web: true } });
+  // It is ChatDGC's own setting, so it is on the ChatDGC page now; Web search says which search it uses.
   x.click('[data-nav=web]');
+  assert.equal(x.d.querySelector('#chatdgc_web'), null, 'not on the Web search page');
+  assert.match(x.d.querySelector('#page').textContent, /Whether ChatDGC searches is on the ChatDGC page/);
+  x.click('[data-nav=chatdgc]');
   const on = x.d.querySelector('#chatdgc_web');
   assert.equal(on.getAttribute('aria-checked'), 'true', 'on unless you turn it off');
   assert.match(x.d.body.textContent, /Off: ChatDGC never goes online/);
@@ -599,9 +612,13 @@ test('Web search: with nothing saved, ChatDGC searches the web; this switch is t
   const x = setup();
   const { chatdgc_web: _never, ...config } = x.config;
   x.message({ type: 'event', event: { ...config, search_provider: 'duckduckgo', search_api_key_set: false, search_url: '' } });
-  x.click('[data-nav=web]');
+  x.click('[data-nav=chatdgc]');
   assert.equal(x.d.querySelector('#chatdgc_web').getAttribute('aria-checked'), 'true', 'on by default');
-  assert.match(x.d.body.textContent, /Search in ChatDGC/);
+  assert.match(x.d.body.textContent, /Search the web/);
+  const y = setup();
+  y.message({ type: 'event', event: { ...y.config, chatdgc_personality: 'default' } });
+  y.click('[data-nav=chatdgc]');
+  assert.equal(y.d.querySelector('#chatdgc_web').disabled, true, 'a CLI that takes no search from here: shown, not changeable');
 });
 
 test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, saved with the page', () => {
@@ -611,7 +628,8 @@ test('ChatDGC: follow-ups under a reply, on unless this switch turns them off, s
   const on = x.d.querySelector('#chatdgc_followups');
   assert.ok(on, 'the switch is on the ChatDGC page');
   assert.equal(on.getAttribute('aria-checked'), 'true');
-  assert.match(x.d.body.textContent, /A few next questions under a reply, as ChatGPT shows them\. Click one to send it\./);
+  assert.equal(rowHint(on), 'A few next questions under a reply.');
+  assert.match(rowDetail(on), /Click one to send it\./);
   x.click('#chatdgc_followups');
   x.click('#save');
   assert.equal(x.sent.at(-1).type, 'saveSettings');
@@ -629,7 +647,8 @@ test('General: a token cap per turn, 0 for none, saved with the page; an older C
   assert.ok(cap, 'on the General page');
   assert.equal(cap.value, '0');
   assert.equal(cap.disabled, false);
-  assert.match(x.d.body.textContent, /Tokens one turn may spend, sub-agents included\. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work\. 0 means no cap\./);
+  assert.equal(rowHint(cap), '0 means no cap.');
+  assert.match(rowDetail(cap), /Tokens one turn may spend, sub-agents included\. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work\./);
   x.input('#turn_token_budget', '2000000');
   x.click('#save');
   assert.equal(x.sent.at(-1).type, 'saveSettings');
@@ -924,23 +943,24 @@ test('General: Context size says a vLLM or llama.cpp server set the window, and 
   // config it forwards (not a protocol field). A number here can only be smaller, and then decides when DGC compacts.
   const plain=setup();
   plain.click('[data-nav=general]');
-  const hintOf=x=>x.d.querySelector('#context_size').closest('.field').querySelector('.hint').textContent;
-  assert.equal(hintOf(plain),"Tokens before DGC compacts. The model's own maximum still applies.");
+  // One line, and the rest behind its "?" (rowSaid joins them).
+  const hintOf=x=>rowSaid(x.d.querySelector('#context_size'));
+  assert.equal(hintOf(plain),"Tokens DGC keeps before it compacts. The model's own maximum still applies.");
 
   const x=setup();
   x.message({type:'event',event:{...x.config,context_size:32768,server_window:{model:'qwen2.5-0.5b',window:8192,server:'vllm',trained:0}}});
   x.click('[data-nav=general]');
-  assert.equal(hintOf(x),'Set by the server: 8K (restart vLLM with --max-model-len to change it). A smaller number here makes DGC compact sooner.');
+  assert.equal(hintOf(x),'Set by the server: 8K. Restart vLLM with --max-model-len to change it. A smaller number here makes DGC compact sooner.');
   assert.equal(x.d.querySelector('#context_size').value,'8192','the window in use: above the server\'s can\'t apply');
   assert.equal(x.d.querySelector('#context_size').max,'','a larger number typed is refused by nothing on the page: DGC holds it to the server\'s');
 
   // The server restarted with another size (or llama-server answered): said in place, a number being typed is kept.
   x.input('#context_size','4096');
   x.message({type:'event',event:{type:'server_window',model:'local',window:6144,server:'llamacpp',trained:32768}});
-  assert.equal(hintOf(x),'Set by the server: 6K (restart llama-server with -c to change it). A smaller number here makes DGC compact sooner.');
+  assert.equal(hintOf(x),'Set by the server: 6K. Restart llama-server with -c to change it. A smaller number here makes DGC compact sooner.');
   assert.equal(x.d.querySelector('#context_size').value,'4096');
   x.message({type:'event',event:{type:'server_window',model:'qwen3.8:27b',window:0}});
-  assert.equal(hintOf(x),"Tokens before DGC compacts. The model's own maximum still applies.");
+  assert.equal(hintOf(x),"Tokens DGC keeps before it compacts. The model's own maximum still applies.");
   assert.equal(x.d.querySelector('#context_size').value,'4096','what you typed stays');
   x.click('#save');
   const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
@@ -952,7 +972,7 @@ test('General: Context size says a vLLM or llama.cpp server set the window, and 
   assert.equal(y.d.querySelector('#context_size').value,'65536');
   y.message({type:'event',event:{type:'server_window',model:'qwen2.5-0.5b',window:24576,server:'vllm'}});
   assert.equal(y.d.querySelector('#context_size').value,'24576');
-  assert.match(hintOf(y),/^Set by the server: 24K \(restart vLLM/);
+  assert.match(hintOf(y),/^Set by the server: 24K\. Restart vLLM/);
 });
 
 test('Agents: the sub-agents\' Context size, blank for the main model\'s window, checked like the main one',()=>{
@@ -1182,11 +1202,12 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   const box=x.d.querySelector('#max_parallel_tasks');
   assert.equal(box.closest('.group').querySelector('h3').textContent,'Sub-agents');
   assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
-  const hint=box.closest('.field').querySelector('.hint').textContent;
-  assert.match(hint,/Up to 32/);
-  assert.match(hint,/its own copy of the project/);
-  assert.match(hint,/Cloud APIs rate-limit/);
-  assert.match(hint,/OLLAMA_NUM_PARALLEL at once and the rest wait/);
+  // One line; what more costs is behind its "?".
+  assert.equal(rowHint(box),'Up to 32. Ultra runs 8 unless you set one.');
+  const more=rowDetail(box);
+  assert.match(more,/its own copy of the project/);
+  assert.match(more,/cloud APIs rate-limit/);
+  assert.match(more,/OLLAMA_NUM_PARALLEL at once while the rest wait/);
   const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
   x.input('#max_parallel_tasks','33');
   x.click('#save');
@@ -1197,16 +1218,15 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   x.message({type:'settingsSaved',ok:true});
   // Under Ultra: what it runs, and that a chosen number (wider than Ultra's 8 too) is kept.
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:4}});
-  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Ultra is on, so 8 run\. Set any other number, up to 32, to pin it/);
+  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Ultra is on, so 8 run\. Set any other number, up to 32, to pin it/);
   x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:20}});
-  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Pinned here; Ultra would run 8/);
+  assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Pinned here; Ultra would run 8\. Set 4 to let Ultra choose/);
 });
 
-test('the direction (Models, Agents): every setting still reachable, detail one click away',()=>{
+test('Models and Agents: every setting still reachable, detail one click away',()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,list_models_at:true,cache_settable:true,subagent_context_size:0,pips_settable:true,pips_model:''}});
   x.click('[data-nav=models]');
-  assert.ok(x.d.querySelector('#page').classList.contains('v2'),'Models wears the direction');
   for(const id of ['base_url','provider','api_key','model','subscription_engine','subscription_model','subscription_effort','prompt_cache','api_mode','provider_state','prompt_cache_ttl','capability_cache_ttl_s'])
     assert.ok(x.d.querySelector('#'+id),`Models still has ${id}`);
   const advanced=x.d.querySelector('details[data-more=models-advanced]');
@@ -1235,7 +1255,6 @@ test('the direction (Models, Agents): every setting still reachable, detail one 
   assert.equal(preset.selectedOptions[0].textContent,'Presets');
 
   x.click('[data-nav=agents]');
-  assert.ok(x.d.querySelector('#page').classList.contains('v2'));
   for(const id of ['subagent_model','max_parallel_tasks','subagent_context_size','subagent_provider','subagent_base_url','subagent_api_mode','subagent_api_key','fallback_model','fallback_base_url','fallback_api_mode','fallback_api_key','pips_model'])
     assert.ok(x.d.querySelector('#'+id),`Agents still has ${id}`);
   // The sub-agents' own host is here (it is set); the fallback has none, so its host waits one click away.
@@ -1246,7 +1265,7 @@ test('the direction (Models, Agents): every setting still reachable, detail one 
   assert.equal(x.d.querySelector('#fallback_base_url').placeholder,'Same as the main host');
   assert.equal(x.d.querySelector('#subagent_model').placeholder,'Same as the main model');
   assert.equal(x.d.querySelector('#fallback_model').placeholder,'None');
-  assert.match(x.d.querySelector('#fallback_model').closest('.field').textContent,/If the main model fails or stalls/);
+  assert.equal(rowHint(x.d.querySelector('#fallback_model')),'Tried when the main model fails.');
   // Save stays in a bar of its own, and still saves every page's edits.
   assert.ok(x.d.querySelector('.save-bar #save'));
   x.input('#fallback_model','backup-2');
@@ -1255,5 +1274,142 @@ test('the direction (Models, Agents): every setting still reachable, detail one 
   assert.equal(saved.fallback_model,'backup-2');
   assert.equal(saved.base_url,'http://127.0.0.1:11434/v1','the Models page\'s edit goes with it');
   x.click('[data-nav=security]');
-  assert.equal(x.d.querySelector('#page').classList.contains('v2'),false,'the other pages wait for the founder\'s choice');
+  assert.ok(x.d.querySelector('.save-bar #save'),'and every settings page has the same one Save');
+});
+
+// ---- Settings everywhere (24 Oct 2026): one-line hints, "?" for the rest, one Save, plain words, safe danger ----
+test('a hint is one line and the rest is behind "?": open, remembered through a redraw, closed again',()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,turn_token_budget:0}});
+  x.click('[data-nav=agents]');
+  const box=x.d.querySelector('#max_parallel_tasks');
+  const info=box.closest('.field').querySelector('.info');
+  assert.ok(info,'a "?" beside Run at once');
+  assert.equal(info.getAttribute('aria-expanded'),'false');
+  assert.equal(box.closest('.field').querySelector('.detail').hidden,true,'the detail waits one click away');
+  assert.equal(x.d.querySelector(`label[for="max_parallel_tasks"]`).textContent,'Run at once','a real label for the box');
+  info.click();
+  assert.equal(info.getAttribute('aria-expanded'),'true');
+  assert.equal(box.closest('.field').querySelector('.detail').hidden,false);
+  x.message({type:'event',event:{...x.config,turn_token_budget:0}});
+  assert.equal(x.d.querySelector('#max_parallel_tasks').closest('.field').querySelector('.detail').hidden,false,'still open after a redraw');
+  x.d.querySelector('#max_parallel_tasks').closest('.field').querySelector('.info').click();
+  assert.equal(x.d.querySelector('#max_parallel_tasks').closest('.field').querySelector('.detail').hidden,true);
+  // A page's long intro is behind its own "?" too.
+  x.click('[data-nav=running]');
+  const page=x.d.querySelector('#page .sub .info');
+  assert.ok(page);assert.equal(x.d.querySelector('#page-running-detail').hidden,true);
+  page.click();assert.equal(x.d.querySelector('#page-running-detail').hidden,false);
+  assert.match(x.d.querySelector('#page-running-detail').textContent,/after 12 hours at most/);
+});
+
+test('one Save for every page: it says so, and names the pages with unsaved changes',()=>{
+  const x=setup();
+  x.click('[data-nav=models]');
+  const save=()=>x.d.querySelector('#save');
+  assert.equal(save().textContent,'Save all');
+  assert.match(save().title,/every page/);
+  assert.equal(x.d.querySelector('#save-status').textContent,'','nothing changed yet');
+  x.input('#model','edited');
+  assert.equal(x.d.querySelector('#save-status').textContent,'Unsaved changes on Models');
+  // The sandbox is on in this config, so its network switch is live.
+  x.click('[data-nav=security]');x.click('#sandbox_network');
+  x.click('[data-nav=general]');
+  assert.equal(x.d.querySelector('#save-status').textContent,'Unsaved changes on Models and Security','said on every page');
+  x.click('#save');
+  const values=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.equal(values.model,'edited','one Save carries every page\'s change');
+  x.message({type:'settingsSaved',ok:true});
+  assert.equal(x.d.querySelector('#save-status').textContent,'Saved');
+});
+
+test('a narrow tab picks pages by name: the page picker lists every page and follows navigation',()=>{
+  const x=setup();
+  const picker=x.d.querySelector('#page-picker');
+  assert.ok(picker,'the picker is there (CSS shows it in place of the side list below 620px)');
+  assert.deepEqual([...picker.options].map(o=>o.textContent),[...x.d.querySelectorAll('[data-nav]')].map(b=>b.textContent));
+  picker.value='voice';picker.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('#page>h2').textContent,'Voice');
+  x.click('[data-nav=mcp]');
+  assert.equal(picker.value,'mcp');
+  assert.equal(x.sent.at(-1).type,'listMcp');
+});
+
+test('Security: plain words, and the sandbox\'s network switch is off while the sandbox is',()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,sandbox:false,sandbox_network:false}});
+  x.click('[data-nav=security]');
+  for(const jargon of [/OS sandbox/,/Loopback only\./,/Broadens the read-only plan surface/]) assert.doesNotMatch(x.d.querySelector('#page').textContent.replace(/\(loopback\)/,''),jargon);
+  assert.equal(x.d.querySelector('label[for=sandbox]').textContent,'Run commands in a sandbox');
+  const net=()=>x.d.querySelector('#sandbox_network');
+  assert.equal(net().disabled,true,'the network switch means nothing without the sandbox');
+  assert.equal(rowHint(net()),'Only with the sandbox on.');
+});
+
+test('Security: turning the sandbox on wakes its network switch',async()=>{
+  const x=setup();
+  x.message({type:'event',event:{...x.config,sandbox:false,sandbox_network:false}});
+  x.click('[data-nav=security]');
+  x.click('#sandbox');
+  await Promise.resolve();
+  assert.equal(x.d.querySelector('#sandbox_network').disabled,false);
+  x.click('#sandbox_network');
+  x.click('#save');
+  const values=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.deepEqual([values.sandbox,values.sandbox_network],[true,true]);
+});
+
+test('MCP form: plain words, sign-in details and logging under Advanced, and nothing destructive without a confirm',()=>{
+  const x=setup();
+  x.message({type:'event',event:{type:'mcp_servers',items:[{name:'local',command:'node',args:['server.js'],enabled:true,state:'configured',transport:'stdio'}]}});
+  x.click('[data-nav=mcp]');
+  x.click('[data-mcp-edit=local]');
+  const text=x.d.querySelector('#page').textContent;
+  for(const jargon of [/Local STDIO/,/SecretStorage/,/No shell parsing/,/Clear stored credentials/]) assert.doesNotMatch(text,jargon);
+  assert.deepEqual([...x.d.querySelectorAll('#mcp-transport option')].map(o=>[o.value,o.textContent]),[['stdio','A command on this computer'],['remote','A URL']]);
+  assert.equal(x.d.querySelector('#mcp-clear'),null,'no destructive checkbox beside everyday fields');
+  const advanced=x.d.querySelector('.mcp-advanced');
+  assert.ok(advanced.contains(x.d.querySelector('#mcp-log')) && advanced.contains(x.d.querySelector('#oauth-app')),'logging and your own sign-in app are Advanced');
+  assert.deepEqual([...x.d.querySelectorAll('#mcp-log option')].map(o=>o.value),['warning','info','debug','error','off'],'the values the host takes');
+  // Forget saved sign-in: asks first; Keep them sends nothing; Forget them saves with the saved sign-in cleared.
+  const before=x.sent.length;
+  x.input('#mcp-args','server.js\n--verbose');
+  x.click('#mcp-forget');
+  assert.equal(x.sent.length,before,'a click alone sends nothing');
+  assert.match(x.d.querySelector('[role=alertdialog]').textContent,/Forget the token, keys and sign-in saved for local\?/);
+  x.click('#mcp-confirm-no');
+  assert.equal(x.d.querySelector('[role=alertdialog]'),null);
+  assert.equal(x.sent.length,before);
+  assert.equal(x.d.querySelector('#mcp-args').value,'server.js\n--verbose','the confirm never redrew the form');
+  x.click('#mcp-forget');x.click('#mcp-forget-yes');
+  const saved=x.sent.at(-1);
+  assert.equal(saved.type,'mcpSave');
+  assert.equal(saved.values.clear_secrets,true);
+  assert.equal(saved.values.args,'server.js\n--verbose','with what the form holds');
+  // An ordinary Save and connect never clears it.
+  x.d.querySelector('#mcp-form').dispatchEvent(new x.w.Event('submit',{cancelable:true}));
+  assert.equal(x.sent.at(-1).values.clear_secrets,false);
+  // Remove server: asks first, too.
+  const n=x.sent.length;
+  x.click('#mcp-remove');
+  assert.equal(x.sent.length,n);
+  x.click('#mcp-remove-yes');
+  assert.deepEqual({...x.sent.at(-1)},{type:'mcpRemove',name:'local'});
+  // A new server has nothing saved to forget or remove.
+  x.click('[data-nav=mcp]');x.click('#add-mcp');
+  assert.equal(x.d.querySelector('.danger-zone'),null);
+});
+
+test('a plugin\'s page: no maintainers\' notes, no "Not provided" rows; directory cards without package jargon',()=>{
+  const x=setup();
+  const noted={...plugin,verification:'DGC browser handoff verified. A user confirmed Figma connection.',audited_on:'2026-09-23',requirements:'An account.',license:'MIT',developer:'',version:''};
+  x.message({type:'plugins',items:[noted]});
+  x.click('[data-nav=plugins]');x.click('[data-open=fixture]');
+  const text=x.d.querySelector('#page').textContent;
+  assert.doesNotMatch(text,/A user confirmed|Checked 2026|handoff verified/,'an older CLI may still send them: never printed');
+  assert.match(text,/An account\./,'what a user needs to know stays');
+  assert.doesNotMatch(x.d.querySelector('.meta').textContent,/Not provided/);
+  assert.match(x.d.querySelector('.meta').textContent,/License/);
+  x.click('#back');x.click('#browse-directory');
+  assert.doesNotMatch(x.d.querySelector('.directory-card-footer').textContent,/dgc-curated|MIT|License/);
 });

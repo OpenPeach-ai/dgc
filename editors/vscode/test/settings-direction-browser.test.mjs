@@ -63,8 +63,12 @@ async function open(width, section, theme = "dark") {
   await p.route("https://settings.test/**", (r) => r.fulfill({ body: pageFor(theme), contentType: "text/html" }));
   await p.goto("https://settings.test/view");
   await p.waitForSelector("#ultra_mode");
-  await p.click(`[data-nav=${section}]`);
-  await p.waitForSelector(".page.v2");
+  // A tab narrower than 620px has the page picker in place of the side list.
+  if (section !== "general") {
+    if (await p.isVisible(`[data-nav=${section}]`)) await p.click(`[data-nav=${section}]`);
+    else await p.selectOption("#page-picker", section);
+  }
+  await p.waitForSelector(".save-bar");
   return { p, close: () => context.close() };
 }
 
@@ -76,8 +80,8 @@ test("Models and Agents follow the VS Code theme, light included", async (t) => 
       try {
         const seen = await p.evaluate(() => {
           const color = (el, prop) => getComputedStyle(el)[prop];
-          return { main: color(document.getElementById("main"), "backgroundColor"), title: color(document.querySelector(".v2>h2"), "color"),
-            rows: color(document.querySelector(".v2 .rows"), "backgroundColor"), input: color(document.querySelector(".v2 input"), "backgroundColor") };
+          return { main: color(document.getElementById("main"), "backgroundColor"), title: color(document.querySelector("#page>h2"), "color"),
+            rows: color(document.querySelector("#page .rows"), "backgroundColor"), input: color(document.querySelector("#page .rows input"), "backgroundColor") };
         });
         const expect = theme === "dark"
           ? { main: "rgb(31, 31, 31)", rows: "rgb(32, 32, 32)", input: "rgb(49, 49, 49)" }
@@ -93,8 +97,8 @@ test("at 900 px the controls line up; at 460 px each sits under its words; nothi
   for (const section of ["models", "agents"]) {
     let { p, close } = await open(900, section);
     try {
-      await p.evaluate(() => document.querySelectorAll(".v2 details.more").forEach((d) => { d.open = true; }));
-      const edges = await p.evaluate(() => [...document.querySelectorAll(".v2 .field")].filter((f) => f.offsetParent)
+      await p.evaluate(() => document.querySelectorAll("#page details.more").forEach((d) => { d.open = true; }));
+      const edges = await p.evaluate(() => [...document.querySelectorAll("#page .field")].filter((f) => f.offsetParent)
         .map((f) => f.lastElementChild).filter((c) => !c.classList.contains("switch")).map((c) => Math.round(c.getBoundingClientRect().left)));
       assert.ok(edges.length >= 5, section);
       assert.equal(new Set(edges).size, 1, `${section}: every control starts at the same x (${[...new Set(edges)]})`);
@@ -103,7 +107,7 @@ test("at 900 px the controls line up; at 460 px each sits under its words; nothi
     } finally { await close(); }
     ({ p, close } = await open(460, section));
     try {
-      const under = await p.evaluate(() => [...document.querySelectorAll(".v2 .field")].filter((f) => f.offsetParent && !f.querySelector(".switch"))
+      const under = await p.evaluate(() => [...document.querySelectorAll("#page .field")].filter((f) => f.offsetParent && !f.querySelector(".switch"))
         .every((f) => f.lastElementChild.getBoundingClientRect().top >= f.firstElementChild.getBoundingClientRect().bottom - 1));
       assert.ok(under, `${section} at 460: each control under its words`);
       const sideways = await p.$eval("#main", (m) => m.scrollWidth - m.clientWidth);

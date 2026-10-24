@@ -17,7 +17,7 @@ import driveLogo from '../media/plugin-logos/drive.png';
 import dgcLogo from '../media/dgc-mark.svg';
 const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo, asana:asanaLogo, docusign:docusignLogo, zoom:zoomLogo};
 const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo};
-import { contextSizeHint, contextSizeShown, renderFields } from './settingsFields.js';
+import { contextSizeHint, contextSizeMore, contextSizeShown, renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
@@ -30,6 +30,7 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
 let mcpError = "";
+let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
 let usageView = 'all', pipUsage = null;
 let sequence = 0;
@@ -43,8 +44,22 @@ const errors = new Map(), pending = new Map(), skillPending = new Map();
 const keyDrafts = new Map(), keyPending = new Map(), keyNotes = new Map(), scopeNotes = new Map();
 const send = m => vscode.postMessage(m);
 const switchHTML = (on, label, attrs = '', disabled = false) => `<button type="button" class="switch${on ? ' on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" ${attrs}${disabled ? ' disabled' : ''}><i></i></button>`;
+// "?" beside a row's name or a page's line: the longer words, one click away, remembered across redraws.
+const INFO = new Set();
+const plain = s => String(s ?? '').replace(/<[^>]*>/g, '');
 const ui = {
-    field: (label, hint, control) => `<label class="field"><span><span class="name">${label}</span>${hint ? `<span class="hint">${hint}</span>` : ''}</span>${control}</label>`,
+    // A row: its name (a real <label> for its control), a one-line hint, and the rest behind "?".
+    field: (label, hint, control, more = '') => {
+        const id = (String(control).match(/\sid="([^"]+)"/) || [])[1] || '';
+        return `<div class="field"><span class="words"><span class="name-line"><label class="name"${id ? ` for="${id}"` : ''}>${label}</label>${more ? ui.infoButton(id, label) : ''}</span>`
+            + `${hint ? `<span class="hint">${hint}</span>` : ''}${more ? ui.detail(id, more) : ''}</span>${control}</div>`;
+    },
+    infoButton: (id, label) => `<button type="button" class="info" data-info="${id}" aria-expanded="${INFO.has(id)}" aria-controls="${id}-detail" aria-label="More about ${esc(plain(label))}" title="More about ${esc(plain(label))}">?</button>`,
+    detail: (id, text) => `<span class="detail" id="${id}-detail"${INFO.has(id) ? '' : ' hidden'}>${text}</span>`,
+    // A page's one line under its title, and its "?".
+    intro: (page, sub, more = '') => `<p class="sub">${sub}${more ? ui.infoButton('page-' + page, 'this page') : ''}</p>${more ? `<p class="page-detail" id="page-${page}-detail"${INFO.has('page-' + page) ? '' : ' hidden'}>${more}</p>` : ''}`,
+    // One Save at the foot of every settings page: it covers every page, and the line beside it names the ones with changes.
+    saveBar: () => '<div class="save-bar"><button type="button" class="save" id="save" title="Save the changes on every page, for every workspace on this computer">Save all</button></div>',
     sel: (id, options, value) => `<select id="${id}">${options.map(([v, label]) => `<option value="${esc(v)}"${String(value ?? '') === String(v) ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`,
     inp: (id, value, type = 'text') => `<input id="${id}" type="${type}" value="${esc(value ?? '')}" autocomplete="off" spellcheck="false">`,
     area: (id, value, placeholder = '', max = 1500) => `<textarea id="${id}" rows="4" maxlength="${max}" placeholder="${esc(placeholder)}" spellcheck="true">${esc(value ?? '')}</textarea>`,
@@ -78,7 +93,21 @@ function modelRoute(id) {
 const modelBoxes = createModelBoxes({ send: m => vscode.postMessage(m), route: modelRoute,
     fields: id => (MODEL_ROUTES[id] || []).slice(1) });
 const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', pips_model: '' };
-function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
+const PAGE_OF = {};
+for (const [page, keys] of Object.entries({
+    general: ['mode', 'think', 'ultra_mode', 'turn_token_budget', 'context_size', 'show_reasoning', 'thinking_inline', 'suggest', 'monitor_wake', 'tool_profile'],
+    models: ['base_url', 'api_key', 'model', 'api_mode', 'provider_state', 'prompt_cache', 'capability_cache_ttl_s', 'subscription_engine', 'subscription_model', 'subscription_effort', 'prompt_cache_ttl', 'ollama_keep_alive'],
+    agents: ['subagent_model', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key', 'subagent_context_size', 'max_parallel_tasks', 'fallback_model', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key', 'pips_model'],
+    web: ['search_provider', 'search_url', 'search_api_key'],
+    chatdgc: ['chatdgc_about', 'chatdgc_style', 'chatdgc_personality', 'chatdgc_window', 'chatdgc_web', 'chatdgc_followups'],
+    security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan'] })) for (const key of keys) PAGE_OF[key] = page;
+/** "Unsaved changes on Models and Agents": Save covers every page, so its line names the pages it will save. */
+function unsavedLine() {
+    const pages = sections.filter(([id]) => [...dirty].some(key => PAGE_OF[key] === id)).map(([, label]) => label);
+    if (!pages.length) return dirty.size ? 'Unsaved changes' : '';
+    return 'Unsaved changes on ' + (pages.length === 1 ? pages[0] : pages.slice(0, -1).join(', ') + ' and ' + pages.at(-1));
+}
+function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = unsavedLine(); if ($('save-status'))
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
     config = ev;
@@ -146,8 +175,18 @@ function snapshot() {
 }
 // A failure belongs to the visit it happened in: leaving the section drops the banner, and the
 // `mcp_servers` reply that every arrival at this page asks for repaints a live one.
-function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpError = ''; if (nextRange)
+function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpConfirm = ''; mcpError = ''; if (nextRange)
     range = nextRange; render(); $('main').scrollTop = 0; }
+document.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-info]');
+    if (!button) return;
+    event.preventDefault();
+    const id = button.dataset.info, detail = document.getElementById(id + '-detail');
+    const open = !INFO.has(id);
+    if (open) INFO.add(id); else INFO.delete(id);
+    button.setAttribute('aria-expanded', String(open));
+    if (detail) detail.hidden = !open;
+});
 // Catalog acknowledgements replace rows. Keep keyboard focus on the same control.
 let rememberedFocus = null;
 document.addEventListener('focusin', event => {
@@ -170,8 +209,7 @@ function render() {
     usage = null;
     document.querySelectorAll('[data-nav]').forEach(b => { b.classList.toggle('active', b.dataset.nav === section); b.setAttribute('aria-current', b.dataset.nav === section ? 'page' : 'false'); });
     const main = $('page');
-    // The direction (24 Oct): Models and Agents in the chat panel's tokens and the new layout (settings.css .v2).
-    main.classList.toggle('v2', section === 'models' || section === 'agents');
+    if ($('page-picker')) $('page-picker').value = section;
     if (section === 'plugins') {
         renderPlugins(main);
         return;
@@ -198,7 +236,10 @@ function render() {
     }
     if (section === 'usage') {
         const view = (id, label) => `<button type="button" data-usage-view="${id}" class="${usageView === id ? 'on' : ''}" aria-pressed="${usageView === id}">${label}</button>`;
-        main.innerHTML = '<h1>Token usage</h1><p class="sub">Your local ledger of model requests.</p>'
+        main.innerHTML = '<h2>Token usage</h2>' + ui.intro('usage', 'What your model requests used, counted here.',
+            'Counted on this computer from what each provider reports; nothing here is sent anywhere. A request the provider '
+            + 'reported nothing for is marked unmetered. Subscription CLI turns are counted by that CLI. Up to 400 days are kept. '
+            + 'This is not your provider account\'s quota or bill.')
             + `<div class="chips usage-views" role="group" aria-label="Show token usage for">${view('all', 'Everything')}${view('pips', 'Pips')}</div>`
             + (usageView === 'pips' ? pipUsageMarkup : usageMarkup);
         usage?.dispose?.();
@@ -226,7 +267,10 @@ function render() {
     renderFields(section, main, draft, providers, ui);
     if (draft.models_at) modelBoxes.bind(main);
     const save = $('save');
-    save.disabled = saving || (section === 'web' && !draft.search_settable) || (section === 'chatdgc' && !draft.chatdgc_settable);
+    // One Save for every page: a page whose CLI can't take its values has its fields disabled, and the host never sends
+    // them; the button still saves what the other pages changed.
+    save.disabled = saving;
+    if (!saving && dirty.size && (!saveStatus || saveStatus.startsWith('Unsaved'))) saveStatus = unsavedLine();
     save.insertAdjacentHTML('afterend', ' <span class="save-status" id="save-status" role="status">' + esc(saveStatus) + '</span>');
     for (const [id, min, max, step] of [['context_size', 2048, null, 1024], ['max_parallel_tasks', 1, 32, 1], ['capability_cache_ttl_s', 1, null, 1]]) {
         const input = $(id);
@@ -287,8 +331,9 @@ function manualServers() {
     return servers.filter(s => !owned.has(s.name));
 }
 function chips(active) {
-    const count = id => id === 'plugins' ? items.filter(r => r.installed && offered(r)).length : id === 'mcp' ? manualServers().length : null;
-    return `<div class="chips" role="group" aria-label="Plugin contents">${[['plugins', 'Plugins'], ['apps', 'Apps'], ['mcp', 'MCPs']].map(([id, label]) => `<button data-lane="${id}" class="${active === id ? 'on' : ''}" aria-pressed="${active === id}">${label}${count(id) === null ? '' : ` <span class="status">${count(id)}</span>`}</button>`).join('')}</div>`;
+    const count = id => id === 'plugins' ? items.filter(r => r.installed && offered(r)).length : null;
+    // Plugins and Apps. MCP servers has a page of its own in the side list: one door to it, not two.
+    return `<div class="chips" role="group" aria-label="Plugin contents">${[['plugins', 'Plugins'], ['apps', 'Apps']].map(([id, label]) => `<button data-lane="${id}" class="${active === id ? 'on' : ''}" aria-pressed="${active === id}">${label}${count(id) === null ? '' : ` <span class="status">${count(id)}</span>`}</button>`).join('')}</div>`;
 }
 function bindChips(main) {
     main.querySelectorAll('[data-lane]').forEach(button => button.onclick = () => {
@@ -366,9 +411,10 @@ function windowlessFor(seconds) {
 function renderRunning(main) {
     clearTimeout(running.timer);
     running.timer = setTimeout(() => { if (section === 'running') send({ type: 'listRunning' }); }, 30000);
-    let html = '<h2>Running sessions</h2><p class="sub">A session, or a ChatDGC reply, keeps working when its window goes: a reload, a closed window, '
+    let html = '<h2>Running sessions</h2>' + ui.intro('running', 'Work that keeps going with no window.',
+        'A session, or a ChatDGC reply, keeps working when its window goes: a reload, a closed window, '
         + 'or a tab you closed with Keep running. Open it again and it picks up where it is. With no window it stops '
-        + 'by itself, saved: 2 minutes after its work finishes, after 1 hour waiting on your answer, and after 12 hours at most.</p>';
+        + 'by itself, saved: 2 minutes after its work finishes, after 1 hour waiting on your answer, and after 12 hours at most.');
     if (running.note) html += `<div class="banner" role="status"><p>${esc(running.note)}</p></div>`;
     if (running.unsupported) {
         main.innerHTML = html + '<p class="note">This DGC CLI ends a session when its window goes. Update it to keep work running through a reload.</p>';
@@ -407,7 +453,7 @@ function renderRunning(main) {
             + `<button type="button" class="secondary" data-running-stop="${esc(key)}" data-pid="${esc(r.pid)}" data-instance="${esc(r.instance)}"`
             + `${running.stopping.has(key) ? ' disabled' : ''} title="Save it and stop" aria-label="Stop: ${esc(title)}">${running.stopping.has(key) ? 'Stopping…' : 'Stop'}</button></div></div>`;
     }
-    html += '</div><p class="note">In a terminal, <code>dgc ps</code> lists every DGC on this computer and <code>dgc stop</code> stops one.</p>';
+    html += '</div><p class="note">In a terminal: <code>dgc ps</code> lists them, <code>dgc stop</code> stops one.</p>';
     main.innerHTML = html;
     main.querySelectorAll('[data-running-open]').forEach(b => b.onclick = () => send({ type: 'openRunning', session: b.dataset.runningOpen, name: b.dataset.runningName || '' }));
     main.querySelectorAll('[data-running-chat]').forEach(b => b.onclick = () => send({ type: 'openRunning', chat: b.dataset.runningChat }));
@@ -420,15 +466,16 @@ function renderRunning(main) {
 function renderMemory(main) {
     const st = memory.state;
     const facts = st?.facts || [], projects = st?.projects || [];
-    let html = '<h2>Memory</h2><p class="sub">One memory of what you tell DGC, shared by ChatDGC, your Work sessions and your Pips: '
-        + 'facts, never files or secrets, and only what you said yourself. Temporary chats are never remembered.</p>';
+    let html = '<h2>Memory</h2>' + ui.intro('memory', 'What DGC remembers about you, everywhere.',
+        'One memory of what you tell DGC, shared by ChatDGC, your Work sessions and your Pips: '
+        + 'facts, never files or secrets, and only what you said yourself. Temporary chats are never remembered.');
     if (memory.note) html += `<div class="banner error" role="alert"><p>${esc(memory.note)}</p></div>`;
     if (!st) {
         main.innerHTML = html + (memory.note ? '' : '<p class="note" role="status">Reading what DGC remembers…</p>');
         return;
     }
-    html += ui.card('Memory', ui.field('Remember things about you', 'Off: nothing is read or saved anywhere. What\'s kept stays until you delete it.',
-        switchHTML(st.enabled, 'Remember things about you', 'data-memory-switch', memory.busy)));
+    html += '<section class="group"><div class="rows">' + ui.field('Remember things about you', 'Off: nothing is read or saved.',
+        switchHTML(st.enabled, 'Remember things about you', 'id="memory-switch" data-memory-switch', memory.busy), 'Off: nothing is read or saved anywhere. What\'s kept stays until you delete it.') + '</div></section>';
     html += `<h3 class="section">What DGC remembers${facts.length ? ' · ' + facts.length : ''}</h3><div class="card memory-facts">`;
     if (!facts.length) html += '<p class="empty">Nothing yet. Tell ChatDGC something about you, or add it here.</p>';
     for (const f of facts) {
@@ -443,8 +490,8 @@ function renderMemory(main) {
     }
     html += '<form class="row memory-add"><input id="memory-add" aria-label="Add a memory" maxlength="300" placeholder="Add a fact, like: Prefers metric units">'
         + '<button type="submit" class="secondary">Add</button></form></div>';
-    html += '<h3 class="section">Your projects</h3><p class="note">From your Work sessions: each folder, when you last worked there and what you asked lately. '
-        + 'ChatDGC uses it to connect a chat to your work. Switch off a project to keep it out of memory.</p><div class="card">';
+    html += '<h3 class="section">Your projects</h3>' + ui.intro('memory-projects', 'From your Work sessions; switch one off to leave it out.',
+        'Each folder you worked in, when you last worked there and what you asked lately. ChatDGC uses it to connect a chat to your work.') + '<div class="card">';
     if (!projects.length) html += '<p class="empty">No Work sessions yet.</p>';
     for (const p of projects) {
         const lately = (p.recent || []).join(' · ');
@@ -489,7 +536,8 @@ function renderMemory(main) {
 const megabytes = (bytes) => `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 const VOICE_STAGES = { starting: 'Starting', runtime: 'Installing the voice engine', download: 'Downloading', verify: 'Checking', unpack: 'Unpacking', done: 'Finishing' };
 function voiceRow(m) {
-    const facts = `${m.languages} · ${megabytes(m.size)} · Licence: ${m.licence}`;
+    // Its size is on its Install button; once installed, here.
+    const facts = `${m.languages}${m.installed ? ' · ' + megabytes(m.size) : ''} · Licence: ${m.licence}`;
     let actions;
     if (m.installing) {
         const p = voice.progress[m.id] || m.installing;
@@ -511,8 +559,9 @@ function voiceRow(m) {
 }
 function renderVoice(main) {
     const st = voice.state;
-    let html = '<h2>Voice</h2><p class="sub">Talk to DGC instead of typing, and have replies read to you. The models run on your own '
-        + 'computer: what you say is never sent anywhere. Install one for each; the first install also adds DGC\'s voice engine.</p>';
+    let html = '<h2>Voice</h2>' + ui.intro('voice', 'Talk to DGC, and hear its replies, on this computer.',
+        'The models run on your own computer: what you say is never sent anywhere. Install one for each.'
+        + (voice.state && !voice.state.runtime?.installed ? ` The first install also adds DGC's voice engine (about ${esc(String(voice.state.runtime?.size_mb || 50))} MB).` : ''));
     if (voice.note) html += `<div class="banner error" role="alert"><p>${esc(voice.note)}</p></div>`;
     if (!st) {
         main.innerHTML = html + (voice.note ? '' : '<p class="note" role="status">Reading your voice models…</p>');
@@ -521,9 +570,8 @@ function renderVoice(main) {
     const models = st.models || [];
     const group = (role, title, note) => `<h3 class="section">${title}</h3><p class="note">${note}</p><div class="card voice-models">`
         + models.filter(m => m.role === role).map(voiceRow).join('') + '</div>';
-    html += group('dictation', 'Dictation', 'The microphone in the message box: speak, and your words appear to edit and send.');
+    html += group('dictation', 'Dictation', 'Speak in the message box; your words appear to edit.');
     html += group('read_aloud', 'Read aloud', 'Read aloud under a reply.');
-    if (!st.runtime?.installed) html += `<p class="note">The first model you install also installs the voice engine (about ${esc(String(st.runtime?.size_mb || 50))} MB).</p>`;
     main.innerHTML = html;
     const go = (message, id) => { voice.busy = id; voice.note = ''; send(message); };
     main.querySelectorAll('[data-voice-install]').forEach(b => b.addEventListener('click', () => go({ type: 'voiceInstall', id: b.dataset.voiceInstall }, b.dataset.voiceInstall)));
@@ -536,8 +584,9 @@ function renderPlugins(main) {
     if (detail) { renderDetail(main); return; }
     if (directory) { renderDirectory(main); return; }
     const shown = items.filter(r => r.installed && offered(r) && `${r.display_name} ${r.summary}`.toLowerCase().includes(query.toLowerCase()));
-    main.innerHTML = banner() + `<div class="page-heading"><div><h1>Plugins</h1><p class="sub">Manage plugins, skills, and MCPs.</p></div><div class="actions"><button class="secondary" id="browse-directory">Browse directory</button>${addMenu()}</div></div>` + notice() + chips(lane) + `<div class="list-toolbar"><input class="search" id="plugin-search" type="search" placeholder="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" aria-label="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" value="${esc(query)}"></div><div id="plugin-list"></div>`;
+    main.innerHTML = banner() + `<div class="page-heading"><div><h2>Plugins</h2><p class="sub">Skills and tools DGC can use.</p></div><div class="actions"><button class="secondary" id="browse-directory">Browse directory</button>${addMenu()}</div></div>` + notice() + chips(lane) + `<div class="list-toolbar"><input class="search" id="plugin-search" type="search" placeholder="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" aria-label="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" value="${esc(query)}"></div><div id="plugin-list"></div>`;
     const rows = lane === 'apps' ? shown.flatMap(r => (r.apps || []).map(app => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${appLogo(r, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="summary">${esc(r.display_name)} · ${r.mcps?.length ? 'Uses MCP' : 'Requires a ChatGPT app connection'}</span></span></button><span class="status">${r.connected ? 'Connected' : r.install === 'block' ? 'Unavailable in DGC' : r.setup_required ? 'Setup required' : r.mcps?.length ? 'Not connected' : 'Unavailable in DGC'}</span></article>`)).join('') : shown.map(r => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${logo(r)}<span class="copy"><strong>${esc(r.display_name)}</strong><span class="summary">${esc(r.summary)}</span></span></button>${pluginControl(r)}</article>`).join('');
+    $('plugin-list').className = lane === 'apps' ? '' : 'listing';
     $('plugin-list').innerHTML = rows || `<div class="empty">${lane === 'apps' ? 'Installed plugins have no app connections. Browse the directory to find a service.' : 'No installed plugins match. Browse the directory to install skills and tools.'}</div>`;
     if (lane === 'apps') {
         if (!rows && items.some(r => r.name === 'composio')) $('plugin-list').innerHTML = '';
@@ -572,7 +621,7 @@ function renderDirectory(main) {
     const available = items.filter(offered);
     const shown = available.filter(r => (marketFilter === 'all' || (r.marketplace || 'dgc-curated') === marketFilter) && `${r.display_name} ${r.summary} ${r.category || ''}`.toLowerCase().includes(query.toLowerCase()));
     const sources = [...new Set(available.map(r => r.marketplace || 'dgc-curated'))];
-    main.innerHTML = `<div class="crumbs"><button id="directory-back">Plugins</button><span>›</span><span>Directory</span></div><div class="page-heading"><div><h1>Plugin directory</h1><p class="sub">Find skills and tools for DGC.</p></div><div class="actions">${addMenu()}</div></div>` + notice() + `<div class="directory-toolbar"><input id="directory-search" class="search" type="search" placeholder="Search plugins" aria-label="Search directory" value="${esc(query)}"><select id="market-filter" aria-label="Marketplace"><option value="all">All marketplaces</option>${sources.map(m => `<option value="${esc(m)}"${marketFilter===m?' selected':''}>${esc(m==='dgc-curated'?'DGC curated':m==='personal'?'Personal':m)}</option>`).join('')}</select><button class="secondary" id="manage-marketplaces">Manage marketplaces</button></div><div class="directory-status"><p class="note">${shown.length} of ${available.length} plugins</p></div><div class="directory-grid">${shown.map(r => `<article class="directory-card"><button class="directory-open" data-open="${esc(r.name)}">${logo(r)}<strong>${esc(r.display_name)}</strong><span>${esc(r.summary)}</span></button><div class="directory-card-footer"><span class="status">${esc(r.marketplace || 'DGC curated')} · ${esc(r.license || 'License not provided')}</span>${r.installed ? '<span class="status">Installed</span>' : `<button class="install" data-install="${esc(r.name)}"${r.install==='block'?' disabled':''}>${r.install==='block'?'Not offered':'Install'}</button>`}</div>${r.install==='block'?`<p class="note">${esc(r.block_reason)}</p>`:''}</article>`).join('') || '<p class="empty">No plugins match this search. Add a marketplace to browse another catalog.</p>'}</div>`;
+    main.innerHTML = `<div class="crumbs"><button id="directory-back">Plugins</button><span>›</span><span>Directory</span></div><div class="page-heading"><div><h2>Plugin directory</h2><p class="sub">Find skills and tools for DGC.</p></div><div class="actions">${addMenu()}</div></div>` + notice() + `<div class="directory-toolbar"><input id="directory-search" class="search" type="search" placeholder="Search plugins" aria-label="Search directory" value="${esc(query)}"><select id="market-filter" aria-label="Marketplace"><option value="all">All marketplaces</option>${sources.map(m => `<option value="${esc(m)}"${marketFilter===m?' selected':''}>${esc(m==='dgc-curated'?'DGC curated':m==='personal'?'Personal':m)}</option>`).join('')}</select><button class="secondary" id="manage-marketplaces">Manage marketplaces</button></div><div class="directory-status">${shown.length < available.length ? `<p class="note" role="status">${shown.length} of ${available.length} plugins</p>` : ''}</div><div class="directory-grid">${shown.map(r => `<article class="directory-card"><button class="directory-open" data-open="${esc(r.name)}">${logo(r)}<strong>${esc(r.display_name)}</strong><span>${esc(r.summary)}</span></button><div class="directory-card-footer">${r.marketplace && r.marketplace !== 'dgc-curated' ? `<span class="status">${esc(r.marketplace === 'personal' ? 'Personal' : r.marketplace)}</span>` : ''}${r.installed ? '<span class="status">Installed</span>' : `<button class="install" data-install="${esc(r.name)}"${r.install==='block'?' disabled':''}>${r.install==='block'?'Not offered':'Install'}</button>`}</div>${r.install==='block'?`<p class="note">${esc(r.block_reason)}</p>`:''}</article>`).join('') || '<p class="empty">No plugins match this search. Add a marketplace to browse another catalog.</p>'}</div>`;
     $('directory-back').onclick = () => { directory = false; query = ''; render(); };
     $('directory-search').oninput = e => keepTyping('directory-search', e, () => renderDirectory(main));
     $('market-filter').onchange = e => { marketFilter = e.target.value; renderDirectory(main); };
@@ -670,7 +719,7 @@ function renderReview(item) {
     const servers = Object.entries(item.server_specs || {});
     const apps = item.apps || item.metadata?.apps || [];
     const serverLabel = name => apps.find(a => name.endsWith('--' + a.id))?.name || name;
-    dialog('review', item.display_name || item.name, `<p>${esc(item.long_summary || item.summary || '')}</p>${compatibilityDetails(item)}<p class="note">Source: ${esc(item.upstream || item.marketplace || 'Local package')}${item.sha ? '<br>Revision: '+esc(item.sha.slice(0,12)) : ''}</p>${item.setup_required?`<div class="banner"><p>${esc(item.setup_instructions)}</p></div><p>${link(item.setup_url,'Google setup instructions')}</p>`:''}${item.skills?.length ? '<details class="review-section"><summary>Skills · '+item.skills.length+'</summary>'+item.skills.map(x=>`<div class="review-skill"><strong>${esc(x.name)}</strong><span>${esc(x.description)}</span></div>`).join('')+'</details>' : ''}${servers.length ? '<h3>MCP servers</h3>' + servers.map(([name,spec])=>`<label class="review-choice"><input type="checkbox" data-server="${esc(name)}" checked><span><strong>${esc(serverLabel(name))}</strong><span>${esc(spec.url || spec.command + ' ' + (spec.args || []).join(' '))}</span>${spec.env_names?.length ? '<span>Requires: '+esc(spec.env_names.join(', '))+'</span>' : ''}</span></label>`).join('') : ''}${(item.warnings || []).map(w=>`<p class="note">${esc(w)}</p>`).join('')}${!item.supported ? `<p class="error-message" role="alert">${esc(item.compatibility_reason)}</p>` : ''}<p class="note">License: ${item.license_url ? link(item.license_url, item.license || 'Publisher license') : esc(item.license || 'Not provided')}. ${item.install==='accept'?'Publisher terms are confirmed before installation.':''}${item.privacy_url ? ' '+link(item.privacy_url, 'Privacy policy') : ''}</p>`, `<button class="save" id="confirm-plugin"${item.supported?'':' disabled'}>${item.setup_required?'Install selected connections':'Install selected plugin'}</button>`);
+    dialog('review', item.display_name || item.name, `<p>${esc(item.long_summary || item.summary || '')}</p>${compatibilityDetails(item)}<p class="note">Source: ${esc(item.upstream || item.marketplace || 'Local package')}${item.sha ? '<br>Revision: '+esc(item.sha.slice(0,12)) : ''}</p>${item.setup_required?`<div class="banner"><p>${esc(item.setup_instructions)}</p></div><p>${link(item.setup_url,'Google setup instructions')}</p>`:''}${item.skills?.length ? '<details class="review-section"><summary>Skills · '+item.skills.length+'</summary>'+item.skills.map(x=>`<div class="review-skill"><strong>${esc(x.name)}</strong><span>${esc(x.description)}</span></div>`).join('')+'</details>' : ''}${servers.length ? '<h3>MCP servers</h3>' + servers.map(([name,spec])=>`<label class="review-choice"><input type="checkbox" data-server="${esc(name)}" checked><span><strong>${esc(serverLabel(name))}</strong><span>${esc(spec.url || spec.command + ' ' + (spec.args || []).join(' '))}</span>${spec.env_names?.length ? '<span>Requires: '+esc(spec.env_names.join(', '))+'</span>' : ''}</span></label>`).join('') : ''}${(item.warnings || []).map(w=>`<p class="note">${esc(w)}</p>`).join('')}${!item.supported ? `<p class="error-message" role="alert">${esc(item.compatibility_reason)}</p>` : ''}<p class="note">License: ${item.license_url ? link(item.license_url, item.license || 'Publisher license') : esc(item.license || 'Not provided')}. ${item.install==='accept'?'Publisher terms are confirmed before installation.':''}${item.privacy_url ? ' '+link(item.privacy_url, 'Privacy policy') : ''}</p>`, `<button class="save" id="confirm-plugin"${item.supported?'':' disabled'}>${item.setup_required?'Install selected connections':'Install'}</button>`);
     if (item.name === 'google-workspace') {
         const choices = servers.map(([name]) => {
             const app = apps.find(a => name.endsWith('--' + a.id));
@@ -790,7 +839,7 @@ function bindPlugins(main) {
     main.querySelectorAll('[data-connector-setup]').forEach(b => b.onclick = () => openConnector(b.dataset.connectorSetup));
     main.querySelectorAll('[data-connector-manage]').forEach(b => b.onclick = () => send({type:'connectorManage',name:b.dataset.connectorManage}));
     main.querySelectorAll('[data-mcp-toggle]').forEach(b => b.onclick = () => { b.disabled = true; send({ type: 'mcpToggle', name: b.dataset.mcpToggle, enabled: b.getAttribute('aria-checked') !== 'true' }); });
-    main.querySelectorAll('[data-mcp-edit]').forEach(b => b.onclick = () => { if (APP_CONNECTORS[b.dataset.mcpEdit]) { openConnector(b.dataset.mcpEdit); return; } mcpEditing = servers.find(s => s.name === b.dataset.mcpEdit); render(); });
+    main.querySelectorAll('[data-mcp-edit]').forEach(b => b.onclick = () => { if (APP_CONNECTORS[b.dataset.mcpEdit]) { openConnector(b.dataset.mcpEdit); return; } mcpEditing = servers.find(s => s.name === b.dataset.mcpEdit); mcpConfirm = ''; render(); });
     main.querySelectorAll('[data-composio-catalog]').forEach(b => b.onclick = () => send({type:'composioCatalog'}));
     main.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { detail = b.dataset.open; render(); $('main').scrollTop = 0; });
     main.querySelectorAll('[data-install]').forEach(b => b.onclick = () => reviewPlugin(b.dataset.install));
@@ -821,7 +870,6 @@ function cloudNotice(row) {
 function compatibilityDetails(row) {
     return cloudNotice(row)
         + (row.requirements ? `<p class="note"><strong>Requirements.</strong> ${esc(row.requirements)}</p>` : '')
-        + (row.verification ? `<p class="note"><strong>Checked${row.audited_on ? ' ' + esc(row.audited_on) : ''}.</strong> ${esc(row.verification)}</p>` : '')
         + (row.compatibility_url ? `<p>${link(row.compatibility_url, 'Connection requirements')}</p>` : '')
         + (row.name === 'figma' ? '<button class="secondary" data-desktop-setup>Set up Figma desktop</button>' : '');
 }
@@ -941,11 +989,11 @@ function renderDetail(main) {
     const connections = servers.filter(s => pluginServerNames(row).has(s.name));
     const keys = row.installed && offered(row) ? row.keys || [] : [];
     const keyReady = keys.every(k => k.saved || k.from_environment);
-    main.innerHTML = `<div class="crumbs"><button id="back">Plugins</button><span aria-hidden="true">›</span><span>${esc(row.display_name)}</span></div>` + banner(row) + (keys.length ? '' : issue(row)) + `<div class="hero">${logo(row, true)}<div class="copy"><h1>${esc(row.display_name)}</h1><p class="sub">${esc(row.summary)}</p></div><div class="actions">${pluginControl(row)}${row.installed && offered(row) && mcps.length && !row.setup_required && !row.connected && !pending.has(row.name) && !row.opening && keyReady ? `<button class="install" data-connect="${esc(row.name)}">Connect</button>` : ''}${row.installed ? `<button class="secondary" data-uninstall="${esc(row.name)}">Uninstall</button>` : ''}</div></div>${row.connected ? '<p class="status connected">Connected</p>' : ''}${row.install === 'block' ? `<p class="note">${esc(row.block_reason)}</p>` : ''}`
+    main.innerHTML = `<div class="crumbs"><button id="back">Plugins</button><span aria-hidden="true">›</span><span>${esc(row.display_name)}</span></div>` + banner(row) + (keys.length ? '' : issue(row)) + `<div class="hero">${logo(row, true)}<div class="copy"><h2>${esc(row.display_name)}</h2><p class="sub">${esc(row.summary)}</p></div><div class="actions">${pluginControl(row)}${row.installed && offered(row) && mcps.length && !row.setup_required && !row.connected && !pending.has(row.name) && !row.opening && keyReady ? `<button class="install" data-connect="${esc(row.name)}">Connect</button>` : ''}${row.installed ? `<button class="secondary" data-uninstall="${esc(row.name)}">Uninstall</button>` : ''}</div></div>${row.connected ? '<p class="status connected">Connected</p>' : ''}${row.install === 'block' ? `<p class="note">${esc(row.block_reason)}</p>` : ''}`
         + compatibilityDetails(row) + (row.setup_required && !row.connected ? `<div class="banner"><p>${esc(row.setup_instructions || 'Complete Google Cloud and OAuth setup before connecting.')}</p></div><p>${link(row.setup_url,'Setup instructions')}</p>` : '') + ((row.default_prompt || []).length ? `<div class="examples">${row.default_prompt.slice(0, 3).map(p => `<div class="example">${esc(p)}</div>`).join('')}</div>` : '') + `<p class="long-description">${esc(row.long_summary || row.summary)}</p>`
         + '<h3>Apps' + (apps.length ? ' · ' + apps.length : '') + '</h3>' + (apps.length ? apps.map(app => `<div class="row">${appLogo(row, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="description">${mcps.length ? 'DGC connects to this service through the plugin’s MCP server.' : 'This package expects a ChatGPT app connection. It is unavailable in DGC without a standalone MCP server.'}</span></span></div>`).join('') : '<p class="note">No apps declared in this package.</p>')
         + `<h3>Skills${skills.length ? ' · ' + skills.length : ''}</h3>` + (skills.length ? skills.map(s => `<div class="row"><span class="copy"><strong>${esc(s.name)}</strong><span class="description skill-description" title="${esc(s.description)}">${esc(s.description || 'No description provided.')}</span></span>${row.installed && offered(row) ? switchHTML(s.enabled !== false, `Enable ${s.name}`, `data-skill="${esc(s.name)}"`, skillPending.has(s.name)) : ''}</div>`).join('') : '<p class="note">No instruction skills in this package.</p>')
-        + `<h3>Information</h3><dl class="meta">${[['Developer', esc(row.developer || 'Not provided')], ['Category', esc(row.category || 'Not provided')], ['License', row.license_url && (!row.declared_license || row.declared_license === row.license) ? link(row.license_url, row.license || 'License') : esc(row.declared_license || row.license || 'Not provided')], ['Version', esc(row.version || 'Not provided')], ['Terms', link(row.terms_url, 'Publisher terms')], ['Privacy', link(row.privacy_url, 'Privacy policy')], ['Website', link(row.website_url)], ['MCP URL', mcps.length ? mcps.map(m => m.url ? link(m.url) : esc(m.command || m.transport)).join('<br>') : 'None declared'], ['Source', link(row.source_url || row.upstream)]].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+        + `<h3>Information</h3><dl class="meta">${[['Developer', esc(row.developer || 'Not provided')], ['Category', esc(row.category || 'Not provided')], ['License', row.license_url && (!row.declared_license || row.declared_license === row.license) ? link(row.license_url, row.license || 'License') : esc(row.declared_license || row.license || 'Not provided')], ['Version', esc(row.version || 'Not provided')], ['Terms', link(row.terms_url, 'Publisher terms')], ['Privacy', link(row.privacy_url, 'Privacy policy')], ['Website', link(row.website_url)], ['MCP URL', mcps.length ? mcps.map(m => m.url ? link(m.url) : esc(m.command || m.transport)).join('<br>') : 'None declared'], ['Source', link(row.source_url || row.upstream)]].filter(([, v]) => v !== 'Not provided').map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
     if (row.installed && offered(row) && connections.length) {
         main.querySelector('.meta').previousElementSibling.insertAdjacentHTML('beforebegin', '<section class="plugin-connections"><h3>Connection</h3>' + serverRows(connections) + '</section>');
     }
@@ -965,8 +1013,10 @@ function renderMcp(main) {
     }
     const user = manualServers();
     const ownSignin = signin && user.some(s => s.name === signin.server) ? banner() : '';
-    main.innerHTML = ownSignin + (mcpError ? '<div class="banner error" role="alert"><p>' + esc(mcpError) + '</p></div>' : '') + '<h1>MCP servers</h1><p class="sub">Servers you add yourself, using a URL or a local command.</p>' + chips('mcp') + '<div class="section-head"><h3>Your servers</h3><button class="secondary" id="add-mcp">Add server</button></div>' + (serverRows(user) || '<p class="empty">No servers added manually. Add a server using its URL and authentication details, or a local command.</p>') + '<p class="note">Manage connections installed by plugins on each plugin’s page.</p><button class="secondary" id="refresh-mcp">Refresh</button>';
-    bindChips(main);
+    main.innerHTML = ownSignin + (mcpError ? '<div class="banner error" role="alert"><p>' + esc(mcpError) + '</p></div>' : '')
+        + '<h2>MCP servers</h2>' + ui.intro('mcp', 'Servers you add yourself: a URL, or a command.', 'A plugin\'s own servers are on that plugin\'s page, under Plugins.')
+        + `<div class="section-head"><h3>Your servers · ${user.length}</h3><div class="actions"><button class="secondary" id="refresh-mcp" title="Read the servers' states again">Refresh</button><button class="secondary" id="add-mcp">Add server</button></div></div>`
+        + (user.length ? `<div class="listing">${serverRows(user)}</div>` : '<div class="listing"><p class="empty">No servers added manually yet. Add one with its URL or the command that starts it.</p></div>');
     $('add-mcp').onclick = () => { mcpEditing = {}; render(); };
     $('refresh-mcp').onclick = () => send({ type: 'listMcp' });
     bindPlugins(main);
@@ -984,25 +1034,64 @@ function formSignin() {
     box.querySelector('[data-cancel-connect]').onclick = () => send({ type: 'cancelSignIn' });
     box.scrollIntoView?.({ block: 'nearest' });
 }
+// A server's form: what most servers need, its sign-in details under Advanced, and what can't be undone in a danger
+// zone of its own, each behind a confirm (an existing server only).
 function renderMcpForm(main, s) {
     const remote = s.transport === 'remote';
-    main.innerHTML = `<div class="crumbs"><button id="mcp-back">${esc(detail ? items.find(r => r.name === detail)?.display_name || 'Plugin' : 'MCP servers')}</button><span>›</span><span>${esc(s.name || 'Add server')}</span></div><h1>${s.name ? 'Configure server' : 'Add server'}</h1><p class="sub">Use your existing MCP configuration and credential storage.</p>${s.setup_note ? `<p class="note">${esc(s.setup_note)}</p>` : ''}<form class="mcp-form" id="mcp-form"><label>Server name<input id="mcp-name" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(s.name || s.suggested_name)}"></label><label>Transport<select id="mcp-transport"><option value="stdio">Local STDIO</option><option value="remote"${remote ? ' selected' : ''}>Remote HTTP</option></select></label><label><span id="mcp-target-label">${remote ? 'Server URL' : 'Command'}</span><input id="mcp-target" required value="${esc(remote ? s.url : s.command)}"></label><label id="args-label">Arguments <span class="note">One per line. No shell parsing.</span><textarea id="mcp-args">${esc((s.args || []).join('\n'))}</textarea></label><label id="env-label">Environment <span class="note">KEY=value goes to SecretStorage. KEY uses the environment.</span><textarea id="mcp-env" placeholder="${esc((s.env_names || []).join('\n'))}"></textarea></label><label id="token-label">Bearer token <span class="note">Leave blank to keep the saved token.</span><input type="password" id="mcp-token" autocomplete="off"></label><fieldset id="oauth-app" class="oauth-app"><legend>Your own OAuth app <span class="note">Optional. For a service that doesn’t let DGC register itself, such as a Google app of your own. Asana, Docusign and Zoom have a guided setup under Plugins → Apps.</span></legend><label>Client ID<input id="mcp-oauth-id" autocomplete="off" spellcheck="false" value="${esc(s.oauth_client_id || '')}"></label><label>Client secret <span class="note">${s.oauth_client_id ? 'Leave blank to keep the saved secret.' : 'Leave blank for a public client.'}</span><input type="password" id="mcp-oauth-secret" autocomplete="off"></label><label>Callback port<input id="mcp-oauth-port" inputmode="numeric" pattern="[0-9]{4,5}" placeholder="3334" value="${esc(s.oauth_port || '')}"></label><p class="note" id="mcp-oauth-redirect">In the app's settings at the service, add this redirect URL: <code>http://localhost:${esc(String(s.oauth_port || 3334))}/oauth/callback</code></p></fieldset><label>Log level<select id="mcp-log">${['warning', 'info', 'debug', 'error', 'off'].map(v => `<option${v === s.log_level ? ' selected' : ''}>${v}</option>`).join('')}</select></label><label class="check"><input type="checkbox" id="mcp-clear">Clear stored credentials before saving</label><div class="actions"><button class="save">Save and connect</button><button type="button" class="secondary" id="mcp-cancel">Cancel</button>${s.name ? '<button type="button" class="secondary" id="mcp-reconnect">Reconnect</button><button type="button" class="secondary" id="mcp-remove">Remove server</button>' : ''}</div></form>`;
-    const back = () => { mcpEditing = null; mcpSubmitted = ''; render(); };
+    const note = text => ` <span class="note">${text}</span>`;
+    main.innerHTML = `<div class="crumbs"><button id="mcp-back">${esc(detail ? items.find(r => r.name === detail)?.display_name || 'Plugin' : 'MCP servers')}</button><span>›</span><span>${esc(s.name || 'Add server')}</span></div>`
+        + `<h2>${s.name ? 'Configure server' : 'Add server'}</h2><p class="sub">A server DGC connects to: a URL, or a command it starts.</p>${s.setup_note ? `<p class="note">${esc(s.setup_note)}</p>` : ''}`
+        + `<form class="mcp-form" id="mcp-form">`
+        + `<label>Server name${note('Letters, numbers, dots, dashes.')}<input id="mcp-name" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(s.name || s.suggested_name)}"></label>`
+        + `<label>Connects with<select id="mcp-transport"><option value="stdio">A command on this computer</option><option value="remote"${remote ? ' selected' : ''}>A URL</option></select></label>`
+        + `<label><span id="mcp-target-label">${remote ? 'Server URL' : 'Command'}</span><input id="mcp-target" required value="${esc(remote ? s.url : s.command)}"></label>`
+        + `<label id="args-label">Arguments${note('One per line, passed exactly as written.')}<textarea id="mcp-args">${esc((s.args || []).join('\n'))}</textarea></label>`
+        + `<label id="env-label">Environment${note('One per line. NAME=value is kept privately; NAME alone passes yours on.')}<textarea id="mcp-env" placeholder="${esc((s.env_names || []).join('\n'))}"></textarea></label>`
+        + `<label id="token-label">Token${note('For a server that asks for one. Blank keeps the saved token.')}<input type="password" id="mcp-token" autocomplete="off"></label>`
+        + `<details class="more mcp-advanced"${INFO.has('mcp-advanced') || s.oauth_client_id || (s.log_level && s.log_level !== 'warning') ? ' open' : ''}><summary>Advanced</summary><div class="mcp-advanced-body">`
+        + `<fieldset id="oauth-app" class="oauth-app"><legend>Your own sign-in app${note('Optional. For a service that won\'t let DGC register itself, such as a Google app of your own. Asana, Docusign and Zoom are set up under Plugins → Apps.')}</legend><label>Client ID<input id="mcp-oauth-id" autocomplete="off" spellcheck="false" value="${esc(s.oauth_client_id || '')}"></label><label>Client secret${note(s.oauth_client_id ? 'Blank keeps the saved secret.' : 'Blank for an app with no secret.')}<input type="password" id="mcp-oauth-secret" autocomplete="off"></label><label>Callback port<input id="mcp-oauth-port" inputmode="numeric" pattern="[0-9]{4,5}" placeholder="3334" value="${esc(s.oauth_port || '')}"></label><p class="note" id="mcp-oauth-redirect">In the app's settings at the service, add this redirect URL: <code>http://localhost:${esc(String(s.oauth_port || 3334))}/oauth/callback</code></p></fieldset>`
+        + `<label>What it logs${note('For finding a problem: Debug says the most.')}<select id="mcp-log">${[['warning', 'Warnings'], ['info', 'Info'], ['debug', 'Debug'], ['error', 'Errors only'], ['off', 'Nothing']].map(([v, label]) => `<option value="${v}"${v === (s.log_level || 'warning') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`
+        + `</div></details>`
+        + `<div class="actions"><button class="save">Save and connect</button><button type="button" class="secondary" id="mcp-cancel">Cancel</button>${s.name ? '<button type="button" class="secondary" id="mcp-reconnect">Reconnect</button>' : ''}</div></form>`
+        + (s.name ? `<section class="danger-zone" aria-label="Can't be undone"><h3>Can't be undone</h3><p class="note">Each asks first.</p><div id="mcp-danger"></div></section>` : '');
+    const back = () => { mcpEditing = null; mcpSubmitted = ''; mcpConfirm = ''; render(); };
     $('mcp-back').onclick = back;
     $('mcp-cancel').onclick = back;
     const transport = () => { const remote = $('mcp-transport').value === 'remote'; $('args-label').hidden = remote; $('env-label').hidden = remote; $('token-label').hidden = !remote; $('oauth-app').hidden = !remote; $('mcp-target-label').textContent = remote ? 'Server URL' : 'Command'; };
     $('mcp-transport').onchange = transport;
     transport();
-    $('mcp-form').onsubmit = e => { e.preventDefault(); mcpSubmitted = $('mcp-name').value; formSignin(); send({ type: 'mcpSave', values: { original_name: s.name || '', name: $('mcp-name').value, transport: $('mcp-transport').value, target: $('mcp-target').value, args: $('mcp-args').value, env: $('mcp-env').value, env_names: s.env_names || [], token: $('mcp-token').value, clear_secrets: $('mcp-clear').checked, log_level: $('mcp-log').value, oauth_client_id: $('mcp-oauth-id').value, oauth_client_secret: $('mcp-oauth-secret').value, oauth_port: $('mcp-oauth-port').value || ($('mcp-oauth-id').value.trim() ? '3334' : '') } }); };
+    main.querySelector('.mcp-advanced').addEventListener('toggle', e => { if (e.currentTarget.open) INFO.add('mcp-advanced'); else INFO.delete('mcp-advanced'); });
+    // What the form holds now: the save, and Forget (the same save, with the saved sign-in cleared first).
+    const values = (clear) => ({ original_name: s.name || '', name: $('mcp-name').value, transport: $('mcp-transport').value, target: $('mcp-target').value, args: $('mcp-args').value, env: $('mcp-env').value, env_names: s.env_names || [], token: $('mcp-token').value, clear_secrets: clear, log_level: $('mcp-log').value, oauth_client_id: $('mcp-oauth-id').value, oauth_client_secret: $('mcp-oauth-secret').value, oauth_port: $('mcp-oauth-port').value || ($('mcp-oauth-id').value.trim() ? '3334' : '') });
+    const submit = (clear) => { mcpSubmitted = $('mcp-name').value; formSignin(); send({ type: 'mcpSave', values: values(clear) }); };
+    $('mcp-form').onsubmit = e => { e.preventDefault(); submit(false); };
     $('mcp-oauth-port').oninput = () => { $('mcp-oauth-redirect').querySelector('code').textContent = `http://localhost:${$('mcp-oauth-port').value || 3334}/oauth/callback`; };
     if (s.name) {
         $('mcp-reconnect').onclick = () => send({ type: 'mcpReconnect', name: s.name });
-        $('mcp-remove').onclick = () => send({ type: 'mcpRemove', name: s.name });
+        // The danger zone draws only itself, so a confirm never redraws (or loses) what the form holds.
+        const danger = (what = '') => {
+            mcpConfirm = what;
+            const box = $('mcp-danger');
+            box.innerHTML = what === 'forget'
+                ? `<div class="banner danger-confirm" role="alertdialog" aria-label="Forget saved sign-in"><p>Forget the token, keys and sign-in saved for ${esc(s.name)}? It asks for them again when it next connects.</p><div class="actions"><button type="button" class="secondary danger" id="mcp-forget-yes">Forget them</button><button type="button" class="link" id="mcp-confirm-no">Keep them</button></div></div>`
+                : what === 'remove'
+                ? `<div class="banner danger-confirm" role="alertdialog" aria-label="Remove server"><p>Remove ${esc(s.name)}? Its saved sign-in goes with it.</p><div class="actions"><button type="button" class="secondary danger" id="mcp-remove-yes">Remove it</button><button type="button" class="link" id="mcp-confirm-no">Keep it</button></div></div>`
+                : '<div class="actions"><button type="button" class="secondary danger" id="mcp-forget">Forget saved sign-in…</button><button type="button" class="secondary danger" id="mcp-remove">Remove server…</button></div>';
+            if ($('mcp-forget')) $('mcp-forget').onclick = () => danger('forget');
+            if ($('mcp-remove')) $('mcp-remove').onclick = () => danger('remove');
+            if ($('mcp-confirm-no')) $('mcp-confirm-no').onclick = () => { danger(''); $(what === 'forget' ? 'mcp-forget' : 'mcp-remove')?.focus(); };
+            if ($('mcp-forget-yes')) $('mcp-forget-yes').onclick = () => { danger(''); submit(true); };
+            if ($('mcp-remove-yes')) $('mcp-remove-yes').onclick = () => { danger(''); send({ type: 'mcpRemove', name: s.name }); };
+            box.querySelector('.danger-confirm .danger')?.focus();
+        };
+        danger(mcpConfirm);
     }
 }
 document.querySelector('nav').innerHTML = sections.map(([id, label]) => (id === 'usage' ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
 document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { navTo(b.dataset.nav); if (b.dataset.nav === 'mcp')
     send({ type: 'listMcp' }); });
+$('main').insertAdjacentHTML('afterbegin', `<div class="page-picker"><label for="page-picker">Settings</label><select id="page-picker">${sections.map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div>`);
+$('page-picker').onchange = () => { const next = $('page-picker').value; navTo(next); if (next === 'mcp') send({ type: 'listMcp' }); };
 $('collapse-nav').innerHTML = icon('panel');
 $('collapse-nav').onclick = () => { const collapsed = document.querySelector('.shell').classList.toggle('collapsed'); $('collapse-nav').setAttribute('aria-expanded', String(!collapsed)); $('collapse-nav').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); };
 window.addEventListener('message', event => {
@@ -1158,8 +1247,9 @@ window.addEventListener('message', event => {
             // number being typed on the page is kept.
             draft.server_window = Number(ev.window) > 0 ? { model: ev.model, window: ev.window, server: ev.server || '', trained: ev.trained || 0 } : null;
             if (config) config.server_window = draft.server_window;
-            const hint = $('context_size')?.closest('.field')?.querySelector('.hint');
-            if (hint) hint.textContent = contextSizeHint(draft);
+            const row = $('context_size')?.closest('.field');
+            if (row?.querySelector('.hint')) row.querySelector('.hint').textContent = contextSizeHint(draft);
+            if (row?.querySelector('.detail')) row.querySelector('.detail').textContent = contextSizeMore(draft);
             const box = $('context_size');
             if (box && !dirty.has('context_size') && document.activeElement !== box) box.value = String(contextSizeShown(draft));
         }

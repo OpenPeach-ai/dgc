@@ -137,3 +137,34 @@ class CloudExecution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaintainersNotesStayHome(unittest.TestCase):
+    """The catalog's `verification` and `audited_on` are DGC's own QA notes ("DGC browser handoff verified. A user
+    confirmed Figma connection in Composio..."). The install review printed them as "Checked 2026-09-23. ..." to every
+    user (the Settings visual pass, 24 Oct 2026). They stay in the catalog for maintainers and never reach the editor."""
+
+    def test_neither_the_list_nor_the_install_review_carries_them(self) -> None:
+        from unittest.mock import patch
+        from dgc import plugins
+        entries = json.loads((ROOT / "dgc" / "plugin_catalog.json").read_text(encoding="utf-8"))["plugins"]
+        noted = [e for e in entries if e.get("verification") or e.get("audited_on")]
+        self.assertTrue(noted, "the catalog still keeps its notes, for maintainers")
+        with patch.object(plugins, "load_catalog", return_value={"plugins": entries}), \
+             patch.object(plugins, "_installed", return_value=[]), \
+             patch.object(plugins, "_source", side_effect=plugins.PluginError("not cached")):
+            rows = plugins.catalog_for_editor()
+        for row in rows:
+            with self.subTest(row=row["name"]):
+                self.assertNotIn("verification", row)
+                self.assertNotIn("audited_on", row)
+        composio = next(e for e in entries if e["name"] == "composio")
+        preview = plugins._preview({**composio, "metadata": {"verification": "planted"}}, None)
+        self.assertNotIn("verification", preview)
+        self.assertNotIn("audited_on", preview)
+        self.assertNotIn("A user confirmed", json.dumps(preview))
+        self.assertEqual(preview["requirements"], composio["requirements"], "what a user needs to know still goes")
+
+    def test_the_page_never_prints_them_even_from_an_older_cli(self) -> None:
+        self.assertNotIn("row.verification", SETTINGS_UI)
+        self.assertNotIn("audited_on", SETTINGS_UI)

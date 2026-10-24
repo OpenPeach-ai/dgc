@@ -2632,10 +2632,13 @@ window sub-agents use, how many run at once, the fallback route, and the model f
 remembers, with its **History** and **Undo**), **Voice**, **Running sessions** (sessions working
 with no window), **Token usage** (what this machine counted), **Security** (sandbox confinement and
 plan-mode limits), **Plugins** (installed packages, the apps they reach, and the directory) and
-**MCP servers**. Everything is a row: what it is on the left,
-the control on the right, the explanation beneath. Each **Model** box lists the models at its own
-card's host as you type it (Ollama's `:cloud` models included), and still takes any name; a saved key
-only ever goes to the host it was saved for. Skills, lifecycle hooks, permission rules,
+**MCP servers**. Settings follows your VS Code theme. Everything is a row: what it is on the left,
+the control on the right, a one-line hint beneath, and the rest behind the **?** beside its name.
+Advanced settings fold away under **Advanced**. One **Save all** at the foot of every settings page
+saves every page's changes and names the pages that have them. Each **Model** box lists the models at
+its own card's host as you type it (Ollama's `:cloud` models included), and still takes any name; a
+saved key only ever goes to the host it was saved for. An MCP server's **Forget saved sign-in** and
+**Remove server** each ask first. Skills, lifecycle hooks, permission rules,
 project memory and these docs each open as their own panel from the command menu.
 See **Plugins, apps and MCP**.
 
