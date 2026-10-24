@@ -235,7 +235,7 @@ def inspect_capacity(config, *, directory=None):
         raise _error('not_initialized', 'No existing local Pip registry is available; nothing was created.') from None
     except RegistryError as exc:
         if exc.code == 'unsupported_platform':
-            raise _error(exc.code, 'Read-only capacity inspection requires Linux procfs and POSIX no-follow filesystem support.') from None
+            raise _error(exc.code, 'Read-only capacity inspection requires Linux procfs or macOS, and POSIX no-follow filesystem support.') from None
         if exc.code == 'schema_version':
             raise _error(exc.code, f'Capacity inspection requires an existing compatible schema{REGISTRY_SCHEMA} registry and never migrates it.') from None
         raise

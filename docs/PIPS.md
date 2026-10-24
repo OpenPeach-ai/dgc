@@ -1629,7 +1629,7 @@ than run unconfined.
   four per Pip.
 - A Pip's computer: up to eight requests waiting at once (more are dropped, unsent),
   each for at most 24 hours; up to 200 screenshots per run, each at most 90 KiB.
-- `dgc pips export-run` and `dgc pips capacity` currently need Linux.
+- `dgc pips export-run` and `dgc pips capacity` work on Linux and macOS.
 
 ## More
 

@@ -90,6 +90,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   after it; here-documents fail there (macOS's bash writes them to `/var/tmp`). `dgc doctor` on a Mac has one row
   for the box. Linux is unchanged.
 
+- **`dgc pips export-run` and `dgc pips capacity` work on a Mac.** Both refused there ("requires Linux procfs"):
+  they read Pips' database read-only through its folder, pinned link by link, and only Linux could open a file
+  through such a folder. On a Mac DGC opens the path macOS gives for that folder and checks afterwards that it is
+  still the same folder and database, so a Quill draft or a Personal result can be saved as Markdown from the
+  terminal there too.
+
 - **A ChatDGC reply keeps running through a window reload.** ChatDGC rides on the Sessions home's `dgc serve`, which
   used to end with its window and stop the reply. For an editor that asks for it, that backend now keeps running
   while a ChatDGC reply (or deep research) is being written: a reload, a closed window or a dropped connection

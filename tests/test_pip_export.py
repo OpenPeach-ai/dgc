@@ -4,7 +4,9 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -50,6 +52,28 @@ class PipExportTests(unittest.TestCase):
         self.assertIn('finding_review_history',[r['type'] for r in rows])
         self.assertIn('handoff_reference',[r['type'] for r in rows])
         self.assertNotIn('base_url',raw.decode());self.assertNotIn(str(self.root),raw.decode())
+
+    def test_a_path_the_kernel_names_must_still_reach_the_pinned_registry(self):
+        # A Mac has no /proc/self/fd: the snapshot opens the path the kernel has for the pinned directory
+        # (F_GETPATH), which SQLite resolves again, so after opening it must still be that directory and registry.
+        # Before, export-run and capacity refused on a Mac. Linux plays the Mac's path here.
+        self.setup_source(); self.propose()
+        named = os.path.realpath(self.registry.directory)
+        with patch.object(export, '_pinned_path', lambda fd: named):
+            self.assertEqual(self.write(name='named.jsonl')['export']['run_id'], self.source_run['id'])
+        elsewhere = self.base / 'elsewhere'
+        shutil.copytree(self.registry.directory, elsewhere); os.chmod(elsewhere, 0o700)
+        with patch.object(export, '_pinned_path', lambda fd: str(elsewhere)), \
+                self.assertRaisesRegex(RegistryError, 'directory moved'):
+            self.write(name='moved.jsonl')
+        self.assertFalse((self.base / 'moved.jsonl').exists())
+        self.assertEqual(list(self.base.glob('.dgc-pip-export-*.partial')), [])
+        if sys.platform == 'darwin':
+            pinned = export._directory(self.registry.directory)
+            try:
+                self.assertEqual(export._pinned_path(pinned), named, "the kernel's own path for it, without links")
+            finally:
+                os.close(pinned)
 
     def test_foreign_workspace_is_rejected_before_any_json_decode(self):
         self.setup_source(); other=self.base/'other';other.mkdir();self.cfg.project_root=other

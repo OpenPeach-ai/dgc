@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import stat
+import sys
 import time
 import uuid
 from collections import Counter
@@ -129,6 +130,20 @@ def _same_parent(path, pinned):
         os.close(current)
 
 
+def _pinned_path(fd):
+    """A path that reaches the pinned directory ``fd``: through it on Linux (procfs), or the path the kernel has for
+    it on macOS (F_GETPATH), which has no procfs; `dgc pips export-run` and `capacity` refused on a Mac."""
+    if Path('/proc/self/fd').is_dir():
+        return f'/proc/self/fd/{fd}'
+    if sys.platform == 'darwin':
+        import fcntl
+        if hasattr(fcntl, 'F_GETPATH'):
+            named = os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).split(b'\0', 1)[0])
+            if named.startswith('/'):
+                return named
+    raise _error('Pinned read-only database export requires Linux procfs or macOS.', 'unsupported_platform')
+
+
 @contextlib.contextmanager
 def _read_database(directory):
     directory = Path(directory)
@@ -145,13 +160,19 @@ def _read_database(directory):
         # process's locks held by other SQLite connections. The directory fd pins
         # its ancestors; as in WorkspaceRegistry, same-UID hostile DB replacement
         # itself is not a claimed security boundary.
-        if not Path('/proc/self/fd').is_dir():
-            raise _error('Pinned read-only database export currently requires Linux procfs.', 'unsupported_platform')
-        uri = Path(f'/proc/self/fd/{fd}/registry.sqlite3').as_uri() + '?mode=ro'
+        named = _pinned_path(fd)
+        uri = Path(named, 'registry.sqlite3').as_uri() + '?mode=ro'
         db = sqlite3.connect(uri, uri=True, isolation_level=None, timeout=1)
         after = os.stat('registry.sqlite3', dir_fd=fd, follow_symlinks=False)
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise _error('The registry changed while opening the export snapshot.')
+        if not named.startswith('/proc/self/fd/'):
+            # A path the kernel named for the pinned directory is resolved again when SQLite opens it, so after the
+            # open it must still be that directory, holding the same registry.
+            through, opened = os.stat(named), os.stat(Path(named, 'registry.sqlite3'), follow_symlinks=False)
+            if ((through.st_dev, through.st_ino) != (info.st_dev, info.st_ino)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                raise _error('The registry directory moved while opening the export snapshot.')
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON'); db.execute('PRAGMA trusted_schema=OFF')
         db.execute('BEGIN')

@@ -714,8 +714,8 @@ macOS. Patch and Pulse commands need Linux with bubblewrap, or macOS with
 Seatbelt and Xcode or the Command Line Tools, with weaker guarantees (see **macOS**
 under Patch and Pulse commands). Live-data commands need Linux with bubblewrap, or
 macOS with Seatbelt (see **The box on macOS** under Live-data commands). Current-tree source needs POSIX directory handles.
-`export-run` and `capacity` need Linux `/proc`. The service needs Linux with user
-systemd.
+`export-run` and `capacity` need Linux `/proc` or macOS (which names the pinned registry folder's
+path itself). The service needs Linux with user systemd.
 
 ## Run kinds
 

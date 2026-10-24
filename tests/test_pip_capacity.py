@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import sqlite3
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,8 +17,9 @@ from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests.test_pips_local import config
 
 
-@unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and Path('/proc/self/fd').is_dir(),
-                     'Existing export opener requires Linux procfs/POSIX no-follow support.')
+@unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW')
+                     and (Path('/proc/self/fd').is_dir() or sys.platform == 'darwin'),
+                     'Existing export opener requires Linux procfs or macOS, with POSIX no-follow support.')
 class CapacityTests(unittest.TestCase):
     def setUp(self):
         # The pressure arithmetic is the same at any ceiling; 1,000-row ceilings keep the
