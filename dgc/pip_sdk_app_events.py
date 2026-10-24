@@ -339,9 +339,9 @@ def trigger(store, app, event, payload, idempotency_key, actor, config=None) -> 
                       "pips": entries[:MAX_LISTED], "more": max(0, len(entries) - MAX_LISTED)}
             db.execute("UPDATE pip_app_events SET answer=?,payload=? WHERE id=?",
                        (json.dumps(answer, ensure_ascii=False, separators=(",", ":")), text if queued else "", event_id))
-    if kept is not None:
-        return _repeat(answer)
     online = bool(runner_status(registry).get("online"))
+    if kept is not None:
+        return {**_repeat(answer), "runner_online": online}
     return {**answer, "repeat": False, "runner_online": online, "notice": _notice(answer, online)}
 
 

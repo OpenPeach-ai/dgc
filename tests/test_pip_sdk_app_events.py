@@ -111,7 +111,7 @@ class RoutineOnAnEventTests(EventWorld, unittest.TestCase):
         # The same order again: a no-op that says so, with what the first one queued.
         again = self.send()
         self.assertTrue(again["repeat"])
-        self.assertEqual((again["event_id"], again["queued"]), (answer["event_id"], 1))
+        self.assertEqual((again["event_id"], again["queued"], again["runner_online"]), (answer["event_id"], 1, False))
         self.assertIn("DGC already has this event (idempotency_key ORD-1041", again["notice"])
         self.assertIn("nothing new was queued", again["notice"])
         self.finish()
