@@ -1838,7 +1838,7 @@ function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpane
 function projectEmptyMarkup(){return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;}
 /** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
 // Its list starts at its first page: the pages read and the search typed were the other tab's (both tabs are paged now).
-function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];jobsExtra=[];S.jobsNext=null;S.jobsTotal=null;S.pipSearch='';draft.pipSearch='';S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
+function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];jobsExtra=[];S.jobsNext=null;S.jobsTotal=null;window.clearTimeout(pipSearchTimer);S.pipSearch='';draft.pipSearch='';S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
 function chooseScopeTab(name,focus=false){
  if(!scopeTabs()||!usable()||!S.workspace||S.busy)return;
  const target=name==='project'?projectSpace():personalSpace();
