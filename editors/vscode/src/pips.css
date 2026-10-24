@@ -520,6 +520,8 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .memory-kept{display:flex;flex-direction:column;gap:2px;margin:-10px 0 14px;font-size:11px;color:var(--vscode-descriptionForeground)}.memory-kept-item{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.memory-kept button.link{min-height:0;padding:0 4px;font-size:11px}
 /* Careful mode (#9): its switch and the sites it may visit, on the page of a Pip with a computer. */
 .pip-page-group[aria-label="Careful mode"] .pip-page-label{margin-top:10px}
+/* From your code (Pips API 64): the change a template asks for, under the line that says your code keeps the Pip. */
+.pip-template-change{border-top:1px solid var(--pip-edge)}.pip-template-change>p.muted{margin:0;padding:8px 14px 0}.pip-template-change>.actions{padding:10px 14px 12px}
 /* A plugin's level (Pips API 45): its choice sits on its own line under the name, so a long option never squeezes the words to one letter a line (seen in VS Code, 2026-10-09). */
 .pip-page-row.plugin-level{flex-wrap:wrap}
 .pip-page-row.plugin-level .row-words{flex:1 1 200px}
