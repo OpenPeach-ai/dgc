@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-#
 # DGC's Pips runner on a server, with no VS Code and no desktop (deploy/docker/README.md).
 #
 # Debian slim with Python 3.12; DGC installed from its release archive by install.sh, at the version you pin; the
@@ -34,8 +32,7 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DGC_HOME=/data \
-    HOME=/data
+    PIP_NO_CACHE_DIR=1
 
 # tini reaps the children Pips' runs leave and passes Docker's stop on. bubblewrap boxes Pip computers and reviewed
 # commands where the container allows user namespaces (README, "Without bubblewrap"); git is for project Pips.
@@ -50,16 +47,15 @@ RUN set -eu; \
     base="${DGC_BASE_URL}"; \
     if [ -f /tmp/dgc-install/release/dgc.tar.gz ]; then base=file:///tmp/dgc-install/release; fi; \
     DGC_BASE_URL="$base" DGC_INSTALL_VERSION="${DGC_VERSION}" DGC_SKIP_EXTENSION=1 \
-      DGC_DATA_DIR=/opt/dgc DGC_BIN=/usr/local/bin DGC_PYTHON=/usr/local/bin/python3 HOME=/root \
+      DGC_DATA_DIR=/opt/dgc DGC_BIN=/usr/local/bin DGC_PYTHON=/usr/local/bin/python3 \
       bash /tmp/dgc-install/install.sh; \
     rm -rf /tmp/dgc-install /root/.cache; \
     test "$(dgc --version)" = "dgc ${DGC_VERSION}"
 
 COPY sdk/python /tmp/dgc-sdk
 RUN set -eu; \
-    if [ -n "${DGC_SDK_VERSION}" ]; then pip install --no-cache-dir "dgc-sdk==${DGC_SDK_VERSION}"; \
-    else pip install --no-cache-dir /tmp/dgc-sdk; fi; \
-    rm -rf /tmp/dgc-sdk; \
+    if [ -n "${DGC_SDK_VERSION}" ]; then pip install "dgc-sdk==${DGC_SDK_VERSION}"; else pip install /tmp/dgc-sdk; fi; \
+    rm -rf /tmp/dgc-sdk /root/.cache; \
     python3 -c "import dgc_sdk"
 
 COPY deploy/docker/with-pips /usr/local/bin/with-pips
@@ -69,6 +65,9 @@ RUN useradd --uid "${DGC_UID}" --home-dir /data --no-create-home --shell /usr/sb
  && mkdir -p /data && chown dgc:dgc /data && chmod 0700 /data \
  && chmod 0755 /usr/local/bin/with-pips
 
+# DGC's home, and so its settings, secrets and Pips state, is the volume.
+ENV DGC_HOME=/data \
+    HOME=/data
 USER dgc
 WORKDIR /data
 VOLUME ["/data"]

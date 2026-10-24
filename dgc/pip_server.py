@@ -39,7 +39,7 @@ SUBSCRIPTION_REFUSED = "server_subscription"
 NO_CHROME = ("This Pips runner is on a server, where there is no Chrome of the user's to lend, so borrowing their "
              "Chrome isn't possible here. Do what you can without it, and say what you would need.")
 QUIET_EVENTS = frozenset({"pip_run_progress"})      # a run's every step: its chat and report have them
-MAX_DETAIL = 400
+MAX_DETAIL = 1000                        # a refusal's whole words fit; a run's error is at most 1,500
 STATES = ("running", "off", "stopped", "no_runner", "heartbeat_stale", "state_unreadable")
 
 
