@@ -519,8 +519,12 @@ def read_arguments(trigger, now: datetime) -> dict:
 
 
 def _record(registry, row, **fields) -> bool:
-    """Save a check's outcome, only if nobody changed the routine meanwhile."""
-    fields["updated_at"] = stamp(_now(registry))
+    """Save a check's outcome, only if nobody changed the routine meanwhile. A check isn't a change to the routine:
+    updated_at moves only when its status does (a one-time routine done). It used to move on every check, so the chat's
+    "Routine added" card (shown while updated_at is recent, pipRoutines.shownRoutineCards) never went away for a routine
+    checked every few minutes, such as an email one."""
+    if "status" in fields and fields["status"] != row["status"]:
+        fields["updated_at"] = stamp(_now(registry))
     with registry.transaction():
         sets = ",".join(f"{name}=?" for name in fields)
         cursor = registry.db.execute(f"UPDATE pip_routines SET {sets},revision=revision+1 WHERE id=? AND revision=?",

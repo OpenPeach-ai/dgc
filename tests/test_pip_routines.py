@@ -176,6 +176,28 @@ class RoutineTests(unittest.TestCase):
         self.assertEqual(self.turns(), [])
         self.assertIsNotNone(routine)
 
+    def test_checks_leave_updated_at_alone_so_the_routine_added_card_goes(self):
+        # The chat shows "Routine added" while a Pip-suggested routine's updated_at is recent (shownRoutineCards). A
+        # check is not a change to the routine: an email routine checked every few minutes kept the card up for good.
+        candidate, _ = pip_routines.tool_result({"title": "Bank alerts", "prompt": "Tell me what the email says.",
+                                                 "when": EMAIL}, connected_toolkits={"gmail"})
+        sent = pip_chat.send(self.store, self.pip["id"], "Tell me about bank emails", "chat-1", "editor-user", self.cfg)
+        self.store.claim_next()
+        self.store.finish(sent["run"]["id"], result={"text": "I can watch for those.", "routine_drafts": [candidate]})
+        [suggested] = pip_routines.listing(self.store, self.pip["id"])["routines"]
+        added = pip_routines.decide(self.store, self.pip["id"], suggested["id"], True)
+        self.connect("gmail")
+
+        def reader(config, app, tool, arguments):
+            return json.dumps({"data": {"messages": []}})
+        for _ in range(3):
+            self.at(11)
+            pip_routines.tick(self.registry, self.cfg, reader=reader)
+        checked, updated = self.registry.db.execute("SELECT last_checked_at,updated_at FROM pip_routines WHERE id=?",
+                                                    (added["id"],)).fetchone()
+        self.assertIsNotNone(checked, "it was checked")
+        self.assertEqual(updated, added["updated_at"], "but checks didn't change the routine")
+
     def test_an_email_routine_notes_what_is_there_then_runs_once_per_new_email(self):
         routine = pip_routines.add(self.store, self.pip["id"], "Bank alerts", "Tell me what the email says.", EMAIL)
         self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "no_app"})
