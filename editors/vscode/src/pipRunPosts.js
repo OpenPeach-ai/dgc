@@ -17,6 +17,7 @@
 // same. (Before, runs nobody answered folded into "N earlier runs" after a day: a log line where the Pip had spoken.
 // The all-clear fold takes the pile that line was for; what remains is news, each said once, and History keeps all.)
 import {esc,record} from './pipsModel.js';
+import {elapsed} from './pipRunActivity.js';
 import '../media/msgtime.js';
 
 const RUN=/^run_[0-9a-f]{32}$/;
@@ -242,7 +243,7 @@ export function routineTitle(text){const m=ROUTINE.exec(String(text||''));return
 // ---- Drawing it -----------------------------------------------------------------------------------------------
 const ICONS={check:'<path d="m3.5 8.5 3 3 6-7"/>',x:'<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>',spin:'<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>',doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
   play:'<path d="M5 3.2v9.6L12.4 8Z"/>',fix:'<path d="M10.2 2.2a3.2 3.2 0 0 0-3.9 4.2L2.2 10.5l3.3 3.3 4.1-4.1a3.2 3.2 0 0 0 4.2-3.9l-2 2-2-.3-.3-2Z"/>',
-  chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>'};
+  chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>',stop:'<rect x="4.5" y="4.5" width="7" height="7" rx="1.2"/>'};
 const icon=(name,cls='run-post-icon')=>`<svg class="${cls}" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 const chev=icon('chev','run-post-chev');
 const where=f=>typeof f.path==='string'&&f.path?`${f.path}${Number.isSafeInteger(f.line)&&f.line>0?`:${f.line}`:''}`:'';
@@ -328,6 +329,27 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
     :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
   return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div><div class="run-post-attach">${attach}</div></article>`;
+}
+
+// ---- A run while it runs (the founder, 24 Oct) ----------------------------------------------------------------------
+// From the moment a run starts its chat has ONE live post for it: the Pip's face at work, its name, what it is doing
+// now (from the run's activity, pipRunActivity.js), a clock, Stop, and how it started ("Started by you", "On schedule ·
+// 9:00 AM", "From a new commit", "Asked by DGC", "First run"). It stands where the run's own post will: at the end of the
+// chat, with the same head, so when the run ends that post takes its place, with no second item and no jump. It is
+// drawn from the run's state (get_pip's active run, list_pip_runs, get_pip_run, its activity), never from memory, so a
+// reload while it runs draws it again.
+/** The live post. `doing`: what it is doing now, as parts; `since`: when it started (ms); `state`: running, queued,
+ *  stopping or ending (its post is on the way); `started`: how it started; `routine`: a routine's title; `body`: a
+ *  routine's reply so far, drawn under what it is doing; `canStop`: Stop is offered. */
+export function livePostMarkup({runId,name,face='',doing=[],since=null,state='running',started='',routine='',body='',canStop=true,now=Date.now()}){
+  const id=esc(runId),doingText=state==='stopping'?'Stopping…':state==='ending'?'Finishing up…':doing.map(partText).join('')||'Getting started';
+  const doingHtml=state==='stopping'||state==='ending'?esc(doingText):doing.length?doing.map(partHtml).join(''):esc(doingText);
+  const clockText=Number.isFinite(since)?elapsed(now-since):'';
+  const clock=Number.isFinite(since)&&state!=='queued'?`<span class="run-post-clock" data-since="${since}" aria-hidden="true">${clockText}</span>`:'';
+  const stop=canStop&&state!=='ending'?`<button type="button" class="run-post-chip run-post-stop" data-live-stop="${id}"${state==='stopping'?' disabled':''} title="${state==='stopping'?'Stopping it. It can take a moment.':'Stop this run. Nothing is posted for it.'}">${icon('stop')}<span>${state==='stopping'?'Stopping…':'Stop'}</span></button>`:'';
+  const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${routine?`<span class="run-post-routine">${esc(routine)}</span>`:''}${clock}</div>`;
+  const label=`${name}${routine?`, ${routine}`:''}: ${doingText}${state==='queued'?'':clockText?`. Running ${clockText}`:''}${started?`. ${started}`:''}`;
+  return `<article class="pip-message assistant dgc run-post run-post-live" data-run-post="${id}" data-live="${esc(state)}" tabindex="-1" aria-label="${esc(label)}" aria-busy="true">${head}<div class="answer"><div class="message-body text final run-post-body"><p class="run-post-doing"><span class="run-post-spinner" aria-hidden="true"></span><span>${doingHtml}</span></p>${body}</div></div><div class="run-post-attach">${stop}${started?`<span class="run-post-started">${esc(started)}</span>`:''}</div></article>`;
 }
 
 /** The chat's messages and runs in time order. Each run is {post, previous}; all-clear runs of one kind in a row

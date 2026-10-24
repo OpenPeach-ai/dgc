@@ -135,6 +135,18 @@ details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post-day-times{display:flex;flex-wrap:wrap;gap:2px 4px;min-width:0;flex:1 1 12em}
 .run-post-time{min-height:0;padding:1px 6px;border:0;border-radius:8px;background:transparent;color:var(--vscode-textLink-foreground);font-size:12px;font-variant-numeric:tabular-nums}
 .run-post-time:hover{background:var(--pip-wash,var(--vscode-toolbar-hoverBackground))}
+/* A run while it runs: the Pip at work, what it is doing now, its clock where its post's time will be, Stop, and how it
+   started. Its own post takes its place when it ends (pipRunPosts.js livePostMarkup). */
+.run-post-clock{margin-left:auto;flex:none;font-variant-numeric:tabular-nums;color:var(--vscode-descriptionForeground)}
+.run-post-doing{display:flex;align-items:center;gap:7px;min-width:0;color:var(--vscode-descriptionForeground)}
+.run-post-doing>span:last-child{min-width:0;overflow-wrap:anywhere}
+.run-post-doing code{color:var(--vscode-foreground)}
+.run-post-spinner{flex:none;width:10px;height:10px;border:1.5px solid color-mix(in srgb,currentColor 30%,transparent);border-top-color:var(--vscode-progressBar-background,var(--vscode-focusBorder,#3794ff));border-radius:50%;animation:run-post-spin .9s linear infinite}
+.run-post-live[data-live=queued] .run-post-spinner{animation:none;border-top-color:color-mix(in srgb,currentColor 30%,transparent)}
+.run-post-reply{margin-top:6px;color:var(--vscode-foreground)}
+.run-post-stop>svg{color:var(--vscode-descriptionForeground)}
+.run-post-started{align-self:center;color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.35}
+@media(prefers-reduced-motion:reduce){.run-post-spinner{animation:none}}
 .run-post-flash{animation:run-post-flash 1.6s ease-out}
 @keyframes run-post-flash{0%{background:color-mix(in srgb,var(--vscode-focusBorder,#7c5cff) 22%,transparent)}100%{background:transparent}}
 @media (prefers-reduced-motion:reduce){.run-post-flash{animation:none;outline:1px solid var(--vscode-focusBorder)}.run-post-chev{transition:none}}
