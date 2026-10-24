@@ -422,12 +422,13 @@ class RunSocket:
                 plugins = self.plugins.pin(registry)
             except Exception:
                 plugins = []                      # a broken plugin list never stops the Pip's apps
+            try:
+                # A Pip made from a template is given only the app tools its template lists (pip_templates).
+                own = self.sdk_apps.pin(registry)
+            except Exception:
+                own = []                          # a broken apps file never stops the Pip's other tools
         pin = {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
                "composio": composio_server(self.config) is not None}
-        try:
-            own = self.sdk_apps.pin()
-        except Exception:
-            own = []                              # a broken apps file never stops the Pip's other tools
         if own:
             pin["sdk_apps"] = own
         lent = self.borrow.pin() if self.borrow is not None else None

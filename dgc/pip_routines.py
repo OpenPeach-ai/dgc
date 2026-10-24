@@ -317,7 +317,9 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
         fields["baselined"] = 0 if trigger["kind"] == "email" else 1   # back on: note what arrived while off
     elif status == "off":
         fields["next_due_at"] = None
-    with registry.transaction():
+    import contextlib
+    # (Inside a Pip template's transaction too: pip_templates.)
+    with contextlib.nullcontext() if registry.db.in_transaction else registry.transaction():
         sets = ",".join(f"{name}=?" for name in fields)
         registry.db.execute(f"UPDATE pip_routines SET {sets},revision=revision+1,updated_at=? WHERE id=?",
                             (*fields.values(), stamp(now), routine_id))
@@ -331,7 +333,8 @@ def delete(store, pip_id, routine_id) -> dict:
     registry = store.registry
     store._job(pip_id)
     _row(registry, pip_id, routine_id)
-    with registry.transaction():
+    import contextlib
+    with contextlib.nullcontext() if registry.db.in_transaction else registry.transaction():
         registry.db.execute("DELETE FROM pip_routines WHERE id=?", (routine_id,))
         from .pip_sdk_app_events import forget
         forget(registry.db, routine_id)

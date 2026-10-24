@@ -86,6 +86,7 @@ CONTROL_COMMANDS = frozenset({
     "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret",
     "list_app_approvals", "decide_app_approval",
     "trigger_app_event", "list_app_events",
+    "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -147,6 +148,9 @@ _COMMAND_ARGS = {
     "list_app_approvals": {"app"}, "decide_app_approval": {"action_id", "decision", "expected_digest"},
     # Events from your app (pip_sdk_app_events, API 63): they run the routines that wait on them; no approval needed.
     "trigger_app_event": {"app", "event", "payload", "idempotency_key"}, "list_app_events": {"app", "limit"},
+    # Pip templates in code (pip_templates, API 64): your code keeps its Pips as its templates say; widening waits.
+    "ensure_pip_template": {"template", "accept_widening", "overwrite_user_changes"}, "prune_pip_templates": {"keep"},
+    "list_pip_templates": {"pip_id"}, "decide_pip_template_change": {"change_id", "decision", "expected_digest"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -806,7 +810,8 @@ class PipStore:
         definition = _definition(name, goal, source_ref, pip_type=pip_type, model_choice=model_choice,
             source_policy={'mode': 'personal'} if workspace['kind'] == 'personal' else source_policy,
             computer_plan=computer_plan)
-        with self.registry.transaction():
+        # (Inside a Pip template's transaction too: pip_templates makes the Pip and its template's record at once.)
+        with contextlib.nullcontext() if self.db.in_transaction else self.registry.transaction():
             self.registry.get(workspace_id)
             from .pip_limits import require_room
             require_room(self.db, workspace_id)
@@ -4665,7 +4670,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             raise RegistryError("disabled", "Pips are disabled in this profile. Run dgc pips enable to turn them on.")
         from .pip_access import require_unrestricted
         require_unrestricted(config)
-        request_limit = 32768 if command in ("register_app", "update_app", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
+        request_limit = 32768 if command in ("register_app", "update_app", "ensure_pip_template", "prepare_pip_connector_draft", "propose_pip_connector_action", "propose_pip_handoff", "propose_pip_artifact_handoff", "propose_pip_personal_handoff", "propose_pip_app_action", "propose_pip_calendar_action", "prepare_pip_message_draft", "prepare_pip_calendar_draft") else 16384
         if (command == 'propose_pip_update' and isinstance(request, dict)
                 and isinstance(request.get('changes'), dict) and 'verification_plan' in request['changes']):
             from .pip_pulse_plans import _encode as bounded_pulse_request
@@ -4718,6 +4723,9 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
         if command in ("register_app", "update_app") and redact_value(request, secret_values(config)) != request:
             # An app's tools are shown to Pips: refuse, rather than keep a description with a hole where a key was.
             raise RegistryError("secret_detected", "Remove configured credentials from the app's address and tools.")
+        if command == "ensure_pip_template" and redact_value(request, secret_values(config)) != request:
+            # A template's words become a Pip's job and routines: refuse, rather than keep a hole where a key was.
+            raise RegistryError("secret_detected", "Remove configured credentials from the template.")
         if (command == 'propose_pip_update' and isinstance(request.get('changes'), dict)
                 and isinstance(request['changes'].get('app_plan'), dict)):
             from .pip_sdk_apps import check_plan, is_app
@@ -4762,7 +4770,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -5136,6 +5144,23 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                                                         request.get('idempotency_key'), actor, config)
                 else:
                     result = pip_sdk_app_events.recent(store, request.get('app'), request.get('limit'), actor)
+            elif command in ('ensure_pip_template', 'prune_pip_templates', 'list_pip_templates', 'decide_pip_template_change'):
+                # Pip templates in code (pip_templates, API 64): your code declares its Pips; narrowing applies, widening
+                # waits for a person on the Pip's page (or the app's accept_widening); a person's own changes are kept.
+                from . import pip_templates
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Only your code on this computer keeps Pips from a template.')
+                if command == 'ensure_pip_template':
+                    result = pip_templates.ensure(store, request.get('template'), actor, config,
+                                                  accept_widening=request.get('accept_widening', False),
+                                                  overwrite_user_changes=request.get('overwrite_user_changes', False))
+                elif command == 'prune_pip_templates':
+                    result = pip_templates.prune(store, request.get('keep'), actor)
+                elif command == 'list_pip_templates':
+                    result = pip_templates.listing(store, request.get('pip_id'))
+                else:
+                    result = pip_templates.decide(store, request.get('change_id'), request.get('decision'),
+                                                  request.get('expected_digest'), actor)
             elif command in ('list_pip_connections', 'inspect_pip_connection', 'list_pip_accounts'):
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', 'Manage shared app connections on the computer.')

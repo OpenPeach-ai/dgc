@@ -337,10 +337,10 @@ class WireTests(EventWorld, unittest.TestCase):
         with self.assertRaises(RegistryError):
             _bounded_pips_command({"type": "pips_control", "request": {**request, "payload": deep}})
 
-    def test_the_api_is_63(self):
+    def test_the_api_is_63_or_newer(self):
         from dgc.headless import PIPS_API_VERSION
         from dgc.pips import CONTROL_COMMANDS, _COMMAND_ARGS
-        self.assertEqual(PIPS_API_VERSION, 63)
+        self.assertGreaterEqual(PIPS_API_VERSION, 63)
         self.assertEqual(_COMMAND_ARGS["trigger_app_event"], {"app", "event", "payload", "idempotency_key"})
         self.assertEqual(_COMMAND_ARGS["list_app_events"], {"app", "limit"})
         self.assertIn("app_events", _COMMAND_ARGS["list_pip_routines"])

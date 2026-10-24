@@ -114,6 +114,45 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
                                                     "tool", "label", "created_at", "created_by")}}
 
 
+def grant_app_tool(registry, pip_id, workspace_id, server, tool, connection_digest, schema_digest, actor, *,
+                   template) -> dict:
+    """Always allow one change tool of your own app for this Pip, pinned to the app and the tool as they are now: a
+    Pip template's always_allow (pip_templates, Pips API 64), accepted by a person or by the app's accept_widening.
+    Inside the caller's transaction. Never a read, never a tool that moves money."""
+    _local(actor)
+    if tool.get("kind") != "change":
+        raise RegistryError("invalid_template", f"{tool['name']} is a read: a read needs no Always allow.")
+    payload = {"kind": "connector_call", "server": server, "connection_digest": connection_digest,
+               "account": "connection_managed", "schema_digest": schema_digest,
+               "call": {"tool": tool["name"], "arguments": {}}}
+    require_can_always(payload)
+    pins = _pins(payload)
+    for existing in list_grants(registry, pip_id):
+        if all(existing[k] == v for k, v in pins.items()):
+            return existing
+    if len(list_grants(registry, pip_id)) >= MAX_PER_PIP:
+        raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
+    from . import pip_sdk_apps
+    grant_id = identifier("grant")
+    label = f"{LABEL['connector_call']} {tool['name']} with {pip_sdk_apps.display(pip_sdk_apps.name_of(server))}"
+    record = {**pins, "label": label[:200], "created_at": registry.clock(), "created_by": actor, "from_template": template}
+    registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(pip_id, grant_id), json.dumps(record, ensure_ascii=False)))
+    registry.event(workspace_id, "pip_action_granted", pip_id=pip_id,
+                   payload={"grant_id": grant_id, "kind": "connector_call", "tool": pins["tool"], "actor": actor,
+                            "template": template})
+    return {"id": grant_id, **{k: record[k] for k in ("kind", "server", "connection_digest", "account", "schema_digest",
+                                                    "tool", "label", "created_at", "created_by")}}
+
+
+def delete_grant(registry, pip_id, grant_id) -> None:
+    """Take one Always allow back, inside the caller's transaction (a template that no longer allows its tool)."""
+    if registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, grant_id),)).rowcount:
+        workspace = registry.db.execute("SELECT workspace_id FROM pips WHERE id=?", (pip_id,)).fetchone()
+        if workspace is not None:
+            registry.event(workspace[0], "pip_action_grant_revoked", pip_id=pip_id,
+                           payload={"grant_id": grant_id, "actor": "pip-template"})
+
+
 def revoke(registry, pip_id, grant_id, actor) -> list:
     _local(actor)
     if not isinstance(grant_id, str) or not re.fullmatch(r"grant_[a-f0-9]{32}", grant_id):

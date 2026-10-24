@@ -100,13 +100,21 @@ def set_level(registry, pip_id, value, actor) -> dict:
         raise RegistryError("local_only", "Only you change how much a Pip asks, on this computer.")
     if value not in LEVELS:
         raise RegistryError("invalid_request", "Choose Ask, Approve for me or Full access.")
-    workspace = _personal(registry, pip_id)
+    _personal(registry, pip_id)
     with registry.transaction():
-        before = level(registry, pip_id)
-        registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
-                            (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor})))
-        registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
+        write_level(registry, pip_id, value, actor)
     return listing(registry, pip_id)
+
+
+def write_level(registry, pip_id, value, actor) -> None:
+    """Save a Personal Pip's level, inside the caller's transaction (set_level, and a Pip template: pip_templates)."""
+    if value not in LEVELS:
+        raise RegistryError("invalid_request", "Choose Ask, Approve for me or Full access.")
+    workspace = _personal(registry, pip_id)
+    before = level(registry, pip_id)
+    registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)",
+                        (KEY + pip_id, json.dumps({"level": value, "at": utc_now(), "by": actor})))
+    registry.event(workspace, "pip_level_changed", pip_id=pip_id, payload={"level": value, "before": before, "actor": actor})
 
 
 def listing(registry, pip_id) -> dict:

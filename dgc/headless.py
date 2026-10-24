@@ -112,7 +112,8 @@ def _bounded_pips_command(cmd):
         request, bulk = bound_bulk(request.get("type"), request)
     pending, count, chars = [(request, 0)], 0, 0
     # An app's tools (register_app, update_app: Pips API 61) are schemas: the SDKs' own bounds, 2,048 values and 12 levels.
-    tools = cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in ("register_app", "update_app")
+    tools = cmd["type"] == "pips_control" and isinstance(request, dict) and request.get("type") in (
+        "register_app", "update_app", "ensure_pip_template", "prune_pip_templates")   # a Pip template (API 64) too
     most, deepest = (2048, 12) if tools else (256, 8)
     while pending:
         value, depth = pending.pop()
@@ -340,7 +341,15 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # repeat, runner_online, notice}. At most 60 a minute per app (rate_limited) and 20 waiting per Pip (the oldest dropped,
 # said in its chat). list_app_events {app, limit?} reads what an app sent lately and the event names it used.
 # list_pip_routines lists routines on an app's event only with app_events: true. Local only.
-PIPS_API_VERSION = 63
+# API 64: Pip templates in code (pip_templates). ensure_pip_template {template: {key, name, instructions, model?, level?,
+# tools?, routines?, always_allow?}, accept_widening?, overwrite_user_changes?} makes a Personal Pip from a template, or
+# brings the one with that key to it: narrowing and neutral changes apply, widening (a new change tool, a computer, a
+# higher level, a new Always allow, a routine newly on an app event) waits as one change for a person, unless
+# accept_widening; a person's own changes in DGC are kept and reported (conflicts) unless overwrite_user_changes. A Pip
+# made from a template uses only the app tools its template lists; every other Pip keeps every registered app.
+# prune_pip_templates {keep} pauses (never deletes) template Pips whose key isn't listed. list_pip_templates {pip_id?} and
+# decide_pip_template_change {change_id, decision accept | reject, expected_digest}. Local only.
+PIPS_API_VERSION = 64
 
 
 def _pips_platform_supported() -> bool:

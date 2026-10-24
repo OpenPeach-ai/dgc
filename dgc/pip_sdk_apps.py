@@ -956,8 +956,10 @@ def _function(app: str, tool: str) -> str:
     return f"{app[:20]}__{tool[:32]}_{hashlib.sha256(name.encode()).hexdigest()[:8]}"
 
 
-def pin() -> list[dict]:
-    """What a run is told about your apps: each one's tools as functions, while they fit PIN_BYTES."""
+def pin(allowed=None) -> list[dict]:
+    """What a run is told about your apps: each one's tools as functions, while they fit PIN_BYTES. ``allowed``: the
+    tools a Pip made from a template may use (pip_templates.allowed_tools, ``app:<name>/<tool>``); None for every other
+    Pip, which may use every registered app."""
     try:
         apps = sorted(_read()["apps"].values(), key=lambda a: a["name"])
     except RegistryError:
@@ -966,6 +968,8 @@ def pin() -> list[dict]:
     for app in apps:
         tools = []
         for tool in app["tools"]:
+            if allowed is not None and f"app:{app['name']}/{tool['name']}" not in allowed:
+                continue
             row = {"function": _function(app["name"], tool["name"]), "tool": tool["name"], "kind": tool["kind"],
                    "description": tool["description"], "input_schema": tool["input_schema"],
                    "money": bool(tool.get("moves_money"))}
@@ -975,8 +979,10 @@ def pin() -> list[dict]:
             used += size
             tools.append(row)
         if tools:
+            listed = len(app["tools"]) if allowed is None else sum(
+                1 for t in app["tools"] if f"app:{app['name']}/{t['name']}" in allowed)
             out.append({"app": app["name"], "name": display(app["name"]), "tools": tools,
-                        "more": len(tools) < len(app["tools"])})
+                        "more": len(tools) < listed})
     return out
 
 
@@ -1038,8 +1044,15 @@ class Session:
         self.calls = 0
         self.used: list[dict] = []
 
-    def pin(self) -> list[dict]:
-        return pin()
+    def pin(self, registry=None) -> list[dict]:
+        return pin(self._allowed(registry))
+
+    def _allowed(self, registry):
+        """A Pip made from a template uses only the app tools its template lists (pip_templates); any other, all."""
+        if registry is None:
+            return None
+        from .pip_templates import allowed_tools
+        return allowed_tools(registry.db, self.pip_id)
 
     def call(self, registry, op: str, args: dict):
         if op == ANSWER_TOOL:
@@ -1057,6 +1070,10 @@ class Session:
         tool = tool_of(app, args.get("tool"))
         if tool is None:
             return f"error: {display(app['name'])} has no tool named {str(args.get('tool'))[:80]} now."
+        allowed = self._allowed(registry)
+        if allowed is not None and f"app:{app['name']}/{tool['name']}" not in allowed:
+            return (f"error: {tool['name']} in {display(app['name'])} isn't one of your tools: your template gives you "
+                    "only the ones you were given. Tell the user in one sentence.")
         arguments = args.get("arguments")
         try:
             arguments = check_arguments(tool, arguments if isinstance(arguments, dict) else {})
