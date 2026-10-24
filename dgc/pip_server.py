@@ -38,7 +38,9 @@ MODE = "server"                          # the supervisor record's "mode" while 
 SUBSCRIPTION_REFUSED = "server_subscription"
 NO_CHROME = ("This Pips runner is on a server, where there is no Chrome of the user's to lend, so borrowing their "
              "Chrome isn't possible here. Do what you can without it, and say what you would need.")
-QUIET_EVENTS = frozenset({"pip_run_progress"})      # a run's every step: its chat and report have them
+# Left out of the log: a run's every step (its chat and report have them), and the bookkeeping each SDK or editor
+# session does when it opens (which workspace a folder is, which session belongs to it).
+QUIET_EVENTS = frozenset({"pip_run_progress", "session_associated", "workspace_resolved"})
 MAX_DETAIL = 1000                        # a refusal's whole words fit; a run's error is at most 1,500
 STATES = ("running", "off", "stopped", "no_runner", "heartbeat_stale", "state_unreadable")
 

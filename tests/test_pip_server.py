@@ -200,6 +200,7 @@ class ServerModeTests(Home):
             self.registry.event(self.workspace["id"], "pip_run_queued", pip_id=job["id"], run_id="pipr_1", payload={})
             self.registry.event(self.workspace["id"], "pip_run_progress", pip_id=job["id"], run_id="pipr_1",
                                 payload={"kind": "text_delta", "text": "private words"})
+            self.registry.event(self.workspace["id"], "session_associated", payload={})     # an SDK session opening
             self.registry.event(self.workspace["id"], "pip_run_failed", pip_id=job["id"], run_id="pipr_1",
                                 payload={"status": "failed", "error": {"code": "server_subscription",
                                                                        "message": "Not run: this Pip's model is\nyours."}})
@@ -222,6 +223,7 @@ class ServerModeTests(Home):
         self.assertIn(f"{NOW} pip_run_failed pip={job['id']} run=pipr_1: server_subscription: Not run: this Pip's model "
                       "is yours.", lines)
         self.assertNotIn("private words", out, "a run's steps stay in its chat")
+        self.assertNotIn("session_associated", out, "nor a session's bookkeeping")
         self.assertRegex(lines[-1], r"^\S+ runner_stopped$")
         self.assertEqual(len([line for line in lines if "pip_run_" in line]), 2)
 
