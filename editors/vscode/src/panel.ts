@@ -155,6 +155,9 @@ const SEARCH_KEY_PROVIDERS = ["brave", "tavily", "ollama"];
 // Ollama's keep_alive as the CLI takes it (dgc/headless.py _KEEP_ALIVE_RE): a duration, seconds, -1, or "".
 const KEEP_ALIVE_RE = /^(?:|-?\d{1,9}|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})$/;
 
+// A model id as Pips take one (dgc/pip_models.py _MODEL_ID).
+const PIPS_MODEL_RE = /^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
+
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
 // The sub-agents' context window as the CLI keeps it (dgc/config.py subagent_window_arg): 0 is the main model's,
@@ -520,6 +523,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
    *  refuse a save that carried them. */
   private cacheSettings?: { prompt_cache: boolean; prompt_cache_ttl: string; ollama_keep_alive: string };
+  /** Settings -> Agents -> Pips: the model every Pip on Default uses ("" follows DGC), from a CLI that answers
+   *  get_config's "pips_settings" with an event of that name (0.48). Undefined: an older CLI, which would refuse a
+   *  save that carried it. */
+  private pipsSettings?: { model: string };
   /** The window a vLLM, SGLang or llama.cpp server was started with (server_window, 0.48), for Settings -> General.
    *  Undefined until a CLI that offers it answers; `window` 0 when DGC sizes the window itself. */
   private serverWindow?: { model: string; window: number; server: string; trained: number };
@@ -3586,6 +3593,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.serverWindow = { model: String((ev as any).model || ""), window: Math.max(0, Math.floor(Number((ev as any).window) || 0)),
                               server: String((ev as any).server || ""), trained: Math.max(0, Math.floor(Number((ev as any).trained) || 0)) };
         break;
+      case "pips_settings":
+        this.pipsSettings = { model: String((ev as any).model ?? "").slice(0, 256) };
+        break;
       case "cache_settings":
         this.cacheSettings = {
           prompt_cache: (ev as any).prompt_cache !== false,
@@ -3859,7 +3869,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    // Not a protocol field either: the last server_window event, for Context size.
                                    ...(this.serverWindow ? { server_window: { ...this.serverWindow } } : {}),
                                    // Nor this: the CLI lists the models at a host as typed (list_models_at).
-                                   list_models_at: this.listsModelsAt() } : ev;
+                                   list_models_at: this.listsModelsAt(),
+                                   // Nor these: the pips_settings event that came just before.
+                                   ...(this.pipsSettings ? { pips_model: this.pipsSettings.model, pips_settable: true } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6726,7 +6738,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
                        "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                       "subagent_context_size", "cache_settings"] });
+                       "subagent_context_size", "cache_settings", "pips_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -7262,6 +7274,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       if (v.capability_cache_ttl_s) {
         values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
+      }
+      // The model every Pip on Default uses ("" follows DGC). Only to a CLI that answered pips_settings.
+      if (this.pipsSettings && typeof v.pips_model === "string") {
+        const pipsModel = v.pips_model.trim();
+        if (pipsModel && (pipsModel.length > 256 || !PIPS_MODEL_RE.test(pipsModel) || pipsModel.includes("://"))) {
+          throw new Error("Model for Pips takes a model's name, like qwen3:8b, or nothing to use DGC's.");
+        }
+        values.pips_model = pipsModel;
       }
 
       const saveConfig = async (prefix: string, configValues: any): Promise<void> => {

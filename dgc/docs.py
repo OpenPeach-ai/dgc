@@ -3991,6 +3991,9 @@ Useful keys:
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
   Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
   redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
+- `pips_model` — the model every Pip on Default uses, on DGC's own connection; empty (the default)
+  follows DGC: its model, or its subscription CLI. Settings → Agents → Pips sets it in the editor, and
+  the Pips runner picks a change up without a restart while its connection is unchanged.
 - `subagent_context_size` — each sub-agent's context window in tokens, as `context_size` is the main
   model's (0, the default, uses the main window). A named agent's own `context_size:` frontmatter
   wins. `/subagent context 64k` sets it; so does Settings → Agents in the editor. The sub-agent

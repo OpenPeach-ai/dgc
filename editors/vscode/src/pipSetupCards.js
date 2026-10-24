@@ -58,7 +58,7 @@ export function mountSetupCards(options) {
   // A live-data Pip (API 60): its approved read-only commands, and that nothing it runs can change anything.
   if(s.live_plan){const n=s.live_plan.commands.length;out.push(`${n} read-only ${n===1?'command':'commands'}`);}
   out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':s.live_plan?'Changes nothing':'Reads committed code');
-  out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
+  out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
   return out;
  }
  const pendingTitle=s=>(s.pip_id?'Change Pip: ':'New Pip: ')+s.name;
@@ -70,7 +70,7 @@ export function mountSetupCards(options) {
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
-  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Your DGC model');
+  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
   if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
   if(s.live_plan){detail(facts,'Runs','These exact commands · its model summarizes what they print');for(const line of s.live_plan.commands)detail(facts,'Command',line,'pip-setup-command');}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
@@ -82,7 +82,7 @@ export function mountSetupCards(options) {
    const models=node('div','pip-setup-model');
    if(entry.models){
     const label=node('label','','Model for this Pip'),select=node('select');select.setAttribute('aria-label','Model for this Pip');
-    const current=s.model_choice||{mode:'default'}, following=entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:`Your DGC model${following?' · '+following:''}`}];
+    const current=s.model_choice||{mode:'default'}, following=entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
     for(const item of entry.models.models)choices.push({value:typeof item==='string'?item:item.id,name:typeof item==='string'?item:item.name||item.id});
     if(current.mode==='model'&&!choices.some(c=>c.value===current.model))choices.push({value:current.model,name:current.model});
     // API 55: a personal setup may run on the user's own Claude Code or Codex (pip_brain). "|" is never in a model ID.

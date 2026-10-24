@@ -350,6 +350,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False), "prompt_cache": _B(),
         "prompt_cache_ttl": _f("string", enum=("5m", "1h")), "ollama_keep_alive": _S(),
     },
+    # 0.48: the Pips-wide settings, for Settings -> Agents. Sent before `config` to a client whose get_config
+    # `fields` named "pips_settings" (an older client never asks, so never sees it). `model` is the model every
+    # Pip on Default uses, on DGC's own connection (set_config `pips_model`); "" follows DGC: its model, or its
+    # subscription CLI.
+    "pips_settings": {"request_id": _S(False), "model": _S()},
     # 0.48: the prompt cache's clock for this chat, only where DGC knows it from the provider itself:
     # Anthropic (the reply's own cache read/write and the TTL it wrote) and a local Ollama (its own
     # /api/ps unload time). "unknown" hides the clock (every other provider). "warm": the cache lasts

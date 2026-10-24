@@ -1138,3 +1138,37 @@ test('a provider preset lists the host it fills in',async()=>{
   assert.equal(asks(x).length,before+1);
   assert.equal(asks(x).at(-1).base_url,'http://127.0.0.1:11434/v1');
 });
+
+test('Agents: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
+  const older=setup();
+  older.click('[data-nav=agents]');
+  const card=[...older.d.querySelectorAll('.card')].find(c=>c.querySelector('h3').textContent==='Pips');
+  assert.ok(card,'a Pips card');
+  assert.equal(card.querySelector('#pips_model').disabled,true,'a CLI that never answered pips_settings would refuse the save');
+  assert.match(card.textContent,/Model for Pips/);
+  assert.match(card.textContent,/Update the DGC CLI/);
+
+  const x=setup();
+  x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',pips_settable:true,pips_model:''}});
+  x.click('[data-nav=agents]');
+  const box=()=>x.d.querySelector('#pips_model');
+  assert.equal(box().disabled,false);
+  assert.equal(box().value,'');
+  assert.equal(box().placeholder,'Same as DGC (original)','blank follows DGC, and says what that is now');
+  assert.match(box().closest('.field').textContent,/Every Pip set to Default uses it/);
+  // It lists DGC's main connection, which Pips use: the same host the Models page lists.
+  const ask=asks(x).filter(m=>m.token.startsWith('pips_model-')).at(-1);
+  assert.deepEqual([ask.role,ask.base_url,ask.api_mode],['main','https://model.example/v1','ollama']);
+  answer(x,ask,{ids:['glm-5.3:cloud','original']});
+  openList(x,'pips_model');
+  assert.deepEqual(optionsOf(x,'pips_model'),['glm-5.3:cloud','original']);
+  x.d.querySelector('#pips_model-list [data-model="glm-5.3:cloud"]').dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+  x.click('#save');
+  assert.equal(x.sent.filter(m=>m.type==='saveSettings').pop().values.pips_model,'glm-5.3:cloud');
+  x.message({type:'settingsSaved',ok:true});
+  x.message({type:'event',event:{...x.config,list_models_at:true,pips_settable:true,pips_model:'glm-5.3:cloud'}});
+  assert.equal(box().value,'glm-5.3:cloud');
+  // DGC on a subscription: blank follows that CLI.
+  x.message({type:'event',event:{...x.config,subscription_engine:'codex',pips_settable:true,pips_model:''}});
+  assert.equal(box().placeholder,'Same as DGC (Codex)');
+});

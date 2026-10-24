@@ -212,6 +212,40 @@ def _app_approvals_tick(registry, config) -> None:
         print(f"[pip app approvals] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr, flush=True)
 
 
+def _follow_pips_default(config, seen: dict) -> None:
+    """The Pips default model (``pips_model``) as Settings last saved it, picked up without a restart.
+
+    Read from the user's config.json only when that file changed (its mtime and size), and applied only while the
+    file names the connection this runner started with: a model name means nothing on another host, and a new
+    connection still needs the runner restarted, as before. Only ``pips_model`` moves; the key is set before the
+    first tick, so the threads that clone this config never see the dict change size under them."""
+    from . import config as config_module
+    data = getattr(config, "data", None)
+    if not isinstance(data, dict):
+        return
+    data.setdefault("pips_model", "")
+    path = config_module.USER_CONFIG
+    try:
+        stat = path.stat()
+    except OSError:
+        return
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    if seen.get("stamp") == stamp:
+        return
+    seen["stamp"] = stamp
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return
+    if not isinstance(saved, dict):
+        return
+    for key in ("base_url", "api_mode"):
+        if saved.get(key, data.get(key)) != data.get(key):
+            return
+    value = saved.get("pips_model", "")
+    data["pips_model"] = value.strip()[:256] if isinstance(value, str) else ""
+
+
 def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False):
     """Foreground heartbeat/queue supervision; Event.wait is injectable for tests.
 
@@ -244,6 +278,9 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
                 raise RegistryError("runtime_paused", "Pips were stopped. Run dgc pips resume locally before starting the supervisor.")
             pips.clear_drain_failure(directory)
             runtime_config = config.clone_for_root(config.project_root)
+            # Pips on Default follow the Pips default model saved in Settings while this runner runs.
+            followed: dict = {}
+            _follow_pips_default(runtime_config, followed)
             record = {"schema_version": 1, "instance_id": identifier("supervisor"),
                       "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "status": "running",
                       **({"mode": pip_server.MODE} if server else {})}
@@ -263,6 +300,7 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
             try:
                 while not event.is_set() and not is_runtime_paused(registry):
                     _check_controller(directory)
+                    _follow_pips_default(runtime_config, followed)
                     if schedule_tick is not None:
                         schedule_tick.check()
                     if event_tick is not None:

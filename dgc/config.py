@@ -487,6 +487,8 @@ DEFAULTS: dict = {
                                                 #   (partial output is continued, not discarded); 0 = off
     "pips_enabled": True,                      # Pips: personal and project agents beside the chat
     "pips_parallel_runs": 4,                   # Pips running at once, one run per Pip (pips.parallel_runs)
+    "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
+                                               #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
     "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load

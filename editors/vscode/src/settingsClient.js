@@ -77,7 +77,7 @@ function modelRoute(id) {
 }
 const modelBoxes = createModelBoxes({ send: m => vscode.postMessage(m), route: modelRoute,
     fields: id => (MODEL_ROUTES[id] || []).slice(1) });
-const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '' };
+const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', pips_model: '' };
 function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
@@ -106,6 +106,8 @@ function applyConfig(ev) {
     // Each Model box lists its own card's host, from a CLI that answers list_models_at (the extension adds it from
     // the handshake; not a protocol field). Without it they stay text boxes.
     draft.models_at = ev.list_models_at === true;
+    // The model every Pip on Default uses, from a CLI that answers pips_settings (the extension adds it to the config).
+    draft.pips_settable = ev.pips_settable === true;
     if (!dirty.has('subagent_context_size'))
         draft.subagent_context_size = Number(ev.subagent_context_size) > 0 ? String(ev.subagent_context_size) : '';
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).

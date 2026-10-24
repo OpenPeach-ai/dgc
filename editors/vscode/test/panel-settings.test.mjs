@@ -959,6 +959,45 @@ test("the config the settings page gets says whether the CLI lists a host's mode
   assert.equal(posted.filter((m) => m.type === "event").at(-1).event.list_models_at, true);
 });
 
+test("Model for Pips goes only to a CLI that answered pips_settings, as a model's name or blank", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ pips_model: "glm-5.3:cloud" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "pips_model" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [typed, sent] of [["glm-5.3:cloud", "glm-5.3:cloud"], ["  qwen3:8b ", "qwen3:8b"], ["", ""]]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "pips_settings", model: "old" });
+    await provider.saveSettings(settings({ pips_model: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "pips_model" in (c.values || {}));
+    assert.equal(config?.values.pips_model, sent, typed || "blank");
+  }
+  for (const bad of ["http://host/v1", "two words"]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "pips_settings", model: "" });
+    await provider.saveSettings(settings({ pips_model: bad }));
+    assert.equal(commands.some((c) => c.type === "set_config"), false, `${bad}: nothing is saved`);
+    assert.match(notices.errors.concat(notices.warnings).join(" "), /Model for Pips/);
+  }
+});
+
+test("the settings page hears the Pips default with the config, from a CLI that sent pips_settings", () => {
+  const posted = [];
+  const { provider } = harness();
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal("pips_settable" in posted.at(-1).event, false);
+  provider.onEvent({ type: "pips_settings", model: "glm-5.3:cloud" });
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.deepEqual([posted.at(-1).event.pips_model, posted.at(-1).event.pips_settable], ["glm-5.3:cloud", true]);
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("agents");
+  assert.ok(commands.find((c) => c.type === "get_config").fields.includes("pips_settings"));
+});
+
 test("Settings asks the CLI for the sub-agents' context window", () => {
   // An opt-in config field (an older editor rejects a field it doesn't know): it reaches the page only when asked.
   const commands = [];

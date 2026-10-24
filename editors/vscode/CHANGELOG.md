@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Settings → Agents → Pips: one model for every Pip on Default.** **Model for Pips** lists the models at DGC's
+  own connection (the host under Models) and takes any name; blank reads **Same as DGC (its model)** and follows DGC
+  as before. Every Pip set to Default uses it, and a Pip's model menu now reads **Default (the model it runs)**
+  instead of Same as DGC; a Pip with a model of its own keeps it. A Pip's setup card says **Default model**. Needs
+  DGC CLI 0.48; with an older one the box says to update.
 - **Every Model box in Settings lists the models at its own host.** Models → Connection, and Agents → Sub-agents and
   Fallback: open the box (or press Down) for the models that card's host has, a local Ollama's `:cloud` models
   included, or keep typing any name: a host that can't list, or a model it doesn't list, still works. It lists again a

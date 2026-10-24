@@ -211,7 +211,7 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
     "search_api_key_brave", "search_api_key_tavily", "search_api_key_ollama",
     "chatdgc_about", "chatdgc_style", "chatdgc_personality", "chatdgc_window", "memory", "chatdgc_web",
-    "chatdgc_followups", "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
+    "chatdgc_followups", "pips_model", "monitor_wake", "monitor_wake_delay_s", "monitor_wake_cooldown_s",
     "monitor_max_consecutive_wakes", "turn_token_budget",
     "thinking_inline", "thinking_inline_max_chars",
     # Both shape only the next request (an Anthropic cache marker's ttl; Ollama's keep_alive).
@@ -445,6 +445,8 @@ _CONFIG_STRING_LIMITS = {
     # ChatDGC's custom instructions: what it should know about you, and how it should answer.
     "chatdgc_about": 1500,
     "chatdgc_style": 1500,
+    # The model every Pip on Default uses (a model id on DGC's own connection; "" follows DGC).
+    "pips_model": 256,
 }
 _CONFIG_ENUMS = {
     "api_mode": frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"}),
@@ -565,6 +567,10 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
         if (isinstance(value, bool) or not isinstance(value, int)
                 or not minimum <= value <= maximum):
             return None, f"{key} must be an integer from {minimum} to {maximum}"
+    if values.get("pips_model"):
+        from .pip_models import _MODEL_ID
+        if not _MODEL_ID.fullmatch(values["pips_model"]) or "://" in values["pips_model"]:
+            return None, "pips_model must be empty or a model's name, like qwen3:8b"
     if "ollama_keep_alive" in values and not _keep_alive_ok(values["ollama_keep_alive"]):
         return None, ("ollama_keep_alive must be a duration Ollama takes (5m, 30m, 1h, 24h), "
                       "-1 to keep the model loaded until Ollama stops, or empty for Ollama's default")
@@ -4703,6 +4709,8 @@ class Backend:
         c = self.config
         if getattr(self, "_cache_settings_wanted", False):
             self._emit_cache_settings(request_id)
+        if getattr(self, "_pips_settings_wanted", False):
+            self.em.emit("pips_settings", model=str(c.get("pips_model", "") or "")[:256], **_request_fields(request_id))
         extra = {}
         for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default"),
                               ("chatdgc_window", "32k")):
@@ -7643,6 +7651,9 @@ class Backend:
                 # never as new fields on `config`, which a published SDK would refuse.
                 if "cache_settings" in fields:
                     self._cache_settings_wanted = True
+                # The Pips-wide default model, for Settings -> Agents, in an event of its own too.
+                if "pips_settings" in fields:
+                    self._pips_settings_wanted = True
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()

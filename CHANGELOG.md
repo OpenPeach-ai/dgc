@@ -6,6 +6,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **One model for every Pip on Default.** The new `pips_model` setting is the model every Pip set to Default
+  uses, on DGC's own connection; empty (the default) follows DGC as before: its model, or its Claude Code or Codex.
+  Set, it wins over DGC's subscription default, so a Project Pip on Default works while DGC itself runs on a
+  subscription. `list_pip_models` says it in its existing `default_model` (no Pips API change), runs are pinned to it,
+  and new Pips start on Default. The Pips runner picks a saved change up on its next tick, without a restart, while
+  config.json names the connection it started with. Settings reads it in a new `pips_settings` event (asked for with
+  get_config's `fields`, sent before `config`) and writes it with set_config `pips_model`.
+
 - **Settings can list a host's models before you save it.** `list_models_at {request_id, role, base_url, api_mode?,
   api_key?}` lists the models at a host as the editor has it typed (Ollama's `/api/tags`, `:cloud` models included; an
   OpenAI-compatible or Anthropic host's `/models`) and answers with `models_at`: the ids, or a short reason it couldn't

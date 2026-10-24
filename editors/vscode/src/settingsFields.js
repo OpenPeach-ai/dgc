@@ -75,6 +75,13 @@ export function contextSizeShown(c) {
     return served && chosen > served ? served : (c?.context_size ?? "");
 }
 
+const ENGINE_NAMES = { claude: "Claude Code", codex: "Codex", qwen: "Qwen", kimi: "Kimi", copilot: "Copilot" };
+/** What "Same as DGC" is right now: DGC's subscription CLI when it runs on one, else its model. */
+function followed(c) {
+    const engine = String(c.subscription_engine || "");
+    return engine ? (ENGINE_NAMES[engine] || engine) : String(c.model || "");
+}
+
 export function renderFields(section, main, config, providers, ui) {
     const { field, sel, inp, bool, card, model } = ui;
     function renderGeneral(main) {
@@ -137,7 +144,14 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Host URL", "", inp("fallback_base_url", c.fallback_base_url || ""))
                 + field("Transport", "", sel("fallback_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.fallback_api_mode || ""))
                 + field("API key", "", inp("fallback_api_key", c.fallback_api_key || "", "password")))
+            + card("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it, on the connection under Models. Blank uses DGC's own."
+                : "Update the DGC CLI to set this here.", c.pips_model || ""))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+        const pipsBox = main.querySelector("#pips_model");
+        if (pipsBox) {
+            pipsBox.placeholder = "Same as DGC" + (followed(c) ? ` (${followed(c)})` : "");
+            if (!c.pips_settable) pipsBox.disabled = true;
+        }
         const window = main.querySelector("#subagent_context_size");
         if (window) {
             // As the main Context size: whole kilotokens from 2,048 up; 0 (blank) is the main model's own.

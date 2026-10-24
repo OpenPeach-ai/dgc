@@ -1,6 +1,6 @@
 // Pips API 55 (pip_brain): a Personal Pip can run on the user's own Claude Code or Codex. Its model picker lists the
 // ones signed in on this computer, says once that its replies and routines use that plan's usage, and saves
-// {mode: "subscription", engine}; "Same as DGC" names the subscription DGC follows. Below API 55, or for a project
+// {mode: "subscription", engine}; Default names the subscription DGC follows. Below API 55, or for a project
 // Pip, none of it shows, and the host refuses the choice before an older CLI sees it.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,10 +55,10 @@ test('a Personal Pip picks its own Codex, and is told once that its runs use tha
  assert.equal(x.d.querySelectorAll('[data-usage-line]').length,1,'said once, where it is chosen');
 });
 
-test('Same as DGC names the subscription DGC follows',async()=>{
+test('Default names the subscription DGC follows',async()=>{
  const x=setup({catalog:{default_model:'',models:[],connection:'configured',subscriptions:SUBS,default_engine:{engine:'codex',name:'Codex',available:true}}});
  await x.select();await openList(x);
- assert.match(x.d.querySelector('[data-chat-model="default"]').textContent,/Same as DGC\s*Codex/);
+ assert.equal(x.d.querySelector('[data-chat-model="default"]').textContent,'Default (Codex)');
  assert.match(x.d.querySelector('[data-usage-line]').textContent,/your Codex plan’s usage/);
 });
 
@@ -86,7 +86,21 @@ test('the model list is checked: only Claude Code or Codex, and a well-formed de
  for(const bad of [{subscriptions:[{engine:'kimi',name:'Kimi'}]},{subscriptions:'codex'},{default_engine:{engine:'codex'}}])
   assert.throws(()=>model.pipModels({default_model:'',models:[],...bad}));
  assert.deepEqual(model.modelChoice('subscription:codex',[],SUBS),{mode:'subscription',engine:'codex'});
- assert.throws(()=>model.modelChoice('subscription:codex',[],[]),/Choose Same as DGC/);
+ assert.throws(()=>model.modelChoice('subscription:codex',[],[]),/Choose Default or a model/);
  assert.equal(model.modelLabel({mode:'subscription',engine:'claude'}),'Claude Code');
  assert.equal(model.modelValue({mode:'subscription',engine:'claude'}),'subscription:claude');
+});
+
+test('the Pip\'s model menu reads Default (the model it runs): the Pips default from Settings, else DGC\'s own',async()=>{
+ // list_pip_models' default_model is what Default runs: Settings -> Agents -> Model for Pips when set, DGC's model
+ // otherwise. The menu used to read "Same as DGC", which a Pips default would have made untrue.
+ const x=setup({catalog:{default_model:'glm-5.3:cloud',models:[{id:'glm-5.3:cloud',name:'glm-5.3:cloud'},{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS}});
+ await x.select();
+ assert.match(x.d.querySelector('#chat-model').textContent,/glm-5\.3:cloud/,'the chip names the model Default runs');
+ await openList(x);
+ const item=x.d.querySelector('[data-chat-model="default"]');
+ assert.equal(item.textContent,'Default (glm-5.3:cloud)');
+ assert.equal(item.getAttribute('aria-selected'),'true','a Pip on Default');
+ assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Same as DGC/);
+ assert.equal(model.modelLabel({mode:'default'}),'Default');
 });
