@@ -231,9 +231,9 @@ async function oldForm(kind,{name,goal,ref,model}){
 async function newFlow(kind,{name,goal,ref,model}){
   const x=setup();await x.drain();await x.tab('project');
   await x.click('#simple-new');
-  assert.ok(x.$('.dialog .character-grid'),'the character picker');
-  await x.click(`.dialog [data-new-character="${kind}"]`);
-  assert.equal(x.$(`.dialog [data-new-character="${kind}"]`).getAttribute('aria-checked'),'true');
+  assert.ok(x.$('.dialog .pip-picker #new-pip-kind'),'the character picker: its job, from a dropdown');
+  await x.click('.dialog #new-pip-kind');await x.click(`.dialog #new-pip-kind-list [data-pick="${kind}"]`);
+  assert.equal(x.$(`.dialog #new-pip-kind-list [data-pick="${kind}"]`).getAttribute('aria-selected'),'true');
   await x.type('#name',name);await x.type('#goal',goal);await x.type('#source_ref',ref);await x.type('#createModel',model);
   await x.click('#review-confirm');
   return x;
@@ -274,7 +274,7 @@ test('describing the job to DGC, a common job and a shared Pip’s file stay one
   assert.ok(x.$('[data-starter="daily_review"]'),'a common job');
   assert.ok(x.$('#import-pip-file'),'a shared Pip’s file');
   await x.click('#advanced-create');
-  assert.ok(x.$('.dialog .character-grid'),'Choose a Pip myself: the picker again');
+  assert.ok(x.$('.dialog .pip-picker #new-pip-kind'),'Choose a Pip myself: the picker again');
   await x.click('#review-cancel');
   await x.click('#simple-new');await x.click('#new-pip-describe');await x.click('#create-back');
   assert.ok(x.$('.simple-home'),'back goes to the list');

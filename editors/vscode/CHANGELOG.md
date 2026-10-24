@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **New Pip: a big face with a list beside it.** The grid of seven character tiles is gone. **New Pip** shows the
+  character's face on the left and a dropdown beside it, and the face changes as soon as you pick. For a Project Pip
+  the dropdown asks **What should it do?** and lists the jobs in plain words, with the character's name beside each:
+  Map out the project (Scout), Answer a question about the code (Lens), Fix files you approve (Patch), Review the code
+  for bugs (Rook), Run tests you approve (Pulse), Look for security problems (Lock), Draft documentation (Quill). For
+  a Personal Pip it is **Character**, the names. Each row has its small face, and a kind your DGC can't make yet stays
+  in the list, greyed, with the reason. It works from the keyboard and with a screen reader: the arrow keys, Home and
+  End move, typing a job's or a name's first letters goes to it, Enter or Space picks, Esc closes the list, Tab moves
+  on. The list opens downward inside the dialog, or upward when there is more room above. The Pip it makes is the
+  same as before. A Personal Pip's **Edit** face page picks its face with the same list.
 - **A Project Pip has the Personal Pips page.** A project's Pips are the same list as your Personal ones, with a
   search, **New Pip**, and a **…** beside it for the project's context and notifications; new Pips the DGC chat set up
   wait above it. A Project Pip opens in its chat under the same top bar: back, its face and name with what its last run

@@ -93,16 +93,22 @@ Personal Pips and this folder's project. In the CLI, add `--personal` to a comma
 Pips are on by default. Open the Pips view with the Pips button in the DGC chat
 view's title bar or the **DGC: Open Pips** command.
 
-**From the Pips view.** Choose **New Pip** and pick a character. A Personal Pip then
-needs only a name: it says hello and sets itself up in its chat. For a Project Pip the
-character is also the kind of work (Scout, Lens, Rook and Lock read the code, Patch
-fixes it, Pulse runs checks, Quill writes docs), so you then say what it does, the
-branch or commit it reads (`HEAD` by default) and its model, and choose **Create
-Pip**. Patch and Pulse first show what they may do. To have DGC set a Project Pip up
+**From the Pips view.** Choose **New Pip**: its face is on the left and a list beside
+it, and the face changes with what you pick. For a Personal Pip the list is
+**Character**, the names with their faces; a Personal Pip then needs only a name: it
+says hello and sets itself up in its chat. For a Project Pip the character is the kind
+of work, so the list asks **What should it do?**: Map out the project (Scout), Answer a
+question about the code (Lens), Fix files you approve (Patch), Review the code for bugs
+(Rook), Run tests you approve (Pulse), Look for security problems (Lock) or Draft
+documentation (Quill). You then say what it does, the branch or commit it reads
+(`HEAD` by default) and its model, and choose **Create Pip**. Patch and Pulse first
+show what they may do. The list works from the keyboard too: the arrow keys, Home and
+End move, typing a name or a job's first letters goes to it, Enter or Space picks,
+and Esc closes it. To have DGC set a Project Pip up
 from your own words, choose **Describe the job to DGC instead**, say what it should
 look after and when, then choose **Describe to DGC**. This prepares a message in the
 main chat; nothing is sent until you send it. **Choose a Pip myself** goes back to the
-characters.
+list.
 
 **From a starter.** On a project's Pips, **New Pip → Describe the job to DGC instead**
 lists starter Pips for common jobs, and `dgc pips starters` lists them all:
@@ -941,7 +947,8 @@ its face, its name and an optional title at the top, then four tabs.
 - **Media**: the images sent in the chat.
 - **Files**: the files sent in the chat, and the ones in its computer's Files folder.
 
-**Edit** under its face changes its look: one of the eight Pip faces and a colour. **Reset to
+**Edit** under its face changes its look: one of the eight Pip faces, picked from the same
+list as New Pip's, and a colour. **Reset to
 default** puts back the face its type gives it. A look never changes what a Pip can do. Its
 model is chosen in the chat (the model button by the message box). The **…** menu has **Copy ID**,
 **Pause** and **Archive**. When you have chosen **Always allow** for something the Pip does, Info

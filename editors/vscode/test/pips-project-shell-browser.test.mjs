@@ -132,8 +132,8 @@ async function views(width) {
   await p.click(".pip-topbar .pip-menu [data-tab=runs]"); await p.waitForSelector(".simple-content[data-view=runs] .run-row"); await look("history");
   await p.click(".pip-topbar .pip-menu > summary"); await p.click(".pip-topbar .pip-menu [data-tab=job]"); await p.waitForSelector(".simple-content[data-view=job]"); await look("settings");
   await p.click("#simple-to-chat"); await p.click("#simple-back");
-  await p.click("#simple-new"); await p.waitForSelector(".dialog [data-new-character=rook]");
-  await p.click(".dialog [data-new-character=rook]"); await p.waitForSelector(".dialog #name"); await look("new-pip");
+  await p.click("#simple-new"); await p.waitForSelector(".dialog #new-pip-kind");
+  await p.click(".dialog #new-pip-kind"); await p.click(".dialog #new-pip-kind-list [data-pick=rook]"); await p.waitForSelector(".dialog #name"); await look("new-pip");
   await p.click("#new-pip-describe"); await p.waitForSelector("#setup-prompt-form"); await look("describe");
   await context.close();
   return seen;
