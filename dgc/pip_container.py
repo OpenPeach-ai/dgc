@@ -77,6 +77,14 @@ def image() -> str:
 # ---------------------------------------------------------------- can this Mac have one
 
 def cli() -> str | None:
+    """Apple's container tool: DGC_CONTAINER_CLI when that is set, else on PATH, else at its installer's place.
+
+    DGC_CONTAINER_CLI names a tool installed somewhere else; set but empty, there is none, so DGC never starts or
+    deletes a VM. The test suite sets it empty: a test on a developer's Mac once started real computer VMs, left
+    them running, and deleted ones it didn't own (2026-10-24)."""
+    if "DGC_CONTAINER_CLI" in os.environ:
+        chosen = os.environ["DGC_CONTAINER_CLI"]
+        return chosen if chosen and os.path.isabs(chosen) and os.access(chosen, os.X_OK) else None
     found = shutil.which("container")
     if found:
         return found
@@ -358,7 +366,8 @@ class Computer:
                     pass
             zone = _host_timezone()
             argv = ["run", "--detach", "--name", self.name, "--network", "none", "--memory", MEMORY, "--cpus", CPUS,
-                    "--label", f"{LABEL}=1", "--env", "LANG=C.UTF-8", *(["--env", f"TZ={zone}"] if zone else []),
+                    "--label", f"{LABEL}=1", "--label", f"{OWNER_LABEL}={owner()}",
+                    "--env", "LANG=C.UTF-8", *(["--env", f"TZ={zone}"] if zone else []),
                     "--volume", f"{home}:/home/pip",
                     "--mount", f"type=bind,source={runtime / 'conf'},target=/run/dgc/conf,readonly",
                     "--mount", f"type=bind,source={runtime / 'boxd'},target=/run/dgc/boxd,readonly"]
@@ -484,25 +493,37 @@ _COMPUTERS: dict[str, Computer] = {}
 _COMPUTERS_LOCK = threading.Lock()
 _REAPED = False
 LABEL = "dgc.pip-computer"
+OWNER_LABEL = "dgc.pip-computer.owner"
+
+
+def owner() -> str:
+    """Whose computers a VM holds: this DGC's folder (~/.dgc, or $DGC_HOME/.dgc), as a short digest."""
+    from .config import dgc_home
+    return hashlib.sha256(os.fsencode(str(Path(dgc_home()).resolve()))).hexdigest()[:16]
 
 
 def reap_orphans() -> list[str]:
-    """Delete DGC's computer VMs that no Host in this process owns: ones left by a DGC that stopped
+    """Delete this DGC's computer VMs that no Host in this process owns: ones left by a DGC that stopped
     without closing them (a crash, a kill) would otherwise keep 4 GB each. Only the Pips supervisor
-    hosts computers, one per machine, so a VM it does not own is nobody's."""
+    hosts computers, one per DGC folder, so such a VM is nobody's.
+
+    Another DGC folder's VMs are never touched: an app's own isolated DGC (DGC_HOME) runs its own Pips beside
+    the user's, and each deleted the other's running computers. A VM made before VMs named their owner
+    (OWNER_LABEL) is reaped as before."""
     try:
         listed = json.loads(run("list", "--all", "--format", "json", timeout=30).stdout or b"[]")
     except (RegistryError, ValueError):
         return []
     with _COMPUTERS_LOCK:
         owned = {computer.name for computer in _COMPUTERS.values() if computer._started}
+    mine = owner()
     gone = []
     for item in listed if isinstance(listed, list) else []:
         config = item.get("configuration") if isinstance(item, dict) else None
         name = config.get("id") if isinstance(config, dict) else None
         labels = config.get("labels") if isinstance(config, dict) else None
         if (isinstance(name, str) and name.startswith("dgc-pip-") and isinstance(labels, dict)
-                and labels.get(LABEL) == "1" and name not in owned):
+                and labels.get(LABEL) == "1" and labels.get(OWNER_LABEL, mine) == mine and name not in owned):
             try:
                 run("delete", "--force", name, timeout=60)
                 gone.append(name)

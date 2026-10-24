@@ -1399,6 +1399,9 @@ that a computer starts in a few seconds. The VM has no network of its own: like 
 browser and the Terminal reach public websites only through DGC's egress proxy on your Mac, and
 nothing on your Mac or your network. Chrome runs with its own sandbox there. The VM gets 4 GB of
 memory and 4 CPUs, its Files are a folder on your Mac, and it is deleted when the computer closes.
+Each DGC folder (`~/.dgc`, or `$DGC_HOME/.dgc`) keeps its own VMs: a second DGC on the same Mac never
+deletes the first one's. If Apple's tool is installed somewhere other than `/usr/local/bin` or your
+`PATH`, set `DGC_CONTAINER_CLI` to its path; set but empty, DGC starts no VMs at all.
 On a Mac a Pip doesn't use the whole desktop yet: its eyes and cursor work in the browser, and its
 image editor, Documents and PDF viewer are not on the Mac's computer.
 

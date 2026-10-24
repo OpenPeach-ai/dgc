@@ -74,6 +74,10 @@ os.environ.pop("XDG_DATA_HOME", None)
 # DGC_HOME instead. Anyone who exports it -- to keep a test run away from a live session, which is the
 # obvious reason to -- gets 14 errors and 29 failures that look like product breakage and are not.
 os.environ.pop("DGC_HOME", None)
+# No test reaches Apple's container tool, which makes a Mac's Pip computers: on the Mac Studio two tests did, started
+# real VMs from the user's computer image, left them running, and deleted VMs they didn't own (2026-10-24). Set but
+# empty, DGC has no such tool; a test of a Mac's VM brings its own stand-in (test_pip_container).
+os.environ["DGC_CONTAINER_CLI"] = ""
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))

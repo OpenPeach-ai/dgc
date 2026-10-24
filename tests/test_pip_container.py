@@ -122,6 +122,26 @@ class SupportedTests(unittest.TestCase):
                 self.assertIn(why, reason)
 
 
+class ToolTests(unittest.TestCase):
+    """DGC_CONTAINER_CLI names the tool; set but empty there is none, so nothing can start or delete a VM."""
+
+    def test_the_tool_dgc_is_told_to_use_or_none(self):
+        with tempfile.TemporaryDirectory() as base:
+            tool = Path(base) / "container"
+            tool.write_text("#!/bin/sh\n")
+            tool.chmod(0o755)
+            for value, expected in ((str(tool), str(tool)), ("", None), ("container", None),
+                                    (str(Path(base) / "missing"), None)):
+                with self.subTest(value=value), patch.dict(os.environ, {"DGC_CONTAINER_CLI": value}):
+                    self.assertEqual(pip_container.cli(), expected)
+            with patch.dict(os.environ, {"DGC_CONTAINER_CLI": ""}), patch.object(sys, "platform", "darwin"), \
+                    patch("platform.machine", return_value="arm64"), \
+                    patch("platform.mac_ver", return_value=("26.5.1", ("", "", ""), "arm64")):
+                self.assertEqual(pip_container.supported(), (False, pip_container.INSTALL))
+                with self.assertRaises(pip_container.RegistryError):
+                    pip_container.run("list", "--all")
+
+
 class SetupTests(FakeContainerTests):
     def test_setting_up_starts_the_service_builds_the_image_and_says_chrome(self):
         self.assertEqual(pip_container.status()["state"], "none")
@@ -196,17 +216,40 @@ class ComputerTests(FakeContainerTests):
         self.assertIn(["delete", "--force", self.computer.name], self.calls())
 
     def test_vms_a_stopped_dgc_left_are_deleted_and_nothing_else(self):
-        listing = [{"configuration": {"id": "dgc-pip-0123456789ab", "labels": {"dgc.pip-computer": "1"}}},
+        ours = {"dgc.pip-computer": "1", "dgc.pip-computer.owner": pip_container.owner()}
+        listing = [{"configuration": {"id": "dgc-pip-0123456789ab", "labels": ours}},
+                   {"configuration": {"id": "dgc-pip-from-before", "labels": {"dgc.pip-computer": "1"}}},
                    {"configuration": {"id": "buildkit", "labels": {"com.apple.container.plugin": "builder"}}},
-                   {"configuration": {"id": "dgc-pip-mine", "labels": {"dgc.pip-computer": "1"}}},
-                   {"configuration": {"id": "dgc-pip-someone", "labels": {}}}]
+                   {"configuration": {"id": "dgc-pip-mine", "labels": ours}},
+                   {"configuration": {"id": "dgc-pip-someone", "labels": {}}},
+                   {"configuration": {"id": "dgc-pip-an-apps-own", "labels": {**ours, "dgc.pip-computer.owner": "0" * 16}}}]
         (self.state / "containers.json").write_text(json.dumps(listing))
         mine = pip_container.Computer(self.root, self.base / "egress.sock", self.sockets)
         mine.name, mine._started = "dgc-pip-mine", True
         with patch.dict(pip_container._COMPUTERS, {"k": mine}, clear=True):
-            self.assertEqual(pip_container.reap_orphans(), ["dgc-pip-0123456789ab"])
+            self.assertEqual(pip_container.reap_orphans(), ["dgc-pip-0123456789ab", "dgc-pip-from-before"])
         deleted = [c[2] for c in self.calls() if c[:2] == ["delete", "--force"]]
-        self.assertEqual(deleted, ["dgc-pip-0123456789ab"], "not the builder, not ours, not an unlabelled one")
+        self.assertEqual(deleted, ["dgc-pip-0123456789ab", "dgc-pip-from-before"],
+                         "not the builder, not ours, not an unlabelled one, not another DGC folder's")
+
+    def test_another_dgc_folder_never_deletes_this_ones_computers(self):
+        # An app's own isolated DGC (DGC_HOME) runs its Pips beside the user's: its supervisor started
+        # its first computer and deleted the user's running ones, as orphans it did not own.
+        with patch.object(pip_container, "START_SECONDS", 0.2):
+            self.computer.start()
+        run = next(c for c in self.calls() if c[0] == "run")
+        labels = [run[i + 1] for i, a in enumerate(run) if a == "--label"]
+        self.assertEqual(labels, ["dgc.pip-computer=1", f"dgc.pip-computer.owner={pip_container.owner()}"])
+        users = {"configuration": {"id": self.computer.name, "labels": dict(label.split("=", 1) for label in labels)}}
+        (self.state / "containers.json").write_text(json.dumps([users]))
+        other = self.base / "an-app"
+        (other / ".dgc").mkdir(parents=True)
+        with patch.dict(os.environ, {"DGC_HOME": str(other)}), patch.dict(pip_container._COMPUTERS, {}, clear=True):
+            self.assertNotEqual(pip_container.owner(), labels[1].split("=", 1)[1])
+            self.assertEqual(pip_container.reap_orphans(), [])
+        self.assertTrue((self.state / "running").exists(), "the user's computer is still running")
+        with patch.dict(pip_container._COMPUTERS, {}, clear=True):
+            self.assertEqual(pip_container.reap_orphans(), [self.computer.name], "its own DGC still cleans it up")
 
     def test_chrome_keeps_its_own_sandbox_and_goes_out_only_through_boxd(self):
         box = pip_container.ContainerBox.__new__(pip_container.ContainerBox)

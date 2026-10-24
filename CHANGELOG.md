@@ -1771,6 +1771,10 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   up your Pip…"); the Mac needs only Apple's tool installed. Verified on a Mac Studio (macOS 26.5.1,
   container 1.5.0): image in under a minute from cache, screen in 1.3 s, the Terminal reaches
   example.com and is refused 192.168.1.1, the dock's Browser click arrives, and closing deletes the VM.
+  Each VM names the DGC folder it belongs to, and DGC cleans up only its own: a second DGC on the same
+  Mac (an app's own isolated DGC, with `DGC_HOME`) deleted the computers the first one was using, as
+  VMs left behind. `DGC_CONTAINER_CLI` points DGC at Apple's tool when it is installed somewhere else;
+  set but empty, DGC uses no VMs at all (the test suite runs that way).
 - A Pip computer's DevTools pipe never blocks on a read. A second reader of the pipe (a test that
   drove the browser without taking the computer's lock) took the data `select()` had announced, and the
   blocking read then held the lock forever; a non-blocking read just waits out its deadline.
