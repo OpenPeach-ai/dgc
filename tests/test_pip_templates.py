@@ -12,7 +12,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tests.test_pip_sdk_apps import AppWorld, DISPATCH, ORDER, REFUND, UNPAID  # noqa: E402
+from test_pip_sdk_apps import AppWorld, DISPATCH, ORDER, REFUND, UNPAID  # noqa: E402
 from dgc import pip_action_grants, pip_levels, pip_routines, pip_sdk_apps, pip_templates  # noqa: E402
 from dgc.workspace_registry import RegistryError  # noqa: E402
 from dgc_sdk.pips_app import define_pip_tool  # noqa: E402

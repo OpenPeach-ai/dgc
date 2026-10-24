@@ -30,7 +30,7 @@ from dgc import pip_app_links as links, pip_levels, pip_message_drafts as drafts
 from dgc import plugin_credentials  # noqa: E402
 from dgc.workspace_registry import RegistryError, state_directory  # noqa: E402
 from dgc_sdk.pips_app import AppToolHandler, PipToolError, define_pip_tool, sign  # noqa: E402
-from tests import test_pip_personal_handoffs as personal  # noqa: E402
+import test_pip_personal_handoffs as personal  # noqa: E402
 
 UNPAID = define_pip_tool("find_unpaid_orders", "Orders unpaid after N days",
                          {"type": "object", "properties": {"days": {"type": "integer", "minimum": 1}},

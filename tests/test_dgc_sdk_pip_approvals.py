@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sdk/python"))
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
-from tests.test_dgc_sdk_pip_apps import DISPATCH, SECRET, UNPAID, call, signed  # noqa: E402
+from test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
+from test_dgc_sdk_pip_apps import DISPATCH, SECRET, UNPAID, call, signed  # noqa: E402
 from dgc_sdk import (AppToolHandler, DGCConfigError, DGCUnsupportedError, PipApprovalRequested,  # noqa: E402
                      PipApprovalResolved)
 from dgc_sdk.pips import COMMAND_FIELDS, MUTATION_COMMANDS, READ_COMMANDS  # noqa: E402

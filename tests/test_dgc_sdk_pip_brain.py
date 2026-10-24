@@ -2,7 +2,7 @@
 (create_pip, propose_pip_update, revise_pip_setup) is refused before API 55, checked, then sent."""
 import unittest
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session
+from test_dgc_sdk_pips import CAPS, Wire, session
 from dgc_sdk import DGCConfigError, DGCUnsupportedError
 
 CODEX = {'mode': 'subscription', 'engine': 'codex'}

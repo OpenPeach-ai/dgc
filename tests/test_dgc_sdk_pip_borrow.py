@@ -2,7 +2,7 @@
 decline_pip_borrow, stop_pip_borrow), known, refused before API 59, the card's id checked, then sent."""
 import unittest
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session
+from test_dgc_sdk_pips import CAPS, Wire, session
 from dgc_sdk import DGCConfigError, DGCUnsupportedError
 from dgc_sdk.pips import COMMAND_FIELDS, READ_COMMANDS, MUTATION_COMMANDS
 

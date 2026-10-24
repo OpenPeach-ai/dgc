@@ -57,7 +57,7 @@ class PipsSDKTests(unittest.TestCase):
         self.assertIs(current.pips.mutate('add_pip_note',{'pip_id':'pip_test','text':'Likes tea','shared':True},approved=True)['request']['shared'],True)
 
     def test_api38_calendar_guests_and_repeat_require_new_runtime(self):
-        from tests.test_pip_calendar_series import EXT
+        from test_pip_calendar_series import EXT
         args={'source_run_id':'run_test','server':'composio','connection_digest':'a'*64,'account':'ca_test','schema_digest':'b'*64,'event':EXT,'request_key':'series'}
         wire=Wire();old=session(wire,caps={**CAPS,'pips_api_version':37})
         with self.assertRaisesRegex(DGCUnsupportedError,'API 38'):old.pips.mutate('propose_pip_calendar_action',args,approved=True)

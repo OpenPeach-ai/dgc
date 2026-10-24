@@ -10,7 +10,7 @@ from unittest.mock import patch
 from dgc import pip_calendar_actions as cal,pip_app_actions as actions,pip_app_access as apps,pips
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
 from dgc import workspace_registry
-from tests import test_pip_app_actions as fixtures
+import test_pip_app_actions as fixtures
 from tests.pip_test_migrations import drop_digest_schema
 
 EVENT={'summary':'Quiet reading','description':'Read <one> chapter & make notes.',

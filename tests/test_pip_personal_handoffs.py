@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from dgc import pips, pip_handoffs as h, pip_personal_handoffs as personal, pip_sources
 from dgc.workspace_registry import RegistryError
-from tests import test_pips_local as fixtures
+import test_pips_local as fixtures
 
 
 class PersonalHandoffTests(unittest.TestCase):
@@ -181,7 +181,7 @@ class PersonalHandoffTests(unittest.TestCase):
 
     def test_app_permissions_are_recipient_only_and_changed_grants_block_dispatch(self):
         from dgc import pip_app_access as apps
-        from tests.test_pip_app_access import MetaManager
+        from test_pip_app_access import MetaManager
         self.prepare()
         self.cfg.data['mcp_servers']={'composio':{'transport':'remote','url':'https://connect.composio.dev/offline'}}
         manager=MetaManager()

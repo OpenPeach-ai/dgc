@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pathlib import Path
 from dgc import pip_app_access as apps
 from dgc.workspace_registry import RegistryError
-from tests.test_pips_local import config
+from test_pips_local import config
 
 class Manager:
     def __init__(self):

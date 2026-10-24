@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from dgc import pip_app_actions as actions, pip_app_sends as sends, pip_app_access as apps, pips
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
-from tests import test_pip_personal_handoffs as fixtures
+import test_pip_personal_handoffs as fixtures
 from tests.pip_test_migrations import drop_digest_schema
 
 

@@ -1,6 +1,6 @@
 """Personal connection metadata SDK contract; no network or sleeps."""
 import unittest
-from tests.test_dgc_sdk_pips import Wire, session, CAPS
+from test_dgc_sdk_pips import Wire, session, CAPS
 from dgc_sdk import DGCConfigError, DGCUnsupportedError
 from dgc_sdk.pips import COMMAND_FIELDS
 from dgc.pips import _COMMAND_ARGS

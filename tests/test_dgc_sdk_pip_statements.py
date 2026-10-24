@@ -2,7 +2,7 @@
 import asyncio
 import copy
 import unittest
-from tests.test_dgc_sdk_pips import Wire, session, CAPS
+from test_dgc_sdk_pips import Wire, session, CAPS
 from dgc_sdk import AsyncSession, DGCConfigError, DGCUnsupportedError, DGCCommandRejectedError, RuntimePolicy
 from dgc_sdk.types import SandboxStatus
 

@@ -2,7 +2,7 @@
 refused before API 54, checked, then sent."""
 import unittest
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session
+from test_dgc_sdk_pips import CAPS, Wire, session
 from dgc_sdk import DGCConfigError, DGCUnsupportedError
 from dgc_sdk.pips import COMMAND_FIELDS, READ_COMMANDS, MUTATION_COMMANDS
 

@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sdk/python"))
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
+from test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
 from dgc_sdk import AsyncPips, DGCCommandRejectedError, DGCConfigError, DGCUnsupportedError, PipTemplate  # noqa: E402
 from dgc_sdk.pips import COMMAND_FIELDS, MUTATION_COMMANDS, READ_COMMANDS  # noqa: E402
 
@@ -138,7 +138,7 @@ class EnsureWireTests(unittest.TestCase):
         self.assertEqual(len(asyncio.run(pips.ensure_all([DUNNING], approved=True))["pips"]), 1)
 
 
-from tests.test_pip_templates import TemplateWorld  # noqa: E402
+from test_pip_templates import TemplateWorld  # noqa: E402
 
 
 class RuntimeWire:

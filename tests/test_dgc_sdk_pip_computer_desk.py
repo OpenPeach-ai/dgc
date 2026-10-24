@@ -1,7 +1,7 @@
 """SDK: a Pip computer's Files and Terminal need API 43, and a file added travels outside the 32 KiB budget."""
 import unittest
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session
+from test_dgc_sdk_pips import CAPS, Wire, session
 from dgc_sdk import DGCConfigError, DGCUnsupportedError
 
 PIP = 'pip_' + 'a' * 32

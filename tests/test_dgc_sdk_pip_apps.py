@@ -13,7 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sdk/python"))
 
-from tests.test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
+from test_dgc_sdk_pips import CAPS, Wire, session  # noqa: E402
 from dgc_sdk import (AppToolHandler, DGCConfigError, DGCUnsupportedError, PipToolError, define_pip_tool)  # noqa: E402
 from dgc_sdk.pips import COMMAND_FIELDS, MUTATION_COMMANDS, READ_COMMANDS  # noqa: E402
 from dgc_sdk.pips_app import sign  # noqa: E402

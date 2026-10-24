@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 from dgc import pip_calendar_actions as cal,pip_app_actions as actions,pip_message_drafts as drafts
 from dgc.workspace_registry import RegistryError,WorkspaceRegistry
-from tests.test_pip_calendar_actions import CalendarActionTests,EVENT
+from test_pip_calendar_actions import CalendarActionTests,EVENT
 
 EXT={**EVENT,'attendees':['friend@example.invalid'],'repeat':{'frequency':'weekly','interval':1,'count':4},'send_invitations':True}
 
