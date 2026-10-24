@@ -2169,9 +2169,9 @@ function simpleHomeList(all,live){
 // A Personal Pip's character is only its face and its name (its job is what you tell it): its big face, and a list of
 // the names, each with its small face.
 function newPipBody(){
- const picker=pickerMarkup({id:'new-pip-character',label:'Character',value:draft.newPipCharacter,face:avatar('idle',characterType(draft.newPipCharacter),'new-face'),
+ const chooser=pickerMarkup({id:'new-pip-character',label:'Character',value:draft.newPipCharacter,face:avatar('idle',characterType(draft.newPipCharacter),'new-face'),
   options:SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return {value:id,label:t.name,face:avatar('idle',t,`new-${id}`)};})});
- return `${picker}<label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
+ return `${chooser}<label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
 }
 function openNewPip(){
  if(S.busy||!usable())return;
@@ -2181,9 +2181,10 @@ function openNewPip(){
  $('newPipName')?.focus();
 }
 // A new Project Pip (the founder, 24 Oct): the Personal flow's character picker, where the character is the kind of work
-// it does, so its list is of jobs ("Review the code for bugs", Rook beside it), then what the old form asked: its name, what it does, the branch or commit it reads, and its model. It
-// sends the old form's create_pip, so it makes the same Pip; Patch and Pulse still show what they can do before they
-// are made. Describing the job to DGC, a common job and a shared Pip's file are one click away, under the form.
+// it does, so its list is of jobs ("Review the code for bugs", Rook beside it), then what the old form asked: its name,
+// what it does, the branch or commit it reads, and its model. It sends the old form's create_pip, so it makes the same
+// Pip; Patch and Pulse still show what they can do before they are made. Describing the job to DGC, a common job and a
+// shared Pip's file are one click away, under the form.
 // The list says what each does in plain words, from the catalog's descriptions (dgc/pip_types.py), with the character's
 // name beside it: you pick the job and the face follows.
 const PROJECT_JOBS={scout:'Map out the project',lens:'Answer a question about the code',patch:'Fix files you approve',rook:'Review the code for bugs',pulse:'Run tests you approve',lock:'Look for security problems',quill:'Draft documentation'};
@@ -2198,13 +2199,13 @@ function newProjectPipModel(){return modelPicker('createModel','Model',draft.cre
 function newProjectPipBody(){
  const type=S.types.find(t=>t.id===S.createType&&t.available);
  const kinds=SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>S.types.find(x=>x.id===id)).filter(Boolean);
- const grid=pickerMarkup({id:'new-pip-kind',label:'What should it do?',value:type?.id||'',placeholder:'Choose what it should do',face:avatar('idle',type||null,'new-face'),
+ const chooser=pickerMarkup({id:'new-pip-kind',label:'What should it do?',value:type?.id||'',placeholder:'Choose what it should do',face:avatar('idle',type||null,'new-face'),
   options:kinds.map(t=>({value:t.id,label:PROJECT_JOBS[t.id]||t.role||t.name,aside:t.name,disabled:!t.available,reason:t.available?'':t.unavailable_reason||'Not available yet',face:avatar(t.available?'idle':'offline',t,`new-${t.id}`)}))});
  const other=`<p class="new-pip-other">${S.apiVersion>=23?button('new-pip-describe','Describe the job to DGC instead',S.busy,'link'):''}${S.apiVersion>=41&&!remoteHost?button('import-pip-file','Import a shared Pip…',S.busy||!usable(),'link'):''}</p>`;
- if(!type)return `${grid}<p class="muted">Pick what it should do.</p>${other}`;
+ if(!type)return `${chooser}<p class="muted">Pick what it should do.</p>${other}`;
  const when=pulsePip(type)?'It can’t run any commands yet. After you create it, you can give it a command plan and a schedule.':executionPip(type)?'It runs only on a handoff you approve, never on a schedule.':documentationPip(type)?(S.apiVersion>=20?'After you create it, you can give it a schedule or have it run on events. It doesn’t take handoffs.':'Update DGC to give Quill a schedule or run it on events. It doesn’t take handoffs.'):'After you create it, you can give it a schedule.';
  const reads=executionPip(type)?'Chatting with it never changes files. You approve every fix or test run separately; creating it allows neither.':documentationPip(type)?'Quill writes drafts with the model and quotes the exact code it used. It never changes or publishes your files.':'All of these read the code the same way; the character you pick doesn’t give it more access.';
- return `${grid}<div class="new-pip-kind"><p class="type-role"><strong>${esc(type.name)}</strong> · ${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p><p class="muted">${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(S.workspace?.name||'this project')}. ${esc(when)}</p></div><div class="form new-pip-form">${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}<p class="muted">It reads only committed code from the branch or commit you choose: HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${esc(reads)}</p><div id="new-pip-model">${newProjectPipModel()}</div></div>${other}`;
+ return `${chooser}<div class="new-pip-kind"><p class="type-role"><strong>${esc(type.name)}</strong> · ${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p><p class="muted">${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(S.workspace?.name||'this project')}. ${esc(when)}</p></div><div class="form new-pip-form">${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}<p class="muted">It reads only committed code from the branch or commit you choose: HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${esc(reads)}</p><div id="new-pip-model">${newProjectPipModel()}</div></div>${other}`;
 }
 function newProjectPipReview(){
  const type=S.types.find(t=>t.id===S.createType&&t.available);
