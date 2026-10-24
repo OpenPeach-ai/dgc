@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Pips API 63: events from your app. `pips.trigger(app, event, payload=None, idempotency_key=...)` (TypeScript:
+  `pips.trigger(app, event, payload, { idempotencyKey })`) tells DGC your app's event happened, and every Personal Pip
+  routine waiting on it (`trigger` `{kind: "app", app, event}`) gets one run, with the payload as untrusted data. It
+  takes no `approved`: it only runs routines a person added. The same `idempotency_key` again runs nothing and answers
+  `repeat: true`. The payload, JSON of at most 32 KB, travels outside the 32 KiB request budget and is checked first,
+  as are the app's name, the event's name and the key; plan mode refuses it. `pips.events(app, limit=None)`
+  (`events(app, { limit })`) reads what your app sent lately (`list_app_events`), and `list_pip_routines` takes
+  `app_events` to list routines on app events. All refused before API 63. `AsyncPips` has both.
+
 - Pips API 62: approvals in your app. `pips.pending(app=None)` lists the changes on your own apps that wait for a
   person, with their digests (`list_app_approvals`); `pips.decide(action_id, "accept" | "reject",
   expected_digest=..., approved=True)` is your app's own accept or reject (`decide_app_approval`), exactly once: an

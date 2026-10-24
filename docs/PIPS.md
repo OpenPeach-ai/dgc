@@ -908,6 +908,7 @@ A routine is something a Personal Pip does on its own. It has a name, what to do
 | A time | Every day at 08:00, weekdays, every Monday, every 3 hours, once | Times are in your time zone |
 | A new email | `from:alerts@bank.com` | A Gmail search; it looks every 10 minutes. Needs Gmail connected to this Pip |
 | A calendar event | 15 minutes before each event | 5 to 120 minutes before. Needs Google Calendar connected to this Pip |
+| Your app's event | When the shop app sends order.created | Choose one of your own apps (see [Your own app](#your-own-app)) and the event: type it, or pick one it sent lately. Once for each event |
 
 Add one with **+ Add routine** on its page, or ask the Pip ("every morning, tell me what my day
 looks like"): it suggests a routine as a card under its reply, and nothing runs until you choose
@@ -920,6 +921,9 @@ the work with whatever it already has: its computer, its apps, its drafts that w
 emails already there; each new matching email after that starts one run (up to five emails at once),
 and an email is never handled twice. The emails and events reach the model as untrusted data. A
 routine whose app is not connected waits and says so ("Waiting for Gmail: ask Ava to connect it").
+A routine on your own app's event runs once for each event the app sends (the same event sent twice runs once),
+one after another, with what the app sent as untrusted data; a Pip keeps up to 20 of them waiting, and says in its
+chat if it had to drop older ones. A paused Pip doesn't run them, and doesn't keep them.
 
 A routine can also run a **troupe** (many read-only agents on one work order; see the DGC docs,
 Troupes) on a project. Ask for it in a DGC chat with Ultra on ("every Monday at 9, review last
@@ -1018,6 +1022,11 @@ answer first counts, once: decide in the app and the card in the Pip's chat sett
 accepted create_dispatch**; choose **Allow** or **Don't** in DGC and the app's screen hears that too. Nothing runs
 twice. If the app can't be reached, DGC tries a few more times and the card in DGC still waits for you. A change
 that moves money still asks a person every time, on either side. For developers: [Approvals in your app](../sdk/PIPS.md#approvals-in-your-app-api-62).
+
+The app's own events can start a Pip, too: give a Pip a routine **When my app sends an event** (see
+[Routines](#routines)), such as "when the shop app sends order.created, check the order and propose a dispatch". Each
+time the app sends that event, the Pip runs the routine once, with what the app sent. The app can't add a routine or
+give a Pip anything new: it only starts what you set up. For developers: [Events from your app](../sdk/PIPS.md#events-from-your-app-api-63).
 
 ### App reads
 

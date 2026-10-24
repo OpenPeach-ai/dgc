@@ -4,10 +4,11 @@ SDK 0.7.0 adds `session.pips` to the Python (sync and async) and TypeScript SDKs
 lets trusted host code read and manage the Pips of an existing DGC profile through
 `dgc serve`: list workspaces and Pips, read runs and reports, review proposals,
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions. From Pips API 61 it also
-gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)), and from API 62
-your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)).
+gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)), from API 62
+your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)), and from API 63
+your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)).
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 62** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 63** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -28,7 +29,7 @@ runner, and every backend review and permission check still applies.
   `pips_enabled: true` and an integer `pips_api_version`. Pips are on by default.
   The handshake is not a live subscription: open a new session after the enable
   flag changes.
-- **Plan mode** allows reads and refuses mutations.
+- **Plan mode** allows reads and refuses mutations, and your app's events (`trigger`).
 
 An inherited controller can reach every workspace of the chosen profile, not just
 its own working directory, and the profile's Personal workspace. Give it only to
@@ -75,6 +76,8 @@ try {
 | `get(pip_id)` | `get(pipId)` | `get_pip` |
 | `runs(pip_id)` | `runs(pipId)` | `list_pip_runs` |
 | `get_run(run_id)` | `getRun(runId)` | `get_pip_run` |
+| `trigger(app, event, payload=None, *, idempotency_key)` | `trigger(app, event, payload, { idempotencyKey })` | `trigger_app_event` (API 63; no `approved`) |
+| `events(app, *, limit=None)` | `events(app, { limit })` | `list_app_events` (API 63) |
 
 Python exports `Pips`, `AsyncPips`, `PipReadCommand` and `PipMutationCommand`.
 TypeScript exports `Pips`, `PipReadCommand`, `PipMutationCommand`, `PipReadParams`,
@@ -91,7 +94,8 @@ person, not proof that the code is correct or that tests passed.
 `mutate` requires the exact boolean `approved=True` (Python) or `{ approved: true }`
 (TypeScript) on every call, including retries. Anything else is refused before the
 request leaves the process. It authorizes that one request only and never changes
-a Pip's own reviewed permissions.
+a Pip's own reviewed permissions. Your app's events (`pips.trigger`, API 63) are the one exception: they only run
+routines a person already added, so they take no `approved` ([Events from your app](#events-from-your-app-api-63)).
 
 Several flows have two separate decisions, and approval of one never carries over
 to the other:
@@ -104,8 +108,8 @@ Show the saved record to the user before asking for the second decision.
 
 ### Commands and parameters
 
-Commands form two closed sets: 92 reads and 100 mutations, with a closed field set
-for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
+Commands form closed sets: 94 reads, 101 mutations and one event (`trigger_app_event`, your app's event,
+API 63), with a closed field set for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
 exposed. Parameters are plain JSON:
 
 - at most 32 KiB in total, 2,048 values and 12 nested levels;
@@ -120,7 +124,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 62; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 63; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -173,6 +177,7 @@ job with `create_pip` and a reviewed update.
 | 60 | A live-data Pip: `changes.live_plan` on `propose_pip_update`, `{schema_version: 1, commands: [...]}` with one to six distinct read-only command lines (or `null` to remove them). Both SDKs refuse it before API 60 and check its shape; the backend refuses a line that writes (`write_command`) or holds a password (`secret_detected`). Its runs (`run_kind` `live`) start with `run_pip` and no Pulse pins; `get_pip_run`'s `result.live` has each line's `status`, `exit_code` and `output`, and the `summary` (`summary_by` `model` or `dgc`) with `attention`. Its run posts have `kind` `live` and `outcome` `live_clear` or `live_attention`. |
 | 61 | Your own app's tools ([below](#your-own-apps-tools-api-61)): `register_app`, `update_app`, `accept_app_update`, `remove_app` and `rotate_app_secret` (M) and `list_apps` (R), all local only; an `app_plan` on `app:<name>`. Both SDKs refuse them before API 61 and check a name, an address and each tool before anything is sent. `define_pip_tool` / `definePipTool` and `AppToolHandler` need no runtime. |
 | 62 | Approvals in your app ([below](#approvals-in-your-app-api-62)): `list_app_approvals` (R) and `decide_app_approval` (M), local only; `pips.pending()` and `pips.decide()` in both SDKs, refused before API 62 and checked before anything is sent. `AppToolHandler`'s approval callbacks need no runtime. `get_pip_app_action` of an app action carries `app_deliveries`. |
+| 63 | Events from your app ([below](#events-from-your-app-api-63)): `trigger_app_event` (an event, sent with `pips.trigger()`: no `approved`, refused in plan mode) and `list_app_events` (R), local only; a routine's trigger `{kind: "app", app, event}` in `add_pip_routine` and `update_pip_routine`; `app_events` on `list_pip_routines`. Both SDKs refuse them before API 63 and check the app, the event's name, the idempotency key and the payload (32 KB of JSON, sent outside the 32 KiB request budget) before anything is sent. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -780,13 +785,71 @@ On DGC's side the card and your app decide one thing. Allow takes the same appro
 `rejected`, by `dgc`) and runs the edited change under a new `action_id`; Don't rejects it. When your app decides
 first, the card settles with one line: "Shop app accepted create_dispatch".
 
+### Events from your app (API 63)
+
+Your app's own events can start a Personal Pip's routine: "when the shop sends `order.created`, check the order and
+propose a dispatch". A person adds the routine once; then your app tells DGC each time it happens.
+
+**The routine.** A routine's `trigger` may be `{"kind": "app", "app": "shop", "event": "order.created"}` (`{"app":
+"shop", "event": "order.created"}` is read the same way). An event's name is 1 to 64 lowercase letters, digits, dots,
+hyphens or underscores, and the app must be registered with `register_app`. It is added like any routine: in the Pip's
+Settings, Routines, **When my app sends an event** (choose the app, then type the event or pick one it sent lately);
+from the Pip's chat, where its suggestion waits for the user's **Add routine**; or with `add_pip_routine` (approved).
+Its list says it in words: "When the shop app sends order.created". `list_pip_routines` lists such routines only with
+`app_events: true`, because an older editor refuses a "when" it doesn't know.
+
+**Sending an event.**
+
+```python
+answer = s.pips.trigger("shop", "order.created", {"order_id": order.id, "total": order.total},
+                        idempotency_key=order.id)
+print(answer["notice"])        # Queued for Asha.
+```
+
+```typescript
+const answer = await session.pips.trigger("shop", "order.created", { order_id: order.id, total: order.total },
+  { idempotencyKey: order.id });
+```
+
+`trigger` needs no `approved=True`, unlike every other change. It only runs routines a person already added; it can't
+add, change or turn one on; and it grants no tools or permissions. In the run, the Pip may do what it may always do: a
+read of your app runs, and a change waits as an Allow card (and, from API 62, as an approval in your app).
+
+- **Once.** DGC records an event once per `(app, idempotency_key)` and remembers the key for 30 days. The same key
+  again is a no-op that says so (`repeat: true`, with what the first one queued). Use your own id for what happened,
+  such as the order's id, not a new random one each call.
+- **Who runs it.** Every routine that is on and waits on `(app, event)`, across Personal Pips, gets one run. The
+  answer's `pips` says, Pip by Pip: `queued`; `busy` (it is answering something now and keeps this for its next
+  check); or `paused` (the Pip is paused, or Pips are stopped on this computer: not run, and not kept). `no_routine`
+  is true when no routine waits on it. `notice` says it all in words. With the runner off, events wait and run when it
+  is back: "Pips are off on this computer, so they will run when it is back."
+- **Limits.** The payload is JSON of at most 32 KB. At most 60 events a minute per app: beyond that `trigger` is
+  refused (`DGCCommandRejectedError`, reason `rate_limited`) and nothing is queued; send it again a minute later. A Pip
+  keeps at most 20 of your apps' events waiting: a 21st drops the oldest, the answer says so (`dropped`), and the
+  Pip's next run tells the user in its chat.
+
+**In the run.** One event is one run, oldest first: a hidden turn in the Pip's chat, as an email routine's is. It names
+your app and the event, and carries the payload as untrusted data from your app, never instructions. A chat turn holds
+4,000 characters, so a Pip sees about the first 2,500 to 3,000 characters of a payload (less with a long routine); a
+larger one is cut, and the turn says so. Send ids and a few fields: the Pip reads the rest through your app's read
+tools. The Pip's reply appears in its chat as its own message.
+
+| Command | | Fields |
+| --- | --- | --- |
+| `trigger_app_event` | E | `app`, `event`, `payload?` (JSON, at most 32 KB), `idempotency_key` (1 to 200 characters on one line). Answers `{event_id, app, event, idempotency_key, received_at, payload_bytes, queued, no_routine, pips: [{pip_id, pip_name, routine_id, routine, outcome, words, dropped?}], more, repeat, runner_online, notice}`. |
+| `list_app_events` | R | `app`, `limit?` (1 to 50; 20). Answers `{app, events, names}`: what the app sent lately, newest first (each `event_id`, `event`, `idempotency_key`, `received_at`, `payload_bytes`, `queued`, `waiting`, `pips`), and the event names it used, most recent first. |
+
+E is an event: neither a read nor an approved mutation. Send it with `pips.trigger(app, event, payload=None, *,
+idempotency_key)` (TypeScript: `pips.trigger(app, event, payload, { idempotencyKey })`); read with `pips.events(app,
+limit=None)` (`pips.events(app, { limit })`). `AsyncPips` has both.
+
 ## Parameters that pin a review
 
 The SDK passes these through unchanged. Read them from the record the user saw.
 
 | Field | Used by |
 | --- | --- |
-| `idempotency_key` | `run_pip`, `send_pip_message`, `propose_pip_handoff`, `propose_pip_artifact_handoff`, `propose_pip_personal_handoff` |
+| `idempotency_key` | `run_pip`, `send_pip_message`, `propose_pip_handoff`, `propose_pip_artifact_handoff`, `propose_pip_personal_handoff`, `trigger_app_event` (an event runs once per key) |
 | `request_key` | `propose_pip_app_action`, `propose_pip_calendar_action`, `propose_pip_connector_action`, `record_pip_exception`, `record_pip_statement`, `archive_pip`, `restore_pip`, `propose_workspace_session_outcome` |
 | `expected_version` | `propose_pip_update`, `accept_pip_update`, `reject_pip_update`, `archive_pip`, `restore_pip`, `run_pip` |
 | `expected_lifecycle_revision` | `archive_pip`, `restore_pip`, `pause_pip`, `resume_pip`, `run_pip` |

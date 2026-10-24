@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A routine on your own app's event.** In a Personal Pip's Settings, Routines, choose **When my app sends an
+  event**, pick your app, and type the event or pick one it sent lately: "When the shop app sends order.created". The
+  Pip runs it once for each event, with what the app sent. The choice shows when you have an app registered through
+  DGC's SDK. Needs a DGC CLI with Pips API 63; with an older one, nothing changes.
+
 - **A change your own app decided settles its card.** Your app can now accept or reject a Pip's change on its own
   screen. When it does before you, the Allow card in the Pip's chat is replaced by one quiet line: **Shop app accepted
   create_dispatch**, decided in Shop app, it ran once (or declined it, and nothing ran). An Allow pressed a moment late

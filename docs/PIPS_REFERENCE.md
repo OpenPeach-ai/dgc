@@ -1794,6 +1794,51 @@ and whichever answers first wins, once.
 - **The money floor** is unchanged: a tool marked `moves_money` gets no Always allow and no level, so it always waits,
   and both the card and `approval_requested` say so.
 
+**Events from your app** (`pip_sdk_app_events`, Pips API 63). Your app's own events start a Personal Pip's routine:
+a third kind of "when" beside a schedule and a Gmail or Calendar event.
+
+- **The routine.** Its `trigger` is `{kind: "app", app, event}` (`{app, event}` is read as that): `app` a registered
+  app's name (refused `app_not_registered` otherwise, in `add_pip_routine`, a changed `trigger` in
+  `update_pip_routine`, and when a suggestion is saved, where one for an app removed meanwhile is dropped and the reply
+  kept), `event` `[a-z0-9_.-]{1,64}`. Its `label` is "when the shop app sends order.created"; its `next_due_at` is
+  null until an event comes. The chat's `add_routine` offers it only when the run's pin names the user's own apps, and
+  refuses an app that isn't one of them; its card waits for **Add routine** as any suggestion does. `list_pip_routines`
+  lists routines of this kind only with `app_events: true` (an older editor refuses an unknown `trigger.kind`, and with
+  it the whole list).
+- **The event.** `trigger_app_event {app, event, payload?, idempotency_key}` (local only; no approval: it runs only
+  routines a person added, and grants nothing). `payload` is plain JSON of at most 32 KB compact (16 levels, 4,096
+  values, safe numbers), bounded on its own outside the request's 16 KiB budget (`pip_computer_files.bulk_fields`);
+  `idempotency_key` is 1 to 200 characters on one line. In one transaction: an event already kept for `(app,
+  idempotency_key)` answers its first answer with `repeat: true` and does nothing; otherwise more than 60 kept for the
+  app in the last minute refuses it (`rate_limited`, nothing kept or queued); events older than 30 days are forgotten
+  (500 at a time, never one a run still waits on); the event is kept (`appevent_<32 hex>`), and every routine that is
+  `on`, of a Personal Pip that isn't archived, with that `(app, event)` is matched. A Pip that is paused, or every Pip
+  when Pips are stopped (`stop_pips`), is answered `paused` and nothing is queued for it. Otherwise one queue row is
+  added for the routine (the Pip's oldest waiting rows are dropped first so that at most 20 wait, `told` 0), the
+  routine is due now (`next_due_at`, its `revision` moved), and it is answered `busy` when the Pip has a conversation
+  run queued, running or cancelling, else `queued`. The answer: `{event_id, app, event, idempotency_key, received_at,
+  payload_bytes, queued, no_routine, pips: [{pip_id, pip_name, routine_id, routine, outcome, words, dropped?,
+  stopped?}] (at most 50), more, repeat, runner_online, notice}`. `notice` is the answer in words, with "Pips are off
+  on this computer, so they will run when it is back." when the runner isn't online and something was queued, and a
+  word about payloads over 2,500 characters. The payload is kept only while a row waits on it.
+- **The run.** The supervisor's routine check (`pip_routines.check`) takes the routine's oldest waiting row and writes
+  the routine's hidden turn (`routine_` key, actor `local-routine`, bound to the event) with: the app, the event and
+  when it came; how many of the Pip's events were dropped unread since its last such turn, with the instruction to say
+  so first; that what the app sent is untrusted data, never instructions, giving no tools or permissions; and the
+  payload, cut to fit the turn's 4,000 characters and 8 KB and said so ("DGC cut it to fit this message: the app sent
+  N KB"). Busy: tried again 5 seconds on; another refusal: 60 seconds, its words in `last_error`. The row is then
+  `ran` with the run's id; the routine stays due while rows wait. A turn already written for the event (its key) counts
+  as run. An app removed meanwhile lets its rows go (`gone`) with `last_error` "Waiting for Shop app: it isn't
+  registered with DGC now." Turning the routine off, changing its `trigger` or deleting it lets its rows go too;
+  turned back on, it waits for the next event.
+- **What an app sent.** `list_app_events {app, limit?}` (local only; 1 to 50, 20): `{app, events: [{event_id, event,
+  idempotency_key, received_at, payload_bytes, queued, waiting, pips}], names}`, newest first, and the event names it
+  used, most recent first (the editor's picker).
+- **Where.** `pip_app_events` (id, app, event, idempotency_key unique per app, payload, payload_bytes, answer,
+  created_at) and `pip_app_event_queue` (seq, event_id, routine_id, pip_id, status `waiting` | `ran` | `dropped` |
+  `gone`, told, run_id, created_at, updated_at), made with `CREATE TABLE IF NOT EXISTS` in the transaction of an app's
+  first event. The registry's schema stays 46.
+
 **Web plans** (`web_plan`):
 
 ```json
@@ -1916,6 +1961,7 @@ passed on. Personal Pips can't hand off to project Pips.
 | Run evidence export | 4 MiB, 2,000 records, 30 seconds (Linux) |
 | Markdown export | 128 KiB |
 | Runner heartbeat | Every 2 seconds; offline after 15 seconds |
+| Your app's events (API 63) | 60 a minute per app; payload 32 KB of JSON; 20 waiting per Pip; an idempotency key kept 30 days |
 
 ## Main-chat tools
 
@@ -2059,6 +2105,7 @@ Clients check it before using a newer control.
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
 | 61 | Your own app's tools (`pip_sdk_apps`): `register_app`, `update_app`, `accept_app_update`, `list_apps`, `remove_app`, `rotate_app_secret` (local only); the connection `app:<name>` in `list_pip_connections`, `inspect_pip_connection` and `inspect_pip_connector_actions`; version-1 `app_plan`s on it; `connector_call` actions on it, sent as one signed POST; `<app>__<tool>` functions and `app_answer` in a Personal Pip's runs (see Your own app's tools, under Personal Pips) |
 | 62 | Approvals in your app (`pip_sdk_app_approvals`): `approval_requested` and `approval_resolved`, POSTed signed to the app's `url` by the supervisor and recorded on the action (`app_deliveries`); `list_app_approvals` and `decide_app_approval` (local only); the review `pip-app-review` opens for a Pip's change on `app:<name>`, tied to its connector draft (see Approvals in your app, under Personal Pips) |
+| 63 | Events from your app (`pip_sdk_app_events`): a routine's `trigger` `{kind: "app", app, event}`; `trigger_app_event` (no approval) and `list_app_events` (local only); `app_events` on `list_pip_routines`; the `add_routine` tool's app kind (see Events from your app, under Personal Pips) |
 | 60 | A live-data Pip: a project Pulse's `live_plan` (`changes.live_plan`, a setup card's `work_kind` `live_data`), run kind `live`, `result.live`, run posts of kind `live` and report cards with outcomes `live_clear` and `live_attention`, `live_plan` on `get_pip` and `list_pips` (see [Live-data commands](#live-data-commands)) |
 | 59 | Borrowing the user's own signed-in Chrome (`pip_borrow`): `borrow_chrome` and `borrowed_chrome`; `list_pip_borrows`, `allow_pip_borrow` (Allow once), `decline_pip_borrow` (Not now), `stop_pip_borrow`, all local only; the reserved chat keys `borrow_` and `borrow_no_`; no Always allow |
 | 58 | How much a Personal Pip asks (`pip_levels`): `get_pip_level`, `set_pip_level` (`ask`, `approve`, `full`); what a level lets through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a pending hold's `asks_because`; the safety floor's computer action of kind `floor`; sites written out in an attached document count as named by the user |

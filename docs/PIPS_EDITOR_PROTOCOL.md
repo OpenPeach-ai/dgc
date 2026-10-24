@@ -335,6 +335,15 @@ the app already decided, or whose accept observes one, says so and runs nothing 
 `decide_app_approval` are SDK calls the view doesn't make. Before API 62 the view asks nothing new. No event and no
 event field changes.
 
+**Routines on your app's events** (API 63). The view sends `list_pip_routines` with `app_events: true`, so a routine
+whose `trigger` is `{kind: "app", app, event}` is listed ("When the shop app sends order.created"); without that field
+the CLI leaves such routines out, so an older view, which refuses a `trigger.kind` it doesn't know, still loads the
+rest. The Routines form offers **When my app sends an event** when `list_apps` has an app (or the routine already
+waits on one): an app select and an event field, with the names `list_app_events {app, limit: 20}` answers as its
+suggestions. It saves with `add_pip_routine` and `update_pip_routine`, as other routines. `trigger_app_event` is an
+SDK call the view doesn't make. Before API 63 the view asks nothing new and offers no such choice. No event and no
+event field changes.
+
 **The computer tab** (API 43). The Pips view's computer button posts
 `{type: 'pipsOpenComputer', pip: {id, name, pip_type}}` instead of opening an in-view browser.
 The host checks it and opens one `dgc.pipComputer` editor tab per Pip, titled "NAME ·

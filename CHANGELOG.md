@@ -6,6 +6,18 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Your app's events start your Pips (Pips API 63).** A Personal Pip's routine can now run when your own app sends an
+  event: "when the shop app sends order.created, check the order and propose a dispatch". Add it in the Pip's
+  Settings (Routines, When my app sends an event), accept the Pip's suggestion in its chat, or add it through the SDK.
+  Your app's code sends the event with `trigger_app_event` (the SDK's `pips.trigger`), which needs no approval because
+  it only runs routines a person already added and gives a Pip nothing new. DGC runs each event once per
+  `idempotency_key` (the same order sent twice runs once, and the answer says so), queues a run of every routine
+  waiting on it across your Pips, and answers, Pip by Pip, which it queued, which is busy and keeps it for its next
+  check, and which is paused and won't run it; with Pips off on this computer, they run when it is back. The payload,
+  JSON of at most 32 KB, reaches the Pip as untrusted data in the routine's turn, never instructions. At most 60
+  events a minute per app (more are refused and queue nothing), and a Pip keeps at most 20 waiting: it says in its chat
+  if it dropped older ones. `list_app_events` shows what an app sent lately. An older DGC still opens your Pips.
+
 - **Your app hears what waits for it, and can decide it (Pips API 62).** When a Pip's change in your own app waits for
   a person, DGC tells the app at its own address, signed as its tool calls are: `approval_requested`, with the change,
   its digest, the Pip, the run, a one-line summary, when it expires and whether it moves money. The app's admin screen

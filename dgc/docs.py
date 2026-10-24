@@ -2749,7 +2749,10 @@ schedule, a commit trigger or a routine. Up to four Pips work at once, with no d
   copy, with **Review** and **Undo**. A file you changed on the same lines meanwhile is held back. A
   **Pip fixes** chip on the chip line above the message box lists the fixes while they work.
 - **Routines.** A Personal Pip does things on its own at a time, on a new email that matches a
-  search, or before a calendar event. It suggests one as a card; nothing runs until you add it.
+  search, before a calendar event, or when your own app sends an event ("when the shop app sends
+  order.created"): once for each event, with what the app sent as data, never as instructions. It
+  suggests one as a card; nothing runs until you add it. Your app's code sends the event with the
+  SDK's `pips.trigger`, which only starts what you set up.
 - **Live data.** A Pulse can keep an eye on live data instead of running tests: a short list of exact
   read-only command lines you approve (a `SELECT` through a read-only database account, `df -h .`,
   `curl -s http://127.0.0.1:8000/health`). DGC runs only those lines, in a read-only box in your
