@@ -88,7 +88,14 @@ const pill=x=>text(x.$('.pip-topbar .pip-pill>span:not(.avatar)'));
 const pillSmall=x=>text(x.$('.pip-topbar .pip-pill small'));
 
 test('a Project Pip gets the Personal Pips page: the paged list, then its top bar and menu; Personal’s own parts stay Personal’s',async()=>{
-  const x=setup();await x.drain();const attention=x.requests('list_pip_attention').length;await x.tab('project');
+  const x=setup();await x.drain();
+  await x.type('#pip-search','plan');await new Promise(r=>setTimeout(r,300));await x.drain();
+  assert.equal(x.requests('list_pips').at(-1).query,'plan','a search on the Personal list');
+  const attention=x.requests('list_pip_attention').length;
+  await x.tab('project');
+  assert.equal(x.requests('list_pips').at(-1).workspace_id,W);
+  assert.equal(x.requests('list_pips').at(-1).query,undefined,'stays with the Personal list: the project’s starts whole');
+  assert.equal(x.$('#pip-search').value,'');
   assert.ok(x.$('.pip-app-root').classList.contains('simple-pips'),'the simple page');
   assert.ok(x.$('.simple-home'),'the list');
   assert.deepEqual(x.$$('.pip-row').map(r=>r.dataset.job),[AUDIT,DOCS,PATCH,TESTS,LIVE]);
@@ -197,7 +204,7 @@ test('a change waiting for you and new Pips waiting stay in sight on a Project P
   const card=x.$('.conversation-log .chat-setup-review');
   assert.match(text(card),/When it runs: Daily at 09:00 · Asia\/Kolkata/,'the change, in its chat');
   assert.ok(card.querySelector(`[data-proposal="${PROPOSAL}"]`)&&card.querySelector(`[data-reject="${PROPOSAL}"]`),'with Review and Reject');
-  assert.equal(text(x.$('.pip-setup-strip')),'1 new Pip waiting for you','new Pips waiting, under its top bar');
+  assert.equal(text(x.$('.pip-setup-strip #chat-review-setups span')),'1 new Pip waiting for you','new Pips waiting, under its top bar');
   await x.click('.pip-topbar .pip-menu [data-tab="runs"]');
   assert.equal(text(x.$('.waiting h3')),'A change is waiting for you','above its other pages too');
   assert.ok(x.$('.pip-setup-strip'),'and the strip stays');

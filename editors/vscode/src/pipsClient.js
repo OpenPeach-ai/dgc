@@ -1837,7 +1837,8 @@ function scopeTabsMarkup(){
 function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpanel" aria-labelledby="pips-tab-${scopeTab()}"${S.switching?' aria-busy="true"':''}`:'';}
 function projectEmptyMarkup(){return `<div class="pips-tab-empty"${scopePanelAttrs()}><p class="muted">Open a project folder to see its Pips.</p></div>`;}
 /** Shows another workspace's Pips from the top: what the old dropdown did, and what opening a Pip elsewhere does. */
-function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
+// Its list starts at its first page: the pages read and the search typed were the other tab's (both tabs are paged now).
+function enterWorkspace(target){S.epoch++;clearSelection();S.selected='';S.jobs=[];jobsExtra=[];S.jobsNext=null;S.jobsTotal=null;S.pipSearch='';draft.pipSearch='';S.context=null;S.create=false;S.overview=true;S.workspace=target;S.projectEmpty=false;S.switching=false;setupRows=[];setupError='';S.error='';rememberView();return refresh(true);}
 function chooseScopeTab(name,focus=false){
  if(!scopeTabs()||!usable()||!S.workspace||S.busy)return;
  const target=name==='project'?projectSpace():personalSpace();
@@ -2297,7 +2298,7 @@ function runNowMarkup(){
 // What a Project Pip's page keeps in sight above its chat and sections: new Pips waiting for you from the DGC chat, and
 // a Pip of a kind this editor doesn't know.
 function projectPipNotes(){
- const setups=S.apiVersion>=23&&(setupRows.length||setupError)?`<div class="chat-setup-banner pip-setup-strip">${button('chat-review-setups',setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`)}</div>`:'';
+ const setups=S.apiVersion>=23&&(setupRows.length||setupError)?`<div class="pip-setup-strip"><button type="button" id="chat-review-setups" class="pip-setup-open"><span>${setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`}</span><span class="pip-setup-review" aria-hidden="true">Review</span></button></div>`:'';
  const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
  return setups+unknown;
 }

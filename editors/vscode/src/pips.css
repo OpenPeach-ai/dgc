@@ -295,6 +295,10 @@ button.pill{border-radius:999px;padding:6px 16px}
 .topbar-running{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:11px;white-space:nowrap;cursor:pointer}
 .topbar-running:hover{background:var(--pip-wash);color:var(--vscode-foreground)}
 .simple-pips .pip-setup-strip{flex:none;margin:0 14px 6px}
+.pip-setup-open{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:32px;padding:5px 12px;border:1px solid var(--pip-edge);border-radius:10px;background:color-mix(in srgb,var(--pip-accent) 8%,transparent);color:var(--vscode-foreground);font-size:12px;text-align:left;cursor:pointer}
+.pip-setup-open:hover{background:color-mix(in srgb,var(--pip-accent) 14%,transparent)}
+.pip-setup-open>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pip-setup-review{flex:none;color:var(--pip-ink)}
 .pip-pill small.pip-status{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pip-pill small.pip-status button.link.last-run{font-size:inherit;color:var(--muted)}
 .pip-pill small.pip-status button.link.last-run:hover{color:var(--vscode-foreground)}
