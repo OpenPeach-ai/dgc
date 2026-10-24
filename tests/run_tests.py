@@ -12,6 +12,29 @@ import stat
 import subprocess
 import sys
 
+def _raise_open_file_limit() -> None:
+    """The suite holds many files open at once: thousands of tests, and backends a test builds and never shuts down.
+    macOS gives a process 256 by default, and a run there died with "Too many open files" in 5,678 places (measured
+    2026-10-24). Raise the soft limit toward the hard one, as test runners do; the unittest child inherits it.
+    macOS refuses a soft limit above kern.maxfilesperproc, so smaller steps are tried after a refusal."""
+    try:
+        import resource
+    except ImportError:                      # Windows: no such limit
+        return
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    for want in (65536, 10240, 4096):
+        target = want if hard == resource.RLIM_INFINITY else min(want, hard)
+        if target <= soft:
+            return
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+            return
+        except (ValueError, OSError):
+            continue
+
+
+_raise_open_file_limit()
+
 import os as _wait_os, sys as _wait_sys                     # noqa: E402
 _wait_sys.path.insert(0, _wait_os.path.dirname(_wait_os.path.abspath(__file__)))
 from waiting import RUNNER_SLACK                            # noqa: E402
