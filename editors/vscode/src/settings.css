@@ -85,3 +85,4 @@ body.vscode-high-contrast{--line:#888;--border-strong:#fff;--muted:#ddd}
 .field .model-box-status{color:#ffc4bf}
 @media(max-width:850px){.field>.model-box{width:175px}}
 @media(max-width:620px){.field>.model-box{width:100%;max-width:none}.model-box-list{left:0;right:auto}}
+.model-box-list [aria-selected=true]::after{content:"\2713";float:right;margin-left:14px;color:var(--muted)}
