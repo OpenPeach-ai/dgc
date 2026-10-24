@@ -2385,7 +2385,8 @@ function sameJson(a,b){const norm=v=>Array.isArray(v)?v.map(norm):record(v)?Obje
 async function loadRoutines(){
  if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
  const token=scope(),sequence=++routineSeq,pip=S.selected;
- try{const list=routinesPage(await send('list_pip_routines',{pip_id:pip}),pip);if(token!==scope()||sequence!==routineSeq)return;S.routines=list;S.routinesError='';render();}
+ // From Pips API 63 its routines on your own app's events too (an older DGC lists none and takes no such field).
+ try{const list=routinesPage(await send('list_pip_routines',{pip_id:pip,...(appEventRoutines()?{app_events:true}:{})}),pip);if(token!==scope()||sequence!==routineSeq)return;S.routines=list;S.routinesError='';render();}
  catch(error){if(token===scope()&&sequence===routineSeq){S.routinesError=errorText(error);render();}}
 }
 function routineCards(){
@@ -2400,7 +2401,20 @@ async function routineCall(command,args,id,notice){
 }
 function editRoutine(id){
  const r=(S.routines||[]).find(x=>x.id===id);if(id!=='new'&&!r)return;
- routineEditing=id;routineError='';Object.assign(draft,routineDraft(id==='new'?null:r,defaultZone));render();$('routineTitle')?.focus();
+ routineEditing=id;routineError='';Object.assign(draft,routineDraft(id==='new'?null:r,defaultZone,ownAppNames()[0]||''));render();$('routineTitle')?.focus();
+ if(draft.routineKind==='app')void loadAppEvents(draft.routineApp);
+}
+// A routine on your own app's event (Pips API 63): choose the app, then type the event or pick one it sent lately.
+const appEventNames=new Map();let appEventsSeq=0;
+function appEventRoutines(){return S.apiVersion>=63&&!remoteHost;}
+function ownAppNames(){return appEventRoutines()?(S.ownApps||[]).map(a=>a.name):[];}
+async function loadAppEvents(app){
+ if(!appEventRoutines()||!app||!usable())return;
+ const token=scope(),sequence=++appEventsSeq;
+ try{const result=await send('list_app_events',{app,limit:20});if(token!==scope()||sequence!==appEventsSeq)return;
+  appEventNames.set(app,Array.isArray(result?.names)?result.names.filter(n=>typeof n==='string'&&/^[a-z0-9_.-]{1,64}$/.test(n)).slice(0,50):[]);
+  if(routineEditing&&draft.routineKind==='app'&&draft.routineApp===app)render();}
+ catch{/* typing the event's name still works */}
 }
 async function saveRoutine(){
  const isNew=routineEditing==='new',current=(S.routines||[]).find(x=>x.id===routineEditing);
@@ -2414,7 +2428,7 @@ function routinesSectionMarkup(){
  if(S.routinesError&&!S.routines)return errorMarkup(S.routinesError);
  if(!S.routines)return '<p class="muted" role="status">Loading…</p>';
  const links=S.appLinks||[],busy=!!routineBusy||S.busy||!usable();
- const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar')}):'';
+ const form=routineEditing?routineFormMarkup(draft,{esc,busy,error:routineError,isNew:routineEditing==='new',gmail:links.some(l=>l.status==='connected'&&l.toolkit==='gmail'),calendar:links.some(l=>l.status==='connected'&&l.toolkit==='googlecalendar'),apps:ownAppNames(),events:appEventNames.get(draft.routineApp)||[]}):'';
  return routinesMarkup(S.routines,{esc,busy,editing:routineEditing,form,formatDate:date,pipName:S.pip.name,schedule:S.pip.schedule?scheduleLabel(S.pip.schedule):''})+(S.legacyOpen&&S.pip.schedule?`<div class="routine-legacy-edit">${quickScheduleMarkup()}</div>`:'');
 }
 function openPipPage(view='info'){
@@ -2995,7 +3009,8 @@ function updateDraft(event) {
   if(key==='sourceMode'||key==='sourceReason'||key==='sourceExcludeInput')S.sourceDirty=true;
   if(key==='pipModel')S.modelDirty=true;
   if((key==='pipPageName'||key==='pipPageTitle')&&!pageNameDirty){pageNameDirty=true;render();}
-  if(key==='routineKind'&&event.type==='change')render();
+  if(key==='routineKind'&&event.type==='change'){if(draft.routineKind==='app'){if(!draft.routineApp)draft.routineApp=ownAppNames()[0]||'';void loadAppEvents(draft.routineApp);}render();}
+  if(key==='routineApp'&&event.type==='change'){render();void loadAppEvents(draft.routineApp);}
   if(key.startsWith('schedule')||key.startsWith('trigger')||key==='verificationEnabled'||key==='pulseMode'||key==='liveCommands')S.scheduleDirty=true;
   if(key==='pulseMode'&&event.type==='change')render();
   if((key==='triggerPaths'||key==='triggerCommit')&&event.type==='change')render();

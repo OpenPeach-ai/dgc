@@ -1,10 +1,14 @@
 // A Personal Pip's routines (pip_routines), Grok's Routines: something it does on its own, at a time,
-// when a matching email arrives, or before a calendar event. You add and edit them in its Settings;
-// the Pip may suggest one in its chat, and the card under its message is your Add routine / Not now.
+// when a matching email arrives, before a calendar event, or when your own app sends an event (Pips API 63:
+// "When the shop app sends order.created"). You add and edit them in its Settings; the Pip may suggest one
+// in its chat, and the card under its message is your Add routine / Not now.
 
 const STATUSES = ['suggested', 'on', 'off'];
 const WEEKDAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 const RECENT_MS = 30 * 60 * 1000;
+const APP = /^[a-z0-9-]{1,40}$/, EVENT = /^[a-z0-9_.-]{1,64}$/;
+/** "shop" is "the shop app", as DGC names it in a sentence. */
+const appPhrase = name => `the ${String(name || '').replace(/-/g, ' ').trim() || 'your'} app`;
 const text = (v, max) => typeof v === 'string' && v.length <= max;
 const record = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const time = v => typeof v === 'string' && Number.isFinite(Date.parse(v));
@@ -20,11 +24,13 @@ export function routine(value, pip) {
   const fail = () => { throw new Error('This routine didn’t load. Refresh to try again.'); };
   if (!record(value) || !/^routine_[a-f0-9]{32}$/.test(value.id) || value.pip_id !== pip || !text(value.title, 160) || !value.title
     || !text(value.prompt, 4000) || !STATUSES.includes(value.status) || !['user', 'pip'].includes(value.created_by)
-    || !record(value.trigger) || !['schedule', 'email', 'calendar'].includes(value.trigger.kind)
+    || !record(value.trigger) || !['schedule', 'email', 'calendar', 'app'].includes(value.trigger.kind)
     || !(value.run_id === null || value.run_id === undefined || /^run_[A-Za-z0-9]{1,64}$/.test(value.run_id))
     || !(value.next_due_at === null || time(value.next_due_at)) || !(value.last_run_at === null || time(value.last_run_at))
     || !(value.last_error === null || text(value.last_error, 600)) || !time(value.updated_at)) fail();
   if (value.trigger.kind === 'schedule' && !record(value.trigger.schedule)) fail();
+  if (value.trigger.kind === 'app' && !(typeof value.trigger.app === 'string' && APP.test(value.trigger.app)
+    && typeof value.trigger.event === 'string' && EVENT.test(value.trigger.event))) fail();
   // A routine that runs a troupe (dgc/troupe_routines.py) says so in a few words; anything else there is dropped.
   if (value.troupe !== undefined && !(record(value.troupe) && ['title', 'plan', 'project', 'items'].every(k => text(value.troupe[k], 400)))) {
     const { troupe, ...rest } = value;
@@ -42,6 +48,7 @@ export function routinesPage(value, pip) {
 
 /** When it runs, in words. */
 export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleString()) {
+  if (trigger.kind === 'app') return `When ${appPhrase(trigger.app)} sends ${trigger.event}`;
   if (trigger.kind === 'email') return `When an email matching “${trigger.query}” arrives`;
   if (trigger.kind === 'calendar') return `${trigger.lead_minutes} minutes before each calendar event`;
   const s = trigger.schedule;
@@ -54,12 +61,13 @@ export function routineWhen(trigger, formatDate = v => new Date(v).toLocaleStrin
 }
 
 /** The form's fields for a routine (a new one when there is none). */
-export function routineDraft(value = null, zone = 'UTC') {
+export function routineDraft(value = null, zone = 'UTC', app = '') {
   const d = { routineId: value?.id || '', routineTitle: value?.title || '', routinePrompt: value?.prompt || '', routineKind: 'daily',
     routineTime: '09:00', routineDay: '1', routineHours: '3', routineAt: '', routineQuery: '', routineLead: '15', routineZone: zone,
-    routineTroupe: value?.troupe || null };
+    routineApp: app, routineEvent: '', routineTroupe: value?.troupe || null };
   const t = value?.trigger;
   if (!t) return d;
+  if (t.kind === 'app') return { ...d, routineKind: 'app', routineApp: t.app, routineEvent: t.event };
   if (t.kind === 'email') return { ...d, routineKind: 'email', routineQuery: t.query };
   if (t.kind === 'calendar') return { ...d, routineKind: 'calendar', routineLead: String(t.lead_minutes) };
   const s = t.schedule;
@@ -111,6 +119,13 @@ export function routineFromDraft(d, now = Date.now()) {
       if (!Number.isInteger(lead) || lead < 5 || lead > 120) throw new Error('Choose 5 to 120 minutes before.');
       trigger = { kind: 'calendar', lead_minutes: lead, every_minutes: 10 }; break;
     }
+    case 'app': {
+      const app = String(d.routineApp || ''), event = String(d.routineEvent || '').trim();
+      if (!APP.test(app)) throw new Error('Choose the app.');
+      if (!event) throw new Error('Say which event, such as order.created.');
+      if (!EVENT.test(event)) throw new Error('An event’s name is lowercase letters, digits, dots, hyphens or underscores, such as order.created.');
+      trigger = { kind: 'app', app, event }; break;
+    }
     default: throw new Error('Choose when it runs.');
   }
   return { title, prompt, trigger };
@@ -153,20 +168,28 @@ export function routinesMarkup(routines, { esc, busy = false, editing = '', form
 }
 
 /** Add or edit one routine. */
-export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = false, calendar = false, isNew = true }) {
+export function routineFormMarkup(d, { esc, busy = false, error = '', gmail = false, calendar = false, isNew = true, apps = [], events = [] }) {
   const off = busy ? ' disabled' : '';
   // A troupe routine runs on a schedule only, and what it does was approved in a DGC chat: its words can't be edited.
   const troupe = d.routineTroupe;
+  // Your own apps (Pips API 63): offered only when you have one, or when this routine already waits on one.
+  const own = [...new Set([...(apps || []), ...(d.routineKind === 'app' && d.routineApp ? [d.routineApp] : [])])].filter(a => APP.test(a));
   const kinds = [['daily', 'Every day'], ['weekdays', 'Weekdays'], ['weekly', 'Every week'], ['hours', 'Every few hours'], ['once', 'Once'],
-    ...(troupe ? [] : [['email', 'When an email arrives'], ['calendar', 'Before calendar events']]), ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
+    ...(troupe ? [] : [['email', 'When an email arrives'], ['calendar', 'Before calendar events']]),
+    ...(troupe || !own.length ? [] : [['app', 'When my app sends an event']]), ...(d.routineKind === 'custom' ? [['custom', 'Its current schedule']] : [])];
+  const appName = a => { const w = String(a).replace(/-/g, ' '); return w.slice(0, 1).toUpperCase() + w.slice(1) + ' app'; };
   const at = ['daily', 'weekdays', 'weekly'].includes(d.routineKind)
     ? `${d.routineKind === 'weekly' ? `<select id="routineDay" data-draft="routineDay" aria-label="Day"${off}>${WEEKDAYS.map((w, i) => `<option value="${i}"${String(d.routineDay) === String(i) ? ' selected' : ''}>${w.slice(0, -1)}</option>`).join('')}</select>` : ''}<label class="inline">at <input id="routineTime" data-draft="routineTime" type="time" step="60" value="${esc(d.routineTime)}"${off}></label>`
     : d.routineKind === 'hours' ? `<label class="inline">every <input id="routineHours" data-draft="routineHours" type="number" min="1" max="168" step="1" value="${esc(d.routineHours)}"${off}> hours</label>`
     : d.routineKind === 'once' ? `<input id="routineAt" data-draft="routineAt" type="datetime-local" value="${esc(d.routineAt)}" aria-label="Date and time"${off}>`
     : d.routineKind === 'email' ? `<input id="routineQuery" data-draft="routineQuery" maxlength="300" placeholder="from:alerts@bank.com" value="${esc(d.routineQuery)}" aria-label="Which emails (a Gmail search)"${off}>`
-    : d.routineKind === 'calendar' ? `<label class="inline"><input id="routineLead" data-draft="routineLead" type="number" min="5" max="120" step="5" value="${esc(d.routineLead)}"${off}> minutes before</label>` : '';
+    : d.routineKind === 'calendar' ? `<label class="inline"><input id="routineLead" data-draft="routineLead" type="number" min="5" max="120" step="5" value="${esc(d.routineLead)}"${off}> minutes before</label>`
+    : d.routineKind === 'app' ? `<select id="routineApp" data-draft="routineApp" aria-label="App"${off}>${own.map(a => `<option value="${esc(a)}"${d.routineApp === a ? ' selected' : ''}>${esc(appName(a))}</option>`).join('')}</select>`
+      + `<label class="inline">sends <input id="routineEvent" data-draft="routineEvent" maxlength="64" list="routineEvents" placeholder="order.created" value="${esc(d.routineEvent)}" autocomplete="off" spellcheck="false" aria-label="Event"${off}></label>`
+      + `<datalist id="routineEvents">${(events || []).filter(e => EVENT.test(e)).slice(0, 50).map(e => `<option value="${esc(e)}"></option>`).join('')}</datalist>` : '';
   const note = d.routineKind === 'email' ? (gmail ? 'It looks every 10 minutes. Emails that are already there don’t count.' : 'Needs Gmail. Ask it in the chat to connect Gmail; the routine waits until then.')
     : d.routineKind === 'calendar' ? (calendar ? 'It looks every 10 minutes and runs once per event.' : 'Needs Google Calendar. Ask it in the chat to connect it; the routine waits until then.')
+    : d.routineKind === 'app' ? 'It runs once for each event your app sends, with what the app sent.'
     : ['daily', 'weekdays', 'weekly'].includes(d.routineKind) ? `Times are in ${esc(d.routineZone)}.` : d.routineKind === 'custom' ? 'Choose a new time to change it.' : '';
   return `<li class="routine-form-row"><form id="routine-form" class="routine-form form">`
     + `<label for="routineTitle">Name</label><input id="routineTitle" data-draft="routineTitle" maxlength="160" placeholder="Morning brief" value="${esc(d.routineTitle)}"${off}>`
