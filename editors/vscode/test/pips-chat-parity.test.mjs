@@ -97,8 +97,9 @@ test('a Project Pip’s chat draws the Personal Pip’s pieces: the Pip at work,
   const personal=shape(x,'Planner');
   assert.ok(x.$('.pip-app-root').classList.contains('simple-pips'),'a Personal Pip opens in its own page, as before');
   await x.open('project',AUDIT);
-  assert.ok(!x.$('.pip-app-root').classList.contains('simple-pips'),'a Project Pip keeps its page: list, History, Settings');
-  assert.ok(x.$('[data-tab=runs]'),'History is still there');
+  // From 24 Oct a Project Pip has the Personal Pips page too: its top bar, and History, Settings and the rest in its menu.
+  assert.ok(x.$('.pip-app-root').classList.contains('simple-pips'),'a Project Pip opens in the same page');
+  assert.ok(x.$('.pip-topbar .pip-menu [data-tab=runs]'),'History is still there, in its menu');
   const project=shape(x,'Billing audit');
   assert.deepEqual(project,personal,'the same chat');
   // And what that chat is, spelled out.

@@ -245,7 +245,7 @@ function createMarkup() {
   if(S.workspace?.kind==='personal'&&S.createStep!=='describe')return `<section class="setup-compose"><h2>Your personal Pip</h2><p class="muted">Available across your projects on this computer. No project files or app access are inherited.</p><form id="create-form" class="form"><label for="personal-character">Character</label><select id="personal-character">${S.types.filter(t=>t.available).map(t=>`<option value="${esc(t.id)}"${t.id===S.createType?' selected':''}>${esc(t.name)}</option>`).join('')}</select>${field('name','Name')}${field('goal','What would you like help with?',true)}${modelPicker('createModel','Model',draft.createModel,S.workspace?.kind==='personal')}<p class="muted">Start a private conversation. App access must be separately supported and reviewed before email or calendar jobs can run.</p><button type="submit" class="primary">Create personal Pip</button>${button('cancel-create','Cancel',S.busy)}</form></section>`;
 
   if(S.workspace?.kind==='personal'&&S.createStep==='describe')return `<section class="setup-compose"><p class="step">Personal · across your projects</p><h2>What would you like a hand with?</h2>${startersMarkup('personal')}${importMarkup()}<p class="muted">Describe the task in your own words. DGC will prepare a setup card for your review.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Help me plan my week every Sunday at 6 pm. Ask me what to include.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary">Describe to DGC</button>':'<p>Describe the task in the main DGC chat.</p>'}</form><p class="muted">Private to this DGC profile. No project files or connected apps are included automatically.</p><div class="actions">${button('advanced-create','Choose a Pip myself',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
-  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}${importMarkup()}<p class="muted">Tell DGC the project, the task and when to do it. You check it on one card before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe it in the DGC chat on your computer. This view can’t send it there.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC confirms the project folder with you. To check a running app, you approve its test commands separately.</p><div class="actions">${button('advanced-create','Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
+  if(S.createStep==='describe')return `<section class="setup-compose" aria-labelledby="setup-compose-title"><p class="step">Start with the job</p><h2 id="setup-compose-title">What should your Pip look after?</h2>${startersMarkup('project')}${importMarkup()}<p class="muted">Tell DGC the project, the task and when to do it. You check it on one card before anything starts.</p><form id="setup-prompt-form" class="form">${field('setupTask','Describe the job',true)}<p class="muted">For example: Review committed changes in this project daily at 11:00 in Asia/Kolkata. Also run once today.</p>${options.onSetupPrompt&&!remoteHost?'<button type="submit" class="primary"'+(S.busy||!usable()?' disabled':'')+'>Describe to DGC</button>':'<p class="notice">Describe it in the DGC chat on your computer. This view can’t send it there.</p>'}</form><p class="muted">Project: ${esc(S.workspace.name)}. DGC confirms the project folder with you. To check a running app, you approve its test commands separately.</p><div class="actions">${button('advanced-create',simpleMode()?'Choose a Pip myself':'Advanced: choose a Pip',S.busy)}${button('cancel-create','Cancel',S.busy)}</div></section>`;
 
   if(S.createStep==='type')return `<section class="type-picker" aria-labelledby="type-picker-title"><p class="step">Step 1 of 2 · Choose your Pip</p><h2 id="type-picker-title">Who’s right for this job?</h2><p class="muted">Scout, Lens, Rook and Lock read committed code. Patch fixes files and Pulse runs tests, each in a private copy and only as you approve. Quill writes private documentation drafts. Chatting with any Pip never changes your files.</p>${S.types.length?`<div class="type-grid">${S.types.map(t=>`<article class="type-card${t.available?'':' planned'}" data-type-card="${esc(t.id)}">${avatar(t.available?'idle':'offline',t,`choose-${t.id}`)}<div class="type-copy"><h3>${esc(t.name)}<span class="badge">${t.available?(executionPip(t)?'You approve each run':documentationPip(t)?'Drafts only':'Reads only'):'Planned'}</span></h3><p class="type-role">${esc(t.role)}</p><p class="muted">${esc(t.description)}</p>${!t.available?`<p class="type-reason">${esc(t.unavailable_reason)}</p>`:''}</div><button type="button" data-pip-type="${esc(t.id)}"${!t.available||S.busy||!usable()?' disabled':''}>${t.available?`Choose ${esc(t.name)}`:'Not available yet'}</button></article>`).join('')}</div>`:'<p class="notice error">Pip types are unavailable. Reconnect to retry.</p>'}<div class="actions">${button('cancel-create','Cancel',S.busy)}</div></section>`;
   const type=S.types.find(t=>t.id===S.createType);
@@ -1777,10 +1777,14 @@ function describeSetup(){
 document.addEventListener('submit',event=>{if(event.target.id==='setup-prompt-form'){event.preventDefault();describeSetup();}});
 // Chat, Results and Settings, always. The rest (schedule details, handoffs, versions and reviews, memory,
 // context, notifications) sit under More; the one open now shows beside the three.
+// Every section a Pip has: the tabs here, and a Project Pip's menu on the simple page.
+function pipSections(){
+ return [['chat','Chat'],['runs',postsShown()?'History':personalPip()?'Results':'Runs'],['job','Settings'],['schedule',pulsePip(S.pip)?'Plan & schedule':'Schedule'],['handoffs','Handoffs'],['revisions','Changes'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]
+  .filter(([key])=>personalPip()&&key==='handoffs'?S.apiVersion>=30&&!remoteHost:key==='schedule'?(!executionPip(S.pip)||pulsePip(S.pip)):key!=='handoffs'||personalPip()||!documentationPip(S.pip));
+}
 function tabsMarkup(){
  if(!S.pip&&!S.selected)return '';
- const all=[['chat','Chat'],['runs',postsShown()?'History':personalPip()?'Results':'Runs'],['job','Settings'],['schedule',pulsePip(S.pip)?'Plan & schedule':'Schedule'],['handoffs','Handoffs'],['revisions','Changes'],...(S.apiVersion>=14?[['memory','Memory']]:[]),['context','Context'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]
-  .filter(([key])=>personalPip()&&key==='handoffs'?S.apiVersion>=30&&!remoteHost:key==='schedule'?(!executionPip(S.pip)||pulsePip(S.pip)):key!=='handoffs'||personalPip()||!documentationPip(S.pip));
+ const all=pipSections();
  const main=['chat','runs','job'],tab=([key,text])=>`<button type="button" data-tab="${key}" aria-pressed="${S.tab===key}"${['revisions','schedule'].includes(key)&&!S.pip?' disabled':''}>${text}</button>`;
  const shown=all.filter(([key])=>main.includes(key)||key===S.tab),more=all.filter(([key])=>!main.includes(key)&&key!==S.tab);
  return shown.map(tab).join('')+(more.length?`<details class="tabs-more" data-details="tabs-more"><summary aria-label="More sections">More</summary><div class="tabs-menu">${more.map(tab).join('')}</div></details>`:'');
@@ -1799,9 +1803,15 @@ function detailMarkup() {
 // ---------------------------------------------------------------- Simple Pips (API 43)
 // Personal Pips the way people meet them: Core is your Primary Pip, a new Pip is a character
 // and a name, and each Pip is a chat that sets itself up. The detailed sections (results,
-// settings, memory) stay one tap away in the chat's menu. Project Pips keep the full view.
+// settings, memory) stay one tap away in the chat's menu.
+// Project Pips have the same page (the founder, 24 Oct: "yes, do it"), from Pips API 51, when their runs post in their
+// chat: the paged list, a top bar with the Pip's name, Run now where a Personal Pip has its computer, and every section
+// of the old page (History, Settings, Schedule, Handoffs, Changes, Memory, Context, Notifications) in its "…" menu. A
+// new one is a character too, then its job and the code it reads. A remote view and an older DGC keep the old page.
 const SIMPLE_CHARACTERS=['core','scout','lens','patch','rook','pulse','lock','quill'];
-function simpleMode(){return S.apiVersion>=43&&!remoteHost&&S.workspace?.kind==='personal';}
+const PROJECT_SIMPLE_API=51;
+function simpleMode(){return !remoteHost&&!!S.workspace&&S.apiVersion>=(S.workspace.kind==='personal'?43:PROJECT_SIMPLE_API);}
+function projectHome(){return S.workspace?.kind!=='personal';}
 // The chat (the founder, 24 Oct: "It should look and feel the same"): every Pip's, Personal and Project, is the one the
 // simple Pips brought: short bubbles, the Pip at work with its face and name, its reply written into bubbles as it
 // comes, time marks, actions under the pointer, the same box. A Project Pip keeps its page (list, History, Settings)
@@ -1847,7 +1857,7 @@ function chatTime(at){
  return days===0?`Today ${time}`:days===1?`Yesterday ${time}`:`${when.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}, ${time}`;
 }
 function characterType(id){const i=SIMPLE_CHARACTERS.indexOf(id);return S.types.find(t=>t.id===id)||{id,name:id?id[0].toUpperCase()+id.slice(1):'Pip',character_index:i<0?4:i};}
-const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>'}[name]}</svg>`;
+const simpleIcon=name=>`<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{back:'<path d="M10 3 5 8l5 5"/>',computer:'<rect x="2" y="2.5" width="12" height="8.5" rx="1.5"/><path d="M6 14h4M8 11v3"/>',more:'<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',share:'<path d="M8 2v8M5 5l3-3 3 3"/><path d="M3 9v4h10V9"/>',gear:'<path d="M2 4h6.5M12 4h2M2 8h2M7.5 8H14M2 12h8.5M14 12h0"/><circle cx="10" cy="4" r="1.6"/><circle cx="5.5" cy="8" r="1.6"/><circle cx="12" cy="12" r="1.6"/>',plus:'<path d="M8 3v10M3 8h10"/>',play:'<path d="M5.5 3.5v9l7-4.5z"/>'}[name]}</svg>`;
 function meetCoreMarkup(){
  return `<section class="meet-core" aria-label="Meet Core">${avatar('idle',characterType('core'),'meet-core')}<h2>Meet Core</h2><p>Core is your Primary Pip. It is your go-to for everyday tasks, looks after your other Pips, and checks in when it needs your help.</p><p class="muted">Core is also the character of DGC’s main chat: your Primary Pip uses it. It works across your projects, without their files.</p>${button('create-core',S.busy?'Creating…':'Create Core',S.busy||!usable(),'primary pill')}</section>`;
 }
@@ -1864,7 +1874,8 @@ function mergePage(first,value){
 // Needs attention (#8): every card your Personal Pips wait on you for, across all of them, on the home.
 S.attention=null;let attentionSeq=0,attentionExpanded=false;
 async function loadAttention(){
- if(remoteHost||S.apiVersion<44||!simpleMode()||!usable())return;
+ // Personal Pips' cards only: a project's home has its setup cards, and each row says what waits for you.
+ if(remoteHost||S.apiVersion<44||!simpleMode()||projectHome()||!usable())return;
  const token=scope(),sequence=++attentionSeq;
  try{const page=attentionPage(await send('list_pip_attention',{limit:100}));if(token!==scope()||sequence!==attentionSeq)return;
   const before=JSON.stringify(S.attention);S.attention=page;if(JSON.stringify(page)!==before)render();}
@@ -2126,23 +2137,89 @@ function searchPips(value){
 }
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
+ if(projectHome())return simpleHomeList(all,live);
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return meetCoreMarkup();   // a search that finds nothing is not an empty home
  return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live);
+}
+// A project's home: where the Personal home has Pips settings, a menu with the project's own pages (its context and its
+// notifications: the old side bar's buttons), and with no Pips yet, what each character does.
+function projectHomeMenu(){
+ return `<details class="pip-menu" data-details="home-menu"><summary class="topbar-icon" aria-label="Project pages" title="Project pages: its context and notifications">${simpleIcon('more')}</summary><div class="tabs-menu">${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}</div></details>`;
+}
+function projectFirstMarkup(){
+ return `<div class="project-first"><div class="pips-welcome-cast">${['scout','rook','pulse'].map(id=>avatar('idle',characterType(id),`welcome-${id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p class="muted">Pick a character for the job: Scout, Lens, Rook and Lock read the code, Patch fixes it, Pulse runs its checks and Quill writes its docs. You approve anything that changes files or runs commands.</p>${button('create-first','New Pip',S.busy||!usable()||!S.types.length,'primary pill')}</div>`;
 }
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
  const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0);
   return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
- return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
+ const project=projectHome();
+ return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
 function newPipBody(){
  return `<div class="character-grid" role="radiogroup" aria-label="Character">${SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=characterType(id);return `<button type="button" class="character-choice" role="radio" aria-checked="${draft.newPipCharacter===id}" data-new-character="${id}">${avatar('idle',t,`new-${id}`)}<span>${esc(t.name)}</span></button>`;}).join('')}</div><label for="newPipName">Name<input id="newPipName" data-draft="newPipName" maxlength="60" autocomplete="off" placeholder="Like Gmail, Travel or Money" value="${esc(draft.newPipName)}"></label><p class="muted">It says hello and sets itself up in its chat. No job form.</p>`;
 }
 function openNewPip(){
  if(S.busy||!usable())return;
+ if(projectHome()){openNewProjectPip();return;}
  draft.newPipName='';draft.newPipCharacter=draft.newPipCharacter||'scout';
  openReview({title:'New Pip',description:'Pick a character and give it a name.',body:newPipBody(),confirm:'Create',newPip:true,request:{type:'create_pip'}});
  $('newPipName')?.focus();
+}
+// A new Project Pip (the founder, 24 Oct): the Personal flow's character picker, where the character is also the kind of
+// work it does, then what the old form asked: its name, what it does, the branch or commit it reads, and its model. It
+// sends the old form's create_pip, so it makes the same Pip; Patch and Pulse still show what they can do before they
+// are made. Describing the job to DGC, a common job and a shared Pip's file are one click away, under the form.
+function projectKindWord(t){return !t.available?'Not yet':pulsePip(t)?'Runs checks':executionPip(t)?'Fixes code':documentationPip(t)?'Writes docs':'Reads code';}
+function pickProjectKind(id){
+ const type=S.types.find(t=>t.id===id&&t.id!=='core');if(!type?.available)return false;
+ if(S.createType!==id){rememberCreationDraft();S.createType=id;Object.assign(draft,creationDrafts.get(id)||{name:type.default_name,goal:type.default_goal,source_ref:'HEAD',createModel:'default'});}
+ return true;
+}
+// The project's own pages, from its home's menu on the simple page: no Pip is open under them.
+function leaveForProjectPage(){if(!simpleMode()||!projectHome()||!S.selected)return;chatDrafts.set(S.selected,draft.chatText);clearSelection();S.selected='';}
+function newProjectPipModel(){return modelPicker('createModel','Model',draft.createModel,false);}
+function newProjectPipBody(){
+ const type=S.types.find(t=>t.id===S.createType&&t.available);
+ const grid=`<div class="character-grid project-kinds" role="radiogroup" aria-label="Character">${SIMPLE_CHARACTERS.filter(id=>id!=='core').map(id=>{const t=S.types.find(x=>x.id===id);if(!t)return '';return `<button type="button" class="character-choice" role="radio" aria-checked="${type?.id===id}" data-new-character="${id}"${t.available?'':` disabled title="${esc(t.unavailable_reason||'Not available yet')}"`}>${avatar(t.available?'idle':'offline',t,`new-${id}`)}<span>${esc(t.name)}</span><small>${esc(projectKindWord(t))}</small></button>`;}).join('')}</div>`;
+ const other=`<p class="new-pip-other">${S.apiVersion>=23?button('new-pip-describe','Describe the job to DGC instead',S.busy,'link'):''}${S.apiVersion>=41&&!remoteHost?button('import-pip-file','Import a shared Pip…',S.busy||!usable(),'link'):''}</p>`;
+ if(!type)return `${grid}<p class="muted">Pick a character for the job.</p>${other}`;
+ const when=pulsePip(type)?'It can’t run any commands yet. After you create it, you can give it a command plan and a schedule.':executionPip(type)?'It runs only on a handoff you approve, never on a schedule.':documentationPip(type)?(S.apiVersion>=20?'After you create it, you can give it a schedule or have it run on events. It doesn’t take handoffs.':'Update DGC to give Quill a schedule or run it on events. It doesn’t take handoffs.'):'After you create it, you can give it a schedule.';
+ const reads=executionPip(type)?'Chatting with it never changes files. You approve every fix or test run separately; creating it allows neither.':documentationPip(type)?'Quill writes drafts with the model and quotes the exact code it used. It never changes or publishes your files.':'All of these read the code the same way; the character you pick doesn’t give it more access.';
+ return `${grid}<div class="new-pip-kind"><p class="type-role"><strong>${esc(type.name)}</strong> · ${esc(type.role)} · ${executionPip(type)?'You approve each run':documentationPip(type)?'Private drafts':'Reads only'}</p><p class="muted">${esc(type.description)}</p><p class="muted">It runs when you ask, in ${esc(S.workspace?.name||'this project')}. ${esc(when)}</p></div><div class="form new-pip-form">${field('name','Name')}${field('goal','What it does',true)}${field('source_ref','Branch or commit')}<p class="muted">It reads only committed code from the branch or commit you choose: HEAD, a branch name or a commit. Uncommitted edits aren’t included. ${esc(reads)}</p><div id="new-pip-model">${newProjectPipModel()}</div></div>${other}`;
+}
+function newProjectPipReview(){
+ const type=S.types.find(t=>t.id===S.createType&&t.available);
+ return {title:'New Pip',description:'Pick a character for the job, then say what it does.',body:newProjectPipBody(),confirm:type&&executionPip(type)?'Review what it can do…':'Create Pip',newPip:true,projectPip:true,request:{type:'create_pip'}};
+}
+function openNewProjectPip(){
+ if(S.busy||!usable())return;
+ setupEditing=false;
+ if(!pickProjectKind(S.createType))['scout','rook','lens','lock','quill','pulse','patch'].some(id=>pickProjectKind(id));
+ openReview(newProjectPipReview());
+ newPipModelKey='';if(!S.modelsLoading)void loadModels();
+ $('name')?.focus();
+}
+// The models arrive after the dialog opens: its picker is redrawn in place when they do (not the fields being typed in).
+let newPipModelKey='';
+function syncNewPipModel(){
+ if(!S.review?.projectPip)return;const box=$('new-pip-model');if(!box)return;
+ const key=JSON.stringify([S.models.map(m=>m.id),S.modelsLoading,S.modelsError,S.defaultModel,S.defaultEngine?.name||'']);
+ if(key===newPipModelKey)return;newPipModelKey=key;box.innerHTML=newProjectPipModel();
+}
+// Patch and Pulse say what they can do before they are made (the old form's second step, as it was).
+function executionCreateReview(type,request,choice){
+ return {title:`Create ${type.name}?`,description:type.id==='pulse'?'You can chat with it, but it can’t run any commands yet. You approve each command it runs, in a handoff or a command plan.':'You can chat with it, but it can’t change files or run tests on its own. You approve each fix in a handoff first.',body:`<h3>${esc(request.name)}</h3><p class="goal">${esc(request.goal)}</p><dl class="meta"><dt>Branch or commit</dt><dd>${esc(request.source_ref)}</dd><dt>Model</dt><dd>${esc(modelLabel(choice))}</dd><dt>Runs</dt><dd>Only when you approve it</dd></dl><p class="muted">${type.id==='patch'?'Patch can change only the exact files you approve, in a private copy.':'Pulse can run only the exact commands you approve, in a private copy.'} No network, and your files are never changed. ${type.id==='pulse'?'After you create it, you can give it a command plan and a schedule.':'It doesn’t run on a schedule.'}</p><p class="muted">${seatbeltRunner()?'Each approved test gets up to 60 seconds, 30 seconds of CPU per process and 64 KB of output. On macOS, the 512 MB memory, 32-process and 64 MB scratch limits are checked every so often, not enforced exactly. Tests can’t change the code.':'Each approved test gets up to 60 seconds, 30 seconds of CPU and 512 MB of memory per process, 64 KB of output and 32 processes, with a 64 MB scratch folder. Total memory is checked every so often, not enforced exactly. Tests can’t change the code.'} You see these limits again with each command.</p>`,confirm:'Create Pip',request};
+}
+// The old form's request, from the dialog: the same fields, checked the same way.
+function createProjectPip(review){
+ const type=S.types.find(t=>t.id===S.createType);
+ if(!type?.available||type.id==='core'){review.error='Pick a character for the job.';renderReview();return;}
+ if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){review.error='Give it a name, say what it does, and choose a branch or commit.';renderReview();return;}
+ let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false));}catch(error){review.error=errorText(error);renderReview();return;}
+ const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:type.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
+ if(executionPip(type)){openReview({...executionCreateReview(type,request,choice),secondary:{id:'new-pip-back',label:'Back'}});return;}
+ void mutate(request,finishCreate);
 }
 // A Pip you meet should answer: creating one starts this computer's runner when it is off. A global
 // stop is the user's own emergency brake, so it is shown, never lifted here.
@@ -2180,9 +2257,55 @@ function simpleTabContent(){
  if(S.tab==='handoffs')return handoffsMarkup();
  return S.tab==='job'?jobSettingsMarkup():S.tab==='revisions'?revisionsMarkup():S.tab==='schedule'?scheduleMarkup():runsMarkup();
 }
+// A Project Pip's status sits beside its name on its chat, as it sat under its name on the old page: what its latest
+// run found ("Today’s audit: 5 findings"), which goes to that run's post in the chat.
+// Run now, for a Project Pip (the founder, 24 Oct): where a Personal Pip has its main action, its computer, one click
+// from its chat. It runs what History's button runs (an audit, a draft, its live-data commands or its approved command
+// plan) with the same checks; a Patch runs only on a handoff you approve, and a Pulse with no command plan has none. While
+// one of its runs is going it says so, and opens that run in History.
+function runAction(){
+ const p=S.pip;if(!p||personalPip())return null;
+ if(livePip(p))return {label:'Run now',title:'Run its approved read-only commands now'};
+ if(pulsePip(p)){let plan=false;try{plan=!!pulsePlan(p.verification_plan);if(plan)pulseRunPins(p);}catch{plan=false;}return plan?{label:'Run approved commands',title:'Run its approved commands now, exactly as approved'}:null;}
+ if(executionPip(p))return null;
+ if(documentationPip(p))return {label:'Create draft',title:'Write a documentation draft now'};
+ return {label:'Run audit',title:'Run an audit of the code now'};
+}
+// Its run that is going now, not a reply in its chat.
+function activeOwnRun(){const a=S.pip?.active_run;return record(a)&&typeof a.id==='string'&&a.run_kind!=='conversation'?a:S.runs.find(r=>active(r.status)&&r.manifest?.run_kind!=='conversation')||null;}
+// Why Run now can't start a run, in words for its tooltip; '' when it can.
+function runBlocked(){
+ const p=S.pip,live=livePip(p);
+ if(live&&S.apiVersion<60)return 'Update DGC to run a live-data Pip.';
+ if(!live&&!supportedSource())return 'It can’t run on its current source here. Check its Settings.';
+ if(!S.runner?.online)return 'Pips aren’t running. Start Pips to run it.';
+ if(S.runner.paused)return 'Pips are stopped on this computer. Resume Pips to run it.';
+ if(p.status==='archived')return 'Archived. Restore it in Settings to run it.';
+ if(p.status!=='active')return 'Paused. Resume it in Settings to run it.';
+ if(!live&&!pulsePip(p)&&!pipType(p,S.types)?.available)return 'This editor doesn’t know this kind of Pip. Update the DGC extension to run it.';
+ if(p.active_run||S.runs.some(r=>active(r.status)))return 'It’s answering in its chat. Run it when that’s done.';
+ if(S.busy||!usable())return 'Busy. Try again in a moment.';
+ return '';
+}
+function runNowMarkup(){
+ const action=runAction();if(!action)return '';
+ const going=activeOwnRun();
+ if(going)return `<button type="button" id="pip-run-open" class="topbar-running" data-run-id="${esc(going.id)}" title="Running now. Open it in History"><span class="topbar-spinner" aria-hidden="true"></span>Running…</button>`;
+ const blocked=runBlocked();
+ return `<button type="button" id="pip-run-now" class="topbar-icon" aria-label="${esc(action.label)}" title="${esc(blocked||action.title)}"${blocked?' disabled':''}>${simpleIcon('play')}</button>`;
+}
+// What a Project Pip's page keeps in sight above its chat and sections: new Pips waiting for you from the DGC chat, and
+// a Pip of a kind this editor doesn't know.
+function projectPipNotes(){
+ const setups=S.apiVersion>=23&&(setupRows.length||setupError)?`<div class="chat-setup-banner pip-setup-strip">${button('chat-review-setups',setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`)}</div>`:'';
+ const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
+ return setups+unknown;
+}
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
- const sections=[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])].filter(([key])=>key!==S.tab);
+ // A Project Pip's menu is every section its old page had; a Personal Pip's, the ones it uses.
+ const project=!personalPip(),every=project?pipSections():null;
+ const sections=(project?every:[['chat','Chat'],['runs',historyName('Results')],['job','Settings'],...(S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?[['memory','Memory']]:[]),['revisions','Changes'],...(S.apiVersion>=13?[['notifications','Notifications']]:[])]).filter(([key])=>key!==S.tab);
  if(S.apiVersion>=43&&!remoteHost&&personalPip()&&screenSetup.pip!==S.selected&&!screenSetup.loading)void loadDesktopStatus();
  const computer=!(S.apiVersion>=42&&personalPip())?'':settingUpComputer()
   ?`<span class="topbar-setup" role="status" title="Getting its computer ready. This happens once."><span class="topbar-spinner" aria-hidden="true"></span>Setting up your Pip…</span>`
@@ -2192,20 +2315,26 @@ function simplePipHeader(){
   const sub=['instructions','character'].includes(S.pipPage),share=S.apiVersion>=41&&['scout','lens','rook','lock','quill'].includes(p.pip_type)&&!archived();
   return `<header class="pip-topbar"><button type="button" id="${sub?'pip-page-back':'simple-to-chat'}" class="topbar-icon" aria-label="${sub?'Back':'Back to the chat'}" title="${sub?'Back':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span><small>${sub?(S.pipPage==='character'?'Face':'Instructions'):'Settings'}</small></div><div class="topbar-actions">${share?`<button type="button" class="topbar-icon" data-pip-share aria-label="Share as template" title="Share as template"${S.busy||!usable()?' disabled':''}>${simpleIcon('share')}</button>`:''}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${pipPageMenu()}</div></details></div></header>`;
  }
- return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span>${onChat?'':`<small>${esc(sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
+ return `<header class="pip-topbar"><button type="button" id="${onChat?'simple-back':'simple-to-chat'}" class="topbar-icon" aria-label="${onChat?'Your Pips':'Back to the chat'}" title="${onChat?'Your Pips':'Back to the chat'}">${simpleIcon('back')}</button><div class="pip-pill">${pipAvatar(p,pose.state,`pill-${p.id}`,type)}<span>${esc(p.name)}</span>${onChat?(project?`<small class="pip-status">${lastRunLink(p,pose.label)}</small>`:''):`<small>${esc(project?(every.find(([key])=>key===S.tab)||[])[1]||'':sections.length&&{runs:historyName('Results'),job:'Settings',memory:'Memory',revisions:'Versions',notifications:'Notifications',schedule:'Schedule',handoffs:'Handoffs',context:'Context'}[S.tab]||'')}</small>`}</div><div class="topbar-actions">${project?runNowMarkup():''}${computer}<details class="pip-menu" data-details="pip-menu"><summary class="topbar-icon" aria-label="More" title="More">${simpleIcon('more')}</summary><div class="tabs-menu">${sections.map(([key,label])=>`<button type="button" data-tab="${key}">${label}</button>`).join('')}</div></details></div></header>`;
 }
 function simpleMarkup(){
  const bar=`<header class="simple-bar"><h1><span class="pips-wordmark">Pips</span></h1>${runnerMarkup()}</header>${scopeTabsMarkup()}`;
  const notes=`${S.error?`<div class="simple-note">${errorMarkup(S.error)}</div>`:''}${S.notice?`<p class="notice simple-note" role="status">${esc(S.notice)}</p>`:''}`;
  if(pipsSettings.view&&(!S.selected||S.overview)&&!S.create)return `${pipsSettingsMarkup()}${notes}`;
  if(S.projectEmpty&&scopeTabs())return `${bar}${notes}${projectEmptyMarkup()}`;
+ const project=projectHome(),back=(id,label)=>`<button type="button" id="${id}" class="topbar-icon" aria-label="${esc(label)}" title="${esc(label)}">${simpleIcon('back')}</button>`;
+ // A project's describe-the-job page (DGC prepares a setup card from your words, or a common job, or a shared Pip's file),
+ // and "Change in chat" from a Project Pip's Settings: the old page's, under the same top bar.
+ if(project&&S.create)return `<header class="pip-topbar">${back('create-back',setupEditing&&S.pip?`Back to ${S.pip.name}`:'Your Pips')}<div class="pip-pill settings-pill"><span>${setupEditing&&S.pip?`Change ${esc(S.pip.name)}`:'New Pip'}</span></div><span></span></header>${notes}<div class="simple-content" data-view="create">${createMarkup()}</div>`;
+ // The project's context and notifications, opened from its home's menu (the old side bar's two buttons).
+ if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
  if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}<p role="status" class="muted simple-note">Loading…</p>`;
- return `${simplePipHeader()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
+ return `${simplePipHeader()}${project?projectPipNotes():''}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
 function render() {
   if(disposed)return;
-  noticeFades();
+  noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const selection=focus&&typeof focus.selectionStart==='number'?[focus.selectionStart,focus.selectionEnd]:null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,atEnd=!oldLog||oldHeight-oldScroll-oldLog.clientHeight<32,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
   const opened=new Set([...document.querySelectorAll('details[open][data-details]')].map(e=>e.dataset.details));
@@ -3162,9 +3291,8 @@ document.addEventListener('submit',event=>{
     if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){setError('Give it a name, say what it does, and choose a branch or commit.');return;}
     let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(S.workspace?.kind==='personal'));}catch(error){setError(error);return;}
     const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:selectedType.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
-    if(executionPip(selectedType)&&S.workspace?.kind!=='personal'){
-      openReview({title:`Create ${selectedType.name}?`,description:selectedType.id==='pulse'?'You can chat with it, but it can’t run any commands yet. You approve each command it runs, in a handoff or a command plan.':'You can chat with it, but it can’t change files or run tests on its own. You approve each fix in a handoff first.',body:`<h3>${esc(request.name)}</h3><p class="goal">${esc(request.goal)}</p><dl class="meta"><dt>Branch or commit</dt><dd>${esc(request.source_ref)}</dd><dt>Model</dt><dd>${esc(modelLabel(choice))}</dd><dt>Runs</dt><dd>Only when you approve it</dd></dl><p class="muted">${selectedType.id==='patch'?'Patch can change only the exact files you approve, in a private copy.':'Pulse can run only the exact commands you approve, in a private copy.'} No network, and your files are never changed. ${selectedType.id==='pulse'?'After you create it, you can give it a command plan and a schedule.':'It doesn’t run on a schedule.'}</p><p class="muted">${seatbeltRunner()?'Each approved test gets up to 60 seconds, 30 seconds of CPU per process and 64 KB of output. On macOS, the 512 MB memory, 32-process and 64 MB scratch limits are checked every so often, not enforced exactly. Tests can’t change the code.':'Each approved test gets up to 60 seconds, 30 seconds of CPU and 512 MB of memory per process, 64 KB of output and 32 processes, with a 64 MB scratch folder. Total memory is checked every so often, not enforced exactly. Tests can’t change the code.'} You see these limits again with each command.</p>`,confirm:'Create Pip',request});
-    }else void mutate(request,finishCreate);
+    if(executionPip(selectedType)&&S.workspace?.kind!=='personal')openReview(executionCreateReview(selectedType,request,choice));
+    else void mutate(request,finishCreate);
   }else if(id==='pip-name-form'){void saveNameAndTitle();
   }else if(id==='pip-instructions-form'){
     const goal=draft.pipInstructions.trim();if(!goal){setError('Say what it is for.');return;}
@@ -3230,7 +3358,9 @@ document.addEventListener('click',event=>{
   if(target.id==='chat-attach'){$('chat-attach-input')?.click();return;}
   if(target.dataset.removeFile!==undefined){const i=Number(target.dataset.removeFile),files=[...pendingFiles()];if(Number.isInteger(i)&&i>=0&&i<files.length){files.splice(i,1);files.length?chatFiles.set(S.selected,files):chatFiles.delete(S.selected);render();$('chatText')?.focus();}return;}
   if(target.dataset.removeImage!==undefined){const i=Number(target.dataset.removeImage),images=[...pendingImages()];if(Number.isInteger(i)&&i>=0&&i<images.length){images.splice(i,1);images.length?chatImages.set(S.selected,images):chatImages.delete(S.selected);render();$('chatText')?.focus();}return;}
-  if(target.dataset.newCharacter){if(SIMPLE_CHARACTERS.includes(target.dataset.newCharacter)&&target.dataset.newCharacter!=='core'){draft.newPipCharacter=target.dataset.newCharacter;if(S.review?.newPip){S.review.body=newPipBody();renderReview();}}return;}
+  if(target.dataset.newCharacter){
+    if(S.review?.projectPip){if(pickProjectKind(target.dataset.newCharacter)){Object.assign(S.review,newProjectPipReview());renderReview();$('name')?.focus();}return;}
+    if(SIMPLE_CHARACTERS.includes(target.dataset.newCharacter)&&target.dataset.newCharacter!=='core'){draft.newPipCharacter=target.dataset.newCharacter;if(S.review?.newPip){S.review.body=newPipBody();renderReview();}}return;}
   if(target.id==='pin-pips-sidebar'){S.sidebarPinned=!S.sidebarPinned;rememberView();render();return;}
   if(target.dataset.chatActivity){void toggleChatActivity(target.dataset.chatActivity);return;}
   if(target.dataset.chatAction){
@@ -3399,10 +3529,10 @@ document.addEventListener('click',event=>{
   if(target.dataset.messageReview){void openMessageReview(target.dataset.messageReview);return;}
   if(target.dataset.messageMore){void messageReviews(target.dataset.messageMore);return;}
   switch(target.id){
-    case 'workspace-notifications':S.tab='notifications';S.overview=false;S.create=false;rememberView();render();void loadNotifications();break;
+    case 'workspace-notifications':leaveForProjectPage();S.tab='notifications';S.overview=false;S.create=false;rememberView();render();void loadNotifications();break;
     case 'refresh-notifications':void loadNotifications();break;
     case 'more-notifications':void loadNotifications(true);break;
-    case 'workspace-context':S.tab='context';S.overview=false;S.create=false;rememberView();render();if(S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}break;
+    case 'workspace-context':leaveForProjectPage();S.tab='context';S.overview=false;S.create=false;rememberView();render();if(S.apiVersion>=12){if(!outcomeSessionsLoaded)void loadOutcomeSessions();if(!outcomeLoaded)void loadOutcomes();}break;
     case 'load-outcome-sessions':void loadOutcomeSessions();break;
     case 'more-outcome-sessions':void loadOutcomeSessions(true);break;
     case 'inspect-outcome-session':void inspectOutcomeSession();break;
@@ -3413,8 +3543,8 @@ document.addEventListener('click',event=>{
     case 'more-outcomes':void loadOutcomes(true);break;
     case 'reconnect':vscode.postMessage({type:'pipsReconnect'});break;
     case 'enable':if(!remoteHost)void enable();break;
-    case 'new-pip':case 'create-first':setupEditing=false;rememberCreationDraft();S.create=true;S.overview=false;S.createStep=S.apiVersion>=23?'describe':'type';S.tab='runs';S.error='';render();($('setupTask')||document.querySelector('[data-pip-type]:not(:disabled)'))?.focus();void loadModels();break;
-    case 'advanced-create':S.createStep='type';render();document.querySelector('[data-pip-type]:not(:disabled)')?.focus();break;
+    case 'new-pip':case 'create-first':if(simpleMode()&&projectHome()){openNewPip();break;}setupEditing=false;rememberCreationDraft();S.create=true;S.overview=false;S.createStep=S.apiVersion>=23?'describe':'type';S.tab='runs';S.error='';render();($('setupTask')||document.querySelector('[data-pip-type]:not(:disabled)'))?.focus();void loadModels();break;
+    case 'advanced-create':if(simpleMode()&&projectHome()){S.create=false;S.overview=!(setupEditing&&S.selected);setupEditing=false;render();openNewPip();break;}S.createStep='type';render();document.querySelector('[data-pip-type]:not(:disabled)')?.focus();break;
     case 'connector-drafts-more':void connectorDraftHistory(S.review?.connectorCursor);break;
     case 'connector-drafts':void connectorDraftHistory();break;
     case 'dismiss-connector-draft':{const d=S.review?.savedConnectorDraft;if(d&&!S.busy)void mutate({type:'dismiss_pip_connector_draft',draft_id:d.id,expected_digest:d.digest},r=>{const v=connectorDraft(r.draft,S.selected,S.workspace.id);if(v.id!==d.id||v.digest!==d.digest||v.status!=='dismissed')throw Error('Dismissal did not match the draft.');void loadConnectorDrafts();});break;}
@@ -3454,14 +3584,21 @@ document.addEventListener('click',event=>{
     case 'rate-up':saveFeedback('up');break;
     case 'rate-down':saveFeedback('down');break;
     case 'rate-clear':saveFeedback(null);break;
-    case 'import-pip-file':void importPipFile();break;
+    case 'import-pip-file':if(S.review?.projectPip)closeReview();void importPipFile();break;
     case 'export-pip-file':void exportPipFile();break;
     case 'refresh-findings':outcomeState.pip='';void loadFindingOutcomes();break;
     case 'back-types':rememberCreationDraft();S.createStep='type';render();[...document.querySelectorAll('[data-pip-type]')].find(b=>b.dataset.pipType===S.createType)?.focus();break;
-    case 'cancel-create':rememberCreationDraft();S.create=false;S.overview=!S.selected;render();break;
+    case 'cancel-create':case 'create-back':rememberCreationDraft();S.create=false;
+      // On the simple page a new Pip's page goes back to the list it came from; Change in chat, to its Pip.
+      S.overview=simpleMode()&&projectHome()?!(setupEditing&&S.selected):!S.selected;setupEditing=simpleMode()&&projectHome()?false:setupEditing;rememberView();render();break;
+    case 'new-pip-describe':if(S.apiVersion<23)break;closeReview();rememberCreationDraft();setupEditing=false;S.create=true;S.overview=false;S.createStep='describe';S.error='';render();$('setupTask')?.focus();break;
+    case 'new-pip-back':openNewProjectPip();break;
+    case 'workspace-back':S.overview=true;S.tab='chat';rememberView();render();break;
+    case 'pip-run-now':if(runAction()&&!runBlocked())runNow();break;
+    case 'pip-run-open':{const id=target.dataset.runId;S.tab='runs';S.overview=false;rememberView();render();void loadSelected(false).then(()=>{if(id&&S.tab==='runs')return loadRun(id);});break;}
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
-    case 'chat-review-setups':S.overview=true;rememberView();render();break;
+    case 'chat-review-setups':S.overview=true;rememberView();render();if(simpleMode()){const box=document.querySelector('[data-details="setup-inbox"]');if(box){box.open=true;box.scrollIntoView?.({block:'start'});}}break;
     case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.composerNoteOpen=false;draft.chatModelSearch='';render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
     case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;render();(S.modelListOpen?$('chatModelSearch'):$('chat-model-summary'))?.focus();break;
     case 'chat-model-close':S.composerPanel='';render();$('chat-model')?.focus();break;
@@ -3560,6 +3697,7 @@ document.addEventListener('click',event=>{
       if(review.emailDraft){void chooseMessageConnection(review.emailDraft,review.calendarAction===true);return;}
       if(review.savedConnectorDraft){void chooseConnectorTool(review.savedConnectorDraft.payload.action.server,review.savedConnectorDraft);return;}
       if(review.connectorForm){prepareConnector(review);return;}
+      if(review.projectPip){createProjectPip(review);return;}
       if(review.newPip){void createSimplePip(draft.newPipCharacter,draft.newPipName,review);return;}
       if(review.computerGrant!==undefined){void applyComputerGrant(review);return;}
       if(review.computerAction){if(!reviewBlocked(review))void decideComputerAction(review,true);else{review.error='This action expired. Nothing was sent.';renderReview();}return;}

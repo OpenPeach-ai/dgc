@@ -236,26 +236,30 @@ test('Open full report opens the run under History; Ask DGC to fix asks once, in
   assert.ok(x.persisted().asked.includes(R1),'kept with the view, so a reload says Asked DGC too');
   x.d.querySelector(`[data-run-post="${R1}"] .run-post-report summary`).click();
   x.click(`.run-post-report [data-post-open="${R1}"]`);await x.drain();
-  assert.equal(x.d.querySelector('[data-tab=runs][aria-pressed=true]')?.textContent,'History');
+  // A Project Pip has the Personal Pips page (24 Oct): History is the page open, named beside the Pip's name.
+  assert.equal(x.d.querySelector('.simple-content')?.dataset.view,'runs');
+  assert.equal(x.d.querySelector('.pip-topbar .pip-pill small')?.textContent,'History');
   assert.equal(x.requests('get_pip_run').at(-1).request.run_id,R1);
   assert.ok(x.d.querySelector(`[data-run="${R1}"][aria-current=true]`),'that run is the one open');
 });
 
+// On the Personal Pips page a Project Pip has from 24 Oct, its status sits beside its name in the top bar, on its chat.
 test('History says what each run found, and the status under its name goes to the run, in a fold too',async()=>{
   const x=setup();await openChat(x);
-  const status=x.d.querySelector('.hero button.last-run');
+  const status=x.d.querySelector('.pip-topbar button.last-run');
   assert.equal(text(status),'Today’s audit: 5 findings');
   x.click('[data-tab=runs]');await x.drain();
   assert.equal(x.d.querySelector('.section h2').textContent,'History');
   assert.deepEqual([...x.d.querySelectorAll('.run-row .hist-row-out')].map(text),
     ['5 findings · 2 high','Didn’t finish · a finding quoted code that does not match the file, so Pips refused the report','Nothing found']);
-  x.d.querySelector('.hero button.last-run').click();await x.drain();
-  assert.equal(x.d.querySelector('[data-tab=chat][aria-pressed=true]')?.textContent,'Chat');
+  x.click('#simple-to-chat');await x.drain();
+  x.d.querySelector('.pip-topbar button.last-run').click();await x.drain();
+  assert.equal(x.d.querySelector('.simple-content')?.dataset.view,'chat');
   assert.equal(x.d.activeElement,x.d.querySelector(`[data-run-post="${R1}"]`),'the message it found is where focus lands');
   // The latest run inside a fold: the fold opens at its time.
   const passes=[0,1,2].map(k=>checks(k,NOW-(5-k)*HOUR));
   const y=setup({pipValue:pulse({latest_run:{id:runId(1),status:'succeeded'}}),postsValue:passes,runs:passes.map(p=>run(p.run_id,p.posted_at))});await openChat(y);
-  y.click('.hero button.last-run');await y.drain();
+  y.click('.pip-topbar button.last-run');await y.drain();
   assert.equal(y.d.activeElement?.dataset.streakRun,runId(1));
   assert.equal(y.d.activeElement.closest('details').open,true);
 });

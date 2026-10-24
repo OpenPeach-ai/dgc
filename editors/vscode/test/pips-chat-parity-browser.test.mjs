@@ -95,11 +95,11 @@ async function painted(kind) {
   return look;
 }
 
-test("a Project Pip’s chat paints as a Personal Pip’s, in its own page", async (t) => {
+test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", async (t) => {
   if (skipOrFail(t)) return;
   const personal = await painted("personal"), project = await painted("project");
   assert.equal(personal.shell, "simple");
-  assert.equal(project.shell, "page", "a Project Pip keeps its page");
+  assert.equal(project.shell, "simple", "a Project Pip has the Personal Pips page too (24 Oct)");
   const { shell: _a, ...personalChat } = personal, { shell: _b, ...projectChat } = project;
   assert.deepEqual(projectChat, personalChat, "the same chat");
   assert.equal(project.you.color, "rgb(255, 255, 255)", "your message: white on the accent");

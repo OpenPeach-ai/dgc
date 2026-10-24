@@ -120,8 +120,13 @@ test('a Pip of another project, opened from a link, stays out: it says where it 
 test('a Pip of this project, opened from a Work chat, opens under the Project tab',async()=>{
  const x=setup();await x.drain();
  const going=x.app.navigate({pip:AUDIT,section:'chat'});await x.drain();await going;await x.drain();
+ // A Project Pip has the Personal Pips page (24 Oct): its chat has no tabs over it, so the Pip is open in its page and
+ // its way back is to the Project tab's list.
+ assert.equal(x.$('.pip-topbar .pip-pill>span:not(.avatar)')?.textContent,'ERP daily audit','and the Pip is open');
+ assert.equal(x.states.at(-1)?.scope_tab,'project');
+ x.$('#simple-back').click();await x.drain();
  assert.equal(x.chosen(),'pips-tab-project');
- assert.equal(x.$(`[data-job="${AUDIT}"]`)?.getAttribute('aria-current'),'true','and the Pip is open');
+ assert.ok(x.$(`[data-job="${AUDIT}"]`),'under the Project tab');
  const back=x.app.navigate({pip:CORE,section:'chat'});await x.drain();await back;await x.drain();
  assert.ok(['pips-tab-personal',null].includes(x.chosen()),'a Personal Pip opens under Personal (its chat has no tabs)');
  assert.ok(x.listedFor().includes(PW));

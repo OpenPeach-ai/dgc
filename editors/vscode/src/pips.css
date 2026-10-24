@@ -288,6 +288,28 @@ button.pill{border-radius:999px;padding:6px 16px}
 .chat-file-chip button{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--muted);font-size:13px;line-height:1}
 .msg-files{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0 0 6px}
 
+/* A Project Pip on the simple page (24 Oct): Run now beside its menu, "Running…" while a run is going, new Pips waiting
+   for you in a strip under the top bar, the project's menu on its home, and its first-Pip offer. */
+.topbar-icon:disabled{opacity:.45;cursor:default}
+.topbar-icon:disabled:hover{background:transparent}
+.topbar-running{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:11px;white-space:nowrap;cursor:pointer}
+.topbar-running:hover{background:var(--pip-wash);color:var(--vscode-foreground)}
+.simple-pips .pip-setup-strip{flex:none;margin:0 14px 6px}
+.pip-pill small.pip-status{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pip-pill small.pip-status button.link.last-run{font-size:inherit;color:var(--muted)}
+.pip-pill small.pip-status button.link.last-run:hover{color:var(--vscode-foreground)}
+.simple-home-actions .pip-menu .tabs-menu{min-width:190px}
+.project-first{text-align:center;border:1px dashed var(--line);border-radius:14px;padding:24px 18px;margin:0 0 12px}
+.project-first .pips-welcome-cast{margin-bottom:14px}
+.project-first h3{font-size:15px;font-weight:500;margin:0}
+.project-first p{max-width:360px;margin:8px auto 14px;font-size:12px;line-height:1.5}
+.project-kinds .character-choice{align-content:start}
+.project-kinds .character-choice small{font-size:10px;color:var(--muted);line-height:1.2;text-align:center}
+.project-kinds .character-choice:disabled{opacity:.5;cursor:default}
+.new-pip-kind{margin:0 0 10px}
+.new-pip-kind p{margin:2px 0}
+.new-pip-form{margin:0 0 6px}
+.new-pip-other{display:flex;flex-wrap:wrap;gap:4px 10px;margin:8px 0 0}
 /* "Setting up your Pip…" where the computer button will be, while its desktop is first set up. */
 .topbar-setup{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;white-space:nowrap;padding:0 4px}
 .topbar-spinner{width:10px;height:10px;border-radius:50%;border:1.5px solid currentColor;border-right-color:transparent;animation:topbar-spin .9s linear infinite}
