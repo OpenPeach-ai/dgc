@@ -80,16 +80,18 @@ export function createPicker({ root, onPick, now = () => Date.now() }) {
       return { below: bottom - b.bottom - 2 * gap, above: b.top - top - 2 * gap, top, b, scroller };
     };
     let room = bounds();
+    const fits = (space) => natural <= space + 0.5;
     const dialog = list.closest('.dialog'), holder = dialog?.parentElement;
-    if (dialog && holder && natural > room.below) {
+    if (dialog && holder && !fits(room.below)) {
       const r = dialog.getBoundingClientRect(), most = parseFloat(win.getComputedStyle(dialog).maxHeight), pad = parseFloat(win.getComputedStyle(holder).paddingTop) || 0;
-      const grow = Math.floor(Math.min(natural - room.below, (Number.isFinite(most) ? most : Infinity) - r.height, (holder.clientHeight - 2 * pad - r.height) / 2));
+      const grow = Math.min(Math.ceil(natural - room.below), Math.floor(Math.min((Number.isFinite(most) ? most : Infinity) - r.height, (holder.clientHeight - 2 * pad - r.height) / 2)));
       if (grow > 0) { grown = dialog; dialog.style.minHeight = `${r.height + grow}px`; dialog.style.marginTop = `${grow}px`; room = bounds(); }
     }
     const enough = Math.min(natural, 170), more = room.scroller ? room.scroller.scrollHeight - room.scroller.clientHeight - room.scroller.scrollTop : 0;
     if (room.below < enough && room.above < enough && more > 0) { room.scroller.scrollTop += Math.min(more, room.b.top - room.top - gap); room = bounds(); }
-    if (natural <= room.below || room.below >= room.above) list.style.maxHeight = `${Math.max(60, Math.floor(room.below))}px`;
-    else { list.classList.add('up'); list.style.maxHeight = `${Math.max(60, Math.floor(room.above))}px`; }
+    const up = !fits(room.below) && room.above > room.below, space = up ? room.above : room.below;
+    list.classList.toggle('up', up);
+    list.style.maxHeight = fits(space) ? '' : `${Math.max(60, Math.floor(space))}px`;
   }
   // Opens on the row given, else the chosen one, else the first (or the last, from the Up arrow).
   function open(id, { value = '', last = false } = {}) {
@@ -185,11 +187,12 @@ export function createPicker({ root, onPick, now = () => Date.now() }) {
     const option = event.target?.closest?.('.pip-picker-list [role=option]'), p = parts(openId);
     if (p && option && p.list.contains(option) && option.getAttribute('aria-disabled') !== 'true' && activeOf(p.list) !== option) setActive(p.list, option, false);
   }
+  // The focus leaving the open list for anything outside its dropdown closes it; a redraw taking the list away doesn't
+  // (restore opens the new one).
   function focusout(event) {
-    if (!openId) return;
+    if (!openId || !event.target?.isConnected) return;
     const p = parts(openId);
-    if (!p) { openId = ''; return; }
-    if (event.target !== p.list) return;
+    if (!p || event.target !== p.list) return;
     if (event.relatedTarget && p.anchor.contains(event.relatedTarget)) return;
     close(false);
   }

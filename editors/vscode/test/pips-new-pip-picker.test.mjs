@@ -157,13 +157,16 @@ test('the keys: arrows, Home and End move, typing goes to a row, Enter or Space 
   assert.equal(x.$('.dialog'), null, 'with the list shut, Esc closes the dialog as before');
 });
 
-test('a click outside the list closes it; a click on the button opens and closes it', async () => {
+test('a click outside the list, or the focus moving on, closes it; a click on the button opens and closes it', async () => {
   const x = await projectDialog();
   await x.click('#new-pip-kind'); assert.equal(state(x, 'new-pip-kind').open, true);
   await x.click('#new-pip-kind'); assert.equal(state(x, 'new-pip-kind').open, false, 'the button closes it again');
   await x.click('#new-pip-kind'); await x.click('.dialog .new-pip-kind');
   assert.equal(state(x, 'new-pip-kind').open, false, 'a click outside closes it');
   assert.ok(x.$('.dialog'));
+  await x.click('#new-pip-kind'); x.$('#name').focus();
+  assert.equal(state(x, 'new-pip-kind').open, false, 'the focus moving on closes it');
+  assert.equal(x.focus()?.id, 'name', 'and stays where it went');
   await x.click('#new-pip-kind'); await x.click('#review-cancel');
   assert.equal(x.$('.dialog'), null, 'a click on another control closes the list and does what that control does');
 });

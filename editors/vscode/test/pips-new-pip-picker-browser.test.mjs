@@ -1,5 +1,5 @@
 // New Pip's big face and dropdown (the founder, 24 Oct: "a big face with a dropdown beside it") in real Chromium, drawn
-// by the real client and its CSS at the side bar's 460 px and a wide 900 px editor tab, dark and light: the Project and
+// by the real client and its CSS at a narrow 300 px side bar, 460 px and a wide 900 px editor tab, dark and light: the Project and
 // Personal dialogs closed and with their list open, and a Personal Pip's face on its page. Nothing sticks out of the page
 // or is cut off by a box it sits in, there is no sideways scroll, the face sits beside the dropdown, and the open list
 // lies wholly inside the dialog's visible part and the page: it drops down, or flips up when the picker sits low. Real
@@ -115,7 +115,7 @@ const inside = (v, label) => {
   assert.ok(list, `${label}: the list is open`);
   assert.ok(list.top >= visible.top - 1 && list.bottom <= visible.bottom + 1 && list.left >= visible.left - 1 && list.right <= visible.right + 1,
     `${label}: the list is wholly inside the dialog's visible part and the page (${JSON.stringify(list)} in ${JSON.stringify(visible)})`);
-  assert.ok(list.left >= v.button.left - 1 && list.right <= v.button.right + 1, `${label}: the list sits under its button`);
+  assert.ok(list.left >= v.face.left - 1 && list.right <= v.button.right + 1 && list.right >= v.button.right - 1, `${label}: the list sits under the picker, its right edge the button's`);
   for (const row of v.rows) assert.ok(row.whole, `${label}: “${row.text}” is whole`);
 };
 
@@ -139,7 +139,7 @@ const shot = async (p, name) => { if (process.env.SHOTS) { await p.waitForTimeou
 const kind = (p) => p.evaluate(() => document.querySelector(".dialog .new-pip-kind .type-role")?.textContent || "");
 const focused = (p) => p.evaluate(() => document.activeElement?.id || document.activeElement?.className || "");
 
-for (const width of [460, 900]) {
+for (const width of [300, 460, 900]) {
   for (const theme of ["dark-modern", "light-modern"]) {
     test(`New Pip at ${width} px, ${theme}: a big face beside a dropdown; open, its list is whole inside the dialog`, async (t) => {
       if (skipOrFail(t)) return;
@@ -160,7 +160,7 @@ for (const width of [460, 900]) {
       v = await p.evaluate(PICKER, ".dialog"); m = await p.evaluate(MEASURE);
       assert.equal(v.expanded, "true");
       inside(v, "Project, open");
-      assert.ok(v.scrolls <= 1, `all seven jobs show without scrolling the list (${v.scrolls}px more)`);
+      assert.ok(v.scrolls <= 0, `all seven jobs show without scrolling the list (${v.scrolls}px more)`);
       assert.deepEqual(v.rows.map((r) => r.text), ["Map out the projectScout", "Answer a question about the codeLens", "Fix files you approvePatch", "Review the code for bugsRook",
         "Run tests you approvePulse", "Look for security problemsLock", "Draft documentationQuill"], "the jobs, each with its character's name");
       assert.deepEqual(m.out, [], "open: nothing sticks out or is cut off"); assert.ok(m.scroll <= 0, `open: no sideways scroll (${m.scroll}px)`);
@@ -188,6 +188,7 @@ for (const width of [460, 900]) {
       await p.click("#new-pip-character");
       v = await p.evaluate(PICKER, ".dialog"); m = await p.evaluate(MEASURE);
       inside(v, "Personal, open");
+      assert.ok(v.scrolls <= 0, `the short dialog makes room: all seven names show without scrolling the list (${v.scrolls}px more)`);
       assert.deepEqual(v.rows.map((r) => r.text), ["Scout", "Lens", "Patch", "Rook", "Pulse", "Lock", "Quill"], "the names");
       assert.deepEqual(m.out, [], "Personal, open: nothing sticks out or is cut off"); assert.ok(m.scroll <= 0);
       await shot(p, `${tag}-personal-open`);
