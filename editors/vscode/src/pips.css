@@ -262,8 +262,9 @@ button.pill{border-radius:999px;padding:6px 16px}
    lies over what is under it, inside the dialog; it flips up when there is more room above. */
 .pip-picker{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;margin:4px 0 12px}
 .pip-picker.large{grid-template-columns:104px minmax(0,1fr);gap:16px;margin:0 0 6px}
-.pip-picker-face{width:72px;height:72px;display:grid;place-items:center;border:1px solid var(--pip-edge);border-radius:14px;background:var(--pip-wash)}
-.pip-picker.large .pip-picker-face{width:104px;height:104px;border-radius:18px}
+/* The face stands on its own, with no box around it (the founder, 24 Oct). */
+.pip-picker-face{width:72px;height:72px;display:grid;place-items:center}
+.pip-picker.large .pip-picker-face{width:104px;height:104px}
 .pip-picker-face .avatar{width:58px;height:56px}
 .pip-picker.large .pip-picker-face .avatar{width:86px;height:84px}
 .pip-picker-field{min-width:0}
@@ -290,7 +291,7 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-picker-option.active .pip-picker-aside,.pip-picker-option.active .pip-picker-reason{color:inherit;opacity:.85}
 .pip-picker-option[aria-disabled=true]{cursor:default;opacity:.55}
 /* A narrow side bar: a smaller face, and the open list as wide as the face and the dropdown together. */
-@container(max-width:360px){.pip-picker{grid-template-columns:64px minmax(0,1fr);gap:10px}.pip-picker-face{width:64px;height:64px;border-radius:12px}.pip-picker-face .avatar{width:52px;height:50px}.pip-picker-list{left:-74px}.pip-picker.large{grid-template-columns:76px minmax(0,1fr)}.pip-picker.large .pip-picker-face{width:76px;height:76px}.pip-picker.large .pip-picker-face .avatar{width:62px;height:60px}.pip-picker.large .pip-picker-list{left:-86px}}
+@container(max-width:360px){.pip-picker{grid-template-columns:64px minmax(0,1fr);gap:10px}.pip-picker-face{width:64px;height:64px}.pip-picker-face .avatar{width:52px;height:50px}.pip-picker-list{left:-74px}.pip-picker.large{grid-template-columns:76px minmax(0,1fr)}.pip-picker.large .pip-picker-face{width:76px;height:76px}.pip-picker.large .pip-picker-face .avatar{width:62px;height:60px}.pip-picker.large .pip-picker-list{left:-86px}}
 /* Grok-style chat: short bubbles, the Pip at work with its name, and time marks. */
 .chat-style .pip-message.assistant .answer.split{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;padding:0;max-width:none}
 .chat-style .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}

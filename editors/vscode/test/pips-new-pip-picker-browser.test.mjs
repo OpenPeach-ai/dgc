@@ -296,3 +296,23 @@ test("with motion allowed the faces move; with reduced motion they are still", a
     await context.close();
   }
 });
+
+// The founder, 24 Oct: "remove the outline cube around the main Pip face". The big face stands on its own, in both
+// themes, in New Pip and on a Pip's Face page: no border, no filled box behind it.
+test("the big face has no box around it: no border and no fill, in both themes", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const { p, context } = await scene({ width: 460, theme });
+    await p.click("[data-pips-tab=project]"); await p.waitForSelector(`[data-job="${AUDIT}"]`);
+    await p.click("#simple-new"); await p.waitForSelector(".dialog #new-pip-kind");
+    const box = await p.evaluate(() => {
+      const s = getComputedStyle(document.querySelector(".dialog .pip-picker-face"));
+      return { border: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth], fill: s.backgroundColor, image: s.backgroundImage, shadow: s.boxShadow };
+    });
+    assert.deepEqual(box.border, ["0px", "0px", "0px", "0px"], `${theme}: no border`);
+    assert.ok(["rgba(0, 0, 0, 0)", "transparent"].includes(box.fill), `${theme}: no fill (${box.fill})`);
+    assert.equal(box.image, "none", `${theme}: no background image`);
+    assert.equal(box.shadow, "none", `${theme}: no shadow`);
+    await context.close();
+  }
+});
