@@ -62,6 +62,8 @@ FAKE_TOOL = textwrap.dedent('''\
     ''')
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "DGC's own desktop download is Linux with apt; a Mac builds "
+                     "its computer's VM image instead (pip_container, test_pip_container)")
 class SetupTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="dgc-desktop-setup-")

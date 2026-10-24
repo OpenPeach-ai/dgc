@@ -1,6 +1,7 @@
 """Pip computers: the box, its egress proxy and the write gate, against a real Chromium in bwrap."""
 import http.server
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -8,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dgc import pip_computer_box as box
+from dgc import pip_computer_box as box, pip_container
 
 TEST_HOST = "dgc-box-test.example"
 FORM = b"""<!doctype html><title>Order desk</title>
@@ -80,12 +81,16 @@ class BrowserChoiceTests(unittest.TestCase):
         path.write_bytes(content); path.chmod(0o755)
         return str(path)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "how Linux finds the Chrome its box runs; on a Mac Chrome "
+                         "is in the computer's VM (pip_container, test_pip_container)")
     def test_google_chrome_wins_when_it_is_installed(self):
         chrome = self.program("chrome", b"\x7fELF real chrome")
         with patch.object(box, "GOOGLE_CHROME", (chrome,)), patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": ""}):
             self.assertEqual(str(box.find_chrome(self.home)), chrome)
             self.assertEqual(box.browser_name(box.find_chrome(self.home)), "Google Chrome")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "how Linux finds the Chrome its box runs; on a Mac Chrome "
+                         "is in the computer's VM (pip_container, test_pip_container)")
     def test_a_script_standing_in_for_chrome_is_not_chrome(self):
         shim = self.program("chrome", b"#!/usr/bin/env bash\nexec chromium \"$@\"\n")
         with patch.object(box, "GOOGLE_CHROME", (shim,)), patch.object(box, "OTHER_CHROMIUM", ()), \
@@ -111,14 +116,19 @@ class BrowserChoiceTests(unittest.TestCase):
         class Built(Exception):
             pass
 
-        def fake_box(home, egress, chrome, *args, **kwargs):
-            built.append(chrome)
+        def fake_box(*args, **kwargs):
+            built.append(args)
             raise Built()
         chrome = Path(self.program("chrome", b"\x7fELF real chrome"))
-        with patch.object(box, "find_chrome", return_value=chrome), patch.object(box, "Box", fake_box):
+        # Both kinds of box: Linux's (bubblewrap) and a Mac's (Chrome in the computer's VM). Patching only Linux's
+        # let this test start a real VM on a Mac and leave it running.
+        with patch.object(box, "find_chrome", return_value=chrome), patch.object(box, "Box", fake_box), \
+                patch.object(pip_container, "ContainerBox", fake_box):
             with self.assertRaises(Built):
                 browser.start()
-        self.assertEqual(built, [chrome])
+        self.assertEqual(len(built), 1)
+        if sys.platform != "darwin":
+            self.assertEqual(built[0][2], chrome, "the box runs the Chrome found now")
         self.assertEqual(browser.binary, chrome)
 
 
