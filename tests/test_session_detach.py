@@ -37,7 +37,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dgc import editor_protocol as ep                        # noqa: E402
-from dgc import serve_detach, serve_relay, session_socket    # noqa: E402
+from dgc import peers, serve_detach, serve_relay, session_socket    # noqa: E402
 from dgc.protocol import Emitter                             # noqa: E402
 
 POSIX_SOCKETS = session_socket.supported()
@@ -913,10 +913,7 @@ class World:
             serve.stop()
         # the windowless process this test made, by pid, after checking its command line
         for pid in self.note_pids():
-            try:
-                cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if Path("/proc").exists() else []
-            except OSError:
-                cmdline = []
+            cmdline = command_line(pid)
             if b"serve" in cmdline and b"-m" in cmdline:
                 try:
                     os.kill(pid, 9)
@@ -954,15 +951,27 @@ class World:
 
 
 def alive(pid):
+    """Running, not merely in the process table. A backend these tests started is their own child, so once it exits
+    it stays a zombie until reaped, and a zombie still answers kill(pid, 0). Linux tells a zombie by /proc; macOS
+    has no /proc, and reading it there called every exited backend alive (twelve "timed out waiting for the exit"
+    failures on a Mac, 2026-10-24). dgc.peers asks ps there, as DGC itself does for a peer."""
     try:
         os.kill(pid, 0)
+    except PermissionError:
+        return True
     except OSError:
         return False
-    try:
-        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        return state != "Z"
-    except (OSError, IndexError):
-        return True
+    return not peers._is_zombie(pid)
+
+
+def command_line(pid):
+    """A process's arguments, as bytes: /proc on Linux, ps elsewhere (macOS), [] once it has gone."""
+    if Path("/proc").is_dir():
+        try:
+            return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        except OSError:
+            return []
+    return peers._ps_field(pid, "command").encode().split()
 
 
 def turn_text(events, after_seq, snapshot=None):
