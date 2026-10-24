@@ -35,6 +35,10 @@ def dgc_home() -> Path:
     (scheduler._lock_directory): they protect the user's project files, which every DGC shares."""
     return _user_home_root() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
+# The most sub-agents that may run at once (max_parallel_tasks). A cautious bound, not a technical one: each is its
+# own checkout of the project and its own stream of model requests, so the cost is disk, rate limits and a server's
+# own parallelism (a local Ollama serves OLLAMA_NUM_PARALLEL at once; the rest wait). Every clamp reads this.
+MAX_PARALLEL_TASKS = 32
 USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
@@ -542,7 +546,7 @@ DEFAULTS: dict = {
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "subagent_link_paths": [],                   # opt-in: ignored dirs shared INTO task checkouts (e.g. node_modules)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
-    "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
+    "max_parallel_tasks": 4,                     # 1 disables; up to MAX_PARALLEL_TASKS concurrent isolated workers
     "max_subagent_depth": 1,                     # how deep `task` may nest; 1 = a child cannot delegate (0-8)
     "trash_mode": "dgc",                        # /files deletes: dgc (~/.dgc/trash, 30-day) | os (system trash)
     "eta": True,                                # show a calibrated "~2–4 min left" range while a turn runs

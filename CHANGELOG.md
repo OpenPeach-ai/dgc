@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Up to 32 sub-agents at once.** `max_parallel_tasks` now goes to 32 (it stopped at 8, a cautious choice rather
+  than a technical limit), and 32 really run at the same time: one `task` call can list up to 32 helpers in `tasks`,
+  and a reply of up to 32 `task` calls runs side by side, each in its own checkout. The default stays 4 and Ultra's
+  own width 8; a number you choose is kept, under Ultra too. More costs more: each sub-agent is its own copy of the
+  project and its own stream of requests, cloud APIs rate-limit, and a local Ollama serves only `OLLAMA_NUM_PARALLEL`
+  at once while the rest wait. The TUI's settings say 1–32.
+
 - **One model for every Pip on Default.** The new `pips_model` setting is the model every Pip set to Default
   uses, on DGC's own connection; empty (the default) follows DGC as before: its model, or its Claude Code or Codex.
   Set, it wins over DGC's subscription default, so a Project Pip on Default works while DGC itself runs on a

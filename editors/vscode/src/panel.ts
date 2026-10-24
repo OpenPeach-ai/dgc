@@ -155,6 +155,8 @@ const SEARCH_KEY_PROVIDERS = ["brave", "tavily", "ollama"];
 // Ollama's keep_alive as the CLI takes it (dgc/headless.py _KEEP_ALIVE_RE): a duration, seconds, -1, or "".
 const KEEP_ALIVE_RE = /^(?:|-?\d{1,9}|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4})$/;
 
+// The most sub-agents that may run at once (dgc/config.py MAX_PARALLEL_TASKS); a Save never writes a wider one.
+const MAX_PARALLEL_TASKS = 32;
 // A model id as Pips take one (dgc/pip_models.py _MODEL_ID).
 const PIPS_MODEL_RE = /^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
 
@@ -7210,7 +7212,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         artifact_in_plan: v.artifact_in_plan === true,
         tool_profile: v.tool_profile === "full" ? "full"
           : v.tool_profile === "adaptive" ? "adaptive" : "standard",
-        max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
+        max_parallel_tasks: Math.max(1, Math.min(MAX_PARALLEL_TASKS, Math.floor(Number(v.max_parallel_tasks || 4)) || 1)),
         // General → Thinking is the composer dial. On a subscription route it maps to
         // subscription_effort; native thinking stays the last native value so a Save does not
         // overwrite it with the vendor effort.

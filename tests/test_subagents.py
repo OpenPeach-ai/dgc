@@ -633,7 +633,8 @@ class TheWidthIsOneNumberTests(unittest.TestCase):
         from dgc.ultra import ULTRA_WORKERS, worker_limit
         self.assertEqual(worker_limit(self.Cfg()), 4, "outside Ultra the default is unchanged")
         self.assertEqual(worker_limit(self.Cfg(ultra_mode=True)), ULTRA_WORKERS)
-        self.assertEqual(ULTRA_WORKERS, 8, "the ceiling is hard-coded in seven places; this is it")
+        self.assertEqual(ULTRA_WORKERS, 8, "Ultra's own width; the ceiling a chosen width may reach is "
+                                           "config.MAX_PARALLEL_TASKS")
 
     def test_a_width_you_chose_is_honoured_even_under_ultra(self):
         from dgc.ultra import worker_limit

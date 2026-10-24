@@ -998,6 +998,16 @@ test("the settings page hears the Pips default with the config, from a CLI that 
   assert.ok(commands.find((c) => c.type === "get_config").fields.includes("pips_settings"));
 });
 
+test("the host keeps up to 32 parallel sub-agents on Save, and never rewrites a stored width downward", async () => {
+  // The host clamped to 8: a width of 32 set in config.json came back as 8 on the next unrelated Save.
+  for (const [typed, sent] of [["32", 32], [32, 32], ["20", 20], ["64", 32], ["12.7", 12], ["", 4], ["0", 1], ["lots", 1]]) {
+    const { provider, commands } = harness();
+    await provider.saveSettings(settings({ max_parallel_tasks: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "max_parallel_tasks" in (c.values || {}));
+    assert.equal(config?.values.max_parallel_tasks, sent, String(typed));
+  }
+});
+
 test("Settings asks the CLI for the sub-agents' context window", () => {
   // An opt-in config field (an older editor rejects a field it doesn't know): it reaches the page only when asked.
   const commands = [];

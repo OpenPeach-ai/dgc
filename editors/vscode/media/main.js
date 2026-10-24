@@ -6661,7 +6661,7 @@
         renderComposerControls();
         paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"
         curUltra = ev.ultra_mode === true;
-        curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
+        curWorkers = Math.max(1, Math.min(32, Number(ev.max_parallel_tasks || 4)));
         updateModelControl();
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         break;

@@ -1172,3 +1172,28 @@ test('Agents: Model for Pips, a Pips-wide default that every Pip on Default foll
   x.message({type:'event',event:{...x.config,subscription_engine:'codex',pips_settable:true,pips_model:''}});
   assert.equal(box().placeholder,'Same as DGC (Codex)');
 });
+
+test('General: Parallel sub-agents takes up to 32 and says plainly what more costs',()=>{
+  const x=setup();
+  x.click('[data-nav=general]');
+  const box=x.d.querySelector('#max_parallel_tasks');
+  assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
+  const hint=box.closest('.field').querySelector('.hint').textContent;
+  assert.match(hint,/up to 32/);
+  assert.match(hint,/its own copy of the project/);
+  assert.match(hint,/Cloud APIs rate-limit/);
+  assert.match(hint,/OLLAMA_NUM_PARALLEL at once; the rest wait/);
+  const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
+  x.input('#max_parallel_tasks','33');
+  x.click('#save');
+  assert.equal(saves().length,0,'33 is refused on the page');
+  x.input('#max_parallel_tasks','32');
+  x.click('#save');
+  assert.equal(saves().at(-1).values.max_parallel_tasks,'32');
+  x.message({type:'settingsSaved',ok:true});
+  // Under Ultra: what it runs, and that a chosen number (wider than Ultra's 8 too) is kept.
+  x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:4}});
+  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/Ultra is on, so this runs 8\. Set any other number, up to 32, to pin it/);
+  x.message({type:'event',event:{...x.config,ultra_mode:true,max_parallel_tasks:20}});
+  assert.match(x.d.querySelector('#max_parallel_tasks').closest('.field').textContent,/this pins it to the number here/);
+});

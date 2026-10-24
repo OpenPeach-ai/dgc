@@ -35,7 +35,7 @@ from .editor_context import _editor_context_json, _format_editor_context, _strip
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import (SEARCH_KEY_PROVIDERS, SEARCH_KEYS, SEARCH_PROVIDERS, Config, mcp_url_has_credentials,
+from .config import (MAX_PARALLEL_TASKS, SEARCH_KEY_PROVIDERS, SEARCH_KEYS, SEARCH_PROVIDERS, Config, mcp_url_has_credentials,
                      search_key_name, search_settings)
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
@@ -469,7 +469,7 @@ _CONFIG_INTEGER_RANGES = {
     "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
     "context_size": (2_048, MAX_SAFE_INTEGER),
     "subagent_context_size": (0, MAX_SAFE_INTEGER),     # 0: the main window
-    "max_parallel_tasks": (1, 8),
+    "max_parallel_tasks": (1, MAX_PARALLEL_TASKS),
     "autonomous_max_turns": (1, 1_000),
     "monitor_wake_delay_s": (1, 300),
     "monitor_wake_cooldown_s": (1, 3600),

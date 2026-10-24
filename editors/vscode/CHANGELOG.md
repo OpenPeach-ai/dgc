@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Settings → General → Parallel sub-agents goes to 32.** It stopped at 8, and Save rewrote a wider number set
+  elsewhere back to 8; both now take up to 32. The hint says what more costs: each sub-agent is its own copy of the
+  project, cloud APIs rate-limit, and a local Ollama runs only its OLLAMA_NUM_PARALLEL at once while the rest wait.
 - **Settings → Agents → Pips: one model for every Pip on Default.** **Model for Pips** lists the models at DGC's
   own connection (the host under Models) and takes any name; blank reads **Same as DGC (its model)** and follows DGC
   as before. Every Pip set to Default uses it, and a Pip's model menu now reads **Default (the model it runs)**

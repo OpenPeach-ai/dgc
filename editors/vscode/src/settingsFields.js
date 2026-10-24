@@ -12,10 +12,12 @@ function keepAliveChoices(current) {
 }
 function parallelHint(c) {
     const pinned = Number(c.max_parallel_tasks ?? 4) !== 4;
-    if (c.ultra_mode !== true) { return "How many sub-agents may run at once. Ultra raises this to 8 unless you set a number here."; }
+    // What more costs, said plainly: the number is cheap to raise and expensive to run.
+    const cost = "Each one is its own copy of the project. Cloud APIs rate-limit, and a local Ollama runs only its OLLAMA_NUM_PARALLEL at once; the rest wait.";
+    if (c.ultra_mode !== true) { return `How many sub-agents may run at once, up to 32. Ultra raises this to 8 unless you set a number here. ${cost}`; }
     return pinned
-        ? "Ultra would run 8; this pins it narrower. Clear it back to 4 to let Ultra widen again."
-        : "Ultra is on, so this runs 8. Set any other number to pin it — 1 disables parallel sub-agents.";
+        ? `Ultra would run 8; this pins it to the number here. Set it back to 4 to let Ultra choose again. ${cost}`
+        : `Ultra is on, so this runs 8. Set any other number, up to 32, to pin it — 1 disables parallel sub-agents. ${cost}`;
 }
 
 // Ollama's keep_alive values Settings offers, in plain words. "" sends none (Ollama's own default, 5 minutes).

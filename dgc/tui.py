@@ -801,7 +801,7 @@ class TUI:
             ("subagent_api_mode", "Sub-agent transport", "enum",
              ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
             ("subagent_context_size", "Sub-agent context window (0 = main)", "int"),
-            ("max_parallel_tasks", "Parallel task workers (1–8)", "int"),
+            ("max_parallel_tasks", "Parallel task workers (1–32)", "int"),
             ("fleet_worktree_root", "Fleet worktree storage", "str"),
             ("fallback_model", "Fallback model", "str"),
             ("fallback_base_url", "Fallback endpoint", "str"),

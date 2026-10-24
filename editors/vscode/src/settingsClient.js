@@ -226,7 +226,7 @@ function render() {
     const save = $('save');
     save.disabled = saving || (section === 'web' && !draft.search_settable) || (section === 'chatdgc' && !draft.chatdgc_settable);
     save.insertAdjacentHTML('afterend', ' <span class="save-status" id="save-status" role="status">' + esc(saveStatus) + '</span>');
-    for (const [id, min, max, step] of [['context_size', 2048, null, 1024], ['max_parallel_tasks', 1, 8, 1], ['capability_cache_ttl_s', 1, null, 1]]) {
+    for (const [id, min, max, step] of [['context_size', 2048, null, 1024], ['max_parallel_tasks', 1, 32, 1], ['capability_cache_ttl_s', 1, null, 1]]) {
         const input = $(id);
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
