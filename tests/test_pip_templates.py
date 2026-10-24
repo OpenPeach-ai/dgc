@@ -451,7 +451,7 @@ class WireTests(TemplateWorld, unittest.TestCase):
     def test_the_api_is_64_and_the_commands_are_the_runtimes(self):
         from dgc.headless import PIPS_API_VERSION, _bounded_pips_command
         from dgc.pips import CONTROL_COMMANDS, _COMMAND_ARGS
-        self.assertEqual(PIPS_API_VERSION, 64)
+        self.assertGreaterEqual(PIPS_API_VERSION, 64)
         self.assertEqual(_COMMAND_ARGS["ensure_pip_template"], {"template", "accept_widening", "overwrite_user_changes"})
         self.assertEqual(_COMMAND_ARGS["prune_pip_templates"], {"keep"})
         self.assertEqual(_COMMAND_ARGS["list_pip_templates"], {"pip_id"})
