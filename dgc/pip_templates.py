@@ -773,9 +773,10 @@ def _answer(store, pip, template, *, created, applied, settled, conflicts, unava
         parts.append(f"Made {name} from its template.")
     elif applied:
         parts.append(f"Brought {name} up to date with its template: " + " ".join(a["words"] for a in applied))
-    else:
-        parts.append(f"{name} already matches its template." if not conflicts else
-                     f"{name} keeps what you changed in DGC.")
+    elif conflicts:
+        parts.append(f"{name} keeps what you changed in DGC.")
+    elif not settled["waiting"] and not settled["declined"]:
+        parts.append(f"{name} already matches its template.")
     if settled["waiting"]:
         parts.append(f"A change waits for a person on {name}'s page in DGC: " + "; ".join(
             item_words(i) for i in json.loads(store.db.execute("SELECT items FROM pip_template_changes WHERE id=?",

@@ -225,7 +225,9 @@ class WideningTests(TemplateWorld, unittest.TestCase):
             "Use create_dispatch in Shop app, a change", "Have its own computer: a browser, a Terminal and files",
             "Run create_dispatch in Shop app without asking", "Ask less: Approve for me (now Ask)",
             "A routine, New orders: when the shop app sends order.created"])
-        self.assertIn("A change waits for a person on Dunning's page in DGC", asked["notice"])
+        self.assertTrue(asked["notice"].startswith("A change waits for a person on Dunning's page in DGC: Use "
+                                                   "create_dispatch in Shop app, a change;"), asked["notice"])
+        self.assertNotIn("already matches", asked["notice"], "not while something waits")
         # Nothing of it is the Pip's yet.
         self.assertEqual(self.level(made), "ask")
         self.assertEqual(self.tools(made["pip_id"]), ["app:shop/find_unpaid_orders"])
