@@ -190,7 +190,8 @@ label>span{display:block}
 #new-pip{background:var(--pip-accent);border-color:var(--pip-accent);color:#fff}
 #new-pip:hover{background:var(--pip-accent-hover)}
 aside>button:not(.job){margin:6px 6px 0 0}
-/* Simple Pips (API 43): Personal Pips as characters you chat with. */
+/* Simple Pips (API 43): Personal Pips as characters you chat with. Their chat (.chat-style) is every Pip's from 24 Oct:
+   a Project Pip's chat looks and works the same, inside its own page. */
 :host,:root{--pip-bubble:color-mix(in srgb,var(--vscode-foreground) 8%,transparent)}
 .simple-pips #app{display:flex;flex-direction:column;min-height:100%}
 .simple-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex:none}
@@ -236,18 +237,18 @@ button.pill{border-radius:999px;padding:6px 16px}
 .simple-pips.chat-open .simple-content.chat{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0 12px 10px;max-width:760px}
 .simple-pips.chat-open .simple-content.chat .pip-conversation{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
 .simple-pips.chat-open .simple-content.chat .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding-top:6px}
-.simple-pips .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:10px 14px}
-.simple-pips .pip-message.assistant .answer p:first-child{margin-top:0}
-.simple-pips .pip-message.assistant .answer p:last-child{margin-bottom:0}
-.simple-pips .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
-.simple-pips .pip-message.user .bubble{max-width:85%;background:var(--pip-accent);color:#fff;border-radius:18px;padding:9px 14px}
+.chat-style .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:10px 14px}
+.chat-style .pip-message.assistant .answer p:first-child{margin-top:0}
+.chat-style .pip-message.assistant .answer p:last-child{margin-bottom:0}
+.chat-style .pip-message.user{border:0;background:transparent;padding:0;display:flex;flex-direction:column;align-items:flex-end}
+.chat-style .pip-message.user .bubble{max-width:85%;background:var(--pip-accent);color:#fff;border-radius:18px;padding:9px 14px}
 /* pipsTranscript.css loads after this file with equal weight: these carry one more class. */
-.simple-pips .pip-message.msg .response-actions{opacity:1}
-.simple-pips .pip-message .response-actions>*{transition:opacity .12s}
-.simple-pips .pip-message:not(:hover):not(:focus-within) .response-actions>:not(.msg-time){opacity:0}
-.simple-pips .pip-message .chat-activity-toggle{display:none}
-.simple-pips .simple-content .composer-hint{display:none}
-.simple-pips .simple-content .pip-composer{border-radius:22px}
+.chat-style .pip-message.msg .response-actions{opacity:1}
+.chat-style .pip-message .response-actions>*{transition:opacity .12s}
+.chat-style .pip-message:not(:hover):not(:focus-within) .response-actions>:not(.msg-time){opacity:0}
+.chat-style .pip-message .chat-activity-toggle{display:none}
+.pip-conversation.chat-style .composer-hint{display:none}
+.pip-conversation.chat-style .pip-composer{border-radius:22px}
 .simple-pips .simple-bar .runner-status{font-size:0;gap:0}
 .simple-pips .simple-bar .runner-status .status-dot{width:8px;height:8px}
 .pip-message.typing{display:inline-flex;padding:13px 16px;border-radius:18px;background:var(--pip-bubble);margin-bottom:18px}
@@ -264,12 +265,12 @@ button.pill{border-radius:999px;padding:6px 16px}
 .character-choice[aria-checked=true]{border-color:#7C5CFA;background:var(--pip-tint);box-shadow:0 0 0 1px #7C5CFA inset}
 .character-choice span{font-size:11px}
 /* Grok-style chat: short bubbles, the Pip at work with its name, and time marks. */
-.simple-pips .pip-message.assistant .answer.split{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;padding:0;max-width:none}
-.simple-pips .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}
-.simple-pips .reply-part>:first-child{margin-top:0}
-.simple-pips .reply-part>:last-child{margin-bottom:0}
-.simple-pips .pip-message.provisional .message-status{display:none}
-.simple-pips .pip-message.user .message-status[data-status=queued],.simple-pips .pip-message.user .message-status[data-status=running]{display:none}
+.chat-style .pip-message.assistant .answer.split{display:flex;flex-direction:column;align-items:flex-start;gap:6px;background:none;padding:0;max-width:none}
+.chat-style .pip-message.assistant .answer.split .reply-part{max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:9px 14px}
+.chat-style .reply-part>:first-child{margin-top:0}
+.chat-style .reply-part>:last-child{margin-bottom:0}
+.chat-style .pip-message.provisional .message-status{display:none}
+.chat-style .pip-message.user .message-status[data-status=queued],.chat-style .pip-message.user .message-status[data-status=running]{display:none}
 .pip-working{display:flex;align-items:center;gap:10px;margin:2px 0 18px;color:var(--muted);font-size:13px}
 .pip-working .avatar{width:34px;height:33px;flex:none}
 .chat-time{text-align:center;color:var(--muted);font-size:11px;margin:14px 0 10px}

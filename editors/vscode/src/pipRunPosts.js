@@ -41,6 +41,42 @@ export function runPostsPage(value,pip,workspace){
     throw new Error('Run posts are invalid or belong to another Pip.');
   return {posts:value.posts.filter(validPost),next_before_id:value.next_before_id};
 }
+// ---- What Ask DGC to fix did (Pips API 65) ----
+// The fix runs in a Work chat (dgc/pip_fix.py), which keeps its record on disk; list_pip_run_fixes reads the latest fix
+// of each of the Pip's runs, so the run's post says what the Work chat's card says: fixing, Fixed, failed or undone.
+const FIX=/^fix_[0-9a-f]{32}$/,SESSION=/^[A-Za-z0-9_-]{1,128}$/;
+export const FIX_ACTIVE=['queued','preparing','running','applying'];
+export const FIX_ENDED=['applied','partial','unchanged','not_applied','failed','stopped','interrupted','undone'];
+/** Whether a run's post offers Ask DGC to fix: a Project Pip's audit, checks or live check that found something or
+ *  failed. */
+export function askable(p){return ['findings','checks_failed','failed','live_attention'].includes(p.outcome)&&['audit','checks','live'].includes(p.kind);}
+function validFix(f){
+  return record(f)&&FIX.test(String(f.fix_id||''))&&RUN.test(String(f.run_id||''))&&[...FIX_ACTIVE,...FIX_ENDED].includes(f.state)
+    &&(f.files===undefined||Array.isArray(f.files)&&f.files.length<=50&&f.files.every(x=>record(x)&&typeof x.path==='string'))
+    &&(f.held===undefined||Array.isArray(f.held)&&f.held.length<=50)&&(f.session_id===undefined||SESSION.test(String(f.session_id)));
+}
+/** list_pip_run_fixes, checked: run_id -> its latest fix. A fix this editor can't read is left out. */
+export function runFixesPage(value,pip,workspace){
+  if(!record(value)||value.pip_id!==pip||value.workspace_id!==workspace||!Array.isArray(value.fixes)||value.fixes.length>200)
+    throw new Error('Fixes are invalid or belong to another Pip.');
+  const out=new Map();
+  for(const f of value.fixes)if(validFix(f)&&!out.has(f.run_id))out.set(f.run_id,f);
+  return out;
+}
+/** A fix in a few words, for its run's post: {state, text, title}. `state` is how the post draws it: fixing, fixed,
+ *  held (some changes held back), unchanged, failed, or undone (the post offers Ask DGC to fix again, as before). */
+export function fixWords(f){
+  const files=Array.isArray(f.files)?f.files.length:0,held=Array.isArray(f.held)?f.held.length:0;
+  const chat='Open the Work chat it ran in';
+  if(FIX_ACTIVE.includes(f.state))return {state:'fixing',text:'DGC is fixing this',title:`DGC is fixing this in the background. ${chat} to watch or stop it.`};
+  if(f.state==='applied')return {state:'fixed',text:files?`Fixed · ${plural(files,'file')}`:'Fixed',title:`DGC fixed this. ${chat} to review or undo it.`};
+  if(f.state==='partial')return {state:'held',text:`Fixed ${plural(files,'file')} · ${held} held back`,title:`DGC fixed this but held back what you changed on the same lines. ${chat} to review or undo it.`};
+  if(f.state==='unchanged')return {state:'unchanged',text:'Nothing to change',title:`DGC looked and found nothing to change. ${chat} to see why.`};
+  if(f.state==='undone')return {state:'undone',text:'',title:''};
+  const why={failed:'The fix didn’t finish',stopped:'The fix was stopped',interrupted:'The fix was interrupted',not_applied:'The fix wasn’t applied'}[f.state];
+  return {state:'failed',text:why,title:`${String(f.message||why+'.').slice(0,300)} ${chat} to see what happened.`};
+}
+
 /** Merge newly read posts into what is held: one per run, oldest first. */
 export function mergePosts(held,more){
   const byRun=new Map(held.map(p=>[p.run_id,p]));
@@ -204,7 +240,7 @@ const ROUTINE=/^This message is from DGC, not the user\. Your routine "([^"\n]{1
 export function routineTitle(text){const m=ROUTINE.exec(String(text||''));return m?m[1]:null;}
 
 // ---- Drawing it -----------------------------------------------------------------------------------------------
-const ICONS={doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
+const ICONS={check:'<path d="m3.5 8.5 3 3 6-7"/>',x:'<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>',spin:'<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>',doc:'<path d="M4 1.8h5.2L12 4.6v9.6H4Z"/><path d="M9 1.8v3h3M6 8h4M6 10.5h4"/>',warn:'<path d="M8 2 1.8 13h12.4Z"/><path d="M8 6.5v3.2M8 11.4v.2"/>',
   play:'<path d="M5 3.2v9.6L12.4 8Z"/>',fix:'<path d="M10.2 2.2a3.2 3.2 0 0 0-3.9 4.2L2.2 10.5l3.3 3.3 4.1-4.1a3.2 3.2 0 0 0 4.2-3.9l-2 2-2-.3-.3-2Z"/>',
   chev:'<path d="m6 3.5 4.5 4.5L6 12.5"/>'};
 const icon=(name,cls='run-post-icon')=>`<svg class="${cls}" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -248,10 +284,29 @@ function timesMarkup(runs,now){
   return `<details class="run-post-times" data-details="streak-${esc(runs[0].run_id)}"><summary class="run-post-chip"><span class="ok" aria-hidden="true">✓</span> <span>${esc(foldWords(runs,now))}</span>${chev}</summary><div class="run-post-times-body">${rows}</div></details>`;
 }
 
+// Ask DGC to fix, or what the fix did (Pips API 65): a chip that says so and goes to the Work chat it ran in (where its
+// Review, Undo, Watch and Stop are), and Ask DGC to fix again when it didn't finish or was undone.
+function fixMarkup(p,{ask,asked,asking,fix,openFix}){
+  const id=esc(p.run_id),words=fix?fixWords(fix):null;
+  const again=words&&words.state==='failed',undone=words?.state==='undone';
+  const askChip=asking?chip(`data-post-fix="${id}" data-state="asking" disabled title="DGC is starting the fix in the Work chat."`,`${icon('fix')}<span>Asking DGC…</span>`,'run-post-fix asked')
+    :asked&&!fix?chip(`data-post-fix="${id}" data-state="asked" disabled title="DGC was asked to fix this run, in the Work chat it reports to."`,`${icon('fix')}<span>Asked DGC</span>`,'run-post-fix asked')
+    :chip(`data-post-fix="${id}" data-state="ask"${undone?' title="DGC’s fix of this run was undone."':''}`,`${icon('fix')}<span>${again?'Ask DGC to fix again':'Ask DGC to fix'}</span>`,'run-post-fix');
+  if(!ask&&!fix)return '';
+  if(!words||undone)return ask?askChip:'';
+  const mark=icon(words.state==='fixing'?'spin':words.state==='failed'?'x':'check');
+  const status=openFix&&fix.session_id
+    ?chip(`data-post-fix-open="${id}" data-state="${words.state}" title="${esc(words.title)}"`,`${mark}<span>${esc(words.text)}</span>${chev}`,'run-post-fix')
+    :`<span class="run-post-chip run-post-fix" data-state="${words.state}" title="${esc(words.title)}">${mark}<span>${esc(words.text)}</span></span>`;
+  return status+(again&&ask?askChip:'');
+}
+
 /** One run in the chat, or a fold of all-clear runs (`streak`, oldest first, `p` its newest), as a message from the
  *  Pip. `previous`: its run before (for "again"); `ask`: Ask DGC to fix is offered (a project Pip's audit or checks,
- *  with a chat to send it to); `asked`: it was; `canRun`: Run again now would start a run; `expanded`: Show all. */
-export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,canRun=false,previous=null,streak=null,expanded=false,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
+ *  with a chat to send it to); `asked`: it was (before Pips API 65, kept with the view); `asking`: it was just now, and
+ *  the fix hasn't been read yet; `fix`: its latest fix (Pips API 65), whose state the post says; `openFix`: a click on
+ *  that goes to the Work chat it ran in; `canRun`: Run again now would start a run; `expanded`: Show all. */
+export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=false,asked=false,asking=false,fix=null,openFix=false,canRun=false,previous=null,streak=null,expanded=false,renderMarkdown=s=>`<p>${esc(s)}</p>`}){
   const id=esc(p.run_id),runs=streak&&streak.length>1?streak:null,before=runs?runs.at(-2):previous;
   const time=globalThis.DgcTime?.markup(at(p))||'';
   let body,text;
@@ -266,11 +321,10 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
     body=words.map(w=>`<p>${w.map(partHtml).join('')}</p>`).join('');
     text=wordsText(words);
   }
-  const askable=ask&&!personal&&['findings','checks_failed','failed','live_attention'].includes(p.outcome)&&['audit','checks','live'].includes(p.kind);
-  const fix=askable?chip(`data-post-fix="${id}"${asked?' disabled title="DGC was asked to fix this run, in the Work chat it reports to."':''}`,`${icon('fix')}<span>${asked?'Asked DGC':'Ask DGC to fix'}</span>`,asked?'asked':''):'';
+  const fixable=!personal&&askable(p),fixChip=fixable?fixMarkup(p,{ask,asked,asking,fix,openFix}):'';
   const attach=runs?timesMarkup(runs,now)
-    :p.outcome==='findings'||p.outcome==='checks_failed'||p.outcome==='live_attention'?reportMarkup(p)+fix
-    :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fix
+    :p.outcome==='findings'||p.outcome==='checks_failed'||p.outcome==='live_attention'?reportMarkup(p)+fixChip
+    :p.outcome==='failed'?chip(`data-post-open="${id}"`,`${icon('warn')}<span>See what happened</span>`)+(canRun?chip(`data-post-run="${id}"`,`${icon('play')}<span>Run again now</span>`):'')+fixChip
     :chip(`data-post-open="${id}"`,`<span>${p.outcome==='draft'?'Open draft':p.kind==='result'?'Open result':'Open run'}</span>${chev}`,'quiet');
   const head=`<div class="run-post-head">${face?`<span class="run-post-face" aria-hidden="true">${face}</span>`:''}<strong class="run-post-name">${esc(name)}</strong>${time}</div>`;
   return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div><div class="run-post-attach">${attach}</div></article>`;

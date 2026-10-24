@@ -1279,3 +1279,27 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
 def for_session(project_root, session_id: str) -> list[dict]:
     """This chat's fixes, newest first."""
     return [row for row in FixProject(project_root).records() if row.get("session_id") == session_id]
+
+
+SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+# What the Pips page reads of a fix: its state and what it changed, never its owner, folders or agent.
+PAGE_FIELDS = ("fix_id", "run_id", "state", "created_at", "started_at", "ended_at", "files", "held", "tests",
+               "summary", "message", "undo")
+
+
+def for_pip(project_root, pip_id: str) -> list[dict]:
+    """``list_pip_run_fixes`` (Pips API 65): what Ask DGC to fix did for each of a Pip's runs, so the run's post in
+    the Pip's own chat says it -- fixing, Fixed, failed, undone. The latest fix of each run, from whichever chat of
+    the project ran it, newest first, with that chat's ``session_id``: Review and Undo are on its card there. Read
+    from this project's fixes.json, so a window reload or a restart of the runner reads the same; a fix whose
+    process stopped reads as interrupted, as the card does."""
+    latest: dict[str, dict] = {}
+    for row in FixProject(project_root).records():             # newest first: the first one per run wins
+        run_id = str(row.get("run_id") or "")
+        if row.get("pip_id") != pip_id or not RUN_ID.match(run_id) or run_id in latest:
+            continue
+        out = {key: row[key] for key in PAGE_FIELDS if key in row and row[key] not in (None, "")}
+        if isinstance(row.get("session_id"), str) and SESSION_ID.match(row["session_id"]):
+            out["session_id"] = row["session_id"]
+        latest[run_id] = out
+    return list(latest.values())

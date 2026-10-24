@@ -107,6 +107,14 @@ body.vscode-light .run-post{--sev-high:#c72e0f;--sev-med:#8a6100}
 .run-post-chip.quiet:hover{color:var(--vscode-foreground)}
 .run-post-chip.asked,.run-post-chip:disabled{opacity:.7;cursor:default}
 .run-post-chip svg{flex:none}
+/* What Ask DGC to fix did (Pips API 65): the Work chat card's marks, in the run's post. */
+.run-post-fix:is([data-state=fixed],[data-state=held],[data-state=unchanged])>svg:first-child{color:var(--vscode-testing-iconPassed,#73c991)}
+.run-post-fix[data-state=failed]>svg:first-child{color:var(--sev-high)}
+.run-post-fix[data-state=fixing]>svg:first-child{animation:run-post-spin 1s linear infinite}
+span.run-post-chip.run-post-fix{cursor:default}
+span.run-post-chip.run-post-fix:hover{background:transparent}
+@keyframes run-post-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.run-post-fix[data-state=fixing]>svg:first-child{animation:none}}
 .run-post-chev{transition:transform .12s}
 details[open]>summary .run-post-chev{transform:rotate(90deg)}
 .run-post-attach summary.run-post-chip{color:var(--vscode-foreground)}

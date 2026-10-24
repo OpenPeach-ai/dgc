@@ -796,6 +796,15 @@ that the user saw each as a short message from the Pip and that DGC wrote them, 
 where the editor's **Ask DGC to fix** fixes the report in the background (`start_pip_fix`, see
 [PIPS.md](PIPS.md#ask-dgc-to-fix)).
 
+`list_pip_run_fixes {pip_id}` (API 65, a read, local only) returns `{pip_id, workspace_id, fixes}`: for each of the
+Pip's runs, the latest fix any chat of its project ran (`dgc/pip_fix.py` keeps them in the project's
+`~/.dgc/fix-copies/<project>/fixes.json`, the newest 40), newest first. Each has the fields the Work chat's `pip_fix`
+event carries that say what it did (`fix_id`, `run_id`, `state`, `created_at`, `started_at`, `ended_at`, `files`,
+`held`, `tests`, `summary`, `message`, `undo`) and `session_id`, the chat it ran in; never its owner, agent or
+folders. A fix whose process stopped before it ended reads `interrupted`. A Personal Pip has none. The editor reads it
+with the posts and draws each post's fix: fixing, Fixed with the number of files and a way to that chat's card, didn't
+finish with Ask DGC to fix again, and Ask DGC to fix again once undone.
+
 ## Schedules and event triggers
 
 A job has a `schedule` or an `event_trigger`, never both. Both only fire while the
@@ -2227,6 +2236,7 @@ Clients check it before using a newer control.
 | 49 | Additive, nothing to gate on: `list_pip_runs` rows carry a failed run's `error`; `get_pip_execution` has `local_http_checks` and, when DGC knows the one-time fix, `fix` (`dgc pips execution --fix`); a Pulse setup card's `runner_notice` says when it can't run on this computer |
 | 50 | The `safe_source_v2` source rules (files DGC can't copy are left out and listed, `.dgcignore`, the project's ignore files for current files, a Pip's Excluded folders in `source_policy.exclude`, 256 MiB); `check_pip_source` and `get_pip_run_source`; new reviewer and Quill Pips start on `safe_source_v2` |
 | 51 | A finished run posts its result in its Pip's own chat (`list_pip_run_posts {pip_id, before_id?, limit?}`, a read); the conversation context's `run_posts`; `get_pip` has `report_session` |
+| 65 | What Ask DGC to fix did for each of a Pip's runs (`list_pip_run_fixes {pip_id}`, a read, local only), so the run's post in its own chat says fixing, Fixed, didn't finish or undone |
 | 53 | A Pip's eyes and cursor (`pip_eyes`): a run whose model sees gets `look` and the position operations (`click_at`, `double_click_at`, `right_click_at`, `hover_at`, `drag`, `scroll_at`), screenshots with password and card fields blacked out, and `upload`; a text-only Pip says so in one line with a three-choice card, or a model that sees looks for it (relay); `get_pip_eyes`, `set_pip_eyes`; `list_pip_computer_frames` takes `pointers`; `use_pip_computer_view` takes op `pointer` and its frames carry `pointer`; a payment held in a Pip's browser never gets Always allow |
 | 56 | Saved logins (`pip_logins`): `list_pip_logins`, `save_pip_login`, `remove_pip_login`, `grant_pip_login`; the `computer` tool's `sign_in`, with DGC typing the saved username, password and one-time code (`pip_totp`) and letting that one submit through; a computer action of kind `login` (the card to save one) |
 | 61 | Your own app's tools (`pip_sdk_apps`): `register_app`, `update_app`, `accept_app_update`, `list_apps`, `remove_app`, `rotate_app_secret` (local only); the connection `app:<name>` in `list_pip_connections`, `inspect_pip_connection` and `inspect_pip_connector_actions`; version-1 `app_plan`s on it; `connector_call` actions on it, sent as one signed POST; `<app>__<tool>` functions and `app_answer` in a Personal Pip's runs (see Your own app's tools, under Personal Pips) |

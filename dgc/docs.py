@@ -2742,7 +2742,10 @@ self-hosted model, never your Claude Code or Codex plan.
 - **A Pip speaks for its runs.** Each finished run is a message from the Pip in its own chat, in
   short first-person words made from the run's report alone, so every number, file and title it says
   is the report's: "I found 4 issues, 3 of them serious." All-clear runs in a row fold into one
-  message that updates itself. Reply to it there.
+  message that updates itself. Reply to it there. After **Ask DGC to fix**, that message says how the
+  fix is going: DGC is fixing this, Fixed · 3 files (a click opens its card in the Work chat, with
+  Review and Undo), or that it didn't finish, with Ask DGC to fix again. A Project Pip's chat looks and
+  answers like a Personal Pip's.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
   reports to: what it found and the worst of it, with **Open report**. A card never starts a turn.
   **Ask DGC to fix** starts a helper in the chat's session without starting a turn, so you keep

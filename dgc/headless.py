@@ -349,7 +349,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # made from a template uses only the app tools its template lists; every other Pip keeps every registered app.
 # prune_pip_templates {keep} pauses (never deletes) template Pips whose key isn't listed. list_pip_templates {pip_id?} and
 # decide_pip_template_change {change_id, decision accept | reject, expected_digest}. Local only.
-PIPS_API_VERSION = 64
+# API 65: a Pip's own chat says what Ask DGC to fix did for each run. list_pip_run_fixes {pip_id} reads it from the
+# Work chat's fix records (pip_fix): {pip_id, workspace_id, fixes: [the latest fix of each run, newest first: {fix_id,
+# run_id, state, created_at, started_at?, ended_at?, files?, held?, tests?, summary?, message?, undo?, session_id?}]},
+# the same fields the Work chat's pip_fix carries plus the chat it ran in. A Personal Pip has none. Local only.
+PIPS_API_VERSION = 65
 
 
 def _pips_platform_supported() -> bool:

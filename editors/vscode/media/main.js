@@ -930,6 +930,8 @@
         close:closePips,
         // Ask DGC to fix, from a Pip's own chat (Pips API 51): the prompt the Work chat's card sends, sent once.
         onAskDgc:({report, session} = {}) => askDgcFromPips(report, session),
+        // What the fix did, in the run's post (Pips API 65): a click goes to its card in the chat it ran in.
+        onOpenFix:({session, run_id} = {}) => openPipFixFromPips(session, run_id),
         onSetupPrompt:prompt => {
           // Preparing a message is never sending it or replacing the user's work.
           if (composerText() || input.querySelector(".composer-pill") || attachments.length || pendingImageFiles || pendingImageBytes) return 'The main chat already has a draft or attachments. Send or save that draft before describing this setup.';
@@ -8978,6 +8980,32 @@
     askDgcToFix(r, null);
     return true;
   }
+  // A run's post on the Pips page says what its fix did (Pips API 65); a click on that goes to the fix's card in the chat
+  // it ran in, where Review, Undo, Watch and Stop are. This chat: close Pips and show it. Another: the host opens that
+  // chat's tab (from the side bar's Sessions home or a session's tab), which shows it once its card is drawn.
+  function openPipFixFromPips(session, runId) {
+    if (!/^run_[0-9a-f]{32}$/.test(String(runId || ""))) return "This fix can't be shown.";
+    const id = /^[A-Za-z0-9_-]{1,128}$/.test(String(session || "")) ? String(session) : "";
+    if (!id) return "DGC can't tell which chat this fix ran in.";
+    if (chatPlace !== "home" && id === draftSession) { closePips(); showPipFix(runId); return true; }
+    if (chatPlace === "chat") return "This fix ran in another chat. Open that chat from your sessions to review or undo it.";
+    vscode.postMessage({ type: "pipOpenFix", session: id, run_id: runId });
+    return true;
+  }
+  let pipFixShow = null;                  // {run, until}: the card to show once it is drawn (a chat just opened replays first)
+  function showPipFix(runId) {
+    const card = replaying ? null : pipFixCards(runId).filter((c) => c.isConnected).at(-1);
+    if (!card) {
+      if (pipFixShow?.run !== runId) pipFixShow = { run: runId, until: Date.now() + 20000 };
+      if (Date.now() < pipFixShow.until) setTimeout(() => { if (pipFixShow?.run === runId) showPipFix(runId); }, 400);
+      else pipFixShow = null;
+      return;
+    }
+    pipFixShow = null;
+    card.scrollIntoView?.({ block: "center" });
+    card.classList.remove("prompt-flash"); void card.offsetWidth; card.classList.add("prompt-flash");
+    setTimeout(() => card.classList.remove("prompt-flash"), 1600);
+  }
   // A chat a Pip's Ask DGC to fix opened: it sends once this chat is ready and its transcript is in, so a run already
   // asked about here is not asked again.
   const pipAsks = [];
@@ -9733,6 +9761,7 @@
     }
     if (msg.type === "pipsOpen") { showPips(); return; }
     if (msg.type === "pipAskDgc") { queuePipAsk(msg.report); return; }
+    if (msg.type === "pipShowFix") { if (/^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) showPipFix(String(msg.run_id)); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }
     if (msg.type === "chatdgc_list") { if (chatPlace === "home") renderChats(msg); return; }
     if (msg.type === "chatdgc_projects") {

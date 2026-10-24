@@ -499,8 +499,18 @@ something breaks the fold and says so in its own message, and a message from you
 chat the Pip reports to (the newest one it was set up in or attached to) in its tab, and DGC fixes
 the report there in the background, as the Work chat's card does (see
 [Ask DGC to fix](#ask-dgc-to-fix)); a Pip that reports to no chat starts a new one, and its report's
-card appears there. The button then reads "Asked DGC". The status under the
-Pip's name says what its last run found ("Today's audit: 5 findings") and goes to its message.
+card appears there. The message then follows the fix, as the Work chat's card does: **DGC is fixing this**
+while it works, **Fixed · 3 files** when it is done (a click opens the Work chat it ran in, at its card, where
+**Review** and **Undo** are), **The fix didn't finish** with **Ask DGC to fix again**, and **Ask DGC to fix** again
+once you undo it. It updates while you look, and says the same after a reload or a restart of the runner: DGC
+keeps each fix's record, and the message reads it. The status under the Pip's name says what its last run found
+("Today's audit: 5 findings") and goes to its message.
+
+**One chat for every Pip.** A Project Pip's chat looks and answers like a Personal Pip's: the Pip at work with its
+face, its name, what it is doing and its clock; its reply written into short bubbles as it comes; time marks between
+messages; the buttons under a message when you point at it; the same box. Its page keeps what only a Project Pip
+has: History, Settings, and its runs with Ask DGC to fix in the chat. Which code it reads (committed, or your current
+files) is under **What this Pip can do** beside the box.
 
 **Once, even with the editor closed.** The post is written when the run finishes, by the
 runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
@@ -591,7 +601,8 @@ reads "Interrupted" and changed nothing.
 
 **Out of sight.** A fix copy nobody used for 14 days is removed by itself; `dgc doctor` lists the
 copies and their size. An older DGC CLI keeps the earlier behaviour: Ask DGC to fix sends DGC one
-message naming the run, and the button reads "Asked DGC".
+message naming the run, and the button reads "Asked DGC". A CLI with Pips API 64 or older fixes in the background but
+the Pip's own chat says only "Asked DGC"; from Pips API 65 it says what the fix did.
 
 **Which runs.** A finished source review (Scout, Lens, Rook, Lock), a Pulse's checks, a live-data
 run, and a failed run of any of them. They are said when something changes: the first report, new or different

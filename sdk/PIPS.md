@@ -6,10 +6,11 @@ lets trusted host code read and manage the Pips of an existing DGC profile throu
 setups and handoffs, queue runs, chat with a Pip, and review Personal app actions. From Pips API 61 it also
 gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-apps-tools-api-61)), from API 62
 your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)), from API 63
-your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)), and from API 64 your
-app declares its Pips in code and keeps them as declared on each deploy ([Pips in code](#pips-in-code-api-64)).
+your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)), from API 64 your
+app declares its Pips in code and keeps them as declared on each deploy ([Pips in code](#pips-in-code-api-64)), and
+from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`).
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 64** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 65** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -77,6 +78,7 @@ try {
 | `get(pip_id)` | `get(pipId)` | `get_pip` |
 | `runs(pip_id)` | `runs(pipId)` | `list_pip_runs` |
 | `get_run(run_id)` | `getRun(runId)` | `get_pip_run` |
+| `run_fixes(pip_id)` | `runFixes(pipId)` | `list_pip_run_fixes` (API 65) |
 | `trigger(app, event, payload=None, *, idempotency_key)` | `trigger(app, event, payload, { idempotencyKey })` | `trigger_app_event` (API 63; no `approved`) |
 | `events(app, *, limit=None)` | `events(app, { limit })` | `list_app_events` (API 63) |
 | `ensure(template, *, approved, accept_widening=False, overwrite_user_changes=False)` | `ensure(template, { approved, acceptWidening, overwriteUserChanges })` | `ensure_pip_template` (API 64) |
@@ -130,7 +132,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 64; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 65; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -185,6 +187,7 @@ job with `create_pip` and a reviewed update.
 | 62 | Approvals in your app ([below](#approvals-in-your-app-api-62)): `list_app_approvals` (R) and `decide_app_approval` (M), local only; `pips.pending()` and `pips.decide()` in both SDKs, refused before API 62 and checked before anything is sent. `AppToolHandler`'s approval callbacks need no runtime. `get_pip_app_action` of an app action carries `app_deliveries`. |
 | 63 | Events from your app ([below](#events-from-your-app-api-63)): `trigger_app_event` (an event, sent with `pips.trigger()`: no `approved`, refused in plan mode) and `list_app_events` (R), local only; a routine's trigger `{kind: "app", app, event}` in `add_pip_routine` and `update_pip_routine`; `app_events` on `list_pip_routines`. Both SDKs refuse them before API 63 and check the app, the event's name, the idempotency key and the payload (32 KB of JSON, sent outside the 32 KiB request budget) before anything is sent. |
 | 64 | Pip templates in code ([below](#pips-in-code-api-64)): `ensure_pip_template`, `prune_pip_templates` and `decide_pip_template_change` (M) and `list_pip_templates` (R), local only; `pips.ensure()`, `pips.ensure_all()`, `pips.templates()` and `pips.decide_template_change()` in both SDKs, refused before API 64. `PipTemplate` / `definePipTemplate` check a template before anything is sent and need no runtime. |
+| 65 | `list_pip_run_fixes {pip_id}` (R, local only): what Ask DGC to fix did for each of a Pip's runs, `{pip_id, workspace_id, fixes}`, the latest fix of each run, newest first: `fix_id`, `run_id`, `state` (`queued`, `preparing`, `running` or `applying` while it works; `applied`, `partial`, `unchanged`, `not_applied`, `failed`, `stopped`, `interrupted` or `undone`), `created_at`, `started_at?`, `ended_at?`, `files?` (`[{path, kind, additions, deletions, counted}]`), `held?`, `tests?`, `summary?`, `message?`, `undo?` and `session_id?` (the Work chat it ran in). A Personal Pip has none. `pips.run_fixes()` / `pips.runFixes()`, refused before API 65. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
