@@ -76,7 +76,13 @@ def in_container() -> bool:
     a container can read but not change, is not the reason bubblewrap can't make namespaces, and no sudo fixes it."""
     if os.environ.get("container"):
         return True
-    return any(os.path.exists(marker) for marker in ("/.dockerenv", "/run/.containerenv"))
+    for marker in ("/.dockerenv", "/run/.containerenv"):      # files Docker and Podman put in each container
+        try:
+            with open(marker, "rb"):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def container_reason(what: str) -> str:

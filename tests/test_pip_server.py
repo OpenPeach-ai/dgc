@@ -407,10 +407,20 @@ class ContainerReasonTests(unittest.TestCase):
         from dgc import browser_setup
         with patch.dict(os.environ, {"container": "podman"}):
             self.assertTrue(browser_setup.in_container())
-        with patch.dict(os.environ, {}, clear=False), patch.object(browser_setup.os.path, "exists",
-                                                                    side_effect=lambda path: path == "/.dockerenv"):
+        real_open = open
+
+        def docker_open(path, *a, **kw):
+            return io.BytesIO(b"") if path == "/.dockerenv" else real_open(path, *a, **kw)
+        with patch.dict(os.environ, {}, clear=False), patch("builtins.open", side_effect=docker_open):
             os.environ.pop("container", None)
             self.assertTrue(browser_setup.in_container())
+        def no_marker(path, *a, **kw):
+            if path in ("/.dockerenv", "/run/.containerenv"):
+                raise FileNotFoundError(path)
+            return real_open(path, *a, **kw)
+        with patch.dict(os.environ, {}, clear=False), patch("builtins.open", side_effect=no_marker):
+            os.environ.pop("container", None)
+            self.assertFalse(browser_setup.in_container())
 
     def test_pip_computers_and_commands_say_why_in_a_container(self):
         from dgc import pip_computer_box, pip_execution
