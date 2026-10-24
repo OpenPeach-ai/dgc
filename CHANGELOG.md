@@ -141,6 +141,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **A long-running DGC no longer collects open files.** Each chat opened and closed in an editor window kept the
   project's notes database open until DGC exited: one more open file per chat, all day. Closing a chat lets it go.
+  The notes store also works from every thread now: a note written from another thread than the one that opened
+  it was dropped without a word.
 
 - **A Pip's "Routine added" card goes away.** A routine the Pip suggested and you added showed "Routine added" in its
   chat for a while, but an email or calendar routine, checked every few minutes, kept it there for good: each check

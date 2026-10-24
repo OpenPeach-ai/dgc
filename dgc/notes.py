@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -55,14 +56,23 @@ class NoteStore:
         self._fts = False
         self._broken = False
         self._any: bool | None = None       # cached "is there anything to read?"
+        # One connection for every thread that uses the store (a turn's worker, a tool's thread, the thread that
+        # closes a chat), so it is opened with check_same_thread=False and every use of it holds this lock. Before,
+        # a write from another thread was refused by sqlite3 and dropped without a word, and close() from the
+        # closing thread was refused too, so the file stayed open until the garbage collector found it.
+        self._lock = threading.RLock()
 
     # ---------------------------------------------------------------- storage ---
     def _connect(self) -> sqlite3.Connection | None:
+        with self._lock:
+            return self._open()
+
+    def _open(self) -> sqlite3.Connection | None:
         if self._db is not None or self._broken:
             return self._db
         try:
             path = notes_path(self.project_root)
-            db = sqlite3.connect(str(path), timeout=2.0, isolation_level=None)
+            db = sqlite3.connect(str(path), timeout=2.0, isolation_level=None, check_same_thread=False)
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=NORMAL")
@@ -99,12 +109,13 @@ class NoteStore:
         return self._db
 
     def close(self) -> None:
-        if self._db is not None:
-            try:
-                self._db.close()
-            except sqlite3.Error:
-                pass
-            self._db = None
+        with self._lock:
+            if self._db is not None:
+                try:
+                    self._db.close()
+                except sqlite3.Error:
+                    pass
+                self._db = None
 
     # ------------------------------------------------------------------ write ---
     def add(self, kind: str, text: str, *, file: str = "", tool: str = "",
@@ -116,6 +127,11 @@ class NoteStore:
         body = _clean(redact_text(text, self._secrets), MAX_TEXT)
         if not body:
             return None
+        with self._lock:
+            return self._insert(kind, body, file, tool, evidence, session, turn)
+
+    def _insert(self, kind, body, file, tool, evidence, session, turn) -> int | None:
+        from .redaction import redact_text
         db = self._connect()
         if db is None:
             return None
@@ -144,13 +160,14 @@ class NoteStore:
     # ------------------------------------------------------------------- read ---
     def _rows(self, sql: str, params: tuple) -> list[dict]:
         from .redaction import redact_text
-        db = self._connect()
-        if db is None:
-            return []
-        try:
-            rows = db.execute(sql, params).fetchall()
-        except sqlite3.Error:
-            return []
+        with self._lock:
+            db = self._connect()
+            if db is None:
+                return []
+            try:
+                rows = db.execute(sql, params).fetchall()
+            except sqlite3.Error:
+                return []
         out = []
         for row in rows:
             item = {k: row[k] for k in row.keys()}
@@ -212,14 +229,15 @@ class NoteStore:
         return self._any
 
     def count(self) -> int:
-        db = self._connect()
-        if db is None:
-            return 0
-        try:
-            (value,) = db.execute("SELECT COUNT(*) FROM notes").fetchone()
-            return int(value)
-        except sqlite3.Error:
-            return 0
+        with self._lock:
+            db = self._connect()
+            if db is None:
+                return 0
+            try:
+                (value,) = db.execute("SELECT COUNT(*) FROM notes").fetchone()
+                return int(value)
+            except sqlite3.Error:
+                return 0
 
 
 def handle_command(agent, rest: str) -> str:

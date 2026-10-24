@@ -189,7 +189,7 @@ class OpenChatTest(unittest.TestCase):
         def cycle(n):
             opened = self.open_b(f"open-{n}")
             self.host.chats[opened["chat_id"]].agent.notes()          # what a turn does: the notes store opens
-            self.host.chats[opened["chat_id"]].agent.notes().add("fact", "the build uses make", tool="bash")
+            self.host.chats[opened["chat_id"]].agent.notes().add("outcome", "the build uses make", tool="bash")
             self.host.dispatch({"type": "close_chat", "request_id": f"close-{n}", "chat_id": opened["chat_id"]})
             self.wait_for(lambda f: f["type"] == "chat_closed" and f.get("request_id") == f"close-{n}")
             deadline = time.monotonic() + 5
