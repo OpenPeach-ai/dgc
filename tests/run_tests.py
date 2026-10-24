@@ -35,6 +35,20 @@ def _raise_open_file_limit() -> None:
 
 _raise_open_file_limit()
 
+
+def _canonical_temp_dir() -> None:
+    """macOS hands out temporary folders under /var/folders, and /var is a link to /private/var. Pips' private paths
+    refuse a link anywhere in them, so on a Mac a test's temporary state failed as "unsafe" in some 290 places
+    (measured 2026-10-24) while a real ~/.dgc under /Users has no links. Tests use the link-free spelling, as HOME
+    already does below; the unittest child inherits TMPDIR."""
+    import tempfile as _tempfile
+    real = os.path.realpath(_tempfile.gettempdir())
+    os.environ["TMPDIR"] = real
+    _tempfile.tempdir = real
+
+
+_canonical_temp_dir()
+
 import os as _wait_os, sys as _wait_sys                     # noqa: E402
 _wait_sys.path.insert(0, _wait_os.path.dirname(_wait_os.path.abspath(__file__)))
 from waiting import RUNNER_SLACK                            # noqa: E402
