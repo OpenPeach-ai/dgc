@@ -474,8 +474,10 @@ class PipsSDKTests(unittest.TestCase):
     def test_sdk_allowlist_tracks_current_runtime_fields(self):
         from dgc.pips import _COMMAND_ARGS
         self.assertEqual({k: set(v) for k, v in COMMAND_FIELDS.items()}, _COMMAND_ARGS)
+        from dgc_sdk.pips import EVENT_COMMANDS     # API 63: your app's events, neither a read nor an approved mutation
         self.assertFalse(READ_COMMANDS & MUTATION_COMMANDS)
-        self.assertEqual(READ_COMMANDS | MUTATION_COMMANDS, set(COMMAND_FIELDS))
+        self.assertFalse(EVENT_COMMANDS & (READ_COMMANDS | MUTATION_COMMANDS))
+        self.assertEqual(READ_COMMANDS | MUTATION_COMMANDS | EVENT_COMMANDS, set(COMMAND_FIELDS))
 
     def test_async_read_mutate_and_errors_match_sync(self):
         async def exercise():

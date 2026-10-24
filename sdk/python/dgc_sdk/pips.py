@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_app_events",
     "list_app_approvals",
     "list_apps",
     "list_pip_borrows",
@@ -322,7 +323,21 @@ API62_MUTATIONS = frozenset({'decide_app_approval'})
 READ_COMMANDS |= API62_READS
 MUTATION_COMMANDS |= API62_MUTATIONS
 APP_ACTION_ID = re.compile(r"appaction_[a-f0-9]{32}\Z")
+# API 63: events from your app (pips.trigger). trigger_app_event {app, event, payload, idempotency_key} runs, once per
+# idempotency_key, every routine a person added for that event (a Personal Pip's routine {kind: "app", app, event}). It
+# needs no approved=True: it runs only what a person set up, and grants no tools or permissions. list_app_events {app,
+# limit?} reads what an app sent lately and the event names it used; list_pip_routines' app_events lists the routines
+# on app events too. Local only.
+API63_READS = frozenset({'list_app_events'})
+API63_EVENTS = frozenset({'trigger_app_event'})
+API63_FIELDS = {'list_pip_routines': frozenset({'app_events'})}
+READ_COMMANDS |= API63_READS
+EVENT_COMMANDS = API63_EVENTS
+EVENT_NAME = re.compile(r"[a-z0-9_.-]{1,64}\Z")
+MAX_EVENT_PAYLOAD = 32768
 COMMAND_FIELDS = {
+    'trigger_app_event': frozenset({'app', 'event', 'payload', 'idempotency_key'}),
+    'list_app_events': frozenset({'app', 'limit'}),
     'list_app_approvals': frozenset({'app'}),
     'decide_app_approval': frozenset({'action_id', 'decision', 'expected_digest'}),
     'register_app': frozenset({'name', 'url', 'tools'}),
@@ -374,7 +389,7 @@ COMMAND_FIELDS = {
     'update_pip_computers': frozenset(),
     'reset_pip_computer': frozenset({'pip_id'}),
     'list_pip_apps': frozenset(),
-    'list_pip_routines': frozenset({'pip_id'}),
+    'list_pip_routines': frozenset({'pip_id', 'app_events'}),
     'add_pip_routine': frozenset({'pip_id', 'title', 'prompt', 'trigger'}),
     'update_pip_routine': frozenset({'pip_id', 'routine_id', 'changes'}),
     'delete_pip_routine': frozenset({'pip_id', 'routine_id'}),
@@ -575,6 +590,41 @@ def _detach(params: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(params, ensure_ascii=False, allow_nan=False))
 
 
+def _event_payload(value: Any) -> Any:
+    """What an app sends with an event: plain JSON of at most 32 KB. It travels outside the 32 KiB request budget,
+    bounded on its own (the runtime checks it again)."""
+    nodes = 0
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        nodes += 1
+        if nodes > 4096 or depth > 16:
+            raise DGCConfigError("payload nests at most 16 levels and holds at most 4,096 values")
+        if type(item) is dict:
+            if any(type(key) is not str for key in item):
+                raise DGCConfigError("payload is plain JSON: its keys are strings")
+            pending.extend((v, depth + 1) for v in item.values())
+        elif type(item) is list:
+            pending.extend((v, depth + 1) for v in item)
+        elif type(item) is float:
+            if not math.isfinite(item):
+                raise DGCConfigError("payload is plain JSON: no NaN or infinity")
+        elif type(item) is int:
+            if not -(2**53 - 1) <= item <= 2**53 - 1:
+                raise DGCConfigError("payload is plain JSON: whole numbers within 2^53")
+        elif not (item is None or type(item) is bool or isinstance(item, str)):
+            raise DGCConfigError("payload is plain JSON: objects, lists, strings, numbers, true, false and null")
+    try:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise DGCConfigError("payload is plain JSON") from exc
+    size = len(text.encode("utf-8"))
+    if size > MAX_EVENT_PAYLOAD:
+        raise DGCConfigError(f"payload is at most 32 KB of JSON; this one is {math.ceil(size / 1024)} KB. Send ids and a "
+                             "few fields: the Pip reads the rest through your app's tools")
+    return json.loads(text)
+
+
 def _spool_name(value: Any) -> bool:
     return (type(value) is str and 1 <= len(value) <= 255 and value not in ('.', '..')
             and not any(c in value for c in '/\\') and value.isprintable())
@@ -669,9 +719,10 @@ class Pips:
         return self._call(command, params, mutation=True, approved=approved)
 
     def _call(self, command: str, params: Mapping[str, Any], *, mutation: bool,
-              approved: bool) -> dict[str, Any]:
+              approved: bool, event: bool = False) -> dict[str, Any]:
         session = self._session
-        if not isinstance(command, str) or command not in (MUTATION_COMMANDS if mutation else READ_COMMANDS):
+        allowed = EVENT_COMMANDS if event else (MUTATION_COMMANDS if mutation else READ_COMMANDS)
+        if not isinstance(command, str) or command not in allowed:
             raise DGCConfigError("Unknown or incorrectly classified Pip command")
         if mutation and approved is not True:
             raise DGCConfigError("Pip mutations require explicit approved=True for this request")
@@ -681,10 +732,14 @@ class Pips:
             raise DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session")
         if mutation and session._permission_mode == "plan":
             raise DGCUnsupportedError("Pip mutations are unavailable in plan mode")
+        if event and session._permission_mode == "plan":
+            raise DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode")
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API62_READS | API62_MUTATIONS:
+        if command in API63_READS | API63_EVENTS:
+            minimum = 63
+        elif command in API62_READS | API62_MUTATIONS:
             minimum = 62
         elif command in API61_READS | API61_MUTATIONS:
             minimum = 61
@@ -789,6 +844,11 @@ class Pips:
                     or not file_data.isascii() or len(file_data) > MAX_IMAGE_URI_CHARS):
                 raise DGCConfigError('data must be one data URI of 2 MB or less')
             params = {key: value for key, value in params.items() if key != 'data'}
+        payload = _UNSET = object()
+        if command == 'trigger_app_event' and isinstance(params, Mapping) and 'payload' in params:
+            # What your app sent travels outside the 32 KiB budget, like a message's images: 32 KB of JSON at most.
+            payload = _event_payload(params['payload'])
+            params = {key: value for key, value in params.items() if key != 'payload'}
         if command in ('register_app', 'update_app') and isinstance(params, Mapping) and 'tools' in params:
             # define_pip_tool values become their wire shape (checked) before the JSON-only bounds below.
             from .pips_app import wire_tools
@@ -829,6 +889,26 @@ class Pips:
         if command == 'list_app_approvals' and 'app' in values and not (isinstance(values['app'], str)
                                                                        and APP_NAME.fullmatch(values['app'])):
             raise DGCConfigError("app is the app's name, such as shop")
+        if command in ('trigger_app_event', 'list_app_events') and not (isinstance(values.get('app'), str)
+                                                                         and APP_NAME.fullmatch(values['app'])):
+            raise DGCConfigError("app is the app's name as you registered it, such as shop")
+        if command == 'trigger_app_event':
+            if not (isinstance(values.get('event'), str) and EVENT_NAME.fullmatch(values['event'])):
+                raise DGCConfigError("event is 1 to 64 lowercase letters, digits, dots, hyphens or underscores, such as "
+                                     "order.created")
+            key = values.get('idempotency_key')
+            if (not isinstance(key, str) or not key.strip() or len(key) > 200
+                    or any(ord(c) < 32 or ord(c) == 127 for c in key)):
+                raise DGCConfigError("idempotency_key is 1 to 200 characters on one line, such as the order's id: DGC "
+                                     "runs an event once per key")
+        if command == 'list_app_events' and 'limit' in values and not (type(values['limit']) is int
+                                                                      and 1 <= values['limit'] <= 50):
+            raise DGCConfigError("limit is 1 to 50")
+        if API63_FIELDS.get(command, frozenset()) & set(values):
+            if version < 63:
+                raise DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer")
+            if type(values['app_events']) is not bool:
+                raise DGCConfigError("app_events is True or False")
         if command == 'decide_app_approval':
             if not (isinstance(values.get('action_id'), str) and APP_ACTION_ID.fullmatch(values['action_id'])):
                 raise DGCConfigError("action_id is the approval's, appaction_ and 32 hex digits")
@@ -920,6 +1000,8 @@ class Pips:
         request = {"type": command, "request_id": rid, **values}
         if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_REQUEST_BYTES:
             raise DGCConfigError("Pip request exceeds 32 KiB")
+        if payload is not _UNSET:
+            request["payload"] = payload
         if images is not None:
             request["images"] = images
         if files is not None:
@@ -975,6 +1057,25 @@ class Pips:
         in DGC, answers ``{"approval", "decided": False}`` with what happened, and nothing runs again."""
         return self.mutate("decide_app_approval", {"action_id": action_id, "decision": decision,
                                                    "expected_digest": expected_digest}, approved=approved)
+
+    def trigger(self, app: str, event: str, payload: Any = None, *, idempotency_key: str) -> dict[str, Any]:
+        """Tell DGC your app's event happened (Pips API 63): every Personal Pip routine waiting on (``app``, ``event``)
+        gets a run, with ``payload`` (JSON, at most 32 KB) as untrusted data in its turn.
+
+        It needs no ``approved=True``: it runs only routines a person added, and grants no tools or permissions. DGC
+        runs an event once per ``idempotency_key`` (use the order's id, say): the same key again answers
+        ``{"repeat": True, ...}`` and queues nothing. The answer lists, Pip by Pip, ``queued``, ``busy`` (kept for its
+        next check) or ``paused`` (not run); ``no_routine`` when none waits; ``notice`` says it in words. At most 60
+        events a minute per app: beyond that it raises ``DGCCommandRejectedError`` (reason ``rate_limited``)."""
+        params: dict[str, Any] = {"app": app, "event": event, "idempotency_key": idempotency_key}
+        if payload is not None:
+            params["payload"] = payload
+        return self._call("trigger_app_event", params, mutation=False, approved=False, event=True)
+
+    def events(self, app: str, *, limit: int | None = None) -> dict[str, Any]:
+        """What your app sent lately (Pips API 63), newest first, with what each queued, and the event names it used:
+        ``{"app", "events": [...], "names": [...]}``."""
+        return self.read("list_app_events", {"app": app} if limit is None else {"app": app, "limit": limit})
 
     def get(self, pip_id: str) -> dict[str, Any]:
         return self.read("get_pip", {"pip_id": pip_id})
@@ -1056,6 +1157,12 @@ class AsyncPips:
                      approved: bool = False) -> dict[str, Any]:
         return await asyncio.to_thread(self._sync.decide, action_id, decision, expected_digest=expected_digest,
                                        approved=approved)
+
+    async def trigger(self, app: str, event: str, payload: Any = None, *, idempotency_key: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.trigger, app, event, payload, idempotency_key=idempotency_key)
+
+    async def events(self, app: str, *, limit: int | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.events, app, limit=limit)
 
     async def get(self, pip_id: str) -> dict[str, Any]:
         return await self.read("get_pip", {"pip_id": pip_id})

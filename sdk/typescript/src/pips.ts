@@ -17,6 +17,7 @@ export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
+  list_app_events: { app: string; limit?: number };
   list_app_approvals: { app?: string };
   list_apps: Record<string, never>;
   list_pip_borrows: { pip_id: string };
@@ -40,7 +41,7 @@ export type PipReadParams = {
   list_pip_run_posts: { pip_id: string; before_id?: string; limit?: number };
   get_pips_limit: Record<string, never>;
   list_pip_reply_stats: { pip_id: string; run_ids: string[] };
-  list_pip_routines: { pip_id: string };
+  list_pip_routines: { pip_id: string; app_events?: boolean };
   list_pip_app_links: { pip_id: string };
   list_pip_computer_files: { pip_id: string; path?: string };
   read_pip_computer_file: { pip_id: string; path: string };
@@ -219,6 +220,8 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  trigger_app_event: ["app", "event", "payload", "idempotency_key"],
+  list_app_events: ["app", "limit"],
   list_app_approvals: ["app"],
   decide_app_approval: ["action_id", "decision", "expected_digest"],
   register_app: ["name", "url", "tools"],
@@ -270,7 +273,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
   set_pips_limit: ["max_pips"],
-  list_pip_routines: ["pip_id"],
+  list_pip_routines: ["pip_id", "app_events"],
   add_pip_routine: ["pip_id", "title", "prompt", "trigger"],
   update_pip_routine: ["pip_id", "routine_id", "changes"],
   delete_pip_routine: ["pip_id", "routine_id"],
@@ -747,6 +750,47 @@ const API62_READS = new Set(["list_app_approvals"]);
 const API62_MUTATIONS = new Set(["decide_app_approval"]);
 for (const command of API62_READS) READS.add(command);
 for (const command of API62_MUTATIONS) MUTATIONS.add(command);
+// API 63: events from your app (pips.trigger). trigger_app_event {app, event, payload, idempotency_key} runs, once per
+// idempotency_key, every routine a person added for that event (a Personal Pip's routine {kind: "app", app, event}). It
+// needs no approved: true: it runs only what a person set up, and grants no tools or permissions. list_app_events {app,
+// limit?} reads what an app sent lately and the event names it used; list_pip_routines' app_events lists the routines
+// on app events too. Local only.
+const API63_READS = new Set(["list_app_events"]);
+const API63_EVENTS = new Set(["trigger_app_event"]);
+const API63_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pip_routines: ["app_events"] };
+for (const command of API63_READS) READS.add(command);
+const MAX_EVENT_PAYLOAD = 32768;
+/** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
+ *  it again). */
+function eventPayload(value: unknown): PipJson {
+  let nodes = 0;
+  const pending: [unknown, number][] = [[value, 0]];
+  while (pending.length) {
+    const [item, depth] = pending.pop()!;
+    nodes += 1;
+    if (nodes > 4096 || depth > 16) throw new DGCConfigError("payload nests at most 16 levels and holds at most 4,096 values");
+    if (Array.isArray(item)) { for (const v of item) pending.push([v, depth + 1]); continue; }
+    if (item && typeof item === "object") {
+      if (Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) {
+        throw new DGCConfigError("payload is plain JSON: objects, arrays, strings, numbers, true, false and null");
+      }
+      for (const v of Object.values(item)) pending.push([v, depth + 1]);
+      continue;
+    }
+    if (typeof item === "number" && (!Number.isFinite(item) || (Number.isInteger(item) && !Number.isSafeInteger(item)))) {
+      throw new DGCConfigError("payload is plain JSON: finite numbers, whole ones within 2^53");
+    }
+    if (!(item === null || ["string", "number", "boolean"].includes(typeof item))) {
+      throw new DGCConfigError("payload is plain JSON: objects, arrays, strings, numbers, true, false and null");
+    }
+  }
+  const text = JSON.stringify(value);
+  const size = Buffer.byteLength(text, "utf8");
+  if (size > MAX_EVENT_PAYLOAD) {
+    throw new DGCConfigError(`payload is at most 32 KB of JSON; this one is ${Math.ceil(size / 1024)} KB. Send ids and a few fields: the Pip reads the rest through your app's tools`);
+  }
+  return JSON.parse(text) as PipJson;
+}
 function appUrl(url: unknown): boolean {
   if (typeof url !== "string" || !url || url.length > 2048 || /[\u0000-\u0020\u007f]/.test(url)) return false;
   let parts: URL;
@@ -856,13 +900,14 @@ export class Pips {
     return this.call(command, params, true, options.approved === true);
   }
 
-  private async call(command: string, params: unknown, mutation: boolean, approved: boolean): Promise<PipResult> {
-    if (!(mutation ? MUTATIONS : READS).has(command)) throw new DGCConfigError("Unknown or incorrectly classified Pip command");
+  private async call(command: string, params: unknown, mutation: boolean, approved: boolean, appEvent = false): Promise<PipResult> {
+    if (!(appEvent ? API63_EVENTS : mutation ? MUTATIONS : READS).has(command)) throw new DGCConfigError("Unknown or incorrectly classified Pip command");
     if (mutation && approved !== true) throw new DGCConfigError("Pip mutations require explicit approved: true for this request");
     if (this.isolated) throw new DGCUnsupportedError("Pips controls use an existing local profile; create an explicitly authorized controller with inheritUserState: true");
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
-    const minimum = API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
+    const minimum = API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -913,6 +958,14 @@ export class Pips {
       const { data: _sent, ...rest } = params as Record<string, unknown>;
       params = rest;
     }
+    let payload: PipJson | undefined;
+    let hasPayload = false;
+    if (command === "trigger_app_event" && isRecordValue(params) && Object.hasOwn(params, "payload")) {
+      // What your app sent travels outside the 32 KiB budget, like a message's images: 32 KB of JSON at most.
+      const { payload: given, ...rest } = params as Record<string, unknown>;
+      payload = eventPayload(given); hasPayload = true;
+      params = rest;
+    }
     if ((command === "register_app" || command === "update_app") && isRecordValue(params) && Object.hasOwn(params, "tools")) {
       // definePipTool values become their wire shape (checked) before the JSON-only bounds below.
       params = { ...params, tools: pipToolsWire((params as Record<string, unknown>).tools) };
@@ -929,6 +982,28 @@ export class Pips {
     }
     if (command === "list_app_approvals" && Object.hasOwn(values, "app") && !(typeof values.app === "string" && /^[a-z0-9-]{1,40}$/.test(values.app))) {
       throw new DGCConfigError("app is the app's name, such as shop");
+    }
+    if ((command === "trigger_app_event" || command === "list_app_events") && !(typeof values.app === "string" && /^[a-z0-9-]{1,40}$/.test(values.app))) {
+      throw new DGCConfigError("app is the app's name as you registered it, such as shop");
+    }
+    if (command === "trigger_app_event") {
+      if (!(typeof values.event === "string" && /^[a-z0-9_.-]{1,64}$/.test(values.event))) {
+        throw new DGCConfigError("event is 1 to 64 lowercase letters, digits, dots, hyphens or underscores, such as order.created");
+      }
+      const key = values.idempotency_key;
+      if (typeof key !== "string" || !key.trim() || key.length > 200 || /[\u0000-\u001f\u007f]/.test(key)) {
+        throw new DGCConfigError("idempotency_key is 1 to 200 characters on one line, such as the order's id: DGC runs an event once per key");
+      }
+    }
+    if (command === "list_app_events" && Object.hasOwn(values, "limit")
+      && !(typeof values.limit === "number" && Number.isInteger(values.limit) && values.limit >= 1 && values.limit <= 50)) {
+      throw new DGCConfigError("limit is 1 to 50");
+    }
+    if ((API63_FIELDS[command] || []).some((key) => Object.hasOwn(values, key))) {
+      if ((this.caps.pips_api_version as number) < 63) {
+        throw new DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer");
+      }
+      if (typeof values.app_events !== "boolean") throw new DGCConfigError("app_events is true or false");
     }
     if (command === "decide_app_approval") {
       if (!(typeof values.action_id === "string" && /^appaction_[a-f0-9]{32}$/.test(values.action_id))) {
@@ -1079,7 +1154,7 @@ export class Pips {
     const requestId = `sdk-pips-${randomUUID()}`;
     const request = { type: command, request_id: requestId, ...values };
     if (Buffer.byteLength(JSON.stringify(request), "utf8") > MAX_BYTES) throw new DGCConfigError("Pip request exceeds 32 KiB");
-    const sent = { ...request, ...(images === undefined ? {} : { images }), ...(files === undefined ? {} : { files }), ...(fileData === undefined ? {} : { data: fileData }) };
+    const sent = { ...request, ...(images === undefined ? {} : { images }), ...(files === undefined ? {} : { files }), ...(fileData === undefined ? {} : { data: fileData }), ...(hasPayload ? { payload } : {}) };
     const event = await this.send({ type: "pips_control", request: sent }, "pips_result", requestId);
     if (event.request_id !== requestId || event.command !== command || typeof event.ok !== "boolean") throw new DGCProtocolError("Mismatched or malformed Pip response");
     if (event.ok) {
@@ -1117,6 +1192,22 @@ export class Pips {
   decide(actionId: string, decision: "accept" | "reject", expectedDigest: string,
     approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
     return this.mutate("decide_app_approval", { action_id: actionId, decision, expected_digest: expectedDigest }, approval);
+  }
+  /** Tell DGC your app's event happened (Pips API 63): every Personal Pip routine waiting on (`app`, `event`) gets a
+   *  run, with `payload` (JSON, at most 32 KB) as untrusted data in its turn. It needs no `approved`: it runs only
+   *  routines a person added, and grants no tools or permissions. DGC runs an event once per `idempotencyKey` (use the
+   *  order's id, say): the same key again resolves to `{repeat: true, ...}` and queues nothing. The answer lists, Pip
+   *  by Pip, `queued`, `busy` (kept for its next check) or `paused` (not run); `no_routine` when none waits; `notice`
+   *  says it in words. At most 60 events a minute per app: beyond that it rejects (reason `rate_limited`). */
+  trigger(app: string, event: string, payload: PipJson | undefined, options: { idempotencyKey: string }): Promise<PipResult> {
+    const key = options && typeof options === "object" ? options.idempotencyKey : undefined;
+    return this.call("trigger_app_event", { app, event, ...(key === undefined ? {} : { idempotency_key: key }),
+      ...(payload === undefined ? {} : { payload }) }, false, false, true);
+  }
+  /** What your app sent lately (Pips API 63), newest first, with what each queued, and the event names it used:
+   *  `{app, events: [...], names: [...]}`. */
+  events(app: string, options: { limit?: number } = {}): Promise<PipResult> {
+    return this.read("list_app_events", { app, ...(options.limit !== undefined ? { limit: options.limit } : {}) });
   }
   get(pipId: string): Promise<PipResult> { return this.read("get_pip", { pip_id: pipId }); }
   runs(pipId: string): Promise<PipResult> { return this.read("list_pip_runs", { pip_id: pipId }); }
