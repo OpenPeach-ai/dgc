@@ -585,6 +585,12 @@ def capability():
                                 "Patch and Pulse commands. Switch it to WSL 2 in Windows: "
                                 f"`wsl --set-version {wsl.distro() or '<distro>'} 2`.")
             return result
+        from .browser_setup import container_reason, in_container
+        if backend == "bwrap" and in_container():
+            result["reason"] = (container_reason("Pulse and Patch commands") + " DGC's local page checks "
+                                "(dgc-http-check) need no sandbox and run anyway.")
+            result["local_http_checks"] = True
+            return result
         fix = machine_fix() if backend == "bwrap" else None
         result["reason"] = (
             "Patch and Pulse on macOS require sandbox-exec Seatbelt confinement, the selected Xcode or "
@@ -618,6 +624,9 @@ def machine_fix():
     {reason, steps, shell}, else None. Never runs anything."""
     if not sys.platform.startswith("linux"):
         return None
+    from .browser_setup import in_container
+    if in_container():
+        return None                  # no sudo inside a container fixes it: the container's own options do
     if not Path("/usr/bin/bwrap").exists():
         if shutil.which("apt") is None:
             return None

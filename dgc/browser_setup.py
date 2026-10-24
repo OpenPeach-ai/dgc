@@ -67,6 +67,26 @@ def supported() -> tuple[bool, str]:
     return False, "DGC fetches Chrome on Linux and macOS for now."
 
 
+CONTAINER_OPTIONS = ("--security-opt seccomp=unconfined --security-opt apparmor=unconfined "
+                     "--security-opt systempaths=unconfined")
+
+
+def in_container() -> bool:
+    """Whether DGC runs inside a container (Docker, Podman, systemd-nspawn): there the host's AppArmor switch, which
+    a container can read but not change, is not the reason bubblewrap can't make namespaces, and no sudo fixes it."""
+    if os.environ.get("container"):
+        return True
+    return any(os.path.exists(marker) for marker in ("/.dockerenv", "/run/.containerenv"))
+
+
+def container_reason(what: str) -> str:
+    """Why bubblewrap can't box ``what`` in a container, and the two ways out."""
+    return (f"This runs in a container that doesn't let bubblewrap make the namespaces it needs, so {what} can't run "
+            f"here. Docker allows them only for a container started with {CONTAINER_OPTIONS}, which loosens the "
+            "container's own confinement; or run DGC's Pips runner on the host instead (dgc pips service install "
+            "--server).")
+
+
 def userns_restricted() -> bool:
     """Ubuntu 23.10+ (AppArmor) or an older Debian switch keeps user namespaces from unconfined programs."""
     for path, refused in (("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "1"),

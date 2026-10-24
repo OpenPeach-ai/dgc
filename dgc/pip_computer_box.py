@@ -527,7 +527,9 @@ def box_runs() -> tuple[bool, str]:
 
 def box_refused_reason(said: str) -> str:
     """What to tell the user when bubblewrap is here but can't build a box."""
-    from .browser_setup import userns_restricted
+    from .browser_setup import container_reason, in_container, userns_restricted
+    if in_container():
+        return container_reason("a Pip's computer")
     if userns_restricted():
         return ("Ubuntu lets only programs with an AppArmor profile make the namespaces a Pip's computer needs, and "
                 "bubblewrap has none here. Turn on Ubuntu's own profile for it, once, in a terminal: "

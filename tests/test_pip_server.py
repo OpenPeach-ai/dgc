@@ -397,6 +397,42 @@ class GuardrailTests(unittest.TestCase):
                                                                                  "base_url": "http://ollama:11434/v1"}))
 
 
+class ContainerReasonTests(unittest.TestCase):
+    """In a container, bubblewrap's missing namespaces are the container's doing: no Ubuntu sudo fix is offered, and the
+    reason names the Docker options and the host's service instead (what pip_computers logs at start)."""
+
+    def test_a_container_is_known_by_its_marker_or_variable(self):
+        from dgc import browser_setup
+        with patch.dict(os.environ, {"container": "podman"}):
+            self.assertTrue(browser_setup.in_container())
+        with patch.dict(os.environ, {}, clear=False), patch.object(browser_setup.os.path, "exists",
+                                                                    side_effect=lambda path: path == "/.dockerenv"):
+            os.environ.pop("container", None)
+            self.assertTrue(browser_setup.in_container())
+
+    def test_pip_computers_and_commands_say_why_in_a_container(self):
+        from dgc import pip_computer_box, pip_execution
+        with patch("dgc.browser_setup.in_container", return_value=True), \
+                patch("dgc.browser_setup.userns_restricted", return_value=True):
+            said = pip_computer_box.box_refused_reason("")
+            self.assertIn("This runs in a container that doesn't let bubblewrap make the namespaces it needs, so a "
+                          "Pip's computer can't run here.", said)
+            self.assertIn("--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt "
+                          "systempaths=unconfined", said)
+            self.assertIn("dgc pips service install --server", said)
+            self.assertNotIn("sudo", said)
+            self.assertIsNone(pip_execution.machine_fix(), "no sudo inside a container fixes it")
+            if pip_execution._backend() == "bwrap":
+                pip_execution._PROBE_CACHE.clear()
+                self.addCleanup(pip_execution._PROBE_CACHE.clear)
+                with patch.object(pip_execution, "_probe_bwrap", return_value=False):
+                    found = pip_execution.capability()
+                self.assertFalse(found["available"])
+                self.assertIn("so Pulse and Patch commands can't run here", found["reason"])
+                self.assertNotIn("fix", found)
+                self.assertTrue(found["local_http_checks"])
+
+
 SERVER_CHAT_WORKER = r'''
 from unittest.mock import patch
 from dgc.llm import LLMClient, ChatResult
