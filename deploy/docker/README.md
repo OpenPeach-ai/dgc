@@ -49,7 +49,7 @@ EOF'
 ## Run the runner
 
 ```sh
-docker run -d --name pips --restart on-failure -v dgc-data:/data dgc-pips
+docker run -d --name pips --restart on-failure --stop-timeout 90 -v dgc-data:/data dgc-pips
 docker inspect -f '{{.State.Health.Status}}' pips      # starting, then healthy
 docker logs -f pips
 ```
@@ -90,13 +90,14 @@ CMD ["with-pips", "gunicorn", "--bind", "0.0.0.0:8000", "--chdir", "/app", "shop
 ```
 
 ```sh
-docker run -d --name shop --restart unless-stopped -v dgc-data:/data my-shop-image
+docker run -d --name shop --restart unless-stopped --stop-timeout 90 -v dgc-data:/data my-shop-image
 ```
 
 Your app is the main process. When it exits, `with-pips` stops the runner and exits with your app's status, so the
 restart policy brings both back. When the runner stops, whether it failed, Pips were turned off, or someone used the
 emergency stop, `with-pips` starts it again 30 seconds later, and `dgc pips health` says why it isn't running meanwhile.
-Docker's stop reaches both, and the runner gets 90 seconds to finish.
+Docker's stop reaches both; `with-pips` gives the runner up to 90 seconds to finish, so start the container with
+`--stop-timeout 90` (Docker's own default is 10 seconds).
 
 In the app, the SDK finds DGC by itself, and its session is this home's:
 
@@ -115,7 +116,7 @@ Run the runner as above, and your app from the same image in its own container, 
 
 ```sh
 docker network create pips-net
-docker run -d --name pips --network pips-net --restart on-failure -v dgc-data:/data dgc-pips
+docker run -d --name pips --network pips-net --restart on-failure --stop-timeout 90 -v dgc-data:/data dgc-pips
 docker run -d --name shop --network pips-net -v dgc-data:/data my-shop-image gunicorn --bind 0.0.0.0:8000 shop:app
 ```
 
@@ -177,7 +178,8 @@ loosens the container's own confinement, so weigh it, or run the runner on the h
 
 ## Stopping, and the emergency stop
 
-`docker stop` stops the runner cleanly: its runs are cancelled, queued work stays queued, and nothing is replayed.
+`docker stop` stops the runner cleanly: its runs are cancelled, queued work stays queued, and nothing is replayed
+(`--stop-timeout 90` above gives it the time).
 
 `dgc pips stop --yes` is the emergency stop: every Pip is paused, their work is cancelled, and the runner exits and
 won't start again until the stop is cleared. With the runner on its own (`docker exec pips dgc pips stop --yes`),
@@ -189,5 +191,6 @@ docker start pips
 docker run --rm -v dgc-data:/data dgc-pips dgc pips resume-job PIP_ID     # each Pip stays paused until you resume it
 ```
 
-Under `with-pips` the container keeps running with your app, health says `stopped`, and after
-`docker exec shop dgc pips resume` the runner is back within 30 seconds.
+Under `with-pips` the container keeps running with your app and health says `stopped`. After
+`docker exec shop dgc pips resume` (and `dgc pips resume-job PIP_ID` for each Pip), the runner is back within 30
+seconds.
