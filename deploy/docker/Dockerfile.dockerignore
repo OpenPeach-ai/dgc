@@ -1,0 +1,9 @@
+# The image needs these three things from the repository, and nothing else.
+*
+!install.sh
+!sdk/python
+!deploy/docker/with-pips
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+sdk/python/build

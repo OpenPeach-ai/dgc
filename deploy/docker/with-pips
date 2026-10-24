@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""with-pips: run your app with DGC's Pips runner beside it, in one container.
+
+    CMD ["with-pips", "gunicorn", "--bind", "0.0.0.0:8000", "shop:app"]
+
+Your app is the container's main process: when it exits, the runner is stopped and the container exits with your
+app's status, so Docker's restart policy restarts both. The runner (`dgc pips serve --server`) is started beside it,
+and started again 30 seconds after it stops, whatever stopped it: a failure, Pips turned off, or the emergency stop
+(`dgc pips resume` then brings it back by itself). `dgc pips health` says why it isn't running meanwhile, and the
+container's health check reports it. Docker's stop (SIGTERM) reaches both; the runner gets 90 seconds to finish.
+
+Standard library only. Each line it prints starts with "with-pips:".
+"""
+import signal
+import subprocess
+import sys
+import time
+
+RUNNER = ["dgc", "pips", "serve", "--server"]
+RESTART_SECONDS = 30
+STOP_SECONDS = 90
+
+
+def say(text):
+    print("with-pips: " + text, flush=True)
+
+
+def status(code):
+    """A child's exit as a shell would report it: 128 + the signal that ended it."""
+    return 128 - code if code is not None and code < 0 else (code or 0)
+
+
+def stop(process, label):
+    if process is None or process.poll() is not None:
+        return
+    process.send_signal(signal.SIGTERM)
+    try:
+        process.wait(timeout=STOP_SECONDS)
+    except subprocess.TimeoutExpired:
+        say(f"{label} did not stop within {STOP_SECONDS} s; ending it")
+        process.kill()
+        process.wait()
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    stopping = []
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda number, _frame: stopping.append(number))
+    try:
+        app = subprocess.Popen(argv)
+    except OSError as error:
+        say(f"your app could not start: {error}")
+        return 127
+    runner, again = subprocess.Popen(RUNNER), None
+    while not stopping:
+        if app.poll() is not None:
+            say(f"your app exited with status {status(app.returncode)}; stopping the Pips runner")
+            break
+        if runner is not None and runner.poll() is not None:
+            say(f"the Pips runner stopped (status {status(runner.returncode)}); starting it again in "
+                f"{RESTART_SECONDS} s. dgc pips health says why it isn't running.")
+            runner, again = None, time.monotonic() + RESTART_SECONDS
+        if runner is None and time.monotonic() >= again:
+            runner = subprocess.Popen(RUNNER)
+        time.sleep(0.5)
+    if stopping:
+        say("stopping your app and the Pips runner")
+    for process in (app, runner):
+        if process is not None and process.poll() is None:
+            process.send_signal(signal.SIGTERM)
+    stop(app, "your app")
+    stop(runner, "the Pips runner")
+    return status(app.returncode)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
