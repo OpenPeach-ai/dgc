@@ -19,7 +19,7 @@ export { definePipTemplate, pipTemplateWire, type PipTemplate, type PipTemplateI
   type PipTemplateWhen, type PipTemplateWire } from "./pipsTemplates.ts";
 export { AppToolHandler, PipToolError, definePipTool, pipToolsWire, sign as signPipCall, type AppToolFunction, type AppToolHandlerOptions,
   type AppToolResponse, type PipApprovalRequested, type PipApprovalResolved, type PipCallContext, type PipTool, type PipToolKind,
-  type PipToolWire } from "./pipsApp.ts";
+  type PipToolWire, type HeaderReader, type WebRequestLike, type WebResponse } from "./pipsApp.ts";
 export { assertSupported, extractJson, validate } from "./schema.ts";
 export {
   DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError, DGCTimeoutError,

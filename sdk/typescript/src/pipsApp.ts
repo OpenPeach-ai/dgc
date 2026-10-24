@@ -201,7 +201,14 @@ export type AppToolHandlerOptions = {
   /** A change was accepted, rejected or expired (Pips API 62). Without it the handler answers 204. */
   onApprovalResolved?: (event: PipApprovalResolved) => unknown | Promise<unknown>;
 };
-type HeaderBag = Headers | Record<string, string | string[] | undefined>;
+/** What the handler reads of a web `Headers`. Declared here so the package needs neither the DOM lib nor Node's types. */
+export interface HeaderReader { get(name: string): string | null }
+/** What `fetch()` reads of a web `Request`: a real one from Node 18+, Bun, Deno or a worker fits. */
+export interface WebRequestLike { readonly method: string; readonly headers: HeaderReader; arrayBuffer(): Promise<ArrayBuffer> }
+/** A web `Response` where your project has one (the DOM lib, or Node's types); otherwise its shape. */
+export type WebResponse = typeof globalThis extends { Response: { prototype: infer R } } ? R
+  : { readonly status: number; readonly headers: HeaderReader; text(): Promise<string> };
+type HeaderBag = HeaderReader | Record<string, string | string[] | undefined>;
 const HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 function answer(status: number, value: unknown): AppToolResponse {
@@ -226,7 +233,7 @@ function approvalEvent(call: Record<string, unknown>): PipApprovalRequested | Pi
     decision: call.decision as "accepted" | "rejected" | "expired", by: call.by, at: call.at });
 }
 function header(headers: HeaderBag, name: string): string {
-  if (typeof (headers as Headers).get === "function") return (headers as Headers).get(name) ?? "";
+  if (typeof (headers as HeaderReader).get === "function") return (headers as HeaderReader).get(name) ?? "";
   for (const [key, value] of Object.entries(headers as Record<string, string | string[] | undefined>)) {
     if (key.toLowerCase() === name) return Array.isArray(value) ? value.join(",") : String(value ?? "");
   }
@@ -375,13 +382,16 @@ export class AppToolHandler {
   }
 
   /** A web `Request` answered with a `Response` (Node 18+, Bun, Deno, workers). */
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: WebRequestLike): Promise<WebResponse> {
+    // The runtime's own Response (Node 18+, Bun, Deno, workers), found at run time so the types need no DOM lib.
+    const WebResponseClass = (globalThis as unknown as {
+      Response: new (body: string | null, init: { status: number; headers: Record<string, string> }) => WebResponse }).Response;
     if (request.method !== "POST") {
       const out = refuse(405, "method", "DGC calls with POST.");
-      return new Response(out.body, { status: out.status, headers: out.headers });
+      return new WebResponseClass(out.body, { status: out.status, headers: out.headers });
     }
     const body = new Uint8Array(await request.arrayBuffer());
     const out = await this.handle({ headers: request.headers, body });
-    return new Response(out.status === 204 ? null : out.body, { status: out.status, headers: out.headers });
+    return new WebResponseClass(out.status === 204 ? null : out.body, { status: out.status, headers: out.headers });
   }
 }
