@@ -50,6 +50,22 @@ def _installer_path() -> str:
                            if part and part != own_bin)
 
 
+def _installer_python(path: str) -> str | None:
+    """The Python install.sh builds with on PATH=path: the first of its own candidates (its `for candidate in`
+    line, read from install.sh) that is 3.10 or later. On a Mac the first `python3` is often Apple's 3.9, which
+    install.sh passes over for a python3.13 later on PATH; the wheelhouse built for that 3.9 had no click 8.5."""
+    found = re.search(r"for candidate in ((?:[^;\\]|\\\n)+); do", (PROJECT / "install.sh").read_text())
+    if found is None:
+        raise RuntimeError("install.sh no longer lists the Pythons it looks for")
+    for candidate in found.group(1).replace("\\\n", " ").split():
+        program = candidate if os.path.isabs(candidate) else shutil.which(candidate, path=path)
+        if program and os.access(program, os.X_OK) and subprocess.run(
+                [program, "-c", "import sys; sys.exit(sys.version_info < (3, 10))"], capture_output=True,
+                stdin=subprocess.DEVNULL, timeout=60).returncode == 0:
+            return program
+    return None
+
+
 def _wheelhouse() -> Path:
     """Wheels for requirements.lock plus the build backend, downloaded once and reused.
 
@@ -62,9 +78,9 @@ def _wheelhouse() -> Path:
     platform tags and bundled pip as the builds that install from it — and cached per interpreter.
     """
     installer_path = _installer_path()
-    python3 = shutil.which("python3", path=installer_path)
+    python3 = _installer_python(installer_path)
     if python3 is None:
-        raise RuntimeError(f"install.sh needs python3, and there is none on PATH={installer_path}")
+        raise RuntimeError(f"install.sh needs Python 3.10 or later, and there is none on PATH={installer_path}")
     # The builds' interpreter environment (clean_env), keeping any pip index settings for the fetch.
     fetch_env = {key: value for key, value in os.environ.items()
                  if not key.startswith(("PYTHON", "VIRTUAL_ENV"))}
@@ -576,8 +592,8 @@ def old_style_install(home: Path, tree: Path, bin_dir: Path, archive: bytes, env
                 handle.extract(member, tree, filter="data")
             except TypeError:           # Python without extraction filters
                 handle.extract(member, tree)
-    subprocess.run(["python3", "-m", "venv", str(tree / ".venv")], check=True, env=env,
-                   timeout=BUILD_TIMEOUT)
+    subprocess.run([_installer_python(env["PATH"]) or "python3", "-m", "venv", str(tree / ".venv")], check=True,
+                   env=env, timeout=BUILD_TIMEOUT)
     pip = str(tree / ".venv" / "bin" / "pip")
     subprocess.run([pip, "install", "-q", "-r", str(tree / "requirements.lock")], check=True,
                    env=env, timeout=BUILD_TIMEOUT, stdout=subprocess.DEVNULL)
@@ -826,7 +842,9 @@ class InterruptedBuilds(unittest.TestCase):
 
         # A python3 that parks before creating the new version's virtualenv — by then the release
         # is unpacked into versions/<v> and the build is under way.
-        real_python = shutil.which("python3", path=env["PATH"])
+        # Standing in for the Python install.sh would choose (not merely the first python3: a Mac's is Apple's 3.9,
+        # which install.sh passes over, so the stand-in was passed over too and never parked).
+        real_python = _installer_python(env["PATH"])
         slow_dir = home / "slow python"
         slow_dir.mkdir()
         (slow_dir / "python3").write_text(
