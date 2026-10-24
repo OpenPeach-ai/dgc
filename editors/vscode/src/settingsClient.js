@@ -261,7 +261,7 @@ function render() {
         return;
     }
     if (!config) {
-        main.innerHTML = '<h1>' + sections.find(([id]) => id === section)[1] + '</h1><p class="sub" role="status">Reading settings from DGC…</p>';
+        main.innerHTML = '<h2>' + sections.find(([id]) => id === section)[1] + '</h2><p class="sub" role="status">Reading settings from DGC…</p>';
         return;
     }
     renderFields(section, main, draft, providers, ui);
