@@ -546,6 +546,8 @@ class AppsTests(Temp):
             self.assertEqual(offer["state"], "unavailable", "the system's own LibreOffice is never mixed with a download")
             self.assertIn("libreoffice-draw", offer["line"])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the apps come with DGC's own desktop download, Linux with apt; "
+                         "a Mac's computer is not offered them (docs/PIPS.md)")
     def test_the_setup_measures_the_apps_and_downloads_them_once_the_user_said_yes(self):
         from dgc import pip_screen_setup
         recorded = {}
@@ -610,6 +612,10 @@ def desktop_host(test, *, run_id="run_" + "a" * 32):
     return host, vnc
 
 
+LINUX_DESKTOP = unittest.skipUnless(sys.platform.startswith("linux"), "the whole desktop is Linux only for now: on a Mac "
+                                    "the screen is in the computer's VM, whose X server DGC can't reach (pip_desktop_eyes)")
+
+
 class StepTests(Temp):
     def setUp(self):
         super().setUp()
@@ -619,6 +625,7 @@ class StepTests(Temp):
             started.start()
             self.addCleanup(started.stop)
 
+    @LINUX_DESKTOP
     def test_a_click_lands_where_the_pip_pointed_and_the_user_and_the_timeline_see_it(self):
         host, vnc = desktop_host(self)
         said = host._desktop("desktop_click", {"x": 100, "y": 50})
@@ -638,6 +645,7 @@ class StepTests(Temp):
         host._desktop("desktop_click", {"x": 20, "y": 20})
         self.assertGreater(host.browser.acted_at, 0.0, "a click on the browser's window is: a submit it causes is held")
 
+    @LINUX_DESKTOP
     def test_typing_keys_windows_focus_and_apps(self):
         host, vnc = desktop_host(self)
         typed = host._desktop("desktop_type", {"text": "Happy 30th, Arjun!"})

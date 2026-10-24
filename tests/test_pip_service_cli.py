@@ -1,5 +1,6 @@
 """CLI routes each explicit service operation without implicit enable or start."""
 import json
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,8 @@ class PipServiceCliTests(unittest.TestCase):
                 self.assertEqual(result, {'operation': name})
                 operation.assert_called_once_with(unit_directory=str(self.base / 'units'))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the service is Linux user systemd; elsewhere preview refuses "
+                         "(pip_service: Linux user systemd only; a Mac's Keep Pips running is a LaunchAgent)")
     def test_service_preview_is_read_only_with_real_unit_generator(self):
         # This fixture creates registry parents directly; a service home requires
         # the same private mode as a saved production Config directory.

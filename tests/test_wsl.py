@@ -421,6 +421,7 @@ class ModelOnWindowsTests(unittest.TestCase):
         self.assertEqual(bridge.call_count, 1)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "WSL is Linux: its paths run only there")
 class SignedInChromeTests(unittest.TestCase):
     """The user's Chrome, on Windows, from DGC in WSL."""
 
