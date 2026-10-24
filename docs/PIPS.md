@@ -85,21 +85,27 @@ pages. A Personal Pip has no project files, no shell and no browsing. It can use
 Any character can be a Personal Pip, but in Personal scope the character is only a
 look: the job is whatever its approved goal says.
 
-In the Pips view, switch between the current project and **Personal** with the
-scope picker. In the CLI, add `--personal` to a command.
+In the Pips view, the **Personal | Project** tabs at the top switch between your
+Personal Pips and this folder's project. In the CLI, add `--personal` to a command.
 
 ## Creating a Pip
 
 Pips are on by default. Open the Pips view with the Pips button in the DGC chat
 view's title bar or the **DGC: Open Pips** command.
 
-**From the Pips view.** Choose **Describe a job**, say what the Pip should look
-after and when, then choose **Describe to DGC**. This prepares a message in the main
-chat; nothing is sent until you send it. If you'd rather pick the character and
-fields yourself, choose **Advanced: choose a Pip** (or **Choose a Pip myself** for a
-Personal Pip).
+**From the Pips view.** Choose **New Pip** and pick a character. A Personal Pip then
+needs only a name: it says hello and sets itself up in its chat. For a Project Pip the
+character is also the kind of work (Scout, Lens, Rook and Lock read the code, Patch
+fixes it, Pulse runs checks, Quill writes docs), so you then say what it does, the
+branch or commit it reads (`HEAD` by default) and its model, and choose **Create
+Pip**. Patch and Pulse first show what they may do. To have DGC set a Project Pip up
+from your own words, choose **Describe the job to DGC instead**, say what it should
+look after and when, then choose **Describe to DGC**. This prepares a message in the
+main chat; nothing is sent until you send it. **Choose a Pip myself** goes back to the
+characters.
 
-**From a starter.** The Pips view's **New** lists starter Pips for common jobs:
+**From a starter.** On a project's Pips, **New Pip → Describe the job to DGC instead**
+lists starter Pips for common jobs, and `dgc pips starters` lists them all:
 
 | Starter | Pip | Runs |
 | --- | --- | --- |
@@ -503,14 +509,14 @@ card appears there. The message then follows the fix, as the Work chat's card do
 while it works, **Fixed · 3 files** when it is done (a click opens the Work chat it ran in, at its card, where
 **Review** and **Undo** are), **The fix didn't finish** with **Ask DGC to fix again**, and **Ask DGC to fix** again
 once you undo it. It updates while you look, and says the same after a reload or a restart of the runner: DGC
-keeps each fix's record, and the message reads it. The status under the Pip's name says what its last run found
-("Today's audit: 5 findings") and goes to its message.
+keeps each fix's record, and the message reads it. The status beside the Pip's name, at the top of its chat, says what
+its last run found ("Today's audit: 5 findings") and goes to its message.
 
 **One chat for every Pip.** A Project Pip's chat looks and answers like a Personal Pip's: the Pip at work with its
 face, its name, what it is doing and its clock; its reply written into short bubbles as it comes; time marks between
-messages; the buttons under a message when you point at it; the same box. Its page keeps what only a Project Pip
-has: History, Settings, and its runs with Ask DGC to fix in the chat. Which code it reads (committed, or your current
-files) is under **What this Pip can do** beside the box.
+messages; the buttons under a message when you point at it; the same box. Its page is the same too (see
+[A Project Pip's page](#a-project-pips-page)), and its runs with Ask DGC to fix are in its chat. Which code it reads
+(committed, or your current files) is under **What this Pip can do** beside the box.
 
 **Once, even with the editor closed.** The post is written when the run finishes, by the
 runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
@@ -898,6 +904,31 @@ dgc pips propose PIP_ID --expected-version 3 --no-github-reads --reason "Stop re
 GitHub `origin`. The review shows the repository and each read. An issue or a
 failing check is context for the model, not evidence: every finding still needs
 exact source lines.
+
+## A Project Pip's page
+
+A project's Pips have the page your Personal Pips have. Its list shows each Pip with what it is doing or what
+waits for you ("1 waiting for you"), with a search and **New Pip**; the **…** beside **New Pip** opens the
+project's **Workspace context** and **Notifications**. New Pips the DGC chat set up for you wait above the list.
+
+A Project Pip opens in its chat, under a top bar: back to the list, its face and name with its status (what its
+last run found, which goes to that run's message), **Run now** and a **…** menu.
+
+- **Run now** (the play button, where a Personal Pip has its computer) starts what the Pip runs: an audit for
+  Scout, Lens, Rook and Lock, a draft for Quill, a Pulse's approved command plan, or a live-data Pip's commands.
+  Patch runs only on a handoff you approve, and a Pulse with no command plan has nothing to run, so they have
+  none. While a run is going it says **Running…**, and a click opens that run in History. When the Pip can't run
+  (Pips are off, the Pip is paused), the button says why.
+- **The … menu** has every section: **History** (every run and its report), **Settings** (what it does, when it
+  runs, its model, pause and archive, and under Advanced its notifications, its source and sharing), **Schedule**
+  (**Plan & schedule** for Pulse), **Handoffs**, **Changes**, **Memory**, **Context** and **Notifications**. Each
+  opens under the same bar, with its name beside the Pip's; back returns to the chat.
+- **What waits for you stays in sight.** A change waiting for your review is a card in its chat, and above each
+  section, with **Review** and **Reject**. New Pips waiting for you are a line under the top bar that goes to them.
+
+A run's full report opens from its message in the chat (**Report · 2 findings**, then **Open full report**) and
+from its row in History. With a DGC CLI before Pips API 51, and in the remote view, a Project Pip keeps the
+earlier page: a list beside its Chat, History, Settings and More.
 
 ## A Personal Pip's page
 
