@@ -954,3 +954,44 @@ test('General: Context size says a vLLM or llama.cpp server set the window, and 
   assert.equal(y.d.querySelector('#context_size').value,'24576');
   assert.match(hintOf(y),/^Set by the server: 24K \(restart vLLM/);
 });
+
+test('Agents: the sub-agents\' Context size, blank for the main model\'s window, checked like the main one',()=>{
+  // Settings -> Agents -> Sub-agents had Model, Host URL, Transport and API key but not the window the backend has
+  // had since 0.40 (subagent_context_size: 0 is the main model's, else 2,048 to 16,777,216 tokens).
+  const hintOf=x=>x.d.querySelector('#subagent_context_size').closest('.field').querySelector('.hint').textContent;
+  const older=setup();
+  older.click('[data-nav=agents]');
+  const box=older.d.querySelector('#subagent_context_size');
+  assert.ok(box,'the card has the field');
+  assert.equal(box.disabled,true,'a CLI that never answered it would refuse the save');
+  assert.match(hintOf(older),/Update the DGC CLI/);
+
+  const x=setup();
+  x.message({type:'event',event:{...x.config,subagent_context_size:0}});
+  x.click('[data-nav=agents]');
+  const size=()=>x.d.querySelector('#subagent_context_size');
+  assert.equal(size().disabled,false);
+  assert.equal(size().value,'','0 is shown as blank');
+  assert.equal(size().placeholder,'Same as the main model');
+  assert.equal(size().closest('.card').querySelector('h3').textContent,'Sub-agents');
+  x.message({type:'event',event:{...x.config,subagent_context_size:65536}});
+  assert.equal(size().value,'65536');
+
+  const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
+  for(const bad of ['1024','50000','33554432','-2048']){
+    x.input('#subagent_context_size',bad);
+    const before=saves().length;
+    x.click('#save');
+    assert.equal(saves().length,before,`${bad} is refused on the page, as the main Context size refuses one`);
+  }
+  for(const [typed,posted] of [['131072','131072'],['','' ],['0','0'],['2048','2048']]){
+    x.input('#subagent_context_size',typed);
+    x.click('#save');
+    assert.equal(saves().at(-1)?.values.subagent_context_size,posted,typed||'blank');
+    x.message({type:'settingsSaved',ok:true});
+  }
+  // Saved from another page, the window travels as it was read.
+  x.message({type:'event',event:{...x.config,subagent_context_size:32768}});
+  x.click('[data-nav=general]');x.click('#save');
+  assert.equal(saves().at(-1).values.subagent_context_size,'32768');
+});

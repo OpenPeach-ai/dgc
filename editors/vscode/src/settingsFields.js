@@ -52,6 +52,22 @@ export function contextSizeHint(c) {
     return `Set by the server: ${tokensShort(served.window)} (${how}). A smaller number here makes DGC compact sooner.`;
 }
 
+// The sub-agents' context window (subagent_context_size, dgc/config.py): 0 is the main model's, else 2,048 to
+// 16,777,216 tokens. The box shows 0 as blank, under "Same as the main model".
+export const SUBAGENT_WINDOW_MIN = 2048, SUBAGENT_WINDOW_MAX = 16777216;
+export function subagentWindowShown(c) {
+    const tokens = Number(c?.subagent_context_size) || 0;
+    return tokens > 0 ? String(tokens) : "";
+}
+/** Why a typed sub-agent window can't be saved, or "" when it can (blank and 0 both mean the main model's). */
+export function subagentWindowProblem(text) {
+    const raw = String(text ?? "").trim();
+    if (!raw || Number(raw) === 0) return "";
+    const tokens = Number(raw);
+    return Number.isInteger(tokens) && tokens >= SUBAGENT_WINDOW_MIN && tokens <= SUBAGENT_WINDOW_MAX ? ""
+        : "Leave it blank for the main model's window, or enter 2,048 to 16,777,216 tokens.";
+}
+
 /** The number Context size shows: the window in use, so never more than a server's own window (above it can't apply). */
 export function contextSizeShown(c) {
     const served = c && c.server_window && Number(c.server_window.window) > 0 ? Number(c.server_window.window) : 0;
@@ -114,12 +130,23 @@ export function renderFields(section, main, config, providers, ui) {
                 + field("Model", "", inp("subagent_model", c.subagent_model || ""))
                 + field("Host URL", "", inp("subagent_base_url", c.subagent_base_url || ""))
                 + field("Transport", "", sel("subagent_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.subagent_api_mode || ""))
-                + field("API key", "Leave blank to keep the saved key.", inp("subagent_api_key", c.subagent_api_key || "", "password")))
+                + field("API key", "Leave blank to keep the saved key.", inp("subagent_api_key", c.subagent_api_key || "", "password"))
+                + field("Context size", c.subagent_window_settable ? "Tokens each sub-agent holds before it compacts." : "Update the DGC CLI to set this here.",
+                    inp("subagent_context_size", subagentWindowShown(c), "number")))
             + card("Fallback", field("Model", "", inp("fallback_model", c.fallback_model || ""))
                 + field("Host URL", "", inp("fallback_base_url", c.fallback_base_url || ""))
                 + field("Transport", "", sel("fallback_api_mode", [["", "Inherit"], ["auto", "Auto"], ["ollama", "Ollama"], ["anthropic", "Anthropic"], ["chat_completions", "Chat completions"], ["responses", "Responses"]], c.fallback_api_mode || ""))
                 + field("API key", "", inp("fallback_api_key", c.fallback_api_key || "", "password")))
             + '<button type="button" class="save" id="save" title="Save these settings for every workspace on this computer">Save</button>';
+        const window = main.querySelector("#subagent_context_size");
+        if (window) {
+            // As the main Context size: whole kilotokens from 2,048 up; 0 (blank) is the main model's own.
+            Object.assign(window, { placeholder: "Same as the main model", min: "0", max: String(SUBAGENT_WINDOW_MAX), step: "1024" });
+            const check = () => window.setCustomValidity(subagentWindowProblem(window.value));
+            window.addEventListener("input", check);
+            check();
+            if (!c.subagent_window_settable) window.disabled = true;
+        }
     }
     function renderSecurity(main) {
         const c = config;

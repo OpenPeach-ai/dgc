@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Settings → Agents: the sub-agents' context window.** The Sub-agents card has **Context size**: how many tokens
+  each sub-agent holds before it compacts. Blank (or 0) reads **Same as the main model** and keeps the main model's
+  window; otherwise 2,048 to 16,777,216 tokens, checked as the main Context size is. Save writes it, which it could
+  not before. Needs DGC CLI 0.41.6 or later; with an older one the box says to update.
 - **New Pip: a big face with a list beside it.** The grid of seven character tiles is gone. **New Pip** shows the
   character's face on the left and a dropdown beside it, and the face changes as soon as you pick. For a Project Pip
   the dropdown asks **What should it do?** and lists the jobs in plain words, with the character's name beside each:

@@ -887,6 +887,35 @@ test("the token cap goes only to a CLI that answered it, as a whole number of to
   }
 });
 
+test("the sub-agents' context window goes only to a CLI that answered it, blank or 0 as the main model's", async () => {
+  // Settings -> Agents -> Sub-agents -> Context size. The host built `values` without it unless the page posted it,
+  // and the page never did: Save could not write it at all.
+  const older = harness();
+  await older.provider.saveSettings(settings({ subagent_context_size: "65536" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "subagent_context_size" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [typed, sent] of [["65536", 65536], ["", 0], ["0", 0], [0, 0], ["100", 2048], ["99999999", 16777216],
+                               ["lots", 0], ["131072.9", 131072]]) {
+    const { provider, commands } = harness();
+    provider.onEvent({ type: "config", model: "m", mode: "default", subagent_context_size: 0 });
+    await provider.saveSettings(settings({ subagent_context_size: typed }));
+    const config = commands.find((c) => c.type === "set_config" && "subagent_context_size" in (c.values || {}));
+    assert.equal(config?.values.subagent_context_size, sent, String(typed));
+  }
+});
+
+test("Settings asks the CLI for the sub-agents' context window", () => {
+  // An opt-in config field (an older editor rejects a field it doesn't know): it reaches the page only when asked.
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("agents");
+  const read = commands.find((c) => c.type === "get_config");
+  assert.ok(read?.fields.includes("subagent_context_size"), JSON.stringify(read));
+});
+
 test("the cache lifetime and keep-loaded time go only to a CLI that answered cache_settings", async () => {
   const sent = (commands, key) => commands.filter((c) => c.type === "set_config" && key in (c.values || {}));
   const older = harness();

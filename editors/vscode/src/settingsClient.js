@@ -50,7 +50,7 @@ const ui = {
     bool: (id, on) => switchHTML(on, id.replaceAll('_', ' '), `id="${id}" data-setting="${id}"`),
     card: (title, body) => `<div class="card"><h3>${title}</h3>${body}</div>`
 };
-const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m' };
+const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '' };
 function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus = 'Unsaved changes'; if ($('save-status'))
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
@@ -74,6 +74,10 @@ function applyConfig(ev) {
     draft.search_providers = Array.isArray(ev.search_providers) ? ev.search_providers : [];
     draft.chatdgc_settable = 'chatdgc_personality' in ev;
     draft.budget_settable = 'turn_token_budget' in ev;
+    // The sub-agents' window, from a CLI that answers it: 0 is the main model's, shown (and kept) as blank.
+    draft.subagent_window_settable = 'subagent_context_size' in ev;
+    if (!dirty.has('subagent_context_size'))
+        draft.subagent_context_size = Number(ev.subagent_context_size) > 0 ? String(ev.subagent_context_size) : '';
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).
     draft.cache_settable = ev.cache_settable === true;
     // The window a vLLM, SGLang or llama.cpp server was started with (the extension adds the last server_window event).

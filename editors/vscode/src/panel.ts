@@ -157,6 +157,16 @@ const KEEP_ALIVE_RE = /^(?:|-?\d{1,9}|(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h)){1,4}
 
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
+// The sub-agents' context window as the CLI keeps it (dgc/config.py subagent_window_arg): 0 is the main model's,
+// otherwise 2,048 to 16,777,216 tokens. Blank, 0 or anything unreadable saves 0; a number outside is brought inside.
+const SUBAGENT_WINDOW_MIN = 2_048;
+const SUBAGENT_WINDOW_MAX = 16_777_216;
+function subagentWindow(value: unknown): number {
+  const tokens = Math.floor(Number(String(value ?? "").trim() || 0));
+  if (!Number.isFinite(tokens) || tokens <= 0) { return 0; }
+  return Math.min(SUBAGENT_WINDOW_MAX, Math.max(SUBAGENT_WINDOW_MIN, tokens));
+}
+
 /** ready.capabilities.search_keys -> which providers have a key of their own saved; undefined from an older CLI. */
 function searchKeysFromHandshake(offered: any): Map<string, boolean> | undefined {
   if (!offered || typeof offered !== "object" || !Array.isArray(offered.providers)) { return undefined; }
@@ -504,6 +514,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private chatdgcSettable = false;
   /** The CLI takes the per-turn token cap from Settings (its config answered turn_token_budget). */
   private budgetSettable = false;
+  /** The CLI takes the sub-agents' context window from Settings (its config answered subagent_context_size). */
+  private subagentWindowSettable = false;
   /** Settings -> Models: the prompt-cache lifetime and Ollama's keep-loaded time, from a CLI that answers
    *  get_config's "cache_settings" with an event of that name (0.48). Undefined: an older CLI, which would
    *  refuse a save that carried them. */
@@ -3627,6 +3639,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         if ("chatdgc_personality" in ev) { this.chatdgcSettable = true; }
         if ("turn_token_budget" in ev) { this.budgetSettable = true; }
+        if ("subagent_context_size" in ev) { this.subagentWindowSettable = true; }
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
@@ -6679,7 +6692,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
                        "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                       "cache_settings"] });
+                       "subagent_context_size", "cache_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -7206,8 +7219,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           values.ollama_keep_alive = v.ollama_keep_alive.trim();
         }
       }
-      if (v.subagent_context_size !== undefined && v.subagent_context_size !== "") {
-        values.subagent_context_size = Math.max(0, Math.floor(Number(v.subagent_context_size) || 0));
+      // The sub-agents' window: blank or 0 is the main model's. Only to a CLI that answered it (an older one
+      // refuses the whole save on a key it doesn't know).
+      if (this.subagentWindowSettable && v.subagent_context_size !== undefined) {
+        values.subagent_context_size = subagentWindow(v.subagent_context_size);
       }
       if (v.capability_cache_ttl_s) {
         values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
