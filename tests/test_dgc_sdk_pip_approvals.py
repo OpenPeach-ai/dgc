@@ -44,7 +44,7 @@ class ApprovalCommandTests(unittest.TestCase):
         self.assertIn("list_app_approvals", READ_COMMANDS)
         self.assertIn("decide_app_approval", MUTATION_COMMANDS)
         from dgc.headless import PIPS_API_VERSION
-        self.assertEqual(PIPS_API_VERSION, 62)
+        self.assertGreaterEqual(PIPS_API_VERSION, 62)
 
     def test_pending_and_decide_are_refused_before_api62_checked_then_sent(self):
         wire = Wire()

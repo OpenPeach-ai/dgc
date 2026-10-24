@@ -85,6 +85,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret",
     "list_app_approvals", "decide_app_approval",
+    "trigger_app_event", "list_app_events",
 }) | STATEMENT_COMMANDS
 _COMMAND_ARGS = {
     "inspect_pip_connector_actions": {"server"},
@@ -113,7 +114,8 @@ _COMMAND_ARGS = {
     "list_pip_app_links": {"pip_id"}, "start_pip_app_link": {"pip_id", "link_id"}, "check_pip_app_link": {"pip_id", "link_id"},
     "decline_pip_app_link": {"pip_id", "link_id"}, "disconnect_pip_app_link": {"pip_id", "link_id"},
     "finish_pip_computer_check": {"pip_id"},
-    "list_pip_routines": {"pip_id"}, "add_pip_routine": {"pip_id", "title", "prompt", "trigger"},
+    # app_events (API 63): list routines on your own app's events too (an older editor refuses a "when" it doesn't know).
+    "list_pip_routines": {"pip_id", "app_events"}, "add_pip_routine": {"pip_id", "title", "prompt", "trigger"},
     "update_pip_routine": {"pip_id", "routine_id", "changes"}, "delete_pip_routine": {"pip_id", "routine_id"},
     "decide_pip_routine": {"pip_id", "routine_id", "add"},
     "set_pip_profile": {"pip_id", "changes"}, "list_pip_shared": {"pip_id", "kind"},
@@ -143,6 +145,8 @@ _COMMAND_ARGS = {
     "rotate_app_secret": {"name"},
     # Approvals in your app (pip_sdk_app_approvals, API 62): what waits for a person, and the app's own decision.
     "list_app_approvals": {"app"}, "decide_app_approval": {"action_id", "decision", "expected_digest"},
+    # Events from your app (pip_sdk_app_events, API 63): they run the routines that wait on them; no approval needed.
+    "trigger_app_event": {"app", "event", "payload", "idempotency_key"}, "list_app_events": {"app", "limit"},
     "list_pip_reply_stats": {"pip_id", "run_ids"},
     "get_pips_limit": set(), "set_pips_limit": {"max_pips"},
     "reject_pip_app_action": {"action_id", "expected_digest"},
@@ -2931,7 +2935,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema()] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps']) if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)])] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -3191,7 +3195,9 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 if len(routine_candidates) >= 2:
                     return 'Not suggested: one reply suggests at most two routines.'
                 toolkits = {a.get('toolkit') for a in (apps_pin or {}).get('apps', [])}
-                candidate, told = pip_routines.tool_result(call.arguments if isinstance(call.arguments, dict) else {}, toolkits)
+                own_apps = {a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)}
+                candidate, told = pip_routines.tool_result(call.arguments if isinstance(call.arguments, dict) else {}, toolkits,
+                                                           own_apps)
                 if candidate is not None:
                     routine_candidates.append(candidate)
                 return told
@@ -4749,7 +4755,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -5079,7 +5085,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', "Only you change a Pip's routines, on this computer.")
                 if command == 'list_pip_routines':
-                    result = pip_routines.listing(store, pip_id)
+                    result = pip_routines.listing(store, pip_id, app_events=request.get('app_events', False))
                 elif command == 'add_pip_routine':
                     result = {'routine': pip_routines.add(store, pip_id, request.get('title'), request.get('prompt'), request.get('trigger'))}
                 elif command == 'update_pip_routine':
@@ -5115,6 +5121,14 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 else:
                     result = pip_sdk_app_approvals.decide(store, request.get('action_id'), request.get('decision'),
                                                           request.get('expected_digest'), actor, config)
+            elif command in ('trigger_app_event', 'list_app_events'):
+                # Events from your app (pip_sdk_app_events, API 63): each runs, once, the routines a person added for it.
+                from . import pip_sdk_app_events
+                if command == 'trigger_app_event':
+                    result = pip_sdk_app_events.trigger(store, request.get('app'), request.get('event'), request.get('payload'),
+                                                        request.get('idempotency_key'), actor, config)
+                else:
+                    result = pip_sdk_app_events.recent(store, request.get('app'), request.get('limit'), actor)
             elif command in ('list_pip_connections', 'inspect_pip_connection', 'list_pip_accounts'):
                 if actor not in ('editor-user', 'local-console'):
                     raise RegistryError('local_only', 'Manage shared app connections on the computer.')

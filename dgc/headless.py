@@ -331,7 +331,16 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # at}. list_app_approvals {app?} lists what waits (with digests); decide_app_approval {action_id, decision accept |
 # reject, expected_digest} is the app's own accept or reject, exactly once (what is decided already is answered, not
 # run again). get_pip_app_action of an app action carries app_deliveries. Local only.
-PIPS_API_VERSION = 62
+# API 63: events from your app (pip_sdk_app_events). A Personal Pip's routine may run when your app sends an event:
+# its trigger {kind: "app", app, event} (event: 1-64 of a-z 0-9 . _ -; the app registered). trigger_app_event {app, event,
+# payload (JSON, at most 32 KB), idempotency_key} needs no approval (it runs only routines a person added): it is kept once
+# per (app, idempotency_key) for 30 days, a repeat answering repeat true and queuing nothing, and queues a run of every
+# routine on (app, event), answering {event_id, app, event, idempotency_key, received_at, payload_bytes, queued,
+# no_routine, pips: [{pip_id, pip_name, routine_id, routine, outcome queued | busy | paused, words, dropped?}], more,
+# repeat, runner_online, notice}. At most 60 a minute per app (rate_limited) and 20 waiting per Pip (the oldest dropped,
+# said in its chat). list_app_events {app, limit?} reads what an app sent lately and the event names it used.
+# list_pip_routines lists routines on an app's event only with app_events: true. Local only.
+PIPS_API_VERSION = 63
 
 
 def _pips_platform_supported() -> bool:

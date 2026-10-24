@@ -190,6 +190,10 @@ def bulk_fields(command):
                 ("spooled_images", bounded_spooled_images), ("spooled_files", bounded_spooled_files))
     if command == "add_pip_computer_file":
         return (("data", bounded_file_uri),)
+    if command == "trigger_app_event":
+        # API 63: what your app sent with an event, up to 32 KB of JSON, bounded on its own (pip_sdk_app_events).
+        from .pip_sdk_app_events import bounded_payload
+        return (("payload", bounded_payload),)
     return ()
 
 
@@ -201,8 +205,8 @@ def bound_bulk(command, request: dict) -> tuple[dict, dict]:
     bulk = {field: bound(request[field]) for field, bound in bulk_fields(command) if field in request}
     size = 0
     for field, value in bulk.items():
-        if field.startswith("spooled_"):
-            continue                       # names of files in the spool: no data rides with them
+        if field.startswith("spooled_") or field == "payload":
+            continue                       # names of files in the spool, or an event's JSON: bounded on their own
         size += len(value) if isinstance(value, str) else sum(len(i if isinstance(i, str) else i["data"]) for i in value)
     if size > MAX_FILE_URI_CHARS:
         raise RegistryError("invalid_request", "Send at most 2 MB of images and files with one message.")

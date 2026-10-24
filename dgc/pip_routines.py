@@ -6,12 +6,14 @@ it says". When a routine is due, DGC writes a turn in the Pip's own chat for it 
 hello), so the Pip does the work with its usual tools (apps, computer, drafts, choices) and what it
 did appears in the chat as its message.
 
-Two kinds of "when":
+Three kinds of "when":
 - a schedule (pip_schedules: daily, weekdays as cron, every N minutes, or once);
 - an app event, read through the Pip's own connected app (pip_app_links) by DGC, with no model and
   no tokens: a new Gmail message matching a search, or a Google Calendar event about to start. The
   first email check only notes what is already there; each later one that finds new items runs the
-  routine with up to five of them as untrusted data, and no item runs twice.
+  routine with up to five of them as untrusted data, and no item runs twice;
+- an event your own app sends (pip_sdk_app_events, Pips API 63): {kind: "app", app, event}, such as
+  the shop app's order.created. Each event runs it once, with what the app sent as untrusted data.
 
 A routine may run a troupe instead (troupe_routines): many read-only agents on a project's committed
 code, as a job of its own, with the Pip telling the user what it found. It is scheduled from a DGC
@@ -44,6 +46,8 @@ LEAD = (5, 120)                   # minutes before a calendar event
 MAX_TICK = 6                      # routines handled per tick
 BUSY_RETRY = timedelta(seconds=60)
 STATUSES = ("suggested", "on", "off", "declined")
+EVENT = re.compile(r"[a-z0-9_.-]{1,64}\Z")   # an event your own app sends (pip_sdk_app_events)
+APP_NAME = re.compile(r"[a-z0-9-]{1,40}\Z")
 APP_KINDS = {"email": ("gmail", "GMAIL_FETCH_EMAILS"), "calendar": ("googlecalendar", "GOOGLECALENDAR_FIND_EVENT")}
 
 SCHEMA = """
@@ -105,9 +109,21 @@ def _text(value, limit: int, what: str) -> str:
 
 def validate_trigger(value) -> dict:
     """The routine's "when", in its one stored shape."""
-    if not isinstance(value, dict) or value.get("kind") not in ("schedule", "email", "calendar"):
-        raise RegistryError("invalid_routine", "Choose when it runs: a time, a new email, or a calendar event.")
+    if isinstance(value, dict) and "kind" not in value and set(value) == {"app", "event"}:
+        value = {"kind": "app", **value}             # {app, event}: when your own app sends that event
+    if not isinstance(value, dict) or value.get("kind") not in ("schedule", "email", "calendar", "app"):
+        raise RegistryError("invalid_routine", "Choose when it runs: a time, a new email, a calendar event, or an "
+                                               "event your app sends.")
     kind = value["kind"]
+    if kind == "app":
+        if set(value) != {"kind", "app", "event"}:
+            raise RegistryError("invalid_routine", "A routine on your app's event has the app's name and the event's.")
+        if not isinstance(value["app"], str) or not APP_NAME.fullmatch(value["app"]):
+            raise RegistryError("invalid_routine", "Name the app as it was registered, such as shop.")
+        if not isinstance(value["event"], str) or not EVENT.fullmatch(value["event"]):
+            raise RegistryError("invalid_routine", "Name the event with 1 to 64 lowercase letters, digits, dots, hyphens "
+                                                   "or underscores, such as order.created.")
+        return {"kind": "app", "app": value["app"], "event": value["event"]}
     if kind == "schedule":
         if set(value) != {"kind", "schedule"}:
             raise RegistryError("invalid_routine", "A timed routine has only its schedule.")
@@ -137,6 +153,9 @@ def validate_trigger(value) -> dict:
 
 def label(trigger: dict) -> str:
     """When it runs, in words (the editor has its own; this one is for the Pip's turn)."""
+    if trigger["kind"] == "app":
+        from .pip_sdk_apps import phrase
+        return f"when {phrase(trigger['app'])} sends {trigger['event']}"
     if trigger["kind"] == "email":
         return f"when a new email matching {trigger['query']} arrives"
     if trigger["kind"] == "calendar":
@@ -177,6 +196,8 @@ def projection(row) -> dict:
 
 
 def _first_due(trigger: dict, now: datetime) -> str | None:
+    if trigger["kind"] == "app":
+        return None                          # due when the app sends the event (pip_sdk_app_events.trigger)
     if trigger["kind"] != "schedule":
         return stamp(now)                    # an app routine checks at once (the first email check only notes)
     from .pip_schedules import next_due
@@ -203,17 +224,30 @@ def _row(registry, pip_id, routine_id):
     return row
 
 
-def listing(store, pip_id) -> dict:
+def listing(store, pip_id, app_events=False) -> dict:
+    """Its routines. One on your own app's event (Pips API 63) is listed only to a caller that asks for them
+    (app_events: true): an older editor refuses a "when" it doesn't know, and with it the whole list."""
     job = store._job(pip_id)
+    if app_events not in (None, True, False):
+        raise RegistryError("invalid_request", "app_events is true or false.")
     rows = store.registry.db.execute("SELECT * FROM pip_routines WHERE pip_id=? AND status<>'declined' ORDER BY created_at",
                                      (pip_id,)).fetchall()
-    return {"pip_id": pip_id, "workspace_id": job["workspace_id"], "routines": [projection(r) for r in rows]}
+    shown = [r for r in rows if app_events or json.loads(r["trigger"]).get("kind") != "app"]
+    return {"pip_id": pip_id, "workspace_id": job["workspace_id"], "routines": [projection(r) for r in shown]}
+
+
+def _registered(trigger: dict) -> None:
+    """A routine on your app's event needs the app registered with DGC (pip_sdk_apps)."""
+    if trigger["kind"] == "app":
+        from .pip_sdk_app_events import require_app
+        require_app(trigger["app"])
 
 
 def _insert(store, pip_id, title, prompt, trigger, *, status, created_by, run_id=None, troupe=None) -> dict:
     registry = store.registry
     job = _personal(store, pip_id)
     trigger = validate_trigger(trigger)
+    _registered(trigger)
     title, prompt = _text(title, 160, "its name"), _text(prompt, 4000, "what to do")
     count = registry.db.execute("SELECT count(*) FROM pip_routines WHERE pip_id=? AND status IN ('on','off','suggested')",
                                 (pip_id,)).fetchone()[0]
@@ -271,6 +305,8 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
     now = _now(registry)
     if "trigger" in changes:
         trigger = validate_trigger(changes["trigger"])
+        if trigger != json.loads(row["trigger"]):
+            _registered(trigger)
         fields.update(trigger=json.dumps(trigger), anchor_at=stamp(now), seen="[]", baselined=0, last_error=None)
     status = changes.get("status", row["status"])
     if status not in ("on", "off"):
@@ -285,6 +321,9 @@ def update(store, pip_id, routine_id, changes: dict) -> dict:
         sets = ",".join(f"{name}=?" for name in fields)
         registry.db.execute(f"UPDATE pip_routines SET {sets},revision=revision+1,updated_at=? WHERE id=?",
                             (*fields.values(), stamp(now), routine_id))
+        if status == "off" or "trigger" in changes:
+            from .pip_sdk_app_events import forget
+            forget(registry.db, routine_id)        # what waited on its app's events is let go
     return projection(_row(registry, pip_id, routine_id))
 
 
@@ -294,6 +333,8 @@ def delete(store, pip_id, routine_id) -> dict:
     _row(registry, pip_id, routine_id)
     with registry.transaction():
         registry.db.execute("DELETE FROM pip_routines WHERE id=?", (routine_id,))
+        from .pip_sdk_app_events import forget
+        forget(registry.db, routine_id)
     return {"pip_id": pip_id, "routine_id": routine_id, "deleted": True}
 
 
@@ -321,7 +362,13 @@ def decide(store, pip_id, routine_id, add_it: bool) -> dict:
 TOOL = "add_routine"
 
 
-def schema() -> dict:
+def schema(own_apps=()) -> dict:
+    """The add_routine tool. ``own_apps``: the names of the user's own apps registered with DGC (pip_sdk_apps), whose
+    events a routine may wait on (Pips API 63)."""
+    own = sorted({a for a in own_apps or () if isinstance(a, str) and APP_NAME.fullmatch(a)})[:16]
+    events = (" | {kind:'app', app:'<name>', event:'<event name>'} when the user's own app sends that event (their apps: "
+              + ", ".join(own) + "). Use the event name the user gives, such as order.created; each event runs it once, "
+              "with what the app sent.") if own else ""
     return {"type": "function", "function": {"name": TOOL, "description": (
         "Suggest a routine: something you will do by yourself, on a schedule or when an app event happens, "
         "like a morning news brief or telling the user when an email from their bank arrives. It shows as a "
@@ -330,9 +377,9 @@ def schema() -> dict:
         "when: {kind:'schedule', schedule:{type:'daily', time:'HH:MM', timezone:'Area/City'} or "
         "{type:'cron', cron:'MM HH * * 1-5', timezone:'Area/City'} for weekdays, or {type:'interval', minutes:N} "
         "or {type:'once', at:ISO time with offset}} | {kind:'email', query:'a Gmail search', every_minutes:5-60} "
-        "(needs Gmail connected to you) | {kind:'calendar', lead_minutes:5-120} (needs Google Calendar). When the user "
-        "wants mail caught as it comes in (\"catch my mails\", \"when an email from my boss arrives\"), use kind 'email' "
-        "with a search for those mails, not a daily schedule."),
+        "(needs Gmail connected to you) | {kind:'calendar', lead_minutes:5-120} (needs Google Calendar)" + events + ". When "
+        "the user wants mail caught as it comes in (\"catch my mails\", \"when an email from my boss arrives\"), use kind "
+        "'email' with a search for those mails, not a daily schedule."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "prompt", "when"],
                        "properties": {"title": {"type": "string", "description": "A short name, like Morning brief."},
                                       "prompt": {"type": "string", "description": "What you will do each time, in the user's words."},
@@ -347,8 +394,8 @@ def validate_candidate(value) -> dict:
             "trigger": validate_trigger(value["trigger"])}
 
 
-def tool_result(arguments: dict, connected_toolkits) -> tuple[dict | None, str]:
-    """In the worker: (the candidate, what the model is told)."""
+def tool_result(arguments: dict, connected_toolkits, own_apps=()) -> tuple[dict | None, str]:
+    """In the worker: (the candidate, what the model is told). ``own_apps``: the user's own apps, from the run's pin."""
     try:
         when = arguments.get("when") if isinstance(arguments, dict) else None
         candidate = validate_candidate({"title": (arguments or {}).get("title"), "prompt": (arguments or {}).get("prompt"),
@@ -356,6 +403,10 @@ def tool_result(arguments: dict, connected_toolkits) -> tuple[dict | None, str]:
     except RegistryError as exc:
         return None, "Not suggested: " + str(exc)
     kind = candidate["trigger"]["kind"]
+    if kind == "app" and candidate["trigger"]["app"] not in set(own_apps or ()):
+        theirs = ", ".join(sorted(own_apps or ())) or "none"
+        return None, (f"Not suggested: {candidate['trigger']['app']} isn't one of the user's own apps registered with DGC "
+                      f"(theirs: {theirs}). Ask the user which app sends the event.")
     if kind in APP_KINDS and APP_KINDS[kind][0] not in connected_toolkits:
         app = "Gmail" if kind == "email" else "Google Calendar"
         return None, f"Not suggested: this routine reads {app}, which is not connected to you. Ask the user to connect it first (connect_app)."
@@ -377,6 +428,10 @@ def commit(store, run, result) -> None:
         if waiting >= MAX_SUGGESTED:
             break
         candidate = validate_candidate(value)
+        if candidate["trigger"]["kind"] == "app":
+            from .pip_sdk_apps import get
+            if get(candidate["trigger"]["app"]) is None:
+                continue                            # the app went away while it replied: no card, the reply stays
         _insert(store, run["pip_id"], candidate["title"], candidate["prompt"], candidate["trigger"],
                 status="suggested", created_by="pip", run_id=run["id"])
         waiting += 1
@@ -473,13 +528,26 @@ def _record(registry, row, **fields) -> bool:
         return cursor.rowcount == 1
 
 
-def _fire(store, row, config, extra: str, occurrence: str) -> None:
+def turn_text(row, trigger) -> str:
+    """The routine's turn, before what started it."""
+    return ROUTINE_TURN.format(title=row["title"].replace('"', "'"), when=label(trigger), prompt=row["prompt"])
+
+
+def _fits(text: str) -> str:
+    """What one chat turn holds (pip_chat.validate_text: 4,000 characters, 8 KB)."""
+    text = text[:4000]
+    while len(text.encode("utf-8")) > 8000:
+        text = text[:int(len(text) * 0.9)]
+    return text
+
+
+def _fire(store, row, config, extra: str, occurrence: str) -> dict:
     """The routine's turn in the Pip's chat (raises when the Pip is busy or the reply is refused)."""
     from . import pip_chat
     trigger = json.loads(row["trigger"])
-    text = ROUTINE_TURN.format(title=row["title"].replace('"', "'"), when=label(trigger), prompt=row["prompt"]) + extra
+    text = turn_text(row, trigger) + extra
     key = KEY + row["id"][-16:] + "_" + hashlib.sha256(occurrence.encode()).hexdigest()[:24]
-    pip_chat.send(store, row["pip_id"], text[:7900], key, ACTOR, config, _intro=True)
+    return pip_chat.send(store, row["pip_id"], _fits(text), key, ACTOR, config, _intro=True)
 
 
 def check(registry, config, row, *, reader=None, now=None) -> str:
@@ -527,6 +595,10 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
         _record(registry, row, next_due_at=following, status=status, last_run_at=stamp(now),
                 last_checked_at=stamp(now), last_error=None)
         return "ran"
+    if trigger["kind"] == "app":
+        # An event your own app sent (pip_sdk_app_events): its oldest waiting one, as this turn.
+        from .pip_sdk_app_events import run_next
+        return run_next(store, config, row, trigger, now)
     # An app event: one read through the Pip's own connected app, with no model.
     from . import pip_app_links
     toolkit, tool = APP_KINDS[trigger["kind"]]
