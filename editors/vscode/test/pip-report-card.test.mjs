@@ -168,23 +168,32 @@ test("a failed run's second line says why", () => {
   assert.equal(card.querySelector(".pip-report-line-what").textContent, FAILED.reason);
 });
 
-test("three reports that arrive together are one line, opened to their rows; two stay two", () => {
+test("two or more reports that arrive together are one line, opened to their rows; one alone is a card", () => {
+  // The founder, 24 Oct: the folded line was perfect, but two reports still stacked as two cards. It starts at two.
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
+  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "one card is not grouped");
   s.event({ type: "pip_report", report: FAILED });
-  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "two cards are not grouped");
+  let group = s.doc.querySelector("#log .pip-report-group");
+  assert.ok(group, "two are one line");
+  assert.equal(group.querySelectorAll(":scope > .pip-report").length, 2);
+  assert.equal(group.querySelector(".pip-report-group-title").textContent, "2 Pip reports · 1 failed · 5 findings");
   s.event({ type: "pip_report", report: CLEAR });
-  const group = s.doc.querySelector("#log .pip-report-group");
-  assert.ok(group, "three are");
+  group = s.doc.querySelector("#log .pip-report-group");
+  assert.equal(s.doc.querySelectorAll("#log .pip-report-group").length, 1, "the third joins the same line");
   assert.equal(group.querySelectorAll(":scope > .pip-report").length, 3);
   assert.equal(group.querySelector(".pip-report-group-title").textContent, "3 Pip reports · 1 failed · 5 findings · 1 clear");
   assert.equal(group.dataset.shown, "closed");
   group.querySelector(".pip-report-group-head").click();
   assert.equal(group.dataset.shown, "open");
-  // Dismissing one leaves two: they stand on their own again.
+  // Dismissing one leaves two: still one line. Dismissing another leaves one card on its own.
   group.querySelector(".pip-report[data-outcome='clear'] .pip-report-dismiss-slim").click();
-  assert.equal(s.doc.querySelector("#log .pip-report-group"), null);
-  assert.equal(cards(s).length, 2);
+  group = s.doc.querySelector("#log .pip-report-group");
+  assert.ok(group, "two left are still one line");
+  assert.equal(group.querySelector(".pip-report-group-title").textContent, "2 Pip reports · 1 failed · 5 findings");
+  group.querySelector(".pip-report[data-outcome='failed'] .pip-report-dismiss-slim").click();
+  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "one left is a card again");
+  assert.equal(cards(s).length, 1);
   assert.deepEqual(s.errors, []);
 });
 

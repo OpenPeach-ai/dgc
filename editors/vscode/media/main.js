@@ -9133,7 +9133,8 @@
              sev: PIP_REPORT_SEVERITIES.includes(top?.severity) ? top.severity : "", what: String(top?.title || "").slice(0, 200),
              where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
   }
-  // Three or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings".
+  // Two or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings"
+  // (from two since the founder, 24 Oct: two still stacked as two cards).
   function groupPipReports(card) {
     if (!card?.parentNode) return;
     // A card with a fix is the fix's status: it stays a card of its own, and breaks a run of reports.
@@ -9144,7 +9145,7 @@
     const run = [];
     for (let node = start; node && groupable(node); node = node.nextElementSibling) run.push(node);
     const cards = run.flatMap((node) => (node.matches(".pip-report-group") ? [...node.querySelectorAll(":scope > .pip-report")] : [node]));
-    if (cards.length < 3) return;
+    if (cards.length < 2) return;
     let group = run.find((node) => node.matches(".pip-report-group"));
     if (!group) {
       group = el("div", "pip-report-group"); group.dataset.shown = "closed";
@@ -9162,7 +9163,7 @@
   }
   function paintPipReportGroup(group) {
     const cards = [...group.querySelectorAll(":scope > .pip-report")];
-    if (cards.length < 3) { for (const c of cards) group.before(c); group.remove(); return; }
+    if (cards.length < 2) { for (const c of cards) group.before(c); group.remove(); return; }
     const failed = cards.filter((c) => c.dataset.outcome === "failed" || c.dataset.outcome === "checks_failed").length;
     const findings = cards.reduce((sum, c) => sum + (c.dataset.outcome === "findings" ? Number(c.dataset.total) || 0 : 0), 0);
     const clear = cards.filter((c) => ["clear", "checks_passed", "live_clear"].includes(c.dataset.outcome)).length;

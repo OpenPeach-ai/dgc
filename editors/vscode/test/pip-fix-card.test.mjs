@@ -302,6 +302,19 @@ test("a card with a fix leaves a folded group of reports: a running fix is never
   s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
   const fixed = s.doc.querySelector(`#log .pip-report[data-run="${RUN}"]`);
   assert.equal(fixed.closest(".pip-report-group"), null, "the fix's card stands on its own");
-  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "the two left are not a group");
+  const group = s.doc.querySelector("#log .pip-report-group");
+  assert.ok(group, "the two left are still one line (the fold starts at two)");
+  assert.equal(group.querySelectorAll(":scope > .pip-report").length, 2);
+  assert.deepEqual(s.errors, []);
+});
+
+test("a fix on one of two folded reports leaves the other as a card of its own", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: { ...REPORT, run_id: "run_" + "d".repeat(32), pip_id: PIP, name: "Pip d" } });
+  s.event({ type: "pip_report", report: REPORT });
+  assert.ok(s.doc.querySelector("#log .pip-report-group"), "two are one line");
+  s.event({ type: "pip_fix", fix: fix({ state: "running" }) });
+  assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "one left is not a group");
+  assert.equal(s.doc.querySelectorAll("#log .pip-report").length, 2);
   assert.deepEqual(s.errors, []);
 });
