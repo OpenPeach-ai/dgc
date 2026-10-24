@@ -39,7 +39,7 @@ export function pickerMarkup({ id, label, value, options, face, placeholder = 'C
  * again (`restore`). The view sends it its clicks, keys and focus changes; each returns true when it was the picker's.
  */
 export function createPicker({ root, onPick, now = () => Date.now() }) {
-  let openId = '', activeValue = '', typed = { text: '', at: 0 };
+  let openId = '', activeValue = '', typed = { text: '', at: 0 }, grown = null;
   const byId = (id) => (root.getElementById ? root.getElementById(id) : root.querySelector(`#${id}`));
   const parts = (id) => { const button = id && byId(id), list = id && byId(`${id}-list`); return button && list ? { button, list, anchor: button.closest('.pip-picker-anchor') || button.parentElement } : null; };
   const rows = (list) => [...list.querySelectorAll('[role=option]')];
@@ -58,26 +58,36 @@ export function createPicker({ root, onPick, now = () => Date.now() }) {
     else list.removeAttribute('aria-activedescendant');
   }
   // Drop down if it fits below the button, inside every box that clips it and the page; else flip up if there is more
-  // room above; else drop down and scroll inside. With room for neither, the box scrolls the button to its top first.
+  // room above; else drop down and scroll inside. A dialog shorter than it may be first grows down to hold the list, its
+  // top (and the button) staying where they are; a box with more to show below scrolls the button up when neither way
+  // has room.
   function place(list, button) {
     list.classList.remove('up'); list.style.maxHeight = '';
     const win = list.ownerDocument?.defaultView;
     if (!win || !button.getBoundingClientRect().height) return;   // nothing is laid out (a test's DOM)
-    const gap = 6, natural = list.scrollHeight + 2;
+    const gap = 6, natural = list.offsetHeight;
+    list.style.maxHeight = '0px';   // while measuring, the list itself gives the box nothing more to scroll
     const bounds = () => {
       let top = 0, bottom = win.innerHeight, scroller = null;
       for (let a = list.parentElement; a; a = a.parentElement) {
         const s = win.getComputedStyle(a);
         if (s.overflowY === 'visible') continue;
-        const r = a.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom);
+        const r = a.getBoundingClientRect(), inner = r.top + a.clientTop;
+        top = Math.max(top, inner); bottom = Math.min(bottom, inner + a.clientHeight);
         if (!scroller && ['auto', 'scroll'].includes(s.overflowY)) scroller = a;
       }
       const b = button.getBoundingClientRect();
       return { below: bottom - b.bottom - 2 * gap, above: b.top - top - 2 * gap, top, b, scroller };
     };
     let room = bounds();
-    const enough = Math.min(natural, 170);
-    if (room.below < enough && room.above < enough && room.scroller) { room.scroller.scrollTop += room.b.top - room.top - gap; room = bounds(); }
+    const dialog = list.closest('.dialog'), holder = dialog?.parentElement;
+    if (dialog && holder && natural > room.below) {
+      const r = dialog.getBoundingClientRect(), most = parseFloat(win.getComputedStyle(dialog).maxHeight), pad = parseFloat(win.getComputedStyle(holder).paddingTop) || 0;
+      const grow = Math.floor(Math.min(natural - room.below, (Number.isFinite(most) ? most : Infinity) - r.height, (holder.clientHeight - 2 * pad - r.height) / 2));
+      if (grow > 0) { grown = dialog; dialog.style.minHeight = `${r.height + grow}px`; dialog.style.marginTop = `${grow}px`; room = bounds(); }
+    }
+    const enough = Math.min(natural, 170), more = room.scroller ? room.scroller.scrollHeight - room.scroller.clientHeight - room.scroller.scrollTop : 0;
+    if (room.below < enough && room.above < enough && more > 0) { room.scroller.scrollTop += Math.min(more, room.b.top - room.top - gap); room = bounds(); }
     if (natural <= room.below || room.below >= room.above) list.style.maxHeight = `${Math.max(60, Math.floor(room.below))}px`;
     else { list.classList.add('up'); list.style.maxHeight = `${Math.max(60, Math.floor(room.above))}px`; }
   }
@@ -97,6 +107,7 @@ export function createPicker({ root, onPick, now = () => Date.now() }) {
   function close(focus = true) {
     const p = parts(openId);
     openId = '';
+    if (grown) { grown.style.minHeight = ''; grown.style.marginTop = ''; grown = null; }
     if (!p) return;
     p.list.hidden = true; p.button.setAttribute('aria-expanded', 'false'); setActive(p.list, null);
     p.list.classList.remove('up'); p.list.style.maxHeight = '';
@@ -163,7 +174,13 @@ export function createPicker({ root, onPick, now = () => Date.now() }) {
     if (openId) { const p = parts(openId); if (!p || !p.anchor.contains(target)) close(false); else return true; }
     return false;   // a click outside goes on to what it was on
   }
+  // The row under the pointer is the one the keys are on, once the pointer moves: a list opening (or a dialog scrolling)
+  // under a still pointer doesn't take the row the keys chose.
+  let pointer = '';
   function hover(event) {
+    const at = `${event.clientX},${event.clientY}`;
+    if (at === pointer) return;
+    pointer = at;
     if (!openId) return;
     const option = event.target?.closest?.('.pip-picker-list [role=option]'), p = parts(openId);
     if (p && option && p.list.contains(option) && option.getAttribute('aria-disabled') !== 'true' && activeOf(p.list) !== option) setActive(p.list, option, false);

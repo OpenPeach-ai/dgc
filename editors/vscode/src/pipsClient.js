@@ -3797,7 +3797,7 @@ async function enable(){
   catch(error){if(epoch===S.epoch)setError(error);}finally{if(epoch===S.epoch){S.busy=false;render();}}
 }
 document.addEventListener('focusout',event=>picker.focusout(event));
-document.addEventListener('mouseover',event=>picker.hover(event));
+document.addEventListener('mousemove',event=>picker.hover(event));
 document.addEventListener('keydown',event=>{
   if(picker.keydown(event))return;
   // Personal | Project keys, as the Sessions home's tabs take them: an arrow goes to the other tab, Home and End to

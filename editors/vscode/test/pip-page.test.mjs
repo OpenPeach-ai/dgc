@@ -128,6 +128,31 @@ test('its face and colour: choose, Save, and Reset to default',async()=>{
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[1].request.changes)),{body:null,color:null});
 });
 
+test('its face is picked as New Pip picks a character: the big face, a dropdown of the faces, and the keys',async()=>{
+ const x=setup();await openPage(x);
+ x.click('[data-pip-page="character"]');await flush();
+ const button=x.d.querySelector('#pip-face'),list=x.d.querySelector('#pip-face-list');
+ assert.equal(x.d.querySelector('.character-grid, [data-pip-body]'),null,'no grid of faces');
+ assert.deepEqual([button.getAttribute('aria-haspopup'),button.getAttribute('aria-expanded'),list.getAttribute('role')],['listbox','false','listbox']);
+ assert.equal(x.d.querySelector('#pip-face-label').textContent,'Face');
+ assert.deepEqual([...list.querySelectorAll('[role=option]')].map(o=>o.textContent),['Core','Scout','Lens','Patch','Rook','Pulse','Lock','Quill'],'the names, each with its small face');
+ assert.equal(x.d.querySelector('#pip-face-value').textContent,'Scout','its own face, chosen');
+ x.click('[data-pip-color="sun"]');
+ assert.ok([...x.d.querySelectorAll('#pip-face-list .avatar')].every(a=>a.dataset.tint==='sun'),'the faces in the list wear the colour chosen');
+ const key=k=>x.d.activeElement.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
+ x.d.querySelector('#pip-face').focus();key('ArrowDown');
+ assert.equal(x.d.querySelector('#pip-face-list').getAttribute('aria-activedescendant'),'pip-face-scout');
+ key('End');key('Enter');await flush();
+ assert.equal(x.d.querySelector('.pip-character .pip-picker-face .avatar').dataset.character,'quill','the big face follows');
+ assert.equal(x.d.querySelector('#pip-face-value').textContent,'Quill');
+ assert.equal(x.d.activeElement?.id,'pip-face','the focus is back on the dropdown');
+ key('ArrowDown');key('Home');key('Escape');await flush();
+ assert.equal(x.d.querySelector('#pip-face-value').textContent,'Quill','Esc picks nothing');
+ assert.equal(x.d.querySelector('#pip-face-list').hidden,true);
+ x.click('[data-pip-character-save]');await flush();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'quill',color:'sun'});
+});
+
 test('an Always allow you gave is on its page, and Stop allowing takes it back',async()=>{
  const grant={id:'grant_'+'e'.repeat(32),kind:'gmail_send',label:'Send emails from me@example.com',server:'composio',account:'ca_x',tool:'GMAIL_SEND_EMAIL',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),created_at:now,created_by:'editor-user'};
  const none=setup();await openPage(none);
