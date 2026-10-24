@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_templates",
     "list_app_events",
     "list_app_approvals",
     "list_apps",
@@ -79,6 +80,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    "ensure_pip_template", "prune_pip_templates", "decide_pip_template_change",
     "decide_app_approval",
     "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
@@ -335,7 +337,22 @@ READ_COMMANDS |= API63_READS
 EVENT_COMMANDS = API63_EVENTS
 EVENT_NAME = re.compile(r"[a-z0-9_.-]{1,64}\Z")
 MAX_EVENT_PAYLOAD = 32768
+# API 64: Pip templates in code (pips_templates.PipTemplate). ensure_pip_template {template, accept_widening?,
+# overwrite_user_changes?} makes a Personal Pip from a template, or brings the Pip with that key to it: narrowing applies,
+# widening waits as one change for a person unless accept_widening, a person's own changes are kept unless
+# overwrite_user_changes. prune_pip_templates {keep} pauses, never deletes, the template Pips no key lists;
+# list_pip_templates {pip_id?} reads them, with the change that waits; decide_pip_template_change {change_id, decision,
+# expected_digest} accepts or turns one down. A Pip made from a template uses only the app tools it lists. Local only.
+API64_READS = frozenset({'list_pip_templates'})
+API64_MUTATIONS = frozenset({'ensure_pip_template', 'prune_pip_templates', 'decide_pip_template_change'})
+READ_COMMANDS |= API64_READS
+MUTATION_COMMANDS |= API64_MUTATIONS
+TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'ensure_pip_template': frozenset({'template', 'accept_widening', 'overwrite_user_changes'}),
+    'prune_pip_templates': frozenset({'keep'}),
+    'list_pip_templates': frozenset({'pip_id'}),
+    'decide_pip_template_change': frozenset({'change_id', 'decision', 'expected_digest'}),
     'trigger_app_event': frozenset({'app', 'event', 'payload', 'idempotency_key'}),
     'list_app_events': frozenset({'app', 'limit'}),
     'list_app_approvals': frozenset({'app'}),
@@ -737,7 +754,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API63_READS | API63_EVENTS:
+        if command in API64_READS | API64_MUTATIONS:
+            minimum = 64
+        elif command in API63_READS | API63_EVENTS:
             minimum = 63
         elif command in API62_READS | API62_MUTATIONS:
             minimum = 62
@@ -849,6 +868,10 @@ class Pips:
             # What your app sent travels outside the 32 KiB budget, like a message's images: 32 KB of JSON at most.
             payload = _event_payload(params['payload'])
             params = {key: value for key, value in params.items() if key != 'payload'}
+        if command == 'ensure_pip_template' and isinstance(params, Mapping) and 'template' in params:
+            # A PipTemplate (or the same dict) becomes its wire shape, checked, before the JSON-only bounds below.
+            from .pips_templates import template_wire
+            params = {**params, 'template': template_wire(params['template'])}
         if command in ('register_app', 'update_app') and isinstance(params, Mapping) and 'tools' in params:
             # define_pip_tool values become their wire shape (checked) before the JSON-only bounds below.
             from .pips_app import wire_tools
@@ -909,6 +932,27 @@ class Pips:
                 raise DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer")
             if type(values['app_events']) is not bool:
                 raise DGCConfigError("app_events is True or False")
+        if command == 'ensure_pip_template':
+            if 'template' not in values:
+                raise DGCConfigError("ensure_pip_template takes a template")
+            for flag in ('accept_widening', 'overwrite_user_changes'):
+                if flag in values and type(values[flag]) is not bool:
+                    raise DGCConfigError(f"{flag} is True or False")
+        if command == 'prune_pip_templates':
+            keep = values.get('keep')
+            if (type(keep) is not list or len(keep) > 100 or len(set(map(str, keep))) != len(keep)
+                    or any(type(k) is not str or not re.fullmatch(r"[a-z0-9-]{1,40}", k) for k in keep)):
+                raise DGCConfigError("keep is the keys of your templates (up to 100, each once): the ones to keep running")
+        if command == 'list_pip_templates' and 'pip_id' in values and not (
+                isinstance(values['pip_id'], str) and re.fullmatch(r"pip_[a-f0-9]{32}", values['pip_id'])):
+            raise DGCConfigError("pip_id is a Pip's id, pip_ and 32 hex digits")
+        if command == 'decide_pip_template_change':
+            if not (isinstance(values.get('change_id'), str) and TEMPLATE_CHANGE_ID.fullmatch(values['change_id'])):
+                raise DGCConfigError("change_id is the change's id, tmplchange_ and 32 hex digits")
+            if values.get('decision') not in ('accept', 'reject'):
+                raise DGCConfigError('decision is "accept" or "reject"')
+            if not (isinstance(values.get('expected_digest'), str) and re.fullmatch(r"[0-9a-f]{64}", values['expected_digest'])):
+                raise DGCConfigError("expected_digest is the change's digest, from list_pip_templates")
         if command == 'decide_app_approval':
             if not (isinstance(values.get('action_id'), str) and APP_ACTION_ID.fullmatch(values['action_id'])):
                 raise DGCConfigError("action_id is the approval's, appaction_ and 32 hex digits")
@@ -1077,6 +1121,51 @@ class Pips:
         ``{"app", "events": [...], "names": [...]}``."""
         return self.read("list_app_events", {"app": app} if limit is None else {"app": app, "limit": limit})
 
+    def ensure(self, template: Any, *, approved: bool = False, accept_widening: bool = False,
+               overwrite_user_changes: bool = False) -> dict[str, Any]:
+        """Make the Personal Pip a :class:`~dgc_sdk.pips_templates.PipTemplate` describes, or bring the Pip with its
+        key to it (Pips API 64). Answers ``{"pip_id", "key", "name", "created", "applied", "waiting", "declined",
+        "unchanged", "conflicts", "unavailable", "notice"}``.
+
+        Narrowing and neutral changes apply at once (its text and model, a tool, routine or Always allow taken away, a
+        lower level, a routine's time). Widening (a new change tool, its own computer, a higher level, a new Always
+        allow, a routine newly on your app's event) waits as one change for a person in DGC, its id in ``waiting``;
+        ``accept_widening=True`` applies it now, and your app takes responsibility for that. A field a person changed
+        in DGC since the last ensure is kept and listed in ``conflicts``, unless ``overwrite_user_changes=True``. The
+        same template twice answers ``unchanged: True``."""
+        return self.mutate("ensure_pip_template", {"template": template, "accept_widening": accept_widening,
+                                                   "overwrite_user_changes": overwrite_user_changes}, approved=approved)
+
+    def ensure_all(self, templates: Any, *, prune: bool = False, approved: bool = False, accept_widening: bool = False,
+                   overwrite_user_changes: bool = False) -> dict[str, Any]:
+        """Your deploy step (Pips API 64): :meth:`ensure` each template, in order, then with ``prune=True`` pause (never
+        delete) every Pip made from a template whose key is no longer listed. The templates are checked together first
+        (each key once); DGC refusing one stops there, before anything is pruned. Answers ``{"pips": [each ensure's
+        answer], "pruned": [...], "waiting": [...], "unchanged"}``."""
+        from .pips_templates import templates_wire
+        if type(prune) is not bool:
+            raise DGCConfigError("prune is True or False")
+        wires = templates_wire(templates)
+        answers = [self.ensure(w, approved=approved, accept_widening=accept_widening,
+                               overwrite_user_changes=overwrite_user_changes) for w in wires]
+        pruned: list[Any] = []
+        if prune:
+            pruned = self.mutate("prune_pip_templates", {"keep": [w["key"] for w in wires]}, approved=approved)["pruned"]
+        return {"pips": answers, "pruned": pruned, "waiting": [i for a in answers for i in a.get("waiting") or []],
+                "unchanged": all(a.get("unchanged") for a in answers) and not pruned}
+
+    def templates(self, pip_id: str | None = None) -> dict[str, Any]:
+        """The Pips made from your templates (Pips API 64), each with what it was last brought to and the change that
+        waits for a person (``waiting``: its ``id``, ``digest``, ``items`` and ``words``): ``{"templates": [...]}``."""
+        return self.read("list_pip_templates", {} if pip_id is None else {"pip_id": pip_id})
+
+    def decide_template_change(self, change_id: str, decision: Literal["accept", "reject"], *, expected_digest: str,
+                               approved: bool = False) -> dict[str, Any]:
+        """Accept or turn down a change a template asks for (Pips API 64), exactly once, as DGC's card on the Pip's page
+        does. Call it from a person's choice, never from code alone: ``accept_widening`` is how code decides."""
+        return self.mutate("decide_pip_template_change", {"change_id": change_id, "decision": decision,
+                                                          "expected_digest": expected_digest}, approved=approved)
+
     def get(self, pip_id: str) -> dict[str, Any]:
         return self.read("get_pip", {"pip_id": pip_id})
 
@@ -1163,6 +1252,24 @@ class AsyncPips:
 
     async def events(self, app: str, *, limit: int | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self._sync.events, app, limit=limit)
+
+    async def ensure(self, template: Any, *, approved: bool = False, accept_widening: bool = False,
+                     overwrite_user_changes: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.ensure, template, approved=approved, accept_widening=accept_widening,
+                                       overwrite_user_changes=overwrite_user_changes)
+
+    async def ensure_all(self, templates: Any, *, prune: bool = False, approved: bool = False,
+                         accept_widening: bool = False, overwrite_user_changes: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.ensure_all, templates, prune=prune, approved=approved,
+                                       accept_widening=accept_widening, overwrite_user_changes=overwrite_user_changes)
+
+    async def templates(self, pip_id: str | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.templates, pip_id)
+
+    async def decide_template_change(self, change_id: str, decision: Literal["accept", "reject"], *,
+                                     expected_digest: str, approved: bool = False) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.decide_template_change, change_id, decision,
+                                       expected_digest=expected_digest, approved=approved)
 
     async def get(self, pip_id: str) -> dict[str, Any]:
         return await self.read("get_pip", {"pip_id": pip_id})

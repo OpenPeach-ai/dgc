@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { DGCCommandRejectedError, DGCConfigError, DGCProtocolError, DGCUnsupportedError } from "./errors.ts";
 import type { Frame } from "./transport.ts";
 import { pipToolsWire, type PipTool, type PipToolWire } from "./pipsApp.ts";
+import { pipTemplateWire, pipTemplatesWire, type PipTemplate, type PipTemplateInput, type PipTemplateWire } from "./pipsTemplates.ts";
 
 export type PipCalendarEvent = { summary: string; description: string; start_datetime: string; end_datetime: string; timezone: string } & (
   { attendees?: never; repeat?: never; send_invitations?: never } |
@@ -17,6 +18,7 @@ export type SessionOutcomeSource = { kind: "commit"; revision: string } | { kind
 export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
+  list_pip_templates: { pip_id?: string };
   list_app_events: { app: string; limit?: number };
   list_app_approvals: { app?: string };
   list_apps: Record<string, never>;
@@ -113,6 +115,9 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  ensure_pip_template: { template: PipTemplate | PipTemplateInput | PipTemplateWire; accept_widening?: boolean; overwrite_user_changes?: boolean };
+  prune_pip_templates: { keep: string[] };
+  decide_pip_template_change: { change_id: string; decision: "accept" | "reject"; expected_digest: string };
   decide_app_approval: { action_id: string; decision: "accept" | "reject"; expected_digest: string };
   register_app: { name: string; url: string; tools: readonly (PipTool | PipToolWire)[] };
   update_app: { name: string; url?: string; tools: readonly (PipTool | PipToolWire)[] };
@@ -220,6 +225,10 @@ export type PipMutationParams = {
 export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  ensure_pip_template: ["template", "accept_widening", "overwrite_user_changes"],
+  prune_pip_templates: ["keep"],
+  list_pip_templates: ["pip_id"],
+  decide_pip_template_change: ["change_id", "decision", "expected_digest"],
   trigger_app_event: ["app", "event", "payload", "idempotency_key"],
   list_app_events: ["app", "limit"],
   list_app_approvals: ["app"],
@@ -759,6 +768,16 @@ const API63_READS = new Set(["list_app_events"]);
 const API63_EVENTS = new Set(["trigger_app_event"]);
 const API63_FIELDS: Readonly<Record<string, readonly string[]>> = { list_pip_routines: ["app_events"] };
 for (const command of API63_READS) READS.add(command);
+// API 64: Pip templates in code (definePipTemplate). ensure_pip_template {template, accept_widening?,
+// overwrite_user_changes?} makes a Personal Pip from a template, or brings the Pip with that key to it: narrowing
+// applies, widening waits as one change for a person unless accept_widening, a person's own changes are kept unless
+// overwrite_user_changes. prune_pip_templates {keep} pauses, never deletes, the template Pips no key lists;
+// list_pip_templates {pip_id?} reads them, with the change that waits; decide_pip_template_change {change_id, decision,
+// expected_digest} accepts or turns one down. A Pip made from a template uses only the app tools it lists. Local only.
+const API64_READS = new Set(["list_pip_templates"]);
+const API64_MUTATIONS = new Set(["ensure_pip_template", "prune_pip_templates", "decide_pip_template_change"]);
+for (const command of API64_READS) READS.add(command);
+for (const command of API64_MUTATIONS) MUTATIONS.add(command);
 const MAX_EVENT_PAYLOAD = 32768;
 /** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
  *  it again). */
@@ -907,7 +926,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -966,6 +985,17 @@ export class Pips {
       payload = eventPayload(given); hasPayload = true;
       params = rest;
     }
+    if (command === "ensure_pip_template" && isRecordValue(params) && Object.hasOwn(params, "template")) {
+      // A definePipTemplate value (or the same object) becomes its wire shape, checked, before the JSON-only bounds below.
+      const given = (params as Record<string, unknown>).template;
+      // Its wire shape (always_allow), as ensureAll sends it, is read the same way.
+      let shaped: unknown = given;
+      if (isRecordValue(given) && Object.hasOwn(given, "always_allow") && !Object.hasOwn(given, "alwaysAllow")) {
+        const { always_allow: allow, ...rest } = given;
+        shaped = { ...rest, alwaysAllow: allow };
+      }
+      params = { ...params, template: pipTemplateWire(shaped) };
+    }
     if ((command === "register_app" || command === "update_app") && isRecordValue(params) && Object.hasOwn(params, "tools")) {
       // definePipTool values become their wire shape (checked) before the JSON-only bounds below.
       params = { ...params, tools: pipToolsWire((params as Record<string, unknown>).tools) };
@@ -1004,6 +1034,31 @@ export class Pips {
         throw new DGCUnsupportedError("Routines on your app's events require a runtime advertising Pips API 63 or newer");
       }
       if (typeof values.app_events !== "boolean") throw new DGCConfigError("app_events is true or false");
+    }
+    if (command === "ensure_pip_template") {
+      if (!Object.hasOwn(values, "template")) throw new DGCConfigError("ensure_pip_template takes a template");
+      for (const flag of ["accept_widening", "overwrite_user_changes"]) {
+        if (Object.hasOwn(values, flag) && typeof values[flag] !== "boolean") throw new DGCConfigError(`${flag} is true or false`);
+      }
+    }
+    if (command === "prune_pip_templates") {
+      const keep = values.keep;
+      if (!Array.isArray(keep) || keep.length > 100 || new Set(keep).size !== keep.length
+        || keep.some((k) => typeof k !== "string" || !/^[a-z0-9-]{1,40}$/.test(k))) {
+        throw new DGCConfigError("keep is the keys of your templates (up to 100, each once): the ones to keep running");
+      }
+    }
+    if (command === "list_pip_templates" && Object.hasOwn(values, "pip_id") && !(typeof values.pip_id === "string" && /^pip_[a-f0-9]{32}$/.test(values.pip_id))) {
+      throw new DGCConfigError("pip_id is a Pip's id, pip_ and 32 hex digits");
+    }
+    if (command === "decide_pip_template_change") {
+      if (!(typeof values.change_id === "string" && /^tmplchange_[a-f0-9]{32}$/.test(values.change_id))) {
+        throw new DGCConfigError("change_id is the change's id, tmplchange_ and 32 hex digits");
+      }
+      if (values.decision !== "accept" && values.decision !== "reject") throw new DGCConfigError('decision is "accept" or "reject"');
+      if (!(typeof values.expected_digest === "string" && /^[0-9a-f]{64}$/.test(values.expected_digest))) {
+        throw new DGCConfigError("expected_digest is the change's digest, from list_pip_templates");
+      }
     }
     if (command === "decide_app_approval") {
       if (!(typeof values.action_id === "string" && /^appaction_[a-f0-9]{32}$/.test(values.action_id))) {
@@ -1208,6 +1263,48 @@ export class Pips {
    *  `{app, events: [...], names: [...]}`. */
   events(app: string, options: { limit?: number } = {}): Promise<PipResult> {
     return this.read("list_app_events", { app, ...(options.limit !== undefined ? { limit: options.limit } : {}) });
+  }
+  /** Make the Personal Pip a definePipTemplate value describes, or bring the Pip with its key to it (Pips API 64).
+   *  Resolves to `{pip_id, key, name, created, applied, waiting, declined, unchanged, conflicts, unavailable, notice}`.
+   *  Narrowing and neutral changes apply at once; widening (a new change tool, its own computer, a higher level, a new
+   *  Always allow, a routine newly on your app's event) waits as one change for a person in DGC, its id in `waiting`;
+   *  `acceptWidening: true` applies it now, and your app takes responsibility for that. A field a person changed in
+   *  DGC since the last ensure is kept and listed in `conflicts`, unless `overwriteUserChanges: true`. The same
+   *  template twice resolves with `unchanged: true`. */
+  ensure(template: PipTemplate | PipTemplateInput, options: { approved: boolean; acceptWidening?: boolean; overwriteUserChanges?: boolean }
+    = { approved: false }): Promise<PipResult> {
+    const o = options && typeof options === "object" ? options : { approved: false };
+    return this.mutate("ensure_pip_template", { template, accept_widening: o.acceptWidening === true,
+      overwrite_user_changes: o.overwriteUserChanges === true }, { approved: o.approved === true });
+  }
+  /** Your deploy step (Pips API 64): ensure each template, in order, then with `prune: true` pause (never delete) every
+   *  Pip made from a template whose key is no longer listed. The templates are checked together first (each key once);
+   *  DGC refusing one stops there, before anything is pruned. Resolves to `{pips, pruned, waiting, unchanged}`. */
+  async ensureAll(templates: readonly (PipTemplate | PipTemplateInput)[], options: { approved: boolean; prune?: boolean;
+    acceptWidening?: boolean; overwriteUserChanges?: boolean } = { approved: false }): Promise<PipResult> {
+    const o = options && typeof options === "object" ? options : { approved: false };
+    if (o.prune !== undefined && typeof o.prune !== "boolean") throw new DGCConfigError("prune is true or false");
+    const wires = pipTemplatesWire(templates);
+    const answers: PipResult[] = [];
+    for (const wire of wires) {
+      answers.push(await this.mutate("ensure_pip_template", { template: wire, accept_widening: o.acceptWidening === true,
+        overwrite_user_changes: o.overwriteUserChanges === true }, { approved: o.approved === true }));
+    }
+    let pruned: PipJson = [];
+    if (o.prune === true) {
+      pruned = (await this.mutate("prune_pip_templates", { keep: wires.map((w) => w.key) }, { approved: o.approved === true })).pruned;
+    }
+    const waiting = answers.flatMap((a) => (Array.isArray(a.waiting) ? a.waiting : []));
+    return { pips: answers, pruned, waiting, unchanged: answers.every((a) => a.unchanged === true) && !(Array.isArray(pruned) && pruned.length) };
+  }
+  /** The Pips made from your templates (Pips API 64), each with what it was last brought to and the change that waits
+   *  for a person (`waiting`: its id, digest, items and words): `{templates: [...]}`. */
+  templates(pipId?: string): Promise<PipResult> { return this.read("list_pip_templates", pipId === undefined ? {} : { pip_id: pipId }); }
+  /** Accept or turn down a change a template asks for (Pips API 64), exactly once, as DGC's card on the Pip's page does.
+   *  Call it from a person's choice, never from code alone: acceptWidening is how code decides. */
+  decideTemplateChange(changeId: string, decision: "accept" | "reject", expectedDigest: string,
+    approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("decide_pip_template_change", { change_id: changeId, decision, expected_digest: expectedDigest }, approval);
   }
   get(pipId: string): Promise<PipResult> { return this.read("get_pip", { pip_id: pipId }); }
   runs(pipId: string): Promise<PipResult> { return this.read("list_pip_runs", { pip_id: pipId }); }
