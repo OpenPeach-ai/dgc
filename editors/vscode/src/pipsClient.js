@@ -10,7 +10,7 @@ import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as m
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
-import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle} from './pipRunPosts.js';
+import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE} from './pipRunPosts.js';
 import {mountSetupCards} from './pipSetupCards.js';
 import {mountDigestBar} from './pipDigestBar.js';
 import {mountHomePips} from './pipHomeStrip.js';
@@ -122,8 +122,12 @@ const defaultZone=OLD_ZONES[browserZone]||browserZone;
 S.sourceDirty=false;S.sourceDraftVersion=null;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;S.executionCapability=null;S.executionLoading=false;S.executionError='';S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';S.types=[];S.createStep='type';S.createType='';S.overview=true;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.modelsError='';S.modelsLoading=false;S.modelDirty=false;S.stream=null;
 const creationDrafts=new Map(),avatarIds=new Map(),chatDrafts=new Map(),chatRequests=new Map();let avatarSequence=0,avatarObserver=null,characterCleanup=null,messageSeq=0,streamSeq=0,streamLoading=false,selectionGeneration=0;
 let savedView=options.getState?.(),restoreView=true,navigationPending=!!options.navigation;
-let postsSeq=0;
-// Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript.
+let postsSeq=0,fixesSeq=0;
+// What Ask DGC to fix did for each run of the open Pip (Pips API 65), read from DGC: run_id -> its latest fix. And the
+// runs asked about just now, whose fix hasn't been read yet (run_id -> when), to say "Asking DGC…" until it is.
+S.fixes=new Map();S.fixesPip='';const askingFix=new Map();
+// Ask DGC to fix, once per run: kept with the view, as the Work chat keeps the prompt in its transcript (before Pips
+// API 65; from 65 the post says what the fix itself did).
 const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r=>typeof r==='string'&&/^run_[0-9a-f]{32}$/.test(r)).slice(-100):[]);
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
@@ -403,7 +407,7 @@ function chatMarkup(){
   const items=postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m}));
   const context=postsShown()?postContext():null;
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
-    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),asked:askedRuns.has(p.run_id),expanded:shownInFull.has(p.run_id)});};
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id)});};
   const messages=items.map(i=>i.message?drawMessage(i.message):drawPost(i)).join('');
   const quietChat=!S.messages.length&&!items.length;
   return `<section class="pip-conversation" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${simple?'':typing}${S.stream?.text?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simpleMode()?runnerOffMarkup():''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simpleMode()?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
@@ -424,7 +428,36 @@ function routineReply(m,title,type){
   return {head,clip:cut.clipped?{text:cut.text,open:shownInFull.has(m.id),key:m.id}:null};
 }
 function postContext(){
-  return {name:S.pip.name,type:pipType(S.pip,S.types)||characterType(S.pip.pip_type),personal:personalPip(),ask:canAskDgc(),canRun:canRunNow(),renderMarkdown:renderPipMarkdown};
+  return {name:S.pip.name,type:pipType(S.pip,S.types)||characterType(S.pip.pip_type),personal:personalPip(),ask:canAskDgc(),canRun:canRunNow(),renderMarkdown:renderPipMarkdown,
+    openFix:typeof options.onOpenFix==='function'&&!remoteHost};
+}
+// ---- What Ask DGC to fix did, in the run's post (Pips API 65) ----
+// The fix runs in a Work chat and keeps its record on disk (dgc/pip_fix.py). The post reads it each time the posts are
+// read: opening the Pip, every 4 seconds while its chat or History is on screen, and coming back into view. So it says
+// fixing, Fixed, failed or undone as the Work chat's card does, live, and the same after a reload or a restart.
+function fixesShown(){return S.apiVersion>=65&&postsShown()&&!personalPip();}
+function fixState(runId){
+  if(!fixesShown())return {asked:askedRuns.has(runId)};
+  const fix=S.fixesPip===S.selected?S.fixes.get(runId)||null:null,at=askingFix.get(runId);
+  // Asked just now: "Asking DGC…" until its fix is read (one at work, or newer than the ask), for half a minute at most.
+  const asking=at!==undefined&&Date.now()-at<30000&&!(fix&&(FIX_ACTIVE.includes(fix.state)||Number(fix.created_at)*1000>=at-2000));
+  if(at!==undefined&&!asking)askingFix.delete(runId);
+  return {fix,asking};
+}
+async function loadFixes(){
+  if(!fixesShown()||!S.selected||!usable()||!S.posts.some(askable))return;
+  const token=scope(),id=S.selected,sequence=++fixesSeq;
+  try{const fixes=runFixesPage(await send('list_pip_run_fixes',{pip_id:id}),id,S.workspace.id);
+    if(token!==scope()||sequence!==fixesSeq||S.selected!==id)return;
+    const before=S.fixesPip===id?JSON.stringify([...S.fixes]):'';S.fixes=fixes;S.fixesPip=id;
+    if(JSON.stringify([...fixes])!==before||askingFix.size)render();
+  }catch{/* the post keeps what it said; the next look reads it again */}
+}
+// The fix's chip goes to the Work chat it ran in: its card there has Review, Undo, Watch and Stop.
+function openFixChat(runId){
+  const fix=S.fixes.get(runId);if(!fix?.session_id||typeof options.onOpenFix!=='function'||remoteHost)return;
+  const result=options.onOpenFix({session:fix.session_id,run_id:runId});
+  if(result!==true)setError(typeof result==='string'?result:'DGC could not open the Work chat this fix ran in.');
 }
 async function loadPosts(more=false){
   if(!postsShown()||!S.selected||!usable()||(more&&(!S.postsCursor||S.postsLoading)))return;
@@ -434,7 +467,7 @@ async function loadPosts(more=false){
     S.posts=mergePosts(S.postsPip===id?S.posts:[],page.posts);S.postsPip=id;
     if(more||!S.postsLoaded)S.postsCursor=page.next_before_id;S.postsLoaded=true;S.postsError='';
   }catch(error){if(token===scope()&&sequence===postsSeq)S.postsError=errorText(error);}
-  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;render();}}
+  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;render();void loadFixes();}}
 }
 // Open full report: the run, under History, at its report.
 function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();render();void loadRun(runId).then(()=>document.querySelector('section[aria-label="Run report"],section[aria-label="Pulse command receipt"],section[aria-label="Documentation draft"]')?.scrollIntoView?.({block:'start'}));}
@@ -445,10 +478,15 @@ function jumpToPost(runId){
   if(!go())void loadMessages().then(()=>{if(!go())openPostReport(runId);});
 }
 function askDgcAbout(runId){
-  const post=postFor(runId);if(!post||!canAskDgc()||askedRuns.has(runId))return;
+  const post=postFor(runId);if(!post||!canAskDgc())return;
+  const live=fixesShown(),{fix,asking}=live?fixState(runId):{};
+  if(live?asking||FIX_ACTIVE.includes(fix?.state):askedRuns.has(runId))return;
   const result=options.onAskDgc({report:post,session:typeof S.pip?.report_session==='string'?S.pip.report_session:''});
   if(result!==true){setError(typeof result==='string'?result:'DGC could not reach the Work chat.');return;}
-  askedRuns.add(runId);rememberView();S.notice='Asked DGC in the Work chat.';render();
+  // From Pips API 65 the post says what the fix does, read from DGC; before, that it was asked, kept with the view.
+  if(live){askingFix.set(runId,Date.now());for(const ms of [1500,5000,12000])window.setTimeout(()=>void loadFixes(),ms);}
+  else{askedRuns.add(runId);rememberView();}
+  S.notice='Asked DGC in the Work chat.';render();
 }
 function runNow(){if(livePip(S.pip)){try{if(S.apiVersion<60)throw Error('Update DGC to run a live-data Pip.');if(!S.runner?.online||S.runner.paused||S.pip.status!=='active'||S.pip.active_run||S.runs.some(r=>active(r.status)))return;void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${globalThis.crypto.randomUUID()}`},async result=>{await loadRun(result.run.id);});}catch(error){setError(error);}return;}if(pulsePip(S.pip)){try{if(S.apiVersion<21)throw Error('Update DGC to run Pulse’s command plan.');if(!supportedSource()||!S.runner?.online||S.runner.paused||S.pip.status!=='active'||S.pip.active_run||S.runs.some(r=>active(r.status)))return;const pins=pulseRunPins(S.pip);void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${globalThis.crypto.randomUUID()}`,...pins},async result=>{await loadRun(result.run.id);});}catch(error){setError(error);}return;}if(supportedSource()&&!executionPip(S.pip)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&pipType(S.pip,S.types)?.available&&!S.pip.active_run)void mutate({type:'run_pip',pip_id:S.selected,idempotency_key:`editor-${Date.now()}-${globalThis.crypto.randomUUID()}`},async result=>{await loadRun(result.run.id);});return;}
 async function toggleChatActivity(runId){
@@ -2827,7 +2865,7 @@ function renderReview() {
   }
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
 }
-function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (the founder,
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -3267,6 +3305,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}
   if(target.dataset.postFix){askDgcAbout(target.dataset.postFix);return;}
+  if(target.dataset.postFixOpen){openFixChat(target.dataset.postFixOpen);return;}
   if(target.dataset.postRun){if(canRunNow())runNow();return;}
   if(target.dataset.postMore){const key=target.dataset.postMore;if(!shownInFull.delete(key))shownInFull.add(key);render();return;}
   if(target.dataset.lastPost){jumpToPost(target.dataset.lastPost);return;}

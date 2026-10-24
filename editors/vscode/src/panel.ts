@@ -4382,6 +4382,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.inVisiblePanel(() => this.post({ type: "pipAskDgc", report }));
   }
 
+  /** A fix this chat ran, opened from its run's post on the Pips page: the chat shows its card once it is drawn. */
+  showPipFix(runId: string): void {
+    this.inVisiblePanel(() => this.post({ type: "pipShowFix", run_id: runId }));
+  }
+
   private inVisiblePanel(action: () => void): void {
     this.focus();
     if (this.webviewReady) { action(); return; }
@@ -4487,6 +4492,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (!report || typeof report !== "object" || !/^run_[0-9a-f]{32}$/.test(String(report.run_id || ""))) return;
         const session = /^[A-Za-z0-9_-]{1,128}$/.test(String(msg.session || "")) ? String(msg.session) : "";
         this.places.open(session).askFromPips(report);
+        return;
+      }
+      case "pipOpenFix": {
+        // What a fix did, from a run's post on the Pips page (Pips API 65): the chat it ran in opens in its tab and shows
+        // the fix's card, where Review, Undo, Watch and Stop are. From the Sessions home, or from another session's tab.
+        const places = this.tab?.places ?? this.places;
+        if (!places || !/^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) return;
+        const session = /^[A-Za-z0-9_-]{1,128}$/.test(String(msg.session || "")) ? String(msg.session) : "";
+        if (session) places.open(session).showPipFix(String(msg.run_id));
         return;
       }
       case "pipsReady":
