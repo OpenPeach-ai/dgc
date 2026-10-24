@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Pips API 65: `pips.run_fixes(pip_id)` (TypeScript `runFixes(pipId)`, a read: `list_pip_run_fixes {pip_id}`) says
+  what Ask DGC to fix did for each of a Pip's runs: `{pip_id, workspace_id, fixes}`, the latest fix of each run,
+  newest first, each with its `state` (`queued`, `preparing`, `running` or `applying` while it works; `applied`,
+  `partial`, `unchanged`, `not_applied`, `failed`, `stopped`, `interrupted` or `undone` when it ended), the `files` it
+  changed, `tests`, `undo`, `message` and the `session_id` of the Work chat it ran in. Local only; refused before API
+  65.
+
 - Pips API 64: Pip templates in code. `PipTemplate(key, name, instructions, model=None, level="ask", tools=(),
   routines=(), always_allow=())` (TypeScript: `definePipTemplate({..., alwaysAllow})`) describes a Personal Pip, checked
   where it is made: `tools` are your apps' tools as `app:<name>/<tool>` and `computer`; `routines` run on a schedule or

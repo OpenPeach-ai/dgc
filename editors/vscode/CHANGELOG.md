@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **A Project Pip's chat is the same as a Personal Pip's.** It looks and answers the same way: the Pip at work with its
+  face, its name, what it is doing and its clock; its reply written into short bubbles as it comes, instead of typing
+  dots and a "Still writing" block; time marks between messages; your message on the accent colour; the buttons under a
+  message when you point at it; the same box ("Ask Billing audit"), with a line above it when Pips aren't running. Its
+  page keeps what only a Project Pip has: History, Settings, and its runs with Ask DGC to fix, now in the same chat.
+  Which code it reads is under What this Pip can do. A remote view keeps the chat it had.
+- **Ask DGC to fix, followed in the Pip's own chat.** Once DGC is fixing a run, its message in the Pip's chat says
+  **DGC is fixing this**; when it is done, **Fixed · 3 files**, and a click opens the Work chat it ran in, at its card,
+  where Review and Undo are. A fix that didn't finish says so and offers **Ask DGC to fix again**; one that was undone
+  offers Ask DGC to fix again. It updates while you look and says the same after a reload. Needs a DGC CLI with Pips
+  API 65; with an older one, the message says Asked DGC, as before.
 - **A finished Pip fix is one line.** "Fixed · 6 files changed +314 −13", its time, and Review, Undo and Watch. Its
   files, tests and summary open under that line with a click, and stay open while the card updates.
 - **No thick accent bar down a card's left edge.** Pip report cards, monitor events and artifact cards lost theirs;

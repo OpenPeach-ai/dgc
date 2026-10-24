@@ -95,6 +95,13 @@ The reply is a `pips_result` event that carries the nested request ID:
   background fix (`start_pip_fix {run_id}`, offered as `ready.capabilities.pip_fix`), which shows the run's card
   there when the chat never had it, unless that report's fix is already working. Against a CLI without
   `pip_fix` it sends the Work chat card's prompt instead, unless the transcript already names the run.
+- `list_pip_run_fixes {pip_id}` (API 65, local only) reads what Ask DGC to fix did for each of the Pip's runs; see
+  **Runs in the Pip's own chat** in [PIPS_REFERENCE.md](PIPS_REFERENCE.md). The host refuses it before sending to a
+  CLI below API 65. The editor reads it with the posts (opening the Pip, every 4 seconds while its chat or History is
+  on screen, coming back into view) and draws each post's fix from it, never from the view's own memory. A click on a
+  fix sends the extension `pipOpenFix {session, run_id}` (the Sessions home, or a session's tab when the fix ran in
+  another), which opens that session's tab and sends it `pipShowFix {run_id}`: the chat shows the fix's card once it
+  is drawn. In the chat the fix ran in, the Pips page closes and shows the card itself.
 - `introduce_pip {pip_id}` (API 43, local only) queues a new Personal Pip's first message once and
   returns `{run, message}` like `send_pip_message`. That message has `intro: true` in
   `list_pip_messages`; the editor hides it and shows the Pip typing until its reply arrives.

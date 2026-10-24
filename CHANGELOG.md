@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A Pip's own chat says what Ask DGC to fix did (Pips API 65).** When a Work chat fixes what a Project Pip reported,
+  the run's message in the Pip's own chat on the Pips page now says so, read from DGC: DGC is fixing this, Fixed
+  · 3 files, the fix didn't finish (with Ask DGC to fix again), or back to Ask DGC to fix once it is undone. It
+  says the same after a window reload or a restart of the runner. `list_pip_run_fixes {pip_id}` reads it: for each of
+  the Pip's runs, the latest fix any chat of the project ran, newest first, with its state, the files it changed, its
+  tests and undo, and the chat it ran in. Local only; a Personal Pip has none.
+
 - **Your app's code keeps its Pips (Pips API 64).** An app that uses DGC's SDK can declare its Personal Pips in code,
   each a template: a name and instructions, a model, how much it asks, the app's tools it may use, its routines (on a
   schedule or on the app's events) and the changes it may run without asking. On each deploy, `ensure_pip_template`
