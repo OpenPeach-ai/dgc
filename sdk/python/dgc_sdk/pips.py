@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "list_pip_run_fixes",
     "list_pip_templates",
     "list_app_events",
     "list_app_approvals",
@@ -347,8 +348,14 @@ API64_READS = frozenset({'list_pip_templates'})
 API64_MUTATIONS = frozenset({'ensure_pip_template', 'prune_pip_templates', 'decide_pip_template_change'})
 READ_COMMANDS |= API64_READS
 MUTATION_COMMANDS |= API64_MUTATIONS
+# API 65: what Ask DGC to fix did for a Pip's runs. list_pip_run_fixes {pip_id} reads, for each run, the latest fix a
+# Work chat ran of it ({fix_id, run_id, state, files?, tests?, undo?, message?, session_id?, ...}), so a Pip's own chat
+# can say fixing, Fixed, failed or undone. A Personal Pip has none. Local only.
+API65_READS = frozenset({'list_pip_run_fixes'})
+READ_COMMANDS |= API65_READS
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'list_pip_run_fixes': frozenset({'pip_id'}),
     'ensure_pip_template': frozenset({'template', 'accept_widening', 'overwrite_user_changes'}),
     'prune_pip_templates': frozenset({'keep'}),
     'list_pip_templates': frozenset({'pip_id'}),
@@ -754,7 +761,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API64_READS | API64_MUTATIONS:
+        if command in API65_READS:
+            minimum = 65
+        elif command in API64_READS | API64_MUTATIONS:
             minimum = 64
         elif command in API63_READS | API63_EVENTS:
             minimum = 63
@@ -1185,6 +1194,14 @@ class Pips:
             params["limit"] = limit
         return self.read("list_pip_run_posts", params)
 
+    def run_fixes(self, pip_id: str) -> dict[str, Any]:
+        """What Ask DGC to fix did for this Pip's runs (Pips API 65): ``{"pip_id", "workspace_id", "fixes": [...]}``,
+        the latest fix of each run, newest first, each with its ``state`` (``queued``, ``preparing``, ``running`` or
+        ``applying`` while it works; ``applied``, ``partial``, ``unchanged``, ``not_applied``, ``failed``, ``stopped``,
+        ``interrupted`` or ``undone`` when it ended), the ``files`` it changed and the ``session_id`` of the Work chat
+        it ran in, where its Review and Undo are."""
+        return self.read("list_pip_run_fixes", {"pip_id": pip_id})
+
     def spool(self, data: bytes, *, suffix: str = "") -> str:
         """Hand a photo or file to the runtime through its spool (Pips API 52); returns the name to send.
 
@@ -1282,6 +1299,9 @@ class AsyncPips:
 
     async def run_posts(self, pip_id: str, *, before_id: str | None = None, limit: int | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self._sync.run_posts, pip_id, before_id=before_id, limit=limit)
+
+    async def run_fixes(self, pip_id: str) -> dict[str, Any]:
+        return await self.read("list_pip_run_fixes", {"pip_id": pip_id})
 
     async def spool(self, data: bytes, *, suffix: str = "") -> str:
         return await asyncio.to_thread(self._sync.spool, data, suffix=suffix)

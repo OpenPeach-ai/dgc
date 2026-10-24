@@ -77,7 +77,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
     "check_pip_source", "get_pip_run_source",
-    "list_pip_run_posts",
+    "list_pip_run_posts", "list_pip_run_fixes",
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
@@ -220,6 +220,8 @@ _COMMAND_ARGS = {
     "get_pip_run": {"run_id"}, "cancel_pip_run": {"run_id"},
     "check_pip_source": {"pip_id", "source_policy"}, "get_pip_run_source": {"run_id"},
     "list_pip_run_posts": {"pip_id", "before_id", "limit"},
+    # API 65: what Ask DGC to fix did for a Pip's runs (pip_fix.for_pip).
+    "list_pip_run_fixes": {"pip_id"},
     "list_workspace_activity": {"workspace_id", "after"},
     "list_pip_run_activity": {"run_id", "after"},
     "reject_pip_update": {"pip_id", "proposal_id", "expected_version"},
@@ -5353,6 +5355,20 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 # API 51: what its runs posted in its own chat, a page at a time (pip_run_posts).
                 from .pip_run_posts import page as run_posts
                 result = run_posts(store, pip_id, request.get("before_id"), request.get("limit", 20))
+            elif command == "list_pip_run_fixes":
+                # API 65: what Ask DGC to fix did for this Pip's runs (pip_fix keeps each fix on disk, per project),
+                # so its own chat says fixing, Fixed, failed or undone. Local: the fix ran in a chat on this computer.
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "See what DGC fixed on the computer it fixed it on.")
+                pip = store._job(pip_id)
+                fixes = []
+                if registry.get(pip["workspace_id"])["kind"] != "personal":    # a Personal Pip has no Ask DGC to fix
+                    from .pip_fix import for_pip
+                    try:
+                        fixes = for_pip(registry.binding(pip["workspace_id"])["canonical_root"], pip_id)
+                    except OSError:
+                        fixes = []
+                result = {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "fixes": fixes}
             elif command == "get_pip_message_image":
                 from .pip_chat import get_image
                 if type(request.get("index")) is not int:
