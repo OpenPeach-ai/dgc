@@ -235,9 +235,11 @@ class ServerModeTests(Home):
         notifier.tick.assert_called()
 
     def test_an_emergency_stop_ends_a_server_runner_with_a_line_saying_so(self):
+        self.registry.resolve(self.base)                # a second workspace: the stop is recorded in each
         out, result, _ = self.serve_once(lambda: daemon.stop_all(self.config, "local-console"))
         self.assertTrue(result["paused"])
         self.assertRegex(out, r"\n\S+Z pip_runtime_stopped by=local-console\n")
+        self.assertEqual(out.count("pip_runtime_stopped"), 1, "one stop, one line")
         self.assertRegex(out.splitlines()[-1], r" runner_stopped reason=emergency_stop$")
 
     def test_a_second_runner_on_the_same_home_is_refused(self):

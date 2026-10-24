@@ -139,6 +139,7 @@ class EventLog:
     def __init__(self, registry, *, out=None):
         self.out = out
         self.last = registry.db.execute("SELECT COALESCE(MAX(seq),0) FROM workspace_events").fetchone()[0]
+        self._said = None                # the last line's content: one stop recorded in each workspace is one line
 
     def say(self, event, detail="", **fields):
         say(event, detail, out=self.out, **fields)
@@ -165,6 +166,10 @@ class EventLog:
                 detail = _error_detail(value)
             elif kind in ("pip_runtime_stopped", "pip_runtime_resumed"):
                 fields["by"] = value.get("actor") if isinstance(value.get("actor"), str) else None
+            said = (kind, created_at, detail, tuple(fields.items()))
+            if said == self._said:
+                continue
+            self._said = said
             self.say(kind, detail, at=created_at, **fields)
             told += 1
         return told
