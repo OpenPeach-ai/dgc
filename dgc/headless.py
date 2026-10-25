@@ -7522,6 +7522,7 @@ class Backend:
                     self.em.emit("session_held", session_id=target.stem)
                     self._publish_cache_clock(current=True, resumed=True)
                     return
+                self._announce_peer("idle")              # the note says this process holds it now
                 # Last: the chat is on screen, in the mode it reopened in. Monitors DGC's stopping
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)

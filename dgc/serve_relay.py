@@ -77,6 +77,10 @@ def find_holder(session_id: str) -> dict | None:
             continue
         if not record.get("socket") or not record.get("instance"):
             continue
+        block = record.get("open_here")
+        if isinstance(block, dict) and not any(isinstance(chat, dict) and chat.get("session_id") == session_id
+                                               for chat in (block.get("chats") or [])):
+            continue                     # it only shows the session (another process has it): nothing to attach to
         if any(place.get("session") and _stem(place["session"]) == session_id
                for place in peers._places(record)):
             return record
