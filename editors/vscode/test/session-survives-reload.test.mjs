@@ -361,7 +361,8 @@ test("a reloaded tab reattaches: no resume, the backend's own snapshot, and its 
   assert.deepEqual(fixture.starts().map((s) => [s.attach_session, s.attach]), [[SESSION, "restore"]]);
   const sent = fixture.types();
   assert.equal(sent.includes("resume_session"), false, "it never reopens from disk what is still running");
-  assert.ok(sent.includes("set_detach"));
+  // Sent during the handshake, but it can reach the fake serve a moment after sessionReady on a loaded machine.
+  assert.ok(await until(() => fixture.types().includes("set_detach")), "the chat keeps running without the window");
   assert.ok(await until(() => fixture.types().includes("get_history")), "repainted from the backend's snapshot");
   assert.equal(fixture.types().includes("set_workspace_roots"), false, "the folder grant waits for the running turn");
   assert.ok(h.posted.some((m) => m.type === "turn_active" && m.turnId === "t7"), "the running turn is the live one");
