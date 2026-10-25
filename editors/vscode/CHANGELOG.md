@@ -8,6 +8,14 @@
   terminal takes a session this window shows, the window turns read-only with the same bar, and its Open here takes it
   back. The window tells the CLI it shows such sessions read-only (`watch_session_owner`).
 
+- **Run in background** (with a DGC CLI that has it, 0.48). When the turn waits on a helper, its line in the chat has a
+  **Run in background** button, and so does its card in the agent map; a running command's row has one too, once the
+  command has run a moment. The turn stops waiting and carries on, and the work keeps going: the helper becomes a
+  background helper (the pill counts it, and its report comes back when it ends), the command a background command in
+  the agent map's list, whose exit wakes the chat. The command's row then reads **Moved to the background**. A batch
+  line with several helpers waiting asks which, each by name, or **All**. Once moved, Stop on the turn leaves it
+  running; stop it from its own card. With an older CLI the button never shows.
+
 - **The agent map shows what matters now; the rest is one click away.** In a long chat it used to list every helper
   the chat ever ran. It now opens on the agents working, the ones your latest turn that started any started (a short
   follow-up that starts none leaves them in view), and any older one whose changes were held back, its row saying

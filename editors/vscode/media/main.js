@@ -1356,6 +1356,8 @@
   // What the agent map may ask for: stopping one agent (`agent_control`; a foreground one only with
   // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
   let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
+  // Run in background on a foreground agent or `bash` command the turn waits on (`background_now`).
+  let backgroundNowLive = false;
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
@@ -4938,6 +4940,33 @@
       const node = live.querySelector(selector);
       if (node.textContent !== text) node.textContent = text;
     }
+    paintLiveRunInBackground(live, runningCard);
+  }
+  // The folded group's running row is what is on screen while a command runs, so a command's Run in
+  // background is there too: the same button's twin, pressing the row's own.
+  function paintLiveRunInBackground(live, card) {
+    const source = card?._runBg;
+    let twin = live._runBg;
+    if (!source || source.hidden) { if (twin) twin.hidden = true; return; }
+    if (!twin) {
+      twin = live._runBg = el("button", "link run-bg tg-live-bg", "Run in background");
+      twin.type = "button";
+      twin.setAttribute("aria-label", "Run this command in the background");
+      twin.title = source.title;
+      twin.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const own = live._runBgCard?._runBg;
+        if (!own || own.disabled) return;
+        own.click();
+        twin.disabled = own.disabled;
+        twin.textContent = own.textContent;
+      });
+      live.appendChild(twin);
+    }
+    live._runBgCard = card;
+    twin.hidden = false;
+    twin.disabled = source.disabled;
+    if (twin.textContent !== source.textContent) twin.textContent = source.textContent;
   }
 
   // Tools whose summary is a shell command, so there is something worth copying verbatim.
@@ -4980,9 +5009,11 @@
           : value === "failed" ? `${copy.past} · failed`
             : value === "blocked" ? `${copy.past} · blocked, repeated call`
               : value === "denied" ? `${copy.present} · denied`
-              : value === "stopped" ? `${copy.past} · stopped` : copy.past;
+              : value === "stopped" ? `${copy.past} · stopped`
+                : value === "moved" ? "Moved to the background" : copy.past;
     }
     if (value !== "running") {
+      card._runBg?.remove(); card._runBg = null;
       clearInterval(card._timer);
       const elapsed = card.querySelector(".tool-time");
       if (elapsed && card._startedAt) {
@@ -5001,6 +5032,33 @@
       if (elapsed) elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
     }, 200);
   }
+  // ---- run in background: a command's row (ready.capabilities.background_now) ----
+  // Shown once the command has run this long, so a quick one never flashes it.
+  const RUN_BG_AFTER_MS = 1500;
+  function runInBackgroundBtn(card) {
+    const b = el("button", "link run-bg", "Run in background");
+    b.type = "button";
+    b.hidden = true;
+    const owner = turn;
+    setTimeout(() => {
+      if (card._runBg !== b || card.dataset.status !== "running") return;
+      b.hidden = false;
+      if (owner?.liveStep) paintLiveStep(owner);     // its folded group's live row shows it at once
+    }, RUN_BG_AFTER_MS);
+    b.setAttribute("aria-label", "Run this command in the background");
+    b.title = "Stop waiting for it: the turn carries on, the command keeps running, and its exit wakes this chat";
+    b.onclick = (event) => {
+      event.stopPropagation();          // the head is a toggle; this must not open the card
+      if (b.disabled) return;
+      b.disabled = true;
+      b.textContent = "Moving…";
+      vscode.postMessage({ type: "backgroundNow", callId: card.dataset.callId });
+    };
+    card._runBg = b;
+    return b;
+  }
+  // The person moved it: its result is the words the model got, which begin this way.
+  const MOVED_RESULT = /^The person moved [`'].*to the background/;
   // `detached`: a card drawn somewhere other than the live turn (an agent page rebuilt from the
   // agent's own step log). It is never put in the turn, never breaks the turn's streaming text, never
   // runs a clock and is never offered to the agents lane.
@@ -5035,6 +5093,9 @@
     // into a terminal, or into a bug report. Only for cards whose summary IS a command; a file
     // path already has Open beside it, and copying a verb would be noise.
     if (COMMAND_TOOLS.has(canonicalTool(ev.name)) && ev.summary) head.appendChild(copyCommandBtn(ev.summary));
+    // A command the turn waits on can be moved to the background; offered once it has run a moment.
+    if (backgroundNowLive && !replaying && !detached && ev.name === "bash" && ev.call_id
+        && ev.args?.background !== true && !agentIdFromCall(ev.call_id)) head.appendChild(runInBackgroundBtn(c));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
     // Nothing is running in a replayed turn, so neither the pulse nor the stopwatch is started:
@@ -6841,6 +6902,7 @@
         agentControlLive = ev.capabilities?.agent_control === true;
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
         backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
+        backgroundNowLive = Number(ev.capabilities?.background_now?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
@@ -7161,7 +7223,8 @@
         // actually happened here. The prefix is agent.LOOP_GUARD_PREFIX; a test pins them together.
         const blocked = ev.is_error
           && String(ev.output || "").startsWith("error: repeated tool call blocked");
-        setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : "completed"));
+        const moved = !ev.is_error && MOVED_RESULT.test(String(ev.output || ""));
+        setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : moved ? "moved" : "completed"));
         if (ev.is_diff && ev.diff) {
           c.classList.add("no-body");           // the diff below is this step's detail
           const rendered = renderDiff(ev.diff); c.after(rendered);
@@ -7453,6 +7516,15 @@
       case "agent_updated": case "agent_ended":
         applyAgentEvent(ev);
         if (stick || following) scroll();
+        return;
+      // The CLI moved what the turn waited on to the background: an agent's snapshot follows, a
+      // command's row gets its result.
+      case "moved_to_background":
+        if (ev.agent_id) {
+          const record = agentRecords.get(String(ev.agent_id));
+          if (record) record.background = true;      // as the snapshot that follows will say
+          agentMoveSettled(ev.agent_id);
+        }
         return;
       case "agents":
         renderAgentsSnapshot(ev);
@@ -10275,6 +10347,15 @@
     }
     else if (msg.type === "artifact_stop_state") { settleArtifactStop(msg); amPreviewStopState(msg); }
     // The agent map's own answers from the host: a Stop that did not take, an output it could not get.
+    else if (msg.type === "background_now_state") {
+      // The move did not happen: almost always because it had just finished, which its own row says.
+      if (msg.agentId) agentMoveSettled(msg.agentId);
+      if (msg.callId) {
+        const card = [...log.querySelectorAll(".tool[data-call-id]")].find((c) => c.dataset.callId === String(msg.callId));
+        if (card?._runBg) { card._runBg.disabled = false; card._runBg.textContent = "Run in background"; }
+      }
+      if (msg.error && !/finished/.test(String(msg.error))) sysLine(String(msg.error), true);
+    }
     else if (msg.type === "agent_stop_state") {
       if (msg.state === "error" && agentStopping.has(String(msg.id || ""))) { agentStopping.set(String(msg.id), "failed"); agentMapChanged(); }
     }
@@ -10836,6 +10917,7 @@
     }
     line.node.dataset.agentIds = line.ids.join(" ");
     line.node.setAttribute("aria-label", members.length === 1 ? "Sub-agent" : "Sub-agents");
+    paintAgentLineMove(line, members);
     // A line drawn into a turn that has already folded its work (after a reload the agents snapshot draws
     // them once the history has): the fold decides it now, as it would have when the turn ended.
     const host = line.node.parentElement;
@@ -12545,6 +12627,82 @@
     else vscode.postMessage({ type: "stopAgent", id });
     renderAgentMap();
   }
+  // ---- run in background: an agent (ready.capabilities.background_now) ----
+  // A foreground agent of the main agent that the turn is waiting on can be moved to the background:
+  // the turn stops waiting and carries on, and the agent keeps working as a background one -- the
+  // pill counts it, and its end wakes the chat with its report. Offered on its line in the chat and
+  // on its card in the map; once moved, its own Stop is the only one that reaches it.
+  const agentMoving = new Map();                // agent id -> "moving", until the CLI answers
+  function agentMovable(record) {
+    return backgroundNowLive && streaming && !!record && !record.parent_id && !record.background
+      && (record.state === "running" || record.state === "waiting");
+  }
+  function moveAgentToBackground(id) {
+    const record = agentRecords.get(id);
+    if (!agentMovable(record) || agentMoving.has(id)) return;
+    agentMoving.set(id, "moving");
+    vscode.postMessage({ type: "backgroundNow", agentId: id });
+    repaintAgentLines();
+    agentMapChanged();
+  }
+  function agentMoveSettled(id) {
+    if (!agentMoving.delete(String(id || ""))) return;
+    repaintAgentLines();
+    agentMapChanged();
+  }
+  // The line's control: "Run in background" for its one waiting agent; with several, the same words
+  // ask which -- each name, All, or Cancel -- as Ctrl+B does in the terminal.
+  function paintAgentLineMove(line, members) {
+    if (line.page || line.open) return;
+    const movable = members.filter((record) => agentMovable(record) && !agentMoving.has(record.id));
+    if (!movable.length) {
+      if (line.move) { line.move.remove(); line.move = null; }
+      line.choosing = false;
+      return;
+    }
+    if (!line.move) line.move = el("span", "agent-line-move");
+    if (line.move.parentElement !== line.node) line.node.appendChild(line.move);
+    if (movable.length < 2) line.choosing = false;
+    const sig = JSON.stringify([movable.map((record) => [record.id, agentDisplayName(record)]), !!line.choosing]);
+    if (line.move._sig === sig) return;
+    line.move._sig = sig;
+    const button = (label, aria, run) => {
+      const b = el("button", "link agent-line-bg");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-label", aria);
+      b.addEventListener("click", (event) => { event.stopPropagation(); run(); });
+      return b;
+    };
+    const focusFirst = () => line.move?.querySelector("button")?.focus();
+    if (!line.choosing) {
+      const one = movable.length === 1 ? movable[0] : null;
+      const b = button("Run in background",
+        one ? `Run ${agentDisplayName(one)} in the background` : `Run in background: choose which of ${movable.length} agents`,
+        () => {
+          if (one) { moveAgentToBackground(one.id); return; }
+          line.choosing = true;
+          paintAgentLine(line);
+          focusFirst();
+        });
+      b.title = "Stop waiting for it: the turn carries on, the agent keeps working, and its report comes back when it ends";
+      line.move.replaceChildren(b);
+      line.move.onkeydown = null;
+      return;
+    }
+    const cancel = () => { line.choosing = false; paintAgentLine(line); focusFirst(); };
+    const ask = el("span", "agent-line-move-ask");
+    ask.textContent = "Run in background:";
+    line.move.replaceChildren(ask,
+      ...movable.map((record) => button(agentDisplayName(record), `Run ${agentDisplayName(record)} in the background`,
+        () => { line.choosing = false; moveAgentToBackground(record.id); })),
+      button("All", `Run all ${movable.length} in the background`,
+        () => { line.choosing = false; for (const record of movable) moveAgentToBackground(record.id); }),
+      button("Cancel", "Keep waiting for them", cancel));
+    line.move.onkeydown = (event) => {
+      if (event.key === "Escape" && line.choosing) { event.preventDefault(); event.stopPropagation(); cancel(); }
+    };
+  }
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
     return [amStateWord(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
@@ -12576,6 +12734,8 @@
       n.calls = n.callsFold.appendChild(el("ul", "am-calls"));
       n.callsNote = n.callsFold.appendChild(el("p", "am-note"));
       const actions = host.appendChild(el("div", "am-actions"));
+      n.move = amButton(actions, "Run in background", () => moveAgentToBackground(id));
+      n.move.title = "Stop waiting for it: the turn carries on, the agent keeps working, and its report comes back when it ends";
       n.stop = amButton(actions, "Stop agent", () => amStopAgent(id));
       n.stopNote = actions.appendChild(el("p", "am-note"));
       n.open = amButton(actions, "Open transcript", () => amOpenTranscript({ kind: "agent", id }, n.open), "act am-wide");
@@ -12654,6 +12814,10 @@
     agentsSetText(n.callsNote, calls.length ? "" : tools > 0 ? "Its steps were not kept in this chat. Its transcript has its report."
       : working ? "No tool calls yet." : "It made no tool calls.");
     n.callsNote.hidden = !n.callsNote.textContent;
+    const moving = agentMoving.has(id);
+    n.move.hidden = !(working && (agentMovable(record) || moving));
+    n.move.disabled = moving;
+    agentsSetText(n.move, moving ? "Moving…" : "Run in background");
     const mode = working ? amStopMode(record) : "";
     const stopping = agentStopping.get(id) === "stopping";
     n.stop.hidden = !mode;

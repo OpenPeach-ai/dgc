@@ -2160,6 +2160,7 @@ def bash(args: dict, ctx) -> str:
             except Exception:
                 pass
 
+    started_at = time.time()
     try:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
@@ -2175,6 +2176,13 @@ def bash(args: dict, ctx) -> str:
             observer = None
     capture = _BoundedCommandCapture(ctx, observer=observer)
     read_failed = _threading.Event()
+    # Where the output goes: this call's capture, or -- once the person moves the command to the
+    # background (dgc/background_now.py) -- the background shell it became (_adopt_foreground).
+    # A configured verifier's run is not movable: its receipt needs this call to see its end.
+    route = {"feed": capture.feed, "end": capture.finish, "ended": False}
+    route_lock = _threading.Lock()
+    waiting = args.get("_dgc_waiting") if observer is None else None
+    moved = False
 
     def read_output() -> None:
         try:
@@ -2183,7 +2191,8 @@ def bash(args: dict, ctx) -> str:
                     chunk = proc.stdout.read(16_384)
                     if not chunk:
                         break
-                    capture.feed(chunk)
+                    with route_lock:
+                        route["feed"](chunk)
         except (OSError, ValueError):
             read_failed.set()
         finally:
@@ -2192,16 +2201,24 @@ def bash(args: dict, ctx) -> str:
                     proc.stdout.close()
                 except (OSError, ValueError):
                     pass
-            capture.finish()
+            with route_lock:
+                route["ended"] = True
+                end = route["end"]
+            end()
 
     reader = _threading.Thread(target=read_output, daemon=True)
     reader.start()
+    if waiting is not None:
+        waiting.arm()                       # running: from now on the person may move it
     deadline = time.monotonic() + timeout
     timed_out = False
     was_cancelled = False
     cancelled = getattr(ctx, "cancelled", None)
     try:
         while True:
+            if waiting is not None and waiting.moved:
+                moved = True                # before the Stop check: the move came first
+                break
             # A shell can exit while a grandchild keeps its output pipe open. That tree is still
             # running from the caller's perspective and must obey the same deadline/cancellation.
             if cancelled is not None and cancelled.is_set():
@@ -2234,6 +2251,15 @@ def bash(args: dict, ctx) -> str:
         reader.join(timeout=1)
         record_native('interrupted', proc.poll(), False)
         raise
+    if waiting is not None and not moved and not waiting.settle():
+        moved = True                        # moved as it ended: the person was told it moved, so it did
+    if moved:
+        from .background_now import command_moved
+        bid = _adopt_foreground(proc, command, ctx, capture, route, route_lock, reader,
+                                started=started_at, notify_exit=bool(getattr(waiting, "notify_exit", False)),
+                                sandboxed=bool(argv))
+        return command_moved(_safe_command_label(command, ctx), bid,
+                             wakes=bool(getattr(waiting, "wakes", False)))
     # Sweep the process group even after a zero exit: a foreground shell can otherwise daemonize a
     # pipe-detached child and release the workspace lease while that child is still mutating files.
     _terminate_background(proc, sweep_exited_group=True)
@@ -2402,32 +2428,9 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
 
     def reader():
         redactor = StreamingRedactor(lambda: secret_values(getattr(ctx, "config", None)))
-
-        def append(chunk: str) -> None:
-            if not chunk:
-                return
-            with entry["lock"]:
-                entry["buf"].append(chunk)
-                entry["buf_chars"] += len(chunk)
-                # Everything it printed, kept or since dropped: the editor shows "the last X of Y".
-                entry["bytes_written"] += len(chunk.encode("utf-8", "replace"))
-                excess = entry["buf_chars"] - _BG_BUFFER_CHARS
-                while excess > 0 and entry["buf"]:
-                    first = entry["buf"][0]
-                    if len(first) <= excess:
-                        entry["buf"].pop(0)
-                        entry["buf_chars"] -= len(first)
-                        entry["dropped_chars"] += len(first)
-                        excess -= len(first)
-                    else:
-                        entry["buf"][0] = first[excess:]
-                        entry["buf_chars"] -= excess
-                        entry["dropped_chars"] += excess
-                        excess = 0
-
         try:
             for line in proc.stdout:
-                append(redactor.feed(line))
+                _bg_append(entry, redactor.feed(line))
         except Exception:
             pass
         finally:
@@ -2436,29 +2439,8 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
                     proc.stdout.close()
                 except (OSError, ValueError):
                     pass
-            append(redactor.flush())
-        try:
-            proc.wait()
-        finally:
-            entry["finished"] = time.time()
-        try:
-            from . import stopped_work
-            stopped_work.shell_ended(entry, "dgc_stopped" if entry.get("shutdown") else
-                                     "killed" if entry.get("killed") else "exited")
-        except Exception:
-            pass
-        # Tell the model once when the task ends on its own -- never after bash_kill or shutdown,
-        # and never into a conversation that replaced the one that started it (the hub's epoch).
-        if hub is not None and not entry.get("killed"):
-            with entry["lock"]:
-                tail = "".join(entry["buf"])[-4000:]
-            try:
-                hub.queue_background_exit(bid, safe_command, proc.returncode,
-                                          entry["finished"] - entry["started"], tail,
-                                          entry["notify_epoch"])
-            except Exception:
-                pass
-        _bg_changed(entry)
+            _bg_append(entry, redactor.flush())
+        _bg_finished(entry, bid, proc, hub, safe_command)
 
     reader_thread = _threading.Thread(target=reader, daemon=True,
                                       name=f"dgc-background-{bid}")
@@ -2469,6 +2451,107 @@ def _bash_background(command: str, ctx, *, notify_exit: bool = False) -> str:
             f"Read its output with bash_output(id=\"{bid}\"). It holds no workspace lease once "
             "started, so do not use it to change files."
             + (" You are notified once when it exits." if hub is not None else ""))
+
+
+def _bg_append(entry: dict, chunk: str) -> None:
+    """Keep one already-redacted chunk of a background shell's output, the newest _BG_BUFFER_CHARS."""
+    if not chunk:
+        return
+    with entry["lock"]:
+        entry["buf"].append(chunk)
+        entry["buf_chars"] += len(chunk)
+        # Everything it printed, kept or since dropped: the editor shows "the last X of Y".
+        entry["bytes_written"] += len(chunk.encode("utf-8", "replace"))
+        excess = entry["buf_chars"] - _BG_BUFFER_CHARS
+        while excess > 0 and entry["buf"]:
+            first = entry["buf"][0]
+            if len(first) <= excess:
+                entry["buf"].pop(0)
+                entry["buf_chars"] -= len(first)
+                entry["dropped_chars"] += len(first)
+                excess -= len(first)
+            else:
+                entry["buf"][0] = first[excess:]
+                entry["buf_chars"] -= excess
+                entry["dropped_chars"] += excess
+                excess = 0
+
+
+def _bg_finished(entry: dict, bid: str, proc, hub, safe_command: str) -> None:
+    """A background shell's output has ended: reap it, write its end down and tell who listens."""
+    try:
+        proc.wait()
+    finally:
+        entry["finished"] = time.time()
+    try:
+        from . import stopped_work
+        stopped_work.shell_ended(entry, "dgc_stopped" if entry.get("shutdown") else
+                                 "killed" if entry.get("killed") else "exited")
+    except Exception:
+        pass
+    # Tell the model once when the task ends on its own -- never after bash_kill or shutdown,
+    # and never into a conversation that replaced the one that started it (the hub's epoch).
+    if hub is not None and not entry.get("killed"):
+        with entry["lock"]:
+            tail = "".join(entry["buf"])[-4000:]
+        try:
+            hub.queue_background_exit(bid, safe_command, proc.returncode,
+                                      entry["finished"] - entry["started"], tail,
+                                      entry["notify_epoch"])
+        except Exception:
+            pass
+    _bg_changed(entry)
+
+
+def _adopt_foreground(proc, command: str, ctx, capture, route: dict, route_lock, reader, *,
+                      started: float, notify_exit: bool, sandboxed: bool) -> str:
+    """A foreground command the person moved to the background: it becomes background shell bgN.
+
+    Nothing is restarted. The process, its group and its reader thread stay as they are; what the
+    reader has kept so far (already redacted) opens the shell's buffer, and from here its output goes
+    there through the same streaming redactor, so a secret split across the move is still caught. The
+    shell then lives as one `bash(background: true)` started: bash_output and bash_kill reach it, the
+    editor's task list shows it, a restart says it stopped, and its exit notice wakes the chat when
+    this frontend delivers one (``notify_exit``). Returns its id.
+    """
+    _reap_background()
+    bid = f"bg{next(_BG_N)}"
+    safe_command = _safe_command_label(command, ctx)
+    hub = getattr(ctx, "monitors", None) if notify_exit else None
+    entry = {"proc": proc, "buf": [], "buf_chars": 0, "dropped_chars": 0, "bytes_written": 0,
+             "lock": _threading.Lock(), "command": safe_command, "owner": _tool_owner(ctx),
+             "started": started, "finished": None, "thread": reader, "killed": False,
+             "notify_epoch": getattr(hub, "epoch", 0),
+             "on_change": getattr(ctx, "on_background", None)}
+    # Listed and written down BEFORE its output is rerouted: its end can follow at once, and must find
+    # it in both places.
+    with _BG_LOCK:
+        _BG[bid] = entry
+    try:
+        from . import stopped_work
+        stopped_work.shell_started(entry, bid, command, ctx, sandboxed=sandboxed)
+    except Exception:
+        pass
+    redactor = capture._redactor
+
+    def end() -> None:
+        _bg_append(entry, redactor.flush())
+        _bg_finished(entry, bid, proc, hub, safe_command)
+
+    with route_lock:
+        ended = route["ended"]
+        if not ended:
+            route["feed"] = lambda chunk: _bg_append(entry, redactor.feed(chunk))
+            route["end"] = end
+        _bg_append(entry, capture.result()[0])          # the reader's flush is in it when it ended
+    if ended:
+        # Its output had already ended: only the reaping is left, on a thread of its own (its leader
+        # may still be running after closing its output).
+        entry["thread"] = _threading.Thread(target=_bg_finished, args=(entry, bid, proc, hub, safe_command),
+                                            daemon=True, name=f"dgc-background-{bid}")
+        entry["thread"].start()
+    _bg_changed(entry)
+    return bid
 
 
 def bash_output(args: dict, ctx) -> str:

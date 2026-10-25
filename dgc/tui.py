@@ -544,6 +544,8 @@ class TUI:
         self.agent.ui = self               # the agent calls back into this TUI
         # Exposes the `monitor` tool: this frontend delivers monitor events and wakes on them.
         self.monitor_wake_enabled = True
+        # Ctrl+B moves what the turn is waiting on to the background (dgc/background_now.py).
+        self.background_now_enabled = True
         self._draft_changed_at = 0.0
 
         self._start = time.monotonic()
@@ -3422,6 +3424,8 @@ class TUI:
                 chips.append(("Ctrl+C", "stop agent"))
         elif self._turn.is_set():
             chips = [("Esc", "stop"), ("Enter", "follow up"), ("Tab", "queue")]
+            if self._background_now_items():
+                chips.insert(1, ("Ctrl+B", "run in background"))
         else:
             chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
                      ("Ctrl+Y", "copy"), ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
@@ -3448,6 +3452,37 @@ class TUI:
             seg += f" [{th.faint}]Ctrl+\\ [/]"          # trailing space: avoid rich reading \] as an escape
             body += f"[{sep}]  {glyphs.RAIL}  [/]" + seg
         return ANSI("  " + self._rich(body))
+
+    # ---- run in background (dgc/background_now.py) ----
+    def _background_now_items(self) -> list:
+        """What the active session's turn waits on now that Ctrl+B can move. Cheap: one list copy."""
+        waiting = getattr(getattr(self, "agent", None), "waiting_now", None)
+        try:
+            return waiting() if callable(waiting) else []
+        except Exception:
+            return []
+
+    def _background_now_move(self, target: str) -> None:
+        moved, _ = self.agent.background_now(target)
+        if not moved:
+            self._flash("it has already finished")
+        elif len(moved) == 1:
+            self._flash(f"moved to the background: {moved[0]['label'][:60]}")
+        else:
+            self._flash(f"moved {len(moved)} to the background")
+
+    def _background_now_key(self) -> None:
+        """Ctrl+B: the one thing the turn waits on goes to the background; with several, which one?"""
+        items = self._background_now_items()
+        if len(items) == 1:
+            self._background_now_move(items[0]["id"])
+            return
+        if not items:
+            return
+        labels = [("command: " if item["kind"] == "command" else "helper: ") + item["label"][:70]
+                  for item in items] + ["All of them"]
+        targets = [item["id"] for item in items] + ["all"]
+        self._show_picker("Run in background", labels, lambda i: self._background_now_move(targets[i]))
 
     # ---- this chat's task sub-agents (the agents indicator) ----
     def _bind_session_agents(self, sess: "AgentSession") -> None:
@@ -3877,7 +3912,8 @@ class TUI:
                          ("/", "command palette"), ("@path", "attach one exact bounded file"),
                          ("Ctrl+R", "recall a past prompt"),
                          ("! command", "run a shell command"), ("# note", "save a memory")]),
-            ("This turn", [("Esc", "stop the turn"), ("Ctrl+C", "cancel · clear draft · quit")]),
+            ("This turn", [("Esc", "stop the turn"), ("Ctrl+C", "cancel · clear draft · quit"),
+                           ("Ctrl+B", "run the helper or command it waits on in the background")]),
             ("Navigate", [("PageUp / PageDn", "scroll the transcript"), ("End", "jump to the latest"),
                           ("click ◆ Thought", "expand the reasoning"), ("click token count", "context details"),
                           (f"click {glyphs.RECONNECT} Reconnecting", "show the connection error")]),
@@ -8840,6 +8876,15 @@ class TUI:
         @kb.add("s-tab")
         def _(ev):
             self._cycle_mode()
+
+        # Run in background: move the helper or command the turn waits on (dgc/background_now.py).
+        # Only while there is one, so Ctrl+B is still the cursor's step back everywhere else.
+        @kb.add("c-b", filter=Condition(lambda: self._turn.is_set() and self._overlay is None
+                                        and self._req is None and self._input is None
+                                        and not self._naming and not self._pane_visible()
+                                        and bool(self._background_now_items())))
+        def _(ev):
+            self._background_now_key()
 
         @kb.add("pageup")
         def _(ev):

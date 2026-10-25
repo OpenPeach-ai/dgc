@@ -102,7 +102,7 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
   "setContextSize", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
   "options_response", "mcp_input_response", "askSkip", "steerQueued", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
-  "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix"]);
+  "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
@@ -2229,6 +2229,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     } catch (err: any) {
       this.post({ type: "agent_stop_state", id: agentId, state: "error",
         error: err?.message || "DGC could not stop the agent." });
+    }
+  }
+
+  /** Run in background: move the foreground agent or `bash` command the turn waits on to the background.
+   *  Only to a CLI that advertises `background_now`; an older one never shows the button. The answer,
+   *  `moved_to_background`, reaches the webview like any event; a refusal is said to it here. */
+  private async backgroundNow(agentId: string, callId: string): Promise<void> {
+    if (!(Number((this.lastReadyEvent?.capabilities as any)?.background_now?.version) >= 1)) { return; }
+    const agent = /^sub-[0-9a-f]{12}$/i.test(agentId) ? agentId : "";
+    const call = agent ? "" : callId.slice(0, 256);
+    if (!agent && !call) { return; }
+    try {
+      await this.ensureBackend().request({ type: "background_now", request_id: this.nextRequestId("background-now"),
+        ...(agent ? { agent_id: agent } : { call_id: call }) } as any, "moved_to_background" as DgcEvent["type"], 5000);
+    } catch (err: any) {
+      this.post({ type: "background_now_state", agentId: agent, callId: call, state: "error",
+        error: err?.message || "DGC could not move it to the background." });
     }
   }
 
@@ -5277,6 +5294,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "stopAgent":
         void this.stopAgent(String(msg.id || ""));
+        break;
+      case "backgroundNow":
+        void this.backgroundNow(String(msg.agentId || ""), String(msg.callId || ""));
         break;
       case "listBackgroundShells":
         if (this.backgroundTasks()) {

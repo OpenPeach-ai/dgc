@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import functools
 import json
 import platform
 import re
@@ -17,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import clock, command_watch, helper_checkout
+from . import background_now, clock, command_watch, helper_checkout
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
@@ -1685,6 +1686,9 @@ class _SubUI:
         # finishes. Blocking questions remain live but are serialized through one interaction lock.
         self._buffered = bool(buffered)
         self._events: list[tuple[str, tuple, dict]] = []
+        # A buffered child the person moves to the background goes live (unbuffer): this keeps an
+        # event it emits at that moment from landing behind the ones being replayed.
+        self._buffer_lock = threading.Lock()
         self._interaction_lock = interaction_lock
         self._cancel = cancel
         tls = getattr(parent, "_tls", None)
@@ -1740,9 +1744,11 @@ class _SubUI:
 
     def _emit(self, name: str, *args, **kwargs):
         if self._buffered:
-            self._events.append((name, args, kwargs))
-            self._emit_live_step(name, args, kwargs)
-            return None
+            with self._buffer_lock:
+                if self._buffered:
+                    self._events.append((name, args, kwargs))
+                    self._emit_live_step(name, args, kwargs)
+                    return None
         return self._direct(name, *args, **kwargs)
 
     def _emit_live_step(self, name: str, args: tuple, kwargs: dict) -> None:
@@ -1762,6 +1768,17 @@ class _SubUI:
             self._routed(send, self.agent_id, step, self._live_seq)
         except Exception:
             pass
+
+    def unbuffer(self) -> list[str]:
+        """A parallel child the person moved to the background: replay what it buffered, then live.
+
+        A background child's steps reach its own agent's line as they happen; held back until it ends,
+        a moved child would show nothing for as long as it runs. On the parent's thread, like replay.
+        """
+        with self._buffer_lock:
+            errors = self.replay()
+            self._buffered = False
+        return errors
 
     def replay(self) -> list[str]:
         """Replay one completed child's trace atomically on the parent worker thread."""
@@ -1961,7 +1978,7 @@ class _SubUI:
         # below stops the instance's own attrs from recursing during partial init.)
         if name in ("_parent", "_label", "_buf", "_last", "_failure", "_call_prefix",
                     "_buffered", "_events", "_interaction_lock", "_cancel", "_route_session",
-                    "_deny_reason", "_plan_feedback"):
+                    "_deny_reason", "_plan_feedback", "_buffer_lock"):
             raise AttributeError(name)
         return getattr(self._parent, name)
 
@@ -3549,6 +3566,8 @@ class Agent(GoalLifecycle):
                              "run any part whose result you need in the foreground."))
         else:
             background = "A part whose result you will not use this turn takes `background: true`."
+        if self._can_move_waiting():
+            lines.append(background_now.guidance())
         if not self.config.get("ultra_mode", False):
             return lines + [
                 "Delegate when it clearly helps: a broad search across many files or areas "
@@ -9582,6 +9601,10 @@ class Agent(GoalLifecycle):
             # Internal: this frontend delivers the exit notice. On wherever it can be delivered,
             # whether or not this request offered the `monitor` tool itself.
             exec_args["_dgc_notify_exit"] = True
+        waiting = None
+        if name == "bash" and not args.get("background") and self._can_move_waiting():
+            # Internal: the person may move this command to the background (dgc/background_now.py).
+            waiting = exec_args["_dgc_waiting"] = self._movable_command(args, call_id, secrets)
         if external_paths:
             # Executors fail closed by default. This marker is internal and exists only after the
             # permission engine (or explicit auto mode) has approved this exact call.
@@ -9715,7 +9738,8 @@ class Agent(GoalLifecycle):
                         # back or says it can't (dgc/command_watch.py).
                         with helper_checkout.command_span(self, name, args), \
                                 command_watch.watching(self, name, args):
-                            out = execute(name, exec_args, self.ctx)
+                            out = (execute(name, exec_args, self.ctx) if waiting is None
+                                   else self._run_waiting_command(waiting, name, exec_args))
                     if name == "add_skill" and not str(out).lstrip().lower().startswith("error"):
                         # Installation refreshes ctx.skills in place. Make the new package visible on
                         # the very next model iteration without bloating unrelated turns.
@@ -10945,9 +10969,19 @@ class Agent(GoalLifecycle):
             stopped_work.agent_started(self, sub_ui.agent_id, description, prompt, agent_name,
                                        background=detach, call_id=call_id, workspace=workspace)
         if not detach:
+            # The person may move it to the background while the turn waits (dgc/background_now.py):
+            # then it runs on its own thread from the start, and `handle` is its job's from the move.
+            waiting = (self._movable_helper(sub_ui, description, call_id, own_cancel)
+                       if self._can_move_waiting() else None)
+            handle: dict | None = {} if waiting is not None else None
             try:
-                execution = self._execute_prepared_subagent(
-                    description, prompt, agent_name, workspace, sub_ui, call_id, cancel=own_cancel)
+                run = functools.partial(self._execute_prepared_subagent, description, prompt,
+                                        agent_name, workspace, sub_ui, call_id, cancel=own_cancel,
+                                        handle=handle)
+                execution = run() if waiting is None else self._wait_on(waiting, run)
+                if execution is background_now.MOVED:
+                    return self._adopt_moved_helper(waiting, description, prompt, agent_name,
+                                                    workspace, sub_ui, call_id, own_cancel, handle)
             finally:
                 # Its record has ended: a Stop from here on is answered "already finished".
                 self._foreground_stops().pop(sub_ui.agent_id, None)
@@ -10992,12 +11026,14 @@ class Agent(GoalLifecycle):
 
     def _spawn_detached_subagent(self, description, prompt, agent_name, workspace, sub_ui, call_id,
                                  own_cancel: threading.Event, *, queued: bool = False,
-                                 brief: bool = False) -> str:
+                                 brief: bool = False, adopt=None, adopted: dict | None = None) -> str:
         """Run the child on its own thread and cancel token; the parent turn may end.
 
         ``queued``: every background slot is taken, so the thread first waits for one
         (_wait_for_detached_slot). ``brief``: return only the sentence naming this child; a batch
-        `task` call says once, for all its helpers, how their results come back."""
+        `task` call says once, for all its helpers, how their results come back. ``adopt``: a
+        foreground child the person moved to the background, already running; it returns that
+        run's execution once it ends, and ``adopted`` is the handle the run publishes its Agent in."""
         jobs = self._detached_jobs
         agent_id = sub_ui.agent_id
         # The frontend's own callback wins; without one, the hub's pending queue is what wakes the
@@ -11025,13 +11061,16 @@ class Agent(GoalLifecycle):
                          "keeper": keeper, "started_at": time.time(),
                          "queued": bool(queued), "queue_seq": self._detached_seq}
         handle = jobs[agent_id]
+        if adopted is not None:            # the moved run's own handle: its Agent is published there
+            adopted.update({**handle, "agent": adopted.get("agent")})
+            handle = jobs[agent_id] = adopted
 
         def work():
             outcome = _TaskOutcome(f"error: Sub-task '{description}' did not complete.")
             try:
                 if handle.get("queued"):
                     self._wait_for_detached_slot(handle, own_cancel)
-                execution = self._execute_prepared_subagent(
+                execution = adopt() if adopt is not None else self._execute_prepared_subagent(
                     description, prompt, agent_name, workspace, sub_ui, call_id,
                     cancel=own_cancel, handle=handle)
                 # From here to the pop, this thread can write the user's files and their .git, with
@@ -11336,6 +11375,128 @@ class Agent(GoalLifecycle):
         stop.set()
         return True, ""
 
+    # ---- run in background: the person moves what the turn waits on (dgc/background_now.py) -----
+    def _waiting_list(self) -> "background_now.WaitingList":
+        listing = self.__dict__.get("_waiting_now")
+        if listing is None:
+            listing = self.__dict__.setdefault("_waiting_now", background_now.WaitingList())
+        return listing
+
+    def _can_move_waiting(self) -> bool:
+        """Can the person move what this agent's turn waits on to the background?
+
+        The main agent only (a background helper is the main agent's, as `background: true` is), in a
+        frontend that offers the move -- the TUI, the classic terminal and `dgc serve` set
+        ``background_now_enabled`` on their UI -- and never in `dgc -p`, which ends with its turn.
+        An identity check on a real instance attribute, as _monitor_delivery's.
+        """
+        return (self.depth == 0 and getattr(self.ui, "background_now_enabled", False) is True
+                and not self._non_interactive() and not self.stopping)
+
+    def waiting_now(self) -> list[dict]:
+        """What the turn is waiting on now that the person may move: {kind, id, call_id, label}."""
+        return [waiting.item() for waiting in self._waiting_list().running()]
+
+    def background_now(self, target: str, kind: str = "") -> tuple[list[dict], str]:
+        """Move what the turn waits on to the background: an agent id, a call id, or "all".
+
+        ``kind`` ("agent" / "command") narrows what ``target`` may name. Returns (moved, reason): the
+        items moved, and "" -- or "not_waiting" when the turn is not waiting on anything ``target``
+        names (it ended, or never was). Takes no lease and waits for nothing, so `dgc serve` can
+        answer it from the loop that reads stdin.
+        """
+        moved = [waiting.item() for waiting in self._waiting_list().find(target, kind)
+                 if waiting.move()]
+        return moved, ("" if moved else "not_waiting")
+
+    def _wait_on(self, waiting, run):
+        """Run ``run`` as something the turn waits on and the person may move: its value, or MOVED."""
+        listing = self._waiting_list()
+        listing.add(waiting)
+        try:
+            return waiting.run(run)
+        finally:
+            listing.remove(waiting)
+
+    def _moved_work_wakes(self) -> bool:
+        """Will moved work's end start a turn on its own? (The classic terminal folds it in instead.)"""
+        from .monitors import wake_settings
+        if callable(getattr(self, "on_detached_ended", None)):
+            return True
+        return self._monitor_delivery() and bool(wake_settings(self.config)[0])
+
+    def _movable_helper(self, sub_ui, description: str, call_id, own_cancel) -> "background_now.Waiting":
+        """The Waiting for one foreground helper of this turn, alone or one of a batch."""
+        agent_id = sub_ui.agent_id
+        registry = getattr(self, "subagents", None)
+
+        def on_move():
+            # Under the Waiting's lock, before the turn is let go: from here the turn's Stop no longer
+            # reaches it, and the turn's end does not end its record.
+            if self.cancelled.is_set() or own_cancel.is_set():
+                raise RuntimeError("the helper is stopping")
+            own_cancel.parent = None
+            if registry is not None:
+                registry.mark_background(agent_id)
+
+        return background_now.Waiting("agent", agent_id, description, on_move=on_move,
+                                      call_id=_wire_call_id(self.ui, call_id) or "")
+
+    def _movable_command(self, args: dict, call_id, secrets) -> "background_now.Waiting":
+        """The Waiting for one foreground `bash` command of this turn; tools.bash arms it once it runs."""
+        label = " ".join(redact_text(str(args.get("command", "") or ""), secrets).split())[:200]
+        waiting = background_now.Waiting("command", str(call_id or ""), label, armed=False,
+                                         call_id=_wire_call_id(self.ui, call_id) or "")
+        waiting.notify_exit = self._monitor_delivery()
+        waiting.wakes = waiting.notify_exit and self._moved_work_wakes()
+        return waiting
+
+    def _run_waiting_command(self, waiting, name: str, exec_args: dict) -> str:
+        listing = self._waiting_list()
+        listing.add(waiting)
+        try:
+            return execute(name, exec_args, self.ctx)
+        finally:
+            listing.remove(waiting)
+            waiting.settle()                # one that never ran is not movable afterwards
+
+    def _adopt_moved_helper(self, waiting, description: str, prompt: str, agent_name: str, workspace,
+                            sub_ui, call_id, own_cancel, handle) -> str:
+        """A foreground helper the person moved: from now on it is a background helper.
+
+        Exactly what `background: true` would have made of it -- a detached job the agents pill
+        counts, integrated on its own thread when it ends and handed back with a wake turn -- except
+        that it is already running: its work, its checkout and its transcript go on untouched.
+        """
+        from . import stopped_work
+        self._ensure_detached_state()
+        self._spawn_detached_subagent(description, prompt, agent_name, workspace, sub_ui, call_id,
+                                      own_cancel, brief=True, adopt=waiting.result, adopted=handle)
+        stopped_work.agent_backgrounded(self, sub_ui.agent_id)
+        moved = self.__dict__.setdefault("_moved_helpers", {})
+        for key in [key for key, turn in moved.items() if turn != self._budget_turn]:
+            moved.pop(key, None)                 # only this turn's moves hold its waits back
+        moved[sub_ui.agent_id] = self._budget_turn
+        return background_now.helper_moved(description, sub_ui.agent_id,
+                                           isolated=workspace is not None,
+                                           wakes=self._moved_work_wakes())
+
+    def _moved_wait_refusal(self, ids, troupe_ids) -> str:
+        """`wait_tasks` only on helpers the person moved out of THIS turn: "" to wait, else why not.
+
+        Moving a helper says "don't hold this turn for it", and a model that read "carry on without
+        it" as "wait for its report" then held the turn for it anyway with wait_tasks (real VS Code,
+        deepseek-v4.1-flash). A later turn may wait for it -- the person may ask for exactly that.
+        """
+        moved = {key for key, turn in (self.__dict__.get("_moved_helpers") or {}).items()
+                 if turn == self._budget_turn}
+        if not moved:
+            return ""
+        asked = set(ids) if ids is not None else (self._live_detached_ids() | set(troupe_ids))
+        if not asked or not asked <= moved or self._detached_results(sorted(asked), unconsumed_only=True):
+            return ""
+        return background_now.wait_refused(sorted(asked))
+
     def _message_task_result(self, args: dict) -> str:
         """`message_task`: the parent's words into a running child's next round, as a tool result."""
         agent_id = str(args.get("id", "") or "").strip()
@@ -11632,6 +11793,9 @@ class Agent(GoalLifecycle):
 
         from .troupe_agent import waiting_ids
         troupe_ids = waiting_ids(self)
+        refused = self._moved_wait_refusal(ids, troupe_ids)
+        if refused:
+            return refused
         if ids is not None:
             known = set(getattr(self, "_detached_jobs", None) or {}) | troupe_ids
             known |= {row["id"] for row in self._detached_results()}
@@ -11771,6 +11935,10 @@ class Agent(GoalLifecycle):
                     f"(max_parallel_tasks): the other {count - width} started as slots freed.")
         else:
             head = f"All {count} helpers ran at the same time."
+        moved = sum(1 for outcome in outcomes.values()
+                    if str(outcome.output).startswith(background_now.MOVED_PREFIX))
+        if moved:
+            head += f" The person moved {moved} of them to the background while they ran."
         head += " Their results, in the order you listed them:"
         # One helper alone gets the room a foreground `task` result gets; several share it, so the
         # central ceiling never cuts the last helper's result in half (wait_tasks does the same).
@@ -12094,6 +12262,12 @@ class Agent(GoalLifecycle):
         for i, sub_ui in sub_uis.items():
             sub_ui._registry = registry
             self._foreground_stops()[sub_ui.agent_id] = stops[i]
+        # The person may move any running one to the background (dgc/background_now.py): its slot in
+        # this batch then says so, and the rest finish as before.
+        movable = self._can_move_waiting()
+        handles: dict[int, dict] = {i: {} for i in prepared} if movable else {}
+        waitings: dict[int, object] = {}
+        moved_out: dict[int, str] = {}
         replay_errors: list[str] = []
         if prepared:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12118,9 +12292,15 @@ class Agent(GoalLifecycle):
                                 agent_type=agent_name if adef else "", depth=self.depth + 1,
                                 isolated=True, parallel=True, queued=True,
                                 turn_hint=getattr(self.ui, "turn_id", ""))
-                        future = pool.submit(
+                        run = functools.partial(
                             self._execute_prepared_subagent, description, prompt,
                             agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i])
+                        if movable:              # movable once a worker has it, not while queued
+                            run = functools.partial(run, handle=handles[i])
+                            waitings[i] = self._movable_helper(sub_uis[i], description,
+                                                               calls[i].id, stops[i])
+                            run = functools.partial(self._wait_on, waitings[i], run)
+                        future = pool.submit(run)
                         pending[future] = i
                     for future in as_completed(pending):
                         i = pending[future]
@@ -12128,10 +12308,23 @@ class Agent(GoalLifecycle):
                             executions[i] = future.result()
                         except Exception as exc:
                             executions[i] = (f"{type(exc).__name__}: {exc}", "", "")
+                        if executions[i] is background_now.MOVED:
+                            # It works on in the background: what it did so far reaches the chat
+                            # now, the rest as it happens, and its slot here says it was moved.
+                            replay_errors.extend(sub_uis[i].unbuffer())
+                            args = calls[i].arguments
+                            moved_out[i] = self._adopt_moved_helper(
+                                waitings[i], self._safe_text(str(args.get("description", ""))),
+                                self._safe_text(str(args.get("prompt", ""))),
+                                self._safe_text(str(args.get("agent", ""))), prepared[i],
+                                sub_uis[i], calls[i].id, stops[i], handles.get(i))
+                            continue
                         replay_errors.extend(sub_uis[i].replay())
             except Exception as exc:
                 failure = f"parallel task scheduler failed: {type(exc).__name__}: {exc}"
                 for i in prepared:
+                    if i in moved_out:
+                        continue
                     if getattr(self, "subagents", None) is not None:
                         self.subagents.end(sub_uis[i].agent_id, "failed", self._safe_text(failure))
                     executions.setdefault(i, (failure, "", ""))
@@ -12145,6 +12338,9 @@ class Agent(GoalLifecycle):
         # Children cannot observe sibling integrations: every run has stopped before this ordered
         # phase begins. Disjoint deltas land; overlaps retain the later call for explicit /tasks use.
         for i in sorted(prepared):
+            if i in moved_out:                   # a background helper now: it integrates on its own
+                outcomes[i] = _TaskOutcome(moved_out[i])
+                continue
             description = self._safe_text(str(calls[i].arguments.get("description", "")))
             execution = executions.get(i, ("parallel task worker did not return a result", "", ""))
             outcomes[i] = self._finalize_subagent(description, prepared[i], *execution,

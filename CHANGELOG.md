@@ -29,6 +29,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     `resume_session` of a held session is refused with `command_rejected` reason `session_held`. A window's Open here
     that a terminal keeps leaves `ready.capabilities.detach.elsewhere` with reason `busy`.
 
+- **Run in background: you can move a helper or a command the turn is waiting on to the background.** DGC lets
+  the model decide whether the turn waits for a helper; now you can overrule it while it runs. The turn stops waiting
+  at once and carries on; the work keeps going exactly where it was, in its own copy, with nothing restarted.
+  - **A helper** becomes a background helper, as if it had been started that way: the agents pill counts it, its
+    changes land when it finishes, and its finish wakes the chat with its report ("Woke on agent · …"). One helper of
+    a batch can be moved on its own; the batch's result says it was moved, and the rest finish as before.
+  - **A command** (`bash`) becomes a background command (`bg3`) with everything it printed kept; its exit wakes the
+    chat ("Woke on background command").
+  - Once moved, Stop on the turn no longer stops it. Stop it from its own row, the agent map or the background list.
+  - **Where:** the full-screen terminal's **Ctrl+B** moves what the turn waits on (with several, it asks which, or
+    All); the bottom bar shows "Ctrl+B run in background" while there is something to move. The classic terminal
+    reads Ctrl+B the same way and asks by number. In the editor it is a button (see the extension's changelog).
+  - The model is told in plain words: "The person moved 'map auth' to the background (id sub-…). It keeps running in
+    its own copy; its report will arrive on its own when it finishes. Carry on without it: don't wait for it, and
+    don't start it again." For a command: "The person moved `npm test` to the background (bg3); its exit will wake
+    this chat. …"
+  - Not offered in `dgc -p`, which ends with its turn, or for the `python` tool, whose interpreter the next call
+    needs.
+  - **For editors**: a new command `background_now {request_id, agent_id | call_id}`, answered by a new event
+    `moved_to_background {request_id, kind, agent_id?, call_id?}` or `command_rejected` (`not_waiting`), offered as
+    `ready.capabilities.background_now = {version: 1}`. No existing event changed: a moved agent's `agents` snapshot
+    lists it with `background: true`, and a moved command appears in `background_shells`.
+
 - **"Open here" says where the chat is open and what runs there.** A session another window holds used to be shown as
   "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/toni-erp ·
   idle 6 min.** 2 monitors and 1 background helper run there. Open here moves them to this window." It says "working

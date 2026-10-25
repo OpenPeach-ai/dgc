@@ -192,6 +192,8 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 
 ## This turn
 - **Esc** — stop the turn · **Ctrl+C** — cancel · clear draft · quit
+- **Ctrl+B** — run what the turn is waiting on (a helper or a command) in the background; with several, pick one
+  or All. The turn carries on; see **Sub-agents** for what happens to it
 - **Enter** — steer native work at the next model/tool boundary; subscription follow-ups queue
 - **Tab** — queue a separate turn while working, outside menus and completion
 - **/skills** and **/skills show NAME** — browse the current catalog without stopping work
@@ -1186,6 +1188,18 @@ message. Either way you do not sit in a blocked turn polling it, and `wait_tasks
 moment you need it. A `dgc -p` run ends with its turn, so there a background child is for overlap
 within the turn: one still running at the end is stopped. Foreground `task` (the default) still
 waits.
+
+You can change that while it waits: **Run in background** moves a helper the turn is waiting on (or a
+`bash` command still running) to the background. Press **Ctrl+B** in the terminal (with several, it asks
+which, or All), or **Run in background** on the helper's line in the editor's chat, its card in the agent
+map, or the command's row. The turn stops waiting and carries on; nothing restarts. The helper becomes a
+background helper, exactly as if it had been started with `background: true`: the agents pill counts it,
+its changes land when it finishes, and its finish wakes the chat with its report. A command becomes a
+background command (`bg3`) with everything it printed kept, and its exit wakes the chat. One helper of a
+batch can be moved alone; the batch's result says so and the rest finish as before. Once moved, Stop on
+the turn no longer reaches it: stop it from its own row, the agent map or the background list. The model
+is told that you moved it, to carry on without it, and not to start it again. Not in `dgc -p`, and not
+for `python`, whose interpreter the next call needs.
 
 That wake turn opens with one quiet line per finished child, "Woke on agent · Review billing.py",
 folded, never a message from you. Open it (click it, or Enter or Space in the editor; `/expand` in

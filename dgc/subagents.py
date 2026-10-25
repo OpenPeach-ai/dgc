@@ -361,6 +361,21 @@ class SubagentRegistry:
                 payload = self._updated_payload(record, model=changed_model)
             self._notify("updated", payload)
 
+    def mark_background(self, id: str) -> None:
+        """A foreground agent the person moved to the background (dgc/background_now.py).
+
+        From here it is listed as a background agent (`agents.items[].background`) and the turn's end
+        no longer ends it (end_open). No frame of its own: `agent_updated` has no field for it, so the
+        listener is asked for a fresh snapshot instead (``resync``), which carries the flag.
+        """
+        with self._publish:
+            with self._lock:
+                record = self._records.get(str(id or ""))
+                if record is None or record.background:
+                    return
+                record.background = True
+            self._notify("resync", {})
+
     def waiting(self, id: str, what: str | None) -> None:
         """running -> waiting (``permission`` / ``answer``); ``None`` -> running again."""
         with self._publish:

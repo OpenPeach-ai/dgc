@@ -1,5 +1,37 @@
 # Controls during a turn
 
+## Run in background (CLI 0.48)
+
+The model decides whether the turn waits for a helper (foreground) or goes on without it (background), and a
+`bash` command runs in the foreground unless it asked otherwise. While the turn waits on one, you can move it to the
+background yourself:
+
+- **Full-screen terminal:** **Ctrl+B**. With several waiting (a batch of helpers), it asks which, with **All of
+  them** as the last row. The bottom bar shows "Ctrl+B run in background" while there is something to move;
+  otherwise Ctrl+B is the cursor's step back, as before.
+- **Classic terminal:** **Ctrl+B** as well; with several it lists them by number and takes a number, `a` for all,
+  or anything else to cancel.
+- **Editor:** **Run in background** on the helper's line in the chat (a batch line asks which, each by name, or
+  **All**), on its card in the agent map, and on a running command's row once it has run a moment.
+
+The waiting call returns at once and the turn carries on. Nothing is restarted or lost: a helper keeps its own copy,
+its transcript and its step count, and becomes a background helper -- the agents pill counts it, its changes land
+when it finishes, and its finish wakes the chat with its report. A command keeps its process and everything it
+printed, becomes a background command (`bgN`) in the agent map's list, and its exit wakes the chat ("Woke on
+background command"). Moving one helper of a batch leaves the rest as they were; the batch's result says which was
+moved. Once moved, Stop on the turn leaves it running; stop it from its own row, the agent map or the background
+list.
+
+What the model reads in the waiting call's result: "The person moved 'map auth' to the background (id sub-…). It
+keeps running in its own copy; its report will arrive on its own when it finishes. Carry on without it: don't wait
+for it, and don't start it again." For a command: "The person moved `npm test` to the background (bg3); its exit
+will wake this chat." followed by the same request and where its output is kept.
+
+Only the main agent's helpers and commands move (a helper's own helpers move with it). `dgc -p` never offers it --
+nothing outlives its one turn -- and the `python` tool is not movable, because its interpreter is one namespace the
+next call needs. Editors: `background_now {request_id, agent_id | call_id}` answered by `moved_to_background`, offered
+as `ready.capabilities.background_now = {version: 1}`.
+
 CLI 0.29.2 and extension 0.16.2 add live controls without changing editor protocol v6.
 Update both components for these capabilities.
 

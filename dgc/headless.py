@@ -2390,6 +2390,9 @@ class Backend:
         self.agent.on_turn_files = self._on_turn_files
         self._agent_wakes: list[dict] = []
         self.ui.monitor_wake_enabled = True
+        # The person may move a helper or command the turn waits on to the background
+        # (background_now, dgc/background_now.py).
+        self.ui.background_now_enabled = True
         # Background shells (bash with background:true), for the editor's task list. Pushed only
         # once this chat's client has sent one of the commands that answer with them, so a client
         # that has never heard of `background_shells` is never sent one (see _on_background_shell).
@@ -2472,6 +2475,11 @@ class Backend:
                           # goes on: its parent is told the user stopped it. Without this a client
                           # can only end the whole turn to stop a foreground child.
                           "agent_control_foreground": True,
+                          # background_now: Run in background on a foreground sub-agent or `bash`
+                          # command the turn is waiting on (dgc/background_now.py). An older CLI
+                          # rejects the command as invalid_command, so a client shows the button
+                          # only when this is here.
+                          "background_now": {"version": 1},
                           # The Agent map's task list: background_shells, and list_background_shells,
                           # stop_background_shell and get_background_output (shell or monitor ids).
                           "background_tasks": {"version": 1},
@@ -7809,6 +7817,8 @@ class Backend:
             self._emit_troupes(request_id)
         elif t == "agent_control":
             self._agent_control(cmd)
+        elif t == "background_now":
+            self._background_now(cmd)
         elif t == "restart_monitor":
             # The Restart on a monitor that did not come back on its own when the chat reopened.
             # Idle only: its note joins the transcript, which a running turn is writing.
@@ -8251,6 +8261,37 @@ class Backend:
             text=redact_value(text, secret_values(getattr(self, "config", None))),
             delivered=bool(delivered),
             **({"reason": _AGENT_MESSAGE_WIRE_REASON.get(why, "unknown")} if why else {}))
+
+    def _background_now(self, cmd: dict) -> None:
+        """Run in background: the person moves what the turn waits on (dgc/background_now.py).
+
+        Like agent_control, deliberately not in _BUSY_MUTATIONS -- a running turn is the only time
+        there is anything to move -- and safe on the loop that reads stdin: a move flips one state
+        under one lock, and the waiting turn's own thread does the rest.
+        """
+        request_id = cmd.get("request_id")
+        if not isinstance(request_id, str) or not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command="background_now", reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        agent_id = str(cmd.get("agent_id") or "").strip()
+        call_id = str(cmd.get("call_id") or "").strip()
+        if bool(agent_id) == bool(call_id) or len(agent_id) > 128 or len(call_id) > 256 or "all" in (agent_id, call_id):
+            self.em.emit("command_rejected", command="background_now", reason="invalid_command",
+                         request_id=request_id, message="name one agent_id or one call_id")
+            return
+        moved, _ = self.agent.background_now(agent_id or call_id, "agent" if agent_id else "")
+        if not moved:
+            self.em.emit("command_rejected", command="background_now", reason="not_waiting",
+                         request_id=request_id,
+                         message="the turn is no longer waiting on that: it has already finished")
+            return
+        for item in moved:
+            self.em.emit("moved_to_background", request_id=request_id, kind=item["kind"],
+                         **({"agent_id": item["id"]} if item["kind"] == "agent" else {}),
+                         **({"call_id": item["call_id"]} if item["call_id"] else {}))
+        if any(item["kind"] == "agent" for item in moved):
+            self._emit_agents()                  # it is listed as a background agent from now on
 
     def _emit_troupes(self, request_id: str | None = None) -> None:
         """Every troupe this chat started, newest first: the card a reconnecting editor repaints."""

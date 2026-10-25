@@ -128,6 +128,19 @@ def agent_started(parent, agent_id: str, description: str, prompt: str, agent_na
     update(target, lambda records: records.append(record))
 
 
+def agent_backgrounded(parent, agent_id: str) -> None:
+    """A foreground sub-agent the person moved to the background (dgc/background_now.py)."""
+    target = _target(parent) if getattr(parent, "depth", 1) == 0 else None
+    if target is None or not agent_id:
+        return
+
+    def mutate(records):
+        for record in records:
+            if record.get("kind") == "agent" and record.get("id") == agent_id and record.get("state") == "running":
+                record["background"] = True
+    update(target, mutate)
+
+
 def agent_ended(parent, agent_id: str, state: str) -> None:
     target = _target(parent) if getattr(parent, "depth", 1) == 0 else None
     if target is None or not agent_id:
