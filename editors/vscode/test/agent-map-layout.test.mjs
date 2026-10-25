@@ -54,7 +54,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.ok(m.pageOverflow <= 0, `the page does not scroll sideways (${m.pageOverflow})`);
         assert.ok(m.bodyOverflow <= 0, `nor does the map (${m.bodyOverflow})`);
         assert.ok(inside(m.dialog, m.inner), `the dialog is inside the viewport (${JSON.stringify(m.dialog)})`);
-        assert.equal(m.subtitle, "4 agents · click an agent for details");
+        assert.equal(m.subtitle, "2 working · 4 this turn", "the one turn started all four; two of them work");
         assert.equal(m.tasksTitle, "4 background tasks · click a task for details");
         assert.equal(m.rows.length, 1 + 4 + 4, "the main agent, four agents and four tasks");
         for (const row of m.rows) {
