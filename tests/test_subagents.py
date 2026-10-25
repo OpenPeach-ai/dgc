@@ -920,7 +920,9 @@ class TerminalStateTests(HarnessCase):
 
         def clone(config, root):
             worktrees.append(root)
-            if len(worktrees) == 1:
+            # The "bad" child's copy fails, by name: which of the two starts first is not fixed (Run in background
+            # runs each helper on a thread of its own), and failing the FIRST one failed "slow" whenever it won the race.
+            if "-task-bad-" in str(root):
                 raise OSError("no config for this worktree")
             return clone_fixture(config, root)
         with patch.object(LLMClient, "chat", Script([("CHILDB", child(sleep=0.6)), ("go", calls_then(calls))])), \
