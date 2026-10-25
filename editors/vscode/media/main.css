@@ -1685,6 +1685,9 @@ button.link:hover { border-color: var(--accent); color: var(--text); }
 /* The mark and the word sit on one line: the icon is a block element, so the button has to be a
    flex row or "open" drops underneath it. */
 button.link.open-file { display: inline-flex; align-items: center; gap: var(--sp-1); }
+/* A running command's Run in background, in its row's head beside Copy. */
+button.link.run-bg { white-space: nowrap; }
+button.link.run-bg[hidden] { display: none; }
 /* A step under the conversation's text: monospace at the prose size reads a size larger. */
 pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) calc(var(--t-chat) - 1px)/1.6 var(--mono); color: var(--text); white-space: pre; }
 pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
@@ -2158,6 +2161,13 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-name { display: inline-block; max-width: min(32ch, 100%); vertical-align: top; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; unicode-bidi: isolate; }
 .agent-line-more { white-space: nowrap; }
+/* Run in background on a line whose agent the turn is waiting on: the tool row's small bordered
+   action, sized to the line so the line keeps its height. With several, the same place asks which. */
+.agent-line-move { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1);
+  min-width: 0; height: auto; }
+.agent-line-move button.link { padding: 0 var(--sp-2); line-height: calc(var(--t-sm) * 1.45 - 2px); white-space: nowrap;
+  max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.agent-line-move-ask { color: var(--muted); white-space: nowrap; }
 .agent-name:not(:disabled):hover, .agent-line-more:not(:disabled):hover { color: var(--text); }
 .agent-name:focus-visible, .agent-line-more:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 /* Waiting and failed need the reader: brighter and heavier. Never --err-text, which is about 3:1 on
