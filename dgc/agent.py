@@ -11736,6 +11736,10 @@ class Agent(GoalLifecycle):
                     f"(max_parallel_tasks): the other {count - width} started as slots freed.")
         else:
             head = f"All {count} helpers ran at the same time."
+        moved = sum(1 for outcome in outcomes.values()
+                    if str(outcome.output).startswith(background_now.MOVED_PREFIX))
+        if moved:
+            head += f" The person moved {moved} of them to the background while they ran."
         head += " Their results, in the order you listed them:"
         # One helper alone gets the room a foreground `task` result gets; several share it, so the
         # central ceiling never cuts the last helper's result in half (wait_tasks does the same).

@@ -256,6 +256,7 @@ class AForegroundHelperMovedTests(_Case):
                 self.assertIn("completed and integrated", quick)
                 self.assertRegex(result, r"\[2\] slow part\nThe person moved 'slow part' to the background "
                                          rf"\(id {agent_id}\)\.")
+                self.assertIn("The person moved 1 of them to the background while they ran.", result.split("[1]")[0])
                 self.assertEqual((h.root / "quick.md").read_text(), "quick\n", "the rest finish as before")
                 self.assertIn(agent_id, h.agent._detached_jobs)
                 release.set()

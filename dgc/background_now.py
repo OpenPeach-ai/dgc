@@ -166,6 +166,7 @@ class WaitingList:
 
 # ---- what the model is told ------------------------------------------------------------------------
 CARRY_ON = "Carry on without it: don't wait for it, and don't start it again."
+MOVED_PREFIX = "The person moved "          # how both results begin (a batch counts its moved slots by it)
 
 
 def helper_moved(description: str, agent_id: str, *, isolated: bool, wakes: bool) -> str:
@@ -176,13 +177,13 @@ def helper_moved(description: str, agent_id: str, *, isolated: bool, wakes: bool
     else:
         arrives = ("its report reaches you between tool calls while a turn is running, otherwise "
                    "with the person's next message")
-    return (f"The person moved '{description}' to the background (id {agent_id}). It keeps running "
+    return (f"{MOVED_PREFIX}'{description}' to the background (id {agent_id}). It keeps running "
             f"{where}; {arrives}. {CARRY_ON}")
 
 
 def command_moved(label: str, bid: str, *, wakes: bool) -> str:
     """The waiting `bash` call's result once the person moved the command."""
-    head = f"The person moved `{label}` to the background ({bid})"
+    head = f"{MOVED_PREFIX}`{label}` to the background ({bid})"
     head += "; its exit will wake this chat." if wakes else "."
     return (f"{head} {CARRY_ON} Its output so far and everything it prints from now on are kept: "
             f"read them with bash_output(id=\"{bid}\").")
