@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Editor protocol: command `background_now {request_id, agent_id?, call_id?}` and event `moved_to_background
+  {request_id, kind, agent_id?, call_id?}` (Run in background: the person moves a foreground sub-agent or `bash`
+  command the turn waits on to the background; offered as `ready.capabilities.background_now`) are in the vendored
+  protocol and the TypeScript SDK's known events. The event only ever answers that command; an SDK session never
+  sends it. No Pips API change.
+
 - Editor protocol: commands `editor_app {name}`, `session_holder {request_id, session_id}` and `chatdgc_holder
   {request_id, conversation_id}`, and events `session_holder {request_id, session_id, found, editor?, windowless?,
   folder?, working?, idle_s?, monitors?, helpers?, commands?, queued?, waiting?}` and `chatdgc_holder {request_id,
