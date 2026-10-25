@@ -5097,21 +5097,34 @@
         + `<div class="muted pip-permission-note">Allow starts it in the background: one agent per item. Its progress shows above the message box, where you can stop it, and this chat continues when it ends.</div>`;
     }
     const row = (label, value) => (value ? `<dt>${label}</dt><dd>${esc(String(value))}</dd>` : "");
+    // A Pip's model and context window in the user's words (the main chat changes them from Pips API 66).
+    const modelWords = (choice) => (!choice || typeof choice !== "object" ? ""
+      : choice.mode === "model" ? String(choice.model || "")
+      : choice.mode === "subscription" ? `${{ claude: "Claude Code", codex: "Codex" }[choice.engine] || String(choice.engine || "")}, on your own plan`
+      : "Default: the model Pips use by default");
+    const windowWords = (n) => (Number.isSafeInteger(n) && n > 0
+      ? `${n === 1048576 ? "1M" : n % 1024 === 0 ? `${n / 1024}K` : n.toLocaleString()} tokens` : "");
     if (name === "pips_propose") {
       const changes = args.changes && typeof args.changes === "object" ? Object.entries(args.changes) : [];
       if (!changes.length) return "";
-      return `<dl class="pip-permission">${changes.map(([key, value]) => row(esc(key.replace(/_/g, " ")), value)).join("")}${row("Why", args.reason)}</dl>`
-        + `<div class="muted pip-permission-note">Allow applies this change to the Pip.</div>`;
+      const label = { name: "Name", goal: "Goal", source_ref: "Branch", source_exclude: "Leave out", model_choice: "Model", context_window: "Context window" };
+      const shown = (key, value) => (key === "model_choice" ? modelWords(value) : key === "context_window" ? windowWords(value)
+        : Array.isArray(value) ? value.map(String).join(", ") || "Nothing" : value && typeof value === "object" ? JSON.stringify(value) : value);
+      return `<dl class="pip-permission">${changes.map(([key, value]) => row(esc(label[key] || key.replace(/_/g, " ")), shown(key, value))).join("")}${row("Why", args.reason)}</dl>`
+        + `<div class="muted pip-permission-note">Allow applies this change to the Pip. It starts no work, and what the Pip may do stays the same.</div>`;
+    }
+    if (name === "pips_settings") {
+      return `<dl class="pip-permission">${row("Model for Pips", String(args.default_model || "") || "Same as DGC")}${row("Why", args.reason)}</dl>`
+        + `<div class="muted pip-permission-note">Allow saves it in Settings, Agents, Pips: every Pip on Default uses it from its next run. A Pip with a model of its own keeps it.</div>`;
     }
     if (name !== "pips_setup") return "";
     const reads = args.web_plan && Array.isArray(args.web_plan.reads) ? args.web_plan.reads : [];
     const readText = reads.map((r) => (r && r.kind === "search" ? `Search: ${r.query || ""}` : String((r && r.url) || ""))).join("\n");
     const kind = `${args.pip_type || ""}, ${args.scope === "personal" ? "personal (across your projects)" : "this project"}`;
-    const model = args.model_choice && args.model_choice.mode && args.model_choice.mode !== "default"
-      ? [args.model_choice.provider, args.model_choice.model].filter(Boolean).join(" · ") : "";
+    const model = args.model_choice && args.model_choice.mode && args.model_choice.mode !== "default" ? modelWords(args.model_choice) : "";
     const fresh = !args.pip_id;
     return `<dl class="pip-permission">${row("Pip", args.name)}${row("Job", args.goal)}${row("Kind", kind)}`
-      + `${row("Reads", readText)}${row("Model", model)}${row("First run", args.run_now ? "Now, then on its schedule" : "")}</dl>`
+      + `${row("Reads", readText)}${row("Model", model)}${row("Context window", windowWords(args.context_window))}${row("First run", args.run_now ? "Now, then on its schedule" : "")}</dl>`
       + `<div class="muted pip-permission-note">${fresh ? "Allow creates this Pip and turns it on." : "Allow applies this setup to the existing Pip."} `
       + `Pause, change or delete it any time in Pips.</div>`;
   }
@@ -6983,7 +6996,7 @@
         const fixQuestion = fixInstall ? "Install the project's dependencies in the fix copy?"
           : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
         const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
-        const title = fixQuestion || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const title = fixQuestion || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
         const buttons = fixFile
           ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
           : `<button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button>`;

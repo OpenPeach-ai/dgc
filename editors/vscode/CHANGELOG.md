@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The main chat's Pip model changes ask in plain words.** The permission card for changing a Pip lists its new
+  **Model** ("glm-5.3:cloud", or "Claude Code, on your own plan") and **Context window** ("64K tokens") instead of
+  "model choice [object Object]", says the change starts no work and leaves what the Pip may do as it is, and the line
+  above it names the Pip. Changing the model every Pip on Default uses asks as **Change the Pips default model**, and a
+  new Pip's card from the chat shows the window it starts with.
+
 - **A Pip's context window changed from the main chat shows on its page.** The main chat can now change a Pip's model
   and context window (with a CLI on Pips API 66). The Pip's prompt box kept the window it first read while the view was
   open, showed that, and sent it with the next message, which saved it back over the chat's change. It now shows the
