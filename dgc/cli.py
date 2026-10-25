@@ -858,6 +858,9 @@ class CLI:
         self.ui._rule_hook = self._add_rule
         self.ui.project_root = config.project_root
         self.ui.redact = lambda text: redact_text(text, secret_values(config))
+        # Ctrl+B during a turn moves what it waits on to the background (dgc/background_now.py).
+        # `dgc -p` builds this CLI too, and never offers it: nothing outlives its one turn.
+        self.ui.background_now_enabled = True
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
 
@@ -1999,6 +2002,46 @@ class CLI:
                      "/model and /think steer its own model and effort  ·  "
                      "/connect <provider> returns to a model endpoint")
 
+    # ---- Ctrl+B: run in background (dgc/background_now.py) ---------------------------------------
+    def _background_now_say(self, line: str) -> None:
+        resume = self.ui._pause_working()
+        self.console.print(f"[dim]{_markup_literal(line)}[/dim]", highlight=False)
+        if resume is not None and not self.agent.cancelled.is_set():
+            self.ui.start_working(resume)
+
+    def _background_now_move(self, target: str) -> None:
+        moved, _ = self.agent.background_now(target)
+        if not moved:
+            self._background_now_say("↳ nothing to move: it has already finished")
+            return
+        for item in moved:
+            what = "command" if item["kind"] == "command" else "helper"
+            self._background_now_say(f"↳ moved to the background ({what}): {item['label'][:70]}")
+
+    def _background_now_key(self) -> list | None:
+        """Ctrl+B: move the one thing the turn waits on, or ask which when there are several."""
+        items = self.agent.waiting_now()
+        if not items:
+            self._background_now_say("↳ the turn is not waiting on a helper or a command")
+            return None
+        if len(items) == 1:
+            self._background_now_move(items[0]["id"])
+            return None
+        choices = "  ".join(f"{n} {item['label'][:40]}" for n, item in enumerate(items[:9], 1))
+        self._background_now_say(f"Run in background: {choices}  a all  (Esc: cancel)")
+        return items[:9]
+
+    def _background_now_choice(self, items: list, ch: str) -> None:
+        """The key after Ctrl+B's question: a number, a for all, anything else cancels."""
+        if ch.lower() == "a":
+            for item in items:
+                self._background_now_move(item["id"])
+        elif ch.isdigit() and 1 <= int(ch) <= len(items):
+            self._background_now_move(items[int(ch) - 1]["id"])
+        else:
+            self._background_now_say("↳ not moved")
+        return None
+
     def _run_turn_live(self, text: str, queue: list[str]) -> None:
         """Run a turn on a worker thread while the main thread watches the keyboard:
         Esc / Ctrl-C interrupts the turn; Enter steers native turns, Tab queues the next turn.
@@ -2047,6 +2090,7 @@ class CLI:
         buf = ""
         import codecs
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        choosing: list | None = None            # Ctrl+B with several waiting: which one(s)
         try:
             tty.setcbreak(fd)  # char-at-a-time, ECHO off, but keep \n->\r\n and signals
             while not done.is_set():
@@ -2062,6 +2106,12 @@ class CLI:
                     ch = decoder.decode(os.read(fd, 1))
                 except OSError:
                     break
+                if choosing is not None:
+                    choosing = self._background_now_choice(choosing, ch)
+                    continue
+                if ch == "\x02":                # Ctrl+B — run what the turn waits on in the background
+                    choosing = self._background_now_key()
+                    continue
                 if ch in ("\x1b", "\x03"):       # Esc / Ctrl-C — interrupt this turn
                     self.agent.cancelled.set()
                     self.ui.stop_working()

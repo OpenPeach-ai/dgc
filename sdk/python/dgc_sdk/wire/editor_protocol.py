@@ -625,6 +625,14 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # nowhere else. `step` is a small record: {type: tool_call|tool_result|text, name, call_id,
     # args, output, is_error, text}, already redacted by the child's own UI.
     "agent_step": {"agent_id": _S(), "step": _O(), "seq_in_agent": _I(False)},
+    # Only ever the answer to `background_now` (capabilities.background_now), so a client that cannot
+    # send that command never receives it. What the person moved to the background: a sub-agent
+    # (`kind` "agent", `agent_id` its sub-<12 hex>) or a `bash` command (`kind` "command"); `call_id`
+    # is the tool row the turn was waiting on. The waiting call's tool_result follows with the words
+    # the model gets; a sub-agent's `agents` snapshot now lists it with `background: true`, and a
+    # command is in `background_shells` as the bg<n> it became.
+    "moved_to_background": {"request_id": _S(), "kind": _f("string", enum=("agent", "command")),
+                            "agent_id": _S(False), "call_id": _S(False)},
     # A message the USER sent to ONE running background sub-agent, and whether the child took it.
     #
     # Only ever a REPLY to `agent_control`, which is why `request_id` is REQUIRED and not optional:
@@ -921,6 +929,15 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # exactly one `agent_message` carrying it, "close" by the refreshed `agents` snapshot.
     "agent_control": {"action": _f("string", enum=("message", "close")), "id": _S(),
                       "request_id": _S(), "text": _S(False)},
+    # capabilities.background_now = {version: 1}: Run in background. The person moves what the
+    # running turn is waiting on to the background: a foreground sub-agent of the main agent
+    # (`agent_id`) or a foreground `bash` command of the main agent (`call_id`, its tool_call's id;
+    # a `task` row's call_id names its sub-agent). Exactly one of the two. The waiting call returns
+    # at once, the work goes on untouched as a background sub-agent or background shell, and its
+    # end wakes the chat. Allowed while a turn runs -- that is when there is something to move.
+    # Answered with `moved_to_background`, or command_rejected (invalid_command, not_waiting: the
+    # turn is no longer waiting on it, usually because it has just finished).
+    "background_now": {"request_id": _S(), "agent_id": _S(False), "call_id": _S(False)},
     # ---- end v14 ----------------------------------------------------------------------------------
 }
 
