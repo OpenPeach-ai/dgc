@@ -4649,7 +4649,7 @@ class TUI:
                   "add_skill": "Install skill", "save_memory": "Save to DGC.md", "remember": "Remember", "forget": "Forget",
                   # The sub-agent supervision tools, in the editor card's own words.
                   "list_tasks": "Check sub-agents", "wait_tasks": "Wait for a sub-agent",
-                  "message_task": "Message", "close_task": "Stop"}
+                  "message_task": "Message", "close_task": "Stop", "continue_task": "Continue"}
 
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
@@ -4663,7 +4663,7 @@ class TUI:
                  "view_image": "Viewing image",
                  "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
                  # The agent follows as the summary: "Sending message to Write the parser".
-                 "message_task": "Sending message to", "close_task": "Stopping"}
+                 "message_task": "Sending message to", "close_task": "Stopping", "continue_task": "Continuing"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
                 "monitor_event": "Monitor event", "subtask_result": "Sub-task result",
@@ -4674,7 +4674,7 @@ class TUI:
                 "add_skill": "Installed skill", "save_memory": "Saved to DGC.md", "remember": "Remembered", "forget": "Forgot",
                 "view_image": "Viewed image",
                 "list_tasks": "Checked sub-agents", "wait_tasks": "Waited for a sub-agent",
-                "message_task": "Sent message to", "close_task": "Stopped"}
+                "message_task": "Sent message to", "close_task": "Stopped", "continue_task": "Continued"}
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
@@ -9682,7 +9682,7 @@ def _arg_summary(args: dict, name: str = "") -> str:
         from .ui import task_batch_summary
         v = style_mod.terminal_safe_text(task_batch_summary(args)).replace("\n", " ")
         return v[:100] + ("…" if len(v) > 100 else "")
-    if name in ("message_task", "close_task") and isinstance(args, dict):
+    if name in ("message_task", "close_task", "continue_task") and isinstance(args, dict):
         # The agent, by what it was asked to do (the agent resolves it into `agent`), else its id.
         v = style_mod.terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
         return v[:100] + ("…" if len(v) > 100 else "")

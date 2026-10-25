@@ -365,7 +365,7 @@ class UI:
         """The one argument worth showing beside a tool name — DGC's own keys first, then the keys
         a delegated vendor tool uses (Claude's `Read`/`Edit` carry `file_path`, Codex's `shell` a
         `command` list), so a subscription turn's cards are not blank."""
-        if name in ("message_task", "close_task") and isinstance(args, dict):
+        if name in ("message_task", "close_task", "continue_task") and isinstance(args, dict):
             # The agent a message went to, by what it was asked to do, else its id.
             value = terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
             return value[:120] + ("…" if len(value) > 120 else "")

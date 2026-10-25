@@ -1894,7 +1894,7 @@
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
     // Supervising sub-agents. Steering one wears a fixed mark, never the agent's own face: the
     // row is about the parent talking to it.
-    list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash",
+    list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash", continue_task: "bot",
     // DGC's own MCP broker, exposed when a server's catalog is too large to inline (dgc/agent.py).
     // It is the same route as an mcp__server__tool call, so it wears the same mark.
     mcp_call: "blocks", mcp_search: "blocks",
@@ -1952,6 +1952,8 @@
     // asked to do (the backend resolves it from the id): "Sent message to Write the parser".
     message_task: ["Sending message to", "Sent message to"],
     close_task: ["Stopping", "Stopped"],
+    // A finished helper given more work, with its memory (dgc/helper_memory.py): "Continued Review billing.py".
+    continue_task: ["Continuing", "Continued"],
   };
   // A lone step names itself in its group's sentence, and a folded group shows only that sentence.
   // These two take their object from the card's detail -- the agent, by what it was asked to do --
@@ -1960,9 +1962,9 @@
   // A delegation names the agent it started the same way: a spawn no agent line has taken (an older
   // CLI, a task that was refused or never started, an agent the backend stopped listing) reads
   // "Delegated Write the parser", which is also what a reload of it draws.
-  const NAMES_ITS_AGENT = new Set(["message_task", "close_task", "task"]);
+  const NAMES_ITS_AGENT = new Set(["message_task", "close_task", "task", "continue_task"]);
   const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent",
-    task: "delegating to a sub-agent" };
+    task: "delegating to a sub-agent", continue_task: "continuing a sub-agent" };
   function pluginLogoHtml(name) {
     const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
     const src = match && pluginLogos[match[1]];
@@ -10953,7 +10955,7 @@
   function stepSummary(name, args) {
     if (!args || typeof args !== "object") return "";
     const one = (value) => { const text = String(value ?? "").replace(/\n/g, " "); return text.length > 120 ? `${text.slice(0, 120)}…` : text; };
-    if (name === "message_task" || name === "close_task") return one(args.agent || args.id || "");
+    if (name === "message_task" || name === "close_task" || name === "continue_task") return one(args.agent || args.id || "");
     const key = STEP_SUMMARY_KEYS.find((k) => k in args);
     return key ? one(args[key]) : "";
   }

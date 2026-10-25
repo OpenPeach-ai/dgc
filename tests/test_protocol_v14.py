@@ -271,7 +271,8 @@ class SharedShapeTests(unittest.TestCase):
 
     def test_parallel_batch_threads_each_call_id(self):
         source = (ROOT / "dgc" / "agent.py").read_text()
-        self.assertIn("agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i])", source)
+        # Each parallel child runs under its own call id (its handle, for the memory dgc/helper_memory.py keeps, follows).
+        self.assertRegex(source, r"agent_name, workspace, sub_uis\[i\], calls\[i\]\.id, cancel=stops\[i\][,)]")
 
 
 class LiveTurnFrameTests(unittest.TestCase):
