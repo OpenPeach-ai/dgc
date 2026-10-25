@@ -524,6 +524,16 @@ messages; the buttons under a message when you point at it; the same box. Its pa
 [A Project Pip's page](#a-project-pips-page)), and its runs with Ask DGC to fix are in its chat. Which code it reads
 (committed, or your current files) is under **What this Pip can do** beside the box.
 
+**While it runs, it is already there.** From the moment a run starts, the chat has one post for it at the end: the
+Pip's face at work, what it is doing now ("Reading billing.py", "Waiting for the model"), a clock, **Stop**, and how
+it started: **Started by you**, **On schedule · 9:00 AM**, **From a new commit** (or another event), **Asked by DGC**
+(a DGC chat ran it), **From another Pip** or **First run**. When the run ends, its post takes that same place. **Stop**
+stops the run, as History's Cancel run does; a run you stop posts nothing, and the chat says so. A Personal Pip's
+routine runs as one too (**From Shop event**, **From Gmail event**, **On schedule · 8:00 AM**), its reply written
+under what it is doing, and its reply takes its place. All of it is read from the run itself, so a window reload
+while it runs draws it again. The Work chat a Pip reports to says so too: a chip above its box ("Billing audit running
+· 0:42", or "2 Pips running") that opens this chat at the run.
+
 **Once, even with the editor closed.** The post is written when the run finishes, by the
 runner, so a run that ends overnight is in the chat in the morning. Chat replies, Patch work
 and cancelled runs post nothing. A Pulse's own command-plan runs are their messages; they don't
@@ -923,7 +933,8 @@ last run found, which goes to that run's message), **Run now** and a **…** men
 - **Run now** (the play button, where a Personal Pip has its computer) starts what the Pip runs: an audit for
   Scout, Lens, Rook and Lock, a draft for Quill, a Pulse's approved command plan, or a live-data Pip's commands.
   Patch runs only on a handoff you approve, and a Pulse with no command plan has nothing to run, so they have
-  none. While a run is going it says **Running…**, and a click opens that run in History. When the Pip can't run
+  none. While a run is going it says **Running…**, and a click opens that run in History; the run's live post in the
+  chat says what it is doing, with Stop (see [A Pip's runs in its own chat](#a-pips-runs-in-its-own-chat)). When the Pip can't run
   (Pips are off, the Pip is paused), the button says why.
 - **The … menu** has every section: **History** (every run and its report), **Settings** (what it does, when it
   runs, its model, pause and archive, and under Advanced its notifications, its source and sharing), **Schedule**

@@ -1362,6 +1362,9 @@
   const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
   const pipFixSteps = new Map();         // agent id -> what the fixer is doing now ("Running npm test")
   const PIP_FIX_ACTIVE = ["queued", "preparing", "running", "applying"];
+  // ready.capabilities.pip_runs_running: which of this chat's Pips are running now, as the backend says (the chip).
+  let pipRunsLive = false;
+  const pipRunning = new Map();          // run_id -> {run_id, pip_id, name, pip_type, started_at, trigger, at (ms)}
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() {
@@ -5627,6 +5630,7 @@
   function syncComposerRail() {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
     const fixes = pipFixesForChip().length ? ["pipfixes"] : [];
+    if (pipRunning.size) fixes.push("piprunning");
     const asChips = present.length + fixes.length >= 2;
     composerRail.classList.toggle("as-chips", asChips);
     composerRail.hidden = pasteBar.hidden && (asChips || !present.length);
@@ -5635,7 +5639,7 @@
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-tasks", !tasksBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
-    // Pip fixes are always a chip on this line: they have no row of their own.
+    // Pip fixes and running Pips are always chips on this line: they have no row of their own.
     renderRailChips([...(asChips ? present : []), ...fixes]);
   }
   function setChatChanges(next) {
@@ -5928,12 +5932,12 @@
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
   const RAIL_ROW_ORDER = ["pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
-    changes: "Changes in this chat", pips: "Pips", pipfixes: "Pip fixes" };
+    changes: "Changes in this chat", pips: "Pips", pipfixes: "Pip fixes", piprunning: "Pips running" };
   const RAIL_FITS = ["full", "compact", "tight", "tighter", "wrap"];
   const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
   let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
   // A kind's real row; Pip fixes have no row (their cards are in the chat): their popover lists them.
-  const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel()
+  const railBar = (kind) => (kind === "pipfixes" ? paintPipFixesPanel() : kind === "piprunning" ? paintPipRunningPanel()
     : (RAIL_KINDS.find(([name]) => name === kind) || [])[1] || null);
   const railCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   function railTroupeLead() {
@@ -6004,6 +6008,21 @@
         need: waiting > 0, tone: "warn", needWord: waiting ? "needs you" : "",
         label: `Pip fixes: ${said}`, tip: `Pip fixes · ${said}` };
     }
+    if (kind === "piprunning") {
+      // "Billing audit running · 0:42"; two or more, "2 Pips running". As room runs out, "running" goes first, then
+      // the clock; the name stays.
+      const runs = pipRunningList();
+      if (!runs.length) return null;
+      if (runs.length === 1) {
+        const run = runs[0], name = String(run.name || "A Pip"), clock = formatDuration(pipRunningSeconds(run));
+        return { icon: "play-circle", num: name, after: "running", extra: [[`· ${clock}`, ""]], live: true,
+          label: `${name} is running, ${clock}, ${pipStartedWords(run).toLowerCase()}. Open its chat`,
+          tip: `${name} · running ${clock} · ${pipStartedWords(run)}\nOpen its chat in Pips` };
+      }
+      const said = runs.map((run) => `${run.name || "A Pip"} (${formatDuration(pipRunningSeconds(run))})`).join(", ");
+      return { icon: "play-circle", num: `${runs.length} Pips`, after: "running", live: true,
+        label: `${runs.length} Pips running: ${said}`, tip: `${runs.length} Pips running · ${said}` };
+    }
     if (kind === "pips") {
       const alert = pipsBar.dataset.reason === "alert", headline = $("pips-digest-text").textContent;
       return { icon: "bell", num: "Pips", need: alert, tone: "warn", needWord: alert ? "alert" : "",
@@ -6032,7 +6051,11 @@
     chip.setAttribute("aria-haspopup", "dialog");
     chip.setAttribute("aria-expanded", "false");
     chip.setAttribute("aria-controls", "rail-pop");
-    chip.addEventListener("click", () => { if (railOpen?.kind === kind) closeRailPop(); else openRailPop(kind); });
+    chip.addEventListener("click", () => {
+      // One Pip running: its chip goes straight to that Pip's chat, at the run's live post.
+      if (kind === "piprunning" && pipRunningList().length === 1) { openRunningPip(pipRunningList()[0]); return; }
+      if (railOpen?.kind === kind) closeRailPop(); else openRailPop(kind);
+    });
     chip.addEventListener("focus", () => { if (railStop !== kind) { railStop = kind; railRove(); } });
     return chip;
   }
@@ -6045,6 +6068,8 @@
     chip._sig = sig;
     chip.innerHTML = railChipFace(spec);
     chip.toggleAttribute("data-live", !!spec.live);
+    if (kind === "piprunning" && pipRunningList().length === 1) chip.removeAttribute("aria-haspopup");
+    else chip.setAttribute("aria-haspopup", "dialog");
     if (spec.need) chip.dataset.need = spec.tone === "error" ? "error" : "warn"; else delete chip.dataset.need;
     chip.setAttribute("aria-label", spec.label + (spec.need ? `. Needs you${spec.needWord ? `: ${spec.needWord}` : ""}` : ""));
     hoverTip.retitle(chip, spec.tip);
@@ -6182,7 +6207,8 @@
     const active = document.activeElement, inside = railPop.contains(active);
     railOpen = null;
     unfolded.forEach((fold) => fold());
-    if (bar === pipFixesPanel) {
+    if (bar === pipRunningPanel) bar.remove();   // the running Pips list is the popover's own too
+    else if (bar === pipFixesPanel) {
       bar.remove();                    // the Pip fixes list is the popover's own, never a rail row
       setTimeout(syncComposerRail, 0); // the fixes it showed are seen now: an ended one leaves the chip
     } else {
@@ -6581,6 +6607,10 @@
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
         // ...and this chat's fixes, for the cards whose report is not in the history (dismissed) and the chip.
         if (pipFixLive) vscode.postMessage({ type: "listPipFixes" });
+        // ...and which of its Pips are running now: the chip above the box (an older CLI says nothing, so no chip).
+        pipRunsLive = ev.capabilities?.pip_runs_running === 1;
+        setPipRunning([]);
+        if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
         agentMapCapabilities();
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
@@ -7116,6 +7146,10 @@
       case "pip_fixes":
         for (const fix of (Array.isArray(ev.items) ? ev.items : []).slice().reverse()) applyPipFix(fix, { quiet: true });
         syncComposerRail();
+        return;
+      case "pip_runs_running":
+        // Which of this chat's Pips are running now: the chip above the box. Never in the transcript.
+        if (pipRunsLive) setPipRunning(ev.items);
         return;
       case "pip_report":
         // A Pip that reports to this chat finished: a card in the transcript, never a turn. A turn
@@ -9553,6 +9587,68 @@
     return [...pipFixes.values()].filter((fix) => pipFixActive(fix) || !fix._seen)
       .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
   }
+  // ---- Pips running now (ready.capabilities.pip_runs_running) ----
+  // The founder (24 Oct): a Pip that reports to this chat runs in the Pips runner, and the chat said nothing until its
+  // card arrived. Now a chip says so while it runs ("Billing audit running · 0:42", "2 Pips running"); a click opens
+  // that Pip's chat on the Pips page, at the run's live post (with two or more, a list to pick from). It goes when the
+  // run ends, and the card arrives as before. Pips that report to other chats show nothing here.
+  const PIP_STARTED = { schedule: "On schedule", event: "From an event", you: "Started by you", chat: "Asked by DGC",
+    handoff: "From another Pip", setup: "First run" };
+  let pipRunningTick = null;
+  function pipRunningList() {
+    return [...pipRunning.values()].sort((a, b) => a.at - b.at || (a.run_id < b.run_id ? -1 : 1));
+  }
+  function pipRunningSeconds(run) { return Math.max(0, (Date.now() - run.at) / 1000); }
+  function pipStartedWords(run) { return PIP_STARTED[run.trigger] || "Started by you"; }
+  function setPipRunning(items) {
+    pipRunning.clear();
+    for (const item of (Array.isArray(items) ? items : []).slice(0, 16)) {
+      if (!item || typeof item !== "object" || !/^run_[0-9a-f]{32}$/.test(String(item.run_id || ""))
+        || !/^pip_[0-9a-f]{32}$/.test(String(item.pip_id || ""))) continue;
+      const at = Date.parse(String(item.started_at || ""));
+      pipRunning.set(item.run_id, { run_id: item.run_id, pip_id: item.pip_id, name: String(item.name || "A Pip").slice(0, 120),
+        pip_type: String(item.pip_type || ""), trigger: String(item.trigger || ""), at: Number.isFinite(at) ? at : Date.now() });
+    }
+    if (pipRunning.size && !pipRunningTick) {
+      // The chip's clock: once a second, only its face (a shape change refits the line).
+      pipRunningTick = setInterval(() => {
+        paintRailChip("piprunning");
+        if (railOpen?.kind === "piprunning") paintPipRunningPanel();
+      }, 1000);
+      if (typeof pipRunningTick?.unref === "function") pipRunningTick.unref();
+    }
+    if (!pipRunning.size && pipRunningTick) { clearInterval(pipRunningTick); pipRunningTick = null; }
+    if (railOpen?.kind === "piprunning" && pipRunning.size < 2) closeRailPop({ restore: false });
+    syncComposerRail();
+    if (railOpen?.kind === "piprunning") paintPipRunningPanel();
+  }
+  function openRunningPip(run) {
+    if (railOpen) closeRailPop({ restore: false });
+    showPips();
+    pipsApp?.navigate?.({ pip: run.pip_id, section: "chat", run: run.run_id });
+  }
+  let pipRunningPanel = null;
+  function paintPipRunningPanel() {
+    if (!pipRunningPanel) { pipRunningPanel = el("section", "pip-running-panel"); pipRunningPanel.setAttribute("aria-label", "Pips running"); }
+    const list = el("ul", "pip-fixes-list");
+    for (const run of pipRunningList()) {
+      const li = el("li");
+      const go = el("button", "rail-main pip-fixes-row"); go.type = "button";
+      go.dataset.run = run.run_id;
+      go.title = `Open ${run.name}'s chat in Pips`;
+      const name = el("span", "pip-fixes-name"); name.textContent = run.name;
+      const state = el("span", "pip-fixes-state");
+      state.textContent = `Running ${formatDuration(pipRunningSeconds(run))} · ${pipStartedWords(run)}`;
+      go.append(name, state);
+      go.onclick = () => openRunningPip(run);
+      li.append(go);
+      list.append(li);
+    }
+    const focused = pipRunningPanel.contains(document.activeElement) ? document.activeElement.dataset.run : "";
+    pipRunningPanel.replaceChildren(list);
+    if (focused) pipRunningPanel.querySelector(`[data-run="${focused}"]`)?.focus({ preventScroll: true });
+    return pipRunningPanel;
+  }
   let pipFixesPanel = null;
   function paintPipFixesPanel() {
     if (!pipFixesPanel) { pipFixesPanel = el("section", "pip-fixes-panel"); pipFixesPanel.setAttribute("aria-label", "Pip fixes"); }
@@ -10035,9 +10131,14 @@
     cacheClockOnSessionReset(kind);   // the incoming chat's backend says its own
     agentsOnSessionReset(kind); imagesOnSessionReset(kind); retryOnSessionReset(kind); askOnSessionReset(kind);
     pipFixesReset(kind);
+    if (kind !== "rewound") {                   // the incoming chat's own running Pips, asked for again
+      setPipRunning([]);
+      if (pipRunsLive) vscode.postMessage({ type: "pipRunsWatch" });
+    }
     railReset();                       // the prompt rail: the incoming chat's snapshot and outline say its own
   }
   function backendExitHooks(msg) {
+    setPipRunning([]);                 // nobody is watching the runner for this chat until it is back
     agentsOnBackendExit(msg); imagesOnBackendExit(msg); retryOnBackendExit(msg); askOnBackendExit(msg);
   }
   // Anything drawn at turn level between tool rounds (text, a model-retry line, an inline thought
@@ -11513,9 +11614,14 @@
       label: "troupe", ms: 0, stoppable: running && !troupeStopping.has(id), stopping: troupeStopping.has(id), ev,
       meta: ["troupe", troupeSummary(ev).text] };
   }
+  // A Pip run this chat started: live while it works -- what it is doing now (its own activity), its clock and Stop.
   function amPipTask(run) {
-    return { key: `pip:${run.id}`, kind: "pip", id: run.id, running: run.active === true, name: String(run.name || "Pip"),
-      word: String(run.label || "Working"), label: "Pip run", ms: 0, run, meta: ["Pip run", String(run.label || "")].filter(Boolean) };
+    const key = `pip:${run.id}`, running = run.active === true;
+    const ms = amTaskMs(key, Number(run.startedAt), running);
+    const word = running && run.status === "running" && run.activity ? String(run.activity) : String(run.label || "Working");
+    return { key, kind: "pip", id: run.id, running, name: String(run.name || "Pip"), word, label: "Pip run", ms,
+      stoppable: running && run.stoppable === true, stopping: run.status === "cancelling", run,
+      meta: ["Pip run", word, ms ? amDuration(ms) : ""].filter(Boolean) };
   }
   function amPreviewTask(preview) {
     const key = `preview:${preview.id}`, running = preview.state !== "stopped";
@@ -12059,6 +12165,13 @@
       if (task.kind === "monitor") vscode.postMessage({ type: "stopMonitor", id: task.id });
       else if (task.kind === "shell") vscode.postMessage({ type: "stopBackgroundShell", id: task.id });
       else if (task.kind === "preview") vscode.postMessage({ type: "stopArtifact", id: task.id });
+      else if (task.kind === "pip") {
+        const key = task.key;
+        Promise.resolve(pipSetupCards?.stopRun?.(task.id)).then((ok) => {
+          if (ok !== true && taskStopping.get(key) === "stopping") taskStopping.set(key, "failed");
+          renderAgentMap();
+        }, () => { taskStopping.set(key, "failed"); renderAgentMap(); });
+      }
     }
     renderAgentMap();
   }
@@ -12098,7 +12211,7 @@
       const actions = host.appendChild(el("div", "am-actions"));
       if (task.kind === "preview") n.open = amButton(actions, "Open in browser", () => amOpenTask(amTaskFor(amCard.key)));
       if (task.kind === "pip") n.open = amButton(actions, "Open in Pips", () => amOpenTask(amTaskFor(amCard.key)));
-      if (task.kind !== "pip") n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
+      n.stop = amButton(actions, "Stop", () => amStopTask(amTaskFor(amCard.key)));
       if (task.rerun) n.rerun = amButton(actions, "Run again", () => {
         n.rerun.disabled = true;
         vscode.postMessage({ type: "rerunTask", key: task.rerun, how: "again" });

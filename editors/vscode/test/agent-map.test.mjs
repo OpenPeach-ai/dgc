@@ -831,10 +831,45 @@ test("Pip runs started from this chat are background tasks, opened in Pips", () 
   options.onRunsChange();
   assert.equal(p.tasks()[0][1], "Review changesPip run · Stopping", "a change repaints the open map");
   p.row(`pip:run_${"b".repeat(32)}`).click();
-  assert.equal([...p.card().querySelectorAll(".am-actions button")].map((b) => b.textContent).join(), "Open in Pips", "no Stop for a Pip run");
+  assert.equal([...p.card().querySelectorAll(".am-actions button")].filter((b) => !b.hidden).map((b) => b.textContent).join(), "Open in Pips,Stopping…",
+    "a run that is stopping says so, and its Stop waits");
+  assert.equal([...p.card().querySelectorAll(".am-actions button")].find((b) => b.textContent === "Stopping…").disabled, true);
   p.card().querySelector(".am-actions button").click();
   assert.deepEqual(opened, [`run_${"b".repeat(32)}`]);
   assert.equal(p.isOpen(), false);
+  assert.deepEqual(p.errors, []);
+});
+
+test("a Pip run's row stays live while it works: what it is doing, its clock, and Stop", () => {
+  const p = view({}, BG);
+  let options = null; const stopped = [];
+  const started = Date.now() - 42_000;
+  const runs = [{ id: "run_" + "b".repeat(32), pipId: "pip_" + "a".repeat(32), name: "Billing audit", status: "running",
+    label: "Working", detail: "Working on its own. You can keep chatting.", active: true, activity: "Reading billing.py",
+    startedAt: started, stoppable: true }];
+  p.dom.window.DgcPips = { mountSetupCards: (o) => { options = o; return { toolResult() {}, finish() {}, reset() {}, receive() {},
+    runs: () => runs, openRun() {}, stopRun: (id) => { stopped.push(id); return Promise.resolve(true); } }; } };
+  p.doc.documentElement.dataset.pipsDocumentId = "doc1";
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  p.event({ type: "tool_call", call_id: "c1", name: "run_pip_now", args: {}, summary: "" });
+  p.event({ type: "tool_result", call_id: "c1", name: "run_pip_now", output: "{}", is_error: false });
+  p.open();
+  const key = `pip:run_${"b".repeat(32)}`;
+  assert.match(p.tasks()[0][1], /^Billing auditPip run · Reading billing\.py · 4[2-3]s$/, "what it is doing now, and since when");
+  runs[0].activity = "Waiting for the model";
+  options.onRunsChange();
+  assert.match(p.tasks()[0][1], /^Billing auditPip run · Waiting for the model · 4\ds$/, "it moves on as the Pip does");
+  p.row(key).click();
+  assert.match(p.$("agent-card-meta").textContent, /^Waiting for the model · Pip run · 4\ds$/);
+  const stop = [...p.card().querySelectorAll(".am-actions button")].find((b) => b.textContent === "Stop");
+  assert.ok(stop && !stop.hidden && !stop.disabled, "Stop, as a monitor or a shell has");
+  stop.click();
+  assert.deepEqual(stopped, [`run_${"b".repeat(32)}`]);
+  assert.equal(stop.textContent, "Stopping…");
+  assert.equal(stop.disabled, true);
+  runs[0] = { ...runs[0], status: "succeeded", label: "Report ready", active: false, activity: "", stoppable: false };
+  options.onRunsChange();
+  assert.deepEqual(p.tasks(), [], "ended: off the list of what runs now");
   assert.deepEqual(p.errors, []);
 });
 

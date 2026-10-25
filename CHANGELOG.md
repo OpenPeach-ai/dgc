@@ -6,6 +6,16 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A chat hears that one of its Pips is running.** Pip runs happen in the Pips runner, not in the chat, so a Work chat
+  said nothing while a Pip that reports to it worked; its card was the first sign. `dgc serve` now tells the chat
+  which of its Pips are running: `watch_pip_runs` asks, and a `pip_runs_running {items}` event answers and is sent
+  again whenever that changes. Its items are the runs going now whose card comes to this chat (the Pips attached to it
+  or set up in it, and the runs it started with `run_pip_now`; source reviews, Pulse checks and live-data runs), each
+  `{run_id, pip_id, name, pip_type, started_at, trigger}`, `trigger` being `schedule`, `event`, `you`, `chat`,
+  `handoff` or `setup` (a setup card's first run). Offered as `ready.capabilities.pip_runs_running`; a new event, never
+  a field on an existing one, and a client that never asks (an older editor, the SDK, ACP) never gets one. No Pips API
+  change.
+
 - **The plugin catalog's own test notes stay out of Settings.** `verification` and `audited_on` (what DGC's
   maintainers checked, and when) are no longer sent to the editor in the plugin list or the install review; they stay
   in the catalog for maintainers.

@@ -1009,6 +1009,18 @@ EVENT_FIELDS["pip_fixes"] = {"items": _A(), "request_id": _S(False)}
 EVENT_FIELDS["pip_fix_change"] = {"request_id": _S(), "fix_id": _S(), "path": _S(), "before": _S(),
                                   "after": _S(), "kind": _S()}
 
+# ---- Which of this chat's Pips are running now (dgc/pip_report_delivery.py running) -----------------
+# Advertised as ready.capabilities.pip_runs_running = 1. `watch_pip_runs` asks; the answer is a
+# `pip_runs_running` event naming its request, and from then on one is sent, unasked, whenever the
+# list changes (a run starts or ends, or the chat becomes another session). `items` are the runs going
+# now whose card comes to this chat (the Pips attached to it or set up in it, and the runs it started
+# with run_pip_now; source reviews, Pulse checks and live-data runs only), oldest first, each an open
+# object (a client reads the keys it knows): {run_id, pip_id, name, pip_type, started_at,
+# trigger (schedule | event | you | chat | handoff | setup)}. An empty list: none is running. A client
+# that never asks never gets one.
+COMMAND_FIELDS["watch_pip_runs"] = {"request_id": _S(False)}
+EVENT_FIELDS["pip_runs_running"] = {"items": _A(), "request_id": _S(False)}
+
 # ---- the window a server was started with (0.48) -------------------------------------------------
 # vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when
 # they start; DGC reads it from the server and can't change it (a window of its own below it only

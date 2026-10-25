@@ -1,8 +1,11 @@
 // Read-only main-chat run views. Tool receipts select IDs, never supply status.
 import '../media/pips/plush.js';
-import {active, record, pulseProgress} from './pipsModel.js';
+import {active, record, pulseProgress, activityPage} from './pipsModel.js';
+import {latestActivity, activityText} from './pipRunActivity.js';
 
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
+// How often a run at work is read again: its line and the agent map's row say what it is doing, live enough to follow.
+const TICK_MS=2500;
 const id=(value,prefix)=>typeof value==='string'&&new RegExp(`^${prefix}_[a-f0-9]{32}$`).test(value);
 export function mountRunCards(options) {
  const doc=options.document, entries=new Map();
@@ -51,9 +54,28 @@ export function mountRunCards(options) {
    const [pv,rv]=await Promise.all([options.request('get_pip',{pip_id:e.pipId}),options.request('get_pip_runner')]);
    if(token!==epoch)return;
    if(!record(pv.pip)||pv.pip.id!==r.pip_id||pv.pip.workspace_id!==r.workspace_id||!TYPES.includes(pv.pip.pip_type)||typeof pv.pip.name!=='string'||!record(rv.runner)||typeof rv.runner.online!=='boolean')throw Error('This didn’t load. Retry.');
-   e.run=r;e.pip=pv.pip;e.runner=rv.runner;
+   e.run=r;e.pip=pv.pip;e.runner=rv.runner;if(!active(r.status))e.stopping=false;
   }catch(error){if(token===epoch)e.error=error.message;}
   finally{if(token===epoch){e.loading=false;paint(e);}}
+  if(token===epoch&&!e.error&&e.run?.status==='running'&&!e.reading){e.reading=true;try{await readActivity(e,token);}finally{e.reading=false;}if(token===epoch)paint(e);}
+ }
+ // What it is doing now, for the agent map's row: the run's own activity, read on from where the last look stopped. A
+ // page that doesn't read keeps what it said; it never costs the line.
+ async function readActivity(e,token){
+  try{for(let page=0;page<4;page++){
+   const after=e.cursor||0,v=activityPage(await options.request('list_pip_run_activity',{run_id:e.id,after}),{id:e.id,pip_id:e.pipId,workspace_id:e.run.workspace_id},after);
+   if(token!==epoch)return;
+   e.cursor=v.next_cursor;e.activity=latestActivity(v.events,e.activity||null);
+   if(!v.has_more)break;
+  }}catch{/* the row keeps what it said */}
+ }
+ // Stop, from the agent map: the run is cancelled as History's Cancel run does it. true once DGC took it.
+ async function stop(runId){
+  const e=entries.get(runId);if(!e||!connected||!active(e.run?.status))return false;
+  const token=epoch;
+  try{await options.request('cancel_pip_run',{run_id:runId});}catch{return false;}
+  if(token===epoch){e.stopping=true;paint(e);void load(e);}
+  return true;
  }
  function add(parent,runId,pipId,into){
   if(disposed||!id(runId,'run')||!id(pipId,'pip')||!parent)return;
@@ -64,7 +86,7 @@ export function mountRunCards(options) {
    const quiet=cls=>node('span',cls);
    const e={id:runId,pipId,root:into,face:quiet('pip-run-avatar'),title:quiet('pip-run-title'),status:into,detail:quiet('pip-run-detail'),
             open:node('button','pip-run-open'),refresh:node('button','pip-run-refresh'),uid:`pip-run-face-${++sequence}`,loading:false,inline:true};
-   entries.set(runId,e);if(timer===null)timer=(options.setInterval||setInterval)(tick,5000);
+   entries.set(runId,e);if(timer===null)timer=(options.setInterval||setInterval)(tick,TICK_MS);
    paint(e);if(connected)load(e);else options.ready?.();return;
   }
   if(entries.size>=12){parent.append(node('p','pip-run-detail','Open Pips to see more.'));return;}
@@ -74,7 +96,7 @@ export function mountRunCards(options) {
   const open=node('button','pip-run-open agent-name'),refresh=node('button','pip-run-refresh','Retry');open.type=refresh.type='button';
   open.append(title);root.append(face,open,status,detail,refresh);parent.append(root);
   const e={id:runId,pipId,root,face,title,status,detail,open,refresh,uid:`pip-run-face-${++sequence}`,loading:false};entries.set(runId,e);
-  if(timer===null)timer=(options.setInterval||setInterval)(tick,5000);
+  if(timer===null)timer=(options.setInterval||setInterval)(tick,TICK_MS);
   open.onclick=()=>{if(e.run&&connected)options.onOpen?.({pip:e.pipId,section:'runs',run:e.id});};
   refresh.onclick=()=>load(e);paint(e);if(connected)load(e);else options.ready?.();
  }
@@ -98,8 +120,12 @@ export function mountRunCards(options) {
  const tick=()=>{if(visible&&!doc.hidden&&connected)for(const e of entries.values())if(!e.run||active(e.run.status))void load(e);};
  const wake=()=>{if(!doc.hidden)tick();};doc.addEventListener('visibilitychange',wake);
  // What the agent map lists as this chat's Pip runs: the same words the run's line says.
- function list(){return [...entries.values()].map(e=>({id:e.id,pipId:e.pipId,name:e.pip?.name||'Pip',status:e.run?.status||'',label:e.status.textContent,detail:e.detail.textContent,active:!e.error&&(!e.run||active(e.run.status))}));}
+ // While it works, the row also says what it is doing (`activity`), since when (`startedAt`, ms) and that Stop may stop it.
+ function list(){return [...entries.values()].map(e=>{const working=!e.error&&(!e.run||active(e.run.status)),started=Date.parse(e.run?.started_at||'');
+  return {id:e.id,pipId:e.pipId,name:e.pip?.name||'Pip',status:e.run?.status||'',label:e.status.textContent,detail:e.detail.textContent,active:working,
+   activity:working&&e.run?.status==='running'&&e.activity?activityText(e.activity):'',startedAt:working&&Number.isFinite(started)?started:null,
+   stoppable:working&&connected&&['queued','running'].includes(e.run?.status)&&!e.stopping};});}
  function open(runId){const e=entries.get(runId);if(e?.run&&connected)options.onOpen?.({pip:e.pipId,section:'runs',run:e.id});}
  function reset(){epoch++;if(timer!==null)(options.clearInterval||clearInterval)(timer);timer=null;for(const e of entries.values()){e.cleanup?.();if(!e.inline)e.root.remove();}entries.clear();}
- return {add,toolResult,finish,connection,tick,reset,list,open,setVisible(v){visible=v===true;if(visible)tick();},dispose(){disposed=true;reset();doc.removeEventListener('visibilitychange',wake);}};
+ return {add,toolResult,finish,connection,tick,reset,list,open,stop,setVisible(v){visible=v===true;if(visible)tick();},dispose(){disposed=true;reset();doc.removeEventListener('visibilitychange',wake);}};
 }

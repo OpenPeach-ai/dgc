@@ -2580,7 +2580,9 @@ DGC ends an answer with what it changed and what you can do about it.
 - **Remembered: … · Forget** shows once when DGC keeps something from the session; `/learn` drafts a
   skill you **Save**, **Edit** or **Cancel**. See **Memory**.
 - **Pip reports** arrive as cards, and **Ask DGC to fix** fixes one in the background while you keep
-  chatting, with a **Pip fixes** chip on the chip line. See **Pips**.
+  chatting, with a **Pip fixes** chip on the chip line. While a Pip that reports to this chat runs, a
+  chip says so (**Billing audit running · 0:42**, or **2 Pips running**) and opens its chat at the run.
+  See **Pips**.
 
 ## Approving work
 
@@ -2749,7 +2751,10 @@ self-hosted model, never your Claude Code or Codex plan.
   is the report's: "I found 4 issues, 3 of them serious." All-clear runs in a row fold into one
   message that updates itself. Reply to it there. After **Ask DGC to fix**, that message says how the
   fix is going: DGC is fixing this, Fixed · 3 files (a click opens its card in the Work chat, with
-  Review and Undo), or that it didn't finish, with Ask DGC to fix again. A Project Pip's page is a
+  Review and Undo), or that it didn't finish, with Ask DGC to fix again. While a run goes on, it is
+  already there: one message with the Pip at work, what it is doing now, a clock, **Stop** and how it
+  started (Started by you, On schedule · 9:00 AM, Asked by DGC, First run), which becomes its report
+  in the same place when the run ends. A Project Pip's page is a
   Personal Pip's: its chat under a top bar with **Run now**, and History, Settings, Schedule, Handoffs,
   Changes, Memory, Context and Notifications in its **…** menu.
 - **Reports reach your chat.** A project reviewer's finished run appears as a card in the chat it
