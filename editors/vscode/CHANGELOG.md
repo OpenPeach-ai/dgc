@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The agent map shows what matters now; the rest is one click away.** In a long chat it used to list every helper
+  the chat ever ran. It now opens on the agents working, the ones your latest turn that started any started (a short
+  follow-up that starts none leaves them in view), and any older one whose changes were held back, its row saying
+  **Held back**, each with the agents that started it. The subtitle counts them: "2 working · 3 this turn · 14
+  earlier". The rest is one row, **Earlier in this chat · 14 agents**, that opens to them grouped under the prompt
+  that started them, newest first; each opens its card as before, and the map remembers per chat whether Earlier is
+  open. **Open in agent map** on an agent's report opens Earlier when that agent is in it. Which turn started an
+  agent comes from what the chat already has (the step that started it, or the turn the CLI named), so it works with
+  any DGC CLI; a chat whose agents carry neither lists every agent, as before.
+
 - **Opened, a group of Pip reports lists them one under another.** Two or more reports fold into one line ("2 Pip
   reports · 2 clear"); opened, the second row was drawn on top of the first. Each is now its own row, with a line
   between them.

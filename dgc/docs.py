@@ -1364,6 +1364,12 @@ its tokens. An agent started by another agent is indented under it. The `/dashbo
 chat says how many of its agents are working. The classic `dgc` prompt prints the same list without
 colour.
 
+In a long chat the list starts with what matters now: every agent working, the agents your latest
+turn that started any started (a short follow-up that starts none leaves them listed), and any older
+agent whose changes were held back, with the agents that started them. The rest is one line,
+`⋮ Earlier · 14 agents · /agents all lists them`; `/agents all` lists every one. A chat saved before
+DGC kept the time of each prompt lists every agent, as before.
+
 ## In the editor
 
 A pill at the start of the controls under the prompt shows `● 2 agents` (only the number in a narrow
@@ -1377,6 +1383,14 @@ panel). Hover it to read how many are working. Click it for the list:
 The list is for looking. **Stop** ends the whole turn, including every agent. When the chat is
 reopened, saved tool steps retain earlier results without repopulating the prompt area with completed
 work. If DGC's backend stops, the agents that were still running are marked stopped.
+
+The agent map opens on what matters now: every agent working, the agents your latest turn that
+started any started, and any older agent whose changes were held back (its row says **Held back**),
+each with the agents that started it. Its subtitle counts them, such as **2 working · 3 this turn · 14
+earlier**. Everything else is one row at the end, **Earlier in this chat · 14 agents**: open it for
+the rest, grouped under the prompt that started them, newest first, and click any of them for its
+card as usual. Whether it is open is remembered for each chat. A chat whose agents don't say which
+turn started them lists every agent, as before.
 
 ## Limits
 

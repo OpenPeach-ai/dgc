@@ -6,6 +6,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **`/agents` starts with what matters now.** In a long chat it lists the agents working, the ones your latest turn
+  that started any started, and any older one whose changes were held back, with the agents that started them; the
+  rest is one line, "⋮ Earlier · 14 agents · /agents all lists them". `/agents all` lists every one. The classic
+  prompt does the same. A chat saved before DGC kept each prompt's time lists every agent, as before.
+
 - **Undo never loses your work.** A study of how Codex and DGC undo a turn found where DGC's Undo could throw away
   work nobody asked it to, or refuse for no reason. All of these are fixed:
   - **Your edits between turns stop an Undo of an earlier turn.** If you (or a formatter, a `git pull`, another chat)
