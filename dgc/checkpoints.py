@@ -640,6 +640,10 @@ class CheckpointManager:
                     except (OSError, ValueError):
                         pass
                 return False
+        # What DGC put back is DGC's own state again: the rewind guard must not take it for a change
+        # somebody else made (nor DGC's next write to it for one made between its writes).
+        for _relative, path in applied:
+            self.note_written(str(path))
         return True
 
     def listing(self) -> list[tuple[int, str, int]]:
