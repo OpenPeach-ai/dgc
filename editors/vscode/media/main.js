@@ -12125,7 +12125,12 @@
     const text = el("span", "am-text"), desc = el("span", "am-desc");
     text.appendChild(desc);
     row.append(chevron, text);
-    row.addEventListener("click", () => { amSetEarlierOpen(!amEarlierIsOpen()); renderAgentMap(); });
+    row.addEventListener("click", () => {
+      const before = row.getBoundingClientRect().top;
+      amSetEarlierOpen(!amEarlierIsOpen());
+      renderAgentMap();
+      amHoldPlace(row, before);
+    });
     self.appendChild(row);
     const groups = el("div", "am-earlier-groups");
     groups.id = "agent-map-earlier";
@@ -12137,6 +12142,28 @@
     amEarlier = { item, row, desc, groups, more, entries: new Map() };
     return amEarlier;
   }
+  // The dialog is centred, so Earlier opening grew it both ways and moved the row out from under the pointer: a
+  // second click landed on an agent (real VS Code, 25 Oct). The row stays where it was clicked; the dialog grows
+  // downward, as far as the panel has room, and moves up only as much as it must to fit. Until the map closes.
+  function amHoldPlace(row, before) {
+    const layer = $("agent-map"), box = $("agent-map-box");
+    if (!row.isConnected || !layer || !box || !Number.isFinite(before)) return;
+    const shift = before - row.getBoundingClientRect().top;
+    if (Math.abs(shift) < 1) return;
+    const style = getComputedStyle(layer);
+    const padTop = parseFloat(style.paddingTop) || 0, padBottom = parseFloat(style.paddingBottom) || 0;
+    const space = layer.clientHeight - padTop - padBottom;
+    const want = box.getBoundingClientRect().top - layer.getBoundingClientRect().top - padTop + shift;
+    const margin = Math.round(Math.max(0, Math.min(want, space - box.offsetHeight)));
+    box.style.alignSelf = "start";
+    box.style.marginTop = `${margin}px`;
+    box.style.maxHeight = `${Math.max(0, Math.floor(space - margin))}px`;
+  }
+  function amReleasePlace() {
+    const box = $("agent-map-box");
+    if (box) { box.style.alignSelf = ""; box.style.marginTop = ""; box.style.maxHeight = ""; }
+  }
+  window.addEventListener("resize", amReleasePlace);
   // One prompt's agents in Earlier: its label, then its rows as the tree draws them.
   function amEarlierGroup(group) {
     let entry = amEarlier.entries.get(group.id);
@@ -12297,6 +12324,7 @@
   function closeAgentMap({ restoreFocus = true } = {}) {
     if (!amOpen) return;
     amOpen = false;
+    amReleasePlace();
     amDropLevels();
     clearTimeout(amTick); amTick = 0;
     hoverTip.hide();

@@ -99,6 +99,7 @@ const measure = (page) => page.evaluate(() => {
   });
   const dialog = document.getElementById("agent-map-box"), body = document.getElementById("agent-map-body");
   return { layout: dialog.dataset.layout, rows, labels, groupRows, nested, subtitle: document.getElementById("agent-map-subtitle").textContent,
+    inner: { width: innerWidth, height: innerHeight },
     fold: fold ? { box: foldBox, desc: line(fold.querySelector(".am-desc")), expanded: fold.getAttribute("aria-expanded"),
       elbowY: box(item).top + parseFloat(elbow.top) + parseFloat(elbow.borderTopWidth) / 2 } : null,
     dialog: box(dialog), pageOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
@@ -138,10 +139,17 @@ for (const theme of ["dark-modern", "light-modern"]) {
         const closed = await contrasts(page, ["#agent-map-tree .am-earlier .am-desc"]);
         assert.ok(closed["#agent-map-tree .am-earlier .am-desc"] >= 4.5, `the folded row's words: ${closed["#agent-map-tree .am-earlier .am-desc"].toFixed(2)}:1`);
 
+        const closedAt = m.fold.box.top;
         await page.click("#agent-map-tree .am-earlier");
         await page.waitForTimeout(60);
         m = await measure(page);
         assert.equal(m.fold.expanded, "true");
+        // The centred dialog grows, but the row that was clicked stays under the pointer (or moves up only as far as
+        // the dialog needs to fit), so a second click lands on it again, not on an agent.
+        const fits = m.dialog.bottom >= m.inner.height - 24;
+        assert.ok(Math.abs(m.fold.box.top - closedAt) <= 1 || (fits && m.fold.box.top < closedAt),
+          `the folded row stayed where it was clicked (${closedAt} -> ${m.fold.box.top})`);
+        assert.ok(m.dialog.top >= -0.5 && m.dialog.bottom <= m.inner.height + 0.5, "the dialog is inside the panel");
         assert.equal(m.layout, width >= 900 ? "horizontal" : "vertical");
         assert.deepEqual(m.labels.map((l) => l.text), [TURNS[1].prompt, TURNS[0].prompt], "newest group first");
         assert.equal(m.rows.length, 4 + 5, "the rows shown, and the five earlier ones");
@@ -166,6 +174,13 @@ for (const theme of ["dark-modern", "light-modern"]) {
         assert.ok(m.bodyOverflow <= 0, `nor does the map (${m.bodyOverflow})`);
         const open = await contrasts(page, ["#agent-map-earlier .am-group-label", "#agent-map-tree .am-earlier .am-desc"]);
         for (const [selector, ratio] of Object.entries(open)) assert.ok(ratio >= 4.5, `${selector}: ${ratio.toFixed(2)}:1`);
+        // Closed again from where it is: it folds, and stays put.
+        const openAt = m.fold.box.top;
+        await page.mouse.click(m.fold.box.left + 40, m.fold.box.top + m.fold.box.height / 2);
+        await page.waitForTimeout(60);
+        m = await measure(page);
+        assert.equal(m.fold.expanded, "false", "the second click folded it");
+        assert.ok(Math.abs(m.fold.box.top - openAt) <= 1, `and it stayed put (${openAt} -> ${m.fold.box.top})`);
         assert.deepEqual(errors, []);
       } finally { await page.close(); }
     });
