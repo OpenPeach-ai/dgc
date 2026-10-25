@@ -54,6 +54,9 @@ from .config import SEARCH_KEYS, SEARCH_PROVIDERS, SUBAGENT_WINDOWS, subagent_wi
 from .config import search_key_name as _search_key_name
 from .config import subagent_window_text as _subagent_window_text
 from .monitors import plural
+import itertools as _itertools
+# Each finished agent's line owns its toggle; two lines with the same words never share fragments.
+_HANDBACK_UIDS = _itertools.count(1)
 from .reasoning import (display_text as reasoning_display_text, label_suffix as reasoning_label_suffix,
                         placement as reasoning_placement, saved_reasoning,
                         wire_identity as reasoning_wire_identity)
@@ -1326,6 +1329,12 @@ class TUI:
         return True
 
     def _monitor_event_block(self, batch) -> dict:
+        from .agent_reports import notice_from_item
+        report = notice_from_item(batch)
+        if report is not None:
+            # A finished background agent's report: its own dim line that opens to the report, as the
+            # editor draws it, never a card headed like command output.
+            return self._handback_block(report)
         safe = style_mod.terminal_safe_text
         lines = [safe(line) for line in batch.lines]
         if batch.kind != "output":
@@ -1466,8 +1475,11 @@ class TUI:
         sess._wake_turn, sess._wake_yield = True, False
         from .monitors import wake_tag
         tag = wake_tag(notification.batches)
-        sess.blocks.append({"kind": "user", "text": style_mod.terminal_safe_text(notification.label),
-                            "tag": tag})
+        # Only finished agents woke it: their lines say so, one each, with no band above them. A band
+        # reads as something typed, and the agent's own line already names what woke the turn.
+        if not tag.startswith("sub-task"):
+            sess.blocks.append({"kind": "user", "text": style_mod.terminal_safe_text(notification.label),
+                                "tag": tag})
         for batch in notification.batches:
             sess.blocks.append(self._monitor_event_block(batch))
         if sess._follow:
@@ -2498,6 +2510,9 @@ class TUI:
             elif isinstance(blk, dict) and blk.get("kind") == "retry":
                 frags, nl = reuse(blk, lambda b=blk: self._retry_frags(b))
                 add(frags, "tool", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "handback":
+                frags, nl = reuse(blk, lambda b=blk: self._handback_frags(b))
+                add(frags, "think", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
                 frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
                 add(frags, "tool", nl)
@@ -2593,6 +2608,10 @@ class TUI:
                     self._width, theme_key)
         if kind == "md":
             return ("md", blk.get("text", ""), self._width, theme_key)
+        if kind == "handback":
+            # uid first: the toggle is bound to its own block (two agents can share a description).
+            return ("handback", blk.get("uid"), bool(blk.get("exp")), blk.get("label", ""),
+                    blk.get("note", ""), blk.get("said", ""), self._width, theme_key)
         if kind == "tool":
             if blk.get("running"):
                 return None
@@ -2830,6 +2849,61 @@ class TUI:
                 frags.append(("", "\n"))
                 frags.append((f"fg:{th.faint}", f"  {glyphs.RAIL} {name:<10}"))
                 frags.append((f"fg:{th.muted}", text))
+        return frags
+
+    # ---- a finished background agent's report: one dim line that opens to it ----------------------
+    def _handback_block(self, notice: dict) -> dict:
+        """The line for one finished background agent (dgc/agent_reports.py): "○ ▸ Woke on agent ·
+        <what it was asked>", opening on click or /expand to what became of its changes and what it
+        reported. Live, and replayed from the saved notice, it is the same block."""
+        from .agent_reports import split_report
+        safe = style_mod.terminal_safe_text
+        note, said = split_report(safe(str(notice.get("message") or "")))
+        label = " ".join(safe(str(notice.get("description") or notice.get("id") or "")).split())[:200]
+        return {"kind": "handback", "uid": next(_HANDBACK_UIDS), "label": label or "agent",
+                "note": note, "said": said, "exp": False}
+
+    def _handback_lines(self, b: dict) -> list[tuple[str, str]]:
+        """(part, text) rows of an open report, wrapped at the transcript width: the note on what became
+        of the agent's changes, a blank row, then what it said."""
+        import textwrap
+        width = max(20, int(getattr(self, "_width", 100) or 100) - 4)
+        rows: list[tuple[str, str]] = []
+
+        def put(part: str, text: str) -> None:
+            for para in str(text).splitlines() or [""]:
+                pieces = textwrap.wrap(para.expandtabs(4), width) if para.strip() else [""]
+                rows.extend((part, piece) for piece in pieces)
+        note, said = b.get("note") or "", b.get("said") or ""
+        if note:
+            put("note", note)
+        if note and said:
+            rows.append(("said", ""))
+        if said:
+            put("said", said)
+        if not rows:
+            rows.append(("note", "The agent reported nothing."))
+        return rows
+
+    def _handback_frags(self, b: dict):
+        from prompt_toolkit.mouse_events import MouseEventType
+        from .agent_reports import held_back
+        th = style_mod.theme()
+        caret = "▾" if b.get("exp") else "▸"
+
+        def toggle(mouse_event):
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                b["exp"] = not b.get("exp")
+                self._invalidate()
+        head = f"{glyphs.AGENT_IDLE} {caret} Woke on agent {glyphs.MIDDOT} {b.get('label') or 'agent'}"
+        frags = [(f"fg:{th.faint}", _fit_cells(head, self._width), toggle)]
+        if b.get("exp"):
+            # Work held back is said in the transcript's own colour: it is waiting for someone.
+            note_style = f"fg:{th.text}" if held_back(b.get("note") or "") else f"fg:{th.muted}"
+            for part, text in self._handback_lines(b):
+                frags.append(("", "\n"))
+                frags.append((f"fg:{th.faint}", f"  {glyphs.RAIL} "))
+                frags.append((note_style if part == "note" else f"fg:{th.text}", text))
         return frags
 
     @staticmethod
@@ -3571,6 +3645,8 @@ class TUI:
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "retry":
             return 1 + (len(self._retry_body_lines(blk)) if blk.get("exp") else 0)
+        if isinstance(blk, dict) and blk.get("kind") == "handback":
+            return 1 + (len(self._handback_lines(blk)) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "narration":
             return len(self._narration_lines(blk.get("text", ""), max(8, self._width - 2)))
         if isinstance(blk, dict) and blk.get("kind") == "user":
@@ -6693,7 +6769,7 @@ class TUI:
             # reconnect's details. /expandall opens every one of both.
             hits = [b for b in self.blocks if isinstance(b, dict) and not b.get("exp")
                     and ((b.get("kind") == "tool" and self._tool_collapsible(b))
-                         or b.get("kind") == "retry")]
+                         or b.get("kind") in ("retry", "handback"))]
             if not hits:
                 self._flash("no collapsed tool output to expand")
             else:
@@ -6703,12 +6779,14 @@ class TUI:
                 self._invalidate()
                 if cmd == "expandall":
                     # Name only what was opened: a chat with no reconnect never hears about one.
-                    kinds = {b.get("kind") for b in chosen}
-                    self._flash("expanded all tool output and reconnect details" if kinds == {"tool", "retry"}
-                                else "expanded all reconnect details" if kinds == {"retry"}
-                                else "expanded all tool output")
+                    names = {"tool": "tool output", "retry": "reconnect details", "handback": "agent reports"}
+                    opened = [names[kind] for kind in names if any(b.get("kind") == kind for b in chosen)]
+                    self._flash("expanded all " + (" and ".join(opened) if len(opened) < 3
+                                                   else ", ".join(opened[:-1]) + " and " + opened[-1]))
                 elif chosen[0].get("kind") == "retry":
                     self._flash("expanded the reconnect details")
+                elif chosen[0].get("kind") == "handback":
+                    self._flash("expanded the agent's report")
                 else:
                     self._flash("expanded the last tool output")
         elif cmd in ("dashboard", "dash", "home"):
@@ -7403,12 +7481,21 @@ class TUI:
                         made.append((len(blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
             elif who == "monitor":
                 # Command output DGC delivered: a marker, never a band that reads as typed text.
-                if row.get("delivery") == "wake":
-                    from .monitors import wake_tag
-                    blocks.append({"kind": "user", "text": body[:200],
-                                   "tag": wake_tag(row.get("items"))})
-                else:
-                    blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
+                from .agent_reports import notice_from_item
+                notice_items = [item for item in list(row.get("items") or []) if isinstance(item, dict)]
+                reports = [report for report in map(notice_from_item, notice_items) if report]
+                if not (notice_items and len(reports) == len(notice_items)):
+                    if row.get("delivery") == "wake":
+                        from .monitors import wake_tag
+                        blocks.append({"kind": "user", "text": body[:200],
+                                       "tag": wake_tag(row.get("items"))})
+                    else:
+                        blocks.append(self._rich(f"[{th.faint}]◉ monitor events · {_esc(body[:200])}[/]"))
+                # A finished background agent's report: its line, as it was drawn live.
+                blocks.extend(self._handback_block(report) for report in reports)
+            elif who == "agent_report":
+                # The editor delivered this agent's report (dgc/agent_reports.py): the same line.
+                blocks.append(self._handback_block(row.get("report") or {}))
             elif who in ("monitor_restart", "task_interrupted"):
                 # What happened to the chat's background work when it was opened again after DGC stopped.
                 blocks.append(self._rich(f"[{th.faint}]◉ {_esc(body[:600])}[/]"))
@@ -7524,6 +7611,13 @@ class TUI:
                     rows.append({"who": "monitor", "body": str(notice.get("label") or "monitor events"),
                                  "tools": "", "delivery": str(notice.get("delivery") or ""),
                                  "items": list(notice.get("items") or [])})
+                    continue
+                from .agent_reports import parse_wake_prompt
+                woke = parse_wake_prompt(m.get("content"))
+                if woke is not None:
+                    # A chat the editor ran: its wake turn's notice is DGC's, never a prompt someone typed.
+                    rows.append({"who": "agent_report", "body": woke["description"], "tools": "",
+                                 "report": woke})
                     continue
                 body = display_prompt(_strip_editor_context(body))
                 if body.startswith(_COMPACT_PREFIX):

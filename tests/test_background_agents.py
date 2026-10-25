@@ -744,8 +744,12 @@ class TheTranscriptCallsItASubTaskTests(HarnessCase):
         return TUI._monitor_event_block(object.__new__(TUI), batch)
 
     def test_a_sub_task_report_is_not_headed_monitor_event(self):
+        # Since 0.48 it is not a card at all: its agent's own line, which opens to the report
+        # (tests/test_tui_agent_reports.py). The card's route name is still the sub-task's words.
         block = self.block("subtask_ended")
-        self.assertEqual(block["route_name"], "subtask_result")
+        self.assertEqual(block["kind"], "handback")
+        self.assertEqual(block["label"], "map auth")
+        self.assertEqual(block["said"], "Auth lives in pkg/auth.py.")
         from dgc.tui import TUI
         for table in (TUI._TOOL_VERB, TUI._TOOL_ING, TUI._TOOL_ED):
             self.assertEqual(table.get("subtask_result"), "Sub-task result")
