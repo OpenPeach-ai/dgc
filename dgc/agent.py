@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import clock, command_watch, helper_checkout
+from . import clock, command_watch, helper_checkout, helper_memory
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
@@ -114,7 +114,7 @@ _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_u
 # and every MCP route (which are discovered at runtime, so they are matched by shape).
 _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search",
                                            "list_tasks", "wait_tasks", "use_pips", "troupe",
-                                           "request_project_file"})
+                                           "request_project_file", "continue_task"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -3204,6 +3204,9 @@ class Agent(GoalLifecycle):
         # Supervision follows delegation: decided once, for every profile, on state and never on
         # the request's wording. A tool with nothing to act on is not offered, exactly as
         # bash_output/bash_kill are gated on a live handle above.
+        if not self._continue_exposed():
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "continue_task"]
         if not self._supervision_exposed():
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name")
@@ -3433,6 +3436,21 @@ class Agent(GoalLifecycle):
             return False
         return (bool(getattr(self, "_detached_jobs", None)) or self._detached_result_waiting()
                 or self._troupe_running())
+
+    def _continue_exposed(self) -> bool:
+        """Is `continue_task` offered (dgc/helper_memory.py)? State only, never wording: the lead agent, outside plan
+        mode, allowed to delegate at all, with a helper of this chat whose conversation is kept. Never to a session a
+        launching application's policy governs, for SUPERVISION_TOOL_SCHEMAS' reason. Registry-free and disk-free:
+        the TUI's status line asks too."""
+        if self.depth != 0 or self.mode == "plan":
+            return False
+        allow = getattr(self, "_agent_tool_allowlist", None)
+        if allow and "task" not in allow:
+            return False
+        from .permissions import session_policy
+        if session_policy() is not None:
+            return False
+        return helper_memory.has_any(self)
 
     def _troupe_running(self) -> bool:
         """A troupe this chat started is still working: its status is something to read (list_tasks) and to wait for
@@ -6150,6 +6168,7 @@ class Agent(GoalLifecycle):
         self.session_name = f"{base} (branch)"[:200] if base else None
         if self.image_views:                      # images: the branch keeps what its chat viewed
             image_views.copy_store(previous[0], self.session_file)
+        helper_memory.copy_store(previous[0], self.session_file)   # and its helpers can still be continued
         if self._persist():
             # The conversation goes on as the branch, and so do its running monitors.
             self.monitors.rebind_journal((previous[0], self.session_root),
@@ -9119,7 +9138,7 @@ class Agent(GoalLifecycle):
         # The cost cap is admission-only, on purpose. A child already running is left alone and its
         # result is still integrated: stopping work that is nearly done spends the tokens and throws
         # away what they bought. What the cap refuses is STARTING more.
-        if name == "task" and self.turn_budget_exceeded():
+        if name in ("task", "continue_task") and self.turn_budget_exceeded():
             refusal = self.turn_budget_refusal()
             self.ui.tool_denied(name, display_args, refusal, call_id)
             return refusal
@@ -9324,6 +9343,10 @@ class Agent(GoalLifecycle):
         # A call in the user's own Chrome that goes nowhere (a click, typing) is about the page its tab is on: the rules
         # see that page (permissions._signed_in_where), so a deny or an ask for that site or path holds there too.
         policy_args = args
+        if name == "continue_task" and isinstance(args, dict):
+            # Decided as the `task` call it is (permissions.POLICY_ALIASES): its description is the helper's.
+            known = helper_memory.find(self, str(args.get("id") or ""))
+            policy_args = {**args, "description": self._task_description(known) or str(args.get("id") or "")}
         if name == "browser" and isinstance(args, dict) and args.get("signed_in") is True and not str(args.get("url") or "").strip():
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
@@ -9475,6 +9498,13 @@ class Agent(GoalLifecycle):
                                 str(args.get("description", "")), str(args.get("prompt", "")),
                                 str(args.get("agent", "")), call_id,
                                 background=_wants_background(args))
+                    elif name == "continue_task":
+                        try:
+                            out = helper_memory.continue_helper(
+                                self, str(args.get("id") or ""), str(args.get("text") or ""), by="model",
+                                background=_wants_background(args), call_id=call_id)
+                        except helper_memory.Refused as refused:
+                            out = f"error: {refused}"
                     elif name == "list_tasks":
                         out = self._list_tasks_result()
                     elif name == "wait_tasks":
@@ -10230,12 +10260,15 @@ class Agent(GoalLifecycle):
                                    checker_box: dict | None = None,
                                    tool_env: dict | None = None,
                                    secrets=(),
-                                   prepare_child=None) -> tuple[str, str, str]:
+                                   prepare_child=None,
+                                   continuing: bool = False) -> tuple[str, str, str]:
         """Run one child in an already-selected checkout.
 
         `tools` narrows what the child is offered (a troupe's read-only agents); `unattended` makes it refuse steps
         that would ask, as a monitor turn's children do (nobody answers a troupe's hundred cards). `prepare_child`
-        is called with the fully wired child just before it runs (a Pip fix tells it about its kept copy).
+        is called with the fully wired child just before it runs (a Pip fix tells it about its kept copy; a continued
+        helper gets its memory back, dgc/helper_memory.py). `continuing`: `prompt` is a continued helper's next
+        request, so its agent definition's instructions, already in its memory, are not repeated.
 
         Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
         retain, or clean the checkout: the parent coordinator performs those operations in stable
@@ -10265,7 +10298,8 @@ class Agent(GoalLifecycle):
                               if isolated else ())
             if isolated:
                 prompt = helper_checkout.map_paths(prompt, user_checkouts, child_root)
-            task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
+            task_prompt = ((adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body and not continuing)
+                           else prompt)
             from .worktree import absent_ignored_dirs
             try:
                 child_config = self.config.clone_for_root(child_root)
@@ -10769,16 +10803,21 @@ class Agent(GoalLifecycle):
             stopped_work.agent_started(self, sub_ui.agent_id, description, prompt, agent_name,
                                        background=detach, call_id=call_id, workspace=workspace)
         if not detach:
+            handle: dict = {}
             try:
                 execution = self._execute_prepared_subagent(
-                    description, prompt, agent_name, workspace, sub_ui, call_id, cancel=own_cancel)
+                    description, prompt, agent_name, workspace, sub_ui, call_id, cancel=own_cancel,
+                    handle=handle)
             finally:
                 # Its record has ended: a Stop from here on is answered "already finished".
                 self._foreground_stops().pop(sub_ui.agent_id, None)
             outcome = self._finalize_subagent(description, workspace, *execution,
                                               stopped_by_user=own_cancel.closed)
             self._last_task_integrated = outcome.integrated
-            return outcome.output
+            # Its conversation is kept, so it can be continued with its memory (dgc/helper_memory.py).
+            return outcome.output + helper_memory.keep(
+                self, sub_ui.agent_id, handle.get("agent"), description=description, prompt=prompt,
+                agent_name=agent_name, workspace=workspace, outcome=outcome)
         if spawned is not None:
             spawned.append((sub_ui.agent_id, queued))
         return self._spawn_detached_subagent(
@@ -10816,7 +10855,8 @@ class Agent(GoalLifecycle):
 
     def _spawn_detached_subagent(self, description, prompt, agent_name, workspace, sub_ui, call_id,
                                  own_cancel: threading.Event, *, queued: bool = False,
-                                 brief: bool = False) -> str:
+                                 brief: bool = False, prepare_child=None,
+                                 continuing: bool = False) -> str:
         """Run the child on its own thread and cancel token; the parent turn may end.
 
         ``queued``: every background slot is taken, so the thread first waits for one
@@ -10857,7 +10897,8 @@ class Agent(GoalLifecycle):
                     self._wait_for_detached_slot(handle, own_cancel)
                 execution = self._execute_prepared_subagent(
                     description, prompt, agent_name, workspace, sub_ui, call_id,
-                    cancel=own_cancel, handle=handle)
+                    cancel=own_cancel, handle=handle, prepare_child=prepare_child,
+                    continuing=continuing)
                 # From here to the pop, this thread can write the user's files and their .git, with
                 # the child's record already ended and the parent turn already returned. This is the
                 # window `wait_finalizers` exists to keep a process exit out of.
@@ -10881,6 +10922,11 @@ class Agent(GoalLifecycle):
                 finally:
                     with self._finalizing_lock:
                         self._finalizing.pop(agent_id, None)
+                # Its conversation is kept, so it can be continued with its memory (dgc/helper_memory.py).
+                if not helper_memory.keep(self, agent_id, handle.get("agent"), description=description,
+                                          prompt=prompt, agent_name=agent_name, workspace=workspace,
+                                          outcome=outcome) and continuing:
+                    helper_memory.release(self, agent_id)
             except Exception as exc:
                 outcome = _TaskOutcome(
                     f"error: Sub-task '{description}' did not complete: {type(exc).__name__}: {exc}.")
@@ -11031,9 +11077,10 @@ class Agent(GoalLifecycle):
         recognises. It carries what that agent was asked to do, live and again when the chat is
         reopened. Never the model's own arguments: a copy, for the screen only.
         """
-        if name not in ("message_task", "close_task") or not isinstance(args, dict):
+        if name not in ("message_task", "close_task", "continue_task") or not isinstance(args, dict):
             return args
-        described = self._task_description(str(args.get("id") or ""))
+        ident = str(args.get("id") or "")
+        described = self._task_description(helper_memory.find(self, ident) if name == "continue_task" else ident)
         return {**args, "agent": described} if described else args
 
     def _knows_finished(self, agent_id: str) -> bool:
@@ -11912,6 +11959,7 @@ class Agent(GoalLifecycle):
         # Each child's own stop, which the turn's Stop also sets: the user can stop one of the batch
         # (even one still queued for a worker) and its siblings run on.
         stops = {i: _ChildStop(self.cancelled) for i in prepared}
+        handles: dict[int, dict] = {i: {} for i in prepared}     # each child, once wired (its memory is kept)
         sub_uis = {i: _SubUI(
             self.ui, self._safe_text(str(calls[i].arguments.get("description", ""))), buffered=True,
             interaction_lock=interaction_lock, cancel=stops[i]) for i in prepared}
@@ -11944,7 +11992,8 @@ class Agent(GoalLifecycle):
                                 turn_hint=getattr(self.ui, "turn_id", ""))
                         future = pool.submit(
                             self._execute_prepared_subagent, description, prompt,
-                            agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i])
+                            agent_name, workspace, sub_uis[i], calls[i].id, cancel=stops[i],
+                            handle=handles[i])
                         pending[future] = i
                     for future in as_completed(pending):
                         i = pending[future]
@@ -11973,6 +12022,15 @@ class Agent(GoalLifecycle):
             execution = executions.get(i, ("parallel task worker did not return a result", "", ""))
             outcomes[i] = self._finalize_subagent(description, prepared[i], *execution,
                                                   stopped_by_user=stops[i].closed)
+            # Its conversation is kept, so it can be continued with its memory (dgc/helper_memory.py).
+            kept = helper_memory.keep(
+                self, sub_uis[i].agent_id, handles[i].get("agent"), description=description,
+                prompt=self._safe_text(str(calls[i].arguments.get("prompt", ""))),
+                agent_name=self._safe_text(str(calls[i].arguments.get("agent", ""))),
+                workspace=prepared[i], outcome=outcomes[i])
+            if kept:
+                outcomes[i] = _TaskOutcome(outcomes[i].output + kept, outcomes[i].integrated,
+                                           outcomes[i].paths)
         for i, call in enumerate(calls):
             outcome = outcomes.get(i, _TaskOutcome("Sub-task failed without a result."))
             outcome = _TaskOutcome(_clamp(self._safe_text(outcome.output)), outcome.integrated,

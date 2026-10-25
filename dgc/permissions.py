@@ -82,6 +82,7 @@ RULE_ARG = {
     "browser": "url",
     "mcp_search": "query", "mcp_call": "name",
     "save_memory": "scope", "remember": "fact", "forget": "id", "artifact": "path", "task": "description", "notes": "query",
+    "continue_task": "description",
     "troupe": "template",      # Always allow on a review troupe allows review troupes; one with its own stages, Troupe
     "external_directory": "path",
 }
@@ -118,7 +119,10 @@ STOP_TOOLS = {"monitor_stop", "close_task"}
 # compound-command matching, plan-mode denial and auto-mode allowance apply to it unchanged. Rules
 # naming the tool itself (`Monitor`, `Monitor(tail *)`) apply too; see PermissionEngine.decide.
 # `view_image` reads a file, so every Read rule (a `Read(secrets/**)` deny above all) covers it too.
-POLICY_ALIASES = {"monitor": "bash", "view_image": "read_file"}
+# `continue_task` gives a finished helper more work (dgc/helper_memory.py): it is a `task` call for that helper, decided
+# by every Task rule (deny: Task stays the off switch) against the helper's own description. Not in DISPLAY, so no
+# rule names it apart, and Always allow saves the Task rule it is.
+POLICY_ALIASES = {"monitor": "bash", "view_image": "read_file", "continue_task": "task"}
 
 # A shell string is not a trustworthy read/write boundary. Redirections, substitutions, interpreters,
 # `find -delete`, git output flags, aliases/config, and wrapper commands all make token allowlists

@@ -1123,6 +1123,8 @@ def delete(path, project_root, *, expected_revision: int | None = None,
                     pass
             from .image_views import remove_store
             remove_store(p)                       # images: the session's viewed-image store
+            from . import helper_memory
+            helper_memory.remove_store(p)         # its helpers' kept conversations (dgc/helper_memory.py)
         return True
     except (OSError, ValueError):
         return False

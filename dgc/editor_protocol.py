@@ -1065,6 +1065,28 @@ COMMAND_FIELDS["watch_agent_reports"] = {"request_id": _S(False)}
 EVENT_FIELDS["agent_report"] = {"id": _S(), "description": _S(), "report": _S(), "integrated": _B(),
                                 "turn_id": _S(False)}
 
+# ---- A finished helper continued with its memory (0.48, dgc/helper_memory.py) -------------------
+# Advertised as ready.capabilities.continue_agent = 1. `watch_agent_runs` says this client draws a helper's runs; it is
+# answered by an `agent_runs` naming its request, and from then on one follows every `agents` snapshot and comes
+# whenever a helper's runs change (a run ends and its conversation is kept, or a helper is continued, or a continuation
+# could not start). `items` are open objects (a client reads the keys it knows), one per helper of this chat that can
+# be continued or has been: {id, runs, continuable, history: [{run, by ("you" | "model"), at?, request?, note?,
+# report?, held}]}. `id` is the agent's, as agent_started has it; `runs` how many runs it has had (the one under way
+# included); `continuable` whether "Ask it to do more" may be offered now (it has ended and its conversation is kept);
+# `history` its runs, oldest first, at most 20: `at` when a continued run started, `request` what it was asked then
+# (run 1's prompt is the spawn's), `note` what became of that run's changes and `report` what it said, both bounded,
+# `held` whether that run's work was held back. A continued helper keeps its row: agent_started is never sent again,
+# and its record goes back to running in the next `agents` snapshot (and its steps' call ids carry the run,
+# "sub-…:r2-…", so a page can divide its runs). `continue_agent {id, text, request_id}` is the person's "Ask it to do
+# more": the helper continues in the background with its memory, in a fresh copy of the project, and reports back like
+# a background helper (a wake turn and its agent_report). Answered by `agent_runs` carrying the request_id, or
+# `command_rejected` (command continue_agent) with a reason -- unknown_agent, still_running, not_kept, busy,
+# plan_mode, denied, invalid_text, too_large, chat_changed, unavailable, failed -- and a message to show. A client
+# that never asks is sent nothing new, and an older CLI has no continue_agent: no box.
+COMMAND_FIELDS["watch_agent_runs"] = {"request_id": _S(False)}
+COMMAND_FIELDS["continue_agent"] = {"id": _S(), "text": _S(), "request_id": _S()}
+EVENT_FIELDS["agent_runs"] = {"items": _A(), "request_id": _S(False)}
+
 # ---- the window a server was started with (0.48) -------------------------------------------------
 # vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when
 # they start; DGC reads it from the server and can't change it (a window of its own below it only

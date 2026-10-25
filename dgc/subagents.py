@@ -109,7 +109,8 @@ class _Record:
                  "state", "waiting_for", "activity", "started_at", "started_mono", "began_mono",
                  "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "background",
                  "message", "turn_id", "restored", "listed", "dirty", "sent_activity",
-                 "sent_tool_calls", "sent_tokens", "order", "log", "face_slot")
+                 "sent_tool_calls", "sent_tokens", "order", "log", "face_slot", "carried_calls",
+                 "carried_tokens")
 
     def __init__(self, **fields):
         self.parent_id = None
@@ -134,6 +135,9 @@ class _Record:
         self.sent_tokens = None
         self.log = []
         self.face_slot = None
+        # A helper continued with its memory (dgc/helper_memory.py) counts its earlier runs' steps and tokens too.
+        self.carried_calls = 0
+        self.carried_tokens = 0
         for key, value in fields.items():
             setattr(self, key, value)
         if not isinstance(getattr(self, "log", None), list):
@@ -426,8 +430,8 @@ class SubagentRegistry:
             record = self._records.get(str(id or ""))
             if record is None or record.state not in ACTIVE:
                 return
-            calls = _int(tool_calls)
-            count = _int(tokens) if tokens else None
+            calls = _int(tool_calls) + _int(record.carried_calls)
+            count = (_int(tokens) + _int(record.carried_tokens)) if tokens else None
             if calls == record.tool_calls and count == record.tokens:
                 return
             record.tool_calls = max(record.tool_calls, calls)
@@ -453,9 +457,9 @@ class SubagentRegistry:
         now = time.monotonic()
         since = record.began_mono if record.began_mono is not None else record.started_mono
         record.duration_ms = _int((now - since) * 1000) if since is not None else 0
-        record.tool_calls = max(_int(record.tool_calls), _int(tool_calls))
+        record.tool_calls = max(_int(record.tool_calls), _int(tool_calls) + _int(record.carried_calls))
         if tokens:
-            record.tokens = _int(tokens)
+            record.tokens = _int(tokens) + _int(record.carried_tokens)
         record.message = clip(scrub_urls(message), MAX_MESSAGE) if message else ""
         record.waiting_for = None
         record.activity = ""
@@ -469,6 +473,41 @@ class SubagentRegistry:
         if record.message:
             payload["message"] = record.message
         return payload
+
+    def reopen(self, id: str, *, background: bool, queued: bool = False, turn_hint: str = "",
+               run: int = 2, by: str = "model") -> bool:
+        """A finished helper continued with its memory (dgc/helper_memory.py): its own record goes back to work.
+
+        The same row, never a second one: ``queued`` behind a worker, else ``running``. Its steps and tokens so far
+        are carried, so the counts go on from where they were. Listener kind ``continued`` (a payload no protocol
+        frame has the shape of: the Backend answers it with a snapshot and ``agent_runs``). False when there is no
+        such record or it is still working."""
+        agent_id = str(id or "")
+        with self._publish:
+            with self._lock:
+                record = self._records.get(agent_id)
+                if record is None or record.state not in ENDED:
+                    return False
+                self._ended_counts[record.state] = max(0, self._ended_counts[record.state] - 1)
+                now = time.monotonic()
+                record.carried_calls = _int(record.tool_calls)
+                record.carried_tokens = _int(record.tokens)
+                record.started_mono, record.began_mono = now, (None if queued else now)
+                record.duration_ms = None
+                record.message = ""
+                record.waiting_for = None
+                record.activity = ""
+                record.sent_activity = ""
+                record.background = bool(background)
+                record.restored = False
+                record.listed = True
+                if isinstance(turn_hint, str) and turn_hint:
+                    record.turn_id = turn_hint
+                self._transition(record, "queued" if queued else "running")
+                payload = {"id": agent_id, "state": record.state, "run": max(2, _int(run)),
+                           "by": "you" if by == "you" else "model", "background": record.background}
+            self._notify("continued", payload)
+        return True
 
     def end_open(self, state: str, message: str) -> None:
         """Safety net: end every record that is still active."""
