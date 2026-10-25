@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Editor protocol: command `watch_agent_reports` and event `agent_report` (a finished background helper's report,
+  after the turn it started; offered as `ready.capabilities.agent_reports`) are in the vendored protocol and the
+  TypeScript SDK's known events. An SDK session never sends the command, so it never gets the event, and its
+  `history()` is unchanged.
+
 - **A run and a chat reply have no time limit by default.** `run()`, `stream()` and `followup()` (Python and
   TypeScript, sync and async) used to stop a turn after 180 seconds, a ChatDGC reply after 600 seconds
   (`reply_timeout`, TypeScript `replyTimeoutMs`) and each deep research stage after 30 minutes. A big model on your

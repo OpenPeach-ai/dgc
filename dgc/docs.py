@@ -1187,6 +1187,13 @@ moment you need it. A `dgc -p` run ends with its turn, so there a background chi
 within the turn: one still running at the end is stopped. Foreground `task` (the default) still
 waits.
 
+That wake turn opens with one quiet line per finished child, "Woke on agent · Review billing.py",
+folded, never a message from you. Open it (click it, or Enter or Space in the editor; `/expand` in
+the terminal) for the child's whole report: what became of its changes (completed and integrated,
+partly integrated, or not integrated and where its worktree is kept), then what it said and the
+files it named. In the editor the report also has **Open in agent map**, which opens the map at that
+child's card. A reopened chat draws the same lines.
+
 One `task` call can also start several helpers at once: `tasks` lists 2 to 8 of them, each with
 its own `description`, `prompt` and `agent`, and they start together (some models send one `task`
 call per reply even when they mean several, so their helpers used to run one after another).
