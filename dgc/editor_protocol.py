@@ -1027,6 +1027,20 @@ EVENT_FIELDS["pip_fix_change"] = {"request_id": _S(), "fix_id": _S(), "path": _S
 COMMAND_FIELDS["watch_pip_runs"] = {"request_id": _S(False)}
 EVENT_FIELDS["pip_runs_running"] = {"items": _A(), "request_id": _S(False)}
 
+# ---- A finished background agent's report in the chat (0.48, dgc/agent_reports.py) ---------------
+# Advertised as ready.capabilities.agent_reports = 1. `watch_agent_reports` says this client draws
+# them; nothing answers it. From then on a turn a finished background sub-agent started (turn_start
+# kind "wake") is followed by one `agent_report` per agent it delivers, and get_history replays the
+# same event after a saved wake turn's turn_start (before the watch, a saved wake replays as it always
+# did). `id` is the agent's id as agent_started had it (a reopened chat's records are renumbered:
+# match on the spawn's result, which names it); `description` what it was asked to do; `report` its
+# whole outcome as the model got it, redacted and bounded (what became of its changes, then
+# "Summary:" and what it said); `integrated` whether any of its changes reached the checkout. A
+# client that never asks never gets one, so an older editor keeps its "Woke on agent" note.
+COMMAND_FIELDS["watch_agent_reports"] = {"request_id": _S(False)}
+EVENT_FIELDS["agent_report"] = {"id": _S(), "description": _S(), "report": _S(), "integrated": _B(),
+                                "turn_id": _S(False)}
+
 # ---- the window a server was started with (0.48) -------------------------------------------------
 # vLLM (--max-model-len), SGLang (--context-length) and llama.cpp (-c) size the context window when
 # they start; DGC reads it from the server and can't change it (a window of its own below it only
