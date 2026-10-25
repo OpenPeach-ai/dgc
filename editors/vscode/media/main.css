@@ -2972,6 +2972,10 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-group[data-shown="closed"] > .pip-report { display: none; }
 .pip-report-group > .pip-report.slim { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
 .pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
+/* Rows of a group are stacked by their own top border. `.pip-report.slim + .pip-report.slim` pulls a standalone card up
+   12px so two cards' borders meet; it outranked the `margin: 0` above, and an opened group's rows sat on top of each
+   other (the founder, 25 Oct). */
+.pip-report-group > .pip-report.slim + .pip-report.slim { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .pip-report-chevron { transition: none; } }
 /* Ask DGC to fix, in the background: the report's card is the fix's status. One line (what it is doing or what it
    did, how long, its actions), then what changed, whether tests ran in the fix copy, and a permission it needs. It is

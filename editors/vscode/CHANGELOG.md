@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Opened, a group of Pip reports lists them one under another.** Two or more reports fold into one line ("2 Pip
+  reports · 2 clear"); opened, the second row was drawn on top of the first. Each is now its own row, with a line
+  between them.
+
 - **Undo never loses your work** (with a DGC CLI that has it, 0.48):
   - When files you or another program changed after DGC wrote them stop an Undo, DGC names them and asks: "These
     files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the version from
