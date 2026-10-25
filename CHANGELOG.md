@@ -6,6 +6,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Undo on the Edited card works while files are open in the editor.** With any file open in an editor tab, Undo
+  said "DGC can no longer undo that turn — its recovery point has been used or pruned", although it had not been. The
+  turn's recovery point was named after the open-files note the extension puts ahead of the prompt, so Undo, which
+  looks for the turn by its prompt, never found it. It is now named after the prompt as the chat shows it.
+
 - **A slow local model is never timed out while it is working.** A big model on a slow machine can take tens of
   minutes before its first word. DGC used to give a local model 15 minutes, then close the request and send it again,
   which made the server read the whole prompt again (and a load start over), so a long first word never came: the

@@ -224,3 +224,25 @@ class SteeringTimeTests(unittest.TestCase):
             {"role": "assistant", "content": "Done."}])
         self.assertFalse([item for item in items if item.get("of") == "steering"])
         self.assertTrue([item for item in items if item.get("role") == "steering"])
+
+
+class UndoFindsATurnWithFilesOpenTests(unittest.TestCase):
+    """The D2 recording, 25 Oct: the Edited card's Undo said "DGC can no longer undo that turn" whenever a file was open,
+    because the turn's checkpoint was labelled with the editor's context block instead of the prompt."""
+
+    def test_the_checkpoint_label_is_the_prompt_not_the_editor_context(self):
+        from dgc.editor_context import _strip_editor_context
+        directory = tempfile.TemporaryDirectory(prefix="dgc-undo-label-")
+        self.addCleanup(directory.cleanup)
+        agent = Agent(make_config(Path(directory.name), mode="auto"), FrontendUI())
+        self.addCleanup(agent.mcp.stop_all)
+        self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+        context = ('<editor-context-json trust="untrusted-reference-data">\n'
+                   '{"open_files":[{"path":"/home/me/shop/billing.py"}]}\n</editor-context-json>\n\n')
+        prompt = "Review the billing module and fix what's wrong"
+        self.assertEqual(_strip_editor_context(context + prompt), prompt, "the stripper this relies on")
+        scripted(agent, [ChatResult(content="Done.")])
+        self.assertTrue(agent.run_turn(context + prompt))
+        label = agent.checkpoints.points[-1]["preview"]
+        self.assertEqual(label, prompt[:70], "the label the editor's Undo matches is the prompt the user sees")
+        self.assertNotIn("editor-context", label)

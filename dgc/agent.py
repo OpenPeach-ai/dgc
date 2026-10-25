@@ -1087,6 +1087,20 @@ THINK_KEYWORDS = [
 ]
 
 
+def _checkpoint_preview(text) -> str:
+    """A turn's checkpoint label: the prompt as the chat shows it. The editor puts the open files ahead of the
+    prompt as an <editor-context-json> block; labelling the checkpoint with that (its first 70 characters) left
+    the Edited card's Undo unable to find the turn whenever a file was open (founder, 25 Oct)."""
+    if not isinstance(text, str):
+        return text
+    from .editor_context import _strip_editor_context
+    from .workflows import display_prompt
+    try:
+        return display_prompt(_strip_editor_context(text)).strip() or text
+    except Exception:                       # noqa: BLE001 -- a label must never stop a turn
+        return text
+
+
 def _written_at() -> float:
     """When a prompt was sent or a reply written, for the chat to show (``_dgc_at``, seconds since 1970).
     Like every ``_dgc_`` key it stays in the session file and never reaches the model. Read from the clock the
@@ -7120,7 +7134,7 @@ class Agent(GoalLifecycle):
                     self.monitors.policy.pause("a UserPromptSubmit hook blocked the wake-up")
                 return self._fail_turn(f"prompt blocked by a UserPromptSubmit hook: {hout}")
             if not wake and not self.checkpoints.open(
-                    len(self.messages), user_text,
+                    len(self.messages), _checkpoint_preview(user_text),
                     [m for m in self.messages if m.get("role") != "system"]):
                 self._last_turn_error = (self._last_persist_error
                                          or "could not durably open the turn checkpoint")
