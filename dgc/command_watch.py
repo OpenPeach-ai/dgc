@@ -738,8 +738,18 @@ class Watch:
             # command did is DGC's own work too -- unless the file was not what DGC left even before
             # the command ran: somebody changed it between, and the point's restore would lose that.
             if mark is not None and mark.digest is not None and left is not None and mark.digest != left:
-                if manager._mark_outside(manager.points[-1], path, "during"):
-                    manager._notify()
+                manager._mark_outside(manager.points[-1], path, "during")
+                # What they left before the command starts DGC's next run of writes (the copy made
+                # just before it), so an Undo can merge their change instead of losing it.
+                copy = self.copies.get(path)
+                begin = getattr(manager, "begin_segment", None)
+                if callable(begin):
+                    if copy is not None and copy[0] == "file":
+                        from .checkpoints import _Snapshot
+                        begin(path, _Snapshot("file", copy[1], copy[2]))
+                    else:
+                        begin(path, None, read=False)
+                manager._notify()
             self._renote(path)
             return
         status = "new" if mark is None else ("deleted" if not (target.exists() or target.is_symlink())

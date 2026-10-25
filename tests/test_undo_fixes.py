@@ -64,20 +64,33 @@ class Chat:
         self.cp = CheckpointManager.from_state(json.loads(json.dumps(self.cp.state())), self.root)
 
 
-class BetweenTurnsTests(unittest.TestCase):
-    """§4.1: a change made after DGC wrote a file and before DGC wrote it again is somebody's work."""
+MODULE = (b"def total(items):\n    return sum(items)\n\n\n"
+          b"def tax(amount):\n    return amount * 0.18\n\n\n"
+          b"def discount(amount):\n    return amount\n")
 
-    def test_d2_the_persons_line_typed_between_two_turns_stops_undo_of_the_first(self):
-        c = Chat(self, {"a.py": b"one\ntwo\nthree\n"})
+
+class BetweenTurnsTests(unittest.TestCase):
+    """§4.1, merged (the founder, 25 Oct: "yes want them now in 0.48.0"): a change somebody made after
+    DGC wrote a file -- between two of DGC's writes, during a turn, or after its last one -- is kept,
+    and DGC's own changes are taken out, by a 3-way merge with what DGC left (its after-bytes). Only
+    when their edits overlap DGC's is the file held back and named."""
+
+    def d2(self, c, person=b"\n\ndef mine():\n    return 'the person'\n"):
+        """Turn 1 changes tax(); the person adds a function at the end; turn 2 changes total()."""
         first = c.turn("turn 1")
-        c.write("a.py", b"one\nTWO\nthree\n")
-        c.p("a.py").write_bytes(b"one\nTWO\nthree\n# the person's own line\n")      # between the turns
+        c.write("a.py", MODULE.replace(b"0.18", b"0.2"))
+        c.p("a.py").write_bytes(c.p("a.py").read_bytes() + person)                    # between the turns
         c.turn("turn 2")
-        c.write("a.py", b"one\nTWO\nTHREE\n# the person's own line\n")
-        self.assertEqual(c.cp.rewind(first), (-1, 0), "the rewind must not bury the person's line")
-        self.assertIn(b"the person's own line", c.p("a.py").read_bytes())
-        self.assertEqual(c.cp.last_rewind_conflicts, [str(c.p("a.py"))])
-        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("a.py")): "between"})
+        c.write("a.py", c.p("a.py").read_bytes().replace(b"sum(items)", b"round(sum(items))"))
+        return first
+
+    def test_d2_the_persons_function_typed_between_two_turns_is_kept_and_dgcs_changes_go(self):
+        c = Chat(self, {"a.py": MODULE})
+        first = self.d2(c)
+        self.assertEqual(c.cp.undo_plan(first), {"merged": [str(c.p("a.py"))], "held": []})
+        self.assertEqual(c.cp.rewind(first), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), MODULE + b"\n\ndef mine():\n    return 'the person'\n")
+        self.assertEqual(c.cp.last_rewind_merged, [str(c.p("a.py"))])
 
     def test_d2_a_rewind_to_the_later_turn_alone_keeps_the_change_and_is_not_stopped(self):
         c = Chat(self, {"a.py": b"one\n"})
@@ -89,36 +102,105 @@ class BetweenTurnsTests(unittest.TestCase):
         self.assertGreaterEqual(c.cp.rewind(second)[0], 0, "turn 2's own before-state holds the person's line")
         self.assertEqual(c.p("a.py").read_bytes(), b"ONE\nmine\n")
 
-    def test_d2_the_evidence_survives_a_restart(self):
-        c = Chat(self, {"a.py": b"one\n"})
-        first = c.turn("turn 1")
-        c.write("a.py", b"ONE\n")
-        c.p("a.py").write_bytes(b"ONE\nmine\n")
-        c.turn("turn 2")
-        c.write("a.py", b"ONE\nmine\nTWO\n")
+    def test_d2_the_merge_base_survives_a_restart(self):
+        c = Chat(self, {"a.py": MODULE})
+        first = self.d2(c)
         c.restart()
-        self.assertEqual(c.cp.rewind(first)[0], -1)
-        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("a.py")): "between"})
+        self.assertEqual(c.cp.rewind(first), (0, 1), "DGC's after-bytes were saved with the points")
+        self.assertIn(b"def mine()", c.p("a.py").read_bytes())
+        self.assertIn(b"0.18", c.p("a.py").read_bytes())
 
-    def test_d2b_a_new_file_the_person_added_to_between_turns_is_not_deleted(self):
+    def test_a_tampered_after_state_is_refused_on_load(self):
+        c = Chat(self, {"a.py": MODULE})
+        self.d2(c)
+        state = json.loads(json.dumps(c.cp.state()))
+        state["points"][0]["writes"]["a.py"][0]["after"]["data"] = "dGFtcGVyZWQK"   # "tampered\n"
+        self.assertEqual(CheckpointManager.from_state(state, c.root).points, [])
+
+    def test_d2b_a_new_file_the_person_added_to_keeps_only_their_lines(self):
         c = Chat(self, {"keep.txt": b"k\n"})
         first = c.turn("turn 1")
         c.write("new.py", b"def f():\n    return 1\n")
-        c.p("new.py").write_bytes(b"def f():\n    return 1\n\ndef users_function():\n    return 'mine'\n")
+        c.p("new.py").write_bytes(b"def f():\n    return 1\n\n\ndef users_function():\n    return 'mine'\n")
         c.turn("turn 2")
-        c.write("new.py", b"def f():\n    return 2\n\ndef users_function():\n    return 'mine'\n")
-        self.assertEqual(c.cp.rewind(first)[0], -1)
-        self.assertIn(b"users_function", c.p("new.py").read_bytes(), "never deleted with the person's work in it")
+        c.write("new.py", b"def f():\n    return 2\n\n\ndef users_function():\n    return 'mine'\n")
+        self.assertGreaterEqual(c.cp.rewind(first)[0], 0)
+        self.assertEqual(c.p("new.py").read_bytes(), b"def users_function():\n    return 'mine'\n",
+                         "DGC created the file: its lines go, the person's stay")
 
-    def test_d2d_a_save_made_while_the_turn_ran_is_not_lost_by_undo_of_that_turn(self):
-        c = Chat(self, {"a.py": b"one\ntwo\n"})
+    def test_d2d_a_save_made_while_the_turn_ran_is_merged_on_undo(self):
+        c = Chat(self, {"a.py": MODULE})
         turn = c.turn("long turn")
-        c.write("a.py", b"one\nTWO\n")
-        c.p("a.py").write_bytes(b"one\nTWO\n# saved mid-turn\n")              # the person saves
-        c.write("a.py", b"ONE\nTWO\n# saved mid-turn\n")                       # DGC writes on top
-        self.assertEqual(c.cp.rewind(turn)[0], -1)
-        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("a.py")): "between"})
-        self.assertIn(b"saved mid-turn", c.p("a.py").read_bytes())
+        c.write("a.py", MODULE.replace(b"0.18", b"0.2"))
+        c.p("a.py").write_bytes(c.p("a.py").read_bytes() + b"\n\n# saved mid-turn\n")   # the person saves
+        c.write("a.py", c.p("a.py").read_bytes().replace(b"sum(items)", b"round(sum(items))"))
+        self.assertEqual(c.cp.rewind(turn), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), MODULE + b"\n\n# saved mid-turn\n")
+
+    def test_d1_and_d2c_an_edit_after_dgcs_last_write_is_kept_too(self):
+        c = Chat(self, {"a.py": MODULE})
+        first = c.turn("turn 1")
+        c.write("a.py", MODULE.replace(b"0.18", b"0.2"))
+        c.turn("turn 2")
+        c.write("a.py", c.p("a.py").read_bytes().replace(b"sum(items)", b"round(sum(items))"))
+        c.p("a.py").write_bytes(c.p("a.py").read_bytes().replace(b"return amount\n", b"return amount * 0.9\n"))
+        self.assertEqual(c.cp.rewind(first), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), MODULE.replace(b"return amount\n", b"return amount * 0.9\n"))
+
+    def test_an_overlapping_edit_is_held_back_and_named(self):
+        c = Chat(self, {"a.py": MODULE, "b.py": b"b\n"})
+        first = c.turn("turn 1")
+        c.write("a.py", MODULE.replace(b"0.18", b"0.2"))
+        c.write("b.py", b"B\n")
+        c.p("a.py").write_bytes(MODULE.replace(b"0.18", b"0.25"))            # the same line DGC changed
+        self.assertEqual(c.cp.undo_plan(first), {"merged": [], "held": [{"path": str(c.p("a.py")),
+                                                                          "reason": "overlap"}]})
+        self.assertEqual(c.cp.rewind(first)[0], -1, "named, nothing written")
+        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("a.py")): "overlap"})
+        self.assertEqual(c.cp.rewind(first, keep=[str(c.p("a.py"))]), (0, 1), "held back: the rest is undone")
+        self.assertEqual((c.p("a.py").read_bytes(), c.p("b.py").read_bytes()),
+                         (MODULE.replace(b"0.18", b"0.25"), b"b\n"))
+        self.assertEqual(c.cp.last_rewind_kept, [str(c.p("a.py"))])
+
+    def test_undo_anyway_still_puts_back_the_before_state_over_an_overlap(self):
+        c = Chat(self, {"a.py": MODULE})
+        first = c.turn("turn 1")
+        c.write("a.py", MODULE.replace(b"0.18", b"0.2"))
+        c.p("a.py").write_bytes(MODULE.replace(b"0.18", b"0.25"))
+        self.assertEqual(c.cp.rewind(first, overwrite=[str(c.p("a.py"))]), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), MODULE)
+
+    def test_crlf_files_merge_byte_for_byte(self):
+        crlf = MODULE.replace(b"\n", b"\r\n")
+        c = Chat(self, {"a.py": crlf})
+        first = c.turn("turn 1")
+        c.write("a.py", crlf.replace(b"0.18", b"0.2"))
+        c.p("a.py").write_bytes(c.p("a.py").read_bytes() + b"\r\n\r\n# mine\r\n")
+        self.assertEqual(c.cp.rewind(first), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), crlf + b"\r\n\r\n# mine\r\n")
+
+    def test_no_final_newline_merges_without_adding_one(self):
+        bare = MODULE.rstrip(b"\n")
+        c = Chat(self, {"a.py": bare})
+        first = c.turn("turn 1")
+        c.write("a.py", bare.replace(b"0.18", b"0.2"))
+        c.p("a.py").write_bytes(b"# mine\n\n\n" + c.p("a.py").read_bytes())
+        self.assertEqual(c.cp.rewind(first), (0, 1))
+        self.assertEqual(c.p("a.py").read_bytes(), b"# mine\n\n\n" + bare)
+
+    def test_binary_and_over_the_cap_keep_refusing(self):
+        blob = bytes(range(256)) * 8
+        c = Chat(self, {"img.bin": blob, "big.txt": b"x\n" * 10})
+        first = c.turn("turn 1")
+        c.write("img.bin", blob[::-1])
+        c.p("img.bin").write_bytes(blob[::-1] + b"\x00mine")
+        saved = cpmod._MERGE_MAX_BYTES
+        cpmod._MERGE_MAX_BYTES = 8                 # the 1 MiB cap, made small
+        self.addCleanup(setattr, cpmod, "_MERGE_MAX_BYTES", saved)
+        c.write("big.txt", b"y\n" * 10)
+        c.p("big.txt").write_bytes(b"y\n" * 10 + b"mine\n")
+        self.assertEqual(c.cp.rewind(first)[0], -1)
+        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("img.bin")): "binary", str(c.p("big.txt")): "large"})
 
     def test_undo_anyway_restores_once_the_person_names_exactly_those_files(self):
         c = Chat(self, {"a.py": b"one\n", "b.py": b"b\n"})
@@ -137,16 +219,6 @@ class BetweenTurnsTests(unittest.TestCase):
         self.assertGreaterEqual(count, 0)
         self.assertEqual((restored, c.p("a.py").read_bytes(), c.p("b.py").read_bytes()), (2, b"one\n", b"b\n"))
         self.assertEqual(c.cp.last_rewind_conflicts, [])
-
-    def test_d2c_and_d1_kept_a_change_after_the_last_write_still_stops_the_rewind(self):
-        c = Chat(self, {"a.py": b"one\n"})
-        first = c.turn("turn 1")
-        c.write("a.py", b"ONE\n")
-        c.turn("turn 2")
-        c.write("a.py", b"ONE\nTWO\n")
-        c.p("a.py").write_bytes(b"ONE\nTWO\nmine\n")
-        self.assertEqual(c.cp.rewind(first)[0], -1)
-        self.assertEqual(c.cp.last_rewind_reasons, {str(c.p("a.py")): "changed"})
 
     def test_no_record_of_what_dgc_left_is_still_not_evidence(self):
         c = Chat(self, {"a.py": b"one\n"})
@@ -464,7 +536,7 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
         self.assertTrue(h.run("racing", [("racing", person_then_sed)]))
         (count, _), outcome = self.undo(h)
         self.assertEqual(count, -1)
-        self.assertEqual(outcome["conflicts"], [{"path": "a.py", "reason": "between"}])
+        self.assertEqual(outcome["conflicts"], [{"path": "a.py", "reason": "overlap"}])
         self.assertIn("typed by the person", (h.root / "a.py").read_text())
 
     def test_the_cost_of_the_look_around_a_command_is_recorded(self):
@@ -551,7 +623,7 @@ class UndoToCommandTests(HarnessCase):
         self.assertTrue(h.run("turn 2", [("turn", route)]))
         h.backend._dispatch({"type": "undo_to", "index": 0, "request_id": "u1"})
         [answer] = [f for f in h.of("undo_result") if f["request_id"] == "u1"]
-        self.assertEqual((answer["ok"], answer["conflicts"]), (False, [{"path": "a.py", "reason": "between"}]))
+        self.assertEqual((answer["ok"], answer["conflicts"]), (False, [{"path": "a.py", "reason": "overlap"}]))
         h.backend._dispatch({"type": "undo_to", "index": 0, "overwrite": ["a.py"], "request_id": "u2"})
         [answer] = [f for f in h.of("undo_result") if f["request_id"] == "u2"]
         self.assertEqual((answer["ok"], answer["files_restored"], answer["conflicts"]), (True, 1, []))
@@ -739,7 +811,8 @@ class SaveDuringCommandTests(HarnessCase):
                                                               "new_string": "x = 2"}),
                                  ToolCall("b1", "bash", {"command": "sleep 1.5"})], person)
         self.assertEqual(h.agent.rewind(0)[0], -1, "not re-noted as DGC's own: the guard sees the person's save")
-        self.assertEqual(h.agent.last_rewind["conflicts"], [{"path": "a.py", "reason": "changed"}])
+        self.assertEqual(h.agent.last_rewind["conflicts"], [{"path": "a.py", "reason": "overlap"}],
+                         "their line touches DGC's: held back and named")
         self.assertIn("the person's line", target.read_text())
 
     def test_the_terminal_has_no_editor_to_say_so_and_stays_by_time(self):
