@@ -69,8 +69,17 @@ def stopped(n: int) -> str:
             else f"{n} background helpers from those turns were stopped.")
 
 
-def done(restored: int, left_count: int = 0) -> str:
+# Undo rewrites files and nothing else: never the index, HEAD, a branch, a stash or a commit (Codex's
+# server-side undo reset people's staging, openai/codex#8214). When a command in the undone turns moved
+# one of those, the question and the line after say so.
+GIT_LEFT_QUESTION = "Your files are put back; Git's commits, branches, stashes and staging are left as they are."
+GIT_LEFT = "Git's commits, branches, stashes and staging are left as they are."
+
+
+def done(restored: int, left_count: int = 0, git: bool = False) -> str:
     """The editor's and the terminal's line after an Undo."""
     line = f"↩ Undone; DGC restored {files(restored)}."
-    tail = left(left_count)
-    return f"{line} {tail}" if tail else line
+    for tail in (left(left_count), GIT_LEFT if git else ""):
+        if tail:
+            line = f"{line} {tail}"
+    return line

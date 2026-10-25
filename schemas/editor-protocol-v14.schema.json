@@ -6242,6 +6242,9 @@
             },
             "checkpoint_preview": {
               "type": "string"
+            },
+            "git_moved": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -6337,6 +6340,9 @@
             },
             "error": {
               "type": "string"
+            },
+            "git": {
+              "type": "boolean"
             }
           },
           "required": [

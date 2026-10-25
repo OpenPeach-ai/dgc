@@ -4799,6 +4799,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "git_moved": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "rewind_preview": {
@@ -4867,6 +4873,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "error": {
       "types": [
         "string"
+      ],
+      "required": false
+    },
+    "git": {
+      "types": [
+        "boolean"
       ],
       "required": false
     }

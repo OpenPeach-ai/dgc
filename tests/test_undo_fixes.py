@@ -349,10 +349,7 @@ def steps(*calls, final="Done."):
     return route
 
 
-class CommandUndoTests(HarnessCase):
-    """§4.2 and §4.4: what the main chat's own commands change is put back by Undo when its earlier
-    state is exact, and named on the card ("Changed by a command — Undo leaves it") when it is not."""
-
+class CommandHelpers:
     def repo(self, files: dict[str, str], git=True, **config):
         h = self.make(git=git, mode="auto", **config)
         for name, text in files.items():
@@ -372,6 +369,11 @@ class CommandUndoTests(HarnessCase):
 
     def undo(self, h, index=0, overwrite=None):
         return h.agent.rewind(index, overwrite=overwrite), h.agent.last_rewind
+
+
+class CommandUndoTests(CommandHelpers, HarnessCase):
+    """§4.2 and §4.4: what the main chat's own commands change is put back by Undo when its earlier
+    state is exact, and named on the card ("Changed by a command — Undo leaves it") when it is not."""
 
     def test_d5_a_sed_on_a_clean_tracked_file_is_on_the_card_and_undone(self):
         h = self.repo({"a.py": "a = 1\n", "b.py": "x = 1\n"})
@@ -400,22 +402,24 @@ class CommandUndoTests(HarnessCase):
         self.assertGreaterEqual(self.undo(h)[0][0], 0)
         self.assertFalse((h.root / "gen.txt").exists())
 
-    def test_d8_an_untracked_file_a_command_changed_is_named_and_left(self):
+    def test_d8_an_untracked_file_a_command_changed_is_put_back_from_its_copy(self):
+        # Since 25 Oct (uncommitted work): copied before the command, so Undo puts it back.
         h = self.repo({"a.py": "a\n"})
-        (h.root / "notes.txt").write_text("my notes\n")          # untracked: no exact earlier state
+        (h.root / "notes.txt").write_text("my notes\n")          # untracked
         card = self.turn(h, "append notes", ToolCall("b1", "bash", {"command": "echo more >> notes.txt"}))
-        self.assertEqual(card["files"], [{"path": "notes.txt", "additions": 0, "deletions": 0, "counted": False,
-                                          "status": "modified", "command": True}])
-        self.assertEqual(card["total"], 1)
+        self.assertEqual(card["files"], [{"path": "notes.txt", "additions": 1, "deletions": 0, "counted": True,
+                                          "status": "modified", "by_command": True}])
         (count, restored), outcome = self.undo(h)
-        self.assertEqual((count >= 0, restored, outcome["left"]), (True, 0, ["notes.txt"]))
-        self.assertEqual((h.root / "notes.txt").read_text(), "my notes\nmore\n", "left as it is, and said so")
+        self.assertEqual((count >= 0, restored, outcome["left"]), (True, 1, []))
+        self.assertEqual((h.root / "notes.txt").read_text(), "my notes\n")
 
-    def test_a_file_with_uncommitted_changes_a_command_changed_is_named_and_left(self):
+    def test_a_file_with_uncommitted_changes_a_command_changed_is_put_back_from_its_copy(self):
         h = self.repo({"c.py": "c = 1\n"})
         (h.root / "c.py").write_text("c = 1\n# the person's uncommitted line\n")
         card = self.turn(h, "sed c", ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' c.py"}))
-        self.assertEqual(self.rows(card), {"c.py": ("modified", True)})
+        self.assertEqual(self.rows(card), {"c.py": ("modified", False)})
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertEqual((h.root / "c.py").read_text(), "c = 1\n# the person's uncommitted line\n")
 
     def test_d6_a_command_after_dgcs_own_edit_is_dgcs_own_and_undo_restores_the_turn(self):
         for git in (True, False):
@@ -818,6 +822,171 @@ class FailureLineTests(HarnessCase):
         self.assertEqual(lines, ["Undo stopped: couldn't write ro/b.py (Permission denied). Nothing was changed, "
                                  "and the recovery point was kept."])
         self.assertEqual(h.agent.last_rewind["error"], "couldn't write ro/b.py (Permission denied)")
+
+
+
+# ---------------------------------------------------------------------------------------------------
+# Uncommitted work (the founder, 25 Oct): a model's git checkout . / reset --hard / clean -fd / stash / rm
+# over uncommitted changes is undoable. DGC copies every file with uncommitted changes before each of the
+# chat's own commands, and Undo puts back the copy of each one the command changed. It never touches Git.
+# ---------------------------------------------------------------------------------------------------
+def git_out(root: Path, *args) -> str:
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+class UncommittedWorkTests(CommandHelpers, HarnessCase):
+    MINE_A = "a = 1\n# my uncommitted work\n"
+
+    def dirty(self, **config):
+        h = self.repo({"a.py": "a = 1\n", "b.py": "b = 1\n", "README.md": "# r\n"}, **config)
+        (h.root / "a.py").write_text(self.MINE_A)
+        (h.root / "notes.txt").write_text("my notes\n")
+        (h.root / "docs").mkdir()
+        (h.root / "docs" / "draft.md").write_text("# my draft\n")
+        return h
+
+    def test_git_checkout_dot_is_undone(self):
+        h = self.dirty()
+        card = self.turn(h, "checkout", ToolCall("b1", "bash", {"command": "git checkout -- ."}))
+        self.assertEqual((h.root / "a.py").read_text(), "a = 1\n", "the command threw the work away")
+        self.assertEqual(self.rows(card), {"a.py": ("modified", False)})
+        self.assertTrue(card["files"][0]["by_command"], "Undo's question names it")
+        self.assertNotIn("git_moved", card, "checkout of files moves neither HEAD nor the index")
+        (count, restored), outcome = self.undo(h)
+        self.assertEqual((count >= 0, restored, outcome["git"]), (True, 1, False))
+        self.assertEqual((h.root / "a.py").read_text(), self.MINE_A)
+
+    def test_git_reset_hard_is_undone_and_staging_is_left_and_said(self):
+        h = self.dirty()
+        (h.root / "b.py").write_text("b = 2\n")
+        run_git(h.root, "add", "b.py")                                   # staged
+        head = git_out(h.root, "rev-parse", "HEAD")
+        card = self.turn(h, "reset", ToolCall("b1", "bash", {"command": "git reset --hard -q"}))
+        self.assertTrue(card.get("git_moved"), "the index changed")
+        (count, restored), outcome = self.undo(h)
+        self.assertEqual((count >= 0, restored, outcome["git"]), (True, 2, True))
+        self.assertEqual(((h.root / "a.py").read_text(), (h.root / "b.py").read_text()), (self.MINE_A, "b = 2\n"))
+        self.assertEqual(git_out(h.root, "diff", "--cached", "--name-only"), "", "staging is not touched")
+        self.assertEqual(git_out(h.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(rewind_words.done(restored, 0, outcome["git"]),
+                         "↩ Undone; DGC restored 2 files. Git's commits, branches, stashes and staging are left as "
+                         "they are.")
+
+    def test_git_clean_fd_is_undone(self):
+        h = self.dirty()
+        self.turn(h, "clean", ToolCall("b1", "bash", {"command": "git clean -fdq"}))
+        self.assertFalse((h.root / "docs").exists())
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertEqual(((h.root / "notes.txt").read_text(), (h.root / "docs" / "draft.md").read_text()),
+                         ("my notes\n", "# my draft\n"))
+
+    def test_git_stash_is_undone_and_the_stash_is_left_and_said(self):
+        h = self.dirty()
+        card = self.turn(h, "stash", ToolCall("b1", "bash", {"command": "git stash -q"}))
+        self.assertTrue(card.get("git_moved"))
+        (count, _), outcome = self.undo(h)
+        self.assertEqual((count >= 0, outcome["git"]), (True, True))
+        self.assertEqual((h.root / "a.py").read_text(), self.MINE_A)
+        self.assertEqual(len(git_out(h.root, "stash", "list").splitlines()), 1, "the stash is left alone")
+
+    def test_rm_of_a_dirty_file_is_undone(self):
+        h = self.dirty()
+        self.turn(h, "rm", ToolCall("b1", "bash", {"command": "rm a.py notes.txt"}))
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertEqual(((h.root / "a.py").read_text(), (h.root / "notes.txt").read_text()),
+                         (self.MINE_A, "my notes\n"))
+
+    def test_a_file_deleted_before_the_command_and_restored_by_it_is_deleted_again(self):
+        h = self.dirty()
+        (h.root / "b.py").unlink()                                      # the person's uncommitted delete
+        self.turn(h, "checkout b", ToolCall("b1", "bash", {"command": "git checkout -- b.py"}))
+        self.assertTrue((h.root / "b.py").exists())
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertFalse((h.root / "b.py").exists())
+
+    def test_over_the_limits_the_card_says_which(self):
+        cases = (("size", {"_COPY_MAX_FILE": 8}, None), ("count", {"_COPY_MAX_FILES": 1}, None),
+                 ("budget", {}, 16))
+        for limit, watch_limits, budget in cases:
+            with self.subTest(limit=limit):
+                saved = {name: getattr(command_watch, name) for name in watch_limits}
+                for name, value in watch_limits.items():
+                    setattr(command_watch, name, value)
+                saved_budget = cpmod._MAX_SNAPSHOT_BYTES
+                if budget is not None:
+                    cpmod._MAX_SNAPSHOT_BYTES = budget
+                try:
+                    h = self.dirty()
+                    (h.root / "b.py").write_text("b = 1\n# also mine, longer than the budget allows\n")
+                    card = self.turn(h, f"limit {limit}", ToolCall("b1", "bash", {"command": "git checkout -- ."}))
+                finally:
+                    for name, value in saved.items():
+                        setattr(command_watch, name, value)
+                    cpmod._MAX_SNAPSHOT_BYTES = saved_budget
+                limited = [row for row in card["files"] if row.get("command")]
+                self.assertTrue(limited, card)
+                self.assertTrue(all(row.get("limit") == limit for row in limited), card)
+
+    def test_a_repeat_command_copies_nothing_new(self):
+        h = self.dirty()
+        self.turn(h, "twice", ToolCall("b1", "bash", {"command": "true"}), ToolCall("b2", "bash", {"command": "true"}))
+        copied = h.agent.__dict__["_command_watch_copied"]
+        self.assertGreater(copied[-2], 0, "the first command copied the uncommitted files")
+        self.assertEqual(copied[-1], 0, "the second only re-read and hashed them")
+
+    def test_a_head_moved_by_the_turn_is_said_in_the_question(self):
+        from types import SimpleNamespace
+        from dgc import tui as tui_mod
+        h = self.dirty()
+        card = self.turn(h, "commit", ToolCall("e1", "edit_file", {"path": "b.py", "old_string": "b = 1",
+                                                                    "new_string": "b = 3"}),
+                         ToolCall("b1", "bash", {"command": "git commit -qam wip"}))
+        self.assertTrue(card.get("git_moved"))
+        fake = TerminalRewindTests.Fake(SimpleNamespace(checkpoints=h.agent.checkpoints,
+                                                        _turn_files_path=h.agent._turn_files_path))
+        tui_mod.TUI._confirm_rewind.__get__(fake)(0)
+        self.assertIn("Your files are put back; Git's commits, branches, stashes and staging are left as they are.",
+                      [t.plain for t in fake.overlays[-1][1]["header"]])
+        head = git_out(h.root, "rev-parse", "HEAD")
+        (count, _), outcome = self.undo(h)
+        self.assertEqual((count >= 0, outcome["git"]), (True, True))
+        self.assertEqual(git_out(h.root, "rev-parse", "HEAD"), head, "the commit stays")
+        self.assertEqual((h.root / "b.py").read_text(), "b = 1\n")
+
+    def test_a_dirty_file_the_person_saves_during_a_command_is_theirs_and_the_commands_is_put_back(self):
+        h = self.dirty()
+        (h.root / "b.py").write_text("b = 1\n# b, uncommitted\n")
+        a = (h.root / "a.py").resolve()
+
+        def person():
+            time.sleep(0.5)
+            a.write_text(self.MINE_A + "# saved during the command\n")
+            command_watch.note_saves([str(a)], time.time())
+        worker = threading.Thread(target=person, daemon=True)
+
+        def route(messages, results, cancel):
+            if not results:
+                worker.start()
+                return ChatResult(tool_calls=[ToolCall("b1", "bash", {"command": "sleep 1.5 && git checkout -- b.py"})])
+            return ChatResult(content="Done.")
+        self.assertTrue(h.run("person saves", [("person saves", route)]))
+        worker.join(10)
+        self.assertEqual([row["path"] for row in h.agent.last_turn_files["files"]], ["b.py"])
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertEqual((h.root / "b.py").read_text(), "b = 1\n# b, uncommitted\n", "the command's: put back")
+        self.assertIn("saved during the command", a.read_text(), "the person's: left alone")
+
+    def test_the_copies_survive_a_restart_and_are_checked(self):
+        h = self.dirty()
+        self.turn(h, "checkout", ToolCall("b1", "bash", {"command": "git checkout -- ."}))
+        state = json.loads(json.dumps(h.agent.checkpoints.state()))
+        revived = CheckpointManager.from_state(json.loads(json.dumps(state)), h.root.resolve())
+        self.assertGreaterEqual(revived.rewind(0)[0], 0)
+        self.assertEqual((h.root / "a.py").read_text(), self.MINE_A)
+        entry = state["points"][0]["files"]["a.py"]
+        import base64
+        entry["data"] = base64.b64encode(b"tampered\n").decode("ascii")
+        self.assertEqual(CheckpointManager.from_state(state, h.root.resolve()).points, [], "a changed copy is refused")
 
 
 if __name__ == "__main__":

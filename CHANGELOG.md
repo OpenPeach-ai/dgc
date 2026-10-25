@@ -34,6 +34,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **Nothing is put back unseen.** Undo's question names the files it restores from Git because a command changed
     them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more"), in the
     editor and in `/rewind`. A `turn_files` row marks them `by_command: true`.
+  - **A model's `git checkout .`, `git reset --hard`, `git clean -fd`, `git stash` or `rm` over your uncommitted
+    work is undone.** Before each command DGC copies every file with uncommitted changes (tracked files Git sees as
+    changed or deleted, untracked files it does not ignore), keyed by their contents so an unchanged file is not
+    copied twice, and Undo puts back each one the command changed, exactly as it was. Only the copies a change needs
+    are kept, in the turn's recovery point, saved and checked like every other snapshot. A file over 5 MB, past 500
+    in one command, or past the session's budget is not copied; the card says "Changed by a command — Undo leaves
+    it" and its tooltip says which limit. Undo never touches Git itself: when a command committed, reset, checked
+    out or stashed, the question and the last line say "Your files are put back; Git's commits, branches, stashes
+    and staging are left as they are."
   - **DGC's own command or formatter no longer locks Undo.** A `sed -i`, `black` or formatting hook after one of DGC's
     edits made every Undo of that turn refuse as "changed outside this chat". It is DGC's own work now, and Undo
     restores the turn.

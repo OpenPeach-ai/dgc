@@ -1073,7 +1073,8 @@ EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window
 # `turn_end`. A client that never asks is never sent one live.
 COMMAND_FIELDS["watch_turn_files"] = {"request_id": _S(False)}
 EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
-                              "checkpoint_index": _I(False), "checkpoint_preview": _S(False)}
+                              "checkpoint_index": _I(False), "checkpoint_preview": _S(False),
+                              "git_moved": _B(False)}
 # A file row may also carry `outside: true` (outside the project: its before-state lives only in the
 # process that changed it) and, replayed by get_history in a later process, `undoable: false` (Undo can
 # no longer put it back, and the Undo question leaves it out of its count). A row with `command: true` is
@@ -1112,11 +1113,17 @@ EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I
 # Edited card as the command's, and a save reported after the command was looked at takes that back.
 #
 # A turn_files row may also carry `by_command: true`: a file one of the turn's commands changed that Undo
-# DOES put back (Git's copy of a clean file, or a file the command created); Undo's question names them.
+# DOES put back (Git's copy of a clean file, the copy DGC made of a file with uncommitted changes before
+# the command, or a file the command created); Undo's question names them. A `command: true` row may carry
+# `limit` (size: over 5 MB; count: past 500 files in one command; budget: the session's copies used up),
+# the limit that kept DGC from copying it first. `git_moved: true` on the event (both fields new in 0.48,
+# as the event is): one of those turns' commands moved HEAD, changed the index or a stash, which Undo
+# leaves as they are; `undo_result` then carries `git: true` after an Undo of such a turn.
 COMMAND_FIELDS["user_saved"] = {"paths": _A(), "at": _N(False)}
 COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "request_id": _S()}
 EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "files_restored": _I(),
-                               "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False)}
+                               "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False),
+                               "git": _B(False)}
 
 # ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
 # Each Model box in the editor's Settings lists the models at its own card's host, before anything is

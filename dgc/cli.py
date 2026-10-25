@@ -1416,12 +1416,15 @@ class CLI:
                         commanded = []
                     if commanded:
                         self.ui.info(rewind_words.also_puts_back(commanded))
+                    if self.agent.checkpoints.git_moved_since(pts[mi][0]):
+                        self.ui.info(rewind_words.GIT_LEFT_QUESTION)
                 overwrite = None
                 while mi is not None:
                     msgs, nfiles = self.agent.rewind(pts[mi][0], overwrite=overwrite)
                     outcome = getattr(self.agent, "last_rewind", None) or {}
                     if msgs >= 0:
-                        self.ui.info(rewind_words.done(nfiles, len(outcome.get("left") or []))
+                        self.ui.info(rewind_words.done(nfiles, len(outcome.get("left") or []),
+                                                       bool(outcome.get("git")))
                                      + " The conversation was truncated.")
                         break
                     conflicts = [row for row in outcome.get("conflicts") or [] if row.get("path")]

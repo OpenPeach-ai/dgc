@@ -4911,7 +4911,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                                    preview: typeof msg.checkpoint?.preview === "string" ? msg.checkpoint.preview : undefined }
                               : undefined,
                             Number.isInteger(msg.later) && msg.later > 0 ? msg.later : 0,
-                            Array.isArray(msg.byCommand) ? msg.byCommand.map(String).filter(Boolean) : []);
+                            Array.isArray(msg.byCommand) ? msg.byCommand.map(String).filter(Boolean) : [],
+                            msg.gitMoved === true);
         break;
       case "branchChat":
         await this.branchChat(String(msg.prompt || ""));
@@ -6300,7 +6301,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    */
   async undoTurn(prompt: string, files: string[],
                  counted?: { total: number; index?: number; preview?: string }, later = 0,
-                 byCommand: string[] = []): Promise<void> {
+                 byCommand: string[] = [], gitMoved = false): Promise<void> {
     const be = this.ensureBackend();
     let items: any[] = [];
     try {
@@ -6353,9 +6354,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Nothing is restored unseen: the files Undo puts back from Git because one of the turns' commands changed them
     // are named (the cards marked them `by_command`), five at most.
     const restored = byCommand.slice(0, 5).join(", ") + (byCommand.length > 5 ? ` and ${byCommand.length - 5} more` : "");
-    const also = byCommand.length
+    const also = (byCommand.length
       ? `\n\nAlso puts back ${byCommand.length === 1 ? "1 file" : `${byCommand.length} files`} a command changed: ${restored}.`
-      : "";
+      : "")
+      // Undo rewrites files only, never Git's own state: a command that committed, reset, checked out or stashed
+      // left history and staging that Undo leaves alone, and the question says so.
+      + (gitMoved ? "\n\nYour files are put back; Git's commits, branches, stashes and staging are left as they are." : "");
     const choice = await vscode.window.showWarningMessage(
       `Undo ${turns}? DGC restores ${upTo ? "up to " : ""}${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
@@ -6387,8 +6391,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (result?.ok === true) {
           const restored = Number(result.files_restored) || 0;
           const left = Array.isArray(result.left) ? result.left.length : 0;
-          const tail = left === 1 ? " 1 file changed by a command was left as it is."
-            : left > 1 ? ` ${left} files changed by commands were left as they are.` : "";
+          const tail = (left === 1 ? " 1 file changed by a command was left as it is."
+            : left > 1 ? ` ${left} files changed by commands were left as they are.` : "")
+            + (result.git === true ? " Git's commits, branches, stashes and staging are left as they are." : "");
           void vscode.window.showInformationMessage(`↩ Undone; DGC restored ${plural(restored)}.${tail}`);
           return;
         }
