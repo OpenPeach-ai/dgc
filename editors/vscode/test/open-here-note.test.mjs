@@ -326,6 +326,48 @@ test("moved, in a window whose side bar never started its backend: it is started
   h.host.backend.dispose("restart: test");
 });
 
+test("held: a session a terminal has open is read-only here, with the line, and this chat keeps its backend", async () => {
+  const terminal = { found: true, editor: "the terminal", windowless: false, folder: "~/toni-erp", working: false, idle_s: 130 };
+  const fixture = fakeServe("serve-held", { caps: { detach: DETACH, session_holder: 1, session_owner: 1 }, holder: terminal });
+  command = fixture.path;
+  const h = tab();
+  const be = h.provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => h.provider.sessionReady));
+  assert.ok(await until(() => fixture.types().includes("watch_session_owner")), "it shows a held session read-only");
+  be.send({ type: "prompt", text: `emit ${JSON.stringify({ type: "session_held", session_id: SESSION })}` });
+  assert.ok(await until(() => bars(h.posted).some((m) => m.note)), "the line");
+  const bar = bars(h.posted).at(-1);
+  assert.equal(bar.state, "elsewhere");
+  assert.deepEqual(bar.note, { head: "Open in the terminal · ~/toni-erp · idle 2 min.", detail: "" });
+  assert.equal(h.provider.backend, be, "its backend stays; it writes nothing to the session");
+  // Read-only: what would change the session is refused here, and nothing reaches the backend.
+  const sent = fixture.types().length;
+  await h.provider.onMessage({ type: "prompt", text: "hello", request_id: "p9" });
+  await pause(200);
+  assert.equal(fixture.types().slice(sent).includes("prompt"), false);
+  // Open here: the terminal lets it go (dgc/serve_relay.py), this window's next backend has it, and the bar goes.
+  const taker = fakeServe("serve-held-taken", { caps: { detach: DETACH, session_holder: 1, session_owner: 1 } });
+  command = taker.path;
+  h.provider.openSessionHere();
+  spawned.push(h.provider.backend?.childPid);
+  assert.ok(await until(() => h.provider.sessionReady && bars(h.posted).at(-1).state === "none"), "this window's again");
+  assert.equal(h.provider.sessionElsewhere, undefined);
+  h.provider.backend?.dispose("restart: test");
+});
+
+test("an older CLI is never told this window shows a held session read-only", async () => {
+  const fixture = fakeServe("serve-held-old", { caps: { detach: DETACH, session_holder: 1 } });
+  command = fixture.path;
+  const h = tab();
+  const be = h.provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => h.provider.sessionReady));
+  await pause(150);
+  assert.equal(fixture.types().includes("watch_session_owner"), false);
+  be.dispose("restart: test");
+});
+
 // ---- the webview ---------------------------------------------------------------------------------
 
 test("the webview: the bar says the line, its head in bold, as text; today's sentence without one", () => {

@@ -38,6 +38,8 @@ COUNTS = ("monitors", "helpers", "commands", "queued", "waiting")
 _NOT_PROMPTS = ("monitor", "wake", "pip_setup", "resume")
 _SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 WINDOWLESS = "kept running by DGC with no window open"
+# What a DGC in a terminal calls itself in its note: the line then reads "Open in the terminal · ~/x".
+TERMINAL = "the terminal"
 
 
 # ------------------------------------------------------------------------------ the facts ---
@@ -106,6 +108,50 @@ def chat_counts(chat) -> dict:
     return found
 
 
+def agent_counts(agent, *, working: bool = False) -> dict:
+    """What runs in a terminal's agent (no Backend around it): its turn, monitors and background helpers."""
+    found = {"working": bool(working), "monitors": 0, "helpers": 0, "commands": 0, "queued": 0, "waiting": 0}
+    try:
+        monitors = getattr(agent, "monitors", None)
+        if monitors is not None:
+            found["monitors"] = len(monitors.running())
+    except Exception:
+        pass
+    try:
+        found["helpers"] = len(getattr(agent, "_detached_jobs", None) or {}) + sum(
+            1 for run in (getattr(agent, "_troupes", None) or {}).values() if getattr(run, "state", "") == "running")
+    except Exception:
+        pass
+    return found
+
+
+def terminal_block(entries) -> dict:
+    """A terminal's ``open_here``: each (agent, counts) whose session this process holds now."""
+    chats, shown = [], []
+    for agent, counts in entries:
+        session_file = getattr(agent, "session_file", None)
+        if not session_file:
+            continue
+        if getattr(agent, "session_viewing", False):
+            shown.append(Path(str(session_file)).stem)
+            continue
+        root = str(getattr(getattr(agent, "config", None), "project_root", "") or "")
+        chats.append({"session_id": Path(str(session_file)).stem, "session": str(session_file), "cwd": root,
+                      **counts})
+        if len(chats) >= MAX_CHATS:
+            break
+    return {"version": NOTE_VERSION, "editor": TERMINAL, "chats": chats, "viewing": shown[:MAX_CHATS]}
+
+
+def busy_reason(counts: dict) -> str:
+    """Why Open here can't move a session now: what runs or waits in it ("" when nothing does)."""
+    parts = ["a turn is running there"] if counts.get("working") else []
+    for sentence in (running_sentence(counts), waiting_sentence(counts)):
+        if sentence:
+            parts.append(sentence[0].lower() + sentence[1:].rstrip("."))
+    return "; ".join(parts)
+
+
 def note_block(host, editor: str = "") -> dict:
     """What a process's note says under ``open_here``: its window's editor and each chat it holds. A session this
     process only shows read-only, because another window holds it (dgc/serve_relay.py), is not one it holds."""
@@ -114,18 +160,27 @@ def note_block(host, editor: str = "") -> dict:
         viewing = str((serve_relay.refused() or {}).get("session_id") or "")
     except Exception:
         viewing = ""
-    chats = []
+    chats, shown = [], []
     for chat in list(getattr(host, "chats", {}).values()):
         agent = getattr(chat, "agent", None)
         session_file = getattr(agent, "session_file", None)
         stem = Path(str(session_file)).stem if session_file else ""
-        if not stem or stem == viewing:
+        if not stem:
+            continue
+        if stem == viewing or getattr(agent, "session_viewing", False):
+            shown.append(stem)                           # another process has it open: shown here, not held
             continue
         root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
         chats.append({"session_id": stem, "session": str(session_file), "cwd": root, **chat_counts(chat)})
         if len(chats) >= MAX_CHATS:
             break
-    return {"version": NOTE_VERSION, "editor": clean_editor(editor), "chats": chats}
+    return {"version": NOTE_VERSION, "editor": clean_editor(editor), "chats": chats, "viewing": shown[:MAX_CHATS]}
+
+
+def views(record: dict, session_id: str) -> bool:
+    """Whether a note says its process only shows this session (another process has it open)."""
+    block = record.get(NOTE_KEY) if isinstance(record, dict) else None
+    return isinstance(block, dict) and session_id in (block.get("viewing") or [])
 
 
 def _block(record: dict) -> dict | None:
@@ -157,7 +212,7 @@ def session_facts(session_id: str, *, now: float | None = None, home: str | None
     except Exception:
         return {"found": False}
     for record in records:
-        if record.get("kind") != "serve":
+        if record.get("kind") not in ("serve", "tui"):     # a window's DGC, or a DGC in a terminal
             continue
         block = _block(record)
         if block is None:
@@ -278,6 +333,41 @@ def terminal_line(facts: dict | None, pid=None) -> str:
                 f"Open it in the editor to pick it up, or {stop}.")
     return (f"This session is open in {where}.{(' ' + tail) if tail else ''} "
             "Carry on there, or start a new session here.")
+
+
+def where_sentence(facts: dict | None) -> str:
+    """"This session is open in VS Code · ~/toni-erp · idle 6 min. 1 monitor runs there." -- "" when it can't say."""
+    if not usable(facts):
+        return ""
+    tail = " ".join(part for part in (running_sentence(facts), waiting_sentence(facts)) if part)
+    lead = f"This session is {where_words(facts)}." if facts.get("windowless") is True \
+        else f"This session is open in {where_words(facts)}."
+    return f"{lead}{(' ' + tail) if tail else ''}"
+
+
+def held_line(facts: dict | None, tail: str = "") -> str:
+    """A write refused because another process has the session open (idle or not)."""
+    lead = where_sentence(facts)
+    if not lead:
+        return ""
+    return f"{lead} Carry on there, use Open here to move it here, or start a new session. {tail}".strip()
+
+
+def taken_line(facts: dict | None, by: str, tail: str = "") -> str:
+    """A prompt in a process Open here took the session from: where it is now, and how to get it back."""
+    lead = where_sentence(facts)
+    if lead:
+        lead = "Open here moved this session: it is " + lead[len("This session is "):]
+    else:
+        lead = f"Open here moved this session to {by or 'another window'}."
+    return f"{lead} Use Open here to take it back, or start a new session. {tail}".strip()
+
+
+def held_elsewhere(facts: dict | None) -> str:
+    """An SDK program's (or an older editor's) resume of a session another process has open, refused."""
+    lead = where_sentence(facts) or "This session is open in another DGC process."
+    return (f"{lead} One DGC writes to a session at a time: carry on there, or start a new session "
+            "(a window or the terminal can take it with Open here).")
 
 
 def held_on_screen(facts: dict | None, tail: str) -> str:

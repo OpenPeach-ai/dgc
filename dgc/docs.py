@@ -1877,9 +1877,20 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
   only. After Open here, the window it came from says the same about this one. When DGC can't tell
   (an older DGC holds it), the bar says what it always did. A ChatDGC chat's bar says the same,
   with *writing a reply now*.
-- **In a terminal**, `dgc -c` (or `--resume`, `/resume`) of a session a window holds says the same
-  facts: *This session is open in Cursor · ~/toni-erp · working now. 1 monitor runs there. Carry
-  on there, or start a new session here.* A message sent there is refused, naming the same.
+- **One DGC writes to a session at a time, idle or not.** The window, terminal, DGC kept running
+  with no window or SDK program that has a session open holds it until it lets it go; nothing else
+  writes it, even between its turns. A DGC that crashes frees it.
+- **In a terminal**, `dgc -c` (or `--resume`, `/resume`) of a session a window holds says where it
+  is open and what runs there (*This session is open in Cursor · ~/toni-erp · idle 6 min. 1 monitor
+  runs there.*) and offers **Open here** (it moves into the terminal, and the window shows it
+  read-only with the line about the terminal), **Start a new session** (highlighted, so Enter alone
+  never takes it) or **Quit**. A message typed meanwhile brings the choices back and is not sent.
+  While something runs there (a turn, a monitor, a background helper, a question), Open here says
+  what and waits: nothing running is lost to a move.
+- **The other way round**, a window opening a session a terminal has open shows it read-only:
+  *Open in the terminal · ~/toni-erp · idle 2 min.* Its Open here takes it from the terminal, which
+  says *This session is open in the editor now* and takes no more prompts for it.
+- **The SDK** (`resume`) of a session another DGC has open is refused with that same line.
 - **Closing a session's tab while it works asks once**: keep it running in the background, or stop
   it. Tick **Remember my choice** to be asked no more (`dgc.closingAWorkingTab`: `ask`,
   `keepRunning` or `stop`). Closing a tab with nothing running ends it, as before.

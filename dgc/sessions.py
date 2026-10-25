@@ -150,6 +150,24 @@ def session_turn_lock(path, project_root):
     return named_process_lock("session-turn", str(session))
 
 
+def session_owner_lock(path, project_root):
+    """The crash-released lock a process holds for as long as it has this session open (0.48).
+
+    One process writes to a session at a time, idle or not: an editor window, a terminal, a DGC kept
+    running with no window, an SDK program. The turn lease above only covered a turn, so a second
+    process could write the session between two of the first one's turns. This one is held from the
+    moment a process opens the session (or first writes it) until it lets it go: another session,
+    Open here elsewhere, or the process ending -- a crash included: the operating system releases it
+    with the process (the descriptor is never inherited by a command it runs)."""
+    return owner_lock_for_file(resolve_path(project_root, path))
+
+
+def owner_lock_for_file(path):
+    """session_owner_lock for a session file named by its absolute path (a peer note's), with no project to
+    confine it to: the same lock, by the same key."""
+    return named_process_lock("session-owner", str(Path(path).expanduser().resolve(strict=False)))
+
+
 def _atomic_temp_path(path: Path) -> Path:
     return path.with_name(f".{path.name}.tmp")
 

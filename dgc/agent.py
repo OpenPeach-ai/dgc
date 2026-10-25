@@ -1479,6 +1479,22 @@ def _mechanical_compaction_brief(prior: str, transcript_lines: list[str],
 # A refusal with no way out is what turned a stale lease into a dead end for 25 hours: the
 # founder's reload left a backend holding the session and every new window was told only to
 # "wait". Say what will actually happen and what can be done meanwhile.
+def peers_refused_on_screen() -> str:
+    from .peers import REFUSED_ON_SCREEN
+    return REFUSED_ON_SCREEN
+
+
+# The sessions this process holds (Agent.own_session): owner key -> [its owner lock, how many agents hold it here].
+_OWNED_SESSIONS: dict = {}
+_OWNED_GUARD = threading.Lock()
+
+
+def _owner_key(path) -> str:
+    """One spelling per session file, to tell whether the session held is the one open now."""
+    import os
+    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+
+
 _HELD_SESSION_REMEDY = (
     "Another window may still hold it; a backend whose editor has gone releases the session "
     "by itself within about 15 minutes. To carry on now, start a new session or close the "
@@ -5020,6 +5036,136 @@ class Agent(GoalLifecycle):
             self.steer_queue.clear()
         return [message for message in messages if message["text"].strip()]
 
+    # --------------------------------------------- one writer per session ---
+    # One process writes to a session at a time, for as long as it has it open (sessions.session_owner_lock),
+    # not only during a turn: an editor window, a terminal, a DGC kept running with no window, an SDK program.
+    # It is taken when the session is opened here or first written, and let go with another session, Open here
+    # elsewhere, or the process (a crash included: the OS releases it).
+    @property
+    def session_file(self):
+        return self.__dict__.get("_session_file_path")
+
+    @session_file.setter
+    def session_file(self, value) -> None:
+        self.__dict__["_session_file_path"] = value
+        held = self.__dict__.get("_session_owner")
+        if held is not None and (value is None or _owner_key(value) != held[0]):
+            self.release_session_owner()          # another session: this one is free for others
+        if held is None or value is None or _owner_key(value) != held[0]:
+            self.__dict__["_session_taken_by"] = ""
+            self.__dict__["_session_viewing"] = False
+
+    @property
+    def session_taken(self) -> str:
+        """Who took this session with Open here elsewhere ("the terminal", "the editor"); "" when nobody did.
+        A session taken is never taken back by a turn: only Open here here does that."""
+        return str(self.__dict__.get("_session_taken_by") or "")
+
+    @property
+    def session_viewing(self) -> bool:
+        """This process only shows this session: another has it open (it was held when opened here, or Open here took
+        it elsewhere). Its note says so, so no window takes this process for the one that has it."""
+        return bool(self.session_taken or self.__dict__.get("_session_viewing"))
+
+    def view_session(self) -> None:
+        """The session just opened here is held by another live process: shown here, written there."""
+        self.__dict__["_session_viewing"] = True
+
+    def owns_session(self) -> bool:
+        held = self.__dict__.get("_session_owner")
+        path = self.session_file
+        return bool(held is not None and path is not None and held[0] == _owner_key(path)
+                    and _OWNED_SESSIONS.get(held[0]) is held[1])
+
+    def own_session(self, wait: float = 0.0, path=None, *, take: bool = False) -> bool:
+        """Hold this session (or ``path``, about to become it) for as long as it is open here. True when this
+        process has it, or there is nothing to hold; False while another live process does -- and, for a session
+        Open here took elsewhere, until this process's own Open here (``take``) asks for it back. Agents of one
+        process share it (each chat, each terminal agent): the turn lease keeps them apart, as before."""
+        target = path if path is not None else self.session_file
+        if self.depth > 0 or not target:
+            return True
+        key = _owner_key(target)
+        held = self.__dict__.get("_session_owner")
+        if held is not None:
+            if held[0] == key and _OWNED_SESSIONS.get(key) is held[1]:
+                return True
+            self.release_session_owner()
+        if (not take and self.session_taken and self.session_file
+                and _owner_key(self.session_file) == key):
+            return False
+        from . import sessions
+        try:
+            lock = sessions.session_owner_lock(target, self.session_root)
+        except (OSError, TypeError, ValueError):
+            return False
+        deadline = time.monotonic() + max(0.0, float(wait or 0.0))
+        while True:
+            with _OWNED_GUARD:
+                entry = _OWNED_SESSIONS.get(key)
+                if entry is not None:            # this process has it already: shared
+                    entry[1] += 1
+                    break
+            try:
+                got = lock.acquire(blocking=False)
+            except (OSError, ValueError):
+                got = False
+            if got:
+                with _OWNED_GUARD:
+                    entry = _OWNED_SESSIONS[key] = [lock, 1]
+                break
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.2)
+        self.__dict__["_session_owner"] = (key, entry)
+        self.__dict__["_session_taken_by"] = ""
+        self.__dict__["_session_viewing"] = False
+        return True
+
+    def own_session_soon(self, path=None) -> bool:
+        """own_session, waiting a moment for a holder on its way out (a window that just reloaded or closed: its note
+        already gone, or saying it is standing down) rather than calling the session held."""
+        if self.own_session(path=path):
+            return True
+        try:
+            from . import peers
+            note = peers.session_holder(str(path if path is not None else self.session_file))
+        except Exception:
+            note = None
+        if note is None or str(note.get("status") or "") == "standing down":
+            return self.own_session(wait=4.0, path=path)
+        return False
+
+    def release_session_owner(self) -> None:
+        held = self.__dict__.pop("_session_owner", None)
+        if held is None:
+            return
+        key, entry = held
+        with _OWNED_GUARD:
+            if _OWNED_SESSIONS.get(key) is not entry:
+                return
+            entry[1] -= 1
+            if entry[1] > 0:
+                return                           # another agent of this process still has it open
+            del _OWNED_SESSIONS[key]
+        try:
+            entry[0].release()
+        except Exception:
+            pass
+
+    def let_go_session(self, by: str = "") -> None:
+        """Open here elsewhere took this session: this process lets it go (every agent of it) and only shows it."""
+        self.__dict__.pop("_session_owner", None)
+        key = _owner_key(self.session_file) if self.session_file else ""
+        with _OWNED_GUARD:
+            entry = _OWNED_SESSIONS.pop(key, None) if key else None
+        if entry is not None:
+            try:
+                entry[0].release()
+            except Exception:
+                pass
+        self.__dict__["_session_taken_by"] = str(by or "another window")[:80]
+
     # --------------------------------------------- reclaiming this session ---
     def _session_holder(self):
         """The peer note claiming this saved session, or None. Never raises: it is a courtesy."""
@@ -5091,6 +5237,23 @@ class Agent(GoalLifecycle):
             # Another chat of this same process: no other window, no 15-minute release.
             return ("This session is open in another chat in this window. Carry on there, or start "
                     f"a new session here. {tail}")
+        # Where it is open and what runs there, as the Open here line says it (dgc/holder_note.py).
+        try:
+            from . import holder_note
+            facts = holder_note.session_facts(Path(str(self.session_file or "")).stem)
+        except Exception:
+            holder_note, facts = None, {"found": False}
+        taken = str(getattr(self, "session_taken", "") or "")
+        if taken:
+            # Open here elsewhere took it from this process: only Open here here takes it back.
+            line = holder_note.taken_line(facts, taken, tail) if holder_note else ""
+            return line or (f"This session is open in {taken} now. Use Open here to take it back, "
+                            f"or start a new session. {tail}")
+        if holder_note is not None and holder_note.usable(facts) and reason in ("", peers_refused_on_screen()):
+            line = (holder_note.held_on_screen(facts, tail) if reason
+                    else holder_note.held_line(facts, tail))
+            if line:
+                return line
         if not isinstance(note, dict):
             return ("This session has an active turn in another DGC process. "
                     + _HELD_SESSION_REMEDY + " " + tail)
@@ -5150,6 +5313,19 @@ class Agent(GoalLifecycle):
         if self.depth > 0 or not self.session_file:
             yield True
             return
+        own = getattr(self, "own_session", None)            # (a stand-in agent in a test has none)
+        if callable(own) and not own():
+            # Another live process has this session open, idle or not: nothing is written here. A turn may ask a
+            # holder whose window has gone to hand it over (as before); a session Open here took elsewhere is
+            # never taken back that way.
+            self._held_session_note = self._session_holder()
+            self._held_session_reason = ""
+            wait_s = None
+            if reclaim and not self.session_taken:
+                wait_s, self._held_session_reason = self._reclaim_session_lease()
+            if wait_s is None or not own(wait=wait_s):
+                yield False
+                return
         owner = threading.get_ident()
         entered = joined = False
         lease = None

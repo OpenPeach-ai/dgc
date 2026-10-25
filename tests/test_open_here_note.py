@@ -346,6 +346,7 @@ class HostTests(unittest.TestCase):
         caps = self.host.default._ready_payload()["capabilities"]
         self.assertEqual(caps["session_holder"], 1)
         self.assertEqual(caps["chatdgc"]["holder"], 1)
+        self.assertTrue(self.host.default.agent.own_session(), "a chat holds its session once it opens or writes it")
         self.host.dispatch({"type": "editor_app", "name": "Cursor"})
         self.assertEqual(self.host.editor_app, "Cursor")
         note = json.loads((self.tmp / "peers" / f"{os.getpid()}.json").read_text())
@@ -353,6 +354,44 @@ class HostTests(unittest.TestCase):
         stem = Path(str(self.host.default.agent.session_file)).stem
         self.assertEqual([c["session_id"] for c in note["open_here"]["chats"]], [stem])
         self.assertEqual(self.frames(), [], "nothing answers editor_app")
+
+    def test_a_turn_starting_while_the_last_one_refreshes_its_note_keeps_its_live_state(self):
+        """The note is refreshed at each turn's end, after the worker let the next prompt start a worker of its own.
+        The retiring worker used to clear the turn state on its way out, the NEW turn's: a reload's snapshot then
+        replayed the running turn closed (its open question answered "not answered"). A slow refresh makes it
+        certain."""
+        import threading
+        from dgc import headless
+        from waiting import wait_until
+        backend = self.host.default
+        started, release = threading.Event(), threading.Event()
+        refreshed = threading.Event()
+
+        def run_turn(text, reset_cancel=False, **_kw):
+            if "second" in text:
+                started.set()
+                release.wait(10)
+            return True
+
+        def slow_refresh(chat, status="idle"):
+            if status == "idle":
+                time.sleep(0.8)                          # the retiring worker, still busy with the note
+                refreshed.set()
+
+        backend.agent.run_turn = run_turn
+        with patch.object(headless.Backend, "_announce_peer", slow_refresh):
+            self.host.dispatch({"type": "prompt", "text": "first", "request_id": "p1"})
+            wait_until(lambda: any(f.get("type") == "turn_end" for f in self.frames()), timeout=10, what="the first turn")
+            self.host.dispatch({"type": "prompt", "text": "second", "request_id": "p2"})
+            self.assertTrue(started.wait(10), "the second turn started")
+            self.assertTrue(refreshed.wait(10))
+            time.sleep(0.2)                              # past the first worker's way out
+            with backend._turn_state_lock():
+                live, kind = backend._live_turn, backend._running_turn_kind
+            release.set()
+        self.assertEqual(kind, "prompt", "the running turn is still the running turn")
+        self.assertIsInstance(live, dict)
+        self.assertIsNotNone(live.get("id"))
 
     def test_session_holder_answers_from_the_other_process_note(self):
         other = {"pid": 4242, "kind": "serve", "cwd": str(self.tmp), "heartbeat": time.time(), "attached": True,
@@ -445,8 +484,10 @@ class OpenHereIntegrationTests(unittest.TestCase):
         b_ready = b.wait(lambda e: e.get("type") == "ready", 90)
         self.assertEqual(b_ready["capabilities"]["detach"]["elsewhere"]["pid"], a.proc.pid)
         b.send({"type": "editor_app", "name": "VS Code"})
+        b.send({"type": "watch_session_owner"})            # as the editor does: it shows a held session read-only
         b.send({"type": "resume_session", "path": f"{session_id}.json", "request_id": "r"})
         b.wait(lambda e: e.get("type") == "session" and e.get("request_id") == "r", 60)
+        b.wait(lambda e: e.get("type") == "session_held" and e.get("session_id") == session_id, 30)
         told = self.ask(b, session_id, "h-b")
         self.assertEqual({k: told.get(k) for k in ("found", "editor", "windowless", "folder", "working")},
                          {"found": True, "editor": "Cursor", "windowless": False, "folder": world.work.name,
