@@ -743,6 +743,7 @@ class RequestWatch:
                 wait = self.check_every_s
             self._next_check_at = now + wait
             self._checking = False
+            self._asked_at = None       # answered: a later deadline asks again when this one is stale
 
     def _maybe_notice(self, phase: str, since: float, silent: float, threshold: float) -> None:
         channel = self.channel

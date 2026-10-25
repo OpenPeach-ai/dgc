@@ -537,6 +537,43 @@ class SocketCeilingTests(unittest.TestCase):
             watch.stop()
 
 
+# ---- the watcher on its own -------------------------------------------------------------------------
+class WatchTests(unittest.TestCase):
+    def test_a_later_deadline_asks_the_server_again(self):
+        # A deadline shorter than the check interval (Wait between words: 20 s, checks every 30 s) asks the server;
+        # new words arrive before it answers. Much later the model goes quiet again: that deadline must ask the
+        # server afresh, not fall back on the old question and close a request the server is still working on.
+        clock = FakeClock()
+        gate = threading.Event()
+        asked = []
+
+        def check():
+            asked.append(clock())
+            gate.wait(5)
+            return "working"
+        watch = model_watch.RequestWatch(None, first_token_s=0, idle_s=20, clock=clock, poll_s=0.01,
+                                         server_check=check, check_every_s=30, recheck_s=10)
+        with mock.patch.object(model_watch, "CHECK_ANSWER_S", 0.3):
+            watch.start()
+            self.addCleanup(watch.stop)
+            watch.attach_response(None)
+            watch.progress()
+            clock.advance(21, step=1.0)                     # the first deadline: the server is asked
+            wait_until(lambda: asked, timeout=5, what="the first check")
+            watch.progress()                                # words arrive before it answers
+            gate.set()
+            wait_until(lambda: watch.verdict == "working", timeout=5, what="its answer")
+            for _ in range(5):                              # 50 s of steady words: no deadline, no check
+                clock.advance(10, step=1.0)
+                watch.progress()
+            time.sleep(0.4)                                 # longer than a check may take to answer
+            n = len(asked)
+            clock.advance(25, step=1.0)                     # quiet past the deadline, the old answer stale
+            wait_until(lambda: len(asked) > n, timeout=5, what="a fresh check at the later deadline")
+            time.sleep(0.3)
+            self.assertEqual(watch.aborted, "", "closed a request the server was still working on")
+
+
 # ---- what each kind of server says -----------------------------------------------------------------
 class ServerCheckTests(unittest.TestCase):
     def setUp(self):
