@@ -27,7 +27,8 @@ const row = (block) => block.querySelector(":scope > .thinking");
 const kind = (node) => node.matches(".thinking") ? "row" : node.matches(".text.commentary-detail") ? "detail"
   : node.matches(".text.commentary") ? "line" : node.matches(".tool-group") ? "tools" : node.matches(".answer") ? "answer"
     : node.matches(".msg.user") ? "you" : node.matches(".agent-line") ? "agent" : node.matches(".card") ? "card"
-      : node.matches(".tool") ? `tool:${node.dataset.toolName}` : node.matches(".sys") ? "notice" : node.className;
+      : node.matches(".tool") ? `tool:${node.dataset.toolName}` : node.matches(".sys") ? "notice"
+        : node.matches(".monitor-event") ? "monitor" : node.className;
 const shape = (block) => [...block.children].filter((node) => !node.matches(".role"))
   .map((node) => `${kind(node)}${node.classList.contains("work-step") ? " (folded)" : ""}`);
 const textOf = (block, words) => [...block.querySelectorAll(".text")].find((node) => node.textContent.includes(words));
@@ -238,4 +239,52 @@ test("a reload, a reattach and a resume draw the same fold as the live turn", ()
   assert.equal(reattached.blocks().length, 1, "one turn, not a replayed one and a live one");
   // Opened in one window, a reload draws it folded again: the fold is how a finished turn reads.
   assert.deepEqual([...live.errors, ...reloaded.errors, ...reattached.errors], []);
+});
+
+// A command run in the background (or a monitor) that reports while the turn works draws a card with up to 40
+// lines of its output. It is work like a tool row: once the answer is there it folds with the rest, one click
+// away, instead of staying open above and below the answer (the founder's .111 Docker build, 25 Oct).
+const exited = (id, turn, delivery = "inline") => ({ type: "monitor_event", id, description: `docker build ${id}`,
+  event_index: 1, lines: [`background task ${id} exited 0 after 20s`, "#12 DONE 1.7s", "#13 DONE 0.1s"], omitted_lines: 0,
+  kind: "background_exit", delivery, turn_id: turn });
+const withExits = (id) => { const frames = detailTurn(id); frames.splice(9, 0, exited("bg1", id), exited("bg2", id)); return frames; };
+
+test("a background command's card that came in while the turn worked folds with the work once the answer is there", () => {
+  const p = panel();
+  const frames = withExits("t1");
+  p.events(frames.slice(0, -3));
+  const [block] = p.blocks();
+  const cards = () => [...block.querySelectorAll(":scope > .monitor-event")];
+  assert.equal(cards().length, 2);
+  assert.ok(cards().every((card) => !card.classList.contains("work-step")), "shown while the turn works");
+  p.events(frames.slice(-3));
+  assert.ok(block.classList.contains("work-folded"));
+  assert.deepEqual(shape(block), ["row", "line (folded)", "tools (folded)", "detail", "tools (folded)",
+    "monitor (folded)", "monitor (folded)", "line (folded)", "tools (folded)", "answer"]);
+  p.click(row(block));
+  assert.equal(block.classList.contains("work-folded"), false, "one click shows them (Chromium: work-fold-layout.test.mjs)");
+  assert.ok(cards().every((card) => card.classList.contains("work-step")), "still steps of the fold, only shown");
+  // A reload draws the same fold.
+  const reloaded = panel({ history_snapshot: true });
+  reloaded.event({ type: "history", complete: true, items: withExits("h1") });
+  assert.deepEqual(shape(reloaded.blocks()[0]).filter((s) => s.startsWith("monitor")),
+    ["monitor (folded)", "monitor (folded)"]);
+  assert.deepEqual([...p.errors, ...reloaded.errors], []);
+});
+
+test("a turn a background command woke folds its card under the answer and keeps the Woke on line", () => {
+  const p = panel();
+  p.events([
+    { type: "turn_start", turn_id: "w1", prompt: "docker build bg1", kind: "wake" },
+    exited("bg1", "w1", "wake"),
+    { type: "text_delta", text: "The image built; the test container is next." },
+    { type: "stream_end", message_id: "w1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "w1", reason: "completed", token_estimate: 5, final_message_id: "w1:1" }]);
+  const [block] = p.blocks();
+  assert.ok(block.classList.contains("work-folded"));
+  assert.deepEqual(shape(block), ["row", "monitor (folded)", "answer"]);
+  const note = p.doc.querySelector("#log .monitor-note");
+  assert.match(note.textContent, /^Woke on background command · /, "the line that says why DGC woke stays");
+  assert.equal(note.classList.contains("work-step"), false);
+  assert.deepEqual(p.errors, []);
 });

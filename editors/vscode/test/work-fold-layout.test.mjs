@@ -107,3 +107,36 @@ test("the row takes keyboard focus: Enter opens it, Space folds it, and the focu
     await page.close();
   }
 });
+
+// The founder's .111 Docker build (25 Oct): two commands run in the background exited while the turn worked, and
+// their cards (up to 40 lines of build output each) stayed drawn under the answer. Folded, they are not drawn;
+// opened, they are drawn under the row with the rest of the work.
+test("a background command's card folds with the work and opens under the row (dark-modern, 460px)", async (t) => {
+  if (skipOrFail(t)) return;
+  const events = detailTurn();
+  const exited = (id) => ({ type: "monitor_event", id, description: `docker build ${id}`, event_index: 1,
+    lines: [`background task ${id} exited 0 after 20s`, ...Array.from({ length: 30 }, (_, i) => `#${i} DONE 0.${i}s`)],
+    omitted_lines: 0, kind: "background_exit", delivery: "inline", turn_id: "t1" });
+  events.splice(9, 0, exited("bg1"), exited("bg2"));
+  const page = await openThinkingPage(browser, { theme: "dark-modern", width: 460, height: 1400, events,
+    config: { model: "deepseek-v4.1-flash:cloud" } });
+  try {
+    const cards = () => page.evaluate(() => {
+      const block = document.querySelector("#log .msg.dgc");
+      const row = block.querySelector(":scope > .work-toggle").getBoundingClientRect();
+      const answer = block.querySelector(":scope > .answer").getBoundingClientRect();
+      return [...block.querySelectorAll(":scope > .monitor-event")].map((n) => {
+        const box = n.getBoundingClientRect();
+        return { drawn: n.checkVisibility() && box.height > 0, between: box.top >= row.bottom - 0.5 && box.bottom <= answer.top + 0.5 };
+      });
+    });
+    const folded = await cards();
+    assert.equal(folded.length, 2);
+    assert.ok(folded.every((c) => !c.drawn), "folded, neither card is drawn");
+    await page.click("#log .work-toggle");
+    const opened = await cards();
+    assert.ok(opened.every((c) => c.drawn && c.between), "opened, both are drawn under the row, above the answer");
+  } finally {
+    await page.close();
+  }
+});

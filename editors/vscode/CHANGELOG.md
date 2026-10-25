@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A background command's card folds with the rest of the work once DGC has answered.** A command DGC ran in the
+  background (a Docker build, a test run) that finished while it worked drew a card with up to 40 lines of its output,
+  and the card stayed open under the answer after everything else had folded into "Worked for …". It now folds with
+  the work, one click away on that row, live and after a reload. A monitor's card folds the same way, and a turn a
+  background command woke keeps its "Woke on background command" line.
+
 - **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
   message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
 - **Settings → Models → Advanced: Wait for the first word, and Wait between words.** How long DGC waits on a model,

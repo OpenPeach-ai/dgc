@@ -3724,7 +3724,9 @@
   // ---- a finished turn's work folds into its "Worked for 43s" row ----
   // Once a turn has given its final answer, the work that led there folds into the turn's "Worked for
   // 43s ›" row, which moves to the top of the turn: the one-line progress updates, the tool rows and
-  // their groups, thinking, a reconnect that recovered, a sub-agent line whose agents are done. One
+  // their groups, thinking, a reconnect that recovered, a sub-agent line whose agents are done, and the
+  // card of a background command or monitor that reported while it worked (up to 40 lines of build
+  // output each, which stayed open under the answer: founder, 25 Oct). One
   // click shows them again, in place under the row, and the row folds them again once the next turn has
   // answered. What a reader still needs stays: a detailed message (a diagnosis, a plan), a message you
   // sent mid-turn, question and approval cards, notices, the files and artifacts the turn made, a
@@ -3734,7 +3736,7 @@
   // endTurn draws it, live and replayed alike, so a reload, a reattach and a resume draw the same fold.
   const WORK_STEPS = [".text.commentary:not(.commentary-detail)", ".tool-group", ".tg-live",
     '.tool:not([data-tool-name="propose_options"])', ".disclosure", ".reasoning", ".thought-note",
-    ".thought-static", '.model-retry[data-state="recovered"]', ".agent-line"].join(", ");
+    ".thought-static", '.model-retry[data-state="recovered"]', ".agent-line", ".monitor-event"].join(", ");
   function isWorkStep(node) {
     return node.matches(WORK_STEPS) && !(node.matches(".agent-line") && node.querySelector(".agent-mark.is-live"));
   }
