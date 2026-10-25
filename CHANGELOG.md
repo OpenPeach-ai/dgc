@@ -36,6 +36,33 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **A card redrawn after the window was reloaded.** When a background helper lands in an earlier turn's recovery
     point, that turn's card is redrawn even if the window was reloaded since and drew the card from history.
 
+- **A helper in its own copy no longer changes your checkout behind your back.** A helper DGC starts in a Git project
+  works in its own copy and its changes reach you when DGC integrates them. When the brief it was given named your
+  project by its full path, a helper could go there and edit your file directly, and its report then said
+  "completed with no file changes" over a change to your code. Now:
+  - **Its brief names its copy.** Wherever the brief (or a message sent to a running helper) names your project
+    folder, the helper reads its own copy's folder instead, and its instructions say where its copy is, that your
+    checkout is not its to change, and that DGC brings its changes over when it finishes. Nothing else in the brief
+    changes, and a helper with no copy of its own (a folder without Git) is told exactly what it always was.
+  - **DGC's file tools refuse to write into your checkout from a helper,** before anyone is asked to approve it, with
+    one sentence naming the same file in its own copy to use instead. This holds through `..` and links, for a
+    helper's own helper, and for a copy kept inside your project. A file outside every checkout (a script in /tmp, a
+    file the task exists to write) is written as before and recorded so Undo can take it back. A folder you chose to
+    share into helpers' copies (`subagent_link_paths`) stays writable.
+  - **A shell command can't be fenced, so the report says what changed.** When a helper ends, DGC compares your
+    checkout with how it was when the helper started (Git's view of changed and new files), leaving out what DGC
+    itself wrote there. Files that changed while one of the helper's own commands was running are named as most
+    likely its doing; any other change is named as one DGC can't attribute (you, the chat, or another program), never
+    blamed on the helper. "Integrated" stays true to what came through integration. When DGC knows the file's exact
+    earlier state (Git's copy of a file that was unchanged then, or the bytes the helper's copy took of a file you had
+    already changed), it puts that state in the recovery point, so Undo takes the helper's change back; otherwise the
+    report says no recovery point covers it. The check runs once, when the helper ends: about 25 ms on DGC's own
+    1,500-file repository and about 130 ms on a 50,000-file one. Files Git ignores are not seen.
+  - **A helper's own helper can finish its work.** With `max_subagent_depth` above 1, a helper's helper always ended
+    "NOT integrated: could not capture rewind checkpoint", its work kept aside: DGC tried to record a recovery point
+    in the first helper's copy, which never has one and needs none. Its work now lands in the first helper's copy and
+    reaches you with that helper's own changes.
+
 - **Undo on the Edited card works while files are open in the editor.** With any file open in an editor tab, Undo
   said "DGC can no longer undo that turn — its recovery point has been used or pruned", although it had not been. The
   turn's recovery point was named after the open-files note the extension puts ahead of the prompt, so Undo, which

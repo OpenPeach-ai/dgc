@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 _MAX_TASK_FILES = 4096
@@ -1265,6 +1265,133 @@ class TaskWorkspace:
 
     def cleanup(self) -> str | None:
         return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
+
+    def source_changes(self) -> list["SourceChange"]:
+        """What changed in the checkout this one was made FROM (the user's) since `prepare`.
+
+        A helper works in this copy, but a shell command it runs can still reach the user's files
+        (`cd /their/checkout && sed -i ...`), and nothing in DGC's file tools sees that. This is
+        Git's view, read the way `prepare` read it: the changed and untracked files against the
+        same base commit, now, beside the set `prepare` recorded. A file clean then and changed now
+        moved during the run; a file already changed then is compared with the exact bytes
+        `prepare` copied from it. Files the repository ignores are not seen.
+
+        The cost is what `prepare` already pays once: one `git diff --name-only` and one
+        `git ls-files --others` in the user's checkout, plus reading the files Git names. Raises
+        TaskWorkspaceError when Git cannot be asked; the caller says so instead of guessing.
+        """
+        now = _dirty_paths(self.repo, self.base_commit, self.project_rel)
+        changes: list[SourceChange] = []
+        for repo_path in sorted(self.initial_dirty | now):
+            if len(changes) >= _MAX_SOURCE_CHANGES:
+                break
+            try:
+                target = _checked_target(self.repo, repo_path)
+            except TaskWorkspaceError:
+                continue                       # a path that leaves the checkout is nobody's file here
+            before = self.baseline.get(repo_path) if repo_path in self.initial_dirty else None
+            if repo_path in self.initial_dirty:
+                if before is None:
+                    continue
+                try:
+                    if _read_state(target) == before:
+                        continue               # already changed when the helper started, and still so
+                except (OSError, TaskWorkspaceError):
+                    pass                       # unreadable or too big now: it is not what it was
+            changes.append(SourceChange(repo_path, self._display_path(repo_path), before,
+                                        _disk_digest(target), _changed_at(target, self.repo)))
+        if any(PurePosixPath(change.repo_path).name == ".gitignore" for change in changes):
+            changes = [replace(change, rules_changed=True) for change in changes]
+        return changes
+
+    def exact_start_state(self, change: "SourceChange") -> "_FileState | None":
+        """The file's exact state when the helper started, or None when DGC cannot be sure of it.
+
+        A file that already had changes then: the bytes `prepare` copied, which it read twice. A
+        file Git called clean then: what a checkout of the base commit holds, but only where no
+        conversion stands between that blob and the bytes on disk (no `text`, `eol`, `filter` or
+        `working-tree-encoding` attribute, no `core.autocrlf`, not skip-worktree or
+        assume-unchanged), because Git calls a converted file clean when its bytes differ. A path
+        that was absent then is exact only while no `.gitignore` changed with it, since a file
+        the old rules ignored would look absent.
+        """
+        if change.before is not None:
+            return change.before
+        try:
+            state = _head_state(self.repo, self.base_commit, change.repo_path)
+        except TaskWorkspaceError:
+            return None
+        if state.kind == "missing":
+            return None if change.rules_changed else state
+        return state if _plain_checkout(self.repo, change.repo_path) else None
+
+
+# One helper's report names at most this many files; it is a warning, not an inventory.
+_MAX_SOURCE_CHANGES = 200
+# Attribute values under which a checked-out file holds exactly its blob's bytes.
+_NO_CONVERSION = frozenset({"unspecified", "unset"})
+
+
+@dataclass(frozen=True)
+class SourceChange:
+    """One file of the user's checkout that changed while a helper ran (TaskWorkspace.source_changes)."""
+    repo_path: str                    # repository-relative, as Git names it
+    display: str                      # project-relative, as the user sees it
+    before: "_FileState | None"       # exact state then, for a file already changed at the start
+    digest: str | None                # sha256 of what is there now ("" when gone; None unreadable)
+    changed_at: float | None          # its modification time (its folder's, once it is gone)
+    rules_changed: bool = False       # a .gitignore changed in the same run
+
+
+def _disk_digest(path: Path) -> str | None:
+    """sha256 the way CheckpointManager records what DGC left: bytes, a link's target, "" absent."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return None
+    try:
+        if stat.S_ISLNK(info.st_mode):
+            return hashlib.sha256(os.readlink(path).encode("utf-8", "surrogateescape")).hexdigest()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_TASK_BYTES:
+            return None
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _changed_at(path: Path, root: Path) -> float | None:
+    """When a file last changed: its own modification time, or its folder's once it was removed."""
+    candidate = path
+    for _ in range(64):
+        try:
+            return candidate.lstat().st_mtime
+        except FileNotFoundError:
+            if candidate == root or candidate.parent == candidate:
+                return None
+            candidate = candidate.parent
+        except OSError:
+            return None
+    return None
+
+
+def _plain_checkout(repo: Path, repo_path: str) -> bool:
+    """Does a checkout of this path hold exactly its blob's bytes? (No conversion configured.)"""
+    flags = _git(["ls-files", "-v", "-z", "--", repo_path], repo)
+    tag = (flags.stdout or "").split("\0", 1)[0][:2] if flags.returncode == 0 else ""
+    if tag and tag != "H ":
+        return False                   # skip-worktree or assume-unchanged: Git never looked at it
+    autocrlf = _git(["config", "--get", "core.autocrlf"], repo)
+    if autocrlf.returncode == 0 and autocrlf.stdout.strip().lower() not in ("", "false"):
+        return False
+    attrs = _git(["check-attr", "-z", "text", "eol", "crlf", "filter", "ident",
+                  "working-tree-encoding", "--", repo_path], repo)
+    if attrs.returncode != 0:
+        return False
+    fields = (attrs.stdout or "").split("\0")
+    values = [fields[i + 2] for i in range(0, len(fields) - 2, 3)]
+    return bool(values) and all(value in _NO_CONVERSION for value in values)
 
 
 @dataclass

@@ -126,6 +126,14 @@ class CheckpointManager:
         if digest is not None:
             self._left[str(resolved)] = digest
 
+    def left_hash(self, path: str) -> str | None:
+        """sha256 of what DGC itself last left in `path` -- one of this chat's file tools, or an
+        integration -- "" for a file it removed, None when it has no record of the path."""
+        try:
+            return self._left.get(str(Path(path)))
+        except (TypeError, ValueError):
+            return None
+
     def _rewind_conflicts(self, restore: dict) -> list[str]:
         """Files whose current contents DGC cannot account for.
 
@@ -336,6 +344,50 @@ class CheckpointManager:
             self.last_record_error = (f"this session's {_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB "
                                       "snapshot budget is spent")
             return False
+        files[path] = snapshot
+        self._snapshot_bytes_total += len(snapshot.data)
+        if not self._notify():
+            files.pop(path, None)
+            self._snapshot_bytes_total -= len(snapshot.data)
+            self.last_record_error = "the session could not be saved"
+            return False
+        return True
+
+    def record_known(self, path: str, kind: str, data: bytes, mode: int) -> bool:
+        """Save a path's state from BEFORE a change DGC learned of afterwards (once per file per turn).
+
+        `record_file` reads the state off disk, which is right only before DGC's own write. A
+        helper's shell command can change a file in the user's checkout with nothing watching; DGC
+        finds it when the helper ends, and knows the exact state from before it when the helper's
+        checkout copied that file (or Git's blob, for a file that was clean then). This puts that
+        state where Undo finds it, under record_file's own limits. A path this turn has already
+        captured keeps the earlier capture, which is older still.
+        """
+        self.last_record_error = ""
+        if self._pending_rewind is not None:
+            self.last_record_error = "a rewind is being applied to this session"
+            return False
+        if not self.points:
+            self.last_record_error = "this turn has no recovery point to record into"
+            return False
+        if kind not in ("missing", "file", "symlink") or not isinstance(data, bytes):
+            self.last_record_error = "the earlier state is not a file, a link or an absence"
+            return False
+        files = self.points[-1]["files"]
+        if path in files:
+            return True
+        if len(files) >= _MAX_FILES_PER_POINT:
+            self.last_record_error = (f"this turn has already captured {_MAX_FILES_PER_POINT} files")
+            return False
+        if self._lexically_within_project(path) and self._relative_project_path(path) is None:
+            self.last_record_error = "the path leaves the project through a symlink"
+            return False
+        if self._snapshot_bytes_total + len(data) > _MAX_SNAPSHOT_BYTES:
+            self.last_record_error = (f"this session's {_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB "
+                                      "snapshot budget is spent")
+            return False
+        snapshot = _Snapshot(kind, data if kind != "missing" else b"",
+                             0 if kind == "missing" else int(mode))
         files[path] = snapshot
         self._snapshot_bytes_total += len(snapshot.data)
         if not self._notify():
