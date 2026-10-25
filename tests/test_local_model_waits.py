@@ -304,6 +304,25 @@ class WorkingLocalServerTests(LocalWaitCase):
         result = self.finish(thread)
         self.assertEqual(result.content, "done after the long prefill")
 
+    def test_when_the_load_ends_the_loading_notice_gives_way_at_once(self):
+        loaded = threading.Event()
+        self.stub.get_routes["/api/ps"] = lambda: (
+            200, {"models": [{"name": "big-local:latest"}] if loaded.is_set() else []}, "application/json")
+        client, events = self.client()                      # the notice threshold stays 45 s
+        thread = self.chat_in_background(client)
+        wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        self.clock.advance(20, step=1.0)
+        wait_until(lambda: events.of("notice"), timeout=5, what="the loading notice")
+        self.assertEqual([e.phase for e in events.of("notice")], ["loading"])
+        loaded.set()                                        # loaded at 20 s, well before 45 s
+        self.clock.advance(10, step=1.0)
+        wait_until(lambda: len(events.of("notice")) == 2, timeout=5, what="the notice after the load")
+        after = events.of("notice")[1]
+        self.assertNotEqual(after.phase, "loading")
+        self.assertEqual(after.server, "working")
+        self.assertLess(after.silent_s, 45)
+        self.assertEqual(self.finish(thread).content, "done after the long prefill")
+
     def test_a_busy_llama_cpp_slot_is_waited_for_then_an_idle_one_is_re_sent(self):
         busy = threading.Event()
         busy.set()

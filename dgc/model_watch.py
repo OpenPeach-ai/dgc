@@ -662,6 +662,12 @@ class RequestWatch:
         if applies and waited >= self.first_token_s and not self._keep_waiting(now):
             self._abort("stalled", self._stall_info(phase, silent, self.first_token_s))
             return
+        if self._noticed == "loading":
+            # The load is over while "Loading the model" is still on screen: replace it now ("Waiting for the
+            # model · the server is working on it"), not when the ordinary notice threshold comes round.
+            self._noticed = None
+            self._maybe_notice(phase, self.t_start, silent, min(self.notice_s, silent))
+            return
         self._maybe_notice(phase, self.t_start, silent, self.notice_s)
 
     # ---- the server check (local requests) ------------------------------------------------------
