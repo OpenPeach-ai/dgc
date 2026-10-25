@@ -2165,6 +2165,8 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
    action, sized to the line so the line keeps its height. With several, the same place asks which. */
 .agent-line-move { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1);
   min-width: 0; height: auto; }
+/* ...right after the sentence, not at the far edge of a wide tab. */
+.agent-line:has(> .agent-line-move) > .agent-line-text { flex: 0 1 auto; }
 .agent-line-move button.link { padding: 0 var(--sp-2); line-height: calc(var(--t-sm) * 1.45 - 2px); white-space: nowrap;
   max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
 .agent-line-move-ask { color: var(--muted); white-space: nowrap; }
