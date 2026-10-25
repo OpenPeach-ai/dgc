@@ -37,7 +37,11 @@ _MODELS_NOTICE = ("The models Pips can use, read now from DGC's own connection. 
                   "else DGC's recommendation for its family), not its maximum; a model without one has none known. "
                   "A Pip's context_window is a whole number of tokens within context_window_range; a new Pip without "
                   "one gets dgc_window. Change one Pip's model or window with pips_propose, the Pips default with "
-                  "pips_settings, and choose both for a new Pip in pips_setup.")
+                  "pips_settings, and choose both for a new Pip in pips_setup. Each model says where it runs: "
+                  "'cloud', or 'local' (this computer or its network); a local Ollama model also says whether it is "
+                  "loaded now. When you choose a model yourself, prefer the Pips default or a cloud model; choose a "
+                  "local model only when the user asked for one or it is loaded now, since a local model that isn't "
+                  "loaded must be read into this computer's memory, and a large one can use it all.")
 
 
 def _models(ctx):
@@ -52,8 +56,16 @@ def _models(ctx):
                "runs_on": listed.get("default_model") or (engine or {}).get("name", "")}
     if engine:
         default["dgc_subscription"] = engine
-    rows = [{"id": row["id"], **({"context_window": row["context_window"]} if "context_window" in row else {})}
-            for row in listed.get("models", [])]
+    base_url = str(ctx.config.get("base_url", "") or "")
+    loaded = _loaded_local_models(base_url)
+    rows = []
+    for row in listed.get("models", []):
+        where = _where(base_url, row["id"])
+        item = {"id": row["id"], **({"context_window": row["context_window"]} if "context_window" in row else {}),
+                "runs": where}
+        if where == "local" and loaded is not None:
+            item["loaded"] = row["id"] in loaded
+        rows.append(item)
     value = {"notice": _MODELS_NOTICE, "pips_default": default, "models": rows,
              "subscriptions": listed.get("subscriptions", []),
              "context_window_range": {"min": CONTEXT_MIN, "max": CONTEXT_MAX,
@@ -67,6 +79,40 @@ def _models(ctx):
         value["models"] = value["models"][:-max(1, len(value["models"]) // 8)]
         value.update(truncated=True, total_models=total)
     return _encode(value, ctx)
+
+
+def _where(base_url, model):
+    """'cloud' for a remote endpoint or an Ollama cloud model, else 'local' (this computer or its network)."""
+    from .model_watch import is_local_endpoint, is_ollama_cloud_model
+    return "local" if is_local_endpoint(base_url) and not is_ollama_cloud_model(model) else "cloud"
+
+
+def _loaded_local_models(base_url):
+    """The model names a local Ollama has loaded now (its /api/ps), or None when this endpoint can't say. One
+    read-only request with a short timeout; never an error."""
+    from .model_watch import is_hosted_ollama, is_local_endpoint
+    if not base_url or not is_local_endpoint(base_url) or is_hosted_ollama(base_url):
+        return None
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[:-3]
+    try:
+        import requests
+        response = requests.get(f"{root}/api/ps", timeout=(1, 2))
+        if response.status_code != 200:
+            return None
+        models = response.json().get("models", [])
+    except Exception:                       # noqa: BLE001 -- not an Ollama, or not reachable: it can't say
+        return None
+    if not isinstance(models, list):
+        return None
+    names = set()
+    for m in models[:64]:
+        if isinstance(m, dict):
+            for key in ("name", "model"):
+                if isinstance(m.get(key), str):
+                    names.add(m[key])
+    return names
 
 
 def _integer(args, name, default, maximum):

@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dgc import config as config_module
 from dgc import pip_chat_options, pip_context_tool, pip_models, pip_proposal_tool, pip_setup, pip_setup_tool, pips
@@ -93,7 +93,7 @@ class TheChatSeesWhichModelsPipsCanUse(Fixture):
         self.cfg.data["model_context_sizes"] = {"glm-5.3:cloud": 65536}
         with patch("dgc.pip_brain.offered", return_value=[]):
             listed = self.read()
-        self.assertEqual(listed["models"], [
+        self.assertEqual([{k: v for k, v in row.items() if k != "runs"} for row in listed["models"]], [
             {"id": "deepseek-v4.1-flash:cloud", "context_window": 65536},   # DGC's recommendation for deepseek
             {"id": "glm-5.3:cloud", "context_window": 65536},               # the window the user chose for it
             {"id": "house-model"}], "a model DGC knows no window for says none, never a guess")
@@ -101,6 +101,41 @@ class TheChatSeesWhichModelsPipsCanUse(Fixture):
         self.assertEqual(listed["pips_default"], {"model": "", "follows_dgc": True,
                                                   "runs_on": "deepseek-v4.1-flash:cloud"})
         self.assertIn("Use only these ids", listed["notice"])
+
+    # The founder, 25 Oct (after an 81 GB local model load took the machine down): when the chat picks a model itself it
+    # prefers the Pips default or a cloud model, and a local one only when asked for or already loaded. So the list says
+    # where each model runs and, for a local Ollama, which are loaded now.
+    def test_each_model_says_where_it_runs_and_a_local_one_whether_it_is_loaded_now(self):
+        self.cfg.data["base_url"] = "http://127.0.0.1:11434/v1"
+        ps = MagicMock(status_code=200)
+        ps.json.return_value = {"models": [{"name": "house-model", "model": "house-model"}]}
+        with patch("dgc.pip_brain.offered", return_value=[]), patch("requests.get", return_value=ps) as get:
+            listed = self.read()
+        self.assertEqual({row["id"]: (row["runs"], row.get("loaded")) for row in listed["models"]},
+                         {"deepseek-v4.1-flash:cloud": ("cloud", None), "glm-5.3:cloud": ("cloud", None),
+                          "house-model": ("local", True)})
+        self.assertEqual(get.call_args.args[0], "http://127.0.0.1:11434/api/ps")
+        ps.json.return_value = {"models": []}
+        with patch("dgc.pip_brain.offered", return_value=[]), patch("requests.get", return_value=ps):
+            listed = self.read()
+        self.assertIs(next(r for r in listed["models"] if r["id"] == "house-model")["loaded"], False)
+        self.assertIn("choose a local model only when the user asked for one or it is loaded now", listed["notice"])
+
+    def test_a_remote_connection_lists_every_model_as_cloud_and_asks_nothing_more(self):
+        self.cfg.data["base_url"] = "https://api.example.com/v1"
+        with patch("dgc.pip_brain.offered", return_value=[]), patch("requests.get") as get:
+            listed = self.read()
+        self.assertEqual({row["runs"] for row in listed["models"]}, {"cloud"})
+        self.assertFalse(any("loaded" in row for row in listed["models"]))
+        get.assert_not_called()
+
+    def test_a_local_server_that_cannot_say_leaves_loaded_out(self):
+        self.cfg.data["base_url"] = "http://127.0.0.1:11434/v1"
+        with patch("dgc.pip_brain.offered", return_value=[]), patch("requests.get", side_effect=OSError("refused")):
+            listed = self.read()
+        local = next(r for r in listed["models"] if r["id"] == "house-model")
+        self.assertEqual(local["runs"], "local")
+        self.assertNotIn("loaded", local)
 
     def test_it_says_the_pips_default_and_the_subscriptions_a_personal_pip_can_use(self):
         self.cfg.data["pips_model"] = "glm-5.3:cloud"
@@ -382,6 +417,16 @@ class ANewPipGetsAModelAndWindowThatFitItsJob(Fixture):
         self.assertIn("say in one line what you picked and why", prompt)
         self.assertIn("To change the model every Pip on Default uses, use pips_settings", prompt)
         self.assertNotIn("For goal, schedule or model changes use a complete pips_setup card", prompt)
+
+    def test_the_rule_is_in_the_setup_tool_and_the_prompt(self):
+        setup = description("pips_setup")["description"]
+        self.assertIn("Prefer the Pips default (leave model_choice out) or a model that runs in the cloud", setup)
+        self.assertIn("only when the user asked for a local model or it is loaded now", setup)
+        agent, _ = self.agent()
+        self.cfg.data["mode"] = "default"
+        prompt = agent.system_prompt()
+        self.assertIn("Prefer the Pips default or a cloud model", prompt)
+        self.assertIn("pick a model that runs locally only when the user asked for one or it is loaded now", prompt)
 
     def test_the_approval_line_says_the_pick(self):
         from dgc import ui

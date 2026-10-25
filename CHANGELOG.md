@@ -23,6 +23,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **Pick a model and window for a new Pip**: `pips_setup` takes `context_window`, and its card says the window
     the Pip starts with; the chat chooses both from the real list to fit the job and says in one line what it picked
     and why. The card's model is checked against the list before the card is shown.
+    When it picks a model itself, it prefers the Pips default or a cloud model, and chooses a model that runs on
+    this computer or your network only when you asked for one or it is loaded now: the model list says where each
+    model runs and, for a local Ollama, which are loaded.
   Each change asks you like any tool call (auto mode allows it, plan mode refuses it), only a listed model is
   accepted, a window outside 2,048–1,048,576 tokens is refused, and a Project Pip never runs on a subscription. None
   of it changes what a Pip may read, run or send. The Pip tools' descriptions now say plainly what each one changes.

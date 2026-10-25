@@ -880,6 +880,11 @@ new Pip, the chat picks a model and window that fit the job (a fast, inexpensive
 daily check; a stronger one with a larger window for a deep code review), says in one line what it
 picked and why, and you can change the model on the card or both later on the Pip's page.
 
+When the chat picks a model itself, it prefers the Pips default or a model that runs in the cloud. It
+chooses a model that runs on this computer or your network only when you asked for one, or when it
+is loaded already: a large local model that isn't loaded has to be read into memory, and can use all
+of it.
+
 Each of these tools has a permission name, so you can control it with the usual
 rules: `PipsContext`, `PipsSetup`, `PipsPropose`, `PipsSettings`, `PipsAdapt`, `PipsRun`,
 `PipsHandoff`, `PipsEmailDraft`, `PipsCalendarDraft`, `PipsConnectorDraft`,

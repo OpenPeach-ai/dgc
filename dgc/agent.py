@@ -4484,7 +4484,9 @@ class Agent(GoalLifecycle):
                "what the result says. They never start work or alter permissions.",
                "- pips_context models lists the models Pips can use, with each one's context window when known, and the "
                "Pips default. Read it before you name, recommend or change a model; never offer one that isn't listed. "
-               "When you set up a new Pip, pick from that list a model_choice and a context_window that fit its job (a "
+               "When you set up a new Pip, pick from that list a model_choice and a context_window that fit its job. Prefer "
+               "the Pips default or a cloud model; pick a model that runs locally only when the user asked for one or it "
+               "is loaded now (a large local model that isn't loaded can use up this computer's memory). Within that: a "
                "fast, inexpensive model and a modest window for a short routine check; a stronger model and a larger "
                "window for a deep code review or long documents), and say in one line what you picked and why, and that "
                "the user can change it on the card or the Pip's page."]
