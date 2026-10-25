@@ -284,7 +284,12 @@ def stall_cause(info) -> FailureCause:
     endpoint = str(data.get("endpoint") or "")
     host = endpoint_host(endpoint) or "the endpoint"
     silent = format_seconds(float(data.get("window_s") or data.get("silent_s") or 0))
-    if phase == "loading":
+    reason = str(data.get("reason") or "")
+    if reason == "server_gone":
+        kind, summary = "connect", f"the server for {model} at {host} stopped answering"
+    elif reason == "server_idle":
+        kind, summary = "stall", f"the server for {model} at {host} stopped working on the request"
+    elif phase == "loading":
         kind, summary = "loading", f"{model} at {host} did not finish loading in {silent}"
     elif phase == "streaming":
         kind, summary = "stall", f"{model} at {host} stopped streaming for {silent}"

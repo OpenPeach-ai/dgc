@@ -250,6 +250,10 @@ class SharedBudget:
             client.prepare_model = lambda *args, **kwargs: {}
         if hasattr(client, '_ollama_load_probe'):
             client._ollama_load_probe = lambda: None
+        # The same for a local server's "still working?" check: without it a local request keeps
+        # the bounded windows a request DGC cannot check on has (dgc/llm.py _stall_windows).
+        if hasattr(client, '_local_server_check'):
+            client._local_server_check = lambda *args, **kwargs: None
         return client
 
     def begin(self, role, model):

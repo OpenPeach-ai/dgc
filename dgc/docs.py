@@ -4086,23 +4086,41 @@ when you want to override it.
   `turn_budget_s`, to cap what a turn COSTS; `turn_budget_s` bounds a turn that HANGS.
 - `request_timeout` (default `1800`) — hard ceiling on socket silence, including the wait for
   response headers; an active response can take longer overall. The stall watcher below
-  normally acts first.
-- `model_first_token_timeout_s` (default `auto`) — how long a request may produce nothing (no
-  headers, a silent stream, or keep-alives with no tokens) before it counts as stalled. `auto` is
-  `900` for a local endpoint (loopback, private or Tailscale addresses, `*.local`, or an
-  Ollama/llama.cpp/LM Studio/vLLM server: room for a model load and a large prefill) and `300`
-  for a remote one — including an Ollama cloud model (`…:cloud`, `…-cloud`) reached through a
-  local Ollama, which is remote work. Streamed reasoning counts as progress. `0` turns it off.
-- `model_idle_timeout_s` (default `300`) — how long a stream may go silent after it started.
-  A stall after partial output continues from what already streamed. `0` turns it off.
+  normally acts first. A model on this computer or your network does not use it: DGC asks its
+  server instead (below), and only a day of total silence is a last backstop.
+- `model_first_token_timeout_s` (default `auto`; Settings → Models → Advanced → **Wait for the
+  first word**) — how long a request may produce nothing (no headers, a silent stream, or
+  keep-alives with no tokens) before it counts as stalled. `auto` is no limit for a model on this
+  computer or your network (loopback, private or Tailscale addresses, `*.local`, or an
+  Ollama/llama.cpp/LM Studio/vLLM server) and `300` for a remote one — including an Ollama cloud
+  model (`…:cloud`, `…-cloud`) reached through a local Ollama, which is remote work. Streamed
+  reasoning counts as progress. `0` is no limit anywhere.
+- **A local model is never re-sent while it is working.** A big model on a slow machine can take
+  tens of minutes before its first word, and every re-send makes the server read the prompt
+  again. While a local request is silent, DGC asks its server every 30 seconds, with one cheap
+  read-only call: Ollama's `/api/ps` (the model is loaded), llama.cpp's `/slots` (a slot is
+  processing) and `/health`, LM Studio's `/api/v0/models` (the model is loaded), vLLM's or
+  SGLang's `/metrics` (requests running or waiting). While the server says it is working on it,
+  DGC keeps waiting, past any limit you set; the "Waiting for the model · the server is working on
+  it" notice stays up with its clock, and Stop still ends the turn. DGC closes the request and
+  sends it again only when the connection drops, the server stops answering (three checks in a
+  row), or it says it is no longer working on it (twice in a row: no slot processing, no request
+  running, or the model it had loaded went away). Any other local server can only say it is up, so
+  a limit you set applies to it as before. Remote and cloud models keep their limits: a stuck cloud
+  worker is worth retrying.
+- `model_idle_timeout_s` (default `300`; Settings → **Wait between words**) — how long a stream
+  may go silent after it started. A stall after partial output continues from what already
+  streamed; for a local model the server is asked first, as above. `0` turns it off.
 - `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
   and host) in the status line and the editor. `0` never shows it.
 - `model_stall_retries` (default `2`) — how many times a stalled request is re-issued. After that
   DGC switches to `fallback_model` when one is set, or fails the turn with a message naming the
   model and endpoint. Esc / Stop works in every phase, including before any response headers.
-- `model_load_timeout_s` (default `900`, self-hosted Ollama only) — while `/api/ps` shows the
+- `model_load_timeout_s` (default `auto`, self-hosted Ollama only) — while `/api/ps` shows the
   model still loading, the first-token clock is paused ("Loading the model") for up to this long.
-  Ollama cloud models never load locally and are never probed.
+  `auto` is no limit for an Ollama on this computer or your network (a huge model can take more
+  than 15 minutes to load from a slow disk) and `900` elsewhere; a stored `900`, the old default,
+  becomes `auto`. Ollama cloud models never load locally and are never probed.
 - `bash_timeout` (default `120`) — per-command shell timeout.
 - `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
 - `ollama_keep_alive` (default `30m`) — how long a local Ollama keeps the model loaded after the last

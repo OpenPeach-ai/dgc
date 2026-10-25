@@ -386,6 +386,9 @@ class PreProgressStallTests(StallTestCase):
             with self.subTest(first_token=first_token):
                 client, _ = self.client(first_token_timeout=first_token, read_timeout=0.3,
                                         stall_retries=0)
+                # The socket's own timeout is the backstop for REMOTE work; a local request lifts it
+                # and asks its server instead (LocalWaitTests). The stub is local, so say it isn't.
+                client._local_work = lambda: False
                 with self.assertRaises(ModelStallError) as caught:
                     client.chat(MESSAGES)
                 self.assertEqual(caught.exception.phase, "headers")
@@ -829,11 +832,14 @@ class AttemptLifecycleTests(StallTestCase):
 
 # ---- configuration --------------------------------------------------------------------------------
 class WindowResolutionTests(unittest.TestCase):
-    def test_auto_is_generous_for_local_endpoints_and_shorter_for_remote(self):
-        self.assertEqual(resolve_first_token_timeout("auto", "http://127.0.0.1:8080/v1"), 900)
-        self.assertEqual(resolve_first_token_timeout("auto", "http://192.168.1.60:11434"), 900)
-        self.assertEqual(resolve_first_token_timeout("auto", "http://100.89.32.80:1234/v1"), 900)
-        self.assertEqual(resolve_first_token_timeout("auto", "http://gpu-box.local:8000/v1"), 900)
+    def test_auto_is_no_limit_for_local_endpoints_and_shorter_for_remote(self):
+        # 0.49: a local model is never timed out while its server says it is working, so "auto" has
+        # no first-token limit there; one DGC cannot check on keeps the old 900 s.
+        for url in ("http://127.0.0.1:8080/v1", "http://192.168.1.60:11434",
+                    "http://100.89.32.80:1234/v1", "http://gpu-box.local:8000/v1"):
+            with self.subTest(url=url):
+                self.assertEqual(resolve_first_token_timeout("auto", url), 0)
+                self.assertEqual(resolve_first_token_timeout("auto", url, checked=False), 900)
         self.assertEqual(resolve_first_token_timeout("auto", "https://api.openai.com/v1"), 300)
         self.assertEqual(resolve_first_token_timeout("auto", "https://ollama.com", "ollama"), 300)
         self.assertEqual(resolve_first_token_timeout("120", "https://api.openai.com/v1"), 120)

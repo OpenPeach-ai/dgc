@@ -6,6 +6,26 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **A slow local model is never timed out while it is working.** A big model on a slow machine can take tens of
+  minutes before its first word. DGC used to give a local model 15 minutes, then close the request and send it again,
+  which made the server read the whole prompt again (and a load start over), so a long first word never came: the
+  turn failed after about 45 minutes. Now, for a model on this computer or your network (Ollama, llama.cpp, LM Studio,
+  vLLM and any other local server):
+  - **No limit on the first word by default.** The "Waiting for the model" notice keeps its clock, and Stop still
+    ends the turn.
+  - **DGC asks the server before it ever sends a request again.** While a request is silent it checks every 30
+    seconds, with one cheap read-only call: Ollama's `/api/ps`, llama.cpp's `/slots` and `/health`, LM Studio's
+    `/api/v0/models`, vLLM's or SGLang's `/metrics`. While the server says it is working on the model, DGC waits, past
+    any limit you set. It sends again only when the connection drops, the server stops answering (three checks in a
+    row), or it says it is no longer working on it (twice in a row).
+  - **A model load has no limit either** while Ollama shows it loading (a stored `model_load_timeout_s: 900`, the old
+    default, becomes `auto`).
+  - **`request_timeout` no longer cuts a local prefill short**: the server check decides when a local request is
+    dead, and only a day of total silence is a last backstop.
+  Remote and cloud models (an Ollama `:cloud` model too) keep today's limits: 5 minutes for the first word, then a
+  retry. A local request DGC cannot check on (a reviewed Pips specialist run), or one a caller bounds on purpose (a
+  title, a suggestion, a turn budget), keeps its old limits.
+
 - **The main chat sees and sets your Pips' models.** A Work chat said a Pip's model "can only be changed in the Pips
   editor UI, not through my tools". Now, after loading its Pips tools, it can:
   - **List the models Pips can use**: `pips_context` `models` reads DGC's connection and gives each model with the

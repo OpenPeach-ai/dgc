@@ -384,7 +384,7 @@ class ChatEngine:
                            idle_timeout=config.get("model_idle_timeout_s", 300),
                            stall_notice=config.get("model_stall_notice_s", 45),
                            stall_retries=config.get("model_stall_retries", 2),
-                           load_timeout=config.get("model_load_timeout_s", 900))
+                           load_timeout=config.get("model_load_timeout_s", "auto"))
 
         def ledger(finished, result):
             try:

@@ -482,20 +482,26 @@ DEFAULTS: dict = {
     "bash_timeout": 120,
     "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
     "request_timeout": 1800,                    # hard ceiling on socket silence, including the wait for
-                                                #   response headers; the stall watcher normally acts first
+                                                #   response headers; the stall watcher normally acts first.
+                                                #   A model on this computer or network is checked with its
+                                                #   server instead (a day's silence is the last backstop)
     # Stall watcher: a model request that hangs without an error (no headers, a silent stream, or
-    # keep-alives with no tokens) is closed, retried, then reported by model and endpoint.
-    "model_first_token_timeout_s": "auto",      # seconds until the first real delta; "auto" = 900 for a
-                                                #   local endpoint (load + large prefill), 300 remote; 0 = off
+    # keep-alives with no tokens) is closed, retried, then reported by model and endpoint. A local
+    # request is never re-sent while its server says it is still working on it (dgc/server_check.py).
+    "model_first_token_timeout_s": "auto",      # seconds until the first real delta; "auto" = no limit
+                                                #   for a model on this computer or network, 300 remote;
+                                                #   0 = no limit (Settings: Wait for the first word)
     "model_idle_timeout_s": 300,                # seconds without a token mid-stream before it is a stall
                                                 #   (partial output is continued, not discarded); 0 = off
+                                                #   (Settings: Wait between words)
     "pips_enabled": True,                      # Pips: personal and project agents beside the chat
     "pips_parallel_runs": 4,                   # Pips running at once, one run per Pip (pips.parallel_runs)
     "pips_model": "",                          # the model every Pip on Default uses, on DGC's own connection;
                                                #   "" follows DGC (its model, or its subscription CLI)
     "model_stall_notice_s": 45,                 # say "no response from the model" after this long; 0 = never
     "model_stall_retries": 2,                   # re-issues after a stall before fallback_model or failing
-    "model_load_timeout_s": 900,                # self-hosted Ollama: how long a model may take to load
+    "model_load_timeout_s": "auto",             # self-hosted Ollama: how long a model may show as loading;
+                                                #   "auto" = no limit on this computer or network, 900 elsewhere
     "approval_timeout_s": 300,                  # bounded MCP input; native human decisions wait for reply/Stop
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)
@@ -1096,6 +1102,13 @@ class Config:
         # becomes the per-level "auto" schedule. Any other number stays an explicit override.
         if raw.get("think_budget_tokens") == 8000:
             raw["think_budget_tokens"] = "auto"
+            migrated = True
+        # Releases through 0.48 defaulted model_load_timeout_s to 900 and save() wrote it into every
+        # config, so a stored 900 is that old default, not a choice. It gave a huge local model 15
+        # minutes to load from a slow disk before its request was closed and sent again (which starts
+        # the load over). It becomes "auto": no limit while a local Ollama shows the model loading.
+        if raw.get("model_load_timeout_s") == 900:
+            raw["model_load_timeout_s"] = "auto"
             migrated = True
         # Releases through 0.41.7 defaulted tool_profile to "adaptive", which offered tools like
         # delegation, the background monitor or image reading only when the prompt's wording matched
