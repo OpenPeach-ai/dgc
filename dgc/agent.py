@@ -11297,9 +11297,29 @@ class Agent(GoalLifecycle):
         self._spawn_detached_subagent(description, prompt, agent_name, workspace, sub_ui, call_id,
                                       own_cancel, brief=True, adopt=waiting.result, adopted=handle)
         stopped_work.agent_backgrounded(self, sub_ui.agent_id)
+        moved = self.__dict__.setdefault("_moved_helpers", {})
+        for key in [key for key, turn in moved.items() if turn != self._budget_turn]:
+            moved.pop(key, None)                 # only this turn's moves hold its waits back
+        moved[sub_ui.agent_id] = self._budget_turn
         return background_now.helper_moved(description, sub_ui.agent_id,
                                            isolated=workspace is not None,
                                            wakes=self._moved_work_wakes())
+
+    def _moved_wait_refusal(self, ids, troupe_ids) -> str:
+        """`wait_tasks` only on helpers the person moved out of THIS turn: "" to wait, else why not.
+
+        Moving a helper says "don't hold this turn for it", and a model that read "carry on without
+        it" as "wait for its report" then held the turn for it anyway with wait_tasks (real VS Code,
+        deepseek-v4.1-flash). A later turn may wait for it -- the person may ask for exactly that.
+        """
+        moved = {key for key, turn in (self.__dict__.get("_moved_helpers") or {}).items()
+                 if turn == self._budget_turn}
+        if not moved:
+            return ""
+        asked = set(ids) if ids is not None else (self._live_detached_ids() | set(troupe_ids))
+        if not asked or not asked <= moved or self._detached_results(sorted(asked), unconsumed_only=True):
+            return ""
+        return background_now.wait_refused(sorted(asked))
 
     def _message_task_result(self, args: dict) -> str:
         """`message_task`: the parent's words into a running child's next round, as a tool result."""
@@ -11597,6 +11617,9 @@ class Agent(GoalLifecycle):
 
         from .troupe_agent import waiting_ids
         troupe_ids = waiting_ids(self)
+        refused = self._moved_wait_refusal(ids, troupe_ids)
+        if refused:
+            return refused
         if ids is not None:
             known = set(getattr(self, "_detached_jobs", None) or {}) | troupe_ids
             known |= {row["id"] for row in self._detached_results()}

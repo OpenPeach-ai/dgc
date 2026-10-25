@@ -140,6 +140,48 @@ class AForegroundHelperMovedTests(_Case):
         self.assertNotIn(agent_id, h.agent._detached_jobs)
         self.assertFramesValid(h)
 
+    def test_the_turn_it_was_moved_out_of_does_not_wait_for_it_a_later_turn_may(self):
+        """A real model read "carry on without it" and called wait_tasks on it, holding the turn anyway."""
+        h = self.harness()
+        notices = []
+        h.agent.on_detached_ended = notices.append
+        rounds, inside, release = [], threading.Event(), threading.Event()
+        seen = {}
+
+        def parent(messages, results, cancel):
+            users = [m for m in messages if m.get("role") == "user"]
+            later = "wait for it now" in str(users[-1].get("content") or "")
+            if not results or (later and not str(results[-1].get("content") or "").startswith("[sub-")
+                               and "wait" not in seen):
+                if later:
+                    seen["wait"] = True
+                    threading.Timer(0.5, release.set).start()
+                    return ChatResult(tool_calls=[ToolCall("w2", "wait_tasks", {"ids": [box["item"]["id"]]})])
+                return ChatResult(tool_calls=[ToolCall("t1", "task", {
+                    "description": "write notes", "prompt": "WRITE-NOTES: create notes.md", "agent": "worker"})])
+            if len(results) == 1 and not later:
+                return ChatResult(tool_calls=[ToolCall("w1", "wait_tasks", {"ids": [box["item"]["id"]]})])
+            seen.setdefault("results", []).append(str(results[-1].get("content") or ""))
+            return ChatResult(content="ok")
+
+        routes = [("WRITE-NOTES", held_child(rounds, inside, release)), ("parent:", parent)]
+        box, mover = self.move_when_waiting(h, "agent", inside)
+        with patch.object(LLMClient, "chat", Script(routes)), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            try:
+                started = time.monotonic()
+                self.assertTrue(h.agent.run_turn("parent: write the notes"))
+                self.assertLess(time.monotonic() - started, 15)
+                self.assertTrue(seen["results"][0].startswith(
+                    f"Not waiting: the person moved {box['item']['id']} to the background"), seen)
+                self.assertFalse(release.is_set(), "the turn ended while the helper still worked")
+                # The next turn is the person's again: there a wait is a wait.
+                h.agent.on_detached_ended = None
+                self.assertTrue(h.agent.run_turn("parent: wait for it now"))
+                self.assertIn("completed and integrated", seen["results"][-1])
+            finally:
+                release.set()
+
     def test_stop_on_the_turn_after_a_move_leaves_the_helper_running(self):
         h = self.harness()
         notices = []

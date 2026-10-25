@@ -115,6 +115,22 @@ test("a running command's row: Run in background shares the head's one line, in 
       assert.ok(row.button.right <= row.headRight + 0.5, "inside the row");
       assert.ok(row.button.contrast >= 4.5, `readable (${row.button.contrast}:1)`);
       assert.equal(m.overflow, 0);
+      // Folded, its group shows the running step as one live row: the button is there, on that one line.
+      const live = await page.evaluate(() => {
+        for (const group of document.querySelectorAll("#log .tool-group")) group.open = false;
+        const row = document.querySelector("#log .tg-live");
+        const twin = row?.querySelector("button.run-bg");
+        if (!row || !twin) return null;
+        const r = row.getBoundingClientRect(), b = twin.getBoundingClientRect();
+        return { height: r.height, right: r.right, lineHeight: parseFloat(getComputedStyle(row).lineHeight) || 20,
+          button: { visible: b.width > 0 && b.height > 0, top: b.top, bottom: b.bottom, right: b.right }, rowTop: r.top, rowBottom: r.bottom,
+          overflow: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      assert.ok(live && live.button.visible, `the folded group's live row offers it (${width}px)`);
+      assert.ok(live.button.top >= live.rowTop - 1 && live.button.bottom <= live.rowBottom + 1, "on the row's one line");
+      assert.ok(live.height <= 32, `the live row stays one line (${live.height}px at ${width}px)`);
+      assert.ok(live.button.right <= live.right + 0.5);
+      assert.equal(live.overflow, 0);
     } finally { await page.close(); }
   }
 });

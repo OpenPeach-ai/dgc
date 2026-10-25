@@ -172,9 +172,18 @@ test("a running command's row offers Run in background once it has run a moment;
   assert.equal(button.hidden, false);
   assert.equal(button.textContent, "Run in background");
   assert.equal(button.getAttribute("aria-label"), "Run this command in the background");
-  p.click(button);
+  // A folded group shows its running step as one live row: the same button is there, and presses the row's own.
+  p.advance(300);
+  const twin = p.doc.querySelector(".tg-live button.run-bg");
+  assert.ok(twin && !twin.hidden, "the live row under a folded group offers it too");
+  assert.equal(twin.getAttribute("aria-label"), "Run this command in the background");
+  p.click(twin);
   assert.deepEqual(p.posts("backgroundNow"), [{ type: "backgroundNow", callId: "b1" }]);
   assert.equal(button.textContent, "Moving…");
+  assert.equal(twin.textContent, "Moving…");
+  assert.equal(twin.disabled, true);
+  p.click(button);
+  assert.equal(p.posts("backgroundNow").length, 1, "pressed once, sent once");
   assert.equal(card.classList.contains("open"), false, "the click does not open the row");
   p.event({ type: "moved_to_background", request_id: "r1", kind: "command", call_id: "b1" });
   p.event({ type: "tool_result", call_id: "b1", name: "bash", is_error: false, is_diff: false,
@@ -194,6 +203,6 @@ test("only on the main agent's foreground command still running: not a backgroun
   p.event({ type: "tool_result", call_id: "b2", name: "bash", is_error: false, is_diff: false, output: "exit code: 0\nhi" });
   p.event({ type: "tool_call", call_id: "b3", name: "bash", args: { command: "npm test" }, summary: "npm test" });
   p.advance(3000);
-  assert.deepEqual([...p.doc.querySelectorAll("button.run-bg:not([hidden])")].map((b) => b.closest(".tool").dataset.callId), ["b3"]);
+  assert.deepEqual([...p.doc.querySelectorAll(".tool button.run-bg:not([hidden])")].map((b) => b.closest(".tool").dataset.callId), ["b3"]);
   assert.deepEqual(p.errors, []);
 });

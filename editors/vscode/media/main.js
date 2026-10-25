@@ -4940,6 +4940,33 @@
       const node = live.querySelector(selector);
       if (node.textContent !== text) node.textContent = text;
     }
+    paintLiveRunInBackground(live, runningCard);
+  }
+  // The folded group's running row is what is on screen while a command runs, so a command's Run in
+  // background is there too: the same button's twin, pressing the row's own.
+  function paintLiveRunInBackground(live, card) {
+    const source = card?._runBg;
+    let twin = live._runBg;
+    if (!source || source.hidden) { if (twin) twin.hidden = true; return; }
+    if (!twin) {
+      twin = live._runBg = el("button", "link run-bg tg-live-bg", "Run in background");
+      twin.type = "button";
+      twin.setAttribute("aria-label", "Run this command in the background");
+      twin.title = source.title;
+      twin.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const own = live._runBgCard?._runBg;
+        if (!own || own.disabled) return;
+        own.click();
+        twin.disabled = own.disabled;
+        twin.textContent = own.textContent;
+      });
+      live.appendChild(twin);
+    }
+    live._runBgCard = card;
+    twin.hidden = false;
+    twin.disabled = source.disabled;
+    if (twin.textContent !== source.textContent) twin.textContent = source.textContent;
   }
 
   // Tools whose summary is a shell command, so there is something worth copying verbatim.
@@ -5012,7 +5039,12 @@
     const b = el("button", "link run-bg", "Run in background");
     b.type = "button";
     b.hidden = true;
-    setTimeout(() => { if (card._runBg === b && card.dataset.status === "running") b.hidden = false; }, RUN_BG_AFTER_MS);
+    const owner = turn;
+    setTimeout(() => {
+      if (card._runBg !== b || card.dataset.status !== "running") return;
+      b.hidden = false;
+      if (owner?.liveStep) paintLiveStep(owner);     // its folded group's live row shows it at once
+    }, RUN_BG_AFTER_MS);
     b.setAttribute("aria-label", "Run this command in the background");
     b.title = "Stop waiting for it: the turn carries on, the command keeps running, and its exit wakes this chat";
     b.onclick = (event) => {

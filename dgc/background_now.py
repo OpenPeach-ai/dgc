@@ -189,6 +189,14 @@ def command_moved(label: str, bid: str, *, wakes: bool) -> str:
             f"read them with bash_output(id=\"{bid}\").")
 
 
+def wait_refused(ids: list) -> str:
+    """`wait_tasks` on helpers the person moved out of this very turn."""
+    named = ", ".join(ids)
+    return (f"Not waiting: the person moved {named} to the background so that this turn would not wait "
+            "for it. Its report arrives on its own when it finishes. Carry on with other work, or end "
+            "your turn.")
+
+
 def guidance() -> str:
     """One line for the system prompt: what the model does when the person moves something."""
     return ("The person can move a sub-task or command you are waiting on to the background. The "
