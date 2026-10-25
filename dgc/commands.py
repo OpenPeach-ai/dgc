@@ -163,7 +163,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("mcp", "inspect and manage MCP servers", frozenset({"tui", "classic", "editor"}),
                 "mcp", True, usage="mcp [ACTION…]"),
     CommandSpec("agents", "sub-agent configuration", frozenset({"tui", "classic", "editor"}),
-                "subagent", available_while_running=True),
+                "subagent", available_while_running=True, usage="agents [all | continue ID WHAT]"),
     CommandSpec("skills", "browse and manage installed skills", _TCE, "skills", True,
                 usage="skills [ACTION…]", aliases=("extensions", "ext"), available_while_running=True),
     CommandSpec("pips", "your Pips: today's digest, starters, runs and reports", _TC,

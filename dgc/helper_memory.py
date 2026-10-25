@@ -418,6 +418,28 @@ def project_state(project_root) -> dict | None:
     return {"head": commit, "project_rel": str(rel), "dirty": digests, "at": time.time()}
 
 
+def view_state(workspace, outcome) -> dict | None:
+    """What a helper last saw of the project, for "changed since": its copy's start (the commit and the uncommitted
+    files it was given) and the files of its own that landed, as they are now. A change the person made while it
+    worked, which it never saw, then counts as changed; so does a file whose work of its was held back."""
+    from .worktree import _checked_target, _read_state
+    base = str(getattr(workspace, "base_commit", "") or "")
+    if workspace is None or not base:
+        return None
+    rel = Path(getattr(workspace, "project_rel", None) or ".")
+    repo = Path(getattr(workspace, "repo", ""))
+    dirty = {}
+    for repo_path, state in list((getattr(workspace, "baseline", None) or {}).items())[:MAX_STATE_FILES]:
+        dirty[str(repo_path)] = _digest(state)
+    for shown in list(getattr(outcome, "paths", ()) or ())[:MAX_STATE_FILES]:
+        repo_path = (rel / str(shown)).as_posix() if rel != Path(".") else str(shown)
+        try:
+            dirty[repo_path] = _digest(_read_state(_checked_target(repo, repo_path)))
+        except Exception:
+            dirty[repo_path] = "unreadable"
+    return {"head": base, "project_rel": str(rel), "dirty": dirty, "at": time.time()}
+
+
 def changed_since(project_root, then) -> list[str] | None:
     """The project's files whose content is not what it was at `then`, as project paths; None when it can't tell."""
     from .worktree import _git_bytes, _head_state, repo_root
@@ -548,7 +570,8 @@ def keep(parent, agent_id: str, child, *, description: str, prompt: str, agent_n
         record["held"] = held
         registry = getattr(parent, "subagents", None)
         record["state"] = (registry.state(agent_id) if registry is not None else "") or "finished"
-        record["project"] = project_state(parent.config.project_root)
+        record["project"] = (view_state(workspace, outcome) if workspace is not None
+                             else project_state(parent.config.project_root))
         record["saved_at"] = time.time()
         _fit(record)
         _save(parent, cache, lock, record)
@@ -627,6 +650,24 @@ def runs_items(parent, only=None) -> list[dict]:
     return items
 
 
+def terminal_marks(parent) -> dict:
+    """What `/agents` adds to a helper's row: "continued · 2 runs", and the id to continue it by ("continue 1a2b3c4d")."""
+    try:
+        items = runs_items(parent)
+    except Exception:                                   # noqa: BLE001 -- a listing, never the chat's work
+        return {}
+    marks = {}
+    for item in items:
+        parts = []
+        if item["runs"] > 1:
+            parts.append(f"continued · {item['runs']} runs")
+        if item["continuable"]:
+            parts.append(f"continue {item['id'][4:12]}")
+        if parts:
+            marks[item["id"]] = " · ".join(parts)
+    return marks
+
+
 def find(parent, ident: str) -> str:
     """An id from what a person or a model typed: the whole id, its hex, a unique start of it, or its description."""
     text = str(ident or "").strip()
@@ -693,14 +734,14 @@ def note_for(parent, record: dict, *, by: str, text: str, copy_root, changed, he
     else:
         lines.append("You work in the project folder itself, as before.")
     if changed is None:
-        lines.append("DGC can't tell which files of the project changed since your run ended.")
+        lines.append("DGC can't tell which files of the project changed since you last worked on it.")
     elif changed:
         shown = ", ".join(changed[:MAX_CHANGED_SHOWN])
         more = f" and {len(changed) - MAX_CHANGED_SHOWN} more" if len(changed) > MAX_CHANGED_SHOWN else ""
-        lines.append(f"Changed in the project since your run ended ({len(changed)} file"
+        lines.append(f"Changed in the project since you last worked on it ({len(changed)} file"
                      f"{'' if len(changed) == 1 else 's'}): {shown}{more}.")
     else:
-        lines.append("Nothing in the project changed since your run ended.")
+        lines.append("Nothing in the project changed since you last worked on it.")
     lines.append("Your earlier view of the code may be stale: re-read a file before you edit it.")
     held = record.get("held")
     if isinstance(held, dict) and held.get("paths"):
@@ -808,6 +849,7 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
         raise Refused("unavailable", "DGC couldn't make the helper a fresh copy of the project: "
                                      f"{isolation_error or 'unknown error'}. Nothing was changed.")
     copy_root = str(workspace.project_root) if workspace is not None else ""
+    earlier_held = copy.deepcopy(record.get("held")) if isinstance(record.get("held"), dict) else None
     changed = changed_since(root, record.get("project")) if record.get("project") else None
     held_text = held_diff(record["held"]) if isinstance(record.get("held"), dict) else ""
     prompt = note_for(parent, record, by=by, text=text, copy_root=copy_root, changed=changed, held_text=held_text)
@@ -888,7 +930,7 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
                 agent_name=agent_name, workspace=workspace, outcome=outcome)
     if not tail:
         release(parent, agent_id)
-    kept = record.get("held") if isinstance(record.get("held"), dict) else None
+    kept = earlier_held
     still = (f"\nIts earlier held-back work is still waiting in Review ({kept.get('worktree')}): apply or drop it "
              "there." if kept and Path(str(kept.get("worktree") or "")).exists() else "")
     return outcome.output + still + tail

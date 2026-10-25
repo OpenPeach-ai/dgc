@@ -1477,8 +1477,23 @@ class CLI:
             self._tasks_cmd(rest)
         elif cmd == "update":
             run_update()
+        elif cmd == "agents" and rest.strip().lower().split(maxsplit=1)[:1] == ["continue"]:
+            # A finished helper continues with its memory, in the background (dgc/helper_memory.py).
+            from . import helper_memory
+            spec = rest.strip()[len("continue"):].strip().split(maxsplit=1)
+            if len(spec) < 2:
+                self.ui.info("usage: /agents continue <id> <what it should do now>")
+                return True
+            try:
+                helper_memory.continue_helper(self.agent, spec[0], spec[1], by="you", background=True)
+            except helper_memory.Refused as refused:
+                self.ui.error(str(refused))
+                return True
+            name = self.agent._task_description(helper_memory.find(self.agent, spec[0])) or spec[0]
+            self.ui.info(f"{name} · continued in the background, with its memory. Its report comes back here.")
         elif cmd == "agents":
             from .subagents import meta_text, recent_ids, summary_parts, tree_items
+            from .helper_memory import terminal_marks
             registry = getattr(self.agent, "subagents", None)
             counts = registry.counts() if registry is not None else {}
             if counts.get("total"):              # this chat's task sub-agents, as the TUI lists them
@@ -1502,6 +1517,9 @@ class CLI:
                         item, main_model=str(cfg.model or ""), fmt_tokens=fmt_tokens,
                         finished_word=False)).split())
                     mark = marks.get(item.get("state"), glyphs.AGENT_IDLE)
+                    runs = terminal_marks(self.agent).get(str(item.get("id") or ""))
+                    if runs:
+                        meta = " · ".join(part for part in (meta, runs) if part)
                     self.console.print(Text(f"  {'  ' * level}{mark} {desc}" + (f"  {meta}" if meta else "")))
                 hidden = int(counts.get("total", 0)) - len(snap["items"])
                 earlier = len(snap["items"]) - listed + max(0, hidden)
