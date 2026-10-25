@@ -119,7 +119,7 @@ _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
 _PIPS_TOOL_NAMES = frozenset({
-    "pips_context", "pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip",
+    "pips_context", "pips_setup", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
     "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
     "pause_pip", "resume_pip", "attach_pip_to_session"})
 _PIPS_MUTATION_TOOL_NAMES = _PIPS_TOOL_NAMES - {"pips_context"}
@@ -4471,20 +4471,28 @@ class Agent(GoalLifecycle):
                "the next recurring run is tomorrow. Say what the result says: created (when it runs, and that the "
                "user can pause, change or delete it in Pips) or waiting as a card, never claiming a card was approved. "
                "Suggest a new or modified Pip when recurring work would clearly help the "
-               "user’s task, but avoid duplicates: inspect current Pips first. For goal, schedule or model changes use "
-               "a complete pips_setup card. The user can select its model and approve, reject or leave it pending "
+               "user’s task, but avoid duplicates: inspect current Pips first. For a schedule change use a complete "
+               "pips_setup card for that Pip. The user can change its model on the card and approve, reject or leave it pending "
                "while this turn continues. A later approval receipt means setup was already applied; inspect status, "
                "never create it again or infer that queued work succeeded. CLI users can use dgc pips setup show/accept. Never use shell, Python, "
                "SDK or acceptance commands to approve your own setup, clear global stop or bypass review."]
               if pips_on and self.depth == 0 and mode != "plan" else []),
-            *(["- To change an existing Pip's name, goal or branch, read its current definition with pips_context, "
-               "then use pips_propose with the expected version and a stable retry key. The user allows it like "
-               "any tool call and it is then applied; say what the result says. It never starts work or alters "
-               "permissions."]
+            *(["- To change an existing Pip's name, goal, branch, model or context window, read it with pips_context "
+               "definition, then use pips_propose with its expected version and a stable retry key (scope personal for a "
+               "Personal Pip, which may also run on the user's own Claude Code or Codex). To change the model every Pip "
+               "on Default uses, use pips_settings. The user allows each like any tool call and it is then applied; say "
+               "what the result says. They never start work or alter permissions.",
+               "- pips_context models lists the models Pips can use, with each one's context window when known, and the "
+               "Pips default. Read it before you name, recommend or change a model; never offer one that isn't listed. "
+               "When you set up a new Pip, pick from that list a model_choice and a context_window that fit its job (a "
+               "fast, inexpensive model and a modest window for a short routine check; a stronger model and a larger "
+               "window for a deep code review or long documents), and say in one line what you picked and why, and that "
+               "the user can change it on the card or the Pip's page."]
               if pips_on and self.depth == 0 and mode != "plan" else []),
             *(["- pips_adapt is a separate mutation for already human-authorized metadata only. Read the Pip's "
                "adaptation_policy first and obey its allowed_fields. In this release even autonomous permits "
-               "only name/source_ref. Goal, schedule, model and permissions always need user review. Never "
+               "only name/source_ref. A goal, model or context window is a pips_propose change and a schedule a "
+               "pips_setup card, both asking the user; permissions never change from the chat. Never "
                "use adaptation to approve a proposal, start work, or bypass a denied tool permission."]
               if pips_on and self.depth == 0 and mode != "plan" else []),
             *(["- run_pip_now starts an existing read-only Pip under its own current job definition and model. "
@@ -8889,7 +8897,7 @@ class Agent(GoalLifecycle):
         call_id = call.id
         secrets = self._secret_values()
         display_args = redact_value(self._with_task_agent(name, args), secrets)
-        if name in ("pips_setup", "pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
+        if name in ("pips_setup", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
                                        or self.depth > 0 or getattr(self, "_monitor_turn", False)):
             reason = ("Pips are disabled in this session" if self.config.get("pips_enabled", False) is not True
                       else "Only the main user chat can request Pip changes or background work")

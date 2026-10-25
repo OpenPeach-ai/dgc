@@ -34,6 +34,13 @@ def validate(value):
     return {'context_size': value['context_size'], 'thinking': value['thinking']}
 
 
+def window_words(tokens) -> str:
+    """64K for 65,536 tokens, 1M for 1,048,576; the exact count when it is not a whole number of K."""
+    if tokens == CONTEXT_MAX:
+        return "1M"
+    return f"{tokens // 1024:,}K" if tokens % 1024 == 0 else f"{tokens:,}"
+
+
 def inherited_context(config):
     value = config.get('context_size', CONTEXT_DEFAULT)
     if type(value) is not int or not CONTEXT_MIN <= value <= 2**53 - 1:

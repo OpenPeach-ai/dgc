@@ -35,6 +35,7 @@ DISPLAY = {
     "use_pips": "UsePips",
     "pips_context": "PipsContext",
     "pips_propose": "PipsPropose",
+    "pips_settings": "PipsSettings",
     "pips_setup": "PipsSetup",
     "pips_adapt": "PipsAdapt",
     "run_pip_now": "PipsRun",
@@ -63,6 +64,7 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 RULE_ARG = {
     "pips_context": "action",
     "pips_propose": "pip_id",
+    "pips_settings": "default_model",
     "pips_setup": "target_root",
     "pips_adapt": "pip_id",
     "run_pip_now": "pip_id",
@@ -666,7 +668,7 @@ class PermissionEngine:
         if self.mode == "acceptEdits":
             if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"
-            if policy_tool in ("pips_propose", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session"):
+            if policy_tool in ("pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session"):
                 return ASK, "acceptEdits: Pip changes and background work need approval"
             return ASK, f"acceptEdits auto-approves file edits; {policy_tool} still needs approval"
         # default

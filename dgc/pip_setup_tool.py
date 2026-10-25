@@ -56,7 +56,10 @@ def _source_check(registry, setup, request):
         'message': found['message'] or summary(found)}
 
 
-def _with_check(payload, check):
+def _with_check(payload, check, request=None):
+    if request and request.get('context_window'):
+        # What the card carries besides its projection: the window the Pip starts with once it is created.
+        payload['context_window'] = request['context_window']
     if check is None:
         return payload
     payload['source_check'] = check
@@ -103,7 +106,7 @@ def propose(args, ctx) -> str:
                                    'execution_started': False,
                                    'message': 'Shown to the user as a card above the chat box. They create it there with '
                                               'one click (Create Pip), see the details, or say not now. Say in a sentence '
-                                              'what the Pip will do; never claim it is on.'}, check),
+                                              'what the Pip will do; never claim it is on.'}, check, request),
                                   ensure_ascii=False, separators=(',', ':'))
             if setup['status'] == 'pending' and not pip_setup.needs_card(request):
                 created, note = _create(registry, setup, request, ctx.config)
@@ -114,17 +117,17 @@ def propose(args, ctx) -> str:
                                        **({'keep_running_notice': told} if told else {}),
                                        'message': 'Created and on. Tell the user it exists, when it runs, and that they can pause, '
                                                   'change or delete it in Pips.'
-                                                  + (' Also tell them, in these words: ' + told if told else '')}, check),
+                                                  + (' Also tell them, in these words: ' + told if told else '')}, check, request),
                                       ensure_ascii=False, separators=(',', ':'))
                 return json.dumps(_with_check({'setup': setup, 'review_required': True, 'job_changed_by_this_call': False,
                                    'execution_started': False,
-                                   'message': 'Saved as a card for the user to review, because ' + note}, check),
+                                   'message': 'Saved as a card for the user to review, because ' + note}, check, request),
                                   ensure_ascii=False, separators=(',', ':'))
             return json.dumps(_with_check({'setup': setup, 'review_required': setup['status'] == 'pending',
                                'job_changed_by_this_call': False, 'execution_started': False, **warning,
                                'message': ('This Pip runs commands on a schedule, so it is shown '
                                            'to the user as a card above the chat box, and it exists only once they choose Create Pip there. '
-                                           'Mention the card; never claim it is on.' + caution)}, check),
+                                           'Mention the card; never claim it is on.' + caution)}, check, request),
                               ensure_ascii=False, separators=(',', ':'))
     except RegistryError:
         raise
