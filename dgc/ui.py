@@ -190,16 +190,56 @@ def pip_schedule_words(schedule, event_trigger=None) -> str:
     return "on a schedule"
 
 
+def pip_model_words(choice) -> str:
+    """A Pip's model choice in the user's words: the model, the Pips default, or their own Claude Code or Codex."""
+    if not isinstance(choice, dict):
+        return "?"
+    if choice.get("mode") == "model":
+        return str(choice.get("model") or "?")
+    if choice.get("mode") == "subscription":
+        engine = {"claude": "Claude Code", "codex": "Codex"}.get(str(choice.get("engine")), str(choice.get("engine") or "?"))
+        return f"{engine} (your subscription)"
+    return "the Pips default"
+
+
+def pip_window_words(tokens) -> str:
+    """A context window as the approval line says it: 64K tokens."""
+    if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
+        return str(tokens)[:40]
+    from .pip_chat_options import window_words
+    return window_words(tokens) + " tokens"
+
+
+def _pip_change_words(key, value) -> str:
+    if key == "model_choice":
+        return "model → " + pip_model_words(value)
+    if key == "context_window":
+        return "context window → " + pip_window_words(value)
+    if key == "source_exclude" and isinstance(value, list):
+        return "leave out → " + (", ".join(str(item) for item in value) or "nothing")
+    return f"{key.replace('_', ' ')} → {value}"
+
+
 def _pip_call_summary(name: str, args: dict) -> str:
     if name == "pips_propose":
         changes = args.get("changes") if isinstance(args.get("changes"), dict) else {}
-        return "Change a Pip: " + "; ".join(f"{key.replace('_', ' ')} → {value}" for key, value in changes.items())
+        from .pip_proposal_tool import display_name
+        named = display_name(args.get("pip_id"))
+        return ((f"Change Pip “{named}”: " if named else "Change a Pip: ")
+                + "; ".join(_pip_change_words(key, value) for key, value in changes.items()))
+    if name == "pips_settings":
+        model = str(args.get("default_model") or "").strip()
+        return ("Pips default model → " + model) if model else "Pips default model → follow DGC's own model"
     reads = len((args.get("web_plan") or {}).get("reads") or []) if isinstance(args.get("web_plan"), dict) else 0
     parts = [("Change" if args.get("pip_id") else "Create") + f" Pip “{args.get('name', '')}”",
              f"{args.get('pip_type', '')}, {'personal' if args.get('scope') == 'personal' else 'this project'}",
              pip_schedule_words(args.get("schedule"), args.get("event_trigger"))]
     if reads:
         parts.append(f"reads {reads} page{'s' if reads != 1 else ''} or search{'es' if reads != 1 else ''}")
+    if isinstance(args.get("model_choice"), dict) and args["model_choice"].get("mode") in ("model", "subscription"):
+        parts.append(pip_model_words(args["model_choice"]))
+    if args.get("context_window"):
+        parts.append(pip_window_words(args["context_window"]) + " window")
     if args.get("run_now"):
         parts.append("runs now")
     return " · ".join(parts)
@@ -225,7 +265,7 @@ def arg_summary(name: str, args: dict, root=None) -> str:
     if name == "task" and isinstance(args, dict) and "tasks" in args:
         value = task_batch_summary(args).replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
-    if name in ("pips_setup", "pips_propose") and isinstance(args, dict):
+    if name in ("pips_setup", "pips_propose", "pips_settings") and isinstance(args, dict):
         # What allowing it does, in the user's words: the permission is the approval.
         value = _pip_call_summary(name, args).replace("\n", " ")
         return value[:160] + ("…" if len(value) > 160 else "")

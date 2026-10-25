@@ -132,15 +132,38 @@ def _catalog(config) -> list[str]:
     return sorted(models)
 
 
+def model_window(config, model) -> int | None:
+    """The context window DGC knows for ``model``, in the range a Pip takes, or None when it knows none.
+
+    The window the user chose for this model before (``model_context_sizes``), else DGC's recommended window for
+    its family (config.MODEL_CATALOG): what DGC itself would start the model with, never a provider's maximum, and
+    found without contacting the endpoint, so listing many models costs nothing."""
+    from .config import context_for_model, remembered_context_size
+    from .pip_chat_options import CONTEXT_MAX, CONTEXT_MIN
+    window = remembered_context_size(config, model) or context_for_model(model)
+    if type(window) is not int or window <= 0:
+        return None
+    return min(CONTEXT_MAX, max(CONTEXT_MIN, window))
+
+
 def list_pip_models(config) -> dict:
     """Return bounded genuine model IDs; discovery failure is never a fallback model.
 
     API 55: ``subscriptions`` lists the CLIs a Personal Pip can run on here (installed, signed in, held to DGC's
     tools), and ``default_engine`` says which one Default follows when DGC's default is a subscription.
-    ``default_model`` is what Default runs: the Pips default model (``pips_model``) when one is set, else DGC's own."""
+    ``default_model`` is what Default runs: the Pips default model (``pips_model``) when one is set, else DGC's own.
+    API 66: ``pips_model`` is the Pips default as set ("" when Pips follow DGC), and each model carries
+    ``context_window`` when DGC knows one for it (model_window)."""
     from . import pip_brain
-    result = {"default_model": "", "models": [], "connection": "configured", "subscriptions": pip_brain.offered()}
-    engine = "" if pips_default(config) else str(config.get("subscription_engine", "") or "").strip().lower()
+    result = {"default_model": "", "pips_model": "", "models": [], "connection": "configured",
+              "subscriptions": pip_brain.offered()}
+    chosen = pips_default(config)
+    if chosen:
+        try:
+            result["pips_model"] = _safe_model_id(chosen, secret_values(config))
+        except RegistryError:
+            pass                  # not a usable model id: `error` below says why when Default would run it
+    engine = "" if chosen else str(config.get("subscription_engine", "") or "").strip().lower()
     if engine:
         reason = pip_brain.available(engine)
         result["default_engine"] = {"engine": engine, "name": pip_brain.name(engine), "available": not reason,
@@ -152,6 +175,9 @@ def list_pip_models(config) -> dict:
         catalog = _catalog(config)
         for model in catalog:
             row = {"id": model, "name": model}
+            window = model_window(config, model)
+            if window is not None:
+                row["context_window"] = window
             if len(result["models"]) >= MAX_LIST_MODELS:
                 result["truncated"] = True
                 break

@@ -278,6 +278,15 @@ Claude Code or Codex."); an older editor shows such a Pip's model as **Same as D
 `{mode: "default"}` runs: the `pips_model` setting when set, else DGC's own model. The editor's
 model menus read **Default (that model)**.
 
+**Models with their windows** (API 66). No new request and no event changes. `list_pip_models` adds
+`pips_model` (the Pips default as set, `""` when Pips follow DGC) and, on each model DGC knows a window
+for, `context_window`: the window DGC starts that model with (the user's own choice for it, else DGC's
+recommendation for its family), never a provider maximum. The main chat reads the same list and, each
+time after asking the user, changes a Pip's model (a new job version, as the Pip's page does) or its
+context window (the Pip's own chat options, as its prompt box saves them with `set_pip_chat_options`),
+the Pips default, or a new Pip's pick on its setup card. The Pip's page shows a window the chat set the
+next time it reads the Pip's messages (at most every 4 seconds while its chat is open).
+
 **Saved logins** (API 56). Four `pips_control` requests: `list_pip_logins {pip_id?}`,
 `save_pip_login {pip_id, username, password, totp?, pips?: "only" | "all", site | action_id +
 expected_digest}`, `remove_pip_login {login_id}` and `grant_pip_login {login_id, pips: "all" |

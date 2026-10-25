@@ -149,7 +149,7 @@ def needs_card(request) -> bool:
 def validate_request(value):
     _encode(value)
     if (type(value) is not dict or not _REQUIRED <= set(value)
-            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer', 'source_exclude', 'live_plan'})
+            or set(value) - (_REQUIRED | _PINS | {'source_ref', 'model_choice', 'verification_plan', 'scope', 'app_plan', 'web_plan', 'event_trigger', 'computer', 'source_exclude', 'live_plan', 'context_window'})
             or (set(value) & _PINS and not _PINS <= set(value))):
         _fail('Supply the complete source-only setup; an existing Pip needs pip_id, expected_version and expected_lifecycle_revision together.')
     request = dict(value)
@@ -239,8 +239,22 @@ def validate_request(value):
     if 'model_choice' in value:
         from .pip_models import validate_model_choice
         request['model_choice'] = validate_model_choice(value['model_choice'])
+    if 'context_window' in value:
+        # The Pip's own context window (pip_chat_options), set when the card is accepted. Not part of its job.
+        from .pip_proposal_tool import context_window
+        request['context_window'] = context_window(value['context_window'])
     _encode(request)
     return request
+
+
+def _window_line(req):
+    """The context window a card's Pip starts with, said on the card (its prompt box changes it later)."""
+    window = req.get('context_window')
+    if not window:
+        return ''
+    from .pip_chat_options import window_words
+    return (f" It starts with a context window of {window_words(window)} tokens, for its replies and its own work; "
+            "change it later in its chat.")
 
 
 def validate_root(request, root):
@@ -447,7 +461,7 @@ def _projection(registry, row, body, receipt):
                               + (f"While Pips are running, DGC checks {req['source_ref']} for new local commits and reviews at most every {req['event_trigger']['minimum_minutes']} minutes. Accepting this doesn’t start Pips."
                               if req.get('event_trigger') else 'It works while Pips are running on this computer. Creating it doesn’t start Pips.' if req.get('scope')=='personal'
                               else 'Its schedule runs only while Pips are running on this computer. Accepting this doesn’t start Pips.')
-                              + _keep_running_line(registry, req))[:2000],
+                              + _keep_running_line(registry, req) + _window_line(req))[:2000],
             'run_now_policy': (("Its first task counts as today's; the next one is on its next scheduled day." if req.get('scope')=='personal' else "This first run counts as today's; the next scheduled run is tomorrow.")
                                if body['counts_for_date'] else ('It also does its task once, right after you create it.' if req.get('scope')=='personal' else 'It also runs once right after you accept, as well as on the schedule shown.') if req['run_now'] else None)}
 
@@ -737,6 +751,13 @@ def review(registry, setup_id, workspace_id, expected_digest, actor, config, acc
             if request.get('event_trigger') is not None:
                 from .pip_event_triggers import reset_trigger
                 reset_trigger(registry, pip_id, version, request['event_trigger'], now)
+            if request.get('context_window'):
+                # The window the card carried, kept as the Pip's own (its prompt box shows it), with the thinking
+                # it already has; a new Pip starts with thinking off, as one made on the Pips page does.
+                from .pip_chat_options import save as save_chat_options, saved as saved_chat_options
+                own = saved_chat_options(registry.db, pip_id)
+                save_chat_options(registry, pip_id, {'context_size': request['context_window'],
+                                                     'thinking': own['thinking'] if own else 'off'})
             pulse_request = None
             if request['pip_type'] == 'pulse' and not personal and 'live_plan' not in request:
                 # This human setup decision is also the exact durable execution

@@ -2736,6 +2736,12 @@ Open the Pips view with the Pips button in the DGC chat view's title bar, or ask
 "Review committed changes in this project every weekday at 9:00, and run once now." In the terminal,
 `dgc pips` does the same (`dgc pips create`, `list`, `run`, `stop`, ...).
 
+The main chat also knows your Pips' models. Ask which models your Pips can use (each with the context
+window DGC starts it with), or to change one: a Pip's model or context window, a Personal Pip onto
+your own Claude Code or Codex, or the model every Pip on **Default** uses. It asks you before each
+change, and a model or window never changes what a Pip may do. A new Pip it sets up gets a model and
+window that fit its job, with one line on why; change them on the card or the Pip's page.
+
 ## They keep going
 
 Pips run on your computer, in the **runner**, with no Pips account and no hosted service. **Keep Pips

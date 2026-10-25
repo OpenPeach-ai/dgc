@@ -114,6 +114,9 @@ function dictatedToPip(text,send){
 S.workspaces=[];S.currentWorkspaceId=null;S.folderOpen=true;S.projectEmpty=false;S.switching=false;S.showArchived=false;S.emailDrafts=[];S.emailDraftError="";S.calendarDrafts=[];S.calendarDraftError="";let emailDraftSeq=0,calendarDraftSeq=0;
 S.composerPanel='';S.chatControls=null;S.continuity=null;
 const chatPreferences=new Map();
+// The prompt box's saves of a Pip's own window and thinking (API 47) that haven't answered yet, and a count that moves
+// when one starts or ends: a conversation read that overlapped a save never takes its choice back.
+const chatOptionsSaving=new Set();let chatOptionsEpoch=0;
 const chatActivities=new Map();
 let setupEditing=false,setupRows=[],setupLoading=false,setupError='',setupSeq=0,setupDetailSeq=0;
 // The browser may still name a zone by its old name (Chromium says Asia/Calcutta); the current name is
@@ -347,9 +350,10 @@ function fitChatInput(){const input=$('chatText');if(!input)return;const sendBut
 function choiceScope(){return S.apiVersion>=47?'For this Pip: its replies and the work it does on its own.':'For the next reply.';}
 async function saveChatPreference(pip,options){
  if(S.apiVersion<47||remoteHost)return;
- const token=scope();
+ const token=scope();chatOptionsSaving.add(pip);chatOptionsEpoch++;
  try{const v=await send('set_pip_chat_options',{pip_id:pip,chat_options:options});if(token!==scope()||S.selected!==pip||!record(v))return;S.chatControls=checkedChatControls(v.chat_controls);render();}
  catch(error){if(token===scope()&&S.selected===pip)setError(error);}
+ finally{chatOptionsSaving.delete(pip);chatOptionsEpoch++;}
 }
 function updateChatPreference(kind,value){
  if(S.apiVersion<24||!S.chatControls||!S.selected||!usable()||S.busy||archived())return;
@@ -630,9 +634,13 @@ async function toggleChatActivity(runId){
 async function loadMessages(more=false){
  if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
-  const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null;S.messagesLoading=true;
+  const token=scope(),id=S.selected,sequence=++messageSeq,before=more?S.messageCursor:null,optionsEpoch=chatOptionsEpoch;S.messagesLoading=true;
   if(!S.messagesLoaded)render();
-  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:20,...(before?{before_id:before}:{})}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);if(!chatPreferences.has(id))chatPreferences.set(id,{...S.chatControls.options});if(!before)void loadChatContext();}
+  try{const page=messagesPage(await send('list_pip_messages',{pip_id:id,limit:20,...(before?{before_id:before}:{})}),id,S.workspace.id);if(token!==scope()||sequence!==messageSeq)return;if(S.apiVersion>=24){S.chatControls=null;S.chatControls=checkedChatControls(page.chat_controls);
+    // Since API 47 DGC keeps the Pip's own window and thinking, so what it says wins over what this view remembered:
+    // the main chat may have changed them. Not while this view is saving its own choice, or when a save overlapped.
+    const kept=S.apiVersion>=47&&!remoteHost&&!before&&optionsEpoch===chatOptionsEpoch&&!chatOptionsSaving.has(id);
+    if(!chatPreferences.has(id)||kept)chatPreferences.set(id,{...S.chatControls.options});if(!before)void loadChatContext();}
     if(more){if(page.next_before_id===before||page.messages.some(m=>S.messages.some(p=>p.id===m.id)))throw new Error('Conversation history did not advance. Refresh before retrying.');S.messages=[...page.messages,...S.messages].slice(-200);S.messageCursor=page.next_before_id;}
     else{const existing=new Map(S.messages.map((m,i)=>[m.id,i]));const next=[...S.messages];for(const m of page.messages){if(existing.has(m.id))next[existing.get(m.id)]=m;else next.push(m);}if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=next.slice(-200);}
     S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();

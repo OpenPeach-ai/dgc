@@ -58,8 +58,10 @@ class PipModelsTests(unittest.TestCase):
                 patch("dgc.pip_brain.offered", return_value=[{"engine": "codex", "name": "Codex"}]):
             factory.return_value.list_models.return_value = ["other", "fixture-main", "other"]
             result = models.list_pip_models(self.config)
-        # API 55: the subscriptions a Personal Pip can run on sit beside the connection's models.
-        self.assertEqual({"default_model": "fixture-main", "models": [{"id": "fixture-main", "name": "fixture-main"},
+        # API 55: the subscriptions a Personal Pip can run on sit beside the connection's models. API 66: the Pips
+        # default as set ("" here: Pips follow DGC), and no window for a model DGC knows none for.
+        self.assertEqual({"default_model": "fixture-main", "pips_model": "",
+                          "models": [{"id": "fixture-main", "name": "fixture-main"},
                            {"id": "other", "name": "other"}], "connection": "configured",
                           "subscriptions": [{"engine": "codex", "name": "Codex"}]}, result)
         self.assertEqual(self.config["base_url"], factory.call_args.kwargs["base_url"])

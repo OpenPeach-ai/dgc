@@ -83,10 +83,53 @@ test("a change to an existing Pip lists exactly what changes", async (t) => {
             reason: "The project now has authenticated routes.", request_key: "k" },
     summary: "Change a Pip: goal → Inspect authorization checks.", suggested_rule: "PipsPropose", choices: ["once", "always", "deny"] });
   const text = await card.innerText();
-  assert.match(text, /goal\s*Inspect authorization checks\./);
+  assert.match(text, /Goal\s*Inspect authorization checks\./);
   assert.match(text, /Allow applies this change to the Pip\./);
   assert.equal(await card.locator("pre").count(), 0);
   await page.close();
+});
+
+test("a Pip's new model and context window read as words, never [object Object]", async (t) => {
+  // Pips API 66: the main chat changes a Pip's model and window with pips_propose, and the Pips default with
+  // pips_settings. Their cards said "model choice [object Object]" and "Run pips_settings".
+  if (skipOrFail(t)) return;
+  const change = await scene({ type: "permission_request", id: "p1", name: "pips_propose",
+    args: { pip_id: "pip_" + "1".repeat(32), expected_version: 1, reason: "The user asked for a stronger model.", request_key: "k",
+            changes: { model_choice: { mode: "model", model: "glm-5.3:cloud" }, context_window: 65536 } },
+    summary: "Change Pip “Billing audit”: model → glm-5.3:cloud; context window → 64K tokens", suggested_rule: "PipsPropose",
+    choices: ["once", "always", "deny"] });
+  let text = await change.card.innerText();
+  assert.match(text, /Change a Pip/);
+  assert.match(text, /Billing audit/, "the line names the Pip");
+  assert.match(text, /Model\s*glm-5\.3:cloud/);
+  assert.match(text, /Context window\s*64K tokens/);
+  assert.match(text, /starts no work, and what the Pip may do stays the same/);
+  assert.doesNotMatch(text, /object Object|model_choice|context_window/);
+  await change.page.close();
+  const personal = await scene({ type: "permission_request", id: "p1", name: "pips_propose",
+    args: { pip_id: "pip_" + "2".repeat(32), scope: "personal", expected_version: 3, reason: "Use my Claude plan.", request_key: "k",
+            changes: { model_choice: { mode: "subscription", engine: "claude" } } },
+    summary: "Change Pip “Inbox helper”: model → Claude Code (your subscription)", suggested_rule: "PipsPropose", choices: ["once", "always", "deny"] });
+  assert.match(await personal.card.innerText(), /Model\s*Claude Code, on your own plan/);
+  await personal.page.close();
+  const settings = await scene({ type: "permission_request", id: "p1", name: "pips_settings",
+    args: { default_model: "glm-5.3:cloud", reason: "Every Pip on GLM." }, summary: "Pips default model → glm-5.3:cloud",
+    suggested_rule: "PipsSettings", choices: ["once", "always", "deny"] });
+  text = await settings.card.innerText();
+  assert.match(text, /Change the Pips default model/);
+  assert.doesNotMatch(text, /pips_settings/);
+  assert.match(text, /Model for Pips\s*glm-5\.3:cloud/);
+  assert.match(text, /every Pip on Default uses it from its next run/);
+  assert.equal(await settings.card.locator("pre").count(), 0);
+  await settings.page.close();
+  const setup = await scene({ type: "permission_request", id: "p1", name: "pips_setup",
+    args: { ...setupArgs, model_choice: { mode: "model", model: "glm-5.3:cloud" }, context_window: 131072 },
+    summary: "Create Pip “Market brief” · lens, personal · glm-5.3:cloud · 128K tokens window", suggested_rule: "PipsSetup",
+    choices: ["once", "always", "deny"] });
+  text = await setup.card.innerText();
+  assert.match(text, /Model\s*glm-5\.3:cloud/);
+  assert.match(text, /Context window\s*128K tokens/);
+  await setup.page.close();
 });
 
 test("other tools keep their raw arguments", async (t) => {

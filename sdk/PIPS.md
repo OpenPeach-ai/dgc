@@ -8,9 +8,10 @@ gives your own app's tools to Personal Pips ([Your own app's tools](#your-own-ap
 your app can show and decide their changes ([Approvals in your app](#approvals-in-your-app-api-62)), from API 63
 your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)), from API 64 your
 app declares its Pips in code and keeps them as declared on each deploy ([Pips in code](#pips-in-code-api-64)), and
-from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`).
+from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`), and from API 66
+`list_pip_models` says each model's context window and the Pips default model.
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 65** over editor protocol
+It pairs with DGC CLI 0.48.0, which advertises **Pips API 66** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -132,7 +133,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.48.0 is API 65; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.48.0 is API 66; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -188,6 +189,7 @@ job with `create_pip` and a reviewed update.
 | 63 | Events from your app ([below](#events-from-your-app-api-63)): `trigger_app_event` (an event, sent with `pips.trigger()`: no `approved`, refused in plan mode) and `list_app_events` (R), local only; a routine's trigger `{kind: "app", app, event}` in `add_pip_routine` and `update_pip_routine`; `app_events` on `list_pip_routines`. Both SDKs refuse them before API 63 and check the app, the event's name, the idempotency key and the payload (32 KB of JSON, sent outside the 32 KiB request budget) before anything is sent. |
 | 64 | Pip templates in code ([below](#pips-in-code-api-64)): `ensure_pip_template`, `prune_pip_templates` and `decide_pip_template_change` (M) and `list_pip_templates` (R), local only; `pips.ensure()`, `pips.ensure_all()`, `pips.templates()` and `pips.decide_template_change()` in both SDKs, refused before API 64. `PipTemplate` / `definePipTemplate` check a template before anything is sent and need no runtime. |
 | 65 | `list_pip_run_fixes {pip_id}` (R, local only): what Ask DGC to fix did for each of a Pip's runs, `{pip_id, workspace_id, fixes}`, the latest fix of each run, newest first: `fix_id`, `run_id`, `state` (`queued`, `preparing`, `running` or `applying` while it works; `applied`, `partial`, `unchanged`, `not_applied`, `failed`, `stopped`, `interrupted` or `undone`), `created_at`, `started_at?`, `ended_at?`, `files?` (`[{path, kind, additions, deletions, counted}]`), `held?`, `tests?`, `summary?`, `message?`, `undo?` and `session_id?` (the Work chat it ran in). A Personal Pip has none. `pips.run_fixes()` / `pips.runFixes()`, refused before API 65. |
+| 66 | No new command. `list_pip_models` also returns `pips_model`, the Pips default as set (`""` when Pips follow DGC; `default_model` stays what Default runs), and each model may carry `context_window`: the window DGC starts that model with (the one the user chose for it, else DGC's recommendation for its family), never a provider's maximum; a model without one has none known. Read the new fields only from a runtime advertising 66. The main chat reads the same list and changes models with its own tools (docs/PIPS.md, Models from the main chat). |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 
@@ -248,7 +250,8 @@ page itself (docs/PIPS.md, Saved logins).
 Personal Pip from Pips API 55, `{"mode": "subscription", "engine": "claude" | "codex"}`: the user's own Claude Code
 or Codex, held to DGC's Pip tools (docs/PIPS.md). Both SDKs refuse a subscription choice before API 55 and check its
 shape; `list_pip_models` then also returns `subscriptions` `[{engine, name}]` and, when DGC's default is a
-subscription, `default_engine` `{engine, name, available, reason?}`. A project Pip refuses it.
+subscription, `default_engine` `{engine, name, available, reason?}`. A project Pip refuses it. From Pips API 66 each
+listed model may carry `context_window` (tokens) and the list says the Pips default as set, `pips_model`.
 Archiving keeps all history and refuses while a run or review is unfinished;
 restoring leaves the Pip paused. An exact retry with the same `request_key`
 returns the original receipt without applying it again.

@@ -434,7 +434,7 @@ decision never applies to a newer state.
 
 | Review | Created by | Pinned by | Expires |
 | --- | --- | --- | --- |
-| Job proposal | A person, the main chat (`pips_propose`: name, goal, source ref and Excluded folders only), or a Pip's own chat (`draft_pip_change`, Personal) | `expected_version` | 7 days |
+| Job proposal | A person, the main chat (`pips_propose`: name, goal, model, source ref and Excluded folders only), or a Pip's own chat (`draft_pip_change`, Personal) | `expected_version` | 7 days |
 | Setup card | The main chat (`pips_setup`) | Digest of the card | 7 days, or once its next run time passes |
 | Handoff | A person or the main chat (`handoff_to_pip`) | `expected_revision` | 7 days |
 | Draft (email, calendar, connector) | A Personal Pip's chat or the main chat | Draft digest | 24 hours |
@@ -2101,7 +2101,7 @@ passed on. Personal Pips can't hand off to project Pips.
 ## Main-chat tools
 
 The main chat carries one small tool, `use_pips`, instead of the Pips tools on every
-request. Calling it loads the other twelve tools below and their guidance for the
+request. Calling it loads the other thirteen tools below and their guidance for the
 rest of the chat. A message that references a Pip with `@`, or a setup-approval
 notice, loads them automatically. A new or resumed chat starts without them.
 
@@ -2110,7 +2110,8 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | `use_pips` | `UsePips` | Allowed | Loads the Pips tools |
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
 | `pips_setup` | `PipsSetup` | Allowed: outside auto mode it only saves a card the editor docks above the chat box, whose **Create Pip** is the approval | In auto mode (or on an allow rule, or your Allow on an ask rule) creates or updates the Pip; one with app reads or Pulse commands is always a card |
-| `pips_propose` | `PipsPropose` | Asks | Applies a change to a project Pip's name, goal, source ref or Excluded folders (`source_exclude`, which moves it to `safe_source_v2`) |
+| `pips_propose` | `PipsPropose` | Asks | Applies a change to a Pip's name, goal, model (`model_choice`; a Personal Pip, with `scope: "personal"`, may run on your Claude Code or Codex) or context window (`context_window`, its own chat option: no new job version), or to a project Pip's source ref or Excluded folders (`source_exclude`, which moves it to `safe_source_v2`) |
+| `pips_settings` | `PipsSettings` | Asks | Sets the Pips default model (`pips_model`, Settings → Agents → Pips): a model from `pips_context` `models`, or empty to follow DGC |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |
 | `handoff_to_pip` | `PipsHandoff` | Asks | Saves a handoff proposal |
@@ -2136,7 +2137,9 @@ notice, loads them automatically. A new or resumed chat starts without them.
 - Setup cards can't create Patch Pips or add event triggers. The drafting tools need
   `scope: "personal"` and a completed Personal result or reply as their source.
 
-`pips_context` actions: `list`, `definition`, `report`, `execution` and `draft` read
+`pips_context` actions: `models` reads the models Pips can use from DGC's connection, each with
+the context window DGC starts it with when it knows one, the Pips default, the window range and the
+subscriptions a Personal Pip can run on; `list`, `definition`, `report`, `execution` and `draft` read
 Pips and runs (`list`, `definition` and `report` accept `scope: "personal"`);
 `context`, `attachments`, `memory`, `statements` and `activity` read workspace
 records; `connections`, `connection` and `connector_tools` read connection metadata

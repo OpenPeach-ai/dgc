@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Pips API 66: `list_pip_models` also returns `pips_model` (the Pips default as set, `""` when Pips follow DGC) and,
+  on each model DGC knows a window for, `context_window` in tokens (the window DGC starts it with, never a provider
+  maximum). No new command, so nothing new is refused; read the fields only from a runtime advertising 66.
+- Policies: the main chat's new `pips_settings` tool (it changes the Pips default model) is `PipsSettings` in both
+  SDKs' tool names, so a `RuntimePolicy` can name it, and a Pip's own policy denies it as it denies every Pips tool.
+
 - Editor protocol: command `watch_pip_runs` and event `pip_runs_running` (which of a chat's Pips are running now;
   offered as `ready.capabilities.pip_runs_running`) are in the vendored protocol and the TypeScript SDK's known events,
   so neither SDK drops them. An SDK session never sends the command, so it never gets the event. No Pips API change.

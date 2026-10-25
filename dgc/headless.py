@@ -356,7 +356,13 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # Work chat's fix records (pip_fix): {pip_id, workspace_id, fixes: [the latest fix of each run, newest first: {fix_id,
 # run_id, state, created_at, started_at?, ended_at?, files?, held?, tests?, summary?, message?, undo?, session_id?}]},
 # the same fields the Work chat's pip_fix carries plus the chat it ran in. A Personal Pip has none. Local only.
-PIPS_API_VERSION = 65
+# API 66: list_pip_models carries each model's `context_window` when DGC knows one (the window the user chose for it,
+# else DGC's recommendation for its family; never a provider maximum) and `pips_model`, the Pips default as set (""
+# when Pips follow DGC). The main chat reads the same list (pips_context models), changes a Pip's model and context
+# window (pips_propose model_choice, context_window; a Personal Pip with scope personal, which may run on Claude Code or
+# Codex), the Pips default (pips_settings) and gives a new Pip both (pips_setup), each asking the user like any tool.
+# No command is added; a client reads the new fields only from a runtime advertising 66.
+PIPS_API_VERSION = 66
 
 
 def _pips_platform_supported() -> bool:
@@ -1744,8 +1750,12 @@ class HeadlessUI:
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         self.turn_activity("waiting", "Waiting for the model")
         is_diff, diff = split_diff(out)
+        failed = tool_output_is_error(out)
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
-                     is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
+                     is_error=failed, is_diff=is_diff, diff=diff)
+        hook = getattr(self, "_pips_settings_hook", None)
+        if name == "pips_settings" and not failed and callable(hook):
+            hook()          # the chat changed the Pips default: an open Settings page shows it at once
 
     def tool_images(self, call_id: str | None, images: list, caption: str = "", *, items=None,
                     omitted: int = 0, meta=None) -> None:
@@ -2280,6 +2290,7 @@ class Backend:
         self.ui._cache_hook = self._publish_cache_clock
         self.ui._rule_hook = self._add_rule
         self.ui._steering_hook = self._steering_applied
+        self.ui._pips_settings_hook = self._emit_config     # pips_settings (when asked for), then config
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._foreground_worker: threading.Thread | None = None

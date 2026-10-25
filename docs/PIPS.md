@@ -869,11 +869,22 @@ Personal Pip; pause, resume or attach a Pip to the chat; propose handoffs; and d
 emails, events and connector actions from a Personal result. In the editor, type `@` and choose
 **Reference a Pip…** to point a message at a Pip in this project.
 
+**Models from the main chat.** Ask "Which models can my Pips use?" and the main chat lists the
+models on DGC's connection, each with the context window DGC starts it with when it knows one, and
+the model Pips use by default. It can also change them for you: one Pip's model or its context
+window ("Switch my Billing audit Pip to glm-5.3:cloud with a 64k window"), a Personal Pip onto your
+own Claude Code or Codex, or the model every Pip on **Default** uses. Each change asks you first,
+like any tool call (auto mode allows it), and only a model from that list is accepted. A model or a
+window is never a permission: what a Pip may read, run or send stays as it is. When it sets up a
+new Pip, the chat picks a model and window that fit the job (a fast, inexpensive one for a short
+daily check; a stronger one with a larger window for a deep code review), says in one line what it
+picked and why, and you can change the model on the card or both later on the Pip's page.
+
 Each of these tools has a permission name, so you can control it with the usual
-rules: `PipsContext`, `PipsSetup`, `PipsPropose`, `PipsAdapt`, `PipsRun`,
+rules: `PipsContext`, `PipsSetup`, `PipsPropose`, `PipsSettings`, `PipsAdapt`, `PipsRun`,
 `PipsHandoff`, `PipsEmailDraft`, `PipsCalendarDraft`, `PipsConnectorDraft`,
-`PipsPause`, `PipsResume` and `PipsAttach`. Setting a Pip up (`PipsSetup`) and
-changing one (`PipsPropose`) ask in the default mode, like the rest, and allowing
+`PipsPause`, `PipsResume` and `PipsAttach`. Setting a Pip up (`PipsSetup`),
+changing one (`PipsPropose`) and changing the Pips default model (`PipsSettings`) ask in the default mode, like the rest, and allowing
 them is the approval; **Always allow** saves an ordinary allow rule. A setup that
 reads connected accounts or runs Pulse commands doesn't ask twice: it saves a card
 you approve instead. Reading never asks, auto mode allows everything, and plan mode
@@ -1020,7 +1031,8 @@ model, or the Claude Code or Codex DGC runs on. New Pips start on Default, and a
 reads **Default (the model it runs)**. A Pip with a model of its own keeps it. The runner picks a
 change up without a restart while its connection is the one it started with; after changing the
 connection itself, restart the runner (stop it and start it again), as before. It is the `pips_model`
-setting (`/set pips_model glm-5.3:cloud`; empty follows DGC).
+setting (`/set pips_model glm-5.3:cloud`; empty follows DGC), and the main chat can change it for you
+after asking.
 
 The gear on **Your Pips** opens settings for all of them:
 

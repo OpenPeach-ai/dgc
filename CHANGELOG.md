@@ -6,6 +6,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The main chat sees and sets your Pips' models.** A Work chat said a Pip's model "can only be changed in the Pips
+  editor UI, not through my tools". Now, after loading its Pips tools, it can:
+  - **List the models Pips can use**: `pips_context` `models` reads DGC's connection and gives each model with the
+    context window DGC starts it with when it knows one (the window you chose for that model, else DGC's
+    recommendation for its family; never a guess), the Pips default model, the window range, and the Claude Code or
+    Codex a Personal Pip can run on. A Pip's `list` row and `definition` now say its model, and its definition its
+    context window.
+  - **Change one Pip's model or context window** in one step: `pips_propose` takes `model_choice` and
+    `context_window` (and `scope: "personal"` for a Personal Pip, which may run on your own Claude Code or Codex). A
+    model change is a new job version, as on the Pip's page; a window is the Pip's own chat option, kept with the
+    thinking it has. The approval line names the Pip and says what changes ("Change Pip “Billing audit”: model →
+    glm-5.3:cloud; context window → 64K tokens").
+  - **Change the Pips default** (Settings → Agents → Pips): the new `pips_settings` tool, permission `PipsSettings`.
+    An open Settings page shows the change at once, and the Pips runner picks it up without a restart.
+  - **Pick a model and window for a new Pip**: `pips_setup` takes `context_window`, and its card says the window
+    the Pip starts with; the chat chooses both from the real list to fit the job and says in one line what it picked
+    and why. The card's model is checked against the list before the card is shown.
+  Each change asks you like any tool call (auto mode allows it, plan mode refuses it), only a listed model is
+  accepted, a window outside 2,048–1,048,576 tokens is refused, and a Project Pip never runs on a subscription. None
+  of it changes what a Pip may read, run or send. The Pip tools' descriptions now say plainly what each one changes.
+  Pips API 66: `list_pip_models` carries each model's `context_window` and `pips_model`, the Pips default as set; no
+  new command or event.
+
 - **A chat hears that one of its Pips is running.** Pip runs happen in the Pips runner, not in the chat, so a Work chat
   said nothing while a Pip that reports to it worked; its card was the first sign. `dgc serve` now tells the chat
   which of its Pips are running: `watch_pip_runs` asks, and a `pip_runs_running {items}` event answers and is sent

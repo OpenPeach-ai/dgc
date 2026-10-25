@@ -835,13 +835,18 @@ class PipStore:
         return result
 
     def propose(self, pip_id, expected_version, changes, actor, reason="", *,
-                origin_session_id=None, request_key=None, expected_workspace_id=None):
+                origin_session_id=None, request_key=None, expected_workspace_id=None, origin_workspace_id=None):
+        """``origin_workspace_id``: a main chat's change to a Personal Pip (pips_propose scope personal) is asked
+        from that chat's project, so its session belongs there, not to the Personal workspace the Pip is in."""
         from . import pip_approvals
         expected_version = _version(expected_version)
         model_origin = origin_session_id is not None
+        if origin_workspace_id is not None and not model_origin:
+            raise RegistryError("invalid_request", "An originating workspace requires a trusted origin session.")
         # The chat may also propose a Pip's Excluded folders (a safe_source_v2 policy in the same mode);
-        # where its source comes from stays a human choice. Checked against the job below.
-        allowed = {"name", "goal", "source_ref", "source_policy"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan"}
+        # where its source comes from stays a human choice. Checked against the job below. Its model too: a model
+        # is not a permission (Pips API 66), and the call that proposes it asked the user first.
+        allowed = {"name", "goal", "source_ref", "source_policy", "model_choice"} if model_origin else {"name", "goal", "source_ref", "schedule", "model_choice", "adaptation_policy", "event_trigger", "source_policy", "verification_plan", "app_plan", "web_plan", "github_plan", "computer_plan", "live_plan"}
         if not isinstance(changes, dict) or not changes or set(changes) - allowed:
             raise RegistryError("invalid_request", "Only job text, committed source and a human-reviewed schedule may change. This release cannot broaden permissions.")
         if 'event_trigger' in changes:
@@ -879,8 +884,10 @@ class PipStore:
                 raise RegistryError("workspace_mismatch", "The Pip belongs to another workspace.")
             if model_origin:
                 identity = self.registry.session_identity(origin_session_id)
-                if not identity or identity["workspace_id"] != pip["workspace_id"]:
+                if not identity or identity["workspace_id"] != (origin_workspace_id or pip["workspace_id"]):
                     raise RegistryError("workspace_mismatch", "The proposal session is not associated with this workspace.")
+                if origin_workspace_id is not None and self.registry.get(pip["workspace_id"])["kind"] != "personal":
+                    raise RegistryError("workspace_mismatch", "Only a Personal Pip is changed from another project's chat.")
                 from .pip_adaptation import can_propose
                 if not can_propose(pip.get("adaptation_policy", "suggest_changes")):
                     raise RegistryError("permission_denied", "This Pip's adaptation policy does not allow model proposals; only human-reviewed updates are available.")
