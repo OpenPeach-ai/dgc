@@ -577,5 +577,80 @@ class ClassicCtrlBTests(unittest.TestCase):
         self.assertEqual(said[-1], "↳ not moved")
 
 
+class ClassicCtrlBInARealTerminalTests(unittest.TestCase):
+    """The classic terminal's live key loop reads Ctrl+B (cbreak keeps it) and moves the running command."""
+
+    @unittest.skipUnless(__import__("os").name == "posix", "requires a real POSIX terminal")
+    def test_ctrl_b_moves_the_command_the_turn_waits_on(self):
+        import json
+        import os
+        import pty
+        import select
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        root = tempfile.mkdtemp(prefix="dgc-classic-ctrl-b-")
+        self.addCleanup(__import__("shutil").rmtree, root, True)
+        script = f"""
+import json, sys, time
+sys.path.insert(0, "tests")
+from pathlib import Path
+from test_subagents import fixture_config
+from dgc.cli import CLI
+from dgc.llm import ChatResult, ToolCall
+from dgc import tools
+root = Path({root!r})
+cli = CLI(fixture_config(root, mode="auto"))
+seen = []
+def chat(messages, **kwargs):
+    results = [m for m in messages if m.get("role") == "tool"]
+    if not results:
+        print("LIVE-READY", flush=True)
+        return ChatResult(tool_calls=[ToolCall("b1", "bash", {{"command": "while [ ! -f go ]; do sleep 0.05; done; echo after"}})])
+    seen.append(str(results[-1].get("content") or ""))
+    return ChatResult(content="Done")
+cli.agent.client.chat = chat
+cli._run_turn_live("Build it", [])
+bid = [b for b in tools._BG if tools._BG[b]["proc"].poll() is None]
+(root / "go").write_text("")
+print("LIVE-RESULT:" + json.dumps({{"result": seen[-1] if seen else "", "running_after_turn": bool(bid)}}), flush=True)
+"""
+        master, slave = pty.openpty()
+        process = subprocess.Popen([sys.executable, "-c", script], stdin=slave, stdout=slave, stderr=slave,
+                                   cwd=Path(__file__).resolve().parents[1],
+                                   env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])})
+        os.close(slave)
+        output, sent = b"", False
+        deadline = time.monotonic() + 60
+        try:
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output += chunk
+                    if b"LIVE-READY" in output and not sent:
+                        time.sleep(0.8)            # the command is running, the key reader in cbreak
+                        os.write(master, b"\x02")
+                        sent = True
+                elif process.poll() is not None:
+                    break
+            process.wait(timeout=5)
+        finally:
+            if process.poll() is None:
+                process.kill(); process.wait()
+            os.close(master)
+        decoded = output.decode("utf-8", "replace")
+        self.assertEqual(process.returncode, 0, decoded)
+        self.assertIn("moved to the background (command): while [ ! -f go ]", decoded)
+        result = json.loads(decoded.split("LIVE-RESULT:")[-1].splitlines()[0])
+        self.assertTrue(result["result"].startswith("The person moved `while [ ! -f go ]"), result)
+        self.assertTrue(result["running_after_turn"], "the turn ended with the command still running")
+
+
 if __name__ == "__main__":
     unittest.main()
