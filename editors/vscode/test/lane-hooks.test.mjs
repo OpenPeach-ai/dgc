@@ -75,7 +75,8 @@ test("main.js and main.css carry one marked section per lane in order", () => {
 test("REPLAYABLE is the backend's replayable fragment list", () => {
   const list = mainJs.match(/const REPLAYABLE = new Set\(\[([\s\S]*?)\]\);/)[1].split(",").map((part) => part.trim().replace(/"/g, ""));
   assert.deepEqual(list, ["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end", "tool_call",
-    "tool_result", "tool_denied", "tool_images", "options_resolved", "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end"]);
+    "tool_result", "tool_denied", "tool_images", "options_resolved", "model_retry", "monitor_event", "agent_report", "turn_activity",
+    "turn_eta", "turn_end"]);
 });
 
 test("a tool card follows the DOM contract and is offered to the agents lane once it is in its group", () => {
