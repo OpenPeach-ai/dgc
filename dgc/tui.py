@@ -3488,16 +3488,20 @@ class TUI:
             return f"[{th.faint}]{glyphs.AGENT_IDLE}{n}[/]"
         return f"[{th.faint}]{glyphs.AGENT_IDLE} {noun}[/]"
 
-    def _agents_listing(self) -> str:
-        """The "agents in this chat" block `/agents` prints above the sub-agent settings."""
+    def _agents_listing(self, everything: bool = False) -> str:
+        """The "agents in this chat" block `/agents` prints above the sub-agent settings: what matters
+        now (every agent working, the latest turn's, any whose work was held back), then one "Earlier ·
+        N agents" line; `/agents all` (``everything``) lists every one. A chat that cannot tell which
+        turn started its agents lists every one, as before."""
         from rich.cells import cell_len
-        from .subagents import meta_text, summary_parts, tree_items
+        from .subagents import meta_text, recent_ids, summary_parts, tree_items
         registry = getattr(getattr(self, "agent", None), "subagents", None)
         if registry is None:
             return ""
         snap, counts = registry.snapshot(), registry.counts()
         if not counts.get("total"):
             return ""
+        shown = None if everything else recent_ids(snap["items"], getattr(self.agent, "messages", None) or ())
         th = style_mod.theme()
         marks = {"queued": (glyphs.AGENT_QUEUED, th.faint), "running": (glyphs.AGENT_RUN, th.ok),
                  "waiting": (glyphs.AGENT_WAIT, th.err), "finished": (glyphs.CHECK, th.faint),
@@ -3505,6 +3509,8 @@ class TUI:
         main_model = str(getattr(self.config, "model", "") or "")
         rows = []
         for level, item in tree_items(snap["items"]):
+            if shown is not None and item.get("id") not in shown:
+                continue
             desc = style_mod.terminal_safe_text(item.get("description") or "(no description)")
             desc = " ".join(desc.split())
             meta = meta_text(item, main_model=main_model, fmt_tokens=render_mod.fmt_tokens,
@@ -3519,7 +3525,13 @@ class TUI:
             lines.append(f"  {'  ' * level}[{colour}]{mark}[/] [{th.text}]{_esc(desc)}[/]"
                          + (f"{gap}[{th.faint}]{_esc(meta)}[/]" if meta else ""))
         hidden = int(counts.get("total", 0)) - len(snap["items"])
-        if hidden > 0:
+        if shown is not None:
+            # The rest, and the ones the list no longer keeps (the oldest): one line, one command away.
+            earlier = len(snap["items"]) - len(rows) + max(0, hidden)
+            if earlier > 0:
+                lines.append(f"  [{th.faint}]{glyphs.ELLIPSIS_V} Earlier · {earlier} agent{'' if earlier == 1 else 's'}"
+                             f" · /agents all lists them[/]")
+        elif hidden > 0:
             lines.append(f"  [{th.faint}]{glyphs.ELLIPSIS_V} {hidden} more not listed[/]")
         return "\n".join(lines) + "\n"
 
@@ -7170,7 +7182,8 @@ class TUI:
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"
             st = cfg.get("subagent_api_mode") or "(inherit/infer)"
             defs = ", ".join(getattr(self.agent, "agent_defs", {}).keys()) or "(none)"
-            listing = self._agents_listing()     # this chat's agents first, then the configuration
+            # This chat's agents first (what matters now; `/agents all` for every one), then the configuration.
+            listing = self._agents_listing(everything=rest.strip().lower() == "all")
             self._append(self._rich(listing + f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
                                     f"  host   [{th.text}]{_esc(sh)}[/]\n"
                                     f"  route  [{th.text}]{_esc(st)}[/]\n"

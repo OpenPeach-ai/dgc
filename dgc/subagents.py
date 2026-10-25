@@ -917,6 +917,71 @@ def tree_items(items: list[dict]) -> list[tuple[int, dict]]:
     return ordered
 
 
+_HELD_BACK = re.compile(r"^Sub-task '(.*?)' (?:partly integrated|completed but its changes were NOT integrated"
+                        r"|completed but was not integrated)", re.M | re.S)
+
+
+def recent_ids(items: list[dict], messages=()) -> set | None:
+    """The agents `/agents` lists before "Earlier · N" (``/agents all`` lists every one), as the editor's
+    agent map shows them: every agent working; every agent the chat's latest turn that started any
+    started; and any older one whose changes were held back -- each with its parents. ``None`` when the
+    chat cannot tell which turn started its agents (a session saved before prompts kept their time, an
+    agent with no start time): the full list, as before.
+
+    A turn runs from one prompt to the next, by the time each prompt was sent (``_dgc_at`` on the chat's
+    own messages, the clock ``started_at`` is on, both read to the second, as a restored record keeps
+    it). A nested agent belongs to the turn its top-level agent started in. Work is held back when a
+    task's result in that turn says so (``Sub-task '<description>' partly integrated``, ``... NOT
+    integrated``)."""
+    sent: list[int] = []
+    held: set[tuple[int, str]] = set()
+    for message in messages or ():
+        if not isinstance(message, dict):
+            continue
+        at = message.get("_dgc_at")
+        if message.get("role") == "user" and isinstance(at, (int, float)) and not isinstance(at, bool):
+            sent.append(int(at))
+        elif message.get("role") == "tool" and sent:
+            for match in _HELD_BACK.finditer(_result_text(message.get("content"))):
+                held.add((len(sent) - 1, match.group(1)))
+    if not sent:
+        return None
+    by_id = {item.get("id"): item for item in items if isinstance(item, dict)}
+    top_of: dict = {}
+    for item_id in by_id:
+        seen, at = {item_id}, item_id
+        while (parent := by_id[at].get("parent_id")) in by_id and parent not in seen:
+            seen.add(parent)
+            at = parent
+        top_of[item_id] = at
+
+    def turn_of(item: dict) -> int | None:
+        start = item.get("started_at")
+        if not isinstance(start, (int, float)) or isinstance(start, bool):
+            return None
+        index = -1                                   # before the first prompt the chat still has
+        for n, at in enumerate(sent):
+            if at <= int(start):
+                index = n
+        return index
+    turns = {item_id: turn_of(by_id[item_id]) for item_id in set(top_of.values())}
+    known = [turn for turn in turns.values() if turn is not None]
+    if not known:
+        return None
+    latest = max(known)
+    shown = {item_id for item_id, top in top_of.items() if turns[top] == latest}
+    for item_id, item in by_id.items():
+        turn = turns[top_of[item_id]]
+        if not (item.get("state") in ACTIVE
+                or (top_of[item_id] == item_id and turn is not None and (turn, item.get("description")) in held)):
+            continue
+        at = item_id
+        while at in by_id and at not in shown:
+            shown.add(at)
+            at = by_id[at].get("parent_id")
+    return shown
+
+
 def meta_text(item: dict, *, main_model: str = "", fmt_tokens: Callable[[int], str] | None = None,
               finished_word: bool = True, capitalize: bool = False) -> str:
     """The meta line of one row, parts joined with `` · `` and omitted when unknown:

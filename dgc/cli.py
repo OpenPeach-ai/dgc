@@ -1475,17 +1475,24 @@ class CLI:
         elif cmd == "update":
             run_update()
         elif cmd == "agents":
-            from .subagents import meta_text, summary_parts, tree_items
+            from .subagents import meta_text, recent_ids, summary_parts, tree_items
             registry = getattr(self.agent, "subagents", None)
             counts = registry.counts() if registry is not None else {}
             if counts.get("total"):              # this chat's task sub-agents, as the TUI lists them
                 from .render import fmt_tokens
                 snap = registry.snapshot()
+                # What matters now, then "Earlier · N"; `/agents all` lists every one.
+                shown = (None if rest.strip().lower() == "all"
+                         else recent_ids(snap["items"], getattr(self.agent, "messages", None) or ()))
                 marks = {"queued": glyphs.AGENT_QUEUED, "running": glyphs.AGENT_RUN,
                          "waiting": glyphs.AGENT_WAIT, "finished": glyphs.CHECK,
                          "failed": glyphs.CROSS, "stopped": glyphs.BLOCKED}
                 self.console.print(Text("agents in this chat · " + " · ".join(summary_parts(counts))))
+                listed = 0
                 for level, item in tree_items(snap["items"]):
+                    if shown is not None and item.get("id") not in shown:
+                        continue
+                    listed += 1
                     desc = " ".join(style_mod.terminal_safe_text(
                         item.get("description") or "(no description)").split())
                     meta = " ".join(style_mod.terminal_safe_text(meta_text(
@@ -1494,7 +1501,11 @@ class CLI:
                     mark = marks.get(item.get("state"), glyphs.AGENT_IDLE)
                     self.console.print(Text(f"  {'  ' * level}{mark} {desc}" + (f"  {meta}" if meta else "")))
                 hidden = int(counts.get("total", 0)) - len(snap["items"])
-                if hidden > 0:
+                earlier = len(snap["items"]) - listed + max(0, hidden)
+                if shown is not None and earlier > 0:
+                    self.console.print(Text(f"  {glyphs.ELLIPSIS_V} Earlier · {earlier} agent{'' if earlier == 1 else 's'}"
+                                            " · /agents all lists them"))
+                elif shown is None and hidden > 0:
                     self.console.print(Text(f"  {glyphs.ELLIPSIS_V} {hidden} more not listed"))
             defs = self.agent.agent_defs
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
