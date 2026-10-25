@@ -6,6 +6,19 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **The Edited card lists every file Undo puts back, with true line counts.** When a helper changed a file in its
+  own copy of the project (with a shell command, say) and DGC brought the change in, the card under the answer left
+  that file out: it counted only the edits DGC made with its own file tools, while Undo restored them all. DGC now
+  makes the card itself when the turn ends, from what its recovery point keeps: each file's state before the turn
+  against what is on disk now, so DGC's own edits and a helper's alike are listed with the lines added and removed. A
+  new file says New, a deleted one Deleted, a binary or very large one Changed, and a file edited and then put back
+  exactly as it was is not listed, because Undo has nothing to restore there. Undo's question names the same number
+  of files as the card, and the files it restores are counted the same way (a file already as it was is not counted).
+  A helper that finishes in the background while the chat is idle lands in the recovery point of the turn that last
+  ended, so that turn's card gains the file when it lands. A reopened chat shows the same card. Editors get it in a
+  new event, `turn_files`, sent before `turn_end` once they send `watch_turn_files` (offered as
+  `ready.capabilities.turn_files`); with an older editor nothing changes.
+
 - **Undo on the Edited card works while files are open in the editor.** With any file open in an editor tab, Undo
   said "DGC can no longer undo that turn — its recovery point has been used or pruned", although it had not been. The
   turn's recovery point was named after the open-files note the extension puts ahead of the prompt, so Undo, which

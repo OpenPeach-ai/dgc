@@ -1366,6 +1366,9 @@
   let pipRunsLive = false;
   const pipRunning = new Map();          // run_id -> {run_id, pip_id, name, pip_type, started_at, trigger, at (ms)}
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
+  // ready.capabilities.turn_files: the CLI counts each turn's Edited card (turn_files, before turn_end), from what the
+  // turn's recovery point will restore. Without it the card counts this turn's edit-tool diffs, as it always has.
+  let turnFilesLive = false;
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() {
     queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : "";
@@ -3518,6 +3521,7 @@
       head = echoPrompt(prompt, requestId);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
+    block._turnId = String(id || "");               // a turn_files for it after it ended finds its card
     block.appendChild(el("div", "role dgc", "DGC"));
     // The verb starts empty and is written only by renderTurnMeta, from what the backend says the
     // turn is doing. A literal here is a claim the panel cannot keep: it was "working…" from the
@@ -3856,8 +3860,11 @@
       const box = el("div", complete ? "answer complete" : "answer partial");
       answer.replaceWith(box);
       box.appendChild(answer);
-      const summary = complete ? turnSummaryCard(turn.edits, turn.prompt) : null;
+      // The CLI's count of what this turn's recovery point restores, when it sent one (turn_files); else the
+      // diffs this turn's own edit tools drew, as an older CLI (or a subscription engine's turn) leaves it.
+      const summary = complete ? turnSummaryCard(turn.files ? turn.files.edits : turn.edits, turn.prompt, turn.files) : null;
       if (summary) box.appendChild(summary);
+      box._turnPrompt = turn.prompt;                 // a later turn_files redraws this card with the same Undo
       const actions = responseActions(answer, turn.prompt, !complete);
       // When the reply was written, first in its row: now, live; a saved turn's from its history.
       const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
@@ -3903,7 +3910,7 @@
   // Codex shows three files then "Show N more files". A turn that touched twenty files should not
   // push its own Undo/Review controls off the screen.
   const TS_VISIBLE_ROWS = 3;
-  function turnSummaryCard(edits, prompt) {
+  function turnSummaryCard(edits, prompt, cli = null) {
     const files = [...(edits || new Map()).entries()];
     if (!files.length) return null;
     const additions = files.reduce((n, [, v]) => n + v.additions, 0);
@@ -3925,7 +3932,7 @@
         // "not diffable" is not "no change": a binary write or an oversized diff has no numbers
         // to show, and printing +0 −0 for it claims the file was untouched.
         + (v.counted === false
-            ? `<span class="ts-uncounted" title="No line count: a new, binary or oversized file">New</span>`
+            ? uncountedLabel(v.status)
             : `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`)
         + `</button>`;
     };
@@ -3933,7 +3940,9 @@
     const totals = counted.length
       ? `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span>`
       : `<span class="ts-uncounted">no line count</span>`;
-    const head = files.length === 1 ? "Edited 1 file" : `Edited ${files.length} files`;
+    // The CLI lists at most 500 files and says how many there are in all.
+    const many = cli ? Math.max(Number(cli.total) || 0, files.length) : files.length;
+    const head = many === 1 ? "Edited 1 file" : `Edited ${many} files`;
     const shown = files.slice(0, TS_VISIBLE_ROWS);
     const rest = files.slice(TS_VISIBLE_ROWS);
     card.innerHTML = `<div class="ts-head"><span class="ts-mark">${icon("file-diff")}</span>`
@@ -3970,9 +3979,50 @@
     card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
     // Undo restores the workspace to the recovery point this turn opened. The extension
     // identifies it by the prompt, refuses when it can no longer find it, and confirms first.
+    // With the CLI's card, Undo's question names the card's count (`exact`) and finds the recovery point the CLI named.
     card.querySelector(".ts-undo").onclick = () => vscode.postMessage({
-      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path) });
+      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path),
+      ...(cli ? { exact: true, total: many, checkpoint: cli.checkpoint } : {}) });
     return card;
+  }
+  // What a row with no line count says instead. A file DGC counted (turn_files) says which kind it is; one from an
+  // edit tool's result with no diff is the case it always was.
+  function uncountedLabel(status) {
+    const [label, why] = status === "new" ? ["New", "A new file: no line count"]
+      : status === "deleted" ? ["Deleted", "Deleted: Undo puts it back"]
+        : status === "modified" ? ["Changed", "No line count: a binary or very large file, or only its permissions changed"]
+          : ["New", "No line count: a new, binary or oversized file"];
+    return `<span class="ts-uncounted" title="${why}">${label}</span>`;
+  }
+  // A turn_files: what the turn's recovery point will restore, as the CLI counted it. For the running turn (or the one
+  // being replayed) it is held until its turn_end draws the card; for a turn that has already ended -- a background
+  // helper integrated into its recovery point later -- that turn's card is drawn again, in place.
+  function turnFilesCard(ev) {
+    const edits = new Map();
+    for (const f of Array.isArray(ev.files) ? ev.files : []) {
+      const path = String(f?.path || "").trim();
+      if (!path) continue;
+      edits.set(path, { additions: Number(f.additions) || 0, deletions: Number(f.deletions) || 0,
+                        counted: f.counted === true, status: String(f.status || "modified") });
+    }
+    const checkpoint = Number.isInteger(ev.checkpoint_index) && typeof ev.checkpoint_preview === "string"
+      ? { index: ev.checkpoint_index, preview: ev.checkpoint_preview } : null;
+    return { edits, total: Number(ev.total) || edits.size, checkpoint };
+  }
+  function onTurnFiles(ev) {
+    const id = String(ev.turn_id || "");
+    if (turn && (!id || !turn.id || turn.id === id)) { turn.files = turnFilesCard(ev); return; }
+    if (replaying || !id) return;
+    const block = [...log.querySelectorAll(".msg.dgc")].find((node) => node._turnId === id);
+    const box = block?.querySelector(":scope > .answer.complete");
+    if (!box) return;
+    const files = turnFilesCard(ev);
+    const fresh = turnSummaryCard(files.edits, box._turnPrompt, files);
+    const old = box.querySelector(":scope > .turn-summary");
+    if (old && fresh) old.replaceWith(fresh);
+    else if (old) old.remove();
+    else if (fresh) box.insertBefore(fresh, box.querySelector(":scope > .response-actions"));
+    repinBlockOf(box);
   }
   //: One rating per response, kept in this workspace and sent nowhere.
   // `partial` is a turn that stopped or failed. Its prose is not an answer and must not be styled
@@ -6616,6 +6666,8 @@
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
+        turnFilesLive = ev.capabilities?.turn_files === 1;
+        if (turnFilesLive) vscode.postMessage({ type: "turnFilesWatch" });
         // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
         if (pipReportsLive) vscode.postMessage({ type: "pipReportsWatch" });
         // ...and this chat's fixes, for the cards whose report is not in the history (dismissed) and the chip.
@@ -6753,6 +6805,7 @@
         break;
       }
       case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
+      case "turn_files": onTurnFiles(ev); break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
         if (turn) { turn.handoff = true; renderTurnMeta(); }
@@ -8828,7 +8881,7 @@
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                               "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                              "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end"]);
+                              "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_files", "turn_end"]);
   function prepareCompleteHistory(items) {
     // The host may have forwarded the end of A and start of queued B while this webview was
     // loading. Those provisional blocks must be replaced together, not adopted as one turn.

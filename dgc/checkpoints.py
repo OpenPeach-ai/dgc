@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -35,6 +36,9 @@ _MAX_MESSAGE_STORE_BYTES = 128 * 1024 * 1024
 _MAX_MESSAGE_BLOBS = 100_000
 _MAX_CHAIN_NODES = 200_000
 _HEX = frozenset("0123456789abcdef")
+# What a turn's Edited card lists (changes): rows sent, and how long counting lines may take.
+_MAX_TURN_FILES = 500
+_TURN_FILES_BUDGET_S = 3.0
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,9 @@ class CheckpointManager:
         self._snapshot_bytes_total = 0
         self._pending_rewind: tuple[dict[str, _Snapshot], list[str], list[dict],
                                     dict[str, object], dict[str, tuple[str, str]], int, int] | None = None
+        # How many points open() has added in this process: the points a turn opened are the last
+        # (opened now - opened when it began) ones, which is how its Edited card finds them.
+        self.opened = 0
 
     @staticmethod
     def _hash(data: bytes) -> str:
@@ -271,6 +278,7 @@ class CheckpointManager:
                                 "conversation_count": conversation_count,
                                 "conversation_exact": exact, "durable": False})
             if self._notify():
+                self.opened += 1
                 return True
         except (TypeError, ValueError):
             pass
@@ -427,6 +435,69 @@ class CheckpointManager:
         """(index, preview, files-touched) for each checkpoint, oldest first."""
         return [(i, pt["preview"], len(pt["files"])) for i, pt in enumerate(self.points)]
 
+    def changes(self, start: int, *, limit: int = _MAX_TURN_FILES,
+                budget_s: float = _TURN_FILES_BUDGET_S) -> tuple[list[dict], int]:
+        """What a rewind to point ``start`` would change, file by file: ``(files, total)``.
+
+        Each file's state before (its earliest snapshot from ``start`` on, as rewind_state picks it)
+        against what is on disk now, so it is every way a file changed: DGC's own edits, a helper's
+        integrated file however the helper wrote it, a new file, a deleted one. A file recorded and
+        then left exactly as it was is not a change, and is not listed. In the order the files were
+        first recorded. Each row is ``{path, additions, deletions, counted, status}``: ``status`` is
+        new, modified or deleted; ``counted`` is False where there is no honest line count (a new or
+        deleted file, a binary or very large one, a symlink, a permissions-only change, or one the
+        time budget did not reach). ``path`` is the recorded (absolute) path. ``total`` counts every
+        changed file; at most ``limit`` rows are returned.
+        """
+        if not (0 <= start < len(self.points)):
+            return [], 0
+        from .workspace_changes import MAX_DIFF_BYTES, _counts
+        earliest: dict[str, object] = {}
+        for point in self.points[start:]:
+            for path, prior in point["files"].items():
+                earliest.setdefault(path, prior)
+        rows: list[dict] = []
+        total = 0
+        deadline = time.monotonic() + max(0.0, budget_s)
+        for path, prior in earliest.items():
+            before = (prior if isinstance(prior, _Snapshot) else
+                      (_Snapshot("missing") if prior is None else
+                       _Snapshot("file", str(prior).encode(), 0o644)))
+            try:
+                # Never more than the snapshot plus one byte: a file larger than what it was is
+                # changed whatever it holds, and reading it whole would only be to count lines that
+                # are past the counting limit anyway.
+                now = _capture(Path(path), max(len(before.data), MAX_DIFF_BYTES) + 1)
+            except (OSError, ValueError):
+                now = None                     # unreadable or grown past the cap: changed, uncounted
+            if now is not None and now == before:
+                continue                       # put back exactly as it was: nothing to restore
+            total += 1
+            if len(rows) >= limit:
+                continue
+            if before.kind == "missing":
+                status = "new"
+            elif now is not None and now.kind == "missing":
+                status = "deleted"
+            else:
+                status = "modified"
+            additions = deletions = 0
+            counted = False
+            if (status == "modified" and now is not None and before.kind == now.kind == "file"
+                    and before.data != now.data and time.monotonic() < deadline
+                    and len(before.data) <= MAX_DIFF_BYTES and len(now.data) <= MAX_DIFF_BYTES):
+                try:
+                    before.data.decode("utf-8")
+                    now.data.decode("utf-8")
+                    measured = _counts(before.data, now.data)
+                except UnicodeDecodeError:
+                    measured = {"binary": True, "counted": False}
+                if measured.get("counted") and not measured.get("binary"):
+                    additions, deletions, counted = measured["additions"], measured["deletions"], True
+            rows.append({"path": path, "additions": additions, "deletions": deletions,
+                         "counted": counted, "status": status})
+        return rows, total
+
     def discard_last_empty(self) -> bool:
         """Remove a speculative checkpoint only when it captured no filesystem state."""
         if self._pending_rewind is not None:
@@ -521,6 +592,11 @@ class CheckpointManager:
                 snapshot = (prior if isinstance(prior, _Snapshot) else
                             (_Snapshot("missing") if prior is None else
                              _Snapshot("file", str(prior).encode(), 0o644)))
+                if rollback[path] == snapshot:
+                    # Already exactly as it was (edited, then put back): nothing to restore, and
+                    # not counted as restored -- the Edited card does not list it either, and
+                    # "restored 3 files" after a question about 2 would be the two disagreeing.
+                    continue
                 if not _restore(p, snapshot):
                     raise OSError("checkpoint restore refused the target")
                 applied.append(path)

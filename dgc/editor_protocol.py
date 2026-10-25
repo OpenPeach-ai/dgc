@@ -1041,6 +1041,26 @@ COMMAND_FIELDS["server_window"] = {"request_id": _S(False)}
 EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window": _I(),
                                   "server": _S(False), "trained": _I(False)}
 
+# ---- what a turn's Edited card lists (0.48) -------------------------------------------------------
+# The files the turn's recovery point will restore, with line counts the CLI makes from each file's
+# saved before-state and what is on disk now: DGC's own edits and a helper's integrated files alike,
+# however they were changed. Advertised as ready.capabilities.turn_files = 1. `watch_turn_files`
+# asks; from then on a `turn_files` is sent once a turn's work is final, just before its `turn_end`,
+# and again for an earlier turn whose recovery point grew after it ended (a background helper that
+# integrated while the chat was idle, a monitor turn's edits), naming that turn. `files` are
+# {path, additions, deletions, counted, status (new | modified | deleted)} in the order the files
+# were first changed, at most 500; `total` counts them all. A file edited and then put back exactly
+# as it was is not listed. `counted` false: no line count (a new, deleted, binary or very large
+# file, or a permissions-only change). `checkpoint_index` and `checkpoint_preview` name the recovery
+# point Undo rewinds to (list_checkpoints' index and preview); both are absent, and `files` is
+# empty, for a turn that opened none (its changes are on the card of the turn whose point holds
+# them). A turn DGC cannot say this for (a subscription engine's) gets none, and the client counts
+# edit-tool diffs as before. get_history replays the same event, just before each turn's
+# `turn_end`. A client that never asks is never sent one live.
+COMMAND_FIELDS["watch_turn_files"] = {"request_id": _S(False)}
+EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
+                              "checkpoint_index": _I(False), "checkpoint_preview": _S(False)}
+
 # ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
 # Each Model box in the editor's Settings lists the models at its own card's host, before anything is
 # saved. Advertised as ready.capabilities.list_models_at = 1. `role` says whose saved key may go with

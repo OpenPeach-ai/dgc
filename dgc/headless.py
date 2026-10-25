@@ -237,6 +237,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "watch_pip_reports", "pip_report_dismiss",
     # Which of this chat's Pips are running: asked once, then sent as it changes.
     "watch_pip_runs",
+    # The Edited card's files: asked once, then sent before each turn_end.
+    "watch_turn_files",
     # Ask DGC to fix: reading a chat's fixes or one file a fix changed.
     "list_pip_fixes", "get_pip_fix_change",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
@@ -400,7 +402,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
-    "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
+    "watch_turn_files", "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
@@ -886,6 +888,39 @@ def _history_written_at(message) -> float | None:
     return float(at) if 946_684_800 <= at <= time.time() + 172_800 else None   # 2000 .. two days ahead
 
 
+_TURN_FILE_STATUSES = ("new", "modified", "deleted")
+
+
+def _history_turn_files(value) -> dict | None:
+    """A saved turn's Edited card (``_dgc_turn_files``, Agent._settle_turn_files), checked field by
+    field before it reaches the wire: the session file is private, but a hand-edited or damaged one
+    must not become an event the protocol refuses. None when it is not one."""
+    if not isinstance(value, dict) or not isinstance(value.get("files"), list):
+        return None
+
+    def count(raw) -> int | None:
+        return raw if isinstance(raw, int) and not isinstance(raw, bool) and 0 <= raw <= 10**9 else None
+
+    files = []
+    for row in value["files"][:500]:
+        if not isinstance(row, dict):
+            return None
+        path, status = row.get("path"), row.get("status")
+        additions, deletions = count(row.get("additions")), count(row.get("deletions"))
+        if (not isinstance(path, str) or not 0 < len(path) <= 4096 or "\0" in path
+                or status not in _TURN_FILE_STATUSES or additions is None or deletions is None
+                or not isinstance(row.get("counted"), bool)):
+            return None
+        files.append({"path": path, "additions": additions, "deletions": deletions,
+                      "counted": row["counted"], "status": status})
+    total = count(value.get("total"))
+    out = {"files": files, "total": max(total if total is not None else 0, len(files))}
+    index, preview = count(value.get("checkpoint_index")), value.get("checkpoint_preview")
+    if index is not None and isinstance(preview, str) and len(preview) <= 200:
+        out["checkpoint_index"], out["checkpoint_preview"] = index, preview
+    return out
+
+
 # The prompt outline (`get_outline`): every prompt of a session, for the editor's prompt rail.
 OUTLINE_PROMPTS = 4000          # the latest prompts an outline lists: well inside one frame
 OUTLINE_CHARS = 160             # of each prompt's words
@@ -953,7 +988,7 @@ def _history_vision_items(seen) -> list:
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                   "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
+                   "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_files", "turn_end")
 
 
 # How long a backend keeps running with no word from its editor before it decides the window is
@@ -2334,6 +2369,8 @@ class Backend:
         self._agents_timer_lock = threading.Lock()
         self.agent.subagents.listener = self._on_subagent
         self.agent.on_detached_ended = self._on_detached_ended
+        # An earlier turn's Edited card changed after that turn ended (turn_files).
+        self.agent.on_turn_files = self._on_turn_files
         self._agent_wakes: list[dict] = []
         self.ui.monitor_wake_enabled = True
         # Background shells (bash with background:true), for the editor's task list. Pushed only
@@ -2445,6 +2482,9 @@ class Backend:
                           # Which of this chat's Pips are running now (the chip above the box): once the client
                           # sends watch_pip_runs, a pip_runs_running event, then another whenever that changes.
                           "pip_runs_running": 1,
+                          # The Edited card lists what the turn's recovery point restores, counted here:
+                          # once the client sends watch_turn_files, a turn_files before each turn_end.
+                          "turn_files": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -3327,6 +3367,10 @@ class Backend:
                     self._emit_monitor_events(notification, "wake", tid)
                 eta_stop = self._start_eta_ticker(tid)
                 failed = False
+                # Set again by the Agent's own turn; a turn that never reaches it (a subscription
+                # engine's) keeps None, and the panel counts edit-tool diffs as it always has.
+                if getattr(self, "agent", None) is not None:
+                    self.agent.last_turn_files = None
                 try:
                     config_get = getattr(active_config, "get", None)
                     engine_key = str(
@@ -3440,6 +3484,9 @@ class Backend:
                     # thirty-second timer is display-only, armed only while its picker is
                     # collapsed and cancelled by any keypress, and its one real expiry knob is
                     # deprecated with every caller passing None.
+                    # What this turn's Edited card lists, counted by the CLI: before turn_end, which
+                    # is when the panel draws the card.
+                    self._emit_turn_files(tid)
                     self.em.emit("turn_end", turn_id=tid, reason=reason,
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
@@ -3771,6 +3818,36 @@ class Backend:
                 worker.start()
         if paused_now:
             self._schedule_monitors_snapshot()
+
+    # ---- what a turn's Edited card lists (ready.capabilities.turn_files) -------------------------
+    def _emit_turn_files(self, tid: str) -> None:
+        """The turn that is ending: its files, as the Agent counted them at the end of its work.
+
+        Read from the record rather than the snapshot taken then: a background helper that
+        integrated between that moment and this one has already been added to it. Called with the
+        turn-state lock held, like the turn_end after it."""
+        agent = getattr(self, "agent", None)
+        view = getattr(agent, "last_turn_files", None)
+        if not isinstance(view, dict):
+            return
+        record = getattr(agent, "turn_files_record", None)
+        if "checkpoint_index" in view and isinstance(record, dict):
+            record["turn_id"] = tid                 # an update after this names this turn
+            view = Agent._turn_files_view(record)
+        if getattr(self, "_turn_files_on", False):
+            self.em.emit("turn_files", turn_id=tid, **view)
+
+    def _on_turn_files(self, record: dict) -> None:
+        """An earlier turn's recovery point grew after it ended: its card is redrawn (Agent
+        _refresh_turn_files). A record whose turn_end has not been published yet needs nothing:
+        _emit_turn_files reads it as it is now."""
+        try:
+            with self._turn_state_lock():
+                tid = record.get("turn_id") if isinstance(record, dict) else None
+                if tid and getattr(self, "_turn_files_on", False):
+                    self.em.emit("turn_files", turn_id=str(tid), **Agent._turn_files_view(record))
+        except Exception:
+            pass                                    # a card is never worth the helper's thread
 
     def _on_detached_ended(self, notice: dict) -> None:
         """A background task finished: wake the idle parent, or wait until it is idle."""
@@ -5029,6 +5106,11 @@ class Backend:
             if pause:
                 finished = False
                 items.append({"type": "info", "message": pause})
+            files = turn.pop("files", None)
+            if files is not None:
+                # What its Edited card listed, as the CLI counted it when the turn ended (saved on
+                # its last message): a reopened chat shows the same files and the same counts.
+                items.append({"type": "turn_files", "turn_id": turn["id"], **files})
             if turn["written_at"] is not None:
                 # When its last reply was written: the panel shows it on the answer, and with the prompt's
                 # time, how long the turn worked. A marker, not an event, as a turn_start field would be.
@@ -5069,6 +5151,15 @@ class Backend:
         # comes while a turn runs goes under that turn's block.
         arrived: list = []
         fixes: dict | None = None
+        # A turn's Edited card is saved on its last message. Given to the turn that message ended up
+        # in, which is known only once the message has been read (one may open a turn).
+        turn_files_mark = None
+
+        def mark_turn_files() -> None:
+            nonlocal turn_files_mark
+            if turn_files_mark is not None and turn is not None:
+                turn["files"] = turn_files_mark
+            turn_files_mark = None
 
         def fixed(reports: list) -> list:
             nonlocal fixes
@@ -5089,6 +5180,8 @@ class Backend:
 
         for index, m in enumerate(self.agent.messages):
             position = index
+            mark_turn_files()
+            turn_files_mark = _history_turn_files(m.get("_dgc_turn_files"))
             place_reports()
             arrived.extend(fixed(pip_report_items(m)))
             # Before any `continue`: images anchored at or before this message join the open turn.
@@ -5308,6 +5401,7 @@ class Backend:
             if (turn is not None and isinstance(pause, str) and 0 < len(pause) <= 256
                     and role in ("assistant", "tool")):
                 turn["goal_pause"] = pause
+        mark_turn_files()
         place_reports()
         live_start = None
         live_reports: list = []
@@ -7294,6 +7388,11 @@ class Backend:
             # _look_for_pip_reports). Until a client says so none is sent, and none is taken.
             self._pip_reports_on = True
             self._kick_pip_reports()
+        elif t == "watch_turn_files":
+            # This client draws the Edited card from what the CLI counted: from now on each turn's
+            # turn_files is sent before its turn_end. Until a client asks none is (an older editor,
+            # the SDK, ACP), and the editor counts edit-tool diffs as before.
+            self._turn_files_on = True
         elif t == "watch_pip_runs":
             # This client draws the chip that says one of this chat's Pips is running: answered now, then sent
             # again whenever that changes. Until a client asks, none is sent (an older editor, the SDK, ACP).

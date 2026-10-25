@@ -5281,6 +5281,118 @@ class Agent(GoalLifecycle):
         finally:
             local.at_boundary = False
 
+    # ---- what a turn's Edited card lists (turn_files) -------------------------------------------
+    # The card lists exactly the files the turn's recovery point will restore, with true line
+    # counts made here from each file's saved before-state and what is on disk now. It used to be
+    # built in the panel from the diffs of DGC's own edit tools, so a file a helper changed (with a
+    # shell command, in its own checkout, then integrated) was restored by Undo and listed nowhere.
+    def _turn_files_begin(self):
+        """At a top-level turn's start: which points it will have opened are counted from here."""
+        self.last_turn_files = None
+        manager = getattr(self, "checkpoints", None)
+        return manager, int(getattr(manager, "opened", 0) or 0)
+
+    def _turn_files_path(self, path: str) -> str:
+        """A recorded path as the card names it: the chat's change set spells project files the
+        same way (relative, '/'), so a click on the row finds its diff there."""
+        relative = self.checkpoints._lexical_project_path(path)
+        if relative is not None:
+            return relative
+        from .ui import display_path
+        return display_path(path, self.config.project_root) or str(path)
+
+    def _turn_files_rows(self, start: int) -> tuple[list[dict], int]:
+        rows, total = self.checkpoints.changes(start)
+        return [{**row, "path": self._turn_files_path(row["path"])} for row in rows], total
+
+    @staticmethod
+    def _turn_files_view(record: dict) -> dict:
+        """What the wire and the session carry of a record: the files, and the recovery point Undo
+        finds them by (its index in list_checkpoints and its preview)."""
+        return {"files": [dict(row) for row in record["files"]], "total": record["total"],
+                "checkpoint_index": record["checkpoint_index"],
+                "checkpoint_preview": record["checkpoint_preview"]}
+
+    def _turn_files_current(self) -> tuple[dict, int] | None:
+        """The last recorded turn's record and its first point's index, while its points are still
+        the newest this chat has (nothing has opened one since, rewound or replaced them)."""
+        record = getattr(self, "turn_files_record", None)
+        manager = getattr(self, "checkpoints", None)
+        if not isinstance(record, dict) or record.get("manager") is not manager or not manager.points:
+            return None
+        if manager.points[-1] is not record.get("last"):
+            return None
+        start = next((i for i, point in enumerate(manager.points) if point is record.get("first")), None)
+        return (record, start) if start is not None else None
+
+    def _refresh_turn_files(self, *, save: bool) -> bool:
+        """Bring the last recorded turn's card up to date with its recovery point.
+
+        That point keeps growing after its turn has ended in two ways: a background helper that
+        finishes while the chat is idle integrates into the newest point (the turn that last ended),
+        and a monitor wake turn opens no point of its own, so its edits land there too. Undo of that
+        turn restores those files, so its card has to list them. Sent to the frontend through
+        `on_turn_files`; saved on the turn's message so a reopened chat shows the same card.
+        False when there is no such record (a resumed chat, a new one, a point opened since).
+        """
+        current = self._turn_files_current()
+        if current is None:
+            return False
+        record, start = current
+        files, total = self._turn_files_rows(start)
+        if (files == record["files"] and total == record["total"]
+                and start == record["checkpoint_index"]):
+            return True
+        record["files"], record["total"], record["checkpoint_index"] = files, total, start
+        message = record.get("message")
+        if isinstance(message, dict) and any(m is message for m in self.messages):
+            message["_dgc_turn_files"] = self._turn_files_view(record)
+            if save:
+                self._persist()
+        notify = getattr(self, "on_turn_files", None)
+        if callable(notify):
+            try:
+                notify(record)
+            except Exception:                # a frontend callback must never break the turn
+                pass
+        return True
+
+    def _settle_turn_files(self, began) -> None:
+        """At a top-level turn's end, before its save: what its Edited card lists.
+
+        `last_turn_files` is the frontend's answer for the turn that just ended: its record's view
+        when it opened recovery points; an empty list when it opened none but the files it changed
+        are on the last recorded turn's card (a monitor turn); None when DGC cannot say (the panel
+        then keeps counting edit-tool diffs, as an older CLI makes it). Never raises: it runs in the
+        finalizer that saves the turn, and a card is never worth the save.
+        """
+        try:
+            self._settle_turn_files_now(began)
+        except Exception:                    # noqa: BLE001
+            self.last_turn_files = None
+
+    def _settle_turn_files_now(self, began) -> None:
+        manager, opened = began
+        self.last_turn_files = None
+        if self.depth != 0 or manager is None or manager is not getattr(self, "checkpoints", None):
+            return
+        own = int(getattr(manager, "opened", 0) or 0) - opened
+        if own <= 0 or not manager.points:
+            if self._refresh_turn_files(save=False) or not manager.points:
+                self.last_turn_files = {"files": [], "total": 0}
+            return
+        start = max(0, len(manager.points) - own)
+        files, total = self._turn_files_rows(start)
+        point = manager.points[start]
+        message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
+        record = {"manager": manager, "first": point, "last": manager.points[-1],
+                  "files": files, "total": total, "checkpoint_index": start,
+                  "checkpoint_preview": str(point.get("preview") or ""), "message": message}
+        if isinstance(message, dict):
+            message["_dgc_turn_files"] = self._turn_files_view(record)
+        self.turn_files_record = record
+        self.last_turn_files = self._turn_files_view(record)
+
     def _record_chat_step(self, runner, prompt):
         if self.depth != 0:
             return runner(prompt)
@@ -5298,6 +5410,7 @@ class Agent(GoalLifecycle):
         """
         self._last_turn_error = ""
         self._last_turn_pause = ""
+        began_files = self._turn_files_begin() if self.depth == 0 else None
         # Hosted MCP servers connect in the background when a chat opens: this turn waits a
         # little for them, so a question asked at once still sees the plugin's tools.
         wait = getattr(getattr(self, "mcp", None), "wait_background", None)
@@ -5462,6 +5575,8 @@ class Agent(GoalLifecycle):
                     self.ui.info("closed an interrupted native tool-call group before saving")
                 self._refresh_system()
                 self._run_handed_over()         # a child that finished during this turn integrates now
+                if began_files is not None:     # after that integration, so its files are listed
+                    self._settle_turn_files(began_files)
                 revision_before_save = self._session_revision
                 saved = self._persist()
                 if not saved and self.depth == 0:
@@ -5500,6 +5615,7 @@ class Agent(GoalLifecycle):
         self._notes_reminded = set()
         if self.depth != 0 or notification is None or not notification.batches:
             return False
+        began_files = self._turn_files_begin()
         hub = self.monitors
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
@@ -5559,6 +5675,8 @@ class Agent(GoalLifecycle):
                     self.messages = repaired
                     self.ui.info("closed an interrupted native tool-call group before saving")
                 self._refresh_system()
+                # It opens no recovery point: what it changed is on the last recorded turn's card.
+                self._settle_turn_files(began_files)
                 saved = self._persist()
                 if not saved:
                     self._last_turn_error = (self._last_persist_error
@@ -10585,9 +10703,23 @@ class Agent(GoalLifecycle):
                 # window `wait_finalizers` exists to keep a process exit out of.
                 with self._finalizing_lock:
                     self._finalizing[agent_id] = description
+
+                def finalize():
+                    result = self._finalize_subagent(
+                        description, workspace, *execution, cancel=own_cancel, keeper=keeper)
+                    # Integrated with no turn running, its files went into the newest recovery
+                    # point -- the turn that last ended, whose card is already drawn. Undo of that
+                    # turn restores them, so its card lists them now. (At a running turn's
+                    # boundary they are that turn's, and its own card lists them.)
+                    if (keeper is getattr(self, "checkpoints", None) and not getattr(
+                            getattr(self, "_handover_local", None), "at_boundary", False)):
+                        try:
+                            self._refresh_turn_files(save=True)
+                        except Exception:    # noqa: BLE001 -- a card is never worth the integration
+                            pass
+                    return result
                 try:
-                    outcome = self._as_session_owner(lambda: self._finalize_subagent(
-                        description, workspace, *execution, cancel=own_cancel, keeper=keeper))
+                    outcome = self._as_session_owner(finalize)
                 finally:
                     with self._finalizing_lock:
                         self._finalizing.pop(agent_id, None)
