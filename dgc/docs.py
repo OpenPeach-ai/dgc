@@ -2080,6 +2080,15 @@ conversation back to one of them.
   nothing converts it (no `autocrlf`, `eol`, `text` or `filter` setting for it, not marked
   skip-worktree). A file the turn's own tools already wrote stays DGC's work when a later command
   or formatter changes it.
+- **Your own saves are yours.** Which change is the command's is told by when it happened: during
+  the command. In the editor DGC also hears every file you save in the chat's folders, so a file you
+  save while a command runs (a long test run, say) is never taken for the command's: it is not put
+  in the point and not listed as the command's, and Undo leaves your edit alone — even when your save
+  reaches DGC a moment after the command ended. In the terminal there is no editor to say so, and it
+  stays by time: a file you save elsewhere while a command runs counts as the command's.
+- **Nothing is put back unseen.** Undo's question names the files it puts back from Git because a
+  command changed them: *Also puts back 2 files a command changed: rates.py, README.md.* (five at
+  most, then *and N more*).
 
 ## Rewind in the terminal
 
@@ -2091,7 +2100,8 @@ one. Files touched at that turn or any later one return to their earliest saved 
 turn created is deleted, and a folder DGC's own write created goes too once it is empty again),
 the conversation returns to just before that prompt, and that point and every later one are
 consumed. If any step fails, the files and the point are rolled back and kept, and DGC says which
-file and why (*Undo stopped: DGC could not write ro/b.py: Permission denied*).
+file and why (*Undo stopped: couldn't write ro/b.py (Permission denied). Nothing was changed, and
+the recovery point was kept.*).
 
 ## When Undo stops instead
 

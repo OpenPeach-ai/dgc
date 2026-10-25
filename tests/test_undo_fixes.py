@@ -246,8 +246,7 @@ class FailureTests(unittest.TestCase):
         self.addCleanup(os.chmod, c.p("ro"), 0o755)
         self.assertEqual(c.cp.rewind(turn)[0], -1)
         self.assertEqual(c.cp.last_rewind_conflicts, [])
-        self.assertEqual(c.cp.last_rewind_error, "DGC could not write ro/b.py: Permission denied; "
-                                                 "the files it had already put back are as they were")
+        self.assertEqual(c.cp.last_rewind_error, "couldn't write ro/b.py (Permission denied)")
         self.assertEqual((c.p("a.py").read_bytes(), c.p("ro/b.py").read_bytes()), (b"A\n", b"B\n"))
         self.assertEqual(len(c.cp.points), 1, "the point is kept")
 
@@ -653,6 +652,172 @@ class TerminalRewindTests(unittest.TestCase):
         fake = self.fake(agent)
         fake._do_rewind(0)
         self.assertEqual(fake.flashes, ["Undo stopped: DGC could not write ro/b.py: Permission denied"])
+
+
+
+# ---------------------------------------------------------------------------------------------------
+# The person's saves (the coordinator, 25 Oct: "close the gap you flagged yourself"), the question that
+# names what a command's change puts back, and the failure line read once.
+# ---------------------------------------------------------------------------------------------------
+from dgc import command_watch, rewind_words
+
+
+class SaveDuringCommandTests(HarnessCase):
+    """DGC runs a long command; meanwhile the person edits and saves a clean tracked file in the editor. The
+    watch used to take that for the command's change, and Undo put Git's copy back with no question."""
+
+    def repo(self, **config):
+        h = self.make(git=True, mode="auto", **config)
+        (h.root / "README.md").write_text("# Billing\n")
+        (h.root / "rates.py").write_text("REDUCED_RATE = 0.05\n")
+        (h.root / "a.py").write_text("x = 1\n")
+        run_git(h.root, "add", "-A")
+        run_git(h.root, "commit", "-qm", "files")
+        return h
+
+    def run_with_person(self, h, calls, person):
+        """The scripted turn; `person` runs on its own thread while the turn's command sleeps."""
+        worker = threading.Thread(target=person, daemon=True)
+
+        def route(messages, results, cancel):
+            if len(results) < len(calls):
+                if calls[len(results)].name == "bash" and not worker.is_alive() and not worker.ident:
+                    worker.start()
+                return ChatResult(tool_calls=[calls[len(results)]])
+            return ChatResult(content="Done.")
+        self.assertTrue(h.run("long command", [("long command", route)]))
+        worker.join(10)
+        return h.agent.last_turn_files
+
+    def test_a_file_the_person_saves_while_a_command_runs_is_theirs(self):
+        h = self.repo()
+        readme = (h.root / "README.md").resolve()
+
+        def person():
+            time.sleep(0.5)
+            readme.write_text("# Billing\n\nMy own paragraph.\n")
+            command_watch.note_saves([str(readme)], time.time())         # the editor's user_saved
+        card = self.run_with_person(h, [ToolCall("b1", "bash", {
+            "command": "sleep 1.5 && sed -i 's/0.05/0.07/' rates.py"})], person)
+        self.assertEqual({row["path"]: row.get("by_command", False) for row in card["files"]}, {"rates.py": True},
+                         "README.md is the person's, not the command's: not on the card")
+        self.assertGreaterEqual(h.agent.rewind(0)[0], 0, h.agent.last_rewind)
+        self.assertEqual(readme.read_text(), "# Billing\n\nMy own paragraph.\n", "Undo leaves the person's edit")
+        self.assertEqual((h.root / "rates.py").read_text(), "REDUCED_RATE = 0.05\n", "and puts the command's back")
+
+    def test_a_save_that_reaches_dgc_after_the_command_was_looked_at_is_taken_back(self):
+        h = self.repo()
+        readme = (h.root / "README.md").resolve()
+        saved_at = []
+
+        def person():
+            time.sleep(0.5)
+            readme.write_text("# Billing\n\nSaved late.\n")
+            saved_at.append(time.time())                               # the editor tells DGC only later
+        self.run_with_person(h, [ToolCall("b1", "bash", {"command": "sleep 1.5"})], person)
+        rows, _ = h.agent.checkpoints.changes(0, commands=True)
+        self.assertIn(str(readme), [row["path"] for row in rows], "by time alone it looked like the command's")
+        self.assertEqual(command_watch.note_saves([str(readme)], saved_at[0]), 1)
+        rows, _ = h.agent.checkpoints.changes(0, commands=True)
+        self.assertNotIn(str(readme), [row["path"] for row in rows], "taken back")
+        self.assertGreaterEqual(h.agent.rewind(0)[0], 0, h.agent.last_rewind)
+        self.assertEqual(readme.read_text(), "# Billing\n\nSaved late.\n")
+
+    def test_a_file_dgc_wrote_that_the_person_saves_during_a_command_makes_undo_ask(self):
+        h = self.repo()
+        target = (h.root / "a.py").resolve()
+
+        def person():
+            time.sleep(0.5)
+            target.write_text("x = 2\n# the person's line\n")
+            command_watch.note_saves([str(target)], time.time())
+        self.run_with_person(h, [ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
+                                                              "new_string": "x = 2"}),
+                                 ToolCall("b1", "bash", {"command": "sleep 1.5"})], person)
+        self.assertEqual(h.agent.rewind(0)[0], -1, "not re-noted as DGC's own: the guard sees the person's save")
+        self.assertEqual(h.agent.last_rewind["conflicts"], [{"path": "a.py", "reason": "changed"}])
+        self.assertIn("the person's line", target.read_text())
+
+    def test_the_terminal_has_no_editor_to_say_so_and_stays_by_time(self):
+        h = self.repo()
+        readme = (h.root / "README.md").resolve()
+
+        def person():
+            time.sleep(0.5)
+            readme.write_text("# Billing\n\nTyped elsewhere.\n")    # no user_saved: nothing tells DGC
+        card = self.run_with_person(h, [ToolCall("b1", "bash", {"command": "sleep 1.5"})], person)
+        self.assertEqual([row["path"] for row in card["files"]], ["README.md"], "documented: by time")
+
+    def test_the_command_is_declared_offered_and_handled(self):
+        self.assertIsNone(ep.command_error({"type": "user_saved", "paths": ["/x/a.py"], "at": 1.5}))
+        self.assertIsNone(ep.command_error({"type": "user_saved", "paths": ["/x/a.py"]}))
+        self.assertIsNotNone(ep.command_error({"type": "user_saved"}))
+        project = Path(__file__).resolve().parents[1]
+        self.assertIn('"user_saved": 1', (project / "dgc/headless.py").read_text())
+        self.assertEqual((project / "sdk/python/dgc_sdk/wire/editor_protocol.py").read_text(),
+                         (project / "dgc/editor_protocol.py").read_text())
+        h = self.make(mode="auto")
+        target = str((h.root / "saved-by-the-person.txt").resolve())
+        h.backend._dispatch({"type": "user_saved", "paths": [target], "at": 1000.0})
+        self.assertTrue(command_watch._saved_between(target, 999.0, 1001.0))
+        self.assertEqual(h.of("command_rejected"), [], "nothing answers it, nothing refuses it")
+
+
+class QuestionNamesCommandFilesTests(unittest.TestCase):
+    def test_the_words(self):
+        self.assertEqual(rewind_words.also_puts_back(["rates.py", "README.md"]),
+                         "Also puts back 2 files a command changed: rates.py, README.md.")
+        self.assertEqual(rewind_words.also_puts_back(["rates.py"]), "Also puts back 1 file a command changed: rates.py.")
+        self.assertEqual(rewind_words.also_puts_back([f"f{n}.py" for n in range(7)]),
+                         "Also puts back 7 files a command changed: f0.py, f1.py, f2.py, f3.py, f4.py and 2 more.")
+        self.assertEqual(rewind_words.also_puts_back([]), "")
+
+    def test_a_file_restored_from_gits_copy_is_marked_and_survives_a_restart(self):
+        c = Chat(self, {"rates.py": b"0.05\n", "a.py": b"a\n"})
+        turn = c.turn()
+        c.write("a.py", b"A\n")
+        self.assertTrue(c.cp.record_known(str(c.p("rates.py")), "file", b"0.05\n", 0o644, by_command=True))
+        c.p("rates.py").write_bytes(b"0.07\n")
+        c.cp.note_written(str(c.p("rates.py")))
+        rows = {Path(row["path"]).name: row.get("by_command", False) for row in c.cp.changes(turn)[0]}
+        self.assertEqual(rows, {"a.py": False, "rates.py": True})
+        c.restart()
+        rows = {Path(row["path"]).name: row.get("by_command", False) for row in c.cp.changes(turn)[0]}
+        self.assertEqual(rows, {"a.py": False, "rates.py": True})
+
+    def test_the_terminal_question_names_them(self):
+        from types import SimpleNamespace
+        c = Chat(self, {"rates.py": b"0.05\n", "README.md": b"# r\n", "a.py": b"a\n"})
+        c.turn("t0")
+        c.write("a.py", b"A\n")
+        for name in ("rates.py", "README.md"):
+            self.assertTrue(c.cp.record_known(str(c.p(name)), "file", c.p(name).read_bytes(), 0o644, by_command=True))
+            c.p(name).write_bytes(b"changed by a command\n")
+            c.cp.note_written(str(c.p(name)))
+        agent = SimpleNamespace(checkpoints=c.cp, _turn_files_path=lambda path: Path(path).name)
+        fake = TerminalRewindTests.Fake(agent)
+        from dgc import tui as tui_mod
+        tui_mod.TUI._confirm_rewind.__get__(fake)(0)
+        header = [t.plain for t in fake.overlays[-1][1]["header"]]
+        self.assertIn("Also puts back 2 files a command changed: rates.py, README.md.", header)
+        self.assertIn("Reverts 3 file(s)", " ".join(header))
+
+
+class FailureLineTests(HarnessCase):
+    @unittest.skipIf(os.geteuid() == 0, "root writes into a read-only folder")
+    def test_the_failure_reads_once_in_the_chat(self):
+        h = self.make(mode="auto")
+        (h.root / "ro").mkdir()
+        (h.root / "ro" / "b.py").write_text("b\n")
+        self.assertTrue(h.run("edit b", [("edit b", steps(ToolCall("e1", "edit_file", {
+            "path": "ro/b.py", "old_string": "b", "new_string": "B"})))]))
+        os.chmod(h.root / "ro", 0o555)
+        self.addCleanup(os.chmod, h.root / "ro", 0o755)
+        self.assertEqual(h.agent.rewind(0)[0], -1)
+        lines = [f["message"] for f in h.of("info") if "Undo stopped" in f["message"]]
+        self.assertEqual(lines, ["Undo stopped: couldn't write ro/b.py (Permission denied). Nothing was changed, "
+                                 "and the recovery point was kept."])
+        self.assertEqual(h.agent.last_rewind["error"], "couldn't write ro/b.py (Permission denied)")
 
 
 if __name__ == "__main__":

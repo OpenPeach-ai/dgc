@@ -774,6 +774,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         },
       }));
     }
+    // The person's own saves reach DGC (ready.capabilities.user_saved), so a file saved while one of a chat's
+    // commands runs is never taken for the command's change and put back by Undo (dgc/command_watch.py). Before
+    // the save too: a format-on-save rewrites the file between the two.
+    if (typeof vscode.workspace.onDidSaveTextDocument === "function") {
+      this.context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => this.reportSave(document)));
+    }
+    if (typeof vscode.workspace.onWillSaveTextDocument === "function") {
+      this.context.subscriptions.push(vscode.workspace.onWillSaveTextDocument((event) => this.reportSave(event.document)));
+    }
     if (typeof vscode.workspace.createFileSystemWatcher === "function") {
       const watcher = vscode.workspace.createFileSystemWatcher("**/*");
       const changed = () => { for (const owner of [this, ...this.tabProviders]) { owner.scheduleWorkspaceChanges(); } };
@@ -781,6 +790,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       watcher.onDidChange(changed);
       watcher.onDidDelete(changed);
       this.context.subscriptions.push(watcher);
+    }
+  }
+
+  /** The person saved a file in the window's folders: each running DGC that offers user_saved is told, once. */
+  reportSave(document: any): void {
+    const uri = document?.uri;
+    if (!uri || uri.scheme !== "file" || !uri.fsPath) return;
+    if (typeof vscode.workspace.getWorkspaceFolder === "function" && !vscode.workspace.getWorkspaceFolder(uri)) return;
+    const at = Date.now() / 1000;
+    const told = new Set<any>();
+    for (const owner of [this, ...this.tabProviders]) {
+      const be: any = owner.backend;
+      if (!be || told.has(be) || !(Number((owner.lastReadyEvent?.capabilities as any)?.user_saved) >= 1)) continue;
+      told.add(be);
+      try { be.send({ type: "user_saved", paths: [uri.fsPath], at }); } catch { /* a closing backend */ }
     }
   }
 
@@ -4886,7 +4910,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                                    index: Number.isInteger(msg.checkpoint?.index) ? msg.checkpoint.index : undefined,
                                                    preview: typeof msg.checkpoint?.preview === "string" ? msg.checkpoint.preview : undefined }
                               : undefined,
-                            Number.isInteger(msg.later) && msg.later > 0 ? msg.later : 0);
+                            Number.isInteger(msg.later) && msg.later > 0 ? msg.later : 0,
+                            Array.isArray(msg.byCommand) ? msg.byCommand.map(String).filter(Boolean) : []);
         break;
       case "branchChat":
         await this.branchChat(String(msg.prompt || ""));
@@ -6274,7 +6299,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * is the card's own count, unchanged.
    */
   async undoTurn(prompt: string, files: string[],
-                 counted?: { total: number; index?: number; preview?: string }, later = 0): Promise<void> {
+                 counted?: { total: number; index?: number; preview?: string }, later = 0,
+                 byCommand: string[] = []): Promise<void> {
     const be = this.ensureBackend();
     let items: any[] = [];
     try {
@@ -6324,10 +6350,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const turns = later === 0 ? "this turn"
       : later === 1 ? "this turn and the turn after it" : `this turn and the ${later} turns after it`;
+    // Nothing is restored unseen: the files Undo puts back from Git because one of the turns' commands changed them
+    // are named (the cards marked them `by_command`), five at most.
+    const restored = byCommand.slice(0, 5).join(", ") + (byCommand.length > 5 ? ` and ${byCommand.length - 5} more` : "");
+    const also = byCommand.length
+      ? `\n\nAlso puts back ${byCommand.length === 1 ? "1 file" : `${byCommand.length} files`} a command changed: ${restored}.`
+      : "";
     const choice = await vscode.window.showWarningMessage(
       `Undo ${turns}? DGC restores ${upTo ? "up to " : ""}${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
-      { modal: true, detail: prompt.trim().slice(0, 70) || wanted }, "Undo turn");
+      { modal: true, detail: (prompt.trim().slice(0, 70) || wanted) + also }, "Undo turn");
     if (choice !== "Undo turn") return;
     await this.runUndo(be, match.index);
   }
@@ -6363,8 +6395,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const conflicts = (Array.isArray(result?.conflicts) ? result.conflicts : [])
           .filter((row: any) => row && typeof row.path === "string" && row.path);
         if (!conflicts.length) {
+          // The CLI's reason reads as the rest of the sentence ("couldn't write ro/b.py (Permission denied)"),
+          // the same line the chat shows.
           void vscode.window.showErrorMessage(
-            `DGC could not undo the turn: ${result?.error || "it could not put the files back"}. `
+            `Undo stopped: ${result?.error || "the files couldn't be put back"}. `
             + "Nothing was changed, and the recovery point was kept.");
           return;
         }

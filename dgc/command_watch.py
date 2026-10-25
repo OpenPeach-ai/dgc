@@ -28,7 +28,9 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import threading
 import time
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +49,51 @@ _HASH_OWN = 16 * 1024 * 1024           # a file the turn's tools wrote is hashed
 _HASH_OWN_BUDGET = 64 * 1024 * 1024
 _SLOW_S = 2.0                          # a `git status` slower than this turns the Git part off
 _NO_CONVERSION = frozenset({"unspecified", "unset"})
+
+
+# ---- the person's own saves (from the editor) ----------------------------------------------------
+# The editor tells DGC when the person saves a file in the chat's folders (the `user_saved` command:
+# onWillSaveTextDocument and onDidSaveTextDocument). A file saved while one of this chat's commands ran
+# is the person's, whatever the clock says, and is never taken for the command's change. Process-wide:
+# a save is a fact about a file, whichever chat's command was running. A save that reaches DGC only
+# after the command was looked at takes back what that look recorded for the file (note_saves).
+# Without an editor (the terminal) there is nothing to tell DGC: attribution stays by time.
+_SAVE_SLACK_S = 2.0                    # a save this close to a command's start or end counts as during it
+_SAVES: "deque[tuple[str, float]]" = deque(maxlen=4096)
+_RECENT: "deque[Watch]" = deque(maxlen=64)
+_LOCK = threading.Lock()
+
+
+def _key(path) -> str:
+    try:
+        return os.path.realpath(os.path.expanduser(str(path)))
+    except (OSError, ValueError, TypeError):
+        return str(path)
+
+
+def _saved_between(path, start: float, end: float) -> bool:
+    key = _key(path)
+    with _LOCK:
+        return any(saved == key and start <= at <= end for saved, at in _SAVES)
+
+
+def note_saves(paths, at: float | None = None) -> int:
+    """The person saved these files (absolute paths) at `at` (seconds since the epoch; now when absent).
+
+    Kept for the watches that look later, and applied at once to a watch that already looked: whatever
+    it recorded for one of these files, inside its span, is taken back -- Git's copy out of the recovery
+    point, the "changed by a command" row off the card, DGC's own file not re-noted (so Undo asks)."""
+    when = float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else time.time()
+    keys = [_key(path) for path in paths if isinstance(path, str) and path][:256]
+    with _LOCK:
+        for key in keys:
+            _SAVES.append((key, when))
+        watches = list(_RECENT)
+    taken = 0
+    for watch in watches:
+        if watch.started - _SAVE_SLACK_S <= when <= (watch.ended or time.time()) + _SAVE_SLACK_S:
+            taken += watch.take_back(set(keys))
+    return taken
 
 
 @dataclass(frozen=True)
@@ -303,6 +350,10 @@ class Watch:
         self.before: dict[str, _Mark | None] = {}
         self.exclude: _Mark | None = None
         self.cost_s = 0.0
+        self.ended: float | None = None
+        # What this look recorded, so a save the editor reports late can take it back:
+        # (kind, path, point, snapshot, left before, mode before, row before).
+        self.records: list[tuple] = []
 
     # ---------------------------------------------------------------- before ---
     def begin(self) -> None:
@@ -347,16 +398,71 @@ class Watch:
             with self.manager.batch():
                 self._settle()
         finally:
+            self.ended = time.time()
+            with _LOCK:
+                _RECENT.append(self)
             self.cost_s += time.monotonic() - clock
             costs = self.agent.__dict__.setdefault("_command_watch_costs", [])
             costs.append(self.cost_s)
             del costs[:-200]
+
+    # What this look records, kept so a late save can take it back.
+    def _before_note(self, path: str) -> tuple:
+        key = str(Path(path))
+        return self.manager._left.get(key), self.manager._left_modes.get(key)
+
+    def _known(self, path: str, kind: str, data: bytes, mode: int) -> bool:
+        old = self._before_note(path)
+        if not self.manager.record_known(path, kind, data, mode, by_command=True):
+            return False
+        point = self.manager.points[-1]
+        self.manager.note_written(path)
+        self.records.append(("known", path, point, point["files"].get(path), *old, None))
+        return True
+
+    def _command(self, path: str, status: str) -> None:
+        point = self.manager.points[-1]
+        prior = (point.get("commands") or {}).get(path)
+        if self.manager.note_command_change(path, status):
+            self.records.append(("command", path, point, None, None, None, prior))
+
+    def _renote(self, path: str) -> None:
+        old = self._before_note(path)
+        self.manager.note_written(path)
+        self.records.append(("renote", path, None, None, *old, None))
+
+    def take_back(self, keys: set) -> int:
+        """Undo what this look recorded for files the person saved during its command."""
+        manager, taken = self.manager, 0
+        for kind, path, point, snapshot, left, mode, row in reversed(list(self.records)):
+            if _key(path) not in keys:
+                continue
+            if kind == "known":
+                if not manager.unrecord(point, path, snapshot):
+                    continue
+                manager.restore_left(path, left, mode)
+            elif kind == "command":
+                manager.restore_command_row(point, path, row)
+            else:
+                manager.restore_left(path, left, mode)
+            self.records = [record for record in self.records if record[1] != path]
+            taken += 1
+        if taken:
+            refresh = getattr(self.agent, "_refresh_turn_files", None)
+            if callable(refresh):
+                try:
+                    refresh(save=True)         # the card no longer lists it as the command's
+                except Exception:              # noqa: BLE001
+                    pass
+        return taken
 
     def _ours(self, path: Path) -> bool:
         """Did this change happen while one of this chat's commands ran, and no other chat's?
 
         Read from the inode's change time, which no tool can set back (`cp -p`, `tar x` and `rsync -a`
         keep an old modification time), or its folder's once the file is gone."""
+        if _saved_between(path, self.started - _SAVE_SLACK_S, time.time() + _SAVE_SLACK_S):
+            return False                       # the person saved it in the editor while this ran
         root = self.git[0] if self.git is not None else Path(self.manager.project_root)
         changed_at = None
         candidate = path
@@ -446,14 +552,14 @@ class Watch:
             if mark is not None and mark.digest is not None and left is not None and mark.digest != left:
                 if manager._mark_outside(manager.points[-1], path, "during"):
                     manager._notify()
-            manager.note_written(path)
+            self._renote(path)
             return
         status = "new" if mark is None else ("deleted" if not (target.exists() or target.is_symlink())
                                               else "modified")
-        manager.note_command_change(path, status)
+        self._command(path, status)
         if mark is not None and mark.digest is not None and left is not None and mark.digest == left:
             # It held exactly what DGC left in an earlier turn: the change is DGC's own command's.
-            manager.note_written(path)
+            self._renote(path)
 
     def _changed_clean(self, repo_paths: list[str], after: dict[str, str]) -> None:
         """Files Git did not list before the command: clean (Git's copy is their exact earlier
@@ -484,17 +590,15 @@ class Watch:
                     state = _FileState(kind, data, 0o755 if mode == "100755" else
                                        (0o777 if kind == "symlink" else 0o644))
                     restore_mode = helper_checkout._restore_mode(target, state)
-                    if manager.record_known(path, kind, data, restore_mode):
-                        manager.note_written(path)
+                    if self._known(path, kind, data, restore_mode):
                         continue
-                manager.note_command_change(path, "modified" if exists else "deleted")
+                self._command(path, "modified" if exists else "deleted")
                 continue
             if after.get(repo_path) == "?" and not rules_changed and exists:
-                if manager.record_known(path, "missing", b"", 0):
-                    manager.note_written(path)
+                if self._known(path, "missing", b"", 0):
                     continue
             if exists:
-                manager.note_command_change(path, "new")
+                self._command(path, "new")
 
 
 def begin(agent, name: str, args=None) -> Watch | None:

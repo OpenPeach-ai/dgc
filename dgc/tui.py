@@ -3765,13 +3765,21 @@ class TUI:
         prev, _recorded = info.get(idx, ("", 0))
         # What the rewind restores now, across that turn and every later one -- the number it reports
         # once it has run, not the files that one point happened to record.
+        from . import rewind_words
+        commanded: list[str] = []
         try:
-            nf = self.agent.checkpoints.changes(idx, limit=0)[1]
+            rows, nf = self.agent.checkpoints.changes(idx)
+            # Nothing is restored unseen: the files it puts back because a command changed them are named.
+            name = getattr(self.agent, "_turn_files_path", None)
+            commanded = [name(row["path"]) if callable(name) else str(row["path"])
+                         for row in rows if row.get("by_command")]
         except Exception:
             nf = _recorded
         header = [Text.from_markup(f"[bold]Rewind to:[/] {_esc(prev)}"),
                   Text.from_markup(f"[{th.warn}]Reverts {nf} file(s) and truncates the conversation. "
                                    f"This cannot be undone.[/]")]
+        if commanded:
+            header.append(Text(rewind_words.also_puts_back(commanded)))
         rows = [{"label": f"{glyphs.CHECK}  Rewind", "value": "yes"},
                 {"label": f"{glyphs.CROSS}  Cancel", "value": "no"}]
         self._open_overlay(rows, on_pick=lambda r: self._do_rewind(idx) if r["value"] == "yes" else None,

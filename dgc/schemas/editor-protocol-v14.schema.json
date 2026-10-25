@@ -11373,6 +11373,32 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "user_saved"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "paths": {
+              "type": "array"
+            },
+            "at": {
+              "type": "number",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "paths"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "undo_to"
             },
             "chat_id": {

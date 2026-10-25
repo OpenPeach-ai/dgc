@@ -491,7 +491,7 @@ class CheckpointManager:
             return False
         return True
 
-    def record_known(self, path: str, kind: str, data: bytes, mode: int) -> bool:
+    def record_known(self, path: str, kind: str, data: bytes, mode: int, *, by_command: bool = False) -> bool:
         """Save a path's state from BEFORE a change DGC learned of afterwards (once per file per turn).
 
         `record_file` reads the state off disk, which is right only before DGC's own write. A
@@ -526,7 +526,55 @@ class CheckpointManager:
             return False
         snapshot = _Snapshot(kind, data if kind != "missing" else b"",
                              0 if kind == "missing" else int(mode))
-        return self._keep(self.points[-1], path, snapshot)
+        point = self.points[-1]
+        if by_command:
+            # Put back by Undo because one of this chat's commands changed it: Undo's question names it.
+            point.setdefault("by_command", [])
+            if path not in point["by_command"]:
+                point["by_command"].append(path)
+        if not self._keep(point, path, snapshot):
+            if by_command and path in point.get("by_command", ()):
+                point["by_command"].remove(path)
+            return False
+        return True
+
+    def unrecord(self, point: dict, path: str, snapshot) -> bool:
+        """Take back a before-state recorded after the fact (record_known) when it turns out the change
+        was not this chat's -- the person saved the file in the editor while the command ran. Only that
+        very capture, in a point still held; the session is saved again."""
+        if (self._pending_rewind is not None or not any(point is held for held in self.points)
+                or point["files"].get(path) is not snapshot):
+            return False
+        point["files"].pop(path, None)
+        self._snapshot_bytes_total -= len(getattr(snapshot, "data", b"") or b"")
+        if path in (point.get("by_command") or ()):
+            point["by_command"].remove(path)
+        (point.get("outside") or {}).pop(path, None)
+        self._notify()
+        return True
+
+    def restore_command_row(self, point: dict, path: str, status: str | None) -> None:
+        """Put a point's "changed by a command" row for `path` back to `status` (None: no row)."""
+        if not any(point is held for held in self.points):
+            return
+        changed = point.setdefault("commands", {})
+        if status is None:
+            changed.pop(path, None)
+        else:
+            changed[path] = status
+        self._notify()
+
+    def restore_left(self, path: str, digest: str | None, mode: int | None) -> None:
+        """Put back what DGC knew it had left in `path` before a note that turned out to be wrong."""
+        key = str(Path(path))
+        if digest is None:
+            self._left.pop(key, None)
+        else:
+            self._left[key] = digest
+        if mode is None:
+            self._left_modes.pop(key, None)
+        else:
+            self._left_modes[key] = mode
 
     def note_command_change(self, path: str, status: str) -> bool:
         """A file one of this chat's commands changed that Undo cannot put back.
@@ -674,10 +722,15 @@ class CheckpointManager:
             return [], 0
         from .workspace_changes import MAX_DIFF_BYTES, _counts
         earliest: dict[str, object] = {}
+        by_command: set[str] = set()
         for point in list(self.points[start:]):
             # A copy: an Undo question can ask while a turn on another thread records into the point.
+            commanded = set(point.get("by_command") or ())
             for path, prior in list(point["files"].items()):
-                earliest.setdefault(path, prior)
+                if path not in earliest:
+                    earliest[path] = prior
+                    if path in commanded:
+                        by_command.add(path)
         rows: list[dict] = []
         total = 0
         deadline = time.monotonic() + max(0.0, budget_s)
@@ -720,6 +773,8 @@ class CheckpointManager:
                    "counted": counted, "status": status}
             if self._lexical_project_path(path) is None:
                 row["outside"] = True
+            if path in by_command:
+                row["by_command"] = True       # Undo puts back Git's copy of it: a command changed it
             rows.append(row)
         if commands:
             for path, status in self._command_changes(start, earliest).items():
@@ -858,14 +913,14 @@ class CheckpointManager:
             if ((durable and not lexical_inside)
                     or (lexical_inside and self._relative_project_path(path) is None)):
                 self.last_rewind_error = (f"{self._display(path)} now leads outside the project "
-                                          "through a link, so DGC will not write it")
+                                          "through a link")
                 return (-1, 0, None)
             try:
                 rollback[path] = _capture(
                     Path(path), _MAX_SNAPSHOT_BYTES - rollback_bytes)
                 rollback_bytes += len(rollback[path].data)
             except (OSError, ValueError) as exc:
-                self.last_rewind_error = f"DGC could not read {self._display(path)}: {_why(exc)}"
+                self.last_rewind_error = f"couldn't read {self._display(path)} ({_why(exc)})"
                 return (-1, 0, None)
 
         applied: list[str] = []
@@ -890,9 +945,7 @@ class CheckpointManager:
                         _restore(Path(changed), rollback[changed])
                     except (OSError, ValueError):
                         pass
-                self.last_rewind_error = (f"DGC could not write {self._display(path)}: {_why(exc)}"
-                                          + ("; the files it had already put back are as they were"
-                                             if applied else ""))
+                self.last_rewind_error = f"couldn't write {self._display(path)} ({_why(exc)})"
                 return (-1, 0, None)
         # The folders DGC's own writes created in those turns, now empty again: removed, deepest
         # first. Only an empty folder goes (rmdir refuses anything else), never through a link.
@@ -1069,6 +1122,10 @@ class CheckpointManager:
                     commands[relative] = status
             made = [folder for folder in (point.get("made_dirs") or ())
                     if isinstance(folder, str) and self._project_path(folder) is not None]
+            commanded = [relative for path in (point.get("by_command") or ())
+                         if (relative := self._lexical_project_path(path)) in files]
+            if commanded:
+                durable["by_command"] = commanded
             if outside:
                 durable["outside"] = outside
             if commands:
@@ -1222,10 +1279,18 @@ class CheckpointManager:
         outside = raw_point.get("outside", {})
         commands = raw_point.get("commands", {})
         made = raw_point.get("made_dirs", [])
+        commanded = raw_point.get("by_command", [])
         if (not isinstance(outside, dict) or not isinstance(commands, dict) or not isinstance(made, list)
+                or not isinstance(commanded, list)
                 or len(outside) > _MAX_FILES_PER_POINT or len(commands) > _MAX_FILES_PER_POINT
-                or len(made) > _MAX_FILES_PER_POINT):
+                or len(made) > _MAX_FILES_PER_POINT or len(commanded) > _MAX_FILES_PER_POINT):
             return None
+        by_command = []
+        for relative in commanded:
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if path is None or str(path) not in files:
+                return None
+            by_command.append(str(path))
         marks = {}
         for relative, when in outside.items():
             path = self._project_path(relative) if isinstance(relative, str) else None
@@ -1249,4 +1314,6 @@ class CheckpointManager:
             extras["commands"] = changed
         if folders:
             extras["made_dirs"] = folders
+        if by_command:
+            extras["by_command"] = by_command
         return extras

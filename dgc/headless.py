@@ -220,6 +220,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
+    # The person saved a file in the editor: a fact for the command watch, not the person acting on the chat.
+    "user_saved",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
     # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
@@ -906,12 +908,14 @@ def _history_turn_files(value) -> dict | None:
                 or not isinstance(row.get("counted"), bool)):
             return None
         if (row.get("outside", False) not in (True, False) or row.get("undoable", True) not in (True, False)
-                or row.get("command", False) not in (True, False)):
+                or row.get("command", False) not in (True, False)
+                or row.get("by_command", False) not in (True, False)):
             return None
         files.append({"path": path, "additions": additions, "deletions": deletions,
                       "counted": row["counted"], "status": status,
                       **({"outside": True} if row.get("outside") is True else {}),
-                      **({"command": True} if row.get("command") is True else {})})
+                      **({"command": True} if row.get("command") is True else {}),
+                      **({"by_command": True} if row.get("by_command") is True else {})})
     total = count(value.get("total"))
     out = {"files": files, "total": max(total if total is not None else 0, len(files))}
     index, preview = count(value.get("checkpoint_index")), value.get("checkpoint_preview")
@@ -2495,6 +2499,9 @@ class Backend:
                           # it stopped (whose changes, or what failed), what commands changed that it left,
                           # and which background helpers it stopped; `overwrite` is Undo anyway.
                           "undo_to": 1,
+                          # user_saved {paths, at}: the person's saves in the editor, so a file saved
+                          # while a command ran is never taken for the command's change.
+                          "user_saved": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -7603,6 +7610,10 @@ class Backend:
             except Exception:                    # noqa: BLE001 -- an unreadable point answers 0, never a crash
                 files = 0
             self.em.emit("rewind_preview", index=index, files=files, request_id=str(cmd["request_id"]))
+        elif t == "user_saved":
+            from . import command_watch
+            command_watch.note_saves([str(path) for path in (cmd.get("paths") or []) if isinstance(path, str)],
+                                     cmd.get("at"))
         elif t in ("rewind", "undo_to"):
             agents_before = self._agents_total()
             index = int(cmd.get("index", -1))
@@ -9306,6 +9317,15 @@ class Host:
             return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if kind in ("list_live_sessions", "stop_live_session"):
             return self._live_sessions(cmd)
+        if kind == "user_saved":
+            # The process's: a save is a fact about a file, whichever chat's command was running.
+            problem = command_error(cmd)
+            if problem:
+                return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+            from . import command_watch
+            command_watch.note_saves([str(path) for path in (cmd.get("paths") or []) if isinstance(path, str)],
+                                     cmd.get("at"))
+            return
         if isinstance(kind, str) and kind.startswith("voice_"):
             # The process's too: the same voice models in every folder (dgc/voice).
             problem = command_error(cmd)

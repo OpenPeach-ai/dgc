@@ -1407,6 +1407,15 @@ class CLI:
                     n = restores(index, nf)
                     labels.append(f"{prev}  [{n} file{'' if n == 1 else 's'}]")
                 mi = select("Rewind to (restores code + conversation)", labels)
+                if mi is not None:
+                    try:
+                        rows, _n = self.agent.checkpoints.changes(pts[mi][0])
+                        commanded = [self.agent._turn_files_path(row["path"]) for row in rows
+                                     if row.get("by_command")]
+                    except Exception:
+                        commanded = []
+                    if commanded:
+                        self.ui.info(rewind_words.also_puts_back(commanded))
                 overwrite = None
                 while mi is not None:
                     msgs, nfiles = self.agent.rewind(pts[mi][0], overwrite=overwrite)

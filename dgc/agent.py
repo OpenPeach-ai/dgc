@@ -10070,7 +10070,7 @@ class Agent(GoalLifecycle):
                         say(rewind_words.refused([row["path"] for row in outcome["conflicts"]]))
                     else:
                         outcome["error"] = (getattr(self.checkpoints, "last_rewind_error", "")
-                                            or "DGC could not put the files back")
+                                            or "the files couldn't be put back")
                         say(rewind_words.failed(outcome["error"]))
                     return (-1, 0)
                 rewind_pending = True
@@ -10090,7 +10090,7 @@ class Agent(GoalLifecycle):
                     self.messages = old_messages
                     self.checkpoints.rollback_rewind()
                     rewind_pending = False
-                    outcome["error"] = ("the session could not be saved"
+                    outcome["error"] = ("the session couldn't be saved"
                                         + (f" ({self._last_persist_error})" if self._last_persist_error else ""))
                     say(rewind_words.failed(outcome["error"]))
                     return (-1, 0)

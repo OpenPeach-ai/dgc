@@ -1103,6 +1103,17 @@ EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I
 # turns were stopped. `overwrite`: files a refusal named whose changes the person agreed to lose (Undo
 # anyway, asked only after that refusal); the rewind goes ahead when those are its only conflicts, and
 # stops and names them all again when there is another.
+#
+# The person's own saves (0.48). Advertised as ready.capabilities.user_saved = 1. `user_saved {paths, at?}`
+# says the person saved these files (absolute paths, at most 256) in the editor, `at` seconds since the
+# epoch (now when absent); the editor sends it from onWillSaveTextDocument and onDidSaveTextDocument for
+# files in the chat's folders. Nothing answers it. A file saved while one of the chat's commands ran is
+# the person's change, never the command's: it is not put in the recovery point and not listed on the
+# Edited card as the command's, and a save reported after the command was looked at takes that back.
+#
+# A turn_files row may also carry `by_command: true`: a file one of the turn's commands changed that Undo
+# DOES put back (Git's copy of a clean file, or a file the command created); Undo's question names them.
+COMMAND_FIELDS["user_saved"] = {"paths": _A(), "at": _N(False)}
 COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "request_id": _S()}
 EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "files_restored": _I(),
                                "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False)}

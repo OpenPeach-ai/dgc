@@ -4108,10 +4108,27 @@
     // With the CLI's card, Undo's question names the card's count (`exact`) -- the files Undo can put back -- and finds
     // the recovery point the CLI named. `later`: the turns after this one in the chat, which the rewind takes back too.
     const undoable = many - files.filter(([, v]) => v.undoable === false || v.command).length;
-    card.querySelector(".ts-undo").onclick = () => vscode.postMessage({
-      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path), later: laterTurns(card),
-      ...(cli ? { exact: true, total: undoable, checkpoint: cli.checkpoint } : {}) });
+    // The files Undo puts back from Git because a command changed them (`by_command`): its question names them.
+    card._byCommand = files.filter(([, v]) => v.byCommand).map(([path]) => path);
+    card.querySelector(".ts-undo").onclick = () => {
+      const byCommand = commandRestores(card);
+      vscode.postMessage({
+        type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path), later: laterTurns(card),
+        ...(cli ? { exact: true, total: undoable, checkpoint: cli.checkpoint } : {}),
+        ...(byCommand.length ? { byCommand } : {}) });
+    };
     return card;
+  }
+  // What Undo on this card puts back from Git because a command changed it, across this turn and every later one (the
+  // rewind takes them all back), each named once.
+  function commandRestores(card) {
+    const cards = [...log.querySelectorAll(".turn-summary")];
+    const at = cards.indexOf(card);
+    const names = [];
+    for (const each of at < 0 ? [card] : cards.slice(at)) {
+      for (const name of each._byCommand || []) if (!names.includes(name)) names.push(name);
+    }
+    return names;
   }
   // How many turns follow the one this card belongs to in the chat: Undo rewinds the conversation to just before its
   // prompt, so every one of them goes too.
@@ -4141,7 +4158,8 @@
       edits.set(path, { additions: Number(f.additions) || 0, deletions: Number(f.deletions) || 0,
                         counted: f.counted === true, status: String(f.status || "modified"),
                         ...(f.undoable === false ? { undoable: false } : {}),
-                        ...(f.command === true ? { command: true } : {}) });
+                        ...(f.command === true ? { command: true } : {}),
+                        ...(f.by_command === true ? { byCommand: true } : {}) });
     }
     const checkpoint = Number.isInteger(ev.checkpoint_index) && typeof ev.checkpoint_preview === "string"
       ? { index: ev.checkpoint_index, preview: ev.checkpoint_preview } : null;

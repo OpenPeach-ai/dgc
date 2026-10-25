@@ -7,8 +7,13 @@
     files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the version from
     before this turn and loses those changes." **Keep my changes** is the default; **Undo anyway** goes ahead for
     exactly those files.
-  - An Undo that stops for any other reason says why: "DGC could not undo the turn: DGC could not write ro/b.py:
-    Permission denied. Nothing was changed, and the recovery point was kept."
+  - An Undo that stops for any other reason says why, in the same words as the chat: "Undo stopped: couldn't write
+    ro/b.py (Permission denied). Nothing was changed, and the recovery point was kept."
+  - **Your saves are yours.** DGC hears the files you save in the chat's folders (a new `user_saved` command, sent
+    only to a CLI that offers it), so a file you save while one of DGC's commands runs, a long test run say, is never
+    taken for the command's change: Undo leaves your edit as it is.
+  - **Nothing is put back unseen.** Undo's question names the files it puts back from Git because a command changed
+    them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more").
   - The Edited card marks a file one of the turn's commands changed that Undo can't put back as **Changed by a
     command — Undo leaves it**, Undo's question leaves it out of its count, and the line after an Undo says how many:
     "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is." A clean file a command changed or

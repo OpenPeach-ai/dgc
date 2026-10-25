@@ -39,6 +39,16 @@ def anyway_question(paths) -> str:
             "this turn and loses those changes.")
 
 
+def also_puts_back(paths, shown: int = 5) -> str:
+    """Undo's question, about the files it restores from Git because one of the turns' commands changed
+    them: "Also puts back 2 files a command changed: rates.py, README.md." Nothing is restored unseen."""
+    paths = [str(path) for path in paths]
+    if not paths:
+        return ""
+    named = ", ".join(paths[:shown]) + (f" and {len(paths) - shown} more" if len(paths) > shown else "")
+    return f"Also puts back {files(len(paths))} a command changed: {named}."
+
+
 def failed(error: str) -> str:
     """The chat line when Undo stops for any other reason."""
     return f"Undo stopped: {error}. Nothing was changed, and the recovery point was kept."

@@ -54,12 +54,39 @@ test("a file a command changed that Undo can't put back says so on the card, and
   assert.deepEqual(v.errors, []);
 });
 
+test("Undo names what it puts back from Git because a command changed it, across this turn and the later ones", () => {
+  const v = makeDom();
+  v.send({ type: "event", event: READY });
+  const turn = (id, files) => {
+    const event = (d) => v.send({ type: "event", event: d });
+    event({ type: "turn_start", turn_id: id, prompt: `turn ${id}`, kind: "prompt" });
+    event({ type: "text_delta", text: "Done." });
+    event({ type: "stream_end", message_id: `${id}:1`, phase: "answer" });
+    event({ type: "turn_files", turn_id: id, files, total: files.length, checkpoint_index: id === "t1" ? 0 : 1,
+            checkpoint_preview: `turn ${id}` });
+    event({ type: "turn_end", turn_id: id, reason: "completed", final_message_id: `${id}:1` });
+  };
+  turn("t1", [{ path: "src/a.py", additions: 1, deletions: 1, counted: true, status: "modified" },
+              { path: "rates.py", additions: 1, deletions: 1, counted: true, status: "modified", by_command: true }]);
+  turn("t2", [{ path: "README.md", additions: 2, deletions: 0, counted: true, status: "modified", by_command: true },
+              { path: "rates.py", additions: 1, deletions: 1, counted: true, status: "modified", by_command: true }]);
+  const [first, second] = [...v.doc.querySelectorAll(".turn-summary")];
+  first.querySelector(".ts-undo").click();
+  assert.deepEqual(JSON.parse(JSON.stringify(v.posted.at(-1))).byCommand, ["rates.py", "README.md"],
+    "the first turn's Undo takes the later turn back too, each file named once");
+  second.querySelector(".ts-undo").click();
+  assert.deepEqual(JSON.parse(JSON.stringify(v.posted.at(-1))).byCommand, ["README.md", "rates.py"]);
+  assert.deepEqual(v.errors, []);
+});
+
 // ---- the extension ----
 const here = dirname(fileURLToPath(import.meta.url));
 const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-undo-anyway-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 const said = [];
 const answers = [];
+const saveListeners = { did: [], will: [] };
+const listen = (list) => (fn) => { list.push(fn); return { dispose() {} }; };
 globalThis.__DGC_TEST_VSCODE = {
   Uri: {}, env: {}, commands: {},
   languages: { getDiagnostics: () => [] },
@@ -76,6 +103,8 @@ globalThis.__DGC_TEST_VSCODE = {
     showInformationMessage: async (message) => { said.push({ kind: "info", message: String(message) }); },
   },
   workspace: { isTrusted: true, workspaceFolders: [{ uri: { fsPath: scratch } }],
+               onDidSaveTextDocument: listen(saveListeners.did), onWillSaveTextDocument: listen(saveListeners.will),
+               getWorkspaceFolder: (uri) => (String(uri.fsPath).startsWith(scratch) ? { uri: { fsPath: scratch } } : undefined),
                getConfiguration: () => ({ get: (_key, fallback) => fallback, inspect: () => undefined, update: async () => {} }) },
 };
 const bundle = join(scratch, "panel.cjs");
@@ -138,10 +167,11 @@ test("Undo anyway sends the same rewind with exactly those files, and its line s
 test("an Undo that stops for any other reason says why", async () => {
   said.length = 0; answers.length = 0; answers.push("Undo turn");
   const { p } = provider([{ ok: false, files_restored: 0, conflicts: [], left: [], stopped: 0,
-                            error: "DGC could not write ro/b.py: Permission denied" }]);
+                            error: "couldn't write ro/b.py (Permission denied)" }]);
   await undoTurn(p);
-  assert.deepEqual(said.at(-1), { kind: "error", message: "DGC could not undo the turn: DGC could not write ro/b.py: "
-    + "Permission denied. Nothing was changed, and the recovery point was kept." });
+  // Read once, the same line the chat shows (it was "DGC could not undo the turn: DGC could not write ...").
+  assert.deepEqual(said.at(-1), { kind: "error", message: "Undo stopped: couldn't write ro/b.py (Permission denied). "
+    + "Nothing was changed, and the recovery point was kept." });
 });
 
 test("one file left by a command, and none", async () => {
@@ -152,6 +182,44 @@ test("one file left by a command, and none", async () => {
   assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file. 1 file changed by a command was left as it is.");
   await undoTurn(p);
   assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file.");
+});
+
+test("the question names the files Undo puts back from Git because a command changed them, five at most", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo turn", "Undo turn");
+  const { p } = provider([{ ok: true, files_restored: 3, conflicts: [], left: [], stopped: 0 },
+                          { ok: true, files_restored: 9, conflicts: [], left: [], stopped: 0 }]);
+  await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 3,
+                      checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["rates.py", "README.md"] });
+  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 2 files a command changed: rates.py, README.md.");
+  await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 9,
+                      checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["a", "b", "c", "d", "e", "f", "g"] });
+  assert.match(said.at(-2).options.detail, /Also puts back 7 files a command changed: a, b, c, d, e and 2 more\.$/);
+});
+
+test("the person's saves in the window's folders go to a CLI that offers user_saved, before and after the save", async () => {
+  const sent = [];
+  const make = (capabilities) => {
+    const p = new DgcViewProvider({
+      extension: { packageJSON: { version: "0.32.0", dgcCliVersion: "0.48.0" } }, extensionUri: { fsPath: "/ext" },
+      subscriptions: [], globalState: { get() {}, async update() {} }, workspaceState: { get() {}, async update() {} } });
+    p.backend = { ready: true, send(cmd) { sent.push(JSON.parse(JSON.stringify(cmd))); return true; }, dispose() {} };
+    p.lastReadyEvent = { type: "ready", capabilities };
+    return p;
+  };
+  saveListeners.did.length = 0; saveListeners.will.length = 0;
+  make({ user_saved: 1 });
+  const doc = (fsPath, scheme = "file") => ({ uri: { fsPath, scheme } });
+  for (const fn of saveListeners.will) fn({ document: doc(join(scratch, "README.md")) });
+  for (const fn of saveListeners.did) fn(doc(join(scratch, "README.md")));
+  for (const fn of saveListeners.did) fn(doc("/elsewhere/notes.md"));                 // not the chat's folders
+  for (const fn of saveListeners.did) fn(doc(join(scratch, "x.md"), "untitled"));     // not a file
+  assert.deepEqual(sent.map((cmd) => [cmd.type, cmd.paths]),
+                   [["user_saved", [join(scratch, "README.md")]], ["user_saved", [join(scratch, "README.md")]]]);
+  assert.ok(sent.every((cmd) => typeof cmd.at === "number" && Math.abs(cmd.at - Date.now() / 1000) < 60));
+  sent.length = 0; saveListeners.did.length = 0; saveListeners.will.length = 0;
+  make({ undo_to: 1 });                                                                 // an older CLI
+  for (const fn of saveListeners.did) fn(doc(join(scratch, "README.md")));
+  assert.deepEqual(sent, [], "a CLI that doesn't offer it is never sent one");
 });
 
 test("an older CLI is sent rewind, as before", async () => {

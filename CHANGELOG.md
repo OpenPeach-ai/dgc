@@ -26,6 +26,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     after an Undo the line says so: "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is."
     The look costs about 15-25 ms per command in an ordinary project and about 80 ms in a 10,000-file one (two `git
     status` calls against a private copy of the index; your own `.git/index` is never written).
+  - **Your saves are yours.** Which change is a command's is told by when it happened. In the editor DGC now also
+    hears every file you save in the chat's folders (a new command, `user_saved {paths, at}`, offered as
+    `ready.capabilities.user_saved`), so a file you save while a command runs, a 3-minute test run say, is never taken
+    for the command's change, is not put back by Undo and is not listed as the command's, even when the save reaches
+    DGC just after the command ended. In the terminal it stays by time.
+  - **Nothing is put back unseen.** Undo's question names the files it restores from Git because a command changed
+    them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more"), in the
+    editor and in `/rewind`. A `turn_files` row marks them `by_command: true`.
   - **DGC's own command or formatter no longer locks Undo.** A `sed -i`, `black` or formatting hook after one of DGC's
     edits made every Undo of that turn refuse as "changed outside this chat". It is DGC's own work now, and Undo
     restores the turn.
@@ -34,7 +42,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - **A helper's write outside its own copy is guarded too.** It was recorded but not watched, so Undo overwrote your
     later edit to that file without a word.
   - **The smaller ones:** a `chmod` after DGC wrote a file stops an Undo instead of being reverted; a rewind that
-    fails says which file and why ("DGC could not write ro/b.py: Permission denied"); `/rewind` in the full-screen
+    fails says which file and why ("Undo stopped: couldn't write ro/b.py (Permission denied). Nothing was changed, and
+    the recovery point was kept."); `/rewind` in the full-screen
     terminal names the files it really restores across the later turns; an empty folder DGC's own write created goes
     with the file; a second Undo right after a first one is no longer refused over DGC's own restore; and what DGC
     left in each file is saved for every file a recovery point holds, not just the last 4,096.
