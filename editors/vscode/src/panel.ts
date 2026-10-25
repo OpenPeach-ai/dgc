@@ -2720,8 +2720,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async reviewWorkspaceChange(identity: string, chat = false): Promise<void> {
     const matches = (chat ? this.chatChanges : this.workspaceChanges).filter(item => item.id === identity || item.displayPath === identity);
     const change = matches.length === 1 ? matches[0] : undefined;
-    // A file on the Edited card that the chat's change set has not recorded (a background helper that integrated
-    // while the chat was idle) still opens a diff: the workspace's, against the last commit.
+    // A file on the Edited card that the chat's change set never recorded (its bounded scan stopped short, or a chat
+    // saved before DGC recorded a helper's idle integration there) still opens a diff: the workspace's, against the
+    // last commit.
     if (!change && chat && this.workspaceChanges.some(item => item.id === identity || item.displayPath === identity)) {
       return this.reviewWorkspaceChange(identity, false);
     }
@@ -3898,7 +3899,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "error" && (ev as any).extension_outdated && !this.tab) {
       void checkForExtensionUpdates(this.context, true);
     }
-    if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
+    // turn_files too: a background helper that integrated while the chat was idle is in the chat's changes by then.
+    if (["tool_result", "turn_end", "turn_files", "rewound", "session"].includes(ev.type)) {
       this.scheduleWorkspaceChanges(ev.type === "tool_result" ? 120 : 0);
     }
     if (ev.type === "image") {
@@ -4878,7 +4880,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                             msg.exact === true ? { total: Number(msg.total) || 0,
                                                    index: Number.isInteger(msg.checkpoint?.index) ? msg.checkpoint.index : undefined,
                                                    preview: typeof msg.checkpoint?.preview === "string" ? msg.checkpoint.preview : undefined }
-                              : undefined);
+                              : undefined,
+                            Number.isInteger(msg.later) && msg.later > 0 ? msg.later : 0);
         break;
       case "branchChat":
         await this.branchChat(String(msg.prompt || ""));
@@ -6258,9 +6261,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * and the question never disagree, and the point is the one the CLI named -- its index when that
    * point still has the preview it named, else the last point with that preview (a wake or resumed
    * turn's point is labelled with what DGC sent the model, not with what the chat shows).
+   *
+   * `later`: how many turns follow this one in the chat. The rewind takes them all back, and their
+   * files with them, so for an older turn the question says how many and names the true number of
+   * files restored across all of them -- what the CLI reports afterwards (rewind_preview), or, from a
+   * CLI that cannot say, an upper bound ("up to"): it never understates. The newest turn's question
+   * is the card's own count, unchanged.
    */
   async undoTurn(prompt: string, files: string[],
-                 counted?: { total: number; index?: number; preview?: string }): Promise<void> {
+                 counted?: { total: number; index?: number; preview?: string }, later = 0): Promise<void> {
     const be = this.ensureBackend();
     let items: any[] = [];
     try {
@@ -6288,9 +6297,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         + "Open Review to see the changes and revert the ones you want.");
       return;
     }
-    const count = counted ? Math.max(counted.total, files.length) : (Number(match.files) || files.length);
+    const indexes = items.map((item) => item?.index).filter((index) => Number.isInteger(index));
+    const newest = later === 0 && match.index === Math.max(...indexes);
+    let count = counted ? counted.total : (Number(match.files) || files.length);
+    let upTo = false;
+    if (!newest) {
+      let restores: number | undefined;
+      if ((this.lastReadyEvent?.capabilities as any)?.rewind_preview === 1) {
+        try {
+          const answer = await this.requestState(
+            be, "rewind-preview", { type: "rewind_preview", index: match.index }, "rewind_preview", 5000);
+          if (Number.isInteger(answer?.files) && answer.index === match.index) restores = answer.files;
+        } catch { /* the bound below, then */ }
+      }
+      if (restores === undefined) {
+        // Every file any of those recovery points recorded: never fewer than the rewind restores.
+        count = items.filter((item) => Number.isInteger(item?.index) && item.index >= match.index)
+          .reduce((sum, item) => sum + (Number(item.files) || 0), 0);
+        upTo = true;
+      } else count = restores;
+    }
+    const turns = later === 0 ? "this turn"
+      : later === 1 ? "this turn and the turn after it" : `this turn and the ${later} turns after it`;
     const choice = await vscode.window.showWarningMessage(
-      `Undo this turn? DGC restores ${count} file${count === 1 ? "" : "s"} and rewinds the `
+      `Undo ${turns}? DGC restores ${upTo ? "up to " : ""}${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
       { modal: true, detail: prompt.trim().slice(0, 70) || wanted }, "Undo turn");
     if (choice !== "Undo turn") return;

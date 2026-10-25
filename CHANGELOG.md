@@ -19,6 +19,23 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   new event, `turn_files`, sent before `turn_end` once they send `watch_turn_files` (offered as
   `ready.capabilities.turn_files`); with an older editor nothing changes.
 
+- **The Edited card and Undo, four more cases.**
+  - **A helper that finishes while the chat is idle is in the chat's changes.** Its files go into the bar under the
+    chat like any other change, and a row on the card opens their real diff, now and in a reopened chat. The bar used
+    to leave them out.
+  - **Undo on an older turn's card says what it will really do.** It rewinds that turn and every turn after it, but
+    the question named only that card's files. It now says, for example, "Undo this turn and the 2 turns after it?
+    DGC restores 5 files and rewinds the conversation to just before this prompt.", with the number of files the
+    rewind restores across all of them (the number it reports afterwards). Editors get it from a new command,
+    `rewind_preview {index}`, answered by a `rewind_preview` event (`files`; offered as
+    `ready.capabilities.rewind_preview`). The newest turn's question is unchanged.
+  - **A file outside the project, after a restart.** DGC keeps what such a file held before a turn only while the
+    session that changed it runs, and never saves it (a later session must not gain authority outside the project from
+    a transcript). A reopened card now marks it "Can't undo", and Undo's question leaves it out of its count, so both
+    say what Undo can really put back.
+  - **A card redrawn after the window was reloaded.** When a background helper lands in an earlier turn's recovery
+    point, that turn's card is redrawn even if the window was reloaded since and drew the card from history.
+
 - **Undo on the Edited card works while files are open in the editor.** With any file open in an editor tab, Undo
   said "DGC can no longer undo that turn — its recovery point has been used or pruned", although it had not been. The
   turn's recovery point was named after the open-files note the extension puts ahead of the prompt, so Undo, which

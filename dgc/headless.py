@@ -219,7 +219,7 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "get_chat_changes", "get_chat_change", "get_workspace_changes", "get_workspace_change",
     "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
-    "get_recall", "list_sessions", "list_checkpoints", "list_retained_tasks", "list_artifacts",
+    "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
     "list_agents", "get_image", "list_troupes", "stop_troupe",
     # The window a vLLM, SGLang or llama.cpp server was started with: asked once, then sent as it changes.
@@ -905,8 +905,11 @@ def _history_turn_files(value) -> dict | None:
                 or status not in _TURN_FILE_STATUSES or additions is None or deletions is None
                 or not isinstance(row.get("counted"), bool)):
             return None
+        if row.get("outside", False) not in (True, False) or row.get("undoable", True) not in (True, False):
+            return None
         files.append({"path": path, "additions": additions, "deletions": deletions,
-                      "counted": row["counted"], "status": status})
+                      "counted": row["counted"], "status": status,
+                      **({"outside": True} if row.get("outside") is True else {})})
     total = count(value.get("total"))
     out = {"files": files, "total": max(total if total is not None else 0, len(files))}
     index, preview = count(value.get("checkpoint_index")), value.get("checkpoint_preview")
@@ -2483,6 +2486,9 @@ class Backend:
                           # The Edited card lists what the turn's recovery point restores, counted here:
                           # once the client sends watch_turn_files, a turn_files before each turn_end.
                           "turn_files": 1,
+                          # rewind_preview {index}: how many files a rewind to that point restores now, for
+                          # the Undo question on an older turn's card (it takes back every turn after it too).
+                          "rewind_preview": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -3841,6 +3847,30 @@ class Backend:
         if getattr(self, "_turn_files_on", False):
             self.em.emit("turn_files", turn_id=tid, **view)
 
+    def _history_turn_files_undoable(self, card: dict) -> dict:
+        """A saved card as Undo can act on it now. A file outside the project keeps its before-state
+        only in the process that changed it (it is never saved: a later process must not gain
+        authority outside the project from a transcript), so after a restart Undo leaves it as it is:
+        its row says `undoable: false` and the Undo question's count leaves it out."""
+        rows = card.get("files") or []
+        if not any(row.get("outside") for row in rows):
+            return card
+        held = set()
+        agent = getattr(self, "agent", None)
+        manager = getattr(agent, "checkpoints", None)
+        points = list(getattr(manager, "points", None) or [])
+        index, preview = card.get("checkpoint_index"), card.get("checkpoint_preview")
+        name = getattr(agent, "_turn_files_path", None)
+        if (callable(name) and isinstance(index, int) and 0 <= index < len(points)
+                and points[index].get("preview") == preview):
+            for point in points[index:]:
+                for path in list(point.get("files") or {}):
+                    if manager._lexical_project_path(path) is None:
+                        held.add(name(path))
+        return {**card, "files": [{**row, "undoable": False}
+                                  if row.get("outside") and row["path"] not in held else row
+                                  for row in rows]}
+
     def _on_turn_files(self, record: dict) -> None:
         """An earlier turn's recovery point grew after it ended: its card is redrawn (Agent
         _refresh_turn_files). A record whose turn_end has not been published yet needs nothing:
@@ -5126,7 +5156,8 @@ class Backend:
             if files is not None:
                 # What its Edited card listed, as the CLI counted it when the turn ended (saved on
                 # its last message): a reopened chat shows the same files and the same counts.
-                items.append({"type": "turn_files", "turn_id": turn["id"], **files})
+                items.append({"type": "turn_files", "turn_id": turn["id"],
+                              **self._history_turn_files_undoable(files)})
             if turn["written_at"] is not None:
                 # When its last reply was written: the panel shows it on the answer, and with the prompt's
                 # time, how long the turn worked. A marker, not an event, as a turn_start field would be.
@@ -7554,6 +7585,15 @@ class Backend:
             items = [{"index": i, "preview": p, "files": nf}
                      for (i, p, nf) in self.agent.checkpoints.listing()]
             self.em.emit("checkpoints", items=items, **_request_fields(request_id))
+        elif t == "rewind_preview":
+            # What Undo on a card would restore: every file a rewind to this point changes now, across
+            # this turn and every later one -- the number the rewind reports once it has run.
+            index = cmd.get("index")
+            try:
+                _rows, files = self.agent.checkpoints.changes(index, limit=0)
+            except Exception:                    # noqa: BLE001 -- an unreadable point answers 0, never a crash
+                files = 0
+            self.em.emit("rewind_preview", index=index, files=files, request_id=str(cmd["request_id"]))
         elif t == "rewind":
             agents_before = self._agents_total()
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))

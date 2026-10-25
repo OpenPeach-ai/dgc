@@ -2071,7 +2071,11 @@ files that rewind puts back, with the lines added and removed, counted from the 
 was in before the turn: DGC's own edits and a helper's integrated files alike, however the helper
 changed them. A file edited and then put back as it was is not listed, and Undo's question names
 the same number of files as the card. A helper that finishes in the background while the chat is
-idle lands in the recovery point of the turn that last ended, and that turn's card shows it. A
+idle lands in the recovery point of the turn that last ended, and that turn's card shows it; the
+changes bar counts it too. Undo on an older turn's card also takes back every turn after it, and
+its question says so: how many later turns, and how many files the rewind restores across all of
+them. A file outside the project can be put back only by the session that changed it (its earlier
+version is never saved); a reopened card marks it "Can't undo" and Undo's count leaves it out. A
 turn that changed no files shows no card — use `/rewind`. If no remaining point was opened by that prompt, Undo
 declines rather than guess; if the same prompt opened more than one point, it takes the most
 recent one — `/rewind` lets you pick another. `/rewind` in the editor lists every point and

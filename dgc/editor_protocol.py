@@ -1074,6 +1074,17 @@ EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window
 COMMAND_FIELDS["watch_turn_files"] = {"request_id": _S(False)}
 EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
                               "checkpoint_index": _I(False), "checkpoint_preview": _S(False)}
+# A file row may also carry `outside: true` (outside the project: its before-state lives only in the
+# process that changed it) and, replayed by get_history in a later process, `undoable: false` (Undo can
+# no longer put it back, and the Undo question leaves it out of its count).
+#
+# Undo on an older turn's card rewinds that turn and every turn after it. Advertised as
+# ready.capabilities.rewind_preview = 1. `rewind_preview {index}` (list_checkpoints' index) is answered by
+# one `rewind_preview` naming the request: `files`, how many files a rewind to that point restores now
+# across all of those turns -- the number `rewound.files_restored` reports once it has run (0 for an
+# index that is not a recovery point).
+COMMAND_FIELDS["rewind_preview"] = {"index": _I(), "request_id": _S()}
+EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I()}
 
 # ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
 # Each Model box in the editor's Settings lists the models at its own card's host, before anything is

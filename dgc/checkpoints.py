@@ -446,15 +446,18 @@ class CheckpointManager:
         first recorded. Each row is ``{path, additions, deletions, counted, status}``: ``status`` is
         new, modified or deleted; ``counted`` is False where there is no honest line count (a new or
         deleted file, a binary or very large one, a symlink, a permissions-only change, or one the
-        time budget did not reach). ``path`` is the recorded (absolute) path. ``total`` counts every
-        changed file; at most ``limit`` rows are returned.
+        time budget did not reach). ``path`` is the recorded (absolute) path; a file outside the
+        project also has ``outside: True`` (its before-state lives only in this process: a restart
+        leaves Undo unable to put it back). ``total`` counts every changed file, which is exactly how
+        many a rewind to ``start`` restores now; at most ``limit`` rows are returned.
         """
         if not (0 <= start < len(self.points)):
             return [], 0
         from .workspace_changes import MAX_DIFF_BYTES, _counts
         earliest: dict[str, object] = {}
-        for point in self.points[start:]:
-            for path, prior in point["files"].items():
+        for point in list(self.points[start:]):
+            # A copy: an Undo question can ask while a turn on another thread records into the point.
+            for path, prior in list(point["files"].items()):
                 earliest.setdefault(path, prior)
         rows: list[dict] = []
         total = 0
@@ -494,8 +497,11 @@ class CheckpointManager:
                     measured = {"binary": True, "counted": False}
                 if measured.get("counted") and not measured.get("binary"):
                     additions, deletions, counted = measured["additions"], measured["deletions"], True
-            rows.append({"path": path, "additions": additions, "deletions": deletions,
-                         "counted": counted, "status": status})
+            row = {"path": path, "additions": additions, "deletions": deletions,
+                   "counted": counted, "status": status}
+            if self._lexical_project_path(path) is None:
+                row["outside"] = True
+            rows.append(row)
         return rows, total
 
     def discard_last_empty(self) -> bool:

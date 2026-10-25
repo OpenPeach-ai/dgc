@@ -3978,6 +3978,9 @@
       const summary = complete ? turnSummaryCard(turn.files ? turn.files.edits : turn.edits, turn.prompt, turn.files) : null;
       if (summary) box.appendChild(summary);
       box._turnPrompt = turn.prompt;                 // a later turn_files redraws this card with the same Undo
+      // ...and finds it by its recovery point when the card was drawn from history (a reloaded window's turn ids are
+      // the history's, not the backend's live ones).
+      box._checkpoint = turn.files?.checkpoint || null;
       const actions = responseActions(answer, turn.prompt, !complete);
       // When the reply was written, first in its row: now, live; a saved turn's from its history.
       const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
@@ -4042,6 +4045,11 @@
       return `<button type="button" class="ts-row" data-file="${i}" title="Review ${esc(path)}">`
         + `<span class="change-path">${dir ? `<span class="path-dir">${esc(dir)}</span>` : ""}`
         + `<span class="path-name">${esc(name)}</span></span>`
+        // A file outside the project changed by a DGC that has since restarted: its earlier version went with that
+        // process (it is never saved), so Undo leaves it as it is, and says so here and in its count.
+        + (v.undoable === false
+            ? `<span class="ts-uncounted ts-no-undo" title="Outside the project. DGC keeps the version from before this turn only while the session that changed it is running, so Undo leaves this file as it is now.">Can't undo</span>`
+            : "")
         // "not diffable" is not "no change": a binary write or an oversized diff has no numbers
         // to show, and printing +0 −0 for it claims the file was untouched.
         + (v.counted === false
@@ -4092,11 +4100,21 @@
     card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
     // Undo restores the workspace to the recovery point this turn opened. The extension
     // identifies it by the prompt, refuses when it can no longer find it, and confirms first.
-    // With the CLI's card, Undo's question names the card's count (`exact`) and finds the recovery point the CLI named.
+    // With the CLI's card, Undo's question names the card's count (`exact`) -- the files Undo can put back -- and finds
+    // the recovery point the CLI named. `later`: the turns after this one in the chat, which the rewind takes back too.
+    const undoable = many - files.filter(([, v]) => v.undoable === false).length;
     card.querySelector(".ts-undo").onclick = () => vscode.postMessage({
-      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path),
-      ...(cli ? { exact: true, total: many, checkpoint: cli.checkpoint } : {}) });
+      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path), later: laterTurns(card),
+      ...(cli ? { exact: true, total: undoable, checkpoint: cli.checkpoint } : {}) });
     return card;
+  }
+  // How many turns follow the one this card belongs to in the chat: Undo rewinds the conversation to just before its
+  // prompt, so every one of them goes too.
+  function laterTurns(card) {
+    const block = card.closest(".msg.dgc");
+    const turns = [...log.querySelectorAll(".msg.dgc:not(.archived)")];
+    const at = turns.indexOf(block);
+    return at < 0 ? 0 : turns.length - at - 1;
   }
   // What a row with no line count says instead. A file DGC counted (turn_files) says which kind it is; one from an
   // edit tool's result with no diff is the case it always was.
@@ -4116,7 +4134,8 @@
       const path = String(f?.path || "").trim();
       if (!path) continue;
       edits.set(path, { additions: Number(f.additions) || 0, deletions: Number(f.deletions) || 0,
-                        counted: f.counted === true, status: String(f.status || "modified") });
+                        counted: f.counted === true, status: String(f.status || "modified"),
+                        ...(f.undoable === false ? { undoable: false } : {}) });
     }
     const checkpoint = Number.isInteger(ev.checkpoint_index) && typeof ev.checkpoint_preview === "string"
       ? { index: ev.checkpoint_index, preview: ev.checkpoint_preview } : null;
@@ -4126,10 +4145,15 @@
     const id = String(ev.turn_id || "");
     if (turn && (!id || !turn.id || turn.id === id)) { turn.files = turnFilesCard(ev); return; }
     if (replaying || !id) return;
-    const block = [...log.querySelectorAll(".msg.dgc")].find((node) => node._turnId === id);
-    const box = block?.querySelector(":scope > .answer.complete");
-    if (!box) return;
     const files = turnFilesCard(ev);
+    const block = [...log.querySelectorAll(".msg.dgc")].find((node) => node._turnId === id);
+    // A turn drawn from history (the window was reloaded) carries the history's turn id: it is found by the recovery
+    // point its card named instead, which is the same in both.
+    const box = block?.querySelector(":scope > .answer.complete")
+      || (files.checkpoint && [...log.querySelectorAll(".answer.complete")].find((node) =>
+        node._checkpoint?.index === files.checkpoint.index && node._checkpoint?.preview === files.checkpoint.preview));
+    if (!box) return;
+    box._checkpoint = files.checkpoint || box._checkpoint;
     const fresh = turnSummaryCard(files.edits, box._turnPrompt, files);
     const old = box.querySelector(":scope > .turn-summary");
     if (old && fresh) old.replaceWith(fresh);

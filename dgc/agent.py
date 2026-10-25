@@ -5357,6 +5357,32 @@ class Agent(GoalLifecycle):
                 pass
         return True
 
+    def _idle_integration_begin(self, workspace):
+        """Before a background helper's work is integrated while the chat is idle: what each file it
+        changed holds now, for the chat's change set (the bar under the chat records a run's changes
+        by scanning before and after it, and no run is going on). None when that cannot be read."""
+        try:
+            repo = getattr(workspace, "repo", None)
+            changed = workspace.changed_paths() if repo is not None else []
+            return self.chat_changes, self.chat_changes.states([Path(repo) / path for path in changed])
+        except Exception:                    # noqa: BLE001 -- the integration decides, not this
+            return None
+
+    def _idle_integration_end(self, before) -> None:
+        """After it: the files it changed join the chat's change set (the bar counts them, and a row
+        on the Edited card opens their real diff), and the card of the turn whose recovery point now
+        holds them lists them. Both saved, so a reopened chat shows the same."""
+        try:
+            journal, states = before if before is not None else (None, None)
+            if journal is not None and journal is self.chat_changes and journal.record_writes(states):
+                self._persist()
+        except Exception:                    # noqa: BLE001 -- never worth the integration
+            pass
+        try:
+            self._refresh_turn_files(save=True)
+        except Exception:                    # noqa: BLE001
+            pass
+
     def _settle_turn_files(self, began) -> None:
         """At a top-level turn's end, before its save: what its Edited card lists.
 
@@ -10705,18 +10731,16 @@ class Agent(GoalLifecycle):
                     self._finalizing[agent_id] = description
 
                 def finalize():
+                    # With no turn running, nothing else records this integration: see
+                    # _idle_integration_begin. (At a running turn's boundary its files are that
+                    # turn's: its recovery point, its chat step and its card all have them.)
+                    idle = (keeper is getattr(self, "checkpoints", None) and not getattr(
+                        getattr(self, "_handover_local", None), "at_boundary", False))
+                    before = self._idle_integration_begin(workspace) if idle else None
                     result = self._finalize_subagent(
                         description, workspace, *execution, cancel=own_cancel, keeper=keeper)
-                    # Integrated with no turn running, its files went into the newest recovery
-                    # point -- the turn that last ended, whose card is already drawn. Undo of that
-                    # turn restores them, so its card lists them now. (At a running turn's
-                    # boundary they are that turn's, and its own card lists them.)
-                    if (keeper is getattr(self, "checkpoints", None) and not getattr(
-                            getattr(self, "_handover_local", None), "at_boundary", False)):
-                        try:
-                            self._refresh_turn_files(save=True)
-                        except Exception:    # noqa: BLE001 -- a card is never worth the integration
-                            pass
+                    if idle:
+                        self._idle_integration_end(before)
                     return result
                 try:
                     outcome = self._as_session_owner(finalize)

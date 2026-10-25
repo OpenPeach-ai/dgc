@@ -544,32 +544,76 @@ class ChatChanges:
             skipped = before["skipped"] | after["skipped"]
             if not before["complete"] or not after["complete"] or skipped or unknown:
                 self.incomplete = True
-            # This run's own edits claim room first, so the cap is never spent on side effects.
-            for name in sorted(steps, key=lambda item: (item not in own, item)):
-                left, right = steps[name]
-                old = self.files.get(name, [])
-                segments = copy.deepcopy(old)
-                # Merge only uninterrupted edits. An intervening manual edit starts a new pair,
-                # excluding that external delta from both the line totals and the diff preview.
-                if segments and _same(segments[-1]["after"], left):
-                    segments[-1]["after"] = right
-                    if _same(segments[-1]["before"], right):
-                        segments.pop()
-                else:
-                    segments.append({"before": left, "after": right})
-                if len(segments) > MAX_SEGMENTS or (name not in self.files and len(self.files) >= MAX_CHANGED_FILES):
-                    self.incomplete = True
-                    continue
-                if segments:
-                    self.files[name] = segments
+            self._merge_locked(steps, own)
+
+    def _merge_locked(self, steps: dict, own) -> None:
+        """Add `{name: (before, after)}` steps to the journal (the caller holds the lock)."""
+        # This run's own edits claim room first, so the cap is never spent on side effects.
+        for name in sorted(steps, key=lambda item: (item not in own, item)):
+            left, right = steps[name]
+            old = self.files.get(name, [])
+            segments = copy.deepcopy(old)
+            # Merge only uninterrupted edits. An intervening manual edit starts a new pair,
+            # excluding that external delta from both the line totals and the diff preview.
+            if segments and _same(segments[-1]["after"], left):
+                segments[-1]["after"] = right
+                if _same(segments[-1]["before"], right):
+                    segments.pop()
+            else:
+                segments.append({"before": left, "after": right})
+            if len(segments) > MAX_SEGMENTS or (name not in self.files and len(self.files) >= MAX_CHANGED_FILES):
+                self.incomplete = True
+                continue
+            if segments:
+                self.files[name] = segments
+            else:
+                self.files.pop(name, None)
+            if len(json.dumps(self.files, ensure_ascii=True)) > MAX_JOURNAL_BYTES:
+                if old:
+                    self.files[name] = old
                 else:
                     self.files.pop(name, None)
-                if len(json.dumps(self.files, ensure_ascii=True)) > MAX_JOURNAL_BYTES:
-                    if old:
-                        self.files[name] = old
-                    else:
-                        self.files.pop(name, None)
-                    self.incomplete = True
+                self.incomplete = True
+
+    def _name(self, path) -> str | None:
+        try:
+            name = Path(path).resolve().relative_to(self.root).as_posix()
+        except (OSError, ValueError):
+            return None
+        return name if _path(name) else None
+
+    def states(self, paths) -> dict:
+        """What each of `paths` holds now, by its name in this journal: the before half of
+        `record_writes`. A path outside this chat's root, or one that cannot be read, is left out."""
+        out = {}
+        for path in list(paths)[:MAX_CHANGED_FILES]:
+            name = self._name(path)
+            if name is None or name in out:
+                continue
+            state = _state(self.root / name)
+            if state is not None:
+                out[name] = state
+        return out
+
+    def record_writes(self, before: dict) -> bool:
+        """Record files DGC changed when no run of this chat was recording: a background helper's
+        work integrated while the chat was idle. `before` is `states()` taken just before; each name
+        whose state now differs joins the journal as one step, merged as a run's steps are, so the
+        changes bar counts it and its diff opens from here. While a run is recording, its own
+        before/after scan sees the change and this records nothing. True when the journal changed."""
+        steps = {}
+        for name, left in dict(before or {}).items():
+            right = _state(self.root / name) if _path(name) else None
+            if right is not None and not _same(left, right):
+                steps[name] = (left, right)
+        if not steps:
+            return False
+        with self.lock:
+            if self._active_before is not None:
+                return False
+            old = copy.deepcopy(self.files)
+            self._merge_locked(steps, set(steps))
+            return self.files != old
 
     def repair(self) -> int:
         """Drop the deletions an older scan invented, so a journal saved before the fix reads true.

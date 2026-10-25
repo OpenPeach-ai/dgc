@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The Edited card and Undo, four more cases** (with a DGC CLI that has them, 0.48):
+  - A helper that finished in the background while the chat was idle is counted in the changes bar, and its row on
+    the card opens its real diff, also in a reopened chat.
+  - **Undo on an older turn's card** says how many later turns it takes back too and how many files it really
+    restores across all of them: "Undo this turn and the 2 turns after it? DGC restores 5 files and rewinds the
+    conversation to just before this prompt." With an older CLI it gives an upper bound ("up to 6 files"), never
+    fewer. The newest turn's question is unchanged.
+  - A reopened card marks a file outside the project that Undo can no longer put back (DGC keeps its earlier version
+    only while the session that changed it runs) with **Can't undo**, and Undo's question leaves it out of its count.
+  - A card redraws in place when a helper lands in its turn's recovery point after the window was reloaded.
+
 - **A background command's card folds with the rest of the work once DGC has answered.** A command DGC ran in the
   background (a Docker build, a test run) that finished while it worked drew a card with up to 40 lines of its output,
   and the card stayed open under the answer after everything else had folded into "Worked for …". It now folds with

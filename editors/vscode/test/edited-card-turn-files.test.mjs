@@ -198,8 +198,10 @@ function provider(items) {
   p.post = () => {};
   const be = { ready: true, send() { return true; }, dispose() {} };
   p.backend = be; p.ensureBackend = () => be;
+  p.lastReadyEvent = { type: "ready", capabilities: { turn_files: 1, rewind_preview: 1 } };
   p.requestState = async (_be, _prefix, command) => {
     asked.push(command);
+    if (command.type === "rewind_preview") return { type: "rewind_preview", index: command.index, files: 3 };
     return command.type === "list_checkpoints" ? { type: "checkpoints", items } : { type: "rewound", ok: true, files_restored: 2 };
   };
   return { p, asked };
@@ -211,9 +213,15 @@ test("Undo's question names as many files as the card, and rewinds to the point 
   const { p, asked } = provider([{ index: 0, preview: "fix the billing rounding", files: 3 },
                                  { index: 1, preview: "fix the billing rounding", files: 1 }]);
   await p.onMessage({ type: "undoTurn", prompt: "fix the billing rounding", files: ["billing.py", "test_billing.py"],
-                      exact: true, total: 2, checkpoint: { index: 0, preview: "fix the billing rounding" } });
-  assert.match(warnings[0].message, /DGC restores 2 files/, warnings[0].message);
+                      exact: true, total: 2, checkpoint: { index: 0, preview: "fix the billing rounding" }, later: 1 });
+  // The rewind takes the later turn back too: the question says so, with the CLI's count across both.
+  assert.match(warnings[0].message, /^Undo this turn and the turn after it\? DGC restores 3 files/, warnings[0].message);
   assert.deepEqual(asked.at(-1), { type: "rewind", index: 0 }, "the point the card belongs to, not the last match");
+  warnings.length = 0; answers.push("Undo turn");
+  await p.onMessage({ type: "undoTurn", prompt: "fix the billing rounding", files: ["billing.py", "test_billing.py"],
+                      exact: true, total: 2, checkpoint: { index: 1, preview: "fix the billing rounding" } });
+  assert.match(warnings[0].message, /^Undo this turn\? DGC restores 2 files/, "the newest: the card's own count");
+  assert.deepEqual(asked.at(-1), { type: "rewind", index: 1 });
 });
 
 test("a wake turn's Undo finds its point by the preview the CLI sent, not the label the panel shows", async () => {

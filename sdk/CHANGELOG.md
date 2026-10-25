@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Editor protocol: command `rewind_preview {index}` and event `rewind_preview {request_id, index, files}` (how many
+  files Undo on an older turn restores across every turn it takes back; offered as
+  `ready.capabilities.rewind_preview`) are in the vendored protocol and the TypeScript SDK's known events. The event
+  only ever answers that command. A `turn_files` file row may carry `outside: true` and, in `history()`,
+  `undoable: false`. No Pips API change.
+
 - **`AppToolHandler.asgi` serves your app's tools at the exact address you registered in Starlette and FastAPI:**
   `app.add_route("/dgc/pips", handler.asgi, methods=["POST"])`. It is now an ASGI app object rather than a method, which
   Starlette took for a request handler. The way this SDK showed before, `app.mount("/dgc/pips", handler.asgi)`, fails:
