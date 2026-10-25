@@ -346,9 +346,14 @@ test("held: a session a terminal has open is read-only here, with the line, and 
   await h.provider.onMessage({ type: "prompt", text: "hello", request_id: "p9" });
   await pause(200);
   assert.equal(fixture.types().slice(sent).includes("prompt"), false);
-  // Another session's word is not this chat's.
-  be.send({ type: "prompt", text: `emit ${JSON.stringify({ type: "session_held", session_id: "20261025-other" })}` });
-  be.dispose("restart: test");
+  // Open here: the terminal lets it go (dgc/serve_relay.py), this window's next backend has it, and the bar goes.
+  const taker = fakeServe("serve-held-taken", { caps: { detach: DETACH, session_holder: 1, session_owner: 1 } });
+  command = taker.path;
+  h.provider.openSessionHere();
+  spawned.push(h.provider.backend?.childPid);
+  assert.ok(await until(() => h.provider.sessionReady && bars(h.posted).at(-1).state === "none"), "this window's again");
+  assert.equal(h.provider.sessionElsewhere, undefined);
+  h.provider.backend?.dispose("restart: test");
 });
 
 test("an older CLI is never told this window shows a held session read-only", async () => {

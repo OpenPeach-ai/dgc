@@ -642,6 +642,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  (it was already there). Read-only here until the user presses "Open here". */
   private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string; holder?: HolderFacts;
                               note?: HolderLine } | undefined;
+  /** Open here was pressed: the next backend's ready says whether this window has the session now. */
+  private openHerePending = false;
   /** While this chat is read-only, how often its bar asks again where the session is open (session_holder). */
   private holderTimer?: ReturnType<typeof setTimeout>;
   /** How this provider's next backend asks to reattach: its first after a window opens is a restore. */
@@ -1867,7 +1869,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const shown = this.sessionElsewhere;
     this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
-    this.watchHolder();
+    this.askHolder();
+    this.watchHolder(3_000);            // a terminal that just took it names itself in its note a moment later
   }
 
   /** The bar of a read-only chat says where its session is open and what runs there: asked now (or after `first` ms),
@@ -1930,6 +1933,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
     this.backendNote(`[extension: Open here — taking session ${id} into this window]`);
     this.sessionElsewhere = undefined;
+    this.openHerePending = true;
     this.watchHolder();                                 // nothing to ask: it is this window's
     this.sessionRestoreCandidate = id;
     this.sessionRestoreSaved = true;
@@ -3690,8 +3694,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             + `which kept this session running${live.turn ? " (a turn is running)" : ""}]`);
         } else {
           const elsewhere = (ev.capabilities as any)?.detach?.elsewhere;
+          const was = this.sessionElsewhere;
           this.sessionElsewhere = elsewhere && elsewhere.session_id && elsewhere.session_id === this.sessionRestoreCandidate
             ? { state: "elsewhere", pid: Number(elsewhere.pid) || undefined } : undefined;
+          // Open here took it from a terminal (or a DGC this window couldn't attach to): this window's now, so the
+          // bar goes. (A reattached window is told so above; one still held hears session_held after its resume.)
+          const tookIt = this.openHerePending;
+          this.openHerePending = false;
+          if ((was || tookIt) && !this.sessionElsewhere) {
+            this.whenWebviewReady(() => this.post({ type: "session_elsewhere", state: "none" }));
+          }
         }
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
         this.composerSelections = ev.capabilities?.composer_selections === true;
