@@ -396,8 +396,8 @@ def session_holder(session: str, *, now: float | None = None) -> dict | None:
     if not session:
         return None
     found = [record for record in others(here=False, now=now) if _same_session(record, session)]
-    # A DGC that says which sessions it holds (its `open_here`, 0.48) and doesn't list this one only shows it, read-only:
-    # it is not the holder. One that lists it is; an older DGC's note says nothing either way and still counts.
+    # A DGC that says which sessions it has open (its `open_here`, 0.48) lists this one under `chats` when it is the holder
+    # and under `viewing` when it only shows it, read-only. A note that says nothing either way (an older DGC) counts.
     stem = os.path.splitext(os.path.basename(str(session)))[0]
     for record in found:
         block = record.get("open_here")
@@ -405,7 +405,8 @@ def session_holder(session: str, *, now: float | None = None) -> dict | None:
                                            for chat in (block.get("chats") or [])):
             return record
     for record in found:
-        if not isinstance(record.get("open_here"), dict):
+        block = record.get("open_here")
+        if not isinstance(block, dict) or stem not in (block.get("viewing") or []):
             return record
     return None
 

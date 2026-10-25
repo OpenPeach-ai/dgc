@@ -1484,6 +1484,11 @@ def peers_refused_on_screen() -> str:
     return REFUSED_ON_SCREEN
 
 
+# The sessions this process holds (Agent.own_session): owner key -> [its owner lock, how many agents hold it here].
+_OWNED_SESSIONS: dict = {}
+_OWNED_GUARD = threading.Lock()
+
+
 def _owner_key(path) -> str:
     """One spelling per session file, to tell whether the session held is the one open now."""
     import os
@@ -5048,6 +5053,7 @@ class Agent(GoalLifecycle):
             self.release_session_owner()          # another session: this one is free for others
         if held is None or value is None or _owner_key(value) != held[0]:
             self.__dict__["_session_taken_by"] = ""
+            self.__dict__["_session_viewing"] = False
 
     @property
     def session_taken(self) -> str:
@@ -5055,22 +5061,34 @@ class Agent(GoalLifecycle):
         A session taken is never taken back by a turn: only Open here here does that."""
         return str(self.__dict__.get("_session_taken_by") or "")
 
+    @property
+    def session_viewing(self) -> bool:
+        """This process only shows this session: another has it open (it was held when opened here, or Open here took
+        it elsewhere). Its note says so, so no window takes this process for the one that has it."""
+        return bool(self.session_taken or self.__dict__.get("_session_viewing"))
+
+    def view_session(self) -> None:
+        """The session just opened here is held by another live process: shown here, written there."""
+        self.__dict__["_session_viewing"] = True
+
     def owns_session(self) -> bool:
         held = self.__dict__.get("_session_owner")
         path = self.session_file
-        return bool(held is not None and path is not None and held[0] == _owner_key(path))
+        return bool(held is not None and path is not None and held[0] == _owner_key(path)
+                    and _OWNED_SESSIONS.get(held[0]) is held[1])
 
     def own_session(self, wait: float = 0.0, path=None, *, take: bool = False) -> bool:
         """Hold this session (or ``path``, about to become it) for as long as it is open here. True when this
         process has it, or there is nothing to hold; False while another live process does -- and, for a session
-        Open here took elsewhere, until this process's own Open here (``take``) asks for it back."""
+        Open here took elsewhere, until this process's own Open here (``take``) asks for it back. Agents of one
+        process share it (each chat, each terminal agent): the turn lease keeps them apart, as before."""
         target = path if path is not None else self.session_file
         if self.depth > 0 or not target:
             return True
         key = _owner_key(target)
         held = self.__dict__.get("_session_owner")
         if held is not None:
-            if held[0] == key:
+            if held[0] == key and _OWNED_SESSIONS.get(key) is held[1]:
                 return True
             self.release_session_owner()
         if (not take and self.session_taken and self.session_file
@@ -5083,17 +5101,25 @@ class Agent(GoalLifecycle):
             return False
         deadline = time.monotonic() + max(0.0, float(wait or 0.0))
         while True:
+            with _OWNED_GUARD:
+                entry = _OWNED_SESSIONS.get(key)
+                if entry is not None:            # this process has it already: shared
+                    entry[1] += 1
+                    break
             try:
                 got = lock.acquire(blocking=False)
             except (OSError, ValueError):
                 got = False
             if got:
+                with _OWNED_GUARD:
+                    entry = _OWNED_SESSIONS[key] = [lock, 1]
                 break
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.2)
-        self.__dict__["_session_owner"] = (key, lock)
+        self.__dict__["_session_owner"] = (key, entry)
         self.__dict__["_session_taken_by"] = ""
+        self.__dict__["_session_viewing"] = False
         return True
 
     def own_session_soon(self, path=None) -> bool:
@@ -5112,15 +5138,32 @@ class Agent(GoalLifecycle):
 
     def release_session_owner(self) -> None:
         held = self.__dict__.pop("_session_owner", None)
-        if held is not None:
-            try:
-                held[1].release()
-            except Exception:
-                pass
+        if held is None:
+            return
+        key, entry = held
+        with _OWNED_GUARD:
+            if _OWNED_SESSIONS.get(key) is not entry:
+                return
+            entry[1] -= 1
+            if entry[1] > 0:
+                return                           # another agent of this process still has it open
+            del _OWNED_SESSIONS[key]
+        try:
+            entry[0].release()
+        except Exception:
+            pass
 
     def let_go_session(self, by: str = "") -> None:
-        """Open here elsewhere took this session: this process only shows it from now on."""
-        self.release_session_owner()
+        """Open here elsewhere took this session: this process lets it go (every agent of it) and only shows it."""
+        self.__dict__.pop("_session_owner", None)
+        key = _owner_key(self.session_file) if self.session_file else ""
+        with _OWNED_GUARD:
+            entry = _OWNED_SESSIONS.pop(key, None) if key else None
+        if entry is not None:
+            try:
+                entry[0].release()
+            except Exception:
+                pass
         self.__dict__["_session_taken_by"] = str(by or "another window")[:80]
 
     # --------------------------------------------- reclaiming this session ---

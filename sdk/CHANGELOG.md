@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `resume` of a session another DGC has open (a VS Code window, a terminal, a DGC kept running with no window) is
+  refused with `DGCConfigError`, naming where it is open ("This session is open in VS Code · ~/toni-erp · idle 6 min.
+  …"): one DGC writes to a session at a time. Before, it opened the session and a run could write it between the
+  other's turns. Editor protocol: `ready.capabilities.session_owner`, command `watch_session_owner`, event
+  `session_held {session_id}` (vendored, and in the TypeScript SDK's known events), `command_rejected` reason
+  `session_held`; an SDK session never sends `watch_session_owner`. No Pips API change.
+
 - Editor protocol: commands `editor_app {name}`, `session_holder {request_id, session_id}` and `chatdgc_holder
   {request_id, conversation_id}`, and events `session_holder {request_id, session_id, found, editor?, windowless?,
   folder?, working?, idle_s?, monitors?, helpers?, commands?, queued?, waiting?}` and `chatdgc_holder {request_id,

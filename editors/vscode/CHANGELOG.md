@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **One DGC writes to a session at a time, idle or not** (with a DGC CLI that has it, 0.48). A session a terminal (or
+  another DGC this window can't take over) has open shows read-only with Open here, and the bar says "Open in the
+  terminal · ~/toni-erp · idle 2 min."; Open here takes it from the terminal, which says so. When Open here in a
+  terminal takes a session this window shows, the window turns read-only with the same bar, and its Open here takes it
+  back. The window tells the CLI it shows such sessions read-only (`watch_session_owner`).
+
 - **The agent map shows what matters now; the rest is one click away.** In a long chat it used to list every helper
   the chat ever ran. It now opens on the agents working, the ones your latest turn that started any started (a short
   follow-up that starts none leaves them in view), and any older one whose changes were held back, its row saying

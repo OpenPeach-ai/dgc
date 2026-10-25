@@ -1657,6 +1657,7 @@ class CLI:
         agent = self.agent
         if not agent.session_file or (not agent.session_taken and agent.own_session_soon()):
             return True
+        agent.view_session()
         return self._owner_choices(interactive=interactive)
 
     def _may_write(self) -> bool:
@@ -1664,6 +1665,7 @@ class CLI:
         agent = self.agent
         if not agent.session_file or (not agent.session_taken and agent.own_session()):
             return True
+        agent.view_session()
         return self._owner_choices()
 
     def _owner_choices(self, *, interactive: bool = True) -> bool:

@@ -7519,6 +7519,8 @@ class Backend:
                 self._forget_ended_shells()
                 if held:
                     # Shown to be read: what runs there runs there; nothing is started or offered here.
+                    self.agent.view_session()
+                    self._announce_peer("idle")
                     self.em.emit("session_held", session_id=target.stem)
                     self._publish_cache_clock(current=True, resumed=True)
                     return

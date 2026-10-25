@@ -9525,6 +9525,8 @@ class TUI:
         if not agent.session_file or agent.own_session_soon():
             self._announce_peer_soon()
             return
+        agent.view_session()
+        self._announce_peer_soon()
         self._offer_owner_choices()
 
     def _may_write(self, text: str = "") -> bool:
@@ -9532,6 +9534,7 @@ class TUI:
         agent = self.agent
         if not agent.session_file or (not agent.session_taken and agent.own_session()):
             return True
+        agent.view_session()
         if text:
             self.input_buf.text = text
         self._offer_owner_choices()

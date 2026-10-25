@@ -127,18 +127,20 @@ def agent_counts(agent, *, working: bool = False) -> dict:
 
 def terminal_block(entries) -> dict:
     """A terminal's ``open_here``: each (agent, counts) whose session this process holds now."""
-    chats = []
+    chats, shown = [], []
     for agent, counts in entries:
         session_file = getattr(agent, "session_file", None)
-        owns = getattr(agent, "owns_session", None)
-        if not session_file or not callable(owns) or not owns():
+        if not session_file:
+            continue
+        if getattr(agent, "session_viewing", False):
+            shown.append(Path(str(session_file)).stem)
             continue
         root = str(getattr(getattr(agent, "config", None), "project_root", "") or "")
         chats.append({"session_id": Path(str(session_file)).stem, "session": str(session_file), "cwd": root,
                       **counts})
         if len(chats) >= MAX_CHATS:
             break
-    return {"version": NOTE_VERSION, "editor": TERMINAL, "chats": chats}
+    return {"version": NOTE_VERSION, "editor": TERMINAL, "chats": chats, "viewing": shown[:MAX_CHATS]}
 
 
 def busy_reason(counts: dict) -> str:
@@ -158,21 +160,27 @@ def note_block(host, editor: str = "") -> dict:
         viewing = str((serve_relay.refused() or {}).get("session_id") or "")
     except Exception:
         viewing = ""
-    chats = []
+    chats, shown = [], []
     for chat in list(getattr(host, "chats", {}).values()):
         agent = getattr(chat, "agent", None)
         session_file = getattr(agent, "session_file", None)
         stem = Path(str(session_file)).stem if session_file else ""
-        if not stem or stem == viewing:
+        if not stem:
             continue
-        owns = getattr(agent, "owns_session", None)
-        if callable(owns) and not owns():
-            continue                                     # another process has it open, or nobody wrote it yet
+        if stem == viewing or getattr(agent, "session_viewing", False):
+            shown.append(stem)                           # another process has it open: shown here, not held
+            continue
         root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
         chats.append({"session_id": stem, "session": str(session_file), "cwd": root, **chat_counts(chat)})
         if len(chats) >= MAX_CHATS:
             break
-    return {"version": NOTE_VERSION, "editor": clean_editor(editor), "chats": chats}
+    return {"version": NOTE_VERSION, "editor": clean_editor(editor), "chats": chats, "viewing": shown[:MAX_CHATS]}
+
+
+def views(record: dict, session_id: str) -> bool:
+    """Whether a note says its process only shows this session (another process has it open)."""
+    block = record.get(NOTE_KEY) if isinstance(record, dict) else None
+    return isinstance(block, dict) and session_id in (block.get("viewing") or [])
 
 
 def _block(record: dict) -> dict | None:

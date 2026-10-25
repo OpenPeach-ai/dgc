@@ -6,6 +6,29 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **One DGC writes to a session at a time, idle or not.** The session's lock used to be held only during a turn, so
+  `dgc -c` in a terminal could run a turn on a session a VS Code window had open while it was idle, and both then wrote
+  the same file. Now the process that has a session open (a window, a terminal, a DGC kept running with no window, an
+  SDK program) holds it until it lets it go, and the operating system frees it if that process dies, a crash included.
+  - **The terminal:** `dgc -c`, `dgc --resume ID` and `/resume` of a session another DGC has open say where it is open
+    and what runs there ("This session is open in VS Code · ~/toni-erp · idle 6 min. 1 monitor runs there.") and offer
+    **Open here** (the window lets it go and shows it read-only with the line about the terminal), **Start a new
+    session** (highlighted: Enter alone never takes it) or **Quit**, in the full screen and the classic prompt. A
+    message typed meanwhile brings the choices back and is not sent; `dgc -c -p` says where and writes nothing. While
+    something runs there (a turn, a monitor, a background helper or command, a queued prompt, a question), Open here
+    says what and leaves it where it is, so nothing running is lost to a move.
+  - **The other way round:** a window opening a session a terminal has open shows it read-only, "Open in the terminal
+    · ~/toni-erp · idle 2 min.", and its Open here takes it from the terminal, which says "This session is open in the
+    editor now" and takes no more prompts for it (Open here takes it back, or start a new session). The classic prompt
+    now leaves a note, as the full screen does, so a window can find it.
+  - **The SDK:** `resume` of a session another DGC has open is refused (`DGCConfigError`, from `command_rejected`
+    reason `session_held`) with the same line, and nothing is written.
+  - **For editors:** `ready.capabilities.session_owner`; the command `watch_session_owner` (this client shows a held
+    session read-only: `resume_session` of one then loads it to be read and says so with the new event
+    `session_held {session_id}`, which also says when Open here elsewhere took this chat's session); without it,
+    `resume_session` of a held session is refused with `command_rejected` reason `session_held`. A window's Open here
+    that a terminal keeps leaves `ready.capabilities.detach.elsewhere` with reason `busy`.
+
 - **"Open here" says where the chat is open and what runs there.** A session another window holds used to be shown as
   "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/toni-erp ·
   idle 6 min.** 2 monitors and 1 background helper run there. Open here moves them to this window." It says "working
