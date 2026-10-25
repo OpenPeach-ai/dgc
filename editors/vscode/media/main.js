@@ -3774,7 +3774,7 @@
     const id = reportAgentId(line.dataset.agentId || "");
     openAgentMap({ from });
     if (!agentMapOpen()) return;
-    const row = id ? amRowByKey(`agent:${id}`) : null;
+    const row = id ? amRevealRow(`agent:${id}`) : null;    // Earlier opens when that is where it is
     if (row) amOpenCard({ kind: "agent", id }, row);       // its card: what it was asked, its steps, its report
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
@@ -6413,7 +6413,7 @@
     const chip = railOpen?.chip || null;
     closeRailPop({ restore: false });
     openAgentMap({ from: chip });
-    const row = amRowByKey(key);
+    const row = amRevealRow(key);
     if (row) amFocusRow(row, { quiet: false });
   }
   function openRailPop(kind) {
@@ -11843,7 +11843,8 @@
     if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
     if (row.dataset.state !== record.state) row.dataset.state = record.state;
     paintAgentMark(face, record.id, AGENT_ACTIVE.has(record.state));
-    const name = agentDisplayName(record), stats = amAgentStats(record), word = amStateWord(record);
+    // Work held back is why an older agent is still in view: its row says so, where "Finished" was.
+    const name = agentDisplayName(record), stats = amAgentStats(record), word = amHeldBack(record) ? "Held back" : amStateWord(record);
     agentsSetText(desc, name);
     // The word leads for every state but working, so no state rests on the dot's colour alone.
     agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
@@ -11985,43 +11986,295 @@
       renderAgentMap();
     }, 1000);
   }
-  function amSubtitle() {
+  // ---- now, and earlier in this chat ----
+  // A long chat has had many agents, and a tree of every one of them is a wall of finished work. The
+  // map shows what matters now: every agent working (queued, running or waiting); every agent the
+  // chat's latest turn that started any started, so a short follow-up that started none leaves the map
+  // as it was; and any older one that still needs the person -- its changes held back, with its
+  // worktree kept (a question or a permission keeps it working, so it is shown already). A shown
+  // agent's parents are shown too, so the tree stays honest. The rest is one row, "Earlier in this
+  // chat", that opens to them grouped by the prompt that started them, newest first.
+  //
+  // Which turn started an agent is read from what the chat already holds, never added to the wire:
+  // the turn its spawn card is in (the card the record claimed), else the turn the CLI named on
+  // agent_started (`turn_id`, shared by every agent that turn started; a restored record's names an
+  // earlier run of the CLI, so it is matched only with its own kind). A nested agent belongs to the
+  // turn that started its top-level parent. A chat whose agents carry neither (an older CLI, a
+  // snapshot without them) keeps the full tree it always had, and its subtitle.
+  const AGENT_HELD_ANY = /^Sub-task '[\s\S]*?' (?:partly integrated|completed but its changes were NOT integrated|completed but was not integrated)/;
+  const AM_EARLIER_PROMPT = "An earlier prompt";     // a group whose prompt is not on screen
+  // Which chats keep Earlier open: this webview's own convenience, bounded like the checklist's.
+  const amEarlierOpen = new Set((() => {
+    try {
+      const saved = vscode.getState()?.agentMapEarlier;
+      return Array.isArray(saved) ? saved.filter((id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)).slice(-32) : [];
+    } catch { return []; }
+  })());
+  function amEarlierIsOpen() { return amEarlierOpen.has(draftSession); }
+  function amSetEarlierOpen(open) {
+    amEarlierOpen.delete(draftSession);
+    if (open) amEarlierOpen.add(draftSession);
+    while (amEarlierOpen.size > 32) amEarlierOpen.delete(amEarlierOpen.values().next().value);
+    try { vscode.setState({ ...(vscode.getState() || {}), agentMapEarlier: [...amEarlierOpen] }); } catch {}
+  }
+  // Its changes were held back (not integrated, or partly), as its spawn's result says -- or, for a
+  // background agent, the report its wake turn drew.
+  function amHeldBack(record) {
+    if (AGENT_ACTIVE.has(record.state)) return false;
+    const out = agentAnchor(record.id)?.querySelector(".body pre")?.textContent || "";
+    if (AGENT_HELD_ANY.test(out)) return true;
+    if (!record.background) return false;
+    const line = log.querySelector(`.handback-line[data-agent-id="${cssEscape(record.id)}"]`);
+    return !!line?._handback && AGENT_HELD_ANY.test(splitAgentReport(line._handback.report)[0]);
+  }
+  // The words of the row that opened a turn, as the chat shows them: its prompt, or the note of a
+  // turn nobody typed ("Woke on agent · …"). "" when the turn has no such row.
+  function amTurnLabel(block) {
+    if (!block?.parentElement?.classList.contains("turn")) return "";
+    for (let node = block.previousElementSibling; node; node = node.previousElementSibling) {
+      if (node.matches(".msg.user")) return railHeadText(node);
+      if (node.matches(".resume-note")) {
+        return ((node.querySelector(".handback-label") || node).textContent || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      }
+      if (node.matches(".msg.dgc")) break;
+    }
+    return "";
+  }
+  // The map's two parts, or null when the chat cannot tell which turn started its agents (the full
+  // tree). `children` is amTree()'s.
+  function amPlan(children) {
+    const tops = children.get("") || [];
+    if (!tops.length) return null;
+    const topOf = new Map(), parentOf = new Map();
+    const walk = (id, top) => {
+      for (const record of children.get(id) || []) {
+        topOf.set(record.id, top); parentOf.set(record.id, id);
+        walk(record.id, top);
+      }
+    };
+    for (const top of tops) { topOf.set(top.id, top); parentOf.set(top.id, ""); walk(top.id, top); }
+    // The turns this panel drew live, by the id the CLI gave them; the newest of an id repeated by a
+    // CLI that started again. A replayed turn's id is the replay's own ("h3"), which no record names.
+    const live = new Map();
+    for (const block of log.querySelectorAll(".msg.dgc")) if (block._turnId) live.set(block._turnId, block);
+    const told = (record) => (typeof record.turn_id === "string" && record.turn_id
+      ? `${record.restored ? "restored" : "live"}:${record.turn_id}` : "");
+    const blockOf = new Map(), toldBlock = new Map();
+    for (const top of tops) {
+      const card = agentAnchor(top.id);
+      const block = card && log.contains(card) ? card.closest(".msg.dgc") : null;
+      if (!block) continue;
+      blockOf.set(top.id, block);
+      // Only within one run of the CLI: two runs both had a "t3".
+      if (told(top).startsWith("live:") && !toldBlock.has(told(top))) toldBlock.set(told(top), block);
+    }
+    const groups = new Map(), loose = [];
+    const join = (id, block, top, counts = true) => {
+      if (!groups.has(id)) groups.set(id, { id, block, tops: [], at: -Infinity, first: Infinity, order: -Infinity });
+      const group = groups.get(id), at = Number(top.started_at);
+      group.tops.push(top);
+      if (!counts) return;
+      if (Number.isFinite(at)) { group.at = Math.max(group.at, at); group.first = Math.min(group.first, at); }
+      group.order = Math.max(group.order, Number(top.order) || 0);
+    };
+    for (const top of tops) {
+      const key = told(top);
+      let block = blockOf.get(top.id) || toldBlock.get(key) || null;
+      if (!block && key.startsWith("live:")) block = live.get(top.turn_id) || null;
+      if (!block && !key) { loose.push(top); continue; }
+      if (block && !block._amGroup) block._amGroup = `turn-${++amGroupSerial}`;
+      join(block ? block._amGroup : key, block, top);
+    }
+    if (!groups.size) return null;
+    // Newest first: by when their agents started (the CLI's clock, the same for every record), then
+    // by the order this panel learned of them.
+    const newest = (a, b) => (b.at - a.at) || (b.order - a.order);
+    // An agent no turn names (a Pip fix's, a CLI that sent no turn) goes with the turn that was the
+    // latest when it started; one older than every turn, or with no start time, with the oldest.
+    const placedNewest = [...groups.values()].sort(newest);
+    for (const top of loose) {
+      const at = Number(top.started_at);
+      const home = Number.isFinite(at) ? placedNewest.find((group) => group.first <= at) : null;
+      if (home) join(home.id, home.block, top, false);
+      else join("unknown", null, top);
+    }
+    const ordered = [...groups.values()].sort(newest);
+    if (groups.has("unknown")) { ordered.splice(ordered.indexOf(groups.get("unknown")), 1); ordered.push(groups.get("unknown")); }
+    const latest = ordered[0];
+    const thisTurn = new Set();
+    for (const record of agentRecords.values()) if (latest.tops.includes(topOf.get(record.id))) thisTurn.add(record.id);
+    const shown = new Set(thisTurn);
+    for (const record of agentRecords.values()) {
+      if (!topOf.has(record.id) || !(AGENT_ACTIVE.has(record.state) || amHeldBack(record))) continue;
+      for (let id = record.id; id && !shown.has(id); id = parentOf.get(id)) shown.add(id);
+    }
+    // What each part draws under each row: the shown children of a shown agent; the earlier children
+    // of an earlier one. An earlier agent whose parent is shown heads its group's list.
+    const nowKids = new Map(), earlierKids = new Map();
+    for (const [parent, list] of children) {
+      const now = list.filter((record) => shown.has(record.id));
+      if (now.length && (parent === "" || shown.has(parent))) nowKids.set(parent, now);
+      const before = list.filter((record) => !shown.has(record.id));
+      if (before.length && parent !== "" && !shown.has(parent)) earlierKids.set(parent, before);
+    }
+    const earlier = [];
+    let earlierCount = 0;
+    for (const group of ordered) {
+      const heads = [...agentRecords.values()].filter((record) => !shown.has(record.id)
+        && group.tops.includes(topOf.get(record.id)) && (parentOf.get(record.id) === "" || shown.has(parentOf.get(record.id))));
+      if (!heads.length) continue;
+      heads.sort(amOrder);
+      const count = [...agentRecords.values()].filter((record) => !shown.has(record.id) && group.tops.includes(topOf.get(record.id))).length;
+      earlierCount += count;
+      const label = (group.block && amTurnLabel(group.block)) || AM_EARLIER_PROMPT;
+      earlier.push({ id: group.id, label, heads, count });
+    }
+    return { nowKids, earlierKids, earlier, shown, working: agentCounts().active, thisTurn: thisTurn.size,
+      earlierCount: earlierCount + agentTotalExtra };
+  }
+  let amGroupSerial = 0;
+  function amSubtitle(plan) {
     const total = agentCounts().total;
-    return total > 0 ? `${agentPlural(total, "agent")} · click an agent for details` : "No agents in this chat yet";
+    if (total <= 0) return "No agents in this chat yet";
+    if (!plan) return `${agentPlural(total, "agent")} · click an agent for details`;
+    return [[plan.working, "working"], [plan.thisTurn, "this turn"], [plan.earlierCount, "earlier"]]
+      .filter(([count]) => count > 0).map(([count, word]) => `${count} ${word}`).join(" · ");
+  }
+  // The folded row: a real button in the tree's own list, the last of the main agent's, so Tab, the
+  // arrows, Enter and Space reach it like any row. What it opens sits under it, groups of rows each
+  // under a short muted label; closed, they are out of the document, so the arrows never land in them.
+  let amEarlier = null;
+  function amEarlierEntry() {
+    if (amEarlier) return amEarlier;
+    const item = el("li", "am-node am-earlier-node"), self = el("div", "am-self");
+    const row = el("button", "am-row am-earlier");
+    row.type = "button"; row.tabIndex = -1; row.dataset.amKey = "earlier";
+    row.setAttribute("aria-expanded", "false");
+    row.setAttribute("aria-controls", "agent-map-earlier");
+    const chevron = el("span", "codicon codicon-chevron-right am-earlier-chevron"); chevron.setAttribute("aria-hidden", "true");
+    const text = el("span", "am-text"), desc = el("span", "am-desc");
+    text.appendChild(desc);
+    row.append(chevron, text);
+    row.addEventListener("click", () => {
+      const before = row.getBoundingClientRect().top;
+      amSetEarlierOpen(!amEarlierIsOpen());
+      renderAgentMap();
+      amHoldPlace(row, before);
+    });
+    self.appendChild(row);
+    const groups = el("div", "am-earlier-groups");
+    groups.id = "agent-map-earlier";
+    groups.hidden = true;
+    groups.setAttribute("role", "group");
+    groups.setAttribute("aria-label", "Earlier in this chat");
+    const more = el("p", "am-note am-earlier-more");
+    item.append(self, groups);
+    amEarlier = { item, row, desc, groups, more, entries: new Map() };
+    return amEarlier;
+  }
+  // The dialog is centred, so Earlier opening grew it both ways and moved the row out from under the pointer: a
+  // second click landed on an agent (real VS Code, 25 Oct). The row stays where it was clicked; the dialog grows
+  // downward, as far as the panel has room, and moves up only as much as it must to fit. Until the map closes.
+  function amHoldPlace(row, before) {
+    const layer = $("agent-map"), box = $("agent-map-box");
+    if (!row.isConnected || !layer || !box || !Number.isFinite(before)) return;
+    const shift = before - row.getBoundingClientRect().top;
+    if (Math.abs(shift) < 1) return;
+    const style = getComputedStyle(layer);
+    const padTop = parseFloat(style.paddingTop) || 0, padBottom = parseFloat(style.paddingBottom) || 0;
+    const space = layer.clientHeight - padTop - padBottom;
+    const want = box.getBoundingClientRect().top - layer.getBoundingClientRect().top - padTop + shift;
+    const margin = Math.round(Math.max(0, Math.min(want, space - box.offsetHeight)));
+    box.style.alignSelf = "start";
+    box.style.marginTop = `${margin}px`;
+    box.style.maxHeight = `${Math.max(0, Math.floor(space - margin))}px`;
+  }
+  function amReleasePlace() {
+    const box = $("agent-map-box");
+    if (box) { box.style.alignSelf = ""; box.style.marginTop = ""; box.style.maxHeight = ""; }
+  }
+  window.addEventListener("resize", amReleasePlace);
+  // One prompt's agents in Earlier: its label, then its rows as the tree draws them.
+  function amEarlierGroup(group) {
+    let entry = amEarlier.entries.get(group.id);
+    if (!entry) {
+      const node = el("div", "am-group"), label = el("p", "am-group-label"), list = el("ul", "am-children am-group-list");
+      label.id = `am-group-${++amGroupSerial}`;
+      node.setAttribute("role", "group");
+      node.setAttribute("aria-labelledby", label.id);
+      node.append(label, list);
+      entry = { node, label, list };
+      amEarlier.entries.set(group.id, entry);
+    }
+    agentsSetText(entry.label, group.label);
+    if (entry.label.title !== group.label) entry.label.title = group.label;
+    return entry;
   }
   function paintAmMap() {
-    agentsSetText($("agent-map-subtitle"), amSubtitle());
     const body = $("agent-map-body"), active = document.activeElement;
     const focusedKey = active && body.contains(active) ? active.dataset?.amKey || "" : "";
     for (const id of [...amRows.keys()]) if (!agentRecords.has(id)) amRows.delete(id);
     const children = amTree();
-    amLayout(amDepth(children));
+    const plan = amPlan(children);
+    agentsSetText($("agent-map-subtitle"), amSubtitle(plan));
+    const nowKids = plan ? plan.nowKids : children;
+    const fold = plan && plan.earlierCount > 0 ? amEarlierEntry() : null;
+    const open = !!fold && amEarlierIsOpen();
+    // Deep enough for what is drawn: the folded row is one level down, and what it opens starts there.
+    let depth = amDepth(nowKids);
+    if (fold) depth = Math.max(depth, 1);
+    if (open) for (const group of plan.earlier) for (const head of group.heads) depth = Math.max(depth, 1 + amDepth(plan.earlierKids, head.id));
+    amLayout(depth);
     const root = amRootEntry();
     amPaintRoot(root);
-    const fill = (parentId, list) => {
+    const fill = (records, list, kidsOf, tail = []) => {
       const items = [];
-      for (const record of children.get(parentId) || []) {
+      for (const record of records) {
         const entry = amAgentEntry(record);
         amPaintAgentRow(entry, record);
-        if (children.has(record.id)) {
+        const kids = kidsOf.get(record.id);
+        if (kids?.length) {
           if (!entry.kids) entry.kids = el("ul", "am-children");
           const label = `Started by ${agentDisplayName(record)}`;
           if (entry.kids.getAttribute("aria-label") !== label) entry.kids.setAttribute("aria-label", label);
           if (entry.kids.parentNode !== entry.item) entry.item.appendChild(entry.kids);
-          fill(record.id, entry.kids);
+          fill(kids, entry.kids, kidsOf);
         } else if (entry.kids) {
           entry.kids.remove(); entry.kids = null;
         }
         items.push(entry.item);
       }
-      agentsPlace(list, items);
+      agentsPlace(list, [...items, ...tail]);
     };
-    fill("", root.kids);
+    fill(nowKids.get("") || [], root.kids, nowKids, fold ? [fold.item] : []);
     root.kids.hidden = !root.kids.childElementCount;
     const more = $("agent-map-more");
-    more.hidden = agentTotalExtra <= 0;
-    agentsSetText(more, agentTotalExtra > 0
-      ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "");
+    const notListed = agentTotalExtra > 0
+      ? `${agentPlural(agentTotalExtra, "more agent")} not listed${agentActiveExtra > 0 ? `, ${agentActiveExtra} of them working` : ""}.` : "";
+    if (fold) {
+      agentsSetText(fold.desc, `Earlier in this chat · ${agentPlural(plan.earlierCount, "agent")}`);
+      if (fold.row.getAttribute("aria-expanded") !== String(open)) fold.row.setAttribute("aria-expanded", String(open));
+      fold.groups.hidden = !open;
+      const ids = new Set(plan.earlier.map((group) => group.id));
+      for (const id of [...fold.entries.keys()]) if (!ids.has(id)) fold.entries.delete(id);
+      const nodes = [];
+      if (open) {
+        plan.earlier.forEach((group) => {
+          const entry = amEarlierGroup(group);
+          fill(group.heads, entry.list, plan.earlierKids);
+          nodes.push(entry.node);
+        });
+        // The cap on what a snapshot itemises applies in here: the ones it left out are the oldest.
+        agentsSetText(fold.more, notListed);
+        if (notListed) nodes.push(fold.more);
+      }
+      agentsPlace(fold.groups, nodes);
+      more.hidden = true;
+      agentsSetText(more, "");
+    } else {
+      more.hidden = !notListed;
+      agentsSetText(more, notListed);
+    }
     // Only what runs now: a task that ends drops out of the list (its card, if open, keeps it). A command a
     // restart stopped stays, with Run again, until it is run again.
     const tasks = amListedTasks();
@@ -12045,6 +12298,19 @@
     if (focusedKey && document.activeElement?.dataset?.amKey !== focusedKey) {
       focusQuietly(amRowByKey(focusedKey) || amFirstRow(), { preventScroll: true });
     }
+  }
+  // An agent's row, opening Earlier first when that is where the agent is (the agent's report's "Open
+  // in agent map", a rail chip): the reader asked for that one.
+  function amRevealRow(key) {
+    let row = amRowByKey(key);
+    if (row || !key.startsWith("agent:") || !amOpen) return row;
+    const plan = amPlan(amTree());
+    if (plan && !plan.shown.has(key.slice("agent:".length)) && agentRecords.has(key.slice("agent:".length)) && !amEarlierIsOpen()) {
+      amSetEarlierOpen(true);
+      renderAgentMap();
+      row = amRowByKey(key);
+    }
+    return row;
   }
   function amRowByKey(key) {
     return [...$("agent-map-body").querySelectorAll(".am-row")].find((row) => row.dataset.amKey === key) || null;
@@ -12088,6 +12354,7 @@
   function closeAgentMap({ restoreFocus = true } = {}) {
     if (!amOpen) return;
     amOpen = false;
+    amReleasePlace();
     amDropLevels();
     clearTimeout(amTick); amTick = 0;
     hoverTip.hide();

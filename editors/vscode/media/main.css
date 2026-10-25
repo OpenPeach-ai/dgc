@@ -2241,6 +2241,27 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   left: calc(var(--am-indent) / -2); top: calc(-1 * var(--sp-2)); bottom: 0; border-left: 1px solid var(--am-line); }
 .agent-map[data-layout="vertical"] .am-children > .am-node:last-child::after { bottom: auto;
   height: calc(var(--sp-2) + var(--am-row-h) / 2); }
+/* "Earlier in this chat": the main agent's last row, one line with no frame of its own, that opens
+   under itself to the earlier agents, a group per prompt under a muted one-line label. A group's own
+   rows have no connector (the label heads them); their children are drawn as anywhere in the tree. */
+.agent-map[data-layout] .am-node.am-earlier-node { display: block; }
+.am-row.am-earlier { border-color: transparent; background: transparent; color: var(--muted); }
+.am-row.am-earlier:hover { background: var(--surface2); color: var(--text); }
+.am-earlier .am-desc { color: inherit; }
+.am-earlier-chevron { flex: none; width: 16px; text-align: center; transition: transform .12s ease-out; }
+.am-earlier[aria-expanded="true"] .am-earlier-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .am-earlier-chevron { transition: none; } }
+.am-earlier-groups { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); min-width: 0; }
+.am-earlier-groups[hidden] { display: none; }
+.am-group { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.am-group-label { margin: 0; max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.agent-map[data-layout="horizontal"] .am-group-label { max-width: var(--am-row-w); }
+.agent-map[data-layout] .am-earlier-groups .am-children.am-group-list { margin-top: 0; padding-left: 0; }
+.agent-map[data-layout] .am-earlier-groups .am-children.am-group-list::before,
+.agent-map[data-layout] .am-earlier-groups .am-children.am-group-list > .am-node::before,
+.agent-map[data-layout] .am-earlier-groups .am-children.am-group-list > .am-node::after { display: none; }
+.am-earlier-groups > .am-note { margin: 0; }
 .am-note { margin: var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
 .am-tasks { margin-top: var(--sp-5); }
 .am-tasks > .agent-map-subtitle { margin: 0 0 var(--sp-2); }

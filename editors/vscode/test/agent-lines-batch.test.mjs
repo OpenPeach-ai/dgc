@@ -114,7 +114,8 @@ for (const [name, draw] of [["live", live], ["reloaded", replayed]]) {
   test(`a batch call's helpers are nodes of the agent map, each with its own prompt (${name})`, () => {
     const v = draw();
     v.doc.getElementById("agents-pill").click();
-    assert.equal(v.doc.getElementById("agent-map-subtitle").textContent, "5 agents · click an agent for details");
+    // All five were started by the one turn: the map counts them as this turn's (none earlier, none working).
+    assert.equal(v.doc.getElementById("agent-map-subtitle").textContent, "5 this turn");
     const keys = [...v.doc.querySelectorAll("#agent-map-tree .am-row")].map((row) => row.dataset.amKey);
     assert.deepEqual(keys.filter((key) => key !== "root").sort(), HELPERS.map((n) => `agent:${sid(n)}`).sort());
     v.doc.querySelector(`#agent-map .am-row[data-am-key="agent:${sid(3)}"]`).click();
