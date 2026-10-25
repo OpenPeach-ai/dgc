@@ -6,6 +6,27 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Ask a finished helper to do more, and it carries on with its memory.** A helper that has finished (or failed, or
+  was stopped) can be given more work, and it is the same helper that does it: it remembers what it was asked, what it
+  read and what it found, so a review can become its fixes, then a follow-up fix, without a new helper reading
+  everything again.
+  - **You ask** from the helper's card in the agent map or under its report line in the chat (**Ask it to do more**),
+    or in the terminal with `/agents continue <id> <what to do>` (`/agents` shows the id beside each helper that can
+    be continued). It runs in the background and its report comes back like any background helper's.
+  - **The model asks** with a new `continue_task` tool, offered only when a helper of the chat can be continued, and
+    asked for exactly as starting that helper would be (Default mode asks you; `deny: Task` refuses it).
+  - **It picks up** from its conversation, which DGC now keeps beside the chat's saved session when each of its runs
+    ends (private, secrets removed, deleted with the session), so it can be continued after a reload or a restart. It
+    works in a fresh copy of your project as it is now, is told which files changed since it last saw them and to
+    re-read before editing, runs on the same agent and model, and a long conversation is compacted first. Work of its
+    that was held back is shown to it as a diff; the kept worktree stays in `/tasks` until you decide.
+  - **It keeps its row**: the agent map says "Continued · 2 runs", and its transcript shows each run after a divider
+    ("Continued 18:42 · asked by you"). Its changes land, and Undo takes them back, like any helper's.
+  - **For editors**: new commands `continue_agent {id, text, request_id}` and `watch_agent_runs`, and a new event
+    `agent_runs {items, request_id?}`, offered as `ready.capabilities.continue_agent`. A continued helper keeps its id:
+    its row goes back to work in the `agents` snapshot, and its steps' call ids carry the run (`sub-…:r2-…`). No
+    existing event changed.
+
 - **"Open here" says where the chat is open and what runs there.** A session another window holds used to be shown as
   "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/toni-erp ·
   idle 6 min.** 2 monitors and 1 background helper run there. Open here moves them to this window." It says "working

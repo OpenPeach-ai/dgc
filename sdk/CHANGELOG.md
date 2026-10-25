@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Editor protocol: commands `watch_agent_runs {request_id?}` and `continue_agent {id, text, request_id}`, and event
+  `agent_runs {items, request_id?}` (a finished helper asked to do more, with its memory: which helpers can be
+  continued and each one's runs; offered as `ready.capabilities.continue_agent`) are in the vendored protocol and the
+  TypeScript SDK's known events. The event is only sent to a client that sent `watch_agent_runs`; an SDK session never
+  does. The model's `continue_task` tool is not in `ready.tools`, like `message_task`, so an `allow_tools` policy never
+  meets it, and a session with a launch policy is never offered it. No Pips API change.
+
 - Editor protocol: commands `editor_app {name}`, `session_holder {request_id, session_id}` and `chatdgc_holder
   {request_id, conversation_id}`, and events `session_holder {request_id, session_id, found, editor?, windowless?,
   folder?, working?, idle_s?, monitors?, helpers?, commands?, queued?, waiting?}` and `chatdgc_holder {request_id,

@@ -1252,7 +1252,7 @@ silently receives it.
   arrived as a correction, so a parent adding scope told the child the opposite of what it meant.
   Either way it is folded in at the child's next tool boundary: it starts no new task, restarts
   nothing and waits for nothing, and a child that has already finished cannot read it — the answer
-  says so and points at `wait_tasks`. The two control tools need a child that is still RUNNING, not
+  says so and points at `wait_tasks` (and `continue_task` gives a finished one more work, below). The two control tools need a child that is still RUNNING, not
   merely a result nobody has read. The transcript names the child by what it was asked to do:
   *Sent message to Write the parser*, in the editor (and again when the chat is reopened there)
   and in the terminal UI as it happens.
@@ -1281,6 +1281,43 @@ reissuing an identical call.
 
 Both show their work as they run: **Checking sub-agents**, and **Waiting for a sub-agent** with a
 line every five seconds — *waiting on 2 background sub-tasks · 15s of 30s*.
+
+## Asking a finished helper to do more
+
+A helper that has finished can be given more work, and it is the same helper that does it, with its
+memory of what it was asked, what it read and what it found. A review can become its fixes, then a
+follow-up fix, without a new helper reading everything again.
+
+- **You**: on a finished helper's card in the agent map, or under its report line in the chat
+  ("Woke on agent · …"), type into **Ask it to do more** and press Continue (or Enter). In the
+  terminal, `/agents continue <id> <what to do>`; `/agents` shows the id to use beside each helper
+  that can be continued ("continue 1a2b3c4d"). It runs in the background, the chat stays free, and
+  its report comes back like any background helper's.
+- **The model**: `continue_task` with the helper's id and the new request, in the turn like `task`
+  or with `background: true`. It is offered only when a helper of this chat can be continued, and it
+  is asked for exactly as a `task` for that helper is (in Default mode you approve it; `deny: Task`
+  refuses it). For a helper that is still working, `message_task` is the tool.
+
+How it picks up:
+
+- **From its saved conversation.** When each of its runs ends, DGC keeps the helper's conversation
+  beside the chat's saved session (in `<session>.helpers/`, private and with secrets removed, like the
+  session itself), so a reopened chat or a restarted DGC can continue it. A chat that is not saved
+  keeps it for as long as the chat is open. A run that a restart stopped part-way has nothing saved
+  (Run again starts it fresh), and a helper's own helpers are not kept. Deleting the session deletes
+  them.
+- **In a fresh copy of your project as it is now**, isolated like any helper: its old copy was
+  brought in and removed. It is told which files of the project changed since it last saw them, and
+  to re-read a file before editing it.
+- **Compacted first** when its conversation fills half its window or more, with DGC's own
+  compaction, before the new request is added.
+- **On the same agent and model** as before, with the chat's permissions.
+- **Work that was held back** (waiting in `/tasks`) is shown to it as a diff, in the fresh copy; its
+  kept worktree stays where it is until you apply or drop it.
+
+The agent map keeps its one row, now "Continued · 2 runs", and its transcript shows each run after a
+divider: what the run before reported, "Continued 18:42 · asked by you", and what it was asked. Its
+changes are brought into your checkout, and taken back by Undo, like any helper's.
 
 ## Eyes for a model without vision
 

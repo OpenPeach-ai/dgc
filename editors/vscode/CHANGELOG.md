@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Ask a finished helper to do more** (with a DGC CLI that has it, 0.48). A finished helper's card in the agent map, and
+  its report line in the chat once opened, have a box: type what it should do now and press Continue (or Enter). The
+  same helper carries on in the background with its memory, in a fresh copy of your project, and reports back like
+  any background helper. Its row keeps its place and says **Continued · 2 runs**; its transcript shows each run after
+  a divider, "Continued 18:42 · asked by you", with what the run before reported and what it was asked. An older CLI
+  shows no box.
+
 - **The agent map shows what matters now; the rest is one click away.** In a long chat it used to list every helper
   the chat ever ran. It now opens on the agents working, the ones your latest turn that started any started (a short
   follow-up that starts none leaves them in view), and any older one whose changes were held back, its row saying
