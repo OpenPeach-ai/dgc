@@ -11,6 +11,7 @@ import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOV
 import { ChatBackend, OpenedChat } from "./chatChannel";
 import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
 import { keepRunningAfterClose } from "./closingTab";
+import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
 import { offerVoiceInstall } from "./voiceInstall";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
@@ -628,7 +629,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private rootsAfterLiveTurn = false;
   /** This chat's session is shown in another window: "moved" (it was taken from here) or "elsewhere"
    *  (it was already there). Read-only here until the user presses "Open here". */
-  private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string } | undefined;
+  private sessionElsewhere: { state: "moved" | "elsewhere"; pid?: number; reason?: string; holder?: HolderFacts;
+                              note?: HolderLine } | undefined;
+  /** While this chat is read-only, how often its bar asks again where the session is open (session_holder). */
+  private holderTimer?: ReturnType<typeof setTimeout>;
   /** How this provider's next backend asks to reattach: its first after a window opens is a restore. */
   private attachMode: AttachMode = "restore";
   private workspaceRootsRevision = 0;
@@ -1147,6 +1151,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // the incoming chat's can land in it, then rebuild from that backend's own snapshot.
     this.post({ type: "chat_switched", slotId: incoming.id, label: incoming.label });
     this.post({ type: "session_elsewhere", ...(this.sessionElsewhere || { state: "none" }) });
+    this.watchHolder();                                 // the chat switched to: its own holder, if it has one
     const held = incoming.pendingReady;
     incoming.pendingReady = undefined;
     if (held && this.backend) {
@@ -1682,6 +1687,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.sessionElsewhere) {
       const shown = this.sessionElsewhere;
       this.whenWebviewReady(() => this.post({ type: "session_elsewhere", ...shown }));
+      this.watchHolder();
     }
     this.surfaceUnsentPrompts();
     this.initializingBackend = undefined;
@@ -1835,6 +1841,45 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       + "this one shows it read-only]");
     const shown = this.sessionElsewhere;
     this.whenWebviewReady(() => this.post({ type: "session_elsewhere", ...shown }));
+    this.watchHolder(3_000);           // the window that took it names its editor a moment after it has it
+  }
+
+  /** The bar of a read-only chat says where its session is open and what runs there: asked now (or after `first` ms),
+   *  then every 30 seconds while it stays read-only, of this window's own backend, or of the side bar's once this chat
+   *  let its own go (it moved). An older CLI, or a holder that doesn't say, leaves today's sentence. */
+  private watchHolder(first = 0): void {
+    if (this.holderTimer) { clearTimeout(this.holderTimer); this.holderTimer = undefined; }
+    if (!this.sessionElsewhere) { return; }
+    if (first <= 0) { this.askHolder(); }
+    this.holderTimer = setTimeout(() => { this.holderTimer = undefined; this.watchHolder(); }, first > 0 ? first : 30_000);
+    (this.holderTimer as any).unref?.();
+  }
+
+  /** This provider's own process, when it can say where a session is open (ready.capabilities.session_holder). */
+  holderProcess(): DgcBackend | undefined {
+    const process = this.processOf(this.backend);
+    const offered = Number((process?.readyEvent?.capabilities as any)?.session_holder) >= 1;
+    return process?.ready && offered ? process : undefined;
+  }
+
+  private askHolder(): void {
+    const shown = this.sessionElsewhere;
+    const id = this.currentSessionId || this.sessionRestoreCandidate;
+    if (!shown || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    const asker = this.holderProcess() ?? this.tab?.host.holderProcess();
+    if (!asker) { return; }
+    void asker.request({ type: "session_holder", request_id: this.nextRequestId("holder"), session_id: id } as any,
+                       "session_holder" as any, 10_000)
+      .then((ev: any) => {
+        // Still this chat, still read-only: a chat switched to, or taken with Open here meanwhile, is not told.
+        if (this.sessionElsewhere !== shown || String(ev?.session_id || "") !== id) { return; }
+        const facts = holderFacts(ev);
+        const note = holderLine(facts, "session");
+        if (JSON.stringify(note) === JSON.stringify(shown.note)) { return; }
+        shown.holder = facts;
+        shown.note = note;
+        this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
+      }, () => { /* no answer: the bar keeps what it says */ });
   }
 
   /** "Open here": take this chat's session from the window that shows it, or from the backend that kept
@@ -1845,6 +1890,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
     this.backendNote(`[extension: Open here — taking session ${id} into this window]`);
     this.sessionElsewhere = undefined;
+    this.watchHolder();                                 // nothing to ask: it is this window's
     this.sessionRestoreCandidate = id;
     this.sessionRestoreSaved = true;
     this.sessionRestoreSuppressed = true;
@@ -3543,6 +3589,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // chat's history carries the cards it saved. The CLI replays them only to a client that asked.
         if (Number((ev.capabilities as any)?.turn_files) >= 1) {
           this.backend?.sendSetup({ type: "watch_turn_files" });
+        }
+        // Which editor this window is: another window showing a chat this process holds says "Open in Cursor".
+        if (Number((ev.capabilities as any)?.session_holder) >= 1) {
+          const name = editorName(vscode.env?.appName);
+          if (name) this.backend?.sendSetup({ type: "editor_app", name } as any);
         }
         // Memory that learns: this panel shows the line a Work session's look back adds ("Remembered: … · Forget"),
         // so it asks for memory_learned. A backend that doesn't offer it never sends one.
@@ -8023,6 +8074,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  answer was remembered; anything else in the tab stops, as closing a tab always did. */
   dispose(closedByUser = false): void {
     if (this.liveSessionsTimer) { clearTimeout(this.liveSessionsTimer); this.liveSessionsTimer = undefined; }
+    if (this.holderTimer) { clearTimeout(this.holderTimer); this.holderTimer = undefined; }
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
     // A tab's box lets go of a recording it started; the side bar's dictation goes with the window.
     if (this.voiceOffer) clearTimeout(this.voiceOffer);

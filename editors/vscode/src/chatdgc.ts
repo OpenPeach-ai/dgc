@@ -6,6 +6,7 @@ import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
 import { tabIcon } from "./tabIcon";
 import { keepRunningAfterClose } from "./closingTab";
+import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 
 /**
@@ -93,7 +94,7 @@ interface Tab {
   waitingAttach?: Record<string, unknown>[];
   /** Its chat is held by another window's DGC (chatdgc_held): shown read-only, as last saved, with Open here.
    *  "moved": this window had it, and another took it. */
-  elsewhere?: { state: "elsewhere" | "moved"; pid?: number };
+  elsewhere?: { state: "elsewhere" | "moved"; pid?: number; note?: HolderLine };
   /** Opened to be taken here at once (Settings › Running sessions › Open): its first ask is chatdgc_open_here. */
   take?: boolean;
 }
@@ -296,6 +297,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private homeShown = HOME_FIRST;
   private homeHeld = false;
   private homeTimer?: ReturnType<typeof setTimeout>;
+  /** While a tab is read-only, how often its bar asks again where its chat is open (chatdgc_holder). */
+  private holderTimer?: ReturnType<typeof setTimeout>;
   /** The chats with a reply being written, as the process said (chatdgc_turn, chatdgc_opened). */
   private readonly answering = new Set<string>();
   /** The window is going (a reload, a closed window): a tab's end is not the user closing it. */
@@ -877,6 +880,22 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
 
   private nextId(kind: string): string { return `cd-${kind}-${++this.seq}`; }
 
+  /** Ask where each read-only tab's chat is open now (or after `first` ms), then every 30 seconds while any tab is
+   *  read-only. Only a CLI that says it can (ready.capabilities.chatdgc.holder) is asked; otherwise the bar keeps its
+   *  plain sentence. */
+  private watchHolders(first = 0): void {
+    if (this.holderTimer) { clearTimeout(this.holderTimer); this.holderTimer = undefined; }
+    const chats = new Set([...this.tabs].filter((tab) => tab.elsewhere && tab.conversation).map((tab) => tab.conversation!));
+    if (this.closing || !chats.size) return;
+    let offered = false;
+    try { offered = Number(this.host?.chatdgcOffers?.()?.holder) >= 1; } catch { offered = false; }
+    if (first <= 0 && offered) {
+      for (const conversation of chats) this.ask({ kind: "holder" }, { type: "chatdgc_holder", conversation_id: conversation });
+    }
+    this.holderTimer = setTimeout(() => { this.holderTimer = undefined; this.watchHolders(); }, first > 0 ? first : 30_000);
+    (this.holderTimer as any).unref?.();
+  }
+
   private ask(asker: Asker, cmd: Record<string, unknown>): void {
     const requestId = this.nextId(asker.kind);
     this.requests.set(requestId, asker);
@@ -975,11 +994,27 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
             this.post(tab, { type: "elsewhere", state: "none", conversation });
             if (tab !== answering && tab.opened) this.ask({ tab, kind: "reopen" }, { type: "chatdgc_open", conversation_id: conversation });
           } else {
-            tab.elsewhere = { state, ...(pid ? { pid } : {}) };
-            this.post(tab, { type: "elsewhere", state, conversation });
+            const was = tab.elsewhere;
+            const note = was && was.state === state ? was.note : undefined;   // the same holder, as last said
+            tab.elsewhere = { state, ...(pid ? { pid } : {}), ...(note ? { note } : {}) };
+            this.post(tab, { type: "elsewhere", state, conversation, ...(note ? { note } : {}) });
           }
         }
         if (state !== "here") this.answering.delete(conversation);        // not this window's reply to keep or stop
+        // Where it is open and whether it is writing there: asked now, and again a moment after a move (the window
+        // that took it names its editor once it has it).
+        if (state !== "here") this.watchHolders(state === "moved" ? 3_000 : 0);
+        return;
+      }
+      case "chatdgc_holder": {
+        if (asker) this.requests.delete(requestId);
+        if (asker?.kind !== "holder" || !CONVERSATION_ID.test(conversation)) return;
+        const note = holderLine(holderFacts(ev), "chat");
+        for (const tab of allShowing(conversation)) {
+          if (!tab.elsewhere || JSON.stringify(tab.elsewhere.note) === JSON.stringify(note)) continue;
+          if (note) tab.elsewhere.note = note; else delete tab.elsewhere.note;
+          this.post(tab, { type: "elsewhere", state: tab.elsewhere.state, conversation, ...(note ? { note } : {}) });
+        }
         return;
       }
       case "chatdgc_chats":
@@ -1266,6 +1301,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         return;
       case "chatdgc_error": {
         if (asker) this.requests.delete(requestId);
+        if (asker?.kind === "holder") return;             // the bar keeps what it says
         const message = String(ev.message || "ChatDGC hit an error.");
         const waiting = this.createWaiting.get(requestId);
         if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
@@ -1303,7 +1339,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.host?.dictation?.()?.release(tab.mic);
         this.host?.readAloud?.()?.release(tab.mic);
         // A reloaded page shows what this tab knows of who holds its chat until its process says again.
-        if (tab.elsewhere) this.post(tab, { type: "elsewhere", state: tab.elsewhere.state, conversation });
+        if (tab.elsewhere) {
+          this.post(tab, { type: "elsewhere", state: tab.elsewhere.state, conversation,
+                           ...(tab.elsewhere.note ? { note: tab.elsewhere.note } : {}) });
+        }
         if (tab.take && conversation && this.openHereOffered()) {
           // Opened to carry on with it here: taken at once, live if its reply is still being written elsewhere.
           tab.take = false;
@@ -2040,6 +2079,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   dispose(): void {
     this.closing = true;
     if (this.homeTimer) clearTimeout(this.homeTimer);
+    if (this.holderTimer) clearTimeout(this.holderTimer);
     this.tabs.clear();
     this.requests.clear();
   }
