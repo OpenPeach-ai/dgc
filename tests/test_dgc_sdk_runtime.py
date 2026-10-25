@@ -526,6 +526,55 @@ class TimeoutTests(_Base):
         self.assertEqual(result.status, "completed", result)
         self.assertIn("slow model", result.final_text)
 
+    def test_runs_and_chat_replies_have_no_limit_by_default(self):
+        # A big local model can take tens of minutes before its first word, and the CLI never gives up on one that is
+        # still working: the SDK's own defaults (180 s a turn, 600 s a reply, 30 min a research stage) went.
+        import inspect
+        from dgc_sdk import AsyncDGC, AsyncSession, Session
+        from dgc_sdk.chat import Chat, Chats
+        for owner in (Session, AsyncSession):
+            for name in ("run", "stream", "followup"):
+                with self.subTest(method=f"{owner.__name__}.{name}"):
+                    self.assertIsNone(inspect.signature(getattr(owner, name)).parameters["timeout"].default)
+        for fn in (DGC.chat, AsyncDGC.chat, Chats.__init__):
+            with self.subTest(fn=fn.__qualname__):
+                self.assertIsNone(inspect.signature(fn).parameters["reply_timeout"].default)
+        self.assertIsNone(inspect.signature(Chat.research).parameters["timeout"].default)
+
+    def test_a_default_run_outlasts_the_old_limit_and_its_ack_and_event_timers(self):
+        # The run's own clock is moved 200 s on once its turn starts (past the old 180 s default), the transport's
+        # 30 s idle wait and the 15 s control-request wait are shrunk below the model's 3 s silence, and a control
+        # request is made while the model works. None of them may end the run.
+        _RuntimeModel.behavior = "slow"
+        from types import SimpleNamespace
+        from dgc_sdk import session as session_module
+        offset = [0.0]
+        clock = SimpleNamespace(monotonic=lambda: time.monotonic() + offset[0], sleep=time.sleep)
+        started = threading.Event()
+        kinds: list = []
+        with self._client(request_timeout=1) as dgc, mock.patch.object(session_module, "time", clock):
+            session = dgc.session(cwd=self.work, permissions=self._auto())
+            session.raw._event_timeout = 0.5
+            handle = session.stream("Summarize README.")               # no timeout given
+
+            def read():
+                for event in handle:
+                    kinds.append(event.type)
+                    if event.type == "turn_start":
+                        started.set()
+            reader = threading.Thread(target=read)
+            reader.start()
+            self.assertTrue(started.wait(30), "the turn never started")
+            offset[0] = 200.0
+            asked = time.monotonic()
+            rules = session.list_permissions()                         # a control request mid-wait
+            self.assertLess(time.monotonic() - asked, 1.0)
+            reader.join(60)
+            result = handle.result(timeout=None)
+        self.assertIsInstance(rules, list)
+        self.assertEqual(result.status, "completed", result)
+        self.assertIn("slow model", result.final_text)
+
     def test_timeouts_above_an_hour_are_accepted(self):
         with self._client() as dgc:
             session = dgc.session(cwd=self.work, permissions=self._auto())

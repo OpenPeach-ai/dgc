@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A run and a chat reply have no time limit by default.** `run()`, `stream()` and `followup()` (Python and
+  TypeScript, sync and async) used to stop a turn after 180 seconds, a ChatDGC reply after 600 seconds
+  (`reply_timeout`, TypeScript `replyTimeoutMs`) and each deep research stage after 30 minutes. A big model on your
+  own machine can take tens of minutes before its first word, and DGC itself now never gives up on a local model that
+  is still working, so the defaults are now no limit (`None` / `null`); `research()` follows the client's reply
+  limit. Pass `timeout` / `timeoutMs` / `reply_timeout` / `replyTimeoutMs` to keep a limit. This changes 0.7.0's
+  defaults before it is published. The client's `request_timeout` (15 s) and the runtime's start and event waits (30 s)
+  never applied to a run, and still don't: a run reads its events in short slices, and control requests are answered
+  while the model works.
+- Editor protocol: event `model_wait_settings` (how long DGC waits on a model, for the editor's Settings; sent only to
+  a client whose get_config `fields` named it) is in the vendored protocol and the TypeScript SDK's known events. An
+  SDK session never asks, so it never gets one.
+
 - Pips API 66: `list_pip_models` also returns `pips_model` (the Pips default as set, `""` when Pips follow DGC) and,
   on each model DGC knows a window for, `context_window` in tokens (the window DGC starts it with, never a provider
   maximum). No new command, so nothing new is refused; read the fields only from a runtime advertising 66.

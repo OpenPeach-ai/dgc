@@ -47,7 +47,6 @@ const TIMEOUT_GRACE_MS = 5_000;  // after a run timeout, how long to wait for th
 const STEER_GRACE_MS = 5_000;    // after the last turn, how long to wait for a steer's outcome
 const BILLING_WAIT_MS = 2_000;   // after the last turn, how long to wait for its usage totals
 const VERIFY_STARTED = "⧗ verify:";
-const DEFAULT_RUN_TIMEOUT_MS = 180_000;
 
 function newId(prefix: string): string {
   return `${prefix}-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -410,7 +409,7 @@ export class Session {
 
   /**
    * Send `prompt` and return a handle over its events. `timeoutMs` limits each turn of the run
-   * (default 180 000; null for none). `maxTurns` caps tool iterations for this run only; the
+   * (default: no limit, as null; a big local model can take tens of minutes before its first word). `maxTurns` caps tool iterations for this run only; the
    * session's own setting is restored afterwards. `signal` cancels the run when aborted.
    */
   stream(prompt: string, runOptions: RunOptions = {}): RunHandle {
@@ -440,7 +439,7 @@ export class Session {
     else this.active = run;
     this.owners.set(run.requestId, run);
     const handle = new RunHandle(this, run);
-    const timeoutMs = runOptions.timeoutMs === undefined ? DEFAULT_RUN_TIMEOUT_MS : runOptions.timeoutMs;
+    const timeoutMs = runOptions.timeoutMs ?? null;
     handle.begin(this.pump(run, prompt.trim(), timeoutMs, maxTurns, runOptions.outputSchema,
       runOptions.skills, runOptions.workflow, runOptions.repairAttempts ?? 1, true, prior), runOptions.signal,
     prior === null);
@@ -479,7 +478,7 @@ export class Session {
       }
     }
     const handle = new RunHandle(this, queued);
-    const timeoutMs = runOptions.timeoutMs === undefined ? DEFAULT_RUN_TIMEOUT_MS : runOptions.timeoutMs;
+    const timeoutMs = runOptions.timeoutMs ?? null;
     handle.begin(this.pump(queued, text.trim(), timeoutMs, undefined, runOptions.outputSchema,
       runOptions.skills, undefined, runOptions.repairAttempts ?? 1, queued.held, prior), runOptions.signal, false);
     return handle;

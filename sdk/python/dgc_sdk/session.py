@@ -636,7 +636,7 @@ class Session:
         self,
         prompt: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         max_turns: int | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
@@ -653,7 +653,7 @@ class Session:
         self,
         prompt: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         max_turns: int | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
@@ -662,8 +662,10 @@ class Session:
     ) -> RunHandle:
         """Send ``prompt`` and return a handle over its events.
 
-        ``timeout`` is seconds for each turn of the run (None: no limit). ``max_turns`` caps
-        tool iterations for this run only; the session's own setting is restored afterwards.
+        ``timeout`` is seconds for each turn of the run; the default, None, is no limit (a big local
+        model can take tens of minutes before its first word, and DGC itself never gives up on a
+        model that is still working). ``max_turns`` caps tool iterations for this run only; the
+        session's own setting is restored afterwards.
         """
         if self._closed:
             raise DGCRuntimeError("this session is closed")
@@ -706,7 +708,7 @@ class Session:
         self,
         text: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
         repair_attempts: int = 1,

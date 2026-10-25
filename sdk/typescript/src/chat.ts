@@ -101,8 +101,8 @@ export type ChatsOptions = {
   /** Every message's model and thinking, unless a message says otherwise. */
   model?: string;
   thinking?: ChatThinking;
-  /** How long a reply may take (default ten minutes). */
-  replyTimeoutMs?: number;
+  /** How long a reply may take, in ms (default: no limit, as `null`). */
+  replyTimeoutMs?: number | null;
 };
 
 export type ResearchOptions = {
@@ -112,7 +112,7 @@ export type ResearchOptions = {
   editPlan?: (plan: Record<string, unknown>) => Record<string, unknown> | null | undefined | Promise<Record<string, unknown> | null | undefined>;
   /** Sees the progress. */
   onEvent?: (event: ChatEvent) => void;
-  /** Each of its two turns (default thirty minutes). */
+  /** Each of its two turns, in ms (default: the client's `replyTimeoutMs`, which is no limit unless given one). */
   timeoutMs?: number | null;
 };
 
@@ -175,7 +175,7 @@ export class Chats {
   private readonly ownsSession: boolean;
   /** @internal */ readonly model: string | undefined;
   /** @internal */ readonly thinking: ChatThinking | undefined;
-  /** @internal */ readonly replyTimeoutMs: number;
+  /** @internal */ readonly replyTimeoutMs: number | null;
   /** @internal */ readonly listeners = new Map<string, Inbox>();
   /** @internal */ readonly titles = new Map<string, string>();
   private failure: Error | null = null;
@@ -188,8 +188,10 @@ export class Chats {
     this.ownsSession = ownsSession;
     this.model = options.model;
     this.thinking = thinkingOf(options.thinking);
-    this.replyTimeoutMs = options.replyTimeoutMs ?? 600_000;
-    if (!(this.replyTimeoutMs > 0)) throw new DGCConfigError("replyTimeoutMs must be positive");
+    this.replyTimeoutMs = options.replyTimeoutMs ?? null;
+    if (this.replyTimeoutMs !== null && !(this.replyTimeoutMs > 0 && Number.isFinite(this.replyTimeoutMs))) {
+      throw new DGCConfigError("replyTimeoutMs must be a positive number of ms, or null for no limit");
+    }
     void this.read();
   }
 
@@ -419,7 +421,7 @@ export class Chat {
     const thinking = thinkingOf(options.thinking) ?? this.chats.thinking;
     if (model) command.model = String(model);
     if (thinking) command.thinking = thinking;
-    const timeout = options.timeoutMs === undefined ? 1_800_000 : options.timeoutMs;
+    const timeout = options.timeoutMs;          // undefined: the client's replyTimeoutMs (default: no limit)
     let planned: ChatReply | undefined;
     for await (const event of this.turn(command, timeout)) {
       options.onEvent?.(event);

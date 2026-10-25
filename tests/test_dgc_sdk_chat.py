@@ -118,6 +118,17 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(again.chat_id, chat.id)
             self.assertEqual(len(chat.messages), 4)
 
+    def test_a_reply_has_no_limit_by_default_and_a_limit_is_still_taken(self):
+        with self._client() as dgc, dgc.chat() as chats:
+            self.assertIsNone(chats._reply_timeout)
+            self.assertIn("checkout", chats.ask("How does checkout work?", search="off").text)
+        with self._client() as dgc:
+            with dgc.chat(reply_timeout=120) as chats:
+                self.assertEqual(chats._reply_timeout, 120.0)
+            for bad in (0, -1, float("nan"), True, "60"):
+                with self.subTest(bad=bad), self.assertRaises(DGCConfigError):
+                    dgc.chat(reply_timeout=bad)
+
     def test_a_temporary_chat_is_never_listed_and_bad_options_are_refused(self):
         with self._client() as dgc, dgc.chat() as chats:
             reply = chats.ask("Just between us.", temporary=True, search="off")
