@@ -3108,7 +3108,12 @@ class Backend:
         """
         host = getattr(self, "_host", None)
         if host is not None:
-            host.announce_peers()
+            # Since 25 Oct this also runs at each turn's start and end (the Open here line's "working now"),
+            # so it must never be what stops a turn.
+            try:
+                host.announce_peers()
+            except Exception:                    # noqa: BLE001 -- a courtesy note, never a turn's failure
+                pass
             return
         try:
             from . import peers as _peers
