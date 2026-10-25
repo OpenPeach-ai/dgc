@@ -947,7 +947,7 @@ def _history_vision_items(seen) -> list:
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                    "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                   "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end")
+                   "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_end")
 
 
 # How long a backend keeps running with no word from its editor before it decides the window is
