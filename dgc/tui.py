@@ -6771,7 +6771,7 @@ class TUI:
                     and ((b.get("kind") == "tool" and self._tool_collapsible(b))
                          or b.get("kind") in ("retry", "handback"))]
             if not hits:
-                self._flash("no collapsed tool output to expand")
+                self._flash("nothing collapsed to expand")
             else:
                 chosen = hits if cmd == "expandall" else hits[-1:]
                 for b in chosen:
