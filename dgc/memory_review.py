@@ -231,7 +231,9 @@ def client_for(config, *, model: str | None = None, base_url: str | None = None,
                        api_mode=str(api_mode or config.get("api_mode", "auto")),
                        provider_capabilities=config.get("provider_capabilities", {}),
                        capability_cache_ttl_s=int(config.get("capability_cache_ttl_s", 300)),
-                       context_size=int(config.get("context_size", 0) or 0))
+                       context_size=int(config.get("context_size", 0) or 0),
+                       # A background look back stays bounded, even on a model that is slow to start.
+                       local_waits=False)
 
     def ledger(finished, result):
         try:

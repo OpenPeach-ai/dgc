@@ -1705,7 +1705,7 @@ class LLMClient:
                  provider_state: str = "stateless", prompt_cache: bool = True,
                  prompt_cache_key: str = "", context_size: int = 0, prompt_cache_ttl: str = "5m",
                  first_token_timeout="auto", idle_timeout=300, stall_notice=45,
-                 stall_retries=2, load_timeout="auto"):
+                 stall_retries=2, load_timeout="auto", local_waits: bool = True):
         self.base_url = base_url.rstrip("/")
         try:
             # DGC on Windows runs in a WSL distro of its own, whose localhost isn't Windows': a model the user serves
@@ -1734,6 +1734,9 @@ class LLMClient:
         # asked whether it is still working (dgc/server_check.py) before anything is re-sent.
         self._first_token_setting = first_token_timeout
         self._load_setting = load_timeout
+        # False: a job bounded on purpose (a background look back) keeps its read_timeout even on a
+        # local model, as before: no server check, and the old local windows.
+        self.local_waits = bool(local_waits)
         self.first_token_timeout = resolve_first_token_timeout(
             first_token_timeout, self.base_url, self.family, model=self.model)
         self.idle_timeout = bounded_seconds(idle_timeout, 300.0)
@@ -2461,6 +2464,12 @@ class LLMClient:
         """A request a server on this computer or network does itself (not an Ollama cloud model)."""
         return is_local_work(self.base_url, getattr(self, "family", ""), getattr(self, "model", ""))
 
+    def _checked_locally(self) -> bool:
+        """Local work this request may wait on for as long as its server says it is working: not a client
+        built bounded (local_waits=False), and not a call whose read_timeout a caller lowered."""
+        return (self._local_work() and getattr(self, "local_waits", True)
+                and not self._read_timeout_lowered())
+
     def _read_timeout_lowered(self) -> bool:
         """A caller lowered read_timeout below what this client was built with, to bound this call."""
         try:
@@ -2485,7 +2494,7 @@ class LLMClient:
         clamp, so a caller's bound still holds."""
         local = self._local_work()
         if checked is None:
-            checked = local and not self._read_timeout_lowered()
+            checked = self._checked_locally()
         checked = bool(checked) and local
         first = float(getattr(self, "first_token_timeout", 0.0) or 0.0)
         if local and not checked:
@@ -2576,8 +2585,7 @@ class LLMClient:
         return probe
 
     def _begin_attempt(self, cancel, endpoint: str, num_ctx: int = 0) -> RequestWatch:
-        check = (self._local_server_check(num_ctx)
-                 if self._local_work() and not self._read_timeout_lowered() else None)
+        check = self._local_server_check(num_ctx) if self._checked_locally() else None
         first, idle = self._stall_windows(checked=check is not None)
         load = float(getattr(self, "load_timeout", 0.0) or 0.0)
         if check is None and self._local_work():

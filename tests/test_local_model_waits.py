@@ -472,6 +472,21 @@ class SocketCeilingTests(unittest.TestCase):
         finally:
             watch.stop()
 
+    def test_a_client_built_bounded_keeps_its_bound_on_a_local_model(self):
+        # The memory look back runs in the background with 90 s; a slow local model must not hold it open.
+        from dgc import memory_review
+        from dgc.config import Config
+        cfg = Config(Path(tempfile.mkdtemp(prefix="dgc-local-waits-review-")))
+        cfg.data.update({"base_url": "http://127.0.0.1:9/v1", "model": "big-local:latest"})
+        client = memory_review.client_for(cfg)
+        watch = client._begin_attempt(None, client._url)
+        try:
+            self.assertFalse(watch.local)
+            self.assertEqual((watch.first_token_s, watch.idle_s), (90, 90))
+            self.assertEqual(client._post_timeout(watch), (15, 95))
+        finally:
+            watch.stop()
+
     def test_a_local_request_with_no_server_check_keeps_the_bounded_windows(self):
         client = LLMClient("http://127.0.0.1:9/v1", "k", "m", read_timeout=1800)
         client._local_server_check = lambda *a, **k: None       # as a reviewed Pips specialist run
