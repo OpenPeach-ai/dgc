@@ -141,7 +141,7 @@ function applyConfig(ev) {
         draft.subagent_context_size = Number(ev.subagent_context_size) > 0 ? String(ev.subagent_context_size) : '';
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).
     draft.cache_settable = ev.cache_settable === true;
-    // How long DGC waits on a model, from a CLI that answers model_wait_settings (0.49; the extension adds it).
+    // How long DGC waits on a model, from a CLI that answers model_wait_settings (0.48; the extension adds it).
     draft.wait_settable = ev.wait_settable === true;
     // The window a vLLM, SGLang or llama.cpp server was started with (the extension adds the last server_window event).
     draft.server_window = ev.server_window && typeof ev.server_window === 'object' ? { ...ev.server_window } : null;

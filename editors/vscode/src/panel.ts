@@ -172,7 +172,7 @@ function subagentWindow(value: unknown): number {
   return Math.min(SUBAGENT_WINDOW_MAX, Math.max(SUBAGENT_WINDOW_MIN, tokens));
 }
 
-// Settings -> Models -> Advanced: how long DGC waits on a model (model_wait_settings, 0.49). The CLI keeps seconds:
+// Settings -> Models -> Advanced: how long DGC waits on a model (model_wait_settings, 0.48). The CLI keeps seconds:
 // model_first_token_timeout_s "auto" | seconds (0: no limit), model_idle_timeout_s seconds (0: no limit); the page
 // shows Auto / Minutes / Never and minutes.
 type WaitSettings = { first_token: string; between_words_s: number };
@@ -578,7 +578,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  save that carried it. */
   private pipsSettings?: { model: string };
   /** Settings -> Models -> Advanced: how long DGC waits on a model, from a CLI that answers get_config's
-   *  "model_wait_settings" with an event of that name (0.49). Undefined: an older CLI, which would refuse a save that
+   *  "model_wait_settings" with an event of that name (0.48). Undefined: an older CLI, which would refuse a save that
    *  carried them. */
   private waitSettings?: WaitSettings;
   /** The window a vLLM, SGLang or llama.cpp server was started with (server_window, 0.48), for Settings -> General.

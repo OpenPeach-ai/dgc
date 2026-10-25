@@ -899,7 +899,7 @@ test('GitHub: Sign in with GitHub, once DGC has an app for it, connects and show
 });
 
 test('Models -> Advanced: Wait for the first word (Auto, minutes, Never) and Wait between words',()=>{
-  // 0.49. Both come from a CLI that answers model_wait_settings (the extension forwards them as the page shows them,
+  // 0.48. Both come from a CLI that answers model_wait_settings (the extension forwards them as the page shows them,
   // with wait_settable); an older CLI would refuse a save that carried them, so the controls are off there.
   const older=setup();
   older.click('[data-nav=models]');

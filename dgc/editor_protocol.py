@@ -355,7 +355,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # Pip on Default uses, on DGC's own connection (set_config `pips_model`); "" follows DGC: its model, or its
     # subscription CLI.
     "pips_settings": {"request_id": _S(False), "model": _S()},
-    # 0.49: how long DGC waits on a model, for Settings -> Models -> Advanced. Sent before `config` to a client whose
+    # 0.48: how long DGC waits on a model, for Settings -> Models -> Advanced. Sent before `config` to a client whose
     # get_config `fields` named "model_wait_settings" (an older client never asks, so never sees it). `first_token` is
     # model_first_token_timeout_s: "auto" (no limit for a model on this computer or network, which DGC asks whether it
     # is still working; 300 s for a remote one) or a whole number of seconds, "0" for no limit. `between_words_s` is

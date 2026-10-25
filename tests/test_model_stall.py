@@ -833,7 +833,7 @@ class AttemptLifecycleTests(StallTestCase):
 # ---- configuration --------------------------------------------------------------------------------
 class WindowResolutionTests(unittest.TestCase):
     def test_auto_is_no_limit_for_local_endpoints_and_shorter_for_remote(self):
-        # 0.49: a local model is never timed out while its server says it is working, so "auto" has
+        # 0.48: a local model is never timed out while its server says it is working, so "auto" has
         # no first-token limit there; one DGC cannot check on keeps the old 900 s.
         for url in ("http://127.0.0.1:8080/v1", "http://192.168.1.60:11434",
                     "http://100.89.32.80:1234/v1", "http://gpu-box.local:8000/v1"):

@@ -8,7 +8,7 @@
   in plain words. **Wait for the first word** is Auto (as long as a model on this computer or your network is working
   on your request, which DGC asks its server; 5 minutes for a cloud model), a number of minutes, or Never. **Wait
   between words** is minutes of quiet once a model has started answering. A local model that is still working is
-  never cut off either way. Needs a DGC CLI that answers `model_wait_settings` (0.49); with an older one the two rows
+  never cut off either way. Needs a DGC CLI that answers `model_wait_settings` (0.48); with an older one the two rows
   are off and say to update the CLI. Save sends them only when you changed them.
 
 - **The main chat's Pip model changes ask in plain words.** The permission card for changing a Pip lists its new
