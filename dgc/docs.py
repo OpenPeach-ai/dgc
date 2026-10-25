@@ -2066,8 +2066,13 @@ stay as they were.
 ## Undo in the editor
 
 **Undo**, on the files-changed card under an answer that edited files, finds the recovery point
-by the prompt that opened it, asks once, and performs the same rewind. A turn that changed no
-files shows no card — use `/rewind`. If no remaining point was opened by that prompt, Undo
+by the prompt that opened it, asks once, and performs the same rewind. The card lists exactly the
+files that rewind puts back, with the lines added and removed, counted from the state each file
+was in before the turn: DGC's own edits and a helper's integrated files alike, however the helper
+changed them. A file edited and then put back as it was is not listed, and Undo's question names
+the same number of files as the card. A helper that finishes in the background while the chat is
+idle lands in the recovery point of the turn that last ended, and that turn's card shows it. A
+turn that changed no files shows no card — use `/rewind`. If no remaining point was opened by that prompt, Undo
 declines rather than guess; if the same prompt opened more than one point, it takes the most
 recent one — `/rewind` lets you pick another. `/rewind` in the editor lists every point and
 rewinds as soon as you pick one.

@@ -17,6 +17,17 @@
   the map at that helper's card. A reload, or a window reload that reopens the chat, draws the same lines with the
   same reports. Needs a DGC CLI that offers `agent_reports` (0.48); with an older one the note stays as it was.
 
+- **The Edited card lists every file Undo puts back, with true line counts.** A file a helper changed without DGC's
+  own edit tools (a worker that fixed `billing.py` with a shell command in its own copy of the project) was restored
+  by Undo but missing from the card, so the card said "Edited 1 file" while Undo put back two. With a DGC CLI that
+  counts the card itself (0.48), the card shows exactly the files the turn's recovery point restores, with the lines
+  added and removed as the CLI counted them: New for a new file, Deleted for a deleted one, Changed for a binary or
+  very large one, and nothing for a file edited and then put back as it was. Undo's question names the same number
+  of files, finds the right recovery point for a turn DGC started itself (a helper's result, a resumed goal), and a
+  click on a row a helper changed still opens its diff. When a background helper finishes later and lands in an
+  earlier turn's recovery point, that turn's card is redrawn in place. A reopened chat shows the same card. With an
+  older CLI the card counts the edits as before.
+
 - **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
   message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
 

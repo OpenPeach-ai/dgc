@@ -6212,6 +6212,51 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "turn_files"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array"
+            },
+            "total": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "checkpoint_index": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "checkpoint_preview": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "turn_id",
+            "files",
+            "total"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "models_at"
             },
             "seq": {
@@ -11163,6 +11208,26 @@
           "properties": {
             "type": {
               "const": "server_window"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "watch_turn_files"
             },
             "chat_id": {
               "type": "string",

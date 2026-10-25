@@ -2720,6 +2720,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private async reviewWorkspaceChange(identity: string, chat = false): Promise<void> {
     const matches = (chat ? this.chatChanges : this.workspaceChanges).filter(item => item.id === identity || item.displayPath === identity);
     const change = matches.length === 1 ? matches[0] : undefined;
+    // A file on the Edited card that the chat's change set has not recorded (a background helper that integrated
+    // while the chat was idle) still opens a diff: the workspace's, against the last commit.
+    if (!change && chat && this.workspaceChanges.some(item => item.id === identity || item.displayPath === identity)) {
+      return this.reviewWorkspaceChange(identity, false);
+    }
     if (!change) {
       this.scheduleWorkspaceChanges(0);
       void vscode.window.showInformationMessage("That file is no longer in the workspace change set.");
@@ -4869,7 +4874,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "undoTurn":
         await this.undoTurn(String(msg.prompt || ""),
-                            Array.isArray(msg.files) ? msg.files.map(String) : []);
+                            Array.isArray(msg.files) ? msg.files.map(String) : [],
+                            msg.exact === true ? { total: Number(msg.total) || 0,
+                                                   index: Number.isInteger(msg.checkpoint?.index) ? msg.checkpoint.index : undefined,
+                                                   preview: typeof msg.checkpoint?.preview === "string" ? msg.checkpoint.preview : undefined }
+                              : undefined);
         break;
       case "branchChat":
         await this.branchChat(String(msg.prompt || ""));
@@ -5080,6 +5089,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipReportsWatch":
         // The panel draws Pip reports (ready.capabilities.pip_reports): this chat's start arriving.
         if (this.lastReadyEvent?.capabilities?.pip_reports === 1) { be.send({ type: "watch_pip_reports" }); }
+        break;
+      case "turnFilesWatch":
+        // The panel draws each turn's Edited card from the CLI's count (ready.capabilities.turn_files).
+        if ((this.lastReadyEvent?.capabilities as any)?.turn_files === 1) { be.send({ type: "watch_turn_files" }); }
         break;
       case "pipRunsWatch":
         // The chip above the box (ready.capabilities.pip_runs_running): which of this chat's Pips are running.
@@ -6240,8 +6253,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * Undo one turn's edits. The turn is identified by the prompt that opened its recovery point,
    * so a card from further up the transcript refuses rather than rewinding the wrong turn — the
    * failure mode of an "undo" that guesses is losing work the user never asked to lose.
+   *
+   * `counted` is the card the CLI counted (turn_files): the question names its count, so the card
+   * and the question never disagree, and the point is the one the CLI named -- its index when that
+   * point still has the preview it named, else the last point with that preview (a wake or resumed
+   * turn's point is labelled with what DGC sent the model, not with what the chat shows).
    */
-  async undoTurn(prompt: string, files: string[]): Promise<void> {
+  async undoTurn(prompt: string, files: string[],
+                 counted?: { total: number; index?: number; preview?: string }): Promise<void> {
     const be = this.ensureBackend();
     let items: any[] = [];
     try {
@@ -6254,10 +6273,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     // The backend stores the first 70 characters of the prompt, stripped, as the preview.
-    const wanted = prompt.trim().slice(0, 70);
+    const wanted = (counted?.preview ?? prompt).trim().slice(0, 70);
     const squash = (value: string) => value.replace(/\s+/g, " ").trim();
     let match: any;
-    for (const item of items) {
+    const named = typeof counted?.index === "number" ? items.find((item) => item?.index === counted.index) : undefined;
+    if (named && String(named.preview ?? "") === counted?.preview) match = named;
+    for (const item of match ? [] : items) {
       const preview = String(item?.preview ?? "");
       if (preview === wanted || (wanted && squash(preview) === squash(wanted))) match = item;
     }
@@ -6267,11 +6288,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         + "Open Review to see the changes and revert the ones you want.");
       return;
     }
-    const count = Number(match.files) || files.length;
+    const count = counted ? Math.max(counted.total, files.length) : (Number(match.files) || files.length);
     const choice = await vscode.window.showWarningMessage(
       `Undo this turn? DGC restores ${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
-      { modal: true, detail: wanted }, "Undo turn");
+      { modal: true, detail: prompt.trim().slice(0, 70) || wanted }, "Undo turn");
     if (choice !== "Undo turn") return;
     let outcome: any;
     try {

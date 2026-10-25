@@ -13,6 +13,12 @@
   TypeScript SDK's known events. An SDK session never sends the command, so it never gets the event, and its
   `history()` is unchanged.
 
+- Editor protocol: command `watch_turn_files` and event `turn_files` (the files a turn's recovery point restores,
+  with line counts, for the editor's Edited card; offered as `ready.capabilities.turn_files`) are in the vendored
+  protocol and the TypeScript SDK's known events, so neither SDK drops them. An SDK session never sends the command,
+  so it never gets the event live; `history()` items may now include `{type: "turn_files", turn_id, files, total,
+  checkpoint_index?, checkpoint_preview?}` just before a turn's `turn_end`. No Pips API change.
+
 - **A run and a chat reply have no time limit by default.** `run()`, `stream()` and `followup()` (Python and
   TypeScript, sync and async) used to stop a turn after 180 seconds, a ChatDGC reply after 600 seconds
   (`reply_timeout`, TypeScript `replyTimeoutMs`) and each deep research stage after 30 minutes. A big model on your
