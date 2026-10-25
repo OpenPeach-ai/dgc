@@ -128,7 +128,7 @@ class TuiSessionOwnerTests(unittest.TestCase):
                         if isinstance(block, str))
 
     def labels(self, ui):
-        return [row["label"] for row in ui._overlay["rows"]]
+        return [f"{row['label']} — {row['desc']}" for row in ui._overlay["rows"]]
 
     def test_resuming_a_held_session_offers_the_choices_and_a_prompt_writes_nothing(self):
         a, session_id, path = self.held_session()

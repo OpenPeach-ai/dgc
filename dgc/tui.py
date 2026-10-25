@@ -9554,27 +9554,28 @@ class TUI:
         else:
             where = agent.session_taken or "the other DGC"
         busy = holder_note.busy_reason(facts) if holder_note.usable(facts) else ""
+        # Each choice says what it does (the description beside it, read in full).
         choices = [
-            ("here", f"Open here — move it into this terminal; {where} shows it read-only" if not busy
-             else f"Open here — not until nothing runs there ({busy})"),
-            ("new", f"Start a new session — this one stays open in {where}"),
-            ("quit", "Quit — leave it as it is"),
+            ("here", "Open here", f"move it into this terminal; {where} shows it read-only" if not busy
+             else f"not until nothing runs there ({busy})"),
+            ("new", "Start a new session", f"this one stays open in {where}"),
+            ("quit", "Quit", "leave it as it is"),
         ]
 
-        def pick(index: int) -> None:
-            choice = choices[index][0]
+        def pick(row: dict) -> None:
+            choice = row.get("value")
             if choice == "here":
                 self._open_here()
             elif choice == "new":
                 self._handle_slash("/clear")
                 self._announce_peer_soon()
-            elif self.app:
+            elif choice == "quit" and self.app:
                 self.app.exit()
 
-        self._show_picker("This session is open elsewhere", [label for _key, label in choices], pick)
-        if self._overlay is not None:
-            self._overlay["sel"] = 1                     # Enter alone never takes it: a new session
-        self.__dict__["_owner_choices"] = [key for key, _label in choices]
+        rows = [{"label": label, "desc": desc, "value": key} for key, label, desc in choices]
+        self._open_overlay(rows, on_pick=pick, title="This session is open elsewhere",
+                           footer="↑↓ move · Enter choose · Esc close")
+        self._overlay["sel"] = 1                         # Enter alone never takes it: a new session
 
     def _open_here(self) -> None:
         """Open here: ask whoever has this session open to let it go, then hold it here and show it as it is now."""
