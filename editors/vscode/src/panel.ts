@@ -514,6 +514,17 @@ interface ChatSlot {
   pendingReady?: DgcEvent;
 }
 
+
+/** The prompt as Undo's question quotes it: one line of at most 70 characters, cut at a word with "…" when longer
+ *  (it read "…and nothing els" before, the founder's screenshot, 25 Oct). */
+function undoPromptLine(text: string): string {
+  const one = String(text || "").replace(/\s+/g, " ").trim();
+  if (one.length <= 70) { return one; }
+  const cut = one.slice(0, 69);
+  const atWord = cut.replace(/\s+\S*$/, "");
+  return (atWord.length >= 40 ? atWord : cut) + "…";
+}
+
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private viewType = "dgc.chat";   // the container the chat currently lives in
@@ -6363,7 +6374,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const choice = await vscode.window.showWarningMessage(
       `Undo ${turns}? DGC restores ${upTo ? "up to " : ""}${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
-      { modal: true, detail: (prompt.trim().slice(0, 70) || wanted) + also }, "Undo turn");
+      { modal: true, detail: undoPromptLine(prompt.trim() || wanted) + also }, "Undo turn");
     if (choice !== "Undo turn") return;
     await this.runUndo(be, match.index);
   }

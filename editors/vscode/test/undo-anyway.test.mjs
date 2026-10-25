@@ -223,6 +223,16 @@ test("the question names the files Undo puts back from Git because a command cha
   assert.match(said.at(-2).options.detail, /Also puts back 7 files a command changed: a, b, c, d, e and 2 more\.$/);
 });
 
+test("the question quotes a long prompt as one line cut at a word, with an ellipsis", async () => {
+  // It read "Run exactly this one shell command with the bash tool, and nothing els" (the founder, 25 Oct).
+  said.length = 0; answers.length = 0; answers.push("Cancel");
+  const long = "Run exactly this one shell command with the bash tool, and nothing else: git stash && git clean -fd";
+  const { p } = provider([]);
+  await p.onMessage({ type: "undoTurn", prompt: long, files: ["a.py"], exact: true, total: 1,
+                      checkpoint: { index: 0, preview: "turn 1" } });     // the point the fake CLI lists
+  assert.equal(said[0].options.detail, "Run exactly this one shell command with the bash tool, and nothing…");
+});
+
 test("the person's saves in the window's folders go to a CLI that offers user_saved, before and after the save", async () => {
   const sent = [];
   const make = (capabilities) => {
