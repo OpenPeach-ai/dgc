@@ -1587,6 +1587,64 @@ test("Open here: Running sessions' Open takes the chat at once; an older CLI hea
   assert.deepEqual(sent.filter((c) => c.type.startsWith("chatdgc_open") || c.type === "chatdgc_shown").map((c) => c.type), ["chatdgc_open"]);
 });
 
+test("Open here: a read-only chat's bar says where it is open and whether it writes there, when the CLI can say", async () => {
+  host.chatdgcOpenHere = () => true;
+  host.offers = { version: 1, holder: 1 };
+  chat.open(ID(6));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(6), title: "Held" });
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(6), state: "elsewhere", pid: 7 });
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "elsewhere", conversation: ID(6) }, "read-only at once");
+  const ask = last("chatdgc_holder");
+  assert.deepEqual({ ...ask, request_id: "" }, { type: "chatdgc_holder", conversation_id: ID(6), request_id: "" });
+  chat.onEvent({ type: "chatdgc_holder", request_id: ask.request_id, conversation_id: ID(6), found: true, editor: "Cursor",
+                 windowless: false, folder: "~/toni-erp", working: true });
+  const line = { head: "Open in Cursor · ~/toni-erp · writing a reply now.", detail: "Open here moves it to this window." };
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "elsewhere", conversation: ID(6), note: line });
+  // A reloaded page shows the line at once.
+  panel.say({ type: "ready" });
+  assert.deepEqual(panel.last("elsewhere").note, line);
+  // The holder can't say where (an older DGC holds it): today's sentence, never a guess.
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(6), state: "elsewhere", pid: 7 });
+  const again = [...sent].reverse().find((c) => c.type === "chatdgc_holder");
+  chat.onEvent({ type: "chatdgc_holder", request_id: again.request_id, conversation_id: ID(6), found: false });
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "elsewhere", conversation: ID(6) });
+  // A failed ask says nothing to anyone.
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(6), state: "elsewhere", pid: 7 });
+  const failed = [...sent].reverse().find((c) => c.type === "chatdgc_holder");
+  chat.onEvent({ type: "chatdgc_error", request_id: failed.request_id, message: "nope" });
+  assert.deepEqual(world.errors, []);
+  assert.equal(panel.last("error"), undefined);
+  // A CLI that can't say is never asked.
+  host.offers = { version: 1 };
+  sent.length = 0;
+  chat.open(ID(7));
+  const older = world.panels.at(-1);
+  older.say({ type: "ready" });
+  opened(older, { id: ID(7), title: "Old" });
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(7), state: "elsewhere", pid: 8 });
+  assert.equal(last("chatdgc_holder"), undefined);
+});
+
+test("Open here: the window a chat was taken from asks a moment later, and says where it is now", async () => {
+  host.chatdgcOpenHere = () => true;
+  host.offers = { version: 1, holder: 1 };
+  chat.open(ID(8));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(8), title: "Mine" });
+  chat.onEvent({ type: "chatdgc_held", conversation_id: ID(8), state: "moved", pid: 9 });
+  assert.equal(last("chatdgc_holder"), undefined, "not at once: the window that took it names itself a moment later");
+  await new Promise((r) => setTimeout(r, 3200));
+  const ask = last("chatdgc_holder");
+  assert.equal(ask?.conversation_id, ID(8));
+  chat.onEvent({ type: "chatdgc_holder", request_id: ask.request_id, conversation_id: ID(8), found: true, editor: "VS Code",
+                 windowless: false, folder: "~/work", working: false, idle_s: 30 });
+  assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "moved", conversation: ID(8),
+                                              note: { head: "Open in VS Code · ~/work · idle under a minute.", detail: "" } });
+});
+
 test("Open here: a read-only chat's menu offers only Export; its own again, the whole menu", async () => {
   host.chatdgcOpenHere = () => true;
   chat.open(ID(5));

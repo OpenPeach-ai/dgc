@@ -2549,8 +2549,19 @@
     const button = $("cd-elsewhere-open");
     if (button) button.disabled = false;
     if (!on) return;
-    $("cd-elsewhere-text").textContent = state.elsewhere.state === "moved" ? "This chat is open in another window now."
+    const plain = state.elsewhere.state === "moved" ? "This chat is open in another window now."
       : "This chat is open in another window.";
+    // Where it is open, and whether it is writing there, when the DGC holding it said so (holderWords.ts): the head in
+    // bold, then the rest. Otherwise the plain sentence. Text only.
+    const node = $("cd-elsewhere-text"), note = state.elsewhere.note;
+    const head = typeof note?.head === "string" ? note.head.slice(0, 300) : "";
+    if (!node) return;
+    if (!head) { node.textContent = plain; return; }
+    const where = document.createElement("strong");
+    where.className = "elsewhere-where";
+    where.textContent = head;
+    const detail = typeof note.detail === "string" ? note.detail.slice(0, 600) : "";
+    node.replaceChildren(where, ...(detail ? [document.createTextNode(` ${detail}`)] : []));
   }
   $("cd-elsewhere-open")?.addEventListener("click", (e) => {
     e.currentTarget.disabled = true;               // one click: the bar goes once this window has it
@@ -2864,7 +2875,13 @@
         const kind = String(msg.state || "none");
         if (kind !== "elsewhere" && kind !== "moved") state.elsewhere = null;
         else {
-          state.elsewhere = { state: kind, conversation: String(msg.conversation || state.conversation?.id || "") };
+          const was = state.elsewhere;
+          state.elsewhere = { state: kind, conversation: String(msg.conversation || state.conversation?.id || ""),
+                              note: msg.note && typeof msg.note === "object" ? msg.note : null };
+          if (was && was.state === kind && was.conversation === state.elsewhere.conversation) {
+            elsewhereBar();                          // only the words changed (where it is open, what runs there)
+            return;
+          }
           if (state.busy) {
             // Taken mid-reply: the reply goes on in the other window, so here it is no longer answering. What was
             // queued behind it comes back to the box, as after Stop, for you to send once you carry on here.

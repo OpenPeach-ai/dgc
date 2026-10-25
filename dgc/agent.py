@@ -5113,6 +5113,16 @@ class Agent(GoalLifecycle):
         # self-heal below -- which is about a backend whose editor HAS gone -- would be a promise
         # this session never keeps. Say the true thing: someone is using it.
         if reason == peers.REFUSED_ON_SCREEN:
+            # Where it is open and what runs there, as the editor's Open here line says it (dgc/holder_note.py),
+            # when the holder's note says so; an older DGC's is named as before.
+            try:
+                from . import holder_note
+                line = holder_note.held_on_screen(
+                    holder_note.session_facts(Path(str(self.session_file or "")).stem), tail)
+            except Exception:
+                line = ""
+            if line:
+                return line
             return (f"This session is open in {who}, and its DGC panel is on screen. Carry on there, "
                     f"or start a new session here. {tail}")
         # A reload is the common case, and then the holder is counting down to handing over. Say

@@ -6,6 +6,27 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **"Open here" says where the chat is open and what runs there.** A session another window holds used to be shown as
+  "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/toni-erp ·
+  idle 6 min.** 2 monitors and 1 background helper run there. Open here moves them to this window." It says "working
+  now" while a turn runs there, "Kept running by DGC with no window open" when no window has it, and names each thing
+  that runs or waits there only when there is one (monitors, background helpers, background commands, queued prompts,
+  questions waiting for an answer). The folder is shown with `~` for your home folder, and anywhere else by its own
+  name only, never a full path. After Open here, the window it came from says the same about the new one. A ChatDGC
+  chat's bar says it too ("writing a reply now"). When DGC can't tell, because an older DGC holds the chat, the bar
+  says what it always did.
+  - **In the terminal**, `dgc -c`, `dgc --resume ID` and `/resume` of a session a window holds now say the same facts:
+    "This session is open in Cursor · ~/toni-erp · working now. 1 monitor runs there. Carry on there, or start a new
+    session here." A message sent there that is refused because the window's panel is on screen names them too.
+  - **For editors**: new commands `editor_app {name}` (which editor this window is; nothing answers it) and
+    `session_holder {request_id, session_id}`, answered by a new event `session_holder {request_id, session_id, found,
+    editor?, windowless?, folder?, working?, idle_s?, monitors?, helpers?, commands?, queued?, waiting?}`, offered as
+    `ready.capabilities.session_holder`; for ChatDGC, `chatdgc_holder {request_id, conversation_id}` answered by
+    `chatdgc_holder {request_id, conversation_id, found, editor?, windowless?, folder?, working?, idle_s?}`, offered as
+    `ready.capabilities.chatdgc.holder`. No existing event changed. Each `dgc serve`'s note in `~/.dgc/peers` says
+    which editor its window is and what runs in each session it holds (`open_here`), refreshed at each turn's start
+    and end and every minute.
+
 - **Undo never loses your work.** A study of how Codex and DGC undo a turn found where DGC's Undo could throw away
   work nobody asked it to, or refuse for no reason. All of these are fixed:
   - **Your edits between turns stop an Undo of an earlier turn.** If you (or a formatter, a `git pull`, another chat)

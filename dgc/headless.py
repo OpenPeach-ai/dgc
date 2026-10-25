@@ -2470,6 +2470,9 @@ class Backend:
                           # dgc/serve_detach.py); `elsewhere` says a window already shows the session
                           # this one asked to reattach to.
                           **self._detach_capability(),
+                          # editor_app and session_holder: where a session another window holds is open, and
+                          # what runs there, for the line beside Open here (dgc/holder_note.py). Only a Host.
+                          **({"session_holder": 1} if getattr(self, "_host", None) is not None else {}),
                           # The chat panel can say what is on screen, so a takeover stops being
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
@@ -2585,8 +2588,10 @@ class Backend:
         # voice_replies: chatdgc_send takes `voice` (spoken in voice mode: the reply is asked to sound like speech).
         # question_forms: a reply's card may hold several questions, and chatdgc_answer takes `choices` for it.
         # outline: chatdgc_outline is understood (every prompt of a chat, and the widgets its replies made).
+        # holder: chatdgc_holder is understood (where a chat another window holds is open, and whether it is writing).
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
-                            "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1},
+                            "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
+                            "holder": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
@@ -3384,6 +3389,8 @@ class Backend:
                              prompt=turn_prompt,
                              kind=turn_kind,
                              **({"request_id": turn_request} if turn_request else {}))
+                # The note says "working" now, not at its next minute: another window's Open here line reads it.
+                self._announce_peer("working")
                 if notification is not None:
                     self._emit_monitor_events(notification, "wake", tid)
                 if agent_notice is not None and self._agent_reports_on():
@@ -3518,6 +3525,7 @@ class Backend:
                                  token_estimate=est, final_message_id=final_message_id)
                     self.ui.turn_id = ""        # nothing after this belongs to the finished turn
                     self._emit_context()
+                self._announce_peer("idle" if idle else "working")    # and "idle" once it is
                 if idle:
                     self._maybe_wake()
                     return
@@ -8978,6 +8986,9 @@ class Host:
         # another chat of this process and that one becomes its own.
         self.wire_default = None
         self.touched: dict[str, float] = {}  # chat id -> when a command for it last arrived
+        # Which editor the window on the wire is (`editor_app`): its note says it, so another window can say where
+        # a chat this process holds is open (dgc/holder_note.py). Forgotten when the wire changes hands.
+        self.editor_app = ""
         self.default = self.add_chat(config)
 
     def add_chat(self, config: Config, chat_id: str = "") -> "Backend":
@@ -9244,6 +9255,30 @@ class Host:
             answer(("Stopped: " if stopped else "Not stopped: ") + what)
         threading.Thread(target=stop, name="dgc-stop-live-session", daemon=True).start()
 
+    def _holder_command(self, cmd: dict) -> None:
+        """editor_app: which editor this window is, said in the process's note. session_holder: where another DGC
+        process holds a session, and what runs there, read from its note (dgc/holder_note.py)."""
+        from . import holder_note
+        problem = command_error(cmd)
+        if problem:
+            return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+        if cmd.get("type") == "editor_app":
+            name = holder_note.clean_editor(cmd.get("name"))
+            if name != self.editor_app:
+                self.editor_app = name
+                self.announce_peers()
+            return
+        session_id = str(cmd.get("session_id") or "")[:128]
+        facts = holder_note.session_facts(session_id)
+        facts.pop("pid", None)
+        self.em.emit("session_holder", request_id=str(cmd.get("request_id") or "")[:128], session_id=session_id,
+                     **facts)
+
+    def forget_editor(self) -> None:
+        """The wire changed hands, or no window has it: the editor that named itself is not the one there now."""
+        if self.editor_app:
+            self.editor_app = ""
+
     def _close_chat(self, cmd: dict) -> None:
         chat_id = cmd.get("chat_id")
         with self._chats_lock:
@@ -9322,6 +9357,8 @@ class Host:
             return self.chatdgc().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
         if kind in ("list_live_sessions", "stop_live_session"):
             return self._live_sessions(cmd)
+        if kind in ("editor_app", "session_holder"):
+            return self._holder_command(cmd)
         if kind == "user_saved":
             # The process's: a save is a fact about a file, whichever chat's command was running.
             problem = command_error(cmd)
@@ -9426,6 +9463,10 @@ class Host:
             board = self.switchboard
             extra = board.note_fields() if board is not None else {}
             extra["name"] = first.get("name", "")
+            # Where this process's chats are open and what runs in each (dgc/holder_note.py): another window's DGC
+            # says it beside Open here, and the terminal on resuming one of them.
+            from . import holder_note
+            extra[holder_note.NOTE_KEY] = holder_note.note_block(self, self.editor_app)
             _peers.announce(kind="serve", takeover=True, session=first.get("session", ""),
                             cwd=first.get("cwd", ""), project_root=first.get("project_root", ""),
                             git_common_dir=first.get("git_common_dir", ""),

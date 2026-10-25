@@ -583,6 +583,18 @@ class TUI:
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
             self._render_history()
+            self._say_holder()
+
+    def _say_holder(self) -> None:
+        """A resumed session another window holds: where it is open and what runs there, as the editor's Open here
+        line says it (dgc/holder_note.py). Nothing when no window holds it, or an older DGC does."""
+        try:
+            from .holder_note import resume_note
+            line = resume_note(getattr(self.agent, "session_file", None))
+        except Exception:
+            line = ""
+        if line:
+            self.info(line)
 
     # ---- floating overlay (a dropdown/modal above the composer) ----
     def _show_picker(self, title: str, labels: list[str], cb, delete_cb=None) -> None:
@@ -7805,6 +7817,7 @@ class TUI:
             self.blocks.clear(); self._buf = ""; self._think = ""
             self._ft_cache = {}
             self._render_history()          # show the loaded conversation, not a blank screen
+            self._say_holder()
             self._flash(f"resumed ({n} messages)"
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 

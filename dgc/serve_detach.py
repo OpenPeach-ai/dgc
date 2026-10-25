@@ -266,6 +266,16 @@ def host_work(host, scope: str = SCOPE_ALL) -> Work:
     return work.merge(chatdgc_work(host))
 
 
+def _forget_editor(host) -> None:
+    """The wire changed hands (or no window has it): which editor named itself is no longer true (dgc/holder_note.py)."""
+    forget = getattr(host, "forget_editor", None)
+    if callable(forget):
+        try:
+            forget()
+        except Exception:
+            pass
+
+
 def _duration(seconds: float) -> str:
     seconds = max(0, int(seconds))
     if seconds < 90:
@@ -539,6 +549,7 @@ class Switchboard:
                 return False
             self.current = None
             self.host.core.switch(NullSink(), farewell=farewell)
+            _forget_editor(self.host)                  # no window names itself now
             self.windowless_since = self.clock()
             self.windowless_wall = self.wall()
             self.windowless_cause = cause
@@ -850,6 +861,8 @@ class Switchboard:
             farewell = ("session_moved", {"reason": "opened_elsewhere"}) if previous is not None else None
             core.switch(conn.sink, farewell=farewell, first=frames)
             host.wire_default = chosen
+            # The editor that named itself was the window just let go: the new one says its own (editor_app).
+            _forget_editor(host)
 
     # -------------------------------------------------------------------- a socket client ---
     def _read_connection(self, conn: Connection) -> None:

@@ -11175,6 +11175,18 @@
     if (locked) hidePop();
     renderComposerControls();
   }
+  // Where it is open and what runs there, when the DGC holding it said so (the host's holderWords.ts): "Open in Cursor ·
+  // ~/toni-erp · idle 6 min." in bold, then what runs and waits there. Otherwise the plain sentence. Text only.
+  function elsewhereWords(node, note, plain) {
+    if (!node) return;
+    const head = typeof note?.head === "string" ? note.head.slice(0, 300) : "";
+    if (!head) { node.textContent = plain; return; }
+    const where = document.createElement("strong");
+    where.className = "elsewhere-where";
+    where.textContent = head;
+    const detail = typeof note.detail === "string" ? note.detail.slice(0, 600) : "";
+    node.replaceChildren(where, ...(detail ? [document.createTextNode(` ${detail}`)] : []));
+  }
   // This session is shown in another window ("Open here" there), or this window stopped answering and its
   // backend kept the session running without it. Nothing stopped: the turn goes on where the session is.
   function showSessionElsewhere(msg) {
@@ -11187,10 +11199,11 @@
       applyComposerLock();
       return;
     }
-    $("elsewhere-text").textContent = state === "moved" && msg.reason === "no_window"
+    const plain = state === "moved" && msg.reason === "no_window"
       ? "This window stopped answering, so DGC kept the session running without it."
       : state === "moved" ? "This session is open in another window now."
       : "This session is open in another window.";
+    elsewhereWords($("elsewhere-text"), msg.note, plain);
     bar.hidden = false;
     if (button) button.disabled = false;
     if (state === "moved" && turn) { releaseHeldEvents(); endTurn("moved"); setSending(false); }

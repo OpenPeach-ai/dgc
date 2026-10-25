@@ -3377,6 +3377,32 @@ test("Open here for a chat: read-only while another window writes to it, in Work
   } finally { await s.page.close(); }
 });
 
+test("Open here for a chat: the bar says where it is open and whether it writes there, its head in bold, as text; today's sentence without it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const text = s.page.locator("#cd-elsewhere-text"), box = s.page.locator("#cd-input");
+    await s.send({ type: "opened", conversation: conversation({ title: "Count" }),
+                   messages: [{ id: M(1), role: "user", text: "Count to 400" }, { id: M(2), role: "assistant", text: "1\n2\n3" }], earlier: 0, busy: false });
+    await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID });
+    assert.equal((await text.textContent()).trim(), "This chat is open in another window.");
+    await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID,
+                   note: { head: "Open in Cursor · ~/toni-erp · writing a reply now.", detail: "Open here moves it to this window." } });
+    assert.equal(await s.page.locator("#cd-elsewhere-text strong.elsewhere-where").textContent(), "Open in Cursor · ~/toni-erp · writing a reply now.");
+    assert.equal((await text.textContent()).trim(), "Open in Cursor · ~/toni-erp · writing a reply now. Open here moves it to this window.");
+    assert.equal(await s.page.locator("#cd-elsewhere-text strong").evaluate((n) => Number(getComputedStyle(n).fontWeight) >= 600), true);
+    assert.equal(await box.isDisabled(), true, "still read-only");
+    const bar = await s.page.locator("#cd-elsewhere").boundingBox(), open = await s.page.locator("#cd-elsewhere-open").boundingBox();
+    assert.ok(open.x + open.width <= bar.x + bar.width + 1, "Open here stays inside the bar");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-elsewhere-note.png") });
+    await s.send({ type: "elsewhere", state: "moved", conversation: ID, note: { head: "<img src=x onerror=alert(1)>", detail: "" } });
+    assert.equal(await s.page.locator("#cd-elsewhere-text img").count(), 0, "text only");
+    await s.send({ type: "elsewhere", state: "moved", conversation: ID });
+    assert.equal((await text.textContent()).trim(), "This chat is open in another window now.");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("Open here for a chat: while it's read-only nothing that would change it looks usable, in the chat or the box; copy and files stay; all of it comes back", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

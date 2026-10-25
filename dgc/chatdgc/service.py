@@ -68,6 +68,15 @@ def _writes(cmd: dict) -> bool:
             or (kind == "chatdgc_widgets" and cmd.get("op") == "remove"))
 
 
+def _epoch(stamp) -> float | None:
+    """A chat's ISO timestamp ("2026-10-25T10:00:00.000Z") as seconds since the epoch, or None."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def _chat_id(value) -> bool:
     return (isinstance(value, str) and len(value) == CHAT_ID_CHARS and value.startswith("chat_")
             and all(c in "0123456789abcdef" for c in value[5:]))
@@ -416,7 +425,7 @@ class ChatService:
         if problem:
             return self._error(f"invalid command: {problem}", request_id, None)
         conversation_id = cmd.get("conversation_id")
-        if _chat_id(conversation_id) and kind not in ("chatdgc_open_here", "chatdgc_shown"):
+        if _chat_id(conversation_id) and kind not in ("chatdgc_open_here", "chatdgc_shown", "chatdgc_holder"):
             if self._through(conversation_id, cmd):
                 return                                   # the process writing its reply answers it, or it waits
             if self._refused_here(conversation_id, cmd):
@@ -435,7 +444,7 @@ class ChatService:
              "chatdgc_context": lambda cmd: self._context_later(cmd["conversation_id"]),
              "chatdgc_context_breakdown": self._breakdown,
              "chatdgc_research_start": self._research_start, "chatdgc_research_steer": self._research_steer,
-             "chatdgc_shown": self._shown_now, "chatdgc_open_here": self._open_here,
+             "chatdgc_shown": self._shown_now, "chatdgc_open_here": self._open_here, "chatdgc_holder": self._holder,
              "memory_list": self._memory, "memory_add": self._memory, "memory_edit": self._memory,
              "memory_forget": self._memory, "memory_clear": self._memory, "memory_project": self._memory,
              "memory_history": self._memory_history, "memory_undo": self._memory_undo,
@@ -672,6 +681,28 @@ class ChatService:
                 self._away[conversation_id] = state
         self._watch_away()
         return dict(state)
+
+    def _holder(self, cmd: dict) -> None:
+        """chatdgc_holder: where another window's DGC holds this chat, and whether it is writing a reply there, from
+        that process's note (dgc/holder_note.py). Answered here, whoever holds it: it changes nothing."""
+        from .. import holder_note
+        conversation_id = cmd["conversation_id"]
+        holders = self._holders(conversation_id) if _chat_id(conversation_id) else []
+        changed = None
+        if holders:
+            try:
+                changed = _epoch(self.engine.open(conversation_id).get("updated_at"))
+            except Exception:                            # noqa: BLE001 -- gone meanwhile: no idle time to say
+                changed = None
+        facts = holder_note.chatdgc_facts(holders[0] if holders else None, conversation_id, changed)
+        with self._lock:
+            writing_here = conversation_id in self._turns
+        if facts.get("found") and writing_here:
+            # Taken mid-reply: the reply this process writes goes on, shown in the window that took it.
+            facts["working"] = True
+            facts.pop("idle_s", None)
+        # This window's news, never down a link: the chat may be one another window took from here mid-reply.
+        self._wire("chatdgc_holder", request_id=cmd["request_id"], conversation_id=conversation_id, **facts)
 
     def _lost_hold(self, conversation_id) -> None:
         """A change refused because another window's DGC has the chat's lock: read-only here, as such a chat is."""

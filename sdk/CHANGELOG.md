@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Editor protocol: commands `editor_app {name}`, `session_holder {request_id, session_id}` and `chatdgc_holder
+  {request_id, conversation_id}`, and events `session_holder {request_id, session_id, found, editor?, windowless?,
+  folder?, working?, idle_s?, monitors?, helpers?, commands?, queued?, waiting?}` and `chatdgc_holder {request_id,
+  conversation_id, found, editor?, windowless?, folder?, working?, idle_s?}` (where a chat another window holds is open,
+  and what runs there; offered as `ready.capabilities.session_holder` and `ready.capabilities.chatdgc.holder`) are in
+  the vendored protocol and the TypeScript SDK's known events. The events only ever answer those commands; an SDK
+  session never sends them. No Pips API change.
+
 - Editor protocol: command `undo_to {index, overwrite?}` and event `undo_result {request_id, index, ok, files_restored,
   conflicts, left, stopped, error?}` (a rewind that says why it stopped and can go ahead over named files; offered as
   `ready.capabilities.undo_to`) are in the vendored protocol and the TypeScript SDK's known events. The event only

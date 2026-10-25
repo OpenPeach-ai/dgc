@@ -1626,6 +1626,18 @@ class CLI:
         self.ui.info(f"resumed session ({n} messages)"
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
         self._show_restored_todos()
+        self._say_holder()
+
+    def _say_holder(self) -> None:
+        """A resumed session another window holds: where it is open and what runs there (dgc/holder_note.py), the
+        same facts the editor's Open here line gives. Nothing when no window holds it, or an older DGC does."""
+        try:
+            from .holder_note import resume_note
+            line = resume_note(getattr(self.agent, "session_file", None))
+        except Exception:
+            line = ""
+        if line:
+            self.ui.info(line)
 
     def _set_model(self, model: str) -> None:
         previous = str(self.config.model or "")
@@ -2950,6 +2962,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+            cli._say_holder()
             cli._show_restored_todos()
             cli.agent.compact_resumed_session()
         else:
@@ -2960,6 +2973,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
+            cli._say_holder()
             cli._show_restored_todos()
             cli.agent.compact_resumed_session()
         else:
@@ -2975,6 +2989,7 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
+                cli._say_holder()
                 cli._show_restored_todos()
                 cli.agent.compact_resumed_session()
             else:
