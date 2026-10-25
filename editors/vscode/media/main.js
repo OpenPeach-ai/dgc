@@ -10983,18 +10983,35 @@
       if (!runs || runs.runs < 2) return;
       while (run < next) { run += 1; into.appendChild(agentRunDivider(id, run)); }
     };
+    // Its steps in the chat, in run order: a background run's steps are drawn by its first spawn, so a later run's
+    // can sit above an earlier one's in the chat. A step that names no call takes the run of the call it leads to.
+    const picked = [];
     for (const node of log.querySelectorAll(".tool.agent-owned, .diff.agent-owned, button.disclosure.agent-owned, .reasoning.agent-owned, .thought-static.agent-owned, .thought-note.agent-owned")) {
+      const own = node.dataset.callId && String(node.dataset.callId).startsWith(`${id}:`);
       if (node.classList.contains("tool") && node.dataset.toolName === "task") {
         const child = agentRecords.get(node.dataset.agentId);
-        if (child && child.parent_id === id && agentAnchor(child.id) === node) { pageLine(child.id); cloned += 1; continue; }
+        if (child && child.parent_id === id && agentAnchor(child.id) === node) {
+          picked.push({ child: child.id, run: own ? agentRunOf(node.dataset.callId, id) : null }); continue;
+        }
       }
       if ((node.dataset.agentId || node.dataset.agent) !== id) continue;
       // The spawn that started this agent is its parent's step, not this agent's work.
       if (node.classList.contains("tool") && node.dataset.toolName === "task"
           && innermostAgentId(node.dataset.callId) !== id) continue;
-      enter(agentRunOf(node.dataset.callId, id));
-      const clone = node.cloneNode(true);
-      rebindAgentClone(clone, node, images);
+      picked.push({ node, run: own ? agentRunOf(node.dataset.callId, id) : null });
+    }
+    if (runs && runs.runs > 1) {
+      for (let i = picked.length - 1, next = null; i >= 0; i--) {
+        if (picked[i].run === null) picked[i].run = next; else next = picked[i].run;
+      }
+      for (let i = 0, last = 1; i < picked.length; i++) { if (picked[i].run === null) picked[i].run = last; last = picked[i].run; }
+      picked.sort((a, b) => a.run - b.run);              // stable: each run's steps keep their order
+    }
+    for (const item of picked) {
+      enter(item.run || 1);
+      if (item.child) { pageLine(item.child); cloned += 1; continue; }
+      const clone = item.node.cloneNode(true);
+      rebindAgentClone(clone, item.node, images);
       into.appendChild(clone);
       cloned += 1;
     }
@@ -12559,8 +12576,10 @@
     const cards = [...log.querySelectorAll(".tool[data-call-id]")]
       .filter((card) => innermostAgentId(card.dataset.callId) === record.id);
     if (cards.length) {
-      return cards.map((card) => ({ status: card.dataset.status || "",
-        text: `${card.querySelector(".verb")?.textContent || ""} ${card.querySelector(".arg")?.textContent || ""}`.trim() }));
+      // In run order (a continued helper's background run is drawn by its first spawn in the chat).
+      return cards.map((card) => ({ status: card.dataset.status || "", run: agentRunOf(card.dataset.callId, record.id),
+        text: `${card.querySelector(".verb")?.textContent || ""} ${card.querySelector(".arg")?.textContent || ""}`.trim() }))
+        .sort((a, b) => a.run - b.run);
     }
     const calls = new Map();
     for (const ev of Array.isArray(record.log) ? record.log : []) {
@@ -12568,7 +12587,7 @@
       const key = ev.call_id || ev.name;
       if (ev.type === "tool_call") {
         const copy = toolCopy(ev.name);
-        calls.set(key, { status: "running", text: [copy.past, copy.target,
+        calls.set(key, { status: "running", run: agentRunOf(ev.call_id, record.id), text: [copy.past, copy.target,
           String(ev.summary || stepSummary(ev.name, ev.args) || ev.args?.description || "")].filter(Boolean).join(" ") });
       } else if (ev.type === "tool_result" && calls.has(key)) {
         calls.get(key).status = ev.is_error ? "failed" : "completed";
@@ -12637,6 +12656,12 @@
   function agentRunOf(callId, id) {
     const found = String(callId || "").match(/^sub-[0-9a-f]{12}:r(\d+)-/);
     return found && String(callId).startsWith(`${id}:`) ? Number(found[1]) : 1;
+  }
+  function agentCallRunMark(id, run) {
+    const info = agentRuns.get(id)?.history.find((entry) => entry.run === run);
+    const li = el("li", "am-call am-call-run");
+    li.textContent = `Continued · asked by ${info?.by === "you" ? "you" : "DGC"}`;
+    return li;
   }
   function amContinuedWords(record) {
     const runs = agentRuns.get(record.id);
@@ -12813,10 +12838,14 @@
     }
     const calls = amToolCalls(record);
     agentsSetText(n.callsTitle, `Tool calls (${Math.max(calls.length, tools)})`);
-    const callSig = JSON.stringify(calls);
+    const callSig = JSON.stringify([calls, agentRuns.get(id)?.runs || 1]);
     if (n.calls._sig !== callSig) {
       n.calls._sig = callSig;
-      n.calls.replaceChildren(...calls.slice(-200).map((call) => {
+      const continued = (agentRuns.get(id)?.runs || 1) > 1;
+      n.calls.replaceChildren(...calls.slice(-200).flatMap((call, i, shown) => {
+        // A continued helper's later runs start with a line saying so: "Continued · asked by you".
+        const mark = continued && call.run > 1 && (i === 0 || shown[i - 1].run !== call.run)
+          ? [agentCallRunMark(id, call.run)] : [];
         const li = el("li", "am-call");
         const dot = li.appendChild(el("span", "agent-dot"));
         dot.setAttribute("aria-hidden", "true");
@@ -12824,7 +12853,7 @@
         const text = li.appendChild(el("span", "am-call-text"));
         text.textContent = call.text || "Tool call";
         if (call.status === "running" || call.status === "failed") li.appendChild(el("span", "sr-only")).textContent = `, ${call.status}`;
-        return li;
+        return [...mark, li];
       }));
     }
     n.calls.hidden = !calls.length;

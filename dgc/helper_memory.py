@@ -418,25 +418,46 @@ def project_state(project_root) -> dict | None:
     return {"head": commit, "project_rel": str(rel), "dirty": digests, "at": time.time()}
 
 
+def landed_states(workspace, outcome) -> dict:
+    """The files a run's integration landed, by repo path, with what each holds now (just after it landed)."""
+    from .worktree import _checked_target, _read_state
+    if workspace is None:
+        return {}
+    rel = Path(getattr(workspace, "project_rel", None) or ".")
+    repo = Path(getattr(workspace, "repo", ""))
+    out = {}
+    for shown in list(getattr(outcome, "paths", ()) or ())[:MAX_STATE_FILES]:
+        repo_path = (rel / str(shown)).as_posix() if rel != Path(".") else str(shown)
+        try:
+            out[repo_path] = _digest(_read_state(_checked_target(repo, repo_path)))
+        except Exception:
+            out[repo_path] = "unreadable"
+    return out
+
+
+def own_dirty(workspace, record: dict) -> frozenset:
+    """The uncommitted files of a fresh copy that hold exactly what this helper landed there last: its own work, not
+    the user's (a file the user changed since holds something else and stays theirs)."""
+    landed = record.get("landed") if isinstance(record.get("landed"), dict) else {}
+    if workspace is None or not landed:
+        return frozenset()
+    baseline = getattr(workspace, "baseline", None) or {}
+    return frozenset(path for path in getattr(workspace, "initial_dirty", ()) or ()
+                     if path in landed and path in baseline and _digest(baseline[path]) == landed[path])
+
+
 def view_state(workspace, outcome) -> dict | None:
     """What a helper last saw of the project, for "changed since": its copy's start (the commit and the uncommitted
     files it was given) and the files of its own that landed, as they are now. A change the person made while it
     worked, which it never saw, then counts as changed; so does a file whose work of its was held back."""
-    from .worktree import _checked_target, _read_state
     base = str(getattr(workspace, "base_commit", "") or "")
     if workspace is None or not base:
         return None
     rel = Path(getattr(workspace, "project_rel", None) or ".")
-    repo = Path(getattr(workspace, "repo", ""))
     dirty = {}
     for repo_path, state in list((getattr(workspace, "baseline", None) or {}).items())[:MAX_STATE_FILES]:
         dirty[str(repo_path)] = _digest(state)
-    for shown in list(getattr(outcome, "paths", ()) or ())[:MAX_STATE_FILES]:
-        repo_path = (rel / str(shown)).as_posix() if rel != Path(".") else str(shown)
-        try:
-            dirty[repo_path] = _digest(_read_state(_checked_target(repo, repo_path)))
-        except Exception:
-            dirty[repo_path] = "unreadable"
+    dirty.update(landed_states(workspace, outcome))
     return {"head": base, "project_rel": str(rel), "dirty": dirty, "at": time.time()}
 
 
@@ -572,6 +593,10 @@ def keep(parent, agent_id: str, child, *, description: str, prompt: str, agent_n
         record["state"] = (registry.state(agent_id) if registry is not None else "") or "finished"
         record["project"] = (view_state(workspace, outcome) if workspace is not None
                              else project_state(parent.config.project_root))
+        # What it landed, as it landed, so its next run may change those files again (own_dirty).
+        landed = dict(record.get("landed") or {}) if isinstance(record.get("landed"), dict) else {}
+        landed.update(landed_states(workspace, outcome))
+        record["landed"] = dict(list(landed.items())[-MAX_STATE_FILES:])
         record["saved_at"] = time.time()
         _fit(record)
         _save(parent, cache, lock, record)
@@ -851,6 +876,10 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
     if workspace is None and repo_root(root) is not None:
         raise Refused("unavailable", "DGC couldn't make the helper a fresh copy of the project: "
                                      f"{isolation_error or 'unknown error'}. Nothing was changed.")
+    if workspace is not None:
+        # Uncommitted files that hold exactly what it landed last are its own work: its next change to them lands
+        # like any file's. A file the user changed since is theirs, and keeps the standing rule.
+        workspace.own_dirty = own_dirty(workspace, record)
     copy_root = str(workspace.project_root) if workspace is not None else ""
     earlier_held = copy.deepcopy(record.get("held")) if isinstance(record.get("held"), dict) else None
     changed = changed_since(root, record.get("project")) if record.get("project") else None

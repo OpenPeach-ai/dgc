@@ -211,3 +211,41 @@ test("its report line in the chat opens to the same box", () => {
   assert.equal(p.button(box, "Starting…").disabled, true);
   assert.deepEqual(p.errors, []);
 });
+
+test("a later run's steps drawn above an earlier run's in the chat still read in run order, on its page and its card", () => {
+  const p = view();
+  reviewed(p);
+  // Run 2: the model's continuation, in its turn.
+  p.event({ type: "turn_start", turn_id: "t2", prompt: "Have it fix total()." });
+  p.event({ type: "tool_call", call_id: "call_2", name: "continue_task", args: { id: sid(1), text: "Fix total().", agent: "Review billing.py" }, summary: "" });
+  p.event({ type: "agents", total: 1, active: 1, items: [{ id: sid(1), parent_id: null, call_id: "call_1",
+    description: "Review billing.py", depth: 1, state: "running", tool_calls: 1, isolated: true, parallel: false, restored: false }] });
+  p.event({ type: "tool_call", call_id: `${sid(1)}:r2-w1`, name: "edit_file", args: { path: "billing.py" }, summary: "billing.py" });
+  p.event({ type: "tool_result", call_id: `${sid(1)}:r2-w1`, name: "edit_file", output: "edited", is_error: false });
+  p.event({ type: "agent_ended", id: sid(1), state: "finished", duration_ms: 3000, tool_calls: 2, message: "Fixed total()." });
+  p.event({ type: "tool_result", call_id: "call_2", name: "continue_task", output: "Sub-task 'Review billing.py' completed and integrated 1 path(s): billing.py.\nSummary:\nFixed total().", is_error: false });
+  p.event({ type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 0 });
+  // Run 3, asked by you, in the background: its steps arrive with no turn, and the chat may draw them by its spawn.
+  const R3 = { ...TWO_RUNS, runs: 3, continuable: false, history: [TWO_RUNS.history[0], { ...TWO_RUNS.history[1], by: "model" },
+    { run: 3, by: "you", at: AT + 60, held: false, request: "Now fix discount() too." }] };
+  p.event({ type: "agents", total: 1, active: 1, items: [{ id: sid(1), parent_id: null, call_id: "call_1",
+    description: "Review billing.py", depth: 1, state: "running", tool_calls: 2, isolated: true, parallel: false, restored: false, background: true }] });
+  p.event({ type: "agent_runs", items: [R3] });
+  // Drawn where the chat put them: here, ahead of run 2's in the document, as a background run's can be.
+  p.event({ type: "tool_call", call_id: `${sid(1)}:r3-w2`, name: "edit_file", args: { path: "billing.py" }, summary: "billing.py" });
+  p.event({ type: "tool_result", call_id: `${sid(1)}:r3-w2`, name: "edit_file", output: "edited", is_error: false });
+  const r3 = p.doc.querySelector(`.tool[data-call-id="${sid(1)}:r3-w2"]`), r1 = p.doc.querySelector(`.tool[data-call-id="${sid(1)}:r1"]`);
+  r1.after(r3);
+  p.event({ type: "agent_ended", id: sid(1), state: "finished", duration_ms: 3000, tool_calls: 3, message: "Fixed discount()." });
+  p.event({ type: "agent_runs", items: [{ ...R3, continuable: true, history: R3.history.map((run) => ({ ...run, note: run.note || "Sub-task 'Review billing.py' completed and integrated 1 path(s): billing.py." })) }] });
+  p.open();
+  p.row(`agent:${sid(1)}`).click();
+  const calls = [...p.card().querySelectorAll(".am-calls > li")].map((li) => li.classList.contains("am-call-run") ? li.textContent : "call");
+  assert.deepEqual(calls, ["call", "Continued · asked by DGC", "call", "Continued · asked by you", "call"]);
+  p.button(p.card(), "Open transcript").click();
+  const order = [...p.$("agent-transcript-log").children]
+    .filter((n) => n.classList.contains("tool") || n.classList.contains("agent-run-divider"))
+    .map((n) => n.classList.contains("agent-run-divider") ? `divider ${n.dataset.run}` : n.dataset.callId);
+  assert.deepEqual(order, [`${sid(1)}:r1`, "divider 2", `${sid(1)}:r2-w1`, "divider 3", `${sid(1)}:r3-w2`]);
+  assert.deepEqual(p.errors, []);
+});

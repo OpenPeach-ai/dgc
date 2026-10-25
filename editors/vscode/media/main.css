@@ -2187,6 +2187,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agent-more-send { flex: none; }
 .agent-more-send:disabled { opacity: .55; cursor: default; }
 .handback-more { margin-top: var(--sp-1); }
+.am-call.am-call-run { margin-top: var(--sp-1); color: var(--muted); font-weight: var(--w-med); }
 /* A row jump marks the task card for a moment; with reduced motion the outline alone says it. */
 .tool.flash { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-md);
   animation: agent-flash 1.2s ease-out; }

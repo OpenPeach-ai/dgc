@@ -197,6 +197,35 @@ class TheModelContinuesAFinishedHelperTest(Case):
         h.agent.rewind(len(points) - 1)
         self.assertEqual((h.root / "billing.py").read_text(), BILLING)
 
+    def test_its_next_change_to_a_file_it_landed_lands_too_and_a_file_the_person_changed_since_stays_theirs(self):
+        # Found in real VS Code: a third run's fix to billing.py was held back as "already dirty before delegation"
+        # when the only uncommitted change in it was the helper's own second run.
+        h = self.make_repo()
+        parent, helper = Turns(), Turns()
+        agent_id = self.review(h, parent, helper)
+        parent.on("PARENT fix", [ToolCall("t2", "continue_task", {"id": agent_id, "text": "Fix FINDING-1."})], "ok")
+        helper.on("[Continued — the main agent asked you to do more.]", self.fix, "Fixed FINDING-1.")
+        self.turn(h, "PARENT fix", parent, helper)
+        self.assertEqual((h.root / "billing.py").read_text(), FIXED, "run 2 landed (uncommitted)")
+        again = lambda messages: [ToolCall("w3", "edit_file", {"path": "billing.py", "old_string": "result = 0",  # noqa: E731
+                                                              "new_string": "result = 0.0"})]
+        parent.on("PARENT more", [ToolCall("t3", "continue_task", {"id": agent_id, "text": "Start the sum at 0.0."})],
+                  "ok")
+        helper.scripts.insert(0, ("Start the sum at 0.0.", again, "Done."))
+        self.turn(h, "PARENT more", parent, helper)
+        self.assertIn("completed and integrated 1 path(s): billing.py", parent.results["PARENT more"][0])
+        self.assertEqual((h.root / "billing.py").read_text(), FIXED.replace("result = 0\n", "result = 0.0\n"))
+        # The person changes billing.py after that: it is their uncommitted work now, and the standing rule holds.
+        (h.root / "billing.py").write_text((h.root / "billing.py").read_text() + "# reviewed by the person\n")
+        once = lambda messages: [ToolCall("w4", "edit_file", {"path": "billing.py", "old_string": "return result",  # noqa: E731
+                                                             "new_string": "return result  # once"})]
+        parent.on("PARENT last", [ToolCall("t4", "continue_task", {"id": agent_id, "text": "Mark the return."})], "ok")
+        helper.scripts.insert(0, ("Mark the return.", once, "Marked."))
+        self.turn(h, "PARENT last", parent, helper)
+        self.assertIn("sub-agent changed files that were already dirty before delegation", parent.results["PARENT last"][0])
+        self.assertTrue((h.root / "billing.py").read_text().endswith("# reviewed by the person\n"))
+        self.assertNotIn("# once", (h.root / "billing.py").read_text())
+
     def test_its_steps_carry_the_run_so_a_second_run_never_lands_on_the_first_runs_cards(self):
         h = self.make_repo()
         parent, helper = Turns(), Turns()
