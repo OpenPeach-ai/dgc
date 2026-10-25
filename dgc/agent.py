@@ -10378,8 +10378,16 @@ class Agent(GoalLifecycle):
                                                  may_remove=False)
             return _TaskOutcome(
                 f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}{outside}")
+        if keeper is None and getattr(self, "_edit_checkpoints_required", True) is False:
+            # A helper integrating its own helper's work into its OWN copy: that copy is disposable and
+            # its own integration records the result where Undo finds it. Its manager never has a
+            # recovery point (checkpoints.open() is top-level only), so recording into it refused
+            # every such integration: "could not capture rewind checkpoint", work kept aside.
+            target_checkpoints = None
+        else:
+            target_checkpoints = keeper if keeper is not None else self.checkpoints
         try:
-            integration = workspace.integrate(keeper if keeper is not None else self.checkpoints)
+            integration = workspace.integrate(target_checkpoints)
         finally:
             lease.release()
 

@@ -26,8 +26,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     blamed on the helper. "Integrated" stays true to what came through integration. When DGC knows the file's exact
     earlier state (Git's copy of a file that was unchanged then, or the bytes the helper's copy took of a file you had
     already changed), it puts that state in the recovery point, so Undo takes the helper's change back; otherwise the
-    report says no recovery point covers it. The check costs about 20 ms on a 1,500-file repository; files Git
-    ignores are not seen.
+    report says no recovery point covers it. The check runs once, when the helper ends: about 25 ms on DGC's own
+    1,500-file repository and about 130 ms on a 50,000-file one. Files Git ignores are not seen.
+  - **A helper's own helper can finish its work.** With `max_subagent_depth` above 1, a helper's helper always ended
+    "NOT integrated: could not capture rewind checkpoint", its work kept aside: DGC tried to record a recovery point
+    in the first helper's copy, which never has one and needs none. Its work now lands in the first helper's copy and
+    reaches you with that helper's own changes.
 
 - **Undo on the Edited card works while files are open in the editor.** With any file open in an editor tab, Undo
   said "DGC can no longer undo that turn — its recovery point has been used or pruned", although it had not been. The

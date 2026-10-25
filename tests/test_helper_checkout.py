@@ -389,6 +389,34 @@ class NonIsolatedAndNestedTest(Case):
                          f"{two / 'billing.py'}.")
         self.assertEqual((root / "billing.py").read_text(), BILLING)
 
+    def test_a_helpers_own_helper_lands_its_work_and_its_shell_change_goes_up_with_its_parents(self):
+        """At depth 2 the grandchild's integration into its parent helper's copy used to fail
+        outright -- "could not capture rewind checkpoint" -- because that helper's own checkpoint
+        manager never has a recovery point. Its copy is disposable; its own integration records."""
+        h = self.make_repo(max_subagent_depth=2)
+        root = h.root.resolve()
+        seen = {}
+
+        def level_one(messages):
+            seen["one"] = system_root(messages)
+            return [ToolCall("d1", "task", {"description": "deeper", "prompt": "LEVEL-2 add deep.txt"})]
+
+        def level_two(messages):
+            return [ToolCall("e1", "write_file", {"path": "deep.txt", "content": "from the grandchild\n"}),
+                    ToolCall("e2", "bash", {"command": f"cd {seen['one']} && printf 'two\\n' >> notes.txt"})]
+
+        first, second = Recorder(level_one, "level one done"), Recorder(level_two, "level two done")
+        results = self.run_parent(h, [[ToolCall("t1", "task", {"description": "top", "prompt": "LEVEL-1 go"})],
+                                      ("LEVEL-1", first), ("LEVEL-2", second)], "parent: delegate")
+        child_saw = first.results[0]
+        self.assertIn("Sub-task 'deeper' completed and integrated 1 path(s): deep.txt.", child_saw)
+        self.assertIn("notes.txt in your checkout changed outside its own copy", child_saw)
+        self.assertIn("It is in your own copy now, so the change goes to the user with your own when "
+                      "you finish.", child_saw)
+        self.assertIn("Sub-task 'top' completed and integrated 2 path(s): deep.txt, notes.txt.", results[0])
+        self.assertEqual((root / "deep.txt").read_text(), "from the grandchild\n")
+        self.assertEqual((root / "notes.txt").read_text(), "one\ntwo\n")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -411,7 +411,10 @@ def settle(parent, workspace, keeper) -> str:
     if not mine and not unknown:
         return ""
     recorded = []
-    record = getattr(keeper, "record_known", None)
+    # The parent is itself a helper: the checkout that changed is its own disposable copy, and the
+    # change goes to the user with the rest of its work. Nothing to record here.
+    disposable = bool(theirs(parent))
+    record = getattr(keeper, "record_known", None) if not disposable else None
     for change in mine:
         target = Path(workspace.repo) / change.repo_path
         try:
@@ -445,7 +448,10 @@ def settle(parent, workspace, keeper) -> str:
                      f"at a moment one of its own commands was running, so it most likely "
                      f"changed {it} directly.")
         rest = [change for change in mine if change not in recorded]
-        if not rest:
+        if disposable:
+            parts.append(f" {'It is' if len(mine) == 1 else 'They are'} in your own copy now, so "
+                         "the change goes to the user with your own when you finish.")
+        elif not rest:
             parts.append(f" DGC put {its} earlier state in the recovery point, so Undo takes "
                          "that change back.")
         elif recorded:
