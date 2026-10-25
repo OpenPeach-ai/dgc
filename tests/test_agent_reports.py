@@ -251,6 +251,9 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(split_report("error: Sub-task 'x' did not complete: timed out."),
                          ("Sub-task 'x' did not complete: timed out.", ""))
         self.assertEqual(split_report("Just words."), ("", "Just words."))
+        shared = ("Sub-task 'x' completed in the shared checkout. This task ran sequentially because an "
+                  "isolated Git checkout was unavailable. Summary:\nDone it.")
+        self.assertEqual(split_report(shared), (shared.split(" Summary:")[0], "Done it."))
         self.assertTrue(held_back(split_report(HELD)[0]))
         self.assertTrue(held_back("Sub-task 'x' partly integrated. Applied 1 path(s)"))
         self.assertTrue(held_back("Sub-task 'x' completed but was not integrated: busy."))

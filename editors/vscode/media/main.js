@@ -3547,7 +3547,7 @@
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
-    if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set() };
+    if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set(), kind };
     // The prompt's time goes under its bubble: when its turn started, live. A saved turn's comes with its
     // history (a {role: "time"} item, legacyItem), so a reopened chat says when each prompt was sent.
     turn.head = head?.matches?.(".msg.user") ? head : null;
@@ -3661,6 +3661,115 @@
     const mark = wake.note.querySelector(".note-icon"), text = wake.note.querySelector(".note-icon + span");
     setIcon(mark, background ? "square-terminal" : "activity");
     if (text) text.textContent = `Woke on ${background ? (wake.ids.size > 1 ? "background commands" : "background command") : "monitor"} · ${wake.label}`;
+  }
+  // ---- a finished background agent's report (ready.capabilities.agent_reports) ----
+  // A background agent that ends starts a turn on the idle chat, and its report comes right after
+  // turn_start (`agent_report`): one muted line per agent, in place of the bare "Woke on agent" note,
+  // which a click or Enter/Space opens to the whole report, drawn as the agent's page draws it -- what
+  // became of its changes (said in the transcript's own colour when work was held back, with where the
+  // worktree is kept), what it said, the files it named -- and "Open in agent map". Folded, live and as
+  // a reload replays it (the history carries the same event). It is a note, never a "you" bubble, and
+  // pins nothing. An older CLI sends none, and the note stays what it was.
+  let handbackSeq = 0;
+  function splitAgentReport(report) {
+    let text = String(report || "").trim();
+    if (text.startsWith("error: ")) text = text.slice("error: ".length);      // the model's word, not the reader's
+    // "...path(s): a, b.\nSummary:\n", or "...was unavailable. Summary:\n" for one that ran in the shared checkout.
+    const mark = /[ \n]Summary:\n/.exec(text);
+    if (!mark) return /^(?:Sub-task |The user stopped sub-task )/.test(text) ? [text, ""] : ["", text];
+    return [text.slice(0, mark.index).trim(), text.slice(mark.index + mark[0].length).trim()];
+  }
+  function paintAgentReport(ev) {
+    ensureTurn();
+    const t = turn, id = String(ev.id || "").slice(0, 64);
+    t.handbacks = t.handbacks || [];
+    // A live event held while the snapshot that already drew it landed: one line per agent, never two.
+    if (id && t.handbacks.some((line) => line.dataset.agentId === id)) return;
+    const wake = t.wake;
+    let line;
+    if (wake?.kind === "wake" && !wake.reported && wake.note?.isConnected) {
+      line = wake.note;                     // the wake's own note becomes the first agent's line
+      wake.reported = true;
+      line.replaceChildren();
+    } else {
+      line = el("div");
+      const after = t.handbacks.at(-1) || (wake?.note?.isConnected ? wake.note : null);
+      if (after) after.after(line);         // the next agent's line, under the one before
+      else { appendTurnContent(line); breakText(); }   // a report that reached a running turn: where it came
+    }
+    buildHandbackLine(line, id, String(ev.description || id || "agent").slice(0, 200), String(ev.report || ""));
+    t.handbacks.push(line);
+  }
+  function buildHandbackLine(line, id, label, report) {
+    line.className = replaying ? "resume-note monitor-note handback-line hist" : "resume-note monitor-note handback-line";
+    if (id) line.dataset.agentId = id; else delete line.dataset.agentId;
+    const n = ++handbackSeq;
+    const toggle = el("button", "handback-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", `handback-${n}`);
+    toggle.innerHTML = `<span class="note-icon" data-icon="bot">${icon("bot")}</span>`;
+    toggle.appendChild(el("span", "handback-label")).textContent = `Woke on agent · ${label}`;
+    const chevron = toggle.appendChild(el("span", "handback-chevron"));
+    chevron.setAttribute("aria-hidden", "true");
+    const body = el("div", "handback-body");
+    body.id = `handback-${n}`;
+    body.hidden = true;
+    body.setAttribute("role", "region");
+    body.setAttribute("aria-label", `Report from ${label}`);
+    line._handback = { report, label };
+    toggle.addEventListener("click", () => setHandbackOpen(line, toggle.getAttribute("aria-expanded") !== "true"));
+    line.append(toggle, body);
+  }
+  // Drawn the first time it opens: a long chat of finished agents renders none of their Markdown until read.
+  function fillHandbackBody(line, body) {
+    const { report, label } = line._handback || { report: "", label: "" };
+    const [note, said] = splitAgentReport(report);
+    if (note) {
+      const p = body.appendChild(el("p", "agent-page-outcome handback-note"));
+      p.textContent = note.slice(0, 4000);
+      if (AGENT_OUTCOME_HELD.test(note) || /^Sub-task '[\s\S]*?' completed but was not integrated/.test(note)) p.dataset.held = "1";
+    }
+    const answer = agentAnswerText({ message: said });
+    if (answer) {
+      const block = body.appendChild(el("div", "surface-markdown handback-answer"));
+      block.innerHTML = md(answer);
+      enrichMarkdown(block);
+    }
+    paintAgentFiles(body, { message: said });
+    if (!note && !answer) body.appendChild(el("p", "agent-page-outcome", "The agent reported nothing."));
+    const map = body.appendChild(el("button", "handback-map", "Open in agent map"));
+    map.type = "button";
+    map.setAttribute("aria-label", `Open ${label} in the agent map`);
+    map.addEventListener("click", () => openReportInMap(line, map));
+  }
+  function setHandbackOpen(line, open) {
+    const toggle = line.querySelector(":scope > .handback-toggle"), body = line.querySelector(":scope > .handback-body");
+    if (!toggle || !body) return;
+    if (open && !body.childElementCount) fillHandbackBody(line, body);
+    body.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    line.classList.toggle("open", open);
+    // Opened, the report is being read: a turn running below must not scroll() the reader away from it.
+    if (open && !atBottom()) following = false;
+    renderToLatest();
+  }
+  // The agent this report is from, as the agents list knows it now. A reopened chat numbers its agents
+  // afresh, but the spawn's own result still names the id the agent ran under.
+  function reportAgentId(id) {
+    if (!id || agentRecords.has(id)) return id;
+    const named = `(id ${id})`;
+    for (const record of agentRecords.values()) {
+      if ((agentAnchor(record.id)?.querySelector(".body pre")?.textContent || "").includes(named)) return record.id;
+    }
+    return "";
+  }
+  function openReportInMap(line, from) {
+    const id = reportAgentId(line.dataset.agentId || "");
+    openAgentMap({ from });
+    if (!agentMapOpen()) return;
+    const row = id ? amRowByKey(`agent:${id}`) : null;
+    if (row) amOpenCard({ kind: "agent", id }, row);       // its card: what it was asked, its steps, its report
   }
   // The one writer of the activity row. Everything it can say is a fact somebody stated: the
   // panel's own open request card, the handoff this panel asked for, or the backend's
@@ -7172,6 +7281,10 @@
         // running now carries on in its own block above it.
         renderPipReport(ev.report);
         break;
+      case "agent_report":
+        // A finished background agent's report: its line, folded (ready.capabilities.agent_reports).
+        paintAgentReport(ev);
+        break;
       case "monitor_event": {
         amNoteMonitorLines(ev);
         ensureTurn();
@@ -8828,7 +8941,7 @@
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
                               "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
-                              "model_retry", "monitor_event", "turn_activity", "turn_eta", "turn_end"]);
+                              "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_end"]);
   function prepareCompleteHistory(items) {
     // The host may have forwarded the end of A and start of queued B while this webview was
     // loading. Those provisional blocks must be replaced together, not adopted as one turn.

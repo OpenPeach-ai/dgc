@@ -33,8 +33,9 @@ _WAKE_RE = re.compile(
     r"(?:\A|\n)" + re.escape(WAKE_HEAD)
     + r"\nid: ([^\n]*)\ndescription: ([\s\S]*?)\nintegrated: (yes|no)\nresult:\n([\s\S]*)\n"
     + re.escape(WAKE_TAIL))
-# The model-facing words before a report's own text, and where they end.
-_SUMMARY_MARK = "\nSummary:\n"
+# Where DGC's words about the agent's changes end and the agent's own begin: "...path(s): a, b.\nSummary:\n",
+# or "...was unavailable. Summary:\n" for a child that ran in the shared checkout.
+_SUMMARY_MARK = re.compile(r"[ \n]Summary:\n")
 
 
 def wake_prompt(notice: dict) -> str:
@@ -109,12 +110,12 @@ def split_report(report: str) -> tuple[str, str]:
     text = str(report or "").strip()
     if text.startswith("error: "):
         text = text[len("error: "):]
-    at = text.find(_SUMMARY_MARK)
-    if at < 0:
+    mark = _SUMMARY_MARK.search(text)
+    if mark is None:
         if text.startswith(("Sub-task ", "The user stopped sub-task ")):
             return text, ""
         return "", text
-    return text[:at].strip(), text[at + len(_SUMMARY_MARK):].strip()
+    return text[:mark.start()].strip(), text[mark.end():].strip()
 
 
 def held_back(note: str) -> bool:
