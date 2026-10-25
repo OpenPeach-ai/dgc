@@ -5,8 +5,8 @@
 - Editor protocol: command `rewind_preview {index}` and event `rewind_preview {request_id, index, files}` (how many
   files Undo on an older turn restores across every turn it takes back; offered as
   `ready.capabilities.rewind_preview`) are in the vendored protocol and the TypeScript SDK's known events. The event
-  only ever answers that command. A `turn_files` file row may carry `outside: true` and, in `history()`,
-  `undoable: false`. No Pips API change.
+  only ever answers that command. A `turn_files` file row may carry `outside: true`, and `undoable: false` when a
+  reopened chat replays it to an editor. No Pips API change.
 
 - **`AppToolHandler.asgi` serves your app's tools at the exact address you registered in Starlette and FastAPI:**
   `app.add_route("/dgc/pips", handler.asgi, methods=["POST"])`. It is now an ASGI app object rather than a method, which
@@ -22,8 +22,7 @@
 - Editor protocol: command `watch_turn_files` and event `turn_files` (the files a turn's recovery point restores,
   with line counts, for the editor's Edited card; offered as `ready.capabilities.turn_files`) are in the vendored
   protocol and the TypeScript SDK's known events, so neither SDK drops them. An SDK session never sends the command,
-  so it never gets the event live; `history()` items may now include `{type: "turn_files", turn_id, files, total,
-  checkpoint_index?, checkpoint_preview?}` just before a turn's `turn_end`. No Pips API change.
+  so it never gets the event, live or in `history()`, which is unchanged. No Pips API change.
 
 - **A run and a chat reply have no time limit by default.** `run()`, `stream()` and `followup()` (Python and
   TypeScript, sync and async) used to stop a turn after 180 seconds, a ChatDGC reply after 600 seconds

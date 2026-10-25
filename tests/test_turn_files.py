@@ -342,12 +342,24 @@ class TurnFilesWireTests(unittest.TestCase):
 class TurnFilesHistoryTests(unittest.TestCase):
     """After a reload the reopened chat replays the same card: the event, just before that turn's turn_end."""
 
-    def history(self, messages):
+    def history(self, messages, watching=True):
         backend = object.__new__(Backend)
         backend.agent = types.SimpleNamespace(messages=messages)
         backend.config = types.SimpleNamespace(data={}, get=lambda key, default=None: default)
         backend.em = types.SimpleNamespace(emit=lambda kind, **value: None)
+        if watching:
+            backend._turn_files_on = True        # a client that sent watch_turn_files, as the extension does
         return backend._history()
+
+    def test_a_client_that_never_asked_gets_the_history_it_always_did(self):
+        """The SDK, ACP and an older editor never send watch_turn_files: a saved card is not replayed to them
+        (a model-retry test found a turn_files item where its history ends with the give-up, 25 Oct)."""
+        saved = {"files": [{"path": "billing.py", "additions": 1, "deletions": 1, "counted": True,
+                            "status": "modified"}], "total": 1}
+        messages = [{"role": "user", "content": "fix it"},
+                    {"role": "assistant", "content": "Fixed.", "_dgc_turn_files": saved}]
+        self.assertTrue([i for i in self.history(messages) if i.get("type") == "turn_files"], "the editor's card")
+        self.assertEqual([i for i in self.history(messages, watching=False) if i.get("type") == "turn_files"], [])
 
     def test_a_saved_card_replays_before_its_turns_end(self):
         saved = TurnFilesWireTests.VIEW

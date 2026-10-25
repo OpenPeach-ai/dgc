@@ -240,3 +240,15 @@ test("an older CLI's card keeps the old question: the recovery point's own count
   await p.onMessage({ type: "undoTurn", prompt: "fix it", files: ["a.py"] });
   assert.match(warnings[0].message, /DGC restores 3 files/);
 });
+
+// The CLI replays a saved Edited card only to a client that sent watch_turn_files, so the panel asks with the handshake,
+// ahead of the session it restores (as for agent_report): a reopened chat's history then carries its cards (25 Oct).
+test("the panel asks for the CLI's cards with the handshake, only from a CLI that offers them", async () => {
+  const { readFileSync } = await import("node:fs");
+  const panelSrc = readFileSync(new URL("../src/panel.ts", import.meta.url), "utf8");
+  assert.match(panelSrc, /Number\(\(ev\.capabilities as any\)\?\.turn_files\) >= 1\) \{\s*this\.backend\?\.sendSetup\(\{ type: "watch_turn_files" \}\);/);
+  const ask = panelSrc.indexOf('sendSetup({ type: "watch_turn_files" })');
+  const ready = panelSrc.lastIndexOf("this.lastReadyEvent = ev;", ask);
+  assert.ok(ready > 0 && ask - ready < 1200, "in the ready handler, right after the capabilities are known");
+  assert.ok(ask < panelSrc.indexOf("this.syncWorkspaceRoots(backend, true);", ask), "ahead of the handshake's roots and the restore");
+});

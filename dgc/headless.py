@@ -5228,7 +5228,10 @@ class Backend:
         for index, m in enumerate(self.agent.messages):
             position = index
             mark_turn_files()
-            turn_files_mark = _history_turn_files(m.get("_dgc_turn_files"))
+            # Only to a client that draws the CLI's card (watch_turn_files): the SDK, ACP and an older editor
+            # get the history they always did, like agent_report's lines.
+            turn_files_mark = (_history_turn_files(m.get("_dgc_turn_files"))
+                               if getattr(self, "_turn_files_on", False) else None)
             place_reports()
             arrived.extend(fixed(pip_report_items(m)))
             # Before any `continue`: images anchored at or before this message join the open turn.

@@ -3515,6 +3515,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (Number((ev.capabilities as any)?.agent_reports) >= 1) {
           this.backend?.sendSetup({ type: "watch_agent_reports" });
         }
+        // Each turn's Edited card from the CLI's count (turn_files): asked here too, for the same reason, so a reopened
+        // chat's history carries the cards it saved. The CLI replays them only to a client that asked.
+        if (Number((ev.capabilities as any)?.turn_files) >= 1) {
+          this.backend?.sendSetup({ type: "watch_turn_files" });
+        }
         // Memory that learns: this panel shows the line a Work session's look back adds ("Remembered: … · Forget"),
         // so it asks for memory_learned. A backend that doesn't offer it never sends one.
         if (Number((ev.capabilities as any)?.memory?.learned) >= 1) {

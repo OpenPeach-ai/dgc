@@ -184,6 +184,7 @@ class OutsideFilesAfterRestartTests(unittest.TestCase):
             checkpoints=manager, _turn_files_path=name)
         backend.config = types.SimpleNamespace(data={}, get=lambda key, default=None: default)
         backend.em = types.SimpleNamespace(emit=lambda kind, **value: None)
+        backend._turn_files_on = True            # a client that sent watch_turn_files, as the extension does
         [card] = [item for item in backend._history() if item.get("type") == "turn_files"]
         self.assertIsNone(ep.event_error({"seq": 1, **card}), card)
         return {Path(row["path"]).name: row for row in card["files"]}
