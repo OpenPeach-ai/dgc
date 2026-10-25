@@ -49,18 +49,18 @@ def take(agent, *, by: str = BY_TERMINAL) -> tuple[bool, str]:
     """Open here, in this process: ask whoever has the agent's session open to let it go, then hold it.
     (True, "") once this process holds it; (False, why) when it stays where it is."""
     path = getattr(agent, "session_file", None)
-    if not path or agent.own_session():
+    if not path or agent.own_session(take=True):
         return True, ""
     note, granted, reason = ask_holder(str(path), by=by)
     if note is None:
         # A process that leaves no note (an older DGC, an SDK program in your own DGC): it can't be asked. One that
         # just ended frees it in a moment.
-        if agent.own_session(wait=2.0):
+        if agent.own_session(wait=2.0, take=True):
             return True, ""
         return False, "another DGC has it open and can't be asked to let it go; close it there"
     if not granted:
         return False, reason
-    if agent.own_session(wait=OPEN_HERE_WAIT_S):
+    if agent.own_session(wait=OPEN_HERE_WAIT_S, take=True):
         return True, ""
     return False, "it let go, but another DGC took it first"
 

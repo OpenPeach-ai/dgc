@@ -5060,9 +5060,10 @@ class Agent(GoalLifecycle):
         path = self.session_file
         return bool(held is not None and path is not None and held[0] == _owner_key(path))
 
-    def own_session(self, wait: float = 0.0, path=None) -> bool:
+    def own_session(self, wait: float = 0.0, path=None, *, take: bool = False) -> bool:
         """Hold this session (or ``path``, about to become it) for as long as it is open here. True when this
-        process has it, or there is nothing to hold; False while another live process does."""
+        process has it, or there is nothing to hold; False while another live process does -- and, for a session
+        Open here took elsewhere, until this process's own Open here (``take``) asks for it back."""
         target = path if path is not None else self.session_file
         if self.depth > 0 or not target:
             return True
@@ -5072,6 +5073,9 @@ class Agent(GoalLifecycle):
             if held[0] == key:
                 return True
             self.release_session_owner()
+        if (not take and self.session_taken and self.session_file
+                and _owner_key(self.session_file) == key):
+            return False
         from . import sessions
         try:
             lock = sessions.session_owner_lock(target, self.session_root)

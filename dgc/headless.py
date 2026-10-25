@@ -1302,6 +1302,14 @@ def _work_keeping_alive(backend) -> str:
     return ""
 
 
+def _let_go_owner(chat) -> None:
+    """A chat closed: its session is free for another window or a terminal (the process may go on)."""
+    try:
+        chat.agent.release_session_owner()
+    except Exception:
+        pass
+
+
 def _safe_busy(backend) -> bool:
     """Is a turn in flight? Never let a status read break the log line that reports it."""
     try:
@@ -9275,6 +9283,7 @@ class Host:
         try:
             chat.close(grace_s=0.0, process=False)
         finally:
+            _let_go_owner(chat)
             chat.em.emit("chat_closed", reason="closed")
             with self._chats_lock:
                 self._retired_secrets.update(secret_values(getattr(chat, "config", None)))
@@ -9355,6 +9364,7 @@ class Host:
             try:
                 chat.close(grace_s=0.0, process=False)     # closing a chat abandons its turn
             finally:
+                _let_go_owner(chat)
                 chat.em.emit("chat_closed", reason="closed", request_id=request_id)
                 with self._chats_lock:
                     self._retired_secrets.update(secret_values(getattr(chat, "config", None)))

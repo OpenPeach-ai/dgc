@@ -6573,6 +6573,10 @@ class TUI:
             worker.join(0.25)
         result = self._finalize_session_workspace(
             sess, "fleet session closed", retain_if_running=True)
+        try:
+            sess.agent.release_session_owner()           # closed here: free for a window or another terminal
+        except Exception:
+            pass
         closed_active = idx == self._active_idx
         if self._active_idx >= len(self._sessions):
             self._active_idx = len(self._sessions) - 1
