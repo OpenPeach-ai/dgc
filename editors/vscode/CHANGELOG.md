@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A Pip's context window changed from the main chat shows on its page.** The main chat can now change a Pip's model
+  and context window (with a CLI on Pips API 66). The Pip's prompt box kept the window it first read while the view was
+  open, showed that, and sent it with the next message, which saved it back over the chat's change. It now shows the
+  window DGC keeps for the Pip at its next read (at most 4 seconds while its chat is open), except while it is saving
+  a choice of your own. No protocol change.
+
 - **A running Pip is seen while it runs.**
   - **In its own chat:** from the moment a run starts, the Pip's chat has one post for it: its face at work, what it
     is doing now ("Reading billing.py", "Waiting for the model"), a clock, **Stop**, and how it started ("Started by

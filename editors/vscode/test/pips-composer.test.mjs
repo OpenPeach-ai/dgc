@@ -155,6 +155,35 @@ test('since API 47 the prompt box\'s context and thinking are the Pip\'s own, sa
  assert.equal(x.requests('propose_pip_update').length,0,'never a job change');
 });
 
+test('a window the main chat set shows in the prompt box at its next read, and the next message keeps it',async()=>{
+ // Pips API 66: the main chat changes a Pip's context window (pips_propose context_window) while its page may be
+ // open. The view had remembered the window it first read, showed that, and sent it with the next message, which
+ // saved it back over the chat's change.
+ const shown={...controls(),context_max:1048576},x=setup({api:66,chatControls:shown});await x.select('a');
+ assert.equal(x.control('#chat-context').value,'8192');
+ Object.assign(shown,{options:{context_size:65536,thinking:'off'},effective_context_size:65536});   // the chat's change
+ x.receive({type:'pipsVisibility',visible:true});await x.drain();
+ assert.equal(x.control('#chat-context').value,'65536','its prompt box shows what DGC keeps');
+ x.input('#chatText','Check the invoices again.');x.submit();
+ assert.equal(x.requests('send_pip_message')[0].request.chat_options.context_size,65536,'never the old window');
+ assert.equal(x.requests('set_pip_chat_options').length,0,'reading it saves nothing');
+});
+
+test('a read that overlaps the prompt box saving its own choice never takes the choice back',async()=>{
+ const x=setup({api:66,chatControls:{...controls(),context_max:1048576}});await x.select('a');
+ const hold={list_pip_messages:()=>undefined,set_pip_chat_options:()=>undefined};
+ x.receive({type:'pipsVisibility',visible:true});await x.drain(hold);                                   // a read, still on its way
+ x.choose('#chat-context','262144');await x.drain(hold);                           // the user's choice, saving
+ const save=x.requests('set_pip_chat_options')[0];
+ x.answer(save,{chat_controls:{...controls({context_size:262144,thinking:'off'}),context_max:1048576,effective_context_size:262144}});await x.drain(hold);
+ for(const read of x.requests('list_pip_messages').slice(1))x.answer(read,{pip_id:'a',workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0,continuity:null,chat_controls:{...controls(),context_max:1048576}});
+ await x.drain(hold);
+ assert.equal(x.control('#chat-context').value,'262144','the read began before the save, so it is older');
+ x.choose('#chat-context','131072');await x.drain(hold);
+ x.receive({type:'pipsVisibility',visible:true});await x.drain({set_pip_chat_options:()=>undefined});    // a read while that save waits
+ assert.equal(x.control('#chat-context').value,'131072');
+});
+
 test('before API 47 a choice is for the next reply only and nothing is saved',async()=>{
  const x=setup({api:46,chatControls:{...controls(),context_max:1048576}});await x.select('a');
  x.choose('#chat-context','65536');
