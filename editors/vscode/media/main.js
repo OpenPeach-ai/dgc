@@ -4047,12 +4047,17 @@
         + `<span class="path-name">${esc(name)}</span></span>`
         // A file outside the project changed by a DGC that has since restarted: its earlier version went with that
         // process (it is never saved), so Undo leaves it as it is, and says so here and in its count.
-        + (v.undoable === false
+        + (v.command
+            // One of the turn's own commands changed it, and DGC has no exact copy from before (uncommitted changes,
+            // or Git doesn't track it): Undo leaves it, and says so here, in its count and in its last line.
+            ? `<span class="ts-uncounted ts-no-undo ts-by-command" title="A command this turn ran changed this file, and DGC has no exact copy of it from before (it had uncommitted changes, or Git doesn't track it), so Undo leaves it as it is now.">Changed by a command — Undo leaves it</span>`
+            : v.undoable === false
             ? `<span class="ts-uncounted ts-no-undo" title="Outside the project. DGC keeps the version from before this turn only while the session that changed it is running, so Undo leaves this file as it is now.">Can't undo</span>`
             : "")
         // "not diffable" is not "no change": a binary write or an oversized diff has no numbers
         // to show, and printing +0 −0 for it claims the file was untouched.
-        + (v.counted === false
+        + (v.command ? ""
+          : v.counted === false
             ? uncountedLabel(v.status)
             : `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`)
         + `</button>`;
@@ -4102,7 +4107,7 @@
     // identifies it by the prompt, refuses when it can no longer find it, and confirms first.
     // With the CLI's card, Undo's question names the card's count (`exact`) -- the files Undo can put back -- and finds
     // the recovery point the CLI named. `later`: the turns after this one in the chat, which the rewind takes back too.
-    const undoable = many - files.filter(([, v]) => v.undoable === false).length;
+    const undoable = many - files.filter(([, v]) => v.undoable === false || v.command).length;
     card.querySelector(".ts-undo").onclick = () => vscode.postMessage({
       type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path), later: laterTurns(card),
       ...(cli ? { exact: true, total: undoable, checkpoint: cli.checkpoint } : {}) });
@@ -4135,7 +4140,8 @@
       if (!path) continue;
       edits.set(path, { additions: Number(f.additions) || 0, deletions: Number(f.deletions) || 0,
                         counted: f.counted === true, status: String(f.status || "modified"),
-                        ...(f.undoable === false ? { undoable: false } : {}) });
+                        ...(f.undoable === false ? { undoable: false } : {}),
+                        ...(f.command === true ? { command: true } : {}) });
     }
     const checkpoint = Number.isInteger(ev.checkpoint_index) && typeof ev.checkpoint_preview === "string"
       ? { index: ev.checkpoint_index, preview: ev.checkpoint_preview } : null;

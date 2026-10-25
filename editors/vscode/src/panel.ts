@@ -6329,10 +6329,68 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       + "conversation to just before this prompt.",
       { modal: true, detail: prompt.trim().slice(0, 70) || wanted }, "Undo turn");
     if (choice !== "Undo turn") return;
+    await this.runUndo(be, match.index);
+  }
+
+  /**
+   * Rewind to recovery point `index` and say how it went. A CLI with ready.capabilities.undo_to answers with
+   * `undo_result`: when files somebody else changed after DGC wrote them stopped it, it names them and Undo anyway
+   * is offered -- only then, naming each file, with Keep my changes the default; when anything else stopped it, it
+   * says what; after it, how many files the turns' commands changed that Undo left as they are. An older CLI is
+   * sent `rewind` and answered with `rewound`, as before.
+   */
+  async runUndo(be: any, index: number): Promise<void> {
+    const plural = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+    if (Number((this.lastReadyEvent?.capabilities as any)?.undo_to) >= 1) {
+      let overwrite: string[] | undefined;
+      for (let round = 0; round < 4; round++) {
+        let result: any;
+        try {
+          result = await this.requestState(be, "undo",
+            { type: "undo_to", index, ...(overwrite ? { overwrite } : {}) }, "undo_result", 30000);
+        } catch (err: any) {
+          void vscode.window.showErrorMessage(err?.message || "DGC could not queue the undo.");
+          return;
+        }
+        if (result?.ok === true) {
+          const restored = Number(result.files_restored) || 0;
+          const left = Array.isArray(result.left) ? result.left.length : 0;
+          const tail = left === 1 ? " 1 file changed by a command was left as it is."
+            : left > 1 ? ` ${left} files changed by commands were left as they are.` : "";
+          void vscode.window.showInformationMessage(`↩ Undone; DGC restored ${plural(restored)}.${tail}`);
+          return;
+        }
+        const conflicts = (Array.isArray(result?.conflicts) ? result.conflicts : [])
+          .filter((row: any) => row && typeof row.path === "string" && row.path);
+        if (!conflicts.length) {
+          void vscode.window.showErrorMessage(
+            `DGC could not undo the turn: ${result?.error || "it could not put the files back"}. `
+            + "Nothing was changed, and the recovery point was kept.");
+          return;
+        }
+        const why: Record<string, string> = {
+          changed: "changed after DGC last wrote it",
+          between: "changed after DGC wrote it, before DGC wrote it again",
+          mode: "its permissions changed after DGC last wrote it",
+          unreadable: "DGC can't read it now",
+        };
+        const paths = conflicts.map((row: any) => String(row.path));
+        const answer = await vscode.window.showWarningMessage(
+          `These files changed after DGC wrote them, by you or another program: ${paths.join(", ")}. `
+          + "Undo anyway puts back the version from before this turn and loses those changes.",
+          { modal: true, detail: conflicts.slice(0, 12).map((row: any) =>
+              `${row.path}: ${why[String(row.reason)] || why.changed}`).join("\n")
+              + (conflicts.length > 12 ? `\n…and ${conflicts.length - 12} more` : "") },
+          "Keep my changes", "Undo anyway");
+        if (answer !== "Undo anyway") return;
+        overwrite = paths;
+      }
+      return;
+    }
     let outcome: any;
     try {
       outcome = await this.requestState(
-        be, "rewind", { type: "rewind", index: match.index }, "rewound", 5000);
+        be, "rewind", { type: "rewind", index }, "rewound", 5000);
     } catch (err: any) {
       outcome = { message: err?.message || "DGC could not queue the undo." };
     }
@@ -6388,6 +6446,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       items.map((c) => ({ label: c.preview, description: `${c.files} file(s)`, index: c.index })),
       { placeHolder: "Rewind code + conversation to…" });
     if (pick) {
+      if (Number((this.lastReadyEvent?.capabilities as any)?.undo_to) >= 1) {
+        await this.runUndo(be, (pick as any).index);
+        return;
+      }
       let outcome: any;
       try {
         outcome = await this.requestState(

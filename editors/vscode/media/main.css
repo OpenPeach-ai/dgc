@@ -813,6 +813,9 @@ body.vscode-light, body.vscode-high-contrast-light {
 .ts-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
 .ts-row .change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ts-row .change-add, .ts-row .change-del, .ts-row .ts-uncounted { flex: none; font-variant-numeric: tabular-nums; }
+/* "Changed by a command — Undo leaves it" is long: in a narrow panel it gives way to the name first, then ends in
+   an ellipsis (its title says it in full), so the file it is about stays readable. */
+.ts-row .ts-by-command { flex: 0 1 auto; min-width: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-dir { color: var(--muted); }
 .path-name { color: var(--text-strong); }
 .ts-row:hover { background: var(--surface2); }
