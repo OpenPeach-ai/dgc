@@ -413,7 +413,7 @@ class TerminalTests(unittest.TestCase):
 
 # --------------------------------------------------------- real windows, Open here, a terminal ---
 try:
-    from test_session_detach import POSIX_SOCKETS, Serve, World, alive   # noqa: E402
+    from test_session_detach import POSIX_SOCKETS, ChatModel, Serve, World, alive   # noqa: E402
 except Exception:                                            # noqa: BLE001
     POSIX_SOCKETS = False
 
@@ -476,6 +476,56 @@ class OpenHereIntegrationTests(unittest.TestCase):
                 self.assertIsNone(ep.event_error(event), event)
         c.send({"type": "shutdown"})
         wait_until(lambda: not alive(a.proc.pid), timeout=30, what="the shutdown through C")
+
+    def test_a_chatdgc_chat_another_window_writes_and_after_open_here(self):
+        from waiting import wait_until
+        world = World(self, scale=0.05, handler=ChatModel)
+
+        def home(name, editor):
+            serve = Serve(world, name=name)
+            ready = serve.wait(lambda e: e.get("type") == "ready", 90)
+            self.assertEqual(ready["capabilities"]["chatdgc"]["holder"], 1)
+            serve.send({"type": "set_detach_chatdgc", "keep_running": True})
+            serve.send({"type": "chatdgc_shown", "conversation_ids": []})
+            serve.send({"type": "editor_app", "name": editor})
+            return serve
+
+        def ask(serve, chat, request_id):
+            serve.send({"type": "chatdgc_holder", "request_id": request_id, "conversation_id": chat})
+            return serve.wait(lambda e: e.get("type") == "chatdgc_holder" and e.get("request_id") == request_id, 30)
+
+        a, b = home("home-a", "Cursor"), home("home-b", "VS Code")
+        a.send({"type": "chatdgc_open", "request_id": "o1"})
+        chat = a.wait(lambda e: e.get("type") == "chatdgc_opened" and e.get("request_id") == "o1", 60)["conversation"]["id"]
+        a.send({"type": "chatdgc_shown", "conversation_ids": [chat]})
+        a.send({"type": "chatdgc_send", "request_id": "s1", "conversation_id": chat, "text": "CHAT_COUNT 400"})
+        a.wait(lambda e: e.get("type") == "chatdgc_delta" and "12\n" in e.get("text", ""), 60)
+        wait_until(lambda: chat in ((world.note(a.proc.pid) or {}).get("chatdgc_held") or []), timeout=20,
+                   what="A's note to hold the chat")
+        b.send({"type": "chatdgc_open", "request_id": "o2", "conversation_id": chat})
+        b.wait(lambda e: e.get("type") == "chatdgc_held" and e.get("state") == "elsewhere", 30)
+        told = ask(b, chat, "q1")
+        self.assertEqual({k: told.get(k) for k in ("found", "editor", "windowless", "folder", "working")},
+                         {"found": True, "editor": "Cursor", "windowless": False, "folder": world.work.name,
+                          "working": True})
+        # Open here in B mid-reply: the window it came from is told about B, and the reply still being written.
+        b.send({"type": "chatdgc_open_here", "request_id": "h1", "conversation_id": chat})
+        a.wait(lambda e: e.get("type") == "chatdgc_held" and e.get("state") == "moved", 40)
+        wait_until(lambda: chat in ((world.note(b.proc.pid) or {}).get("chatdgc_held") or []), timeout=20,
+                   what="B's note to hold it")
+        told = ask(a, chat, "q2")
+        self.assertEqual({k: told.get(k) for k in ("found", "editor", "working")},
+                         {"found": True, "editor": "VS Code", "working": True})
+        b.wait(lambda e: e.get("type") == "chatdgc_turn" and e.get("state") == "ended", 120)
+        wait_until(lambda: not ((world.note(a.proc.pid) or {}).get("chatdgc") or []), timeout=30,
+                   what="the reply to end")
+        told = ask(a, chat, "q3")
+        self.assertEqual({k: told.get(k) for k in ("found", "editor", "working")},
+                         {"found": True, "editor": "VS Code", "working": False})
+        self.assertLess(told["idle_s"], 120)
+        for serve in (a, b):
+            for event in serve.events:
+                self.assertIsNone(ep.event_error(event), event)
 
 
 if __name__ == "__main__":

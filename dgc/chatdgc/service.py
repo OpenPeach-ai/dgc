@@ -695,6 +695,12 @@ class ChatService:
             except Exception:                            # noqa: BLE001 -- gone meanwhile: no idle time to say
                 changed = None
         facts = holder_note.chatdgc_facts(holders[0] if holders else None, conversation_id, changed)
+        with self._lock:
+            writing_here = conversation_id in self._turns
+        if facts.get("found") and writing_here:
+            # Taken mid-reply: the reply this process writes goes on, shown in the window that took it.
+            facts["working"] = True
+            facts.pop("idle_s", None)
         # This window's news, never down a link: the chat may be one another window took from here mid-reply.
         self._wire("chatdgc_holder", request_id=cmd["request_id"], conversation_id=conversation_id, **facts)
 
