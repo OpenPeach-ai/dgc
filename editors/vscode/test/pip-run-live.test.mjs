@@ -170,6 +170,12 @@ test('how it started: first run, waiting to start, and a run of a kind that neve
   assert.equal(text(live(later.d).querySelector('.run-post-started')),'Started by you','Run now on a Pip that never ran: you started it');
   assert.equal(text(live(first.d).querySelector('.run-post-doing')),'Waiting to start');
   assert.equal(live(first.d).querySelector('.run-post-clock'),null,'no clock before it starts');
+  // It waited, then started: its clock starts with it (the full read, taken while it waited, has no start time).
+  const waited=setup();waited.state.pip.created_at=iso(NOW-HOUR);running(waited,{status:'queued'});await openChat(waited);
+  assert.equal(live(waited.d).querySelector('.run-post-clock'),null);
+  running(waited);await waited.look();
+  assert.equal(text(live(waited.d).querySelector('.run-post-clock')),'0:42','the clock, once it runs');
+  assert.equal(live(waited.d).dataset.live,'running');
   const handoff=setup();running(handoff,{kind:'patch',trigger:'handoff'});await openChat(handoff);
   assert.equal(live(handoff.d),null,'Patch work is reviewed where it was handed off');
 });

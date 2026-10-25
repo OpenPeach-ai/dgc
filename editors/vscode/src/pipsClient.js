@@ -532,7 +532,11 @@ function liveMarkup(markdown){
       doing:!S.runner?.online?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:act?[act.label]:['Getting started'],since:Date.parse(run?.started_at||''),state,started:live.started,
       body:text?`<div class="run-post-reply">${markdown(text)}</div>`:''});
   }
-  const run={...live.run,...(live.detail||{}),status:S.pip.active_run?.id===live.runId?S.pip.active_run.status:live.run.status};
+  // Its state and start from the latest look (get_pip, list_pip_runs); from the full read only what never changes (when
+  // it was due, what started it): read while it waited, that read has no start time.
+  const now=S.pip.active_run?.id===live.runId?S.pip.active_run:{};
+  const run={...(live.detail||{}),...live.run,manifest:{...(live.run.manifest||{}),...(live.detail?.manifest||{})},status:now.status||live.run.status,
+    started_at:now.started_at||live.run.started_at||live.detail?.started_at||null};
   const state=live.state==='ending'?'ending':live.stopping||run.status==='cancelling'?'stopping':run.status==='queued'?'queued':'running';
   const pulse=pulseProgress({...run,command_progress:S.pip.active_run?.id===live.runId&&S.pip.active_run.command_progress||run.command_progress});
   const doing=!S.runner?.online&&state!=='ending'?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:pulse?[`Checked ${pulse.passed+pulse.failed} of ${pulse.total}`]:live.activity||['Getting started'];
