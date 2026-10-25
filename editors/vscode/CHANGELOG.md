@@ -19,6 +19,7 @@
 
 - **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
   message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
+
 - **Settings → Models → Advanced: Wait for the first word, and Wait between words.** How long DGC waits on a model,
   in plain words. **Wait for the first word** is Auto (as long as a model on this computer or your network is working
   on your request, which DGC asks its server; 5 minutes for a cloud model), a number of minutes, or Never. **Wait
