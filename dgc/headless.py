@@ -378,7 +378,7 @@ _BUSY_MUTATIONS = {
     # request; the next model round in this turn (or the next prompt) uses the new one. A request
     # that has produced nothing yet is re-sent on the new model at once (Agent.refresh_client).
     "clear_session", "resume_session",
-    "delete_session", "rewind", "compact", "set_workspace_roots",
+    "delete_session", "rewind", "undo_to", "compact", "set_workspace_roots",
     # set_goal validates live edits in its handler; other live state changes are refused.
     # set_skill_enabled is absent: a skill switch only changes what the next prompt may load.
     # name_session is absent: a rename joins the running turn's own session reservation and is
@@ -401,7 +401,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
-    "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
+    "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
     "set_config", "clear_todos", "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
@@ -905,11 +905,13 @@ def _history_turn_files(value) -> dict | None:
                 or status not in _TURN_FILE_STATUSES or additions is None or deletions is None
                 or not isinstance(row.get("counted"), bool)):
             return None
-        if row.get("outside", False) not in (True, False) or row.get("undoable", True) not in (True, False):
+        if (row.get("outside", False) not in (True, False) or row.get("undoable", True) not in (True, False)
+                or row.get("command", False) not in (True, False)):
             return None
         files.append({"path": path, "additions": additions, "deletions": deletions,
                       "counted": row["counted"], "status": status,
-                      **({"outside": True} if row.get("outside") is True else {})})
+                      **({"outside": True} if row.get("outside") is True else {}),
+                      **({"command": True} if row.get("command") is True else {})})
     total = count(value.get("total"))
     out = {"files": files, "total": max(total if total is not None else 0, len(files))}
     index, preview = count(value.get("checkpoint_index")), value.get("checkpoint_preview")
@@ -2489,6 +2491,10 @@ class Backend:
                           # rewind_preview {index}: how many files a rewind to that point restores now, for
                           # the Undo question on an older turn's card (it takes back every turn after it too).
                           "rewind_preview": 1,
+                          # undo_to {index, overwrite?}: a rewind answered by undo_result, which says why
+                          # it stopped (whose changes, or what failed), what commands changed that it left,
+                          # and which background helpers it stopped; `overwrite` is Undo anyway.
+                          "undo_to": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -7597,12 +7603,30 @@ class Backend:
             except Exception:                    # noqa: BLE001 -- an unreadable point answers 0, never a crash
                 files = 0
             self.em.emit("rewind_preview", index=index, files=files, request_id=str(cmd["request_id"]))
-        elif t == "rewind":
+        elif t in ("rewind", "undo_to"):
             agents_before = self._agents_total()
-            msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
+            index = int(cmd.get("index", -1))
+            overwrite = None
+            if t == "undo_to":
+                overwrite = [str(path) for path in (cmd.get("overwrite") or [])
+                             if isinstance(path, str) and 0 < len(path) <= 4096][:4096]
+            msgs, nfiles = self.agent.rewind(index, overwrite=overwrite)
             ok = msgs >= 0
-            self.em.emit("rewound", ok=ok, files_restored=nfiles,
-                         **_request_fields(request_id))
+            if t == "undo_to":
+                outcome = getattr(self.agent, "last_rewind", None) or {}
+                conflicts = [{"path": str(row.get("path", "")), "reason": str(row.get("reason", "changed"))}
+                             for row in (outcome.get("conflicts") or [])[:500] if isinstance(row, dict)]
+                error = str(outcome.get("error") or "")[:500]
+                self.em.emit("undo_result", request_id=str(cmd["request_id"]), index=index, ok=ok,
+                             files_restored=nfiles if ok else 0, conflicts=conflicts,
+                             left=[str(path) for path in (outcome.get("left") or [])[:500]],
+                             stopped=int(outcome.get("stopped") or 0),
+                             **({"error": error} if error and not ok else {}))
+                # The `rewound` every client knows, for what it redraws on one (not the answer).
+                self.em.emit("rewound", ok=ok, files_restored=nfiles)
+            else:
+                self.em.emit("rewound", ok=ok, files_restored=nfiles,
+                             **_request_fields(request_id))
             if ok:
                 self._emit_history()
                 if agents_before or self._agents_total():   # an empty list has nothing to drop

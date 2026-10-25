@@ -18,6 +18,7 @@ import json
 import os
 import stat
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -297,10 +298,27 @@ class CheckpointManager:
     def _notify(self) -> bool:
         if self._on_change is None:
             return True
+        if getattr(self, "_batched", 0):
+            self._batch_dirty = True             # saved once, when the batch ends
+            return True
         try:
             return self._on_change() is not False
         except Exception:
             return False
+
+    @contextmanager
+    def batch(self):
+        """Save the session once for many records made after the fact (a command's changes),
+        instead of once per file. Never use it around record_file: an edit tool's write may only
+        start once its before-state is saved."""
+        self._batched = getattr(self, "_batched", 0) + 1
+        try:
+            yield self
+        finally:
+            self._batched -= 1
+            if not self._batched and getattr(self, "_batch_dirty", False):
+                self._batch_dirty = False
+                self._notify()
 
     def _lexical_project_path(self, path: str) -> str | None:
         if self.project_root is None:

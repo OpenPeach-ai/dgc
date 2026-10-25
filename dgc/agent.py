@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import clock, helper_checkout
+from . import clock, command_watch, helper_checkout
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
@@ -3822,7 +3822,10 @@ class Agent(GoalLifecycle):
         notify("started")
         started = time.monotonic()
         try:
-            with helper_checkout.command_span(self, "hook"):
+            # A tool hook (a formatter after an edit) is this chat's own command: what it changes is
+            # looked at around it (dgc/command_watch.py), so Undo puts it back or says it can't.
+            watched = "hook" if event in ("PreToolUse", "PostToolUse") else ""
+            with helper_checkout.command_span(self, "hook"), command_watch.watching(self, watched):
                 blocked, output = run_hooks(
                     event, payload, self.config, self.config.project_root, timeout=timeout,
                     cancelled=cancelled, lease_held=lease_held)
@@ -5305,7 +5308,8 @@ class Agent(GoalLifecycle):
         return display_path(path, self.config.project_root) or str(path)
 
     def _turn_files_rows(self, start: int) -> tuple[list[dict], int]:
-        rows, total = self.checkpoints.changes(start)
+        # With the files commands changed that Undo leaves (`command: true`), so the card can say so.
+        rows, total = self.checkpoints.changes(start, commands=True)
         return [{**row, "path": self._turn_files_path(row["path"])} for row in rows], total
 
     @staticmethod
@@ -9401,6 +9405,7 @@ class Agent(GoalLifecycle):
         needs_lease = ((name in _SERIAL_MUTATIONS and not (name == "bash" and args.get("background")))
                        or name.startswith("mcp__") or name == "mcp_call")
         lease = workspace_mutation_lock(self.config.project_root) if needs_lease else None
+        recorded_by = None                          # set once an edit's before-state is recorded
         image_token = image_call_scope(call_id)     # images: queued pixels belong to this call
         mcp_images: list = []
         self.ui.tool_call(name, display_args, call_id)
@@ -9432,6 +9437,8 @@ class Agent(GoalLifecycle):
                                    or self._last_persist_error or "the reason is not recorded")
                             path_error = ("error: the file was not changed — DGC could not capture "
                                           f"its pre-edit state first: {why}")
+                        else:
+                            recorded_by = keeper
                     except ValueError as e:
                         path_error = f"error: {e}"
                 if path_error:
@@ -9514,7 +9521,10 @@ class Agent(GoalLifecycle):
                                                     input_handler=self._handle_mcp_input, **image_kwargs)
                     else:
                         # When it ran, for whom: a change to a checkout is read against these spans.
-                        with helper_checkout.command_span(self, name, args):
+                        # A shell or code action's changes are looked at around it, so Undo puts them
+                        # back or says it can't (dgc/command_watch.py).
+                        with helper_checkout.command_span(self, name, args), \
+                                command_watch.watching(self, name, args):
                             out = execute(name, exec_args, self.ctx)
                     if name == "add_skill" and not str(out).lstrip().lower().startswith("error"):
                         # Installation refreshes ctx.skills in place. Make the new package visible on
@@ -9537,7 +9547,11 @@ class Agent(GoalLifecycle):
         # the person made since, and would silently overwrite theirs.
         if (name in ("write_file", "edit_file", "multi_edit", "apply_patch")
                 and args.get("path") and not str(out).startswith("error:")):
-            note = getattr(self.checkpoints, "note_written", None)
+            # In the manager that recorded the before-state. An isolated helper's write outside its
+            # copy is recorded in the parent's (`_external_checkpoints`); noting it in the helper's
+            # own, never-opened manager left the parent's guard blind to the person's later edit.
+            note = getattr(recorded_by if recorded_by is not None else self.checkpoints,
+                           "note_written", None)
             if callable(note):
                 try:
                     from .workspace import resolve_path
@@ -9994,15 +10008,43 @@ class Agent(GoalLifecycle):
         except (ValueError, TypeError, OSError):
             return str(path)
 
-    def rewind(self, idx: int) -> tuple[int, int]:
-        """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
+    def _rewind_target(self, path) -> str:
+        """A path as Undo's question named it (project-relative, or absolute outside), as the
+        recovery point keys it."""
+        text = str(path or "")
+        try:
+            from .workspace import resolve_path
+            return str(resolve_path(text, self.config.project_root, allow_external=True))
+        except (ValueError, OSError):
+            return text
+
+    def rewind(self, idx: int, overwrite=None) -> tuple[int, int]:
+        """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored).
+
+        `overwrite`: the files a refusal named whose changes the person agreed to lose ("Undo
+        anyway"), as the refusal named them. `last_rewind` says how it went: `conflicts` [{path,
+        reason}] when somebody else's changes stopped it, `error` when anything else did, and after
+        a rewind, `left` (files commands changed that Undo can't put back) and `stopped` (background
+        helpers from the rewound turns that were stopped)."""
+        from . import rewind_words
+        outcome = {"conflicts": [], "error": "", "left": [], "stopped": 0}
+        self.last_rewind = outcome
+        info = getattr(self.ui, "info", None)
+
+        def say(text: str) -> None:
+            if callable(info) and text:
+                info(text)
+
         with self._session_turn_scope() as reserved:
             if not reserved:
                 self._last_persist_error = (
                     "Rewind stopped because this session has an active turn in another DGC process.")
+                outcome["error"] = "this chat has a turn running in another DGC process"
                 return (-1, 0)
             lease = workspace_mutation_lock(self.config.project_root)
             if not acquire_cancellable(lease, self.cancelled):
+                outcome["error"] = (lease.last_error or
+                                    "it was cancelled while another DGC write to these files finished")
                 return (-1, 0)
             old_messages = self.messages
             old_images = self._image_state()
@@ -10010,22 +10052,25 @@ class Agent(GoalLifecycle):
             before_changes = self.chat_changes.begin()
             rewind_pending = False
             try:
+                allowed = [self._rewind_target(path) for path in (overwrite or ())]
                 msg_count, n_files, conversation = self.checkpoints.rewind_state(
-                    idx, transactional=True)
+                    idx, transactional=True, overwrite=allowed)
                 if msg_count < 0:
-                    # Say WHY when the refusal was the guard. A bare "rewind failed" over a file
-                    # someone else has since edited reads as a bug; it is the one case where DGC
-                    # declining to act is the whole point. Reported on `info`, because adding a
-                    # field to the `rewound` event would break a client that has not opted in.
+                    # Say WHY. A bare "rewind failed" over a file someone else has since edited reads
+                    # as a bug; it is the one case where DGC declining to act is the whole point.
+                    # Reported on `info`, because adding a field to the `rewound` event would break a
+                    # client that has not opted in (the editor asks with `undo_to` instead).
                     clashes = list(getattr(self.checkpoints, "last_rewind_conflicts", ()) or ())
+                    reasons = getattr(self.checkpoints, "last_rewind_reasons", {}) or {}
                     if clashes:
-                        shown = ", ".join(self._display_path(c) for c in clashes[:4])
-                        more = f" and {len(clashes) - 4} more" if len(clashes) > 4 else ""
-                        info = getattr(self.ui, "info", None)
-                        if callable(info):
-                            info(f"Rewind stopped: {shown}{more} changed outside this chat since "
-                                 f"DGC last wrote {'them' if len(clashes) != 1 else 'it'}. "
-                                 "Nothing was restored, so those edits are intact.")
+                        outcome["conflicts"] = [{"path": self._turn_files_path(path),
+                                                 "reason": reasons.get(path, "changed")}
+                                                for path in clashes]
+                        say(rewind_words.refused([row["path"] for row in outcome["conflicts"]]))
+                    else:
+                        outcome["error"] = (getattr(self.checkpoints, "last_rewind_error", "")
+                                            or "DGC could not put the files back")
+                        say(rewind_words.failed(outcome["error"]))
                     return (-1, 0)
                 rewind_pending = True
                 if conversation is not None:
@@ -10044,13 +10089,29 @@ class Agent(GoalLifecycle):
                     self.messages = old_messages
                     self.checkpoints.rollback_rewind()
                     rewind_pending = False
+                    outcome["error"] = ("the session could not be saved"
+                                        + (f" ({self._last_persist_error})" if self._last_persist_error else ""))
+                    say(rewind_words.failed(outcome["error"]))
                     return (-1, 0)
                 self.checkpoints.commit_rewind()
                 if self.monitors.has_running() or self.monitors.pending_count():
                     self.ui.info("monitors stopped by rewind")
                 # A rewind took back the turn that started them: a reopen must not bring them back.
                 self.monitors.new_epoch("shutdown", journal_end="rewound")
-                self.subagents.prune_to(self.messages)   # agents whose task call was rewound away go
+                # Agents whose task call was rewound away go -- and a background one still running
+                # is stopped, as on /new: left alone it integrated its work into the checkout minutes
+                # after the person undid the turn that asked for it. Stopped while the write lease is
+                # still held, so it cannot slip an integration in between.
+                ids = getattr(self.subagents, "ids", None)
+                before_ids = ids() if callable(ids) else set()
+                self.subagents.prune_to(self.messages)
+                gone = before_ids - (ids() if callable(ids) else set())
+                jobs = getattr(self, "_detached_jobs", None) or {}
+                outcome["stopped"] = sum(self.stop_detached(agent_id) for agent_id in sorted(gone)
+                                         if agent_id in jobs)
+                say(rewind_words.stopped(outcome["stopped"]))
+                outcome["left"] = [self._turn_files_path(path)
+                                   for path in (getattr(self.checkpoints, "last_rewind_left", ()) or ())]
                 if conversation is not None and self.session_file:
                     # Rewinding restores the very messages a later compaction archived; keeping
                     # those rows would render them twice.

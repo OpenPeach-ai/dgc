@@ -1076,7 +1076,12 @@ EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
                               "checkpoint_index": _I(False), "checkpoint_preview": _S(False)}
 # A file row may also carry `outside: true` (outside the project: its before-state lives only in the
 # process that changed it) and, replayed by get_history in a later process, `undoable: false` (Undo can
-# no longer put it back, and the Undo question leaves it out of its count).
+# no longer put it back, and the Undo question leaves it out of its count). A row with `command: true` is
+# a file one of the turn's own commands (a shell or code action, a tool hook) changed that Undo can't put
+# back -- it had uncommitted changes, it is untracked, or Git converts it -- listed after the others with
+# `counted: false`; `total` counts it, and the Undo question leaves it out of its count. A file a command
+# changed that Undo CAN put back (Git's exact copy of a clean file, or a file the command created) is an
+# ordinary row.
 #
 # Undo on an older turn's card rewinds that turn and every turn after it. Advertised as
 # ready.capabilities.rewind_preview = 1. `rewind_preview {index}` (list_checkpoints' index) is answered by
@@ -1085,6 +1090,22 @@ EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
 # index that is not a recovery point).
 COMMAND_FIELDS["rewind_preview"] = {"index": _I(), "request_id": _S()}
 EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I()}
+
+# ---- Undo that says why it stopped, and Undo anyway (0.48) -----------------------------------------
+# Advertised as ready.capabilities.undo_to = 1. `undo_to {index, overwrite?, request_id}` rewinds to
+# list_checkpoints' `index` exactly as `rewind` does, and is answered by one `undo_result` naming the
+# request, then the `rewound` a `rewind` gets. `undo_result`: `ok`, `files_restored`; when somebody else's
+# changes stopped it, `conflicts` [{path, reason}], the files the person or another program changed after
+# DGC wrote them, named as the Edited card names them (reason: changed -- since DGC last wrote it;
+# between -- after DGC wrote it and before DGC wrote it again; mode -- its permissions; unreadable); when
+# anything else stopped it, `error`, a sentence saying why; after an Undo, `left`, the files the rewound
+# turns' commands changed that Undo can't put back, and `stopped`, how many background helpers from those
+# turns were stopped. `overwrite`: files a refusal named whose changes the person agreed to lose (Undo
+# anyway, asked only after that refusal); the rewind goes ahead when those are its only conflicts, and
+# stops and names them all again when there is another.
+COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "request_id": _S()}
+EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "files_restored": _I(),
+                               "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False)}
 
 # ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
 # Each Model box in the editor's Settings lists the models at its own card's host, before anything is

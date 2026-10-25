@@ -223,6 +223,18 @@ class GuardDetailTests(unittest.TestCase):
         self.assertEqual(c.p("a.py").read_bytes(), b"one\n")
 
 
+class HelperDeleteTests(unittest.TestCase):
+    def test_d4b_a_file_a_helpers_integration_removed_comes_back(self):
+        c = Chat(self, {"old.py": b"old\n"})
+        turn = c.turn("helper deletes old.py")
+        target = c.p("old.py")
+        self.assertTrue(c.cp.record_file(str(target)))      # as worktree.py integrates a delete
+        target.unlink()
+        c.cp.note_written(str(target))
+        self.assertGreaterEqual(c.cp.rewind(turn)[0], 0)
+        self.assertEqual(target.read_bytes(), b"old\n")
+
+
 class FailureTests(unittest.TestCase):
     @unittest.skipIf(os.geteuid() == 0, "root writes into a read-only folder")
     def test_d15_a_rewind_that_cannot_write_a_file_says_which_and_why_and_changes_nothing(self):
@@ -294,6 +306,267 @@ class CommandRowTests(unittest.TestCase):
         c.turn()
         c.cp.note_command_change(str(c.p("scratch.txt")), "modified")
         self.assertFalse(c.cp.discard_last_empty(), "its card has something to say")
+
+
+
+
+# ---------------------------------------------------------------------------------------------------
+# The agent: a turn's own commands, its hooks, its helpers, and the editor's undo_to
+# ---------------------------------------------------------------------------------------------------
+import threading
+import time
+from unittest.mock import patch
+
+from dgc import editor_protocol as ep
+from dgc.config import Config
+from dgc.llm import ChatResult, LLMClient, ToolCall
+from test_subagents import HarnessCase, Script, clone_fixture
+
+
+def run_git(root: Path, *args):
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+
+def by_prompt(**turns):
+    """A scripted parent for several turns in one chat: routed by the newest prompt, not the first."""
+    def route(messages, results, cancel):
+        users = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+        last = users[-1] if users else 0
+        prompt = str(messages[last].get("content", "")) if users else ""
+        done = [m for m in messages[last:] if m.get("role") == "tool"]
+        for needle, calls in turns.items():
+            if needle.replace("_", " ") in prompt:
+                return steps(*calls)(messages, done, cancel)
+        raise AssertionError(f"no turn for {prompt[:60]!r}")
+    return route
+
+
+def steps(*calls, final="Done."):
+    """A scripted parent: each tool call in turn, then a final answer."""
+    def route(messages, results, cancel):
+        if len(results) < len(calls):
+            return ChatResult(tool_calls=[calls[len(results)]])
+        return ChatResult(content=final)
+    return route
+
+
+class CommandUndoTests(HarnessCase):
+    """§4.2 and §4.4: what the main chat's own commands change is put back by Undo when its earlier
+    state is exact, and named on the card ("Changed by a command — Undo leaves it") when it is not."""
+
+    def repo(self, files: dict[str, str], git=True, **config):
+        h = self.make(git=git, mode="auto", **config)
+        for name, text in files.items():
+            (h.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (h.root / name).write_text(text)
+        if git:
+            run_git(h.root, "add", "-A")
+            run_git(h.root, "commit", "-qm", "files")
+        return h
+
+    def turn(self, h, prompt, *calls):
+        self.assertTrue(h.run(prompt, [(prompt, steps(*calls))]))
+        return h.agent.last_turn_files
+
+    def rows(self, card):
+        return {row["path"]: (row["status"], row.get("command", False)) for row in card["files"]}
+
+    def undo(self, h, index=0, overwrite=None):
+        return h.agent.rewind(index, overwrite=overwrite), h.agent.last_rewind
+
+    def test_d5_a_sed_on_a_clean_tracked_file_is_on_the_card_and_undone(self):
+        h = self.repo({"a.py": "a = 1\n", "b.py": "x = 1\n"})
+        card = self.turn(h, "edit and sed", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "1",
+                                                                        "new_string": "2"}),
+                         ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' b.py"}))
+        self.assertEqual(self.rows(card), {"a.py": ("modified", False), "b.py": ("modified", False)})
+        (count, restored), outcome = self.undo(h)
+        self.assertGreaterEqual(count, 0, outcome)
+        self.assertEqual(restored, 2)
+        self.assertEqual(((h.root / "a.py").read_text(), (h.root / "b.py").read_text()), ("a = 1\n", "x = 1\n"))
+        self.assertEqual(outcome["left"], [])
+
+    def test_d4a_a_tracked_file_a_command_deleted_comes_back(self):
+        h = self.repo({"old.py": "old\n", "a.py": "a\n"})
+        card = self.turn(h, "delete old", ToolCall("b1", "bash", {"command": "rm old.py"}))
+        self.assertEqual(self.rows(card), {"old.py": ("deleted", False)})
+        (count, restored), _ = self.undo(h)
+        self.assertEqual((count >= 0, restored), (True, 1))
+        self.assertEqual((h.root / "old.py").read_text(), "old\n")
+
+    def test_a_file_a_command_created_is_removed_again(self):
+        h = self.repo({"a.py": "a\n"})
+        card = self.turn(h, "generate", ToolCall("b1", "bash", {"command": "echo made > gen.txt"}))
+        self.assertEqual(self.rows(card), {"gen.txt": ("new", False)})
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertFalse((h.root / "gen.txt").exists())
+
+    def test_d8_an_untracked_file_a_command_changed_is_named_and_left(self):
+        h = self.repo({"a.py": "a\n"})
+        (h.root / "notes.txt").write_text("my notes\n")          # untracked: no exact earlier state
+        card = self.turn(h, "append notes", ToolCall("b1", "bash", {"command": "echo more >> notes.txt"}))
+        self.assertEqual(card["files"], [{"path": "notes.txt", "additions": 0, "deletions": 0, "counted": False,
+                                          "status": "modified", "command": True}])
+        self.assertEqual(card["total"], 1)
+        (count, restored), outcome = self.undo(h)
+        self.assertEqual((count >= 0, restored, outcome["left"]), (True, 0, ["notes.txt"]))
+        self.assertEqual((h.root / "notes.txt").read_text(), "my notes\nmore\n", "left as it is, and said so")
+
+    def test_a_file_with_uncommitted_changes_a_command_changed_is_named_and_left(self):
+        h = self.repo({"c.py": "c = 1\n"})
+        (h.root / "c.py").write_text("c = 1\n# the person's uncommitted line\n")
+        card = self.turn(h, "sed c", ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' c.py"}))
+        self.assertEqual(self.rows(card), {"c.py": ("modified", True)})
+
+    def test_d6_a_command_after_dgcs_own_edit_is_dgcs_own_and_undo_restores_the_turn(self):
+        for git in (True, False):
+            with self.subTest(git=git):
+                h = self.repo({"a.py": "x = 1\n"}, git=git)
+                self.turn(h, "edit then sed", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
+                                                                           "new_string": "x = 1\ny = 1"}),
+                          ToolCall("b1", "bash", {"command": "sed -i 's/1/2/g' a.py"}))
+                self.assertEqual((h.root / "a.py").read_text(), "x = 2\ny = 2\n")
+                (count, _), outcome = self.undo(h)
+                self.assertGreaterEqual(count, 0, outcome)
+                self.assertEqual((h.root / "a.py").read_text(), "x = 1\n")
+
+    def test_d6_a_formatter_hook_after_an_edit_does_not_lock_undo(self):
+        hooks = {"PostToolUse": [{"command": "sed -i 's/ugly/pretty/' a.py"}]}
+        h = self.repo({"a.py": "x = 1\n"}, hooks=hooks)
+        self.turn(h, "edit with hook", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
+                                                                    "new_string": "x = 'ugly'"}))
+        self.assertEqual((h.root / "a.py").read_text(), "x = 'pretty'\n", "the hook formatted DGC's edit")
+        (count, _), outcome = self.undo(h)
+        self.assertGreaterEqual(count, 0, outcome)
+        self.assertEqual((h.root / "a.py").read_text(), "x = 1\n")
+
+    def test_d7_a_sed_before_the_edit_is_undone_too(self):
+        h = self.repo({"a.py": "x = 1\n"})
+        self.turn(h, "sed then edit", ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' a.py"}),
+                  ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 2", "new_string": "x = 3"}))
+        self.assertGreaterEqual(self.undo(h)[0][0], 0)
+        self.assertEqual((h.root / "a.py").read_text(), "x = 1\n", "Git's copy was the file's exact state")
+
+    def test_a_person_editing_between_dgcs_edit_and_its_command_still_stops_undo(self):
+        h = self.repo({"a.py": "x = 1\n"})
+
+        def person_then_sed(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
+                                                                           "new_string": "x = 2"})])
+            if len(results) == 1:
+                (h.root / "a.py").write_text("x = 2\n# typed by the person\n")
+                return ChatResult(tool_calls=[ToolCall("b1", "bash", {"command": "sed -i 's/2/3/' a.py"})])
+            return ChatResult(content="Done.")
+        self.assertTrue(h.run("racing", [("racing", person_then_sed)]))
+        (count, _), outcome = self.undo(h)
+        self.assertEqual(count, -1)
+        self.assertEqual(outcome["conflicts"], [{"path": "a.py", "reason": "between"}])
+        self.assertIn("typed by the person", (h.root / "a.py").read_text())
+
+    def test_the_cost_of_the_look_around_a_command_is_recorded(self):
+        h = self.repo({"a.py": "a\n"})
+        self.turn(h, "one command", ToolCall("b1", "bash", {"command": "true"}))
+        costs = h.agent.__dict__.get("_command_watch_costs")
+        self.assertEqual(len(costs), 1)
+        self.assertLess(costs[0], 2.0)
+
+
+class HelperUndoTests(HarnessCase):
+    def test_d13_an_isolated_helpers_write_outside_its_copy_is_guarded(self):
+        h = self.make(git=True, mode="auto")
+        outside = Path(tempfile.mkdtemp(prefix="dgc-outside-")).resolve()
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(outside)]))
+        notes = outside / "notes.md"
+        notes.write_text("before\n")
+        h.answer("permission_request", {"decision": "once"})
+
+        def parent(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("p1", "task", {
+                    "description": "write notes", "prompt": "CHILD write the notes", "agent": "worker"})])
+            return ChatResult(content="The helper wrote the notes.")
+
+        def worker(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("w1", "write_file", {"path": str(notes),
+                                                                            "content": "helper\n"})])
+            return ChatResult(content="Wrote them.")
+        self.assertTrue(h.run("parent: notes", [("CHILD write", worker), ("parent: notes", parent)]))
+        self.assertEqual(notes.read_text(), "helper\n", "the helper's write landed")
+        notes.write_text("helper\nthe person's edit\n")
+        self.assertEqual(h.agent.rewind(0)[0], -1, "the parent's guard knows what the helper left")
+        self.assertIn("the person's edit", notes.read_text())
+
+    def test_a_rewind_stops_a_background_helper_its_turn_started(self):
+        h = self.make(git=True, mode="auto")
+        go, release = threading.Event(), threading.Event()
+
+        def parent(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("p1", "task", {
+                    "description": "slow work", "prompt": "CHILD slow work", "agent": "worker",
+                    "background": True})])
+            return ChatResult(content="A helper is on it.")
+
+        def worker(messages, results, cancel):
+            if not results:
+                go.set()
+                release.wait(20)
+                return ChatResult(tool_calls=[ToolCall("w1", "bash", {"command": "echo late > late.txt"})])
+            return ChatResult(content="Done late.")
+        with patch.object(LLMClient, "chat", Script([("CHILD slow", worker), ("parent: start", parent)])), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            self.assertTrue(h.agent.run_turn("parent: start a helper"))
+            self.assertTrue(go.wait(10))
+            count, _ = h.agent.rewind(0)
+            self.assertGreaterEqual(count, 0, h.agent.last_rewind)
+            self.assertEqual(h.agent.last_rewind["stopped"], 1)
+            release.set()
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and getattr(h.agent, "_detached_jobs", None):
+                time.sleep(0.05)
+        self.assertFalse((h.root / "late.txt").exists(), "nothing landed after the Undo")
+        lines = [f["message"] for f in h.of("info")]
+        self.assertIn("1 background helper from those turns was stopped.", lines)
+
+
+class UndoToCommandTests(HarnessCase):
+    """The editor's `undo_to`: a refusal says whose changes, Undo anyway goes ahead for exactly those."""
+
+    def test_refusal_then_undo_anyway(self):
+        h = self.make(git=True, mode="auto")
+        (h.root / "a.py").write_text("one\n")
+        run_git(h.root, "add", "-A")
+        run_git(h.root, "commit", "-qm", "a")
+        route = by_prompt(turn_1=[ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "one",
+                                                                "new_string": "ONE"})],
+                          turn_2=[ToolCall("e2", "edit_file", {"path": "a.py", "old_string": "mine",
+                                                                "new_string": "mine\nTWO"})])
+        self.assertTrue(h.run("turn 1", [("turn", route)]))
+        (h.root / "a.py").write_text("ONE\nmine\n")
+        self.assertTrue(h.run("turn 2", [("turn", route)]))
+        h.backend._dispatch({"type": "undo_to", "index": 0, "request_id": "u1"})
+        [answer] = [f for f in h.of("undo_result") if f["request_id"] == "u1"]
+        self.assertEqual((answer["ok"], answer["conflicts"]), (False, [{"path": "a.py", "reason": "between"}]))
+        h.backend._dispatch({"type": "undo_to", "index": 0, "overwrite": ["a.py"], "request_id": "u2"})
+        [answer] = [f for f in h.of("undo_result") if f["request_id"] == "u2"]
+        self.assertEqual((answer["ok"], answer["files_restored"], answer["conflicts"]), (True, 1, []))
+        self.assertEqual((h.root / "a.py").read_text(), "one\n")
+        self.assertEqual([f["ok"] for f in h.of("rewound")], [False, True], "every client still gets `rewound`")
+        for frame in h.of("undo_result"):
+            self.assertIsNone(ep.event_error(frame), frame)
+
+    def test_declared_offered_and_vendored(self):
+        self.assertIsNone(ep.command_error({"type": "undo_to", "index": 0, "request_id": "r"}))
+        self.assertIsNone(ep.command_error({"type": "undo_to", "index": 0, "overwrite": ["a.py"], "request_id": "r"}))
+        self.assertIsNotNone(ep.command_error({"type": "undo_to", "index": 0}), "the answer needs its request")
+        project = Path(__file__).resolve().parents[1]
+        self.assertEqual((project / "sdk/python/dgc_sdk/wire/editor_protocol.py").read_text(),
+                         (project / "dgc/editor_protocol.py").read_text())
+        known = (project / "sdk/typescript/src/transport.ts").read_text()
+        self.assertIn('"undo_result"', known.split("KNOWN_EVENTS", 1)[1].split("]);", 1)[0])
+        self.assertIn('"undo_to": 1', (project / "dgc/headless.py").read_text())
 
 
 if __name__ == "__main__":

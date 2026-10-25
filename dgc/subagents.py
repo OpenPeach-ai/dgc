@@ -639,6 +639,11 @@ class SubagentRegistry:
                                       for state in ENDED}
 
     # ---- reads -------------------------------------------------------------------------------
+    def ids(self) -> set[str]:
+        """Every record's id (a rewind compares them around prune_to to find what it took back)."""
+        with self._lock:
+            return set(self._records)
+
     def log_of(self, id: str) -> list:
         """A copy of one record's bounded step log (tool calls and results), [] when there is none."""
         with self._lock:
