@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **"Open here" says where the chat is open and what runs there** (with a DGC CLI that has it, 0.48). The read-only
+  bar of a Work session another window holds now says "**Open in Cursor · ~/toni-erp · idle 6 min.** 2 monitors and
+  1 background helper run there. Open here moves them to this window." instead of "This session is open in another
+  window.": "working now" while a turn runs there, "Kept running by DGC with no window open" when no window has it,
+  and each thing that runs or waits there named only when there is one (monitors, background helpers, background
+  commands, queued prompts, questions waiting for an answer). The editor's name comes from the window (VS Code,
+  Cursor, Windsurf...), and the folder is shown with `~` for your home folder, never as a full path. It is asked
+  again every 30 seconds while the bar shows. After Open here, the window it came from says the same about the new
+  one, asked of the side bar's DGC. A ChatDGC chat's bar says it too ("writing a reply now"). With an older CLI, or
+  when DGC can't tell, the bar says what it always did.
+
 - **Undo never loses your work** (with a DGC CLI that has it, 0.48):
   - When files you or another program changed after DGC wrote them stop an Undo, DGC names them and asks: "These
     files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the version from

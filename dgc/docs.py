@@ -1854,6 +1854,18 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
 - **One window at a time.** A session shown in another window is never taken from it on its own.
   The new window shows it read-only with **Open here**; Open here moves it, and the other window
   then shows it read-only with its own Open here. Nothing stops when a session moves.
+- **The bar says where it is open and what runs there**, in one line: *Open in Cursor ·
+  ~/toni-erp · idle 6 min. 2 monitors and 1 background helper run there. Open here moves them to
+  this window.* It says *working now* while a turn runs there, *Kept running by DGC with no window
+  open* when no window has it, and names each thing that runs or waits there only when there is one
+  (monitors, background helpers, background commands, queued prompts, questions waiting for an
+  answer). The folder is shown with `~` for your home folder, and anywhere else by its own name
+  only. After Open here, the window it came from says the same about this one. When DGC can't tell
+  (an older DGC holds it), the bar says what it always did. A ChatDGC chat's bar says the same,
+  with *writing a reply now*.
+- **In a terminal**, `dgc -c` (or `--resume`, `/resume`) of a session a window holds says the same
+  facts: *This session is open in Cursor · ~/toni-erp · working now. 1 monitor runs there. Carry
+  on there, or start a new session here.* A message sent there is refused, naming the same.
 - **Closing a session's tab while it works asks once**: keep it running in the background, or stop
   it. Tick **Remember my choice** to be asked no more (`dgc.closingAWorkingTab`: `ask`,
   `keepRunning` or `stop`). Closing a tab with nothing running ends it, as before.
