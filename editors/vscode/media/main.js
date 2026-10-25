@@ -6790,6 +6790,9 @@
             // landed (agent.py, _drain_steer), which left a sighted user with no sign at all
             // that the model had picked the message up.
             setSteerState(pending.node, ev.state === "applied" ? "applied" : "queued");
+            if (ev.state === "applied" && !pending.node.querySelector(":scope > .msg-time")) {
+              stampPrompt(pending.node, pending.sentAt || Date.now());   // a queued message steered in later
+            }
             if (ev.state === "applied" && turn) placeSteering(pending.node);
           }
           // Unconsumed steering is spliced back in at the HEAD of the backend's queue.
@@ -7762,8 +7765,12 @@
     m.dataset.promptId = requestId;        // which request this row is: its turn_start finds it by this
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
+    const sentAt = Date.now();
     pendingPrompts.set(requestId, { text: pastes.length ? typed : text,
-      attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession });
+      attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession, sentAt });
+    // A message sent while a turn runs is folded into that turn, so no turn start ever stamps it: it gets its time
+    // now, as every prompt does (the founder, 25 Oct: steered prompts had none).
+    if (streaming && delivery === "steer") stampPrompt(m, sentAt);
     // The restore draft rides along for the extension, which keeps it while the message is queued (a
     // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
     const restore = { text: pastes.length ? typed : text,
@@ -9686,6 +9693,8 @@
     pipFixesPanel.replaceChildren(list);
     return pipFixesPanel;
   }
+  // A saved steering message's send time (a {role: "time", of: "steering"} item just before it).
+  let steeringAt = null;
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
     if (it.role === "time") {
@@ -9693,6 +9702,7 @@
       const at = Number(it.at) * 1000;
       if (!turn || !Number.isFinite(at) || at <= 0) return;
       if (it.of === "prompt") { turn.promptAt = at; stampPrompt(turn.head, at); } else if (it.of === "reply") turn.replyAt = at;
+      else if (it.of === "steering") steeringAt = at;      // the next steering item's time
       return;
     }
     if (it.role === "goal_edit") { sysLine(String(it.text || "")); return; }
@@ -9705,6 +9715,7 @@
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text, parsed.attachments);
       node.appendChild(bubble);
+      if (steeringAt !== null) { stampPrompt(node, steeringAt); steeringAt = null; }
       placeSteering(node);
       return;
     }

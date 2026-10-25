@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
+  message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
+
 - **The main chat's Pip model changes ask in plain words.** The permission card for changing a Pip lists its new
   **Model** ("glm-5.3:cloud", or "Claude Code, on your own plan") and **Context window** ("64K tokens") instead of
   "model choice [object Object]", says the change starts no work and leaves what the Pip may do as it is, and the line

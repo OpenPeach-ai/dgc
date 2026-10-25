@@ -170,3 +170,57 @@ class HistoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SteeringTimeTests(unittest.TestCase):
+    """The founder, 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while
+    a turn runs keeps the time it was sent, and a reopened chat shows it under that message's own bubble."""
+
+    def agent(self):
+        directory = tempfile.TemporaryDirectory(prefix="dgc-times-steer-")
+        self.addCleanup(directory.cleanup)
+        agent = Agent(make_config(Path(directory.name), mode="auto"), FrontendUI())
+        self.addCleanup(agent.mcp.stop_all)
+        self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+        return agent
+
+    def test_each_steered_message_keeps_when_it_was_sent(self):
+        agent = self.agent()
+        agent._accepting_steer = True
+        before = time.time()
+        self.assertTrue(agent.steer("use staging-2"))
+        self.assertTrue(agent.steer("and run the tests"))
+        self.assertTrue(agent._drain_steer())
+        message = agent.messages[-1]
+        self.assertEqual(message["_dgc_steering"], ["use staging-2", "and run the tests"])
+        sent = message["_dgc_steering_at"]
+        self.assertEqual(len(sent), 2)
+        for at in sent:
+            self.assertGreaterEqual(at, before - 1)
+            self.assertLessEqual(at, time.time() + 1)
+
+    def history(self, messages):
+        return HistoryTests.history(self, messages)
+
+    def test_a_reopened_chat_has_a_time_marker_before_each_steered_message(self):
+        from dgc.workflows import STEERING_PREFIX, STEERING_SUFFIX
+        items = self.history([
+            {"role": "user", "content": "deploy it", "_dgc_at": 1_760_000_000.0},
+            {"role": "user", "content": STEERING_PREFIX + "use staging-2\nand run the tests" + STEERING_SUFFIX,
+             "_dgc_steering": ["use staging-2", "and run the tests"],
+             "_dgc_steering_at": [1_760_000_030.0, 1_760_000_041.5]},
+            {"role": "assistant", "content": "Done.", "_dgc_at": 1_760_000_090.0},
+        ])
+        shape = [item.get("type") or f'{item["role"]}:{item.get("of") or item.get("text")}' for item in items]
+        self.assertEqual(shape[:6], ["turn_start", "time:prompt", "time:steering", "steering:use staging-2",
+                                     "time:steering", "steering:and run the tests"])
+        self.assertEqual([item["at"] for item in items if item.get("of") == "steering"], [1_760_000_030.0, 1_760_000_041.5])
+
+    def test_a_steer_saved_before_times_were_kept_has_no_marker(self):
+        from dgc.workflows import STEERING_PREFIX, STEERING_SUFFIX
+        items = self.history([
+            {"role": "user", "content": "deploy it"},
+            {"role": "user", "content": STEERING_PREFIX + "use staging-2" + STEERING_SUFFIX, "_dgc_steering": ["use staging-2"]},
+            {"role": "assistant", "content": "Done."}])
+        self.assertFalse([item for item in items if item.get("of") == "steering"])
+        self.assertTrue([item for item in items if item.get("role") == "steering"])

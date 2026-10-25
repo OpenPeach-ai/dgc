@@ -112,3 +112,59 @@ test("Pips: a prompt's time is last in its row (under the bubble's edge), a repl
   assert.ok(!messageMarkup({ id: "u2", role: "user", text: "hi", status: "succeeded" }, options).includes("msg-time"),
     "no saved time, no time");
 });
+
+// The founder, 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while a
+// turn runs is folded into that turn, so no turn start ever stamped it.
+function typed(v, text, { queue = false } = {}) {
+  const input = v.doc.getElementById("input"), win = v.dom.window;
+  input.value = text;
+  input.dispatchEvent(new win.Event("input", { bubbles: true }));
+  input.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Enter", altKey: queue, bubbles: true, cancelable: true }));
+  return v.posted.filter((m) => m?.type === "prompt").at(-1)?.requestId;
+}
+test("Work: a message steered into a running turn gets its time under its bubble, as every prompt does", () => {
+  const v = makeDom();
+  v.send({ type: "event", event: { ...READY, capabilities: { live_steering: true, steering_native: true } } });
+  v.send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "deploy it", kind: "prompt" } });
+  const before = Date.now();
+  const id = typed(v, "use staging-2");
+  v.send({ type: "event", event: { type: "prompt_accepted", request_id: id, state: "steered" } });
+  v.send({ type: "event", event: { type: "steering_update", request_id: id, state: "applied" } });
+  const steered = v.doc.querySelector("#log .msg.dgc > .msg.user");
+  assert.ok(steered, "the steer is inside the running turn");
+  const time = steered.querySelector(":scope > .msg-time");
+  assert.ok(time, "it has a time");
+  assert.ok(Date.parse(time.getAttribute("datetime")) >= before - 1000, "the time it was sent");
+  assert.equal(steered.querySelectorAll(":scope > .msg-time").length, 1, "one time, not two");
+  assert.deepEqual(v.errors, []);
+});
+test("Work: a queued message steered in later gets the time it was sent, once", () => {
+  const v = makeDom();
+  v.send({ type: "event", event: { ...READY, capabilities: { live_steering: true, steering_native: true, steer_queued: true } } });
+  v.send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "deploy it", kind: "prompt" } });
+  const id = typed(v, "then run the tests", { queue: true });
+  v.send({ type: "event", event: { type: "prompt_accepted", request_id: id, state: "queued" } });
+  const queued = [...v.doc.querySelectorAll("#log .msg.user")].find((n) => n.textContent.includes("then run the tests"));
+  assert.equal(queued.querySelector(":scope > .msg-time"), null, "a queued message waits for its turn, or a steer, for its time");
+  queued.querySelector(".steer-now").click();                  // the person presses Steer now
+  v.send({ type: "event", event: { type: "prompt_accepted", request_id: id, state: "steered" } });
+  v.send({ type: "event", event: { type: "steering_update", request_id: id, state: "applied" } });
+  const steered = [...v.doc.querySelectorAll("#log .msg.user")].find((n) => n.textContent.includes("then run the tests"));
+  assert.ok(steered?.querySelector(":scope > .msg-time"), "stamped when it was steered in");
+  assert.equal(steered.querySelectorAll(":scope > .msg-time").length, 1);
+  assert.deepEqual(v.errors, []);
+});
+test("Work: a reopened chat shows each steered message's own time", () => {
+  const v = work([
+    { type: "turn_start", turn_id: "t1", prompt: "deploy it", kind: "prompt" }, { role: "time", of: "prompt", at: SENT },
+    { type: "text_delta", text: "Deploying." },
+    { role: "time", of: "steering", at: SENT + 30 }, { role: "steering", text: "use staging-2" },
+    { role: "steering", text: "an older save keeps no time" },
+    { type: "stream_end", message_id: "t1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" }]);
+  const steers = [...v.doc.querySelectorAll("#log .msg.dgc > .msg.user")];
+  assert.equal(steers.length, 2);
+  assert.equal(steers[0].querySelector(":scope > .msg-time")?.getAttribute("datetime"), new Date((SENT + 30) * 1000).toISOString());
+  assert.equal(steers[1].querySelector(":scope > .msg-time"), null, "a steer saved without a time shows none, never the previous one's");
+  assert.deepEqual(v.errors, []);
+});

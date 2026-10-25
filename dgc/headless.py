@@ -5145,7 +5145,13 @@ class Backend:
                 if m.get("_dgc_goal_edit") is True:
                     items.append({"role": "goal_edit", "text": "Goal updated. Continuing with the revised objective."})
                 else:
-                    items.extend({"role": "steering", "text": text} for text in steering)
+                    sent = m.get("_dgc_steering_at")
+                    sent = sent if isinstance(sent, list) and len(sent) == len(steering) else [None] * len(steering)
+                    for text, at in zip(steering, sent):
+                        at = _history_written_at({"_dgc_at": at})
+                        if at is not None:
+                            items.append({"role": "time", "of": "steering", "at": at})
+                        items.append({"role": "steering", "text": text})
                 continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",

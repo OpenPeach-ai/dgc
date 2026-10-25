@@ -4890,7 +4890,8 @@ class Agent(GoalLifecycle):
         # A closed set, normalised here so no caller can invent an origin the drain does not group:
         # an unknown value would silently fall out of every envelope and reach the model bare.
         item = {"text": clean, "images": image_values, "request_id": request_id,
-                "origin": origin if origin in ("agent", "agent_task") else "user"}
+                "origin": origin if origin in ("agent", "agent_task") else "user",
+                "at": _written_at()}          # when it was sent: a restored chat shows it under its bubble
         if origin == "pip_setup":
             from .pip_setup_notification import valid_notice
             notice = valid_notice(pip_setup_notice)
@@ -4962,6 +4963,7 @@ class Agent(GoalLifecycle):
                     # Where one message ends and the next begins: the model reads them joined, but
                     # each was its own bubble live, and a restored chat shows them the same way.
                     message["_dgc_steering"] = [m["text"] for m in group]
+                    message["_dgc_steering_at"] = [m.get("at") for m in group]
                 else:
                     # NOT a user bubble, and not the user's words for anything that reads roles.
                     message["_dgc_agent_message"] = [m["text"] for m in group]
