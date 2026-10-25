@@ -21,7 +21,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     re-read before editing, runs on the same agent and model, and a long conversation is compacted first. Work of its
     that was held back is shown to it as a diff; the kept worktree stays in `/tasks` until you decide.
   - **It keeps its row**: the agent map says "Continued · 2 runs", and its transcript shows each run after a divider
-    ("Continued 18:42 · asked by you"). Its changes land, and Undo takes them back, like any helper's.
+    ("Continued 18:42 · asked by you"). Its changes land, and Undo takes them back, like any helper's. A file it
+    changed in an earlier run that nobody has touched since counts as its own work, so its next change to that file
+    lands even before you commit; a file you changed since stays yours, under the usual rule.
   - **For editors**: new commands `continue_agent {id, text, request_id}` and `watch_agent_runs`, and a new event
     `agent_runs {items, request_id?}`, offered as `ready.capabilities.continue_agent`. A continued helper keeps its id:
     its row goes back to work in the `agents` snapshot, and its steps' call ids carry the run (`sub-…:r2-…`). No

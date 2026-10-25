@@ -1317,7 +1317,9 @@ How it picks up:
 
 The agent map keeps its one row, now "Continued · 2 runs", and its transcript shows each run after a
 divider: what the run before reported, "Continued 18:42 · asked by you", and what it was asked. Its
-changes are brought into your checkout, and taken back by Undo, like any helper's.
+changes are brought into your checkout, and taken back by Undo, like any helper's. A helper never
+writes into a file you have uncommitted work in; a file it changed itself in an earlier run, that
+nobody has touched since, is its own work, so its next change to that file lands too.
 
 ## Eyes for a model without vision
 
