@@ -1960,9 +1960,34 @@ the guard fires on evidence that a file was changed, never on uncertainty.
 ## Delegated work can write outside its own checkout
 
 A delegated task runs in its own disposable worktree, so edits there need no snapshot. A write
-*outside* it — a file in your project, a script in `/tmp` — is an ordinary change to your files and
-is captured by the parent chat, which is what can undo it. Until this release those writes were
-refused outright: *"DGC could not capture its pre-edit state first"*.
+outside every checkout — a script in `/tmp`, a file the task exists to write — is an ordinary
+change to your files and is captured by the parent chat, which is what can undo it.
+
+## A helper's copy is its only place to work
+
+A helper in a Git project never changes your checkout itself: its changes reach you when DGC
+integrates its copy. Three things keep that true:
+
+- **Its brief names its copy.** Wherever the brief names your project folder (as a whole path:
+  `/home/you/app/src/a.py`, not `/home/you/app2`), the helper reads its own copy's folder. Its
+  instructions say where its copy is and that your checkout is not its to change. The same holds
+  for a message sent to a running helper, and for a helper's own helper.
+- **DGC's file tools refuse a write into your checkout** from a helper, before any approval is
+  asked: *"not changed: /home/you/app/billing.py is in the user's checkout, which is not yours to
+  change; make this edit in your own copy instead, at …/billing.py."* `..` and links are followed
+  to where they really write. A folder you share into helpers' copies (`subagent_link_paths`)
+  stays writable, as you chose.
+- **The report names what a shell command changed.** A command such as
+  `cd /home/you/app && sed -i …` cannot be fenced, so when the helper ends DGC compares your
+  checkout with how it was when the helper started — Git's changed and new files against the same
+  commit, and the exact bytes of any file you had already changed — and leaves out what DGC itself
+  wrote there. A file that changed while one of the helper's own commands ran (and no other
+  command DGC was running) is named as most likely the helper's doing. Any other change is named
+  as one DGC can't attribute: you, the chat, or another program. When the earlier state is known
+  exactly (Git's copy of a file that was unchanged then, with no line-ending or filter conversion
+  configured for it; or the bytes the helper's copy took), it goes into the recovery point and
+  Undo takes the change back. Otherwise the report says no recovery point covers it. Files Git
+  ignores are not seen, nor are changes a helper's background process makes after it ends.
 
 ## Two DGCs, one settings file
 

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import clock
+from . import clock, helper_checkout
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
@@ -3822,9 +3822,10 @@ class Agent(GoalLifecycle):
         notify("started")
         started = time.monotonic()
         try:
-            blocked, output = run_hooks(
-                event, payload, self.config, self.config.project_root, timeout=timeout,
-                cancelled=cancelled, lease_held=lease_held)
+            with helper_checkout.command_span(self, "hook"):
+                blocked, output = run_hooks(
+                    event, payload, self.config, self.config.project_root, timeout=timeout,
+                    cancelled=cancelled, lease_held=lease_held)
         except Exception as exc:
             elapsed = int((time.monotonic() - started) * 1000)
             notify("error", duration_ms=elapsed,
@@ -4365,6 +4366,8 @@ class Agent(GoalLifecycle):
                 f"back, so treat those paths as read-only unless the task is about them.")
         # A Pip fix's kept copy: what is installed in it and which ignored files it was given.
         lines.extend(str(line) for line in (getattr(self, "_fix_notes", ()) or ()))
+        # An isolated helper: where its copy is, and that the user's checkout is not its to change.
+        lines.extend(helper_checkout.prompt_lines(self))
         return lines
 
     # ------------------------------------------------------ system prompt ---
@@ -9137,6 +9140,17 @@ class Agent(GoalLifecycle):
                     f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
                     f"another server yourself." + (f" {artifacts.SCOPED_NOTE}" if art.scoped else ""))
 
+        if name in helper_checkout.FILE_TOOLS and isinstance(args, dict) and args.get("path"):
+            # An isolated helper's copy is its only place to write. A write into the user's checkout
+            # (or a parent helper's copy) skips its integration and its report, so it is refused
+            # before anyone is asked to approve it, naming the same file in its own copy. A write
+            # outside every checkout (/tmp) goes on to the capture below, as before.
+            claimed = helper_checkout.claim(self, args.get("path"))
+            if claimed is not None:
+                refusal = helper_checkout.refusal(args.get("path"), *claimed)
+                self.ui.tool_denied(name, display_args, refusal[len("error: "):], call_id)
+                return refusal
+
         def current_permissions():
             with self._mode_lock:
                 rules = {action: [*(self.config.permissions.get(action, []) or []),
@@ -9350,11 +9364,14 @@ class Agent(GoalLifecycle):
                         if target:
                             image_kwargs = ({"on_image": self._mcp_image_sink(mcp_images)}
                                             if _accepts_keyword(self.mcp.call, "on_image") else {})
-                            out = self.mcp.call(target, mcp_args, self.cancelled,
-                                                on_progress=on_progress, on_log=on_log,
-                                                input_handler=self._handle_mcp_input, **image_kwargs)
+                            with helper_checkout.command_span(self, target):
+                                out = self.mcp.call(target, mcp_args, self.cancelled,
+                                                    on_progress=on_progress, on_log=on_log,
+                                                    input_handler=self._handle_mcp_input, **image_kwargs)
                     else:
-                        out = execute(name, exec_args, self.ctx)
+                        # When it ran, for whom: a change to a checkout is read against these spans.
+                        with helper_checkout.command_span(self, name, args):
+                            out = execute(name, exec_args, self.ctx)
                     if name == "add_skill" and not str(out).lstrip().lower().startswith("error"):
                         # Installation refreshes ctx.skills in place. Make the new package visible on
                         # the very next model iteration without bloating unrelated turns.
@@ -10012,12 +10029,20 @@ class Agent(GoalLifecycle):
             registry.running(agent_id)               # a worker slot was taken (queued -> running)
         try:
             adef = self.agent_defs.get(agent_name) if agent_name else None
-            task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
             if adef and adef.tool_allow:
                 # Set before the child is constructed so its first system prompt sees the gate.
                 pass
             isolated = workspace is not None
             child_root = workspace.project_root if isolated else self.config.project_root
+            # The brief names the copy, never the user's checkout. A parent that wrote "Project:
+            # /home/.../billing-app" sent a helper with a worktree of its own to edit the user's
+            # billing.py, and its report then said "no file changes". Only the brief's own text, and
+            # only that root as a whole path prefix; an agent definition's body is the user's file.
+            user_checkouts = ((Path(self.config.project_root), *helper_checkout.theirs(self))
+                              if isolated else ())
+            if isolated:
+                prompt = helper_checkout.map_paths(prompt, user_checkouts, child_root)
+            task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
             from .worktree import absent_ignored_dirs
             try:
                 child_config = self.config.clone_for_root(child_root)
@@ -10064,14 +10089,20 @@ class Agent(GoalLifecycle):
                     sub._agent_tool_allowlist = adef.tool_allow
                 if tools is not None:
                     sub._agent_tool_allowlist = frozenset(tools)
+                # Its commands' time spans carry this, so a change in the user's checkout can be told
+                # apart as its own work, its helpers', or someone else's (dgc/helper_checkout.py).
+                sub._command_lineage = (*helper_checkout.lineage(self),
+                                        str(agent_id or f"child-{id(sub):x}"))
                 if isolated:
                     # After construction, so it is set on the object whose prompt it belongs to,
                     # and refreshed because __init__ already built messages[0] from a bare agent.
                     sub._absent_dirs = absent_ignored_dirs(
                         self.config.project_root, child_root)
                     sub._shared_dirs = list(getattr(workspace, "linked", ()) or ())
-                    if sub._absent_dirs or sub._shared_dirs:
-                        sub._refresh_system()
+                    # The checkouts that are not its to change: the parent's, and every one above.
+                    # Its prompt says so, and its file tools refuse a write into them.
+                    sub._user_checkouts = user_checkouts
+                    sub._refresh_system()
                 if registry is not None and agent_id:
                     sub.subagents = registry             # one list per chat, whatever the depth
                     sub._subagent_id = agent_id
@@ -10144,6 +10175,10 @@ class Agent(GoalLifecycle):
                     except Exception as exc:
                         if not thrown:
                             thrown = f"isolated MCP cleanup failed: {type(exc).__name__}: {exc}"
+            if isolated and sub is not None:
+                # A shell command can't be fenced: what changed in the user's checkout while this
+                # helper ran, read now, at its end, before anything integrates (_finalize_subagent).
+                helper_checkout.watch_end(workspace, sub)
 
             failure = thrown or sub_ui.failure()
             result = sub_ui.result()
@@ -10291,6 +10326,12 @@ class Agent(GoalLifecycle):
         the window where it was already past that check.
         """
         isolated = workspace is not None
+        # What changed in the user's checkout while the child ran, outside its copy: a shell command
+        # can't be fenced, and its report said "no file changes" over an edit to the user's file.
+        # Settled before integration writes anything, so what is exactly known reaches the recovery
+        # point first (dgc/helper_checkout.py).
+        outside = (helper_checkout.settle(self, workspace, keeper if keeper is not None else self.checkpoints)
+                   if isolated and not start_error else "")
         if start_error:
             # The child never ran, so the checkout is empty and removing it is right -- but that
             # removal writes the user's .git, so it goes through the one helper that takes the write
@@ -10312,8 +10353,9 @@ class Agent(GoalLifecycle):
                 return _TaskOutcome(
                     f"The user stopped sub-task '{description}' before it finished. That was the "
                     "user's choice, not a failure: carry on with the rest of the work without it, "
-                    f"and do not start it again unless the user asks.{kept}{shared}{found}")
-            return _TaskOutcome(f"error: Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
+                    f"and do not start it again unless the user asks.{kept}{shared}{outside}{found}")
+            return _TaskOutcome(
+                f"error: Sub-task '{description}' did not complete: {failure}.{kept}{shared}{outside}")
         if workspace is None:
             return _TaskOutcome(
                 f"Sub-task '{description}' completed in the shared checkout. "
@@ -10335,7 +10377,7 @@ class Agent(GoalLifecycle):
             kept = self._preserve_task_workspace(workspace, detail, cancel=cancel,
                                                  may_remove=False)
             return _TaskOutcome(
-                f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}")
+                f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}{outside}")
         try:
             integration = workspace.integrate(keeper if keeper is not None else self.checkpoints)
         finally:
@@ -10366,7 +10408,7 @@ class Agent(GoalLifecycle):
                               f" answer, and suggest the user review those files.")
             return _TaskOutcome(
                 f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
-                f"{paths}{extra}.{reconciled}{warning}\nSummary:\n{result}", True,
+                f"{paths}{extra}.{reconciled}{outside}{warning}\nSummary:\n{result}", True,
                 tuple(integration.paths))
         if integration.status == "partial":
             # Some of the delta landed and some is held back. Say both halves plainly: a result
@@ -10388,16 +10430,21 @@ class Agent(GoalLifecycle):
                 f"Sub-task '{description}' partly integrated. Applied {len(integration.paths)} "
                 f"path(s): {landed}{more}.{reconciled} Held back because you changed the same lines:"
                 f" {held}. That work is preserved at {workspace.path} on branch {workspace.branch};"
-                f" resolve it from /tasks.{warning}\nSummary:\n{result}",
+                f" resolve it from /tasks.{outside}{warning}\nSummary:\n{result}",
                 True, tuple(integration.paths))
         if integration.status == "clean":
+            if outside:
+                # Its own copy is unchanged, but the user's checkout is not: never "no file changes".
+                return _TaskOutcome(
+                    f"Sub-task '{description}' completed. Its own copy holds no changes, so nothing "
+                    f"was integrated.{outside}{warning}\nSummary:\n{result}")
             return _TaskOutcome(
                 f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}")
         conflicts = ", ".join(integration.conflicts[:20]) or "(delta inspection/integration error)"
         return _TaskOutcome(
             f"Sub-task '{description}' completed but its changes were NOT integrated: "
             f"{integration.error or integration.status}. Conflicts: {conflicts}. The isolated "
-            f"worktree is preserved at {workspace.path} on branch {workspace.branch}.\n"
+            f"worktree is preserved at {workspace.path} on branch {workspace.branch}.{outside}\n"
             f"Summary:\n{result}")
 
     def _run_subagent(self, description: str, prompt: str, agent_name: str = "",
@@ -10793,6 +10840,7 @@ class Agent(GoalLifecycle):
         steer = getattr(child, "steer", None)
         if not callable(steer):
             return False, "unavailable"
+        clean = helper_checkout.hand_to(child, clean)     # its own copy, wherever the words name theirs
         # origin="agent": this is the PARENT MODEL writing, not the user. Under the user envelope
         # the child was told "The user sent this WHILE you were working" and frontends rendered the
         # model's words as a human bubble.
