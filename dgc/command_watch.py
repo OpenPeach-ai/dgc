@@ -72,6 +72,7 @@ _NO_CONVERSION = frozenset({"unspecified", "unset"})
 # after the command was looked at takes back what that look recorded for the file (note_saves).
 # Without an editor (the terminal) there is nothing to tell DGC: attribution stays by time.
 _SAVE_SLACK_S = 2.0                    # a save this close to a command's start or end counts as during it
+_CLOCK_SLACK_S = 0.015                 # the kernel stamps file times from a coarse clock, a few ms behind
 _SAVES: "deque[tuple[str, float]]" = deque(maxlen=4096)
 _RECENT: "deque[Watch]" = deque(maxlen=64)
 _LOCK = threading.Lock()
@@ -623,10 +624,13 @@ class Watch:
         return taken
 
     def _ours(self, path: Path) -> bool:
-        """Did this change happen while one of this chat's commands ran, and no other chat's?
+        """Did this change happen while this chat's command ran, and no other chat's?
 
         Read from the inode's change time, which no tool can set back (`cp -p`, `tar x` and `rsync -a`
-        keep an old modification time), or its folder's once the file is gone."""
+        keep an old modification time), or its folder's once the file is gone. It must fall inside this
+        look's own window (it began just before the command), and inside no other chat's command; the
+        slack is the kernel's coarse file clock, a few milliseconds, not helper_checkout's 50 ms, which
+        took a chat's command that ended a moment earlier for one still running."""
         if _saved_between(path, self.started - _SAVE_SLACK_S, time.time() + _SAVE_SLACK_S):
             return False                       # the person saved it in the editor while this ran
         root = self.git[0] if self.git is not None else Path(self.manager.project_root)
@@ -643,7 +647,18 @@ class Watch:
                 candidate = candidate.parent
             except OSError:
                 break
-        return helper_checkout._who(changed_at, helper_checkout.lineage(self.agent), time.time()) == "helper"
+        now = time.time()
+        if changed_at is None or not (self.started - _CLOCK_SLACK_S <= changed_at <= now + _CLOCK_SLACK_S):
+            return False
+        own = helper_checkout.lineage(self.agent)
+        with helper_checkout._SPANS_LOCK:
+            spans = list(helper_checkout._SPANS)
+        for span in spans:
+            if span.lineage[:len(own)] == own:
+                continue                       # this chat's, or one of its helpers'
+            if span.start - _CLOCK_SLACK_S <= changed_at <= span.until(now) + _CLOCK_SLACK_S:
+                return False                   # another chat's command was running too: can't say whose
+        return True
 
     def _repo_path(self, path: str) -> str | None:
         """`path` as Git names it, when it is in the project's part of the checkout."""
