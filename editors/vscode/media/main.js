@@ -1356,6 +1356,12 @@
   // What the agent map may ask for: stopping one agent (`agent_control`; a foreground one only with
   // `agent_control_foreground`), and the background shells with their output (`background_tasks`).
   let agentControlLive = false, agentControlForeground = false, backgroundTasksLive = false;
+  // A finished helper can be asked to do more, with its memory (ready.capabilities.continue_agent): the box on its
+  // card and on its report line. `agentRuns` is what the CLI says of each helper's runs (agent_runs, by id):
+  // {runs, continuable, history: [{run, by, at, request, note, report, held}]}. `agentMore` is the box's own state
+  // while a request is on its way: {state: "sending" | "error", error}.
+  let continueAgentLive = false;
+  const agentRuns = new Map(), agentMore = new Map();
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
@@ -3748,6 +3754,16 @@
     map.type = "button";
     map.setAttribute("aria-label", `Open ${label} in the agent map`);
     map.addEventListener("click", () => openReportInMap(line, map));
+    // A finished helper's report is where a follow-up starts: "Ask it to do more", as on its card.
+    const agentId = reportAgentId(line.dataset.agentId || "");
+    if (agentId) {
+      const more = body.appendChild(agentMoreBox(agentId));
+      more.classList.add("handback-more");
+      line._more = more;
+      const record = agentRecords.get(agentId);
+      if (record) paintAgentMoreBox(more, record);
+      else more.hidden = true;
+    }
   }
   function setHandbackOpen(line, open) {
     const toggle = line.querySelector(":scope > .handback-toggle"), body = line.querySelector(":scope > .handback-body");
@@ -6840,6 +6856,8 @@
         agentsLive = ev.capabilities?.agents === true;
         agentControlLive = ev.capabilities?.agent_control === true;
         agentControlForeground = agentControlLive && ev.capabilities?.agent_control_foreground === true;
+        continueAgentLive = ev.capabilities?.continue_agent === 1;
+        if (!continueAgentLive) { agentRuns.clear(); agentMore.clear(); }
         backgroundTasksLive = Number(ev.capabilities?.background_tasks?.version) >= 1;
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
@@ -7454,6 +7472,10 @@
         applyAgentEvent(ev);
         if (stick || following) scroll();
         return;
+      case "agent_runs":
+        // A helper's runs (Continued, its dividers) and whether it can be asked to do more. Never in the chat.
+        receiveAgentRuns(ev);
+        return;
       case "agents":
         renderAgentsSnapshot(ev);
         for (const fix of pipFixes.values()) if (fix.agent_id) pipFixAgentChanged(fix.agent_id);
@@ -7658,6 +7680,7 @@
             || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
         if (ev.command === "steer_queued") { steerQueuedRefused(); sysLine(ev.message || "That message stays queued for the next turn."); break; }
         if (ev.command === "start_pip_fix" || ev.command === "undo_pip_fix") { pipFixRefused(ev); break; }
+        if (ev.command === "continue_agent") break;    // the box that asked says why (agent_continue_state)
         if (ev.command === "list_prompt_pips") {
           if (pipPicker.active && ev.request_id === pipPicker.id) { pipPicker.loading=false; pipPicker.error=String(ev.message || "Pip references are unavailable."); renderPipPicker(); }
           break;
@@ -10278,6 +10301,13 @@
     else if (msg.type === "agent_stop_state") {
       if (msg.state === "error" && agentStopping.has(String(msg.id || ""))) { agentStopping.set(String(msg.id), "failed"); agentMapChanged(); }
     }
+    else if (msg.type === "agent_continue_state") {
+      // "Ask it to do more" from the host: the request started (agent_runs follows), or why it did not.
+      const id = String(msg.id || "");
+      if (msg.state === "error") agentMore.set(id, { state: "error", error: String(msg.error || "DGC couldn't continue the helper.").slice(0, 600) });
+      else agentMore.delete(id);
+      agentRunsChanged(id);
+    }
     else if (msg.type === "background_stop_state") {
       if (msg.state === "error") { taskStopping.set(`${msg.kind === "shell" ? "shell" : "monitor"}:${String(msg.id || "")}`, "failed"); agentMapChanged(); }
     }
@@ -10943,6 +10973,14 @@
       if (!line.ids.includes(childId)) line.ids.push(childId);
       placed.add(childId);
     };
+    // A helper asked to do more draws each run after a divider ("Continued 18:42 · asked by you"); a step's call id
+    // says its run ("sub-…:r2-…"). A run that left no step of its own gets its divider at the end.
+    const runs = agentRuns.get(id);
+    let run = 1;
+    const enter = (next) => {
+      if (!runs || runs.runs < 2) return;
+      while (run < next) { run += 1; into.appendChild(agentRunDivider(id, run)); }
+    };
     for (const node of log.querySelectorAll(".tool.agent-owned, .diff.agent-owned, button.disclosure.agent-owned, .reasoning.agent-owned, .thought-static.agent-owned, .thought-note.agent-owned")) {
       if (node.classList.contains("tool") && node.dataset.toolName === "task") {
         const child = agentRecords.get(node.dataset.agentId);
@@ -10952,6 +10990,7 @@
       // The spawn that started this agent is its parent's step, not this agent's work.
       if (node.classList.contains("tool") && node.dataset.toolName === "task"
           && innermostAgentId(node.dataset.callId) !== id) continue;
+      enter(agentRunOf(node.dataset.callId, id));
       const clone = node.cloneNode(true);
       rebindAgentClone(clone, node, images);
       into.appendChild(clone);
@@ -10967,6 +11006,7 @@
         ? [...agentRecords.values()].find((r) => r.parent_id === id && r.call_id === ev.call_id) : null);
       for (const ev of events) {
         if (!ev || typeof ev !== "object") continue;
+        if (ev.type === "tool_call" || ev.type === "tool_result") enter(agentRunOf(ev.call_id, id));
         if (ev.type === "tool_call") {
           const child = nested(ev);
           if (child) { pageLine(child.id); continue; }
@@ -10995,6 +11035,7 @@
         into.appendChild(note);
       }
     }
+    if (runs) enter(runs.runs);
     // Children whose spawn is not drawn here -- a parallel parent's trace has not replayed yet, or
     // was not kept -- still get a line, at the end, in the order they started.
     for (const child of [...agentRecords.values()].filter((r) => r.parent_id === id && !placed.has(r.id)).sort(agentByStart)) {
@@ -11096,7 +11137,8 @@
   const AGENT_OUTCOME = /^Sub-task '[\s\S]*?' (?:completed and integrated|partly integrated|completed but its changes were NOT integrated)/;
   const AGENT_OUTCOME_HELD = /^Sub-task '[\s\S]*?' (?:partly integrated|completed but its changes were NOT integrated)/;
   function agentOutcomeNote(id) {
-    const out = agentAnchor(id)?.querySelector(".body pre")?.textContent || "";
+    const latest = agentLatestRun(id);
+    const out = latest ? latest.note : agentAnchor(id)?.querySelector(".body pre")?.textContent || "";
     if (!AGENT_OUTCOME.test(out)) return null;
     const note = el("p", "agent-page-outcome");
     note.textContent = out.split("\nSummary:")[0].trim().slice(0, 600);
@@ -11844,7 +11886,9 @@
     if (row.dataset.state !== record.state) row.dataset.state = record.state;
     paintAgentMark(face, record.id, AGENT_ACTIVE.has(record.state));
     // Work held back is why an older agent is still in view: its row says so, where "Finished" was.
-    const name = agentDisplayName(record), stats = amAgentStats(record), word = amHeldBack(record) ? "Held back" : amStateWord(record);
+    const name = agentDisplayName(record), word = amHeldBack(record) ? "Held back" : amStateWord(record);
+    // A helper asked to do more keeps its row: "Continued · 2 runs" says so (agent_runs).
+    const stats = [amContinuedWords(record), ...amAgentStats(record)].filter(Boolean);
     agentsSetText(desc, name);
     // The word leads for every state but working, so no state rests on the dot's colour alone.
     agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
@@ -12021,6 +12065,8 @@
   // background agent, the report its wake turn drew.
   function amHeldBack(record) {
     if (AGENT_ACTIVE.has(record.state)) return false;
+    const latest = agentLatestRun(record.id);
+    if (latest) return latest.held === true;
     const out = agentAnchor(record.id)?.querySelector(".body pre")?.textContent || "";
     if (AGENT_HELD_ANY.test(out)) return true;
     if (!record.background) return false;
@@ -12545,6 +12591,133 @@
     else vscode.postMessage({ type: "stopAgent", id });
     renderAgentMap();
   }
+  // ---- a finished helper asked to do more (agent_runs, continue_agent) ----
+  // The CLI says which helpers can be continued and each one's runs, after every agents snapshot and whenever one
+  // changes; a helper continued keeps its one row, its record going back to work in the snapshot before this.
+  function receiveAgentRuns(ev) {
+    const items = Array.isArray(ev.items) ? ev.items : [];
+    const changed = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object" || !/^sub-[0-9a-f]{12}$/.test(String(item.id || ""))) continue;
+      const id = String(item.id);
+      const history = (Array.isArray(item.history) ? item.history : []).filter((run) => run && typeof run === "object")
+        .slice(-20).map((run) => ({
+          run: Number.isSafeInteger(run.run) && run.run > 0 ? run.run : 1, by: run.by === "you" ? "you" : "model",
+          at: Number.isFinite(run.at) ? run.at : null, request: String(run.request || "").slice(0, 2000),
+          note: String(run.note || "").slice(0, 600), report: String(run.report || "").slice(0, 2000), held: run.held === true }));
+      const runs = Number.isSafeInteger(item.runs) && item.runs > 0 ? item.runs : Math.max(1, history.length);
+      const before = agentRuns.get(id);
+      agentRuns.set(id, { runs, continuable: item.continuable === true, history });
+      // A request on its way is settled once the helper is working again (or has no box to show).
+      if (agentMore.get(id)?.state === "sending" && (!item.continuable || (before && runs > before.runs))) agentMore.delete(id);
+      changed.push(id);
+    }
+    for (const id of changed) agentRunsChanged(id, false);
+    if (changed.length) renderAgents();
+  }
+  function agentRunsChanged(id, render = true) {
+    if (agentPageId === id) paintAgentPage(id);
+    for (const line of log.querySelectorAll(".handback-line")) {
+      if (line._more && line._more.dataset.agentId === id) {
+        const record = agentRecords.get(id);
+        if (record) paintAgentMoreBox(line._more, record);
+      }
+    }
+    if (render) renderAgents();
+  }
+  // The latest run of a helper continued at least once, or null: what became of its changes is that run's.
+  function agentLatestRun(id) {
+    const runs = agentRuns.get(id);
+    if (!runs || runs.runs < 2) return null;
+    const latest = runs.history.at(-1);
+    return latest && latest.run === runs.runs && (latest.note || latest.report) ? latest : null;
+  }
+  function agentRunOf(callId, id) {
+    const found = String(callId || "").match(/^sub-[0-9a-f]{12}:r(\d+)-/);
+    return found && String(callId).startsWith(`${id}:`) ? Number(found[1]) : 1;
+  }
+  function amContinuedWords(record) {
+    const runs = agentRuns.get(record.id);
+    return runs && runs.runs > 1 ? `Continued · ${runs.runs} runs` : "";
+  }
+  // Before a continued run: what the run before it reported, then "Continued 18:42 · asked by you" and what it was
+  // asked, drawn as the chat draws a prompt.
+  function agentRunDivider(id, run) {
+    const runs = agentRuns.get(id);
+    const info = runs?.history.find((entry) => entry.run === run) || null;
+    const earlier = runs?.history.find((entry) => entry.run === run - 1) || null;
+    const box = el("div", "agent-run-divider");
+    box.dataset.run = String(run);
+    if (earlier?.report) {
+      const said = box.appendChild(el("div", "text agent-answer agent-run-report"));
+      said.innerHTML = md(earlier.report);
+    }
+    const mark = box.appendChild(el("p", "agent-run-mark"));
+    mark.setAttribute("role", "separator");
+    const when = info?.at ? window.DgcTime?.label(info.at * 1000) || "" : "";
+    const who = info?.by === "you" ? "asked by you" : "asked by DGC";
+    mark.textContent = ["Continued" + (when ? ` ${when}` : ""), who].join(" · ");
+    if (info?.at) mark.title = window.DgcTime?.title(info.at * 1000) || "";
+    if (info?.request) {
+      const m = box.appendChild(el("div", "msg user agent-prompt agent-run-request"));
+      m.appendChild(el("div", "role")).textContent = info.by === "you" ? "you" : "the main agent";
+      fillUserBubble(m.appendChild(el("div", "bubble")), info.request, []);
+    }
+    return box;
+  }
+  // "Ask it to do more": a finished helper of this chat, asked by the person, continues in the background with its
+  // memory. Shown only when the CLI can (continue_agent) and says this helper can be continued now.
+  function agentMoreBox(id) {
+    const box = el("form", "agent-more");
+    box.dataset.agentId = id;
+    box.noValidate = true;
+    const field = box.appendChild(el("textarea", "agent-more-text"));
+    field.rows = 2;
+    field.maxLength = 16000;
+    field.placeholder = "Ask it to do more…";
+    field.setAttribute("aria-label", "Ask it to do more");
+    const row = box.appendChild(el("div", "agent-more-row"));
+    const note = row.appendChild(el("p", "am-note agent-more-note"));
+    note.id = `agent-more-note-${++handbackSeq}`;
+    field.setAttribute("aria-describedby", note.id);
+    const send = row.appendChild(el("button", "act primary agent-more-send"));
+    send.type = "submit";
+    send.textContent = "Continue";
+    const submit = () => {
+      const text = field.value.trim();
+      const record = agentRecords.get(id);
+      if (!text || !record || agentMore.get(id)?.state === "sending") return;
+      agentMore.set(id, { state: "sending" });
+      vscode.postMessage({ type: "continueAgent", id, text });
+      field.value = "";
+      agentRunsChanged(id);
+    };
+    box.addEventListener("submit", (event) => { event.preventDefault(); submit(); });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); }
+    });
+    field.addEventListener("input", () => { send.disabled = !field.value.trim() || agentMore.get(id)?.state === "sending"; });
+    send.disabled = true;
+    return box;
+  }
+  function paintAgentMoreBox(box, record) {
+    if (!box) return;
+    const runs = agentRuns.get(record.id), pending = agentMore.get(record.id);
+    const show = continueAgentLive && !record.parent_id && !AGENT_ACTIVE.has(record.state)
+      && (runs?.continuable === true || !!pending);
+    box.hidden = !show;
+    if (!show) return;
+    const field = box.querySelector(".agent-more-text"), send = box.querySelector(".agent-more-send");
+    const note = box.querySelector(".agent-more-note");
+    const sending = pending?.state === "sending";
+    field.disabled = sending;
+    send.disabled = sending || !field.value.trim();
+    agentsSetText(send, sending ? "Starting…" : "Continue");
+    agentsSetText(note, pending?.state === "error" ? pending.error
+      : sending ? "It picks up where it left off, in a fresh copy of your project."
+        : "It remembers its work and picks up where it left off.");
+    note.classList.toggle("am-failure", pending?.state === "error");
+  }
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
     return [amStateWord(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
@@ -12569,6 +12742,7 @@
       n.activity = host.appendChild(el("p", "am-card-line am-activity"));
       n.failure = host.appendChild(el("p", "am-card-line am-failure"));
       n.result = host.appendChild(el("div", "am-result"));
+      n.more = host.appendChild(agentMoreBox(id));
       // The prompt is open while the agent works and folded once it has ended; the calls are open.
       ({ fold: n.promptFold } = amFold(host, "Prompt", working));
       n.prompt = n.promptFold.appendChild(el("pre", "am-prompt"));
@@ -12628,6 +12802,7 @@
       }
     }
     n.result.hidden = !n.result.childElementCount;
+    paintAgentMoreBox(n.more, record);
     const prompt = agentPromptOf(record);
     if (n.prompt._text !== prompt) {
       n.prompt._text = prompt;
@@ -12864,7 +13039,8 @@
     return JSON.stringify([record.state, String(record.message || "").length, Array.isArray(record.log) ? record.log.length : 0,
       nodes.map((node) => `${node.dataset.status || ""}:${node.textContent.length}`).join(","),
       kids.map((r) => `${r.id}:${r.state}:${agentDisplayName(r)}`).join(","),
-      agentAnchor(id)?.querySelector(".body pre")?.textContent.length || 0, agentPromptOf(record).length]);
+      agentAnchor(id)?.querySelector(".body pre")?.textContent.length || 0, agentPromptOf(record).length,
+      JSON.stringify(agentRuns.get(id)?.history || null).length]);
   }
   function paintAmTranscript() {
     const box = $("agent-transcript-box"), body = $("agent-transcript-body");
@@ -13132,6 +13308,7 @@
     }
     agentsHoldClaims = false;
     agentRecords.clear(); agentAnchors.clear(); agentsBatch.clear(); amRows.clear();
+    agentRuns.clear(); agentMore.clear();
     amRoot?.kids.replaceChildren();
     // What ran in the background of the chat that was left is not this chat's.
     amTasksReset();
