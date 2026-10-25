@@ -325,16 +325,17 @@ class TheReportNamesShellChangesTest(Case):
                             ("FIXER-6", child)], "parent: delegate", then=meanwhile)
         self.assertTrue(notices, "the helper finished")
         out = notices[0]["message"]
-        self.assertNotIn("no file changes", out)
-        self.assertIn("notes.txt in the user's checkout changed while it ran; DGC can't tell who "
-                      "changed it (the user, this chat or another program), so don't present it as "
-                      "this helper's work.", out)
+        # Since the undo fixes (25 Oct) the parent's own shell command is looked at around it
+        # (dgc/command_watch.py): its change to notes.txt is this chat's own work, as its file tool's
+        # write to other.txt always was. It is in the parent's recovery point -- Git's copy, which Undo
+        # puts back -- and the helper's report neither blames the helper for it nor calls it unknown.
         self.assertNotIn("most likely changed", out, "not blamed on the helper")
+        self.assertNotIn("notes.txt", out, "the parent's own command's change is DGC's own work")
         self.assertNotIn("other.txt", out, "the parent's own file tool write is DGC's own work")
         self.assertFalse(notices[0]["integrated"])
-        recorded = [path for point in h.agent.checkpoints.points for path in point["files"]]
-        self.assertNotIn(str(root / "notes.txt"), recorded,
-                         "nobody knows whose change it is, so it goes in nobody's recovery point")
+        snapshot = h.agent.checkpoints.points[-1]["files"].get(str(root / "notes.txt"))
+        self.assertIsNotNone(snapshot, "the parent's command's change is in the parent's recovery point")
+        self.assertEqual(snapshot.data, b"one\n", "as Git's copy: exactly what it held before the command")
 
 
 # --------------------------------------------------------------------------- unchanged and depth ---

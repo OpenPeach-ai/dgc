@@ -1206,7 +1206,9 @@ class HeadlessSnapshotTests(HarnessCase):
                                ("resume_session", "self._emit_history()\n                self._emit_agents()"),
                                ("rewind", "self._emit_history()\n                if agents_before or self._agents_total():"
                                           "   # an empty list has nothing to drop\n                    self._emit_agents()")):
-            block = source[source.index(f'elif t == "{command}":'):]
+            head = (f'elif t == "{command}":' if command != "rewind"
+                    else 'elif t in ("rewind", "undo_to"):')      # undo_to is the same rewind, answered twice
+            block = source[source.index(head):]
             block = block[:block.index("\n        elif t ==")]
             self.assertIn(after, block, command)
         self.assertIn('elif t == "list_agents":\n            self._emit_agents(request_id)', source)

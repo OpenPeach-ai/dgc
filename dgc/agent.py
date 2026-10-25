@@ -10053,8 +10053,9 @@ class Agent(GoalLifecycle):
             rewind_pending = False
             try:
                 allowed = [self._rewind_target(path) for path in (overwrite or ())]
-                msg_count, n_files, conversation = self.checkpoints.rewind_state(
-                    idx, transactional=True, overwrite=allowed)
+                msg_count, n_files, conversation = (
+                    self.checkpoints.rewind_state(idx, transactional=True, overwrite=allowed) if allowed
+                    else self.checkpoints.rewind_state(idx, transactional=True))
                 if msg_count < 0:
                     # Say WHY. A bare "rewind failed" over a file someone else has since edited reads
                     # as a bug; it is the one case where DGC declining to act is the whole point.

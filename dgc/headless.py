@@ -7610,7 +7610,8 @@ class Backend:
             if t == "undo_to":
                 overwrite = [str(path) for path in (cmd.get("overwrite") or [])
                              if isinstance(path, str) and 0 < len(path) <= 4096][:4096]
-            msgs, nfiles = self.agent.rewind(index, overwrite=overwrite)
+            msgs, nfiles = (self.agent.rewind(index) if overwrite is None
+                            else self.agent.rewind(index, overwrite=overwrite))
             ok = msgs >= 0
             if t == "undo_to":
                 outcome = getattr(self.agent, "last_rewind", None) or {}
