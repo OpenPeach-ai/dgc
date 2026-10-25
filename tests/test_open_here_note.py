@@ -355,6 +355,44 @@ class HostTests(unittest.TestCase):
         self.assertEqual([c["session_id"] for c in note["open_here"]["chats"]], [stem])
         self.assertEqual(self.frames(), [], "nothing answers editor_app")
 
+    def test_a_turn_starting_while_the_last_one_refreshes_its_note_keeps_its_live_state(self):
+        """The note is refreshed at each turn's end, after the worker let the next prompt start a worker of its own.
+        The retiring worker used to clear the turn state on its way out, the NEW turn's: a reload's snapshot then
+        replayed the running turn closed (its open question answered "not answered"). A slow refresh makes it
+        certain."""
+        import threading
+        from dgc import headless
+        from waiting import wait_until
+        backend = self.host.default
+        started, release = threading.Event(), threading.Event()
+        refreshed = threading.Event()
+
+        def run_turn(text, reset_cancel=False, **_kw):
+            if "second" in text:
+                started.set()
+                release.wait(10)
+            return True
+
+        def slow_refresh(chat, status="idle"):
+            if status == "idle":
+                time.sleep(0.8)                          # the retiring worker, still busy with the note
+                refreshed.set()
+
+        backend.agent.run_turn = run_turn
+        with patch.object(headless.Backend, "_announce_peer", slow_refresh):
+            self.host.dispatch({"type": "prompt", "text": "first", "request_id": "p1"})
+            wait_until(lambda: any(f.get("type") == "turn_end" for f in self.frames()), timeout=10, what="the first turn")
+            self.host.dispatch({"type": "prompt", "text": "second", "request_id": "p2"})
+            self.assertTrue(started.wait(10), "the second turn started")
+            self.assertTrue(refreshed.wait(10))
+            time.sleep(0.2)                              # past the first worker's way out
+            with backend._turn_state_lock():
+                live, kind = backend._live_turn, backend._running_turn_kind
+            release.set()
+        self.assertEqual(kind, "prompt", "the running turn is still the running turn")
+        self.assertIsInstance(live, dict)
+        self.assertIsNotNone(live.get("id"))
+
     def test_session_holder_answers_from_the_other_process_note(self):
         other = {"pid": 4242, "kind": "serve", "cwd": str(self.tmp), "heartbeat": time.time(), "attached": True,
                  "open_here": {"version": 1, "editor": "Windsurf", "chats": [

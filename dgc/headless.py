@@ -3579,9 +3579,14 @@ class Backend:
             # A broken output stream or unexpected fixture/runtime exception must not leave the
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
             with self._turn_state_lock():
-                self._running_turn_kind = ""
-                self._running_pip_setup_text = None
-                self._live_turn = None
+                # Only this worker's own turn: a worker that already retired (its last turn ended and it let
+                # `_worker` go) can reach here after the next prompt started a worker of its own -- its
+                # turn-end note refresh takes a moment -- and clearing then wiped THAT turn's live state, so
+                # a reload's snapshot replayed the running turn closed, its open question lost.
+                if self._worker is current or self._worker is None:
+                    self._running_turn_kind = ""
+                    self._running_pip_setup_text = None
+                    self._live_turn = None
                 if self._worker is current:
                     self._worker = None
                     self._flush_unsaved_todo_clear()
