@@ -581,7 +581,8 @@ class OllamaThinkingLevelTests(unittest.TestCase):
         self.assertIsNone(cloud._ollama_load_probe(), "a cloud model never loads locally")
         self.assertIsNotNone(local._ollama_load_probe())
         self.assertEqual(cloud.first_token_timeout, 300)
-        self.assertEqual(local.first_token_timeout, 900)
+        self.assertEqual(local.first_token_timeout, 0, "0.49: a local model has no first-token limit")
+        self.assertEqual((cloud.load_timeout, local.load_timeout), (900, 0))
         self.assertEqual(resolve_first_token_timeout("auto", "http://127.0.0.1:11434", "ollama",
                                                      model="kimi-k2:1t-cloud"), 300)
         self.assertEqual(resolve_first_token_timeout("120", "http://127.0.0.1:11434", "ollama",

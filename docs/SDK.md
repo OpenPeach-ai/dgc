@@ -103,14 +103,14 @@ try {
 
 | API | Purpose |
 | --- | --- |
-| `dgc.chat(model=, thinking=, reply_timeout=)` | `Chats` on its own backend. `model` and `thinking` (`off` to `xhigh`) apply to every message unless one says otherwise; `reply_timeout` (TypeScript `replyTimeoutMs`) bounds each reply. A CLI without ChatDGC raises `DGCUnsupportedError`. |
+| `dgc.chat(model=, thinking=, reply_timeout=)` | `Chats` on its own backend. `model` and `thinking` (`off` to `xhigh`) apply to every message unless one says otherwise; `reply_timeout` (TypeScript `replyTimeoutMs`) bounds each reply; by default there is no limit. A CLI without ChatDGC raises `DGCUnsupportedError`. |
 | `chats.ask(text, **options)` | One question in a new chat: its `ChatReply`. Takes `temporary=True` for a chat that's never saved or listed. |
 | `chats.list(query=None, limit=, offset=, archived=)` | `ChatSummary` rows, newest first; `query` finds a chat by its title or anything said in it. |
 | `chats.new(temporary=)`, `chats.open(chat_id)` | A `Chat`: a new one (saved from its first message) or an existing one with its latest `messages`. |
 | `chat.send(text, model=, thinking=, search=, files=, study=, timeout=)` | Send and wait for the whole reply. `search`: `auto` (default), `on` or `off`; `files`: up to ten local files; `study`: `True` turns Study mode on for the chat (it teaches instead of answering), `False` turns it off. |
 | `chat.answer(message_id, choice, question=0, choices=None, ...)` | Answer the question card a reply asked (a `question` event), as a click on it does: `choice` for a one-question card, `choices` (one per question, in order) for a card of several. The message the model wrote for it is sent with your answers, and its reply comes back. TypeScript: `chat.answer(messageId, choice, { choices })`. |
 | `chat.stream(...)` | The same, as `ChatEvent`s while it's written: `text`, `thinking`, `activity` (searching, looking), `question`, `research`, and last `reply`. |
-| `chat.research(question, edit_plan=, on_event=)` | Deep research: a plan you may change, then the research, then a report whose citations are checked. |
+| `chat.research(question, edit_plan=, on_event=, timeout=)` | Deep research: a plan you may change, then the research, then a report whose citations are checked. `timeout` bounds each of its two turns (default: the client's `reply_timeout`, no limit unless you gave one). |
 | `chat.cancel()`, `rename(title)`, `pin()`, `archive()`, `delete()`, `export(path, format=)`, `refresh()` | Stop a reply (what it wrote is kept), manage the chat, save it as Markdown or JSON. |
 
 A `ChatReply` has `chat_id`, `message_id`, `text`, `sources` (each a `ChatSource`: `n`, `title`, `url`, `snippet`),
@@ -338,13 +338,15 @@ below).
 
 Running:
 
-- `run(prompt, *, timeout=180.0, max_turns=None, output_schema=None, skills=None, workflow=None, repair_attempts=1)`
-  → `RunResult`. `timeout` is in seconds (`None`: no limit); a run that reaches it ends with
+- `run(prompt, *, timeout=None, max_turns=None, output_schema=None, skills=None, workflow=None, repair_attempts=1)`
+  → `RunResult`. `timeout` is in seconds per turn; the default, `None`, is no limit, because a big
+  model on your own machine can take tens of minutes before its first word and DGC never gives up on
+  a model that is still working. A run that reaches a `timeout` you set ends with
   `status="failed"`, `reason="timeout"`. `max_turns` applies to this run only. `output_schema`
   asks for a JSON answer checked against a schema (see [Structured output](#structured-output)).
   `skills` names skills to apply to this prompt; `workflow` is `"plan"`, `"review"` or `"init"`.
 - `stream(prompt, **same options)` → `RunHandle`.
-- `followup(text, *, timeout=180.0, output_schema=None, skills=None, repair_attempts=1)` →
+- `followup(text, *, timeout=None, output_schema=None, skills=None, repair_attempts=1)` →
   `RunHandle` — queue a prompt behind the run in flight (or start it now when idle). Its turn is
   observed, audited and billed like any run. Behind a run with its own `max_turns` or
   `output_schema` it is sent once that run is over, so it runs under the session's settings; it
@@ -597,10 +599,11 @@ are skipped rather than ending the session.
 | --- | --- |
 | `state_dir` | a new private temporary directory |
 | Runtime | discovered (see [Install](#install)) |
-| Run timeout (`run`, `stream`) | 180 seconds per turn |
+| Run timeout (`run`, `stream`, `followup`) | none: a run takes as long as the model works |
+| Chat reply timeout (`reply_timeout`, `research`) | none |
 | Decision timeout | 30 seconds, then deny |
 | Custom tool timeout | 30 seconds |
-| Runtime start / control request | 30 / 15 seconds |
+| Runtime start / control request | 30 / 15 seconds (neither applies to a run: a long wait for the model never trips them) |
 | Permission mode | `default` |
 | Unhandled permission requests | denied |
 | Model and endpoint | the CLI's defaults unless you pass `model` / `base_url` |

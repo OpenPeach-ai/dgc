@@ -216,6 +216,8 @@ _LIVE_SAFE_CONFIG_KEYS = frozenset({
     "thinking_inline", "thinking_inline_max_chars",
     # Both shape only the next request (an Anthropic cache marker's ttl; Ollama's keep_alive).
     "prompt_cache_ttl", "ollama_keep_alive",
+    # How long the next request waits for its first word and between words (a request in flight keeps its own).
+    "model_first_token_timeout_s", "model_idle_timeout_s",
     # Same dial as the composer: the in-flight generation keeps its budget; the next model
     # round in this turn (or the next prompt) uses the new level.
     "thinking", "subscription_effort",
@@ -488,7 +490,10 @@ _CONFIG_INTEGER_RANGES = {
     "turn_budget_s": (0, 86_400),
     "max_tokens": (0, 1_000_000),
     "turn_token_budget": (0, 1_000_000_000),            # 0: no cap
+    "model_idle_timeout_s": (0, 86_400),                # Settings -> Wait between words; 0: no limit
 }
+# Settings -> Wait for the first word: "auto", or whole seconds up to a day (0: no limit).
+_FIRST_TOKEN_MAX_S = 86_400
 
 
 # Ollama's keep_alive: a Go duration ("30m", "1h30m", "90s"), a number of seconds, a negative value
@@ -532,7 +537,7 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
         return None, "settings values must be an object"
     allowed = {*_CONFIG_BOOLEAN_KEYS, *_CONFIG_STRING_LIMITS, *_CONFIG_ENUMS,
                *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine",
-               "ollama_keep_alive"}
+               "ollama_keep_alive", "model_first_token_timeout_s"}
     unknown = [key for key in raw_values if key not in allowed]
     if unknown:
         return None, f"unsupported settings key: {str(unknown[0])[:80]}"
@@ -579,6 +584,12 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
         from .pip_models import _MODEL_ID
         if not _MODEL_ID.fullmatch(values["pips_model"]) or "://" in values["pips_model"]:
             return None, "pips_model must be empty or a model's name, like qwen3:8b"
+    if "model_first_token_timeout_s" in values:
+        first = values["model_first_token_timeout_s"]
+        if not (first == "auto" or (isinstance(first, int) and not isinstance(first, bool)
+                                    and 0 <= first <= _FIRST_TOKEN_MAX_S)):
+            return None, (f"model_first_token_timeout_s must be \"auto\" or whole seconds from 0 (no limit) "
+                          f"to {_FIRST_TOKEN_MAX_S}")
     if "ollama_keep_alive" in values and not _keep_alive_ok(values["ollama_keep_alive"]):
         return None, ("ollama_keep_alive must be a duration Ollama takes (5m, 30m, 1h, 24h), "
                       "-1 to keep the model loaded until Ollama stops, or empty for Ollama's default")
@@ -4721,10 +4732,22 @@ class Backend:
                      ollama_keep_alive=str(c.get("ollama_keep_alive", "30m") or "")[:32],
                      **_request_fields(request_id))
 
+    def _emit_model_wait_settings(self, request_id: str | None = None) -> None:
+        """Settings -> Models -> Advanced: Wait for the first word, Wait between words (model_wait_settings)."""
+        from .model_watch import bounded_seconds, is_auto
+        c = self.config
+        first = c.get("model_first_token_timeout_s", "auto")
+        shown = "auto" if is_auto(first) else str(int(round(bounded_seconds(first, 300.0))))
+        self.em.emit("model_wait_settings", first_token=shown,
+                     between_words_s=int(round(bounded_seconds(c.get("model_idle_timeout_s", 300), 300.0))),
+                     **_request_fields(request_id))
+
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         if getattr(self, "_cache_settings_wanted", False):
             self._emit_cache_settings(request_id)
+        if getattr(self, "_model_wait_settings_wanted", False):
+            self._emit_model_wait_settings(request_id)
         if getattr(self, "_pips_settings_wanted", False):
             self.em.emit("pips_settings", model=str(c.get("pips_model", "") or "")[:256], **_request_fields(request_id))
         extra = {}
@@ -7608,6 +7631,7 @@ class Backend:
                 "api_mode", "provider_state", "prompt_cache", "prompt_cache_key",
                 "provider_capabilities", "capability_cache_ttl_s", "context_size",
                 "prompt_cache_ttl", "ollama_keep_alive",
+                "model_first_token_timeout_s", "model_idle_timeout_s",
             })
             # Config.set normally persists each key. Suspend that behavior while staging so another
             # process cannot observe half of a route change, then commit the complete validated
@@ -7705,6 +7729,9 @@ class Backend:
                 # The Pips-wide default model, for Settings -> Agents, in an event of its own too.
                 if "pips_settings" in fields:
                     self._pips_settings_wanted = True
+                # How long DGC waits on a model (Settings -> Models -> Advanced), in an event of its own too.
+                if "model_wait_settings" in fields:
+                    self._model_wait_settings_wanted = True
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()

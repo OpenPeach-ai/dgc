@@ -364,8 +364,8 @@ export type Env = Record<string, string | undefined>;
 
 export type RunOptions = {
   /**
-   * Limit for each turn of the run (default 180 000 ms; `null` means no limit). When it passes,
-   * the run is cancelled and its result is `status: "failed"`, `reason: "timeout"`.
+   * Limit for each turn of the run in ms (default: no limit, as `null`). When it passes, the run is
+   * cancelled and its result is `status: "failed"`, `reason: "timeout"`.
    */
   timeoutMs?: number | null;
   /** Aborting this signal cancels the run (result `status: "cancelled"`). */

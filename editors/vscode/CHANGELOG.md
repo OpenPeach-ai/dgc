@@ -4,6 +4,12 @@
 
 - **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
   message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
+- **Settings → Models → Advanced: Wait for the first word, and Wait between words.** How long DGC waits on a model,
+  in plain words. **Wait for the first word** is Auto (as long as a model on this computer or your network is working
+  on your request, which DGC asks its server; 5 minutes for a cloud model), a number of minutes, or Never. **Wait
+  between words** is minutes of quiet once a model has started answering. A local model that is still working is
+  never cut off either way. Needs a DGC CLI that answers `model_wait_settings` (0.49); with an older one the two rows
+  are off and say to update the CLI. Save sends them only when you changed them.
 
 - **The main chat's Pip model changes ask in plain words.** The permission card for changing a Pip lists its new
   **Model** ("glm-5.3:cloud", or "Claude Code, on your own plan") and **Context window** ("64K tokens") instead of

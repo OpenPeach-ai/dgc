@@ -139,7 +139,7 @@ class Chats:
     client) when done."""
 
     def __init__(self, session: "Session", *, model: str | None = None, thinking: str | None = None,
-                 reply_timeout: float = 600.0, owns_session: bool = True):
+                 reply_timeout: float | None = None, owns_session: bool = True):
         chatdgc = session.capabilities.get("chatdgc")
         if not isinstance(chatdgc, Mapping) or int(chatdgc.get("version") or 0) < 1:
             raise DGCUnsupportedError("This DGC CLI has no ChatDGC; update it (dgc update).")
@@ -148,7 +148,10 @@ class Chats:
         self._owns_session = owns_session
         self._model = model
         self._thinking = _choice(thinking, THINKING, "thinking")
-        self._reply_timeout = float(reply_timeout)
+        if reply_timeout is not None and (isinstance(reply_timeout, bool) or not isinstance(reply_timeout, (int, float))
+                                          or not reply_timeout > 0 or reply_timeout != reply_timeout):
+            raise DGCConfigError("reply_timeout must be a positive number of seconds, or None for no limit")
+        self._reply_timeout = None if reply_timeout is None else float(reply_timeout)
         self._lock = threading.Lock()
         self._outstanding: set[str] = set()
         self._listeners: dict[str, queue.Queue] = {}
@@ -284,7 +287,8 @@ class Chat:
             if self.id in chats._listeners:
                 raise DGCRuntimeError("this chat is already answering; wait for its reply")
             chats._listeners[self.id] = listener
-        deadline = time.monotonic() + (chats._reply_timeout if timeout is None else float(timeout))
+        limit = chats._reply_timeout if timeout is None else float(timeout)
+        deadline = None if limit is None else time.monotonic() + limit
         try:
             try:
                 chats._raw.send({**command, "conversation_id": self.id, "request_id": rid})
@@ -293,7 +297,7 @@ class Chat:
             started = False
             final: ChatReply | None = None
             while True:
-                left = deadline - time.monotonic()
+                left = 1.0 if deadline is None else deadline - time.monotonic()
                 if left <= 0:
                     self.cancel()
                     raise DGCTimeoutError("ChatDGC didn't finish the reply in time; it was stopped")
@@ -390,8 +394,8 @@ class Chat:
         ``search``: ``"auto"`` (the default: it searches when an answer depends on facts), ``"on"`` (search first)
         or ``"off"``. ``files``: up to ten local files the backend reads. ``study``: True turns Study mode on for the
         chat from this message (it teaches instead of answering), False turns it off; left out, the chat stays as it
-        is. ``timeout``: seconds for the whole reply (default: the client's ``reply_timeout``); past it the reply is
-        stopped."""
+        is. ``timeout``: seconds for the whole reply (default: the client's ``reply_timeout``, which is no limit unless it
+        was given one); past it the reply is stopped."""
         return self._turn(self._send_command(text, model, thinking, search, files, study), timeout)
 
     def send(self, text: str, **options: Any) -> ChatReply:
@@ -404,11 +408,12 @@ class Chat:
         return reply
 
     def research(self, question: str, *, edit_plan: Callable[[dict[str, Any]], Mapping[str, Any] | None] | None = None,
-                 model: str | None = None, thinking: str | None = None, timeout: float | None = 1800.0,
+                 model: str | None = None, thinking: str | None = None, timeout: float | None = None,
                  on_event: Callable[[ChatEvent], None] | None = None) -> ChatReply:
         """Deep research: a plan ({title, steps, sites}), then the research, then a report whose citations are
         checked. ``edit_plan`` gets the plan and may return a changed one (or None to keep it), as you'd edit it
-        in the editor. ``on_event`` sees the progress. Returns the report."""
+        in the editor. ``on_event`` sees the progress. ``timeout``: seconds for each of its two turns (default: the
+        client's ``reply_timeout``, which is no limit unless it was given one). Returns the report."""
         if not isinstance(question, str) or not question.strip():
             raise DGCConfigError("question must be non-empty")
         command: dict[str, Any] = {"type": "chatdgc_research", "text": question}

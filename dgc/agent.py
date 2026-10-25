@@ -2397,7 +2397,7 @@ class Agent(GoalLifecycle):
                            idle_timeout=self.config.get("model_idle_timeout_s", 300),
                            stall_notice=self.config.get("model_stall_notice_s", 45),
                            stall_retries=self.config.get("model_stall_retries", 2),
-                           load_timeout=self.config.get("model_load_timeout_s", 900))
+                           load_timeout=self.config.get("model_load_timeout_s", "auto"))
         # Every client this agent builds reports each finished request to the local usage ledger,
         # labelled with the route that sent it. See _ledger_usage.
         client.usage_source = source
@@ -6512,6 +6512,10 @@ class Agent(GoalLifecycle):
         after = format_seconds(ev.threshold_s)
         if ev.phase == "loading":
             return "Loading the model", where
+        if getattr(ev, "server", "") == "working":
+            # A local server DGC asked: it is still on this request (a long prefill, a slow model).
+            # DGC waits for it, however long; Stop still ends the turn.
+            return "Waiting for the model", f"{where} · the server is working on it"
         if ev.phase == "streaming":
             return "The model stopped streaming", f"{where} · no tokens for {after}+"
         if ev.phase == "first_token":
@@ -6543,7 +6547,9 @@ class Agent(GoalLifecycle):
         host = endpoint_host(ev.endpoint)
         silent = format_seconds(ev.silent_s)
         attempt, retries = int(ev.attempt or 0), int(ev.retries or 0)
-        if ev.phase == "loading":
+        if getattr(ev, "summary", ""):
+            what = str(ev.summary)      # a local server's own answer: gone, or no longer on it
+        elif ev.phase == "loading":
             what = f"{ev.model} at {host} did not finish loading in {silent}"
         elif ev.phase == "first_token":
             what = f"no tokens from {ev.model} at {host} for {silent}"

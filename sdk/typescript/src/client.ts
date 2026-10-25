@@ -400,7 +400,7 @@ export class DGC {
    * ChatDGC: DGC's chat app, from your program (see `chat.ts`). It runs on a backend of its own that never opens a
    * workspace (a private, empty folder in this client's state). With `inheritUserState: true` these are your chats,
    * the ones the editor lists; otherwise the client's own. `model` and `thinking` apply to every message unless one
-   * says otherwise; `replyTimeoutMs` bounds each reply. Close the returned {@link Chats} (or this client) when done.
+   * says otherwise; `replyTimeoutMs` bounds each reply (default: no limit). Close the returned {@link Chats} (or this client) when done.
    * A CLI without ChatDGC throws {@link DGCUnsupportedError}.
    */
   async chat(options: ChatsOptions = {}): Promise<Chats> {

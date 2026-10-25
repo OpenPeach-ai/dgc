@@ -130,6 +130,14 @@ test("a temporary chat is never listed; bad options are refused before anything 
   });
 });
 
+test("a reply has no limit by default; a limit is still taken and checked", { timeout: 180_000 }, async () => {
+  await withChats(async (chats) => {
+    assert.equal(chats.replyTimeoutMs, null);
+    const reply = await chats.ask("How does checkout work?", { search: "off" });
+    assert.match(reply.text, /checkout/);
+  });
+});
+
 test("a closed client's chats refuse politely", { timeout: 120_000 }, async () => {
   const { server, baseUrl } = await startModel();
   const stateDir = mkdtempSync(join(tmpdir(), "dgc-sdk-chat-ts-"));

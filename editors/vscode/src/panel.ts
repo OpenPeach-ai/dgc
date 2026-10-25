@@ -172,6 +172,54 @@ function subagentWindow(value: unknown): number {
   return Math.min(SUBAGENT_WINDOW_MAX, Math.max(SUBAGENT_WINDOW_MIN, tokens));
 }
 
+// Settings -> Models -> Advanced: how long DGC waits on a model (model_wait_settings, 0.49). The CLI keeps seconds:
+// model_first_token_timeout_s "auto" | seconds (0: no limit), model_idle_timeout_s seconds (0: no limit); the page
+// shows Auto / Minutes / Never and minutes.
+type WaitSettings = { first_token: string; between_words_s: number };
+const WAIT_MAX_MINUTES = 1440;
+const minutesText = (seconds: number): string => String(Math.round((Math.max(0, seconds) / 60) * 100) / 100);
+/** The page's fields for what the CLI keeps. */
+export function waitDraft(w: WaitSettings): { wait_first_word: string; wait_first_word_minutes: string; wait_between_words: string } {
+  const first = String(w.first_token ?? "auto").trim().toLowerCase();
+  const seconds = Number(first);
+  const auto = first === "auto" || first === "" || !Number.isFinite(seconds);
+  return {
+    wait_first_word: auto ? "auto" : seconds > 0 ? "minutes" : "never",
+    wait_first_word_minutes: !auto && seconds > 0 ? minutesText(seconds) : "",
+    wait_between_words: minutesText(Number(w.between_words_s) || 0),
+  };
+}
+/** What a Save sends for the page's fields: only a value that differs from what the CLI keeps (so a rounded number
+ *  on the page never rewrites the seconds behind it). Throws, in the page's words, on a number it can't take. */
+export function waitValues(v: any, kept: WaitSettings): { model_first_token_timeout_s?: "auto" | number; model_idle_timeout_s?: number } {
+  const out: { model_first_token_timeout_s?: "auto" | number; model_idle_timeout_s?: number } = {};
+  const choice = String(v?.wait_first_word ?? "");
+  let first: "auto" | number | undefined;
+  if (choice === "auto") { first = "auto"; }
+  else if (choice === "never") { first = 0; }
+  else if (choice === "minutes") {
+    const minutes = Number(String(v?.wait_first_word_minutes ?? "").trim());
+    if (!String(v?.wait_first_word_minutes ?? "").trim() || !Number.isFinite(minutes) || minutes <= 0 || minutes > WAIT_MAX_MINUTES) {
+      throw new Error("Wait for the first word takes a number of minutes, more than 0 and up to 1,440 (a day).");
+    }
+    first = Math.min(86_400, Math.max(1, Math.round(minutes * 60)));
+  }
+  const keptFirst = waitDraft(kept);
+  const sameFirst = first === "auto" ? keptFirst.wait_first_word === "auto"
+    : first === 0 ? keptFirst.wait_first_word === "never"
+    : first !== undefined && keptFirst.wait_first_word === "minutes" && keptFirst.wait_first_word_minutes === String(v?.wait_first_word_minutes ?? "").trim();
+  if (first !== undefined && !sameFirst) { out.model_first_token_timeout_s = first; }
+  const between = String(v?.wait_between_words ?? "").trim();
+  if (between) {
+    const minutes = Number(between);
+    if (!Number.isFinite(minutes) || minutes < 0 || minutes > WAIT_MAX_MINUTES) {
+      throw new Error("Wait between words takes a number of minutes, from 0 (no limit) up to 1,440 (a day).");
+    }
+    if (between !== keptFirst.wait_between_words) { out.model_idle_timeout_s = Math.min(86_400, Math.round(minutes * 60)); }
+  }
+  return out;
+}
+
 /** ready.capabilities.search_keys -> which providers have a key of their own saved; undefined from an older CLI. */
 function searchKeysFromHandshake(offered: any): Map<string, boolean> | undefined {
   if (!offered || typeof offered !== "object" || !Array.isArray(offered.providers)) { return undefined; }
@@ -529,6 +577,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  get_config's "pips_settings" with an event of that name (0.48). Undefined: an older CLI, which would refuse a
    *  save that carried it. */
   private pipsSettings?: { model: string };
+  /** Settings -> Models -> Advanced: how long DGC waits on a model, from a CLI that answers get_config's
+   *  "model_wait_settings" with an event of that name (0.49). Undefined: an older CLI, which would refuse a save that
+   *  carried them. */
+  private waitSettings?: WaitSettings;
   /** The window a vLLM, SGLang or llama.cpp server was started with (server_window, 0.48), for Settings -> General.
    *  Undefined until a CLI that offers it answers; `window` 0 when DGC sizes the window itself. */
   private serverWindow?: { model: string; window: number; server: string; trained: number };
@@ -3598,6 +3650,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pips_settings":
         this.pipsSettings = { model: String((ev as any).model ?? "").slice(0, 256) };
         break;
+      case "model_wait_settings":
+        this.waitSettings = { first_token: String((ev as any).first_token ?? "auto").slice(0, 16),
+                              between_words_s: Math.max(0, Math.floor(Number((ev as any).between_words_s) || 0)) };
+        break;
       case "cache_settings":
         this.cacheSettings = {
           prompt_cache: (ev as any).prompt_cache !== false,
@@ -3873,7 +3929,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    // Nor this: the CLI lists the models at a host as typed (list_models_at).
                                    list_models_at: this.listsModelsAt(),
                                    // Nor these: the pips_settings event that came just before.
-                                   ...(this.pipsSettings ? { pips_model: this.pipsSettings.model, pips_settable: true } : {}) } : ev;
+                                   ...(this.pipsSettings ? { pips_model: this.pipsSettings.model, pips_settable: true } : {}),
+                                   // Nor these: the model_wait_settings event that came just before, as the page shows it.
+                                   ...(this.waitSettings ? { ...waitDraft(this.waitSettings), wait_settable: true } : {}) } : ev;
       this.settingsEditor.webview.postMessage({ type: "event", event });
     }
     if (ev.type === "mcp_servers" && this.pendingSignInServer) {
@@ -6744,7 +6802,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.send({ type: "get_config", request_id: this.nextRequestId("config-read"),
               fields: ["search_url", "search_api_key_set", "chatdgc_about", "chatdgc_style", "chatdgc_personality",
                        "chatdgc_window", "memory", "chatdgc_web", "chatdgc_followups", "turn_token_budget",
-                       "subagent_context_size", "cache_settings", "pips_settings"] });
+                       "subagent_context_size", "cache_settings", "pips_settings", "model_wait_settings"] });
     this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
     this.sendPluginCommand({ type: "list_plugin_marketplaces", request_id: this.nextRequestId("marketplaces") });
     be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
@@ -7280,6 +7338,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       if (v.capability_cache_ttl_s) {
         values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
+      }
+      // How long DGC waits on a model: only to a CLI that answered model_wait_settings, and only what changed.
+      if (this.waitSettings) {
+        Object.assign(values, waitValues(v, this.waitSettings));
       }
       // The model every Pip on Default uses ("" follows DGC). Only to a CLI that answered pips_settings.
       if (this.pipsSettings && typeof v.pips_model === "string") {

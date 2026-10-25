@@ -22,11 +22,12 @@ import requests
 
 from . import reasoning as _reasoning
 from .image_views import parse_dimensions as _image_dimensions   # one header parser, shared
-from .model_watch import (RequestWatch, StallInfo, WaitChannel, WaitEvent, bounded_retries,
-                          bounded_seconds, format_seconds, is_hosted_ollama, is_ollama_cloud_model,
-                          ollama_model_listed,
-                          resolve_first_token_timeout, safe_endpoint)
+from .model_watch import (CHECK_EVERY_S, LOCAL_SOCKET_CEILING_S, RECHECK_S, RequestWatch, StallInfo,
+                          WaitChannel, WaitEvent, bounded_retries, bounded_seconds, format_seconds,
+                          is_hosted_ollama, is_local_work, is_ollama_cloud_model, ollama_model_listed,
+                          resolve_first_token_timeout, resolve_load_timeout, safe_endpoint)
 from .model_watch import is_local_endpoint
+from .server_check import ServerCheck, kind_for as _server_kind
 from .model_errors import classify_exception, classify_status, eof_cause, hint_for, scrub_urls
 
 
@@ -682,11 +683,11 @@ def _wait_for_retry(delay: float, cancel=None) -> bool:
 
 MODEL_STALL_HINT = (
     "the server is reachable but the model produced nothing — check its log (a model still loading, "
-    "an overloaded or wedged worker); raise model_first_token_timeout_s for very large prompts, "
-    "or set fallback_model")
+    "an overloaded or wedged worker); raise Wait for the first word (Settings → Models → Advanced, "
+    "model_first_token_timeout_s) for very large prompts, or set fallback_model")
 _STALL_MESSAGE_RE = re.compile(
     r"no response from model '|opened a stream but sent no tokens|did not finish loading within"
-    r"|stopped streaming: no tokens")
+    r"|stopped streaming: no tokens|stopped working on the request")
 
 
 def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> str:
@@ -770,6 +771,13 @@ class ModelStallError(LLMError):
         seconds = format_seconds(self.info.window_s or self.silent_s)
         tries = f"{self.attempts} attempt{'s' if self.attempts != 1 else ''}"
         model, endpoint = self.model or "the model", self.endpoint or "the endpoint"
+        reason = getattr(self.info, "reason", "")
+        if reason == "server_gone":
+            return (f"model '{model}' at {endpoint}: its server became unreachable while DGC waited "
+                    f"for it ({tries})")
+        if reason == "server_idle":
+            return (f"model '{model}' at {endpoint}: its server stopped working on the request "
+                    f"after {format_seconds(self.silent_s)} with no answer ({tries})")
         if self.phase == "loading":
             return f"model '{model}' at {endpoint} did not finish loading within {seconds}"
         if self.phase == "headers":
@@ -1697,7 +1705,7 @@ class LLMClient:
                  provider_state: str = "stateless", prompt_cache: bool = True,
                  prompt_cache_key: str = "", context_size: int = 0, prompt_cache_ttl: str = "5m",
                  first_token_timeout="auto", idle_timeout=300, stall_notice=45,
-                 stall_retries=2, load_timeout=900):
+                 stall_retries=2, load_timeout="auto", local_waits: bool = True):
         self.base_url = base_url.rstrip("/")
         try:
             # DGC on Windows runs in a WSL distro of its own, whose localhost isn't Windows': a model the user serves
@@ -1715,15 +1723,27 @@ class LLMClient:
         self.capabilities = self.adapter.with_overrides(self._capability_overrides)
         self.capability_cache_ttl_s = max(1, int(capability_cache_ttl_s or 0))
         # Hard ceiling on socket silence, including the wait for response headers. The stall watcher
-        # (below) normally acts first; this stays as the backstop and is never lowered by it.
+        # (below) normally acts first; this stays as the backstop and is never lowered by it. A model
+        # on this computer or network is checked with its server instead (_post_timeout).
         self.read_timeout = read_timeout
+        # What it was built with: a caller that lowers read_timeout afterwards (a title, a suggestion,
+        # a turn budget's remaining time) bounds that call on purpose, local or not (_read_timeout_lowered).
+        self._built_read_timeout = read_timeout
         # Stall watcher (dgc/model_watch.py). "auto" resolves per endpoint; 0 turns a window off.
+        # Local work DGC can check on has no first-token or load window by default: its server is
+        # asked whether it is still working (dgc/server_check.py) before anything is re-sent.
+        self._first_token_setting = first_token_timeout
+        self._load_setting = load_timeout
+        # False: a job bounded on purpose (a background look back) keeps its read_timeout even on a
+        # local model, as before: no server check, and the old local windows.
+        self.local_waits = bool(local_waits)
         self.first_token_timeout = resolve_first_token_timeout(
             first_token_timeout, self.base_url, self.family, model=self.model)
         self.idle_timeout = bounded_seconds(idle_timeout, 300.0)
         self.stall_notice = bounded_seconds(stall_notice, 45.0)
         self.stall_retries = bounded_retries(stall_retries, 2)
-        self.load_timeout = bounded_seconds(load_timeout, 900.0)
+        self.load_timeout = resolve_load_timeout(load_timeout, self.base_url, self.family,
+                                                 model=self.model)
         self.stall_listener = None      # the Agent installs its wait handler for one _chat call
         self.stall_route = None         # runner that delivers a notice on the caller's UI session
         self._wait_channel: WaitChannel | None = None
@@ -2437,15 +2457,57 @@ class LLMClient:
 
     # ---- stall watcher ---------------------------------------------------------------------------
     _load_probe_interval_s = 5.0
+    _server_check_interval_s = CHECK_EVERY_S      # a silent local request asks its server this often
+    _server_recheck_s = RECHECK_S
 
-    def _stall_windows(self) -> tuple[float, float]:
-        """First-token and idle windows, each clamped by this request's read timeout."""
+    def _local_work(self) -> bool:
+        """A request a server on this computer or network does itself (not an Ollama cloud model)."""
+        return is_local_work(self.base_url, getattr(self, "family", ""), getattr(self, "model", ""))
+
+    def _checked_locally(self) -> bool:
+        """Local work this request may wait on for as long as its server says it is working: not a client
+        built bounded (local_waits=False), and not a call whose read_timeout a caller lowered."""
+        return (self._local_work() and getattr(self, "local_waits", True)
+                and not self._read_timeout_lowered())
+
+    def _read_timeout_lowered(self) -> bool:
+        """A caller lowered read_timeout below what this client was built with, to bound this call."""
+        try:
+            return float(self.read_timeout) < float(getattr(self, "_built_read_timeout", self.read_timeout))
+        except (TypeError, ValueError):
+            return False
+
+    def _local_server_check(self, num_ctx: int = 0):
+        """The read-only check a silent local request asks its server (dgc/server_check.py), or None
+        for remote work. ``num_ctx`` is the context an Ollama request asked for."""
+        if not self._local_work():
+            return None
+        return ServerCheck(self.base_url, self.model,
+                           kind=_server_kind(getattr(self, "family", ""), getattr(self, "api_mode", "")),
+                           headers=self._headers(), num_ctx=num_ctx)
+
+    def _stall_windows(self, checked: bool | None = None) -> tuple[float, float]:
+        """First-token and idle windows. Remote: each clamped by this request's read timeout. Local
+        work with a server check (``checked``; by default, local work whose read_timeout no caller
+        lowered): "auto" has no first-token window and nothing is clamped -- the socket's timeout
+        is lifted for it. Local work that is not checked keeps the old local window (900 s) and the
+        clamp, so a caller's bound still holds."""
+        local = self._local_work()
+        if checked is None:
+            checked = self._checked_locally()
+        checked = bool(checked) and local
+        first = float(getattr(self, "first_token_timeout", 0.0) or 0.0)
+        if local and not checked:
+            first = resolve_first_token_timeout(getattr(self, "_first_token_setting", "auto"),
+                                                self.base_url, getattr(self, "family", ""),
+                                                model=self.model, checked=False)
+        idle = float(getattr(self, "idle_timeout", 0.0) or 0.0)
+        if checked:
+            return first, idle
         try:
             ceiling = float(self.read_timeout)
         except (TypeError, ValueError):
             ceiling = 0.0
-        first = float(getattr(self, "first_token_timeout", 0.0) or 0.0)
-        idle = float(getattr(self, "idle_timeout", 0.0) or 0.0)
         if ceiling > 0:
             first = min(first, ceiling) if first > 0 else 0.0
             idle = min(idle, ceiling) if idle > 0 else 0.0
@@ -2453,9 +2515,16 @@ class LLMClient:
 
     def _post_timeout(self, watch: RequestWatch | None) -> tuple:
         """The socket timeout: the backstop, never lower than read_timeout and never ahead of the
-        watcher's own first-token deadline."""
+        watcher's own first-token deadline. A local request checked with its server lifts it to a
+        last backstop of a day: the check, not socket silence, says when that request is dead, and
+        a working prefill can be silent for longer than request_timeout."""
         first = watch.first_token_s if watch is not None else 0.0
         read = self.read_timeout
+        if watch is not None and watch.local:
+            try:
+                read = max(float(read or 0), LOCAL_SOCKET_CEILING_S)
+            except (TypeError, ValueError):
+                read = LOCAL_SOCKET_CEILING_S
         return (15, max(read, first + 5) if first > 0 else read)
 
     def _streaming_rejected(self) -> bool:
@@ -2515,23 +2584,32 @@ class LLMClient:
             return ollama_model_listed(value, model)
         return probe
 
-    def _begin_attempt(self, cancel, endpoint: str) -> RequestWatch:
-        first, idle = self._stall_windows()
+    def _begin_attempt(self, cancel, endpoint: str, num_ctx: int = 0) -> RequestWatch:
+        check = self._local_server_check(num_ctx) if self._checked_locally() else None
+        first, idle = self._stall_windows(checked=check is not None)
+        load = float(getattr(self, "load_timeout", 0.0) or 0.0)
+        if check is None and self._local_work():
+            load = resolve_load_timeout(getattr(self, "_load_setting", "auto"), self.base_url,
+                                        getattr(self, "family", ""), model=self.model, checked=False)
         watch = RequestWatch(
             cancel, first_token_s=first, idle_s=idle,
             notice_s=float(getattr(self, "stall_notice", 0.0) or 0.0),
-            load_probe=self._ollama_load_probe(),
-            load_timeout_s=float(getattr(self, "load_timeout", 0.0) or 0.0),
+            load_probe=None if check is not None else self._ollama_load_probe(),
+            load_timeout_s=load,
             load_poll_s=self._load_probe_interval_s,
             channel=getattr(self, "_wait_channel", None),
             headers_deadline=not self._streaming_rejected(),
-            model=self.model, endpoint=safe_endpoint(endpoint))
+            model=self.model, endpoint=safe_endpoint(endpoint),
+            server_check=check, check_every_s=self._server_check_interval_s,
+            recheck_s=self._server_recheck_s,
+            check_at_start=bool(check is not None and getattr(check, "reports_loading", False)))
         return watch.start()
 
-    def _next_watch(self, cancel, endpoint: str) -> RequestWatch:
+    def _next_watch(self, cancel, endpoint: str, num_ctx: int = 0) -> RequestWatch:
         """Stop the previous attempt's watch and start this attempt's."""
         self._stop_watch()
-        watch = self._begin_attempt(cancel, endpoint)
+        watch = self._begin_attempt(cancel, endpoint, num_ctx) if num_ctx else \
+            self._begin_attempt(cancel, endpoint)
         self._active_watch = watch
         return watch
 
@@ -2552,10 +2630,13 @@ class LLMClient:
             self._report_usage(ChatResult(finish_reason="error"))
         channel = getattr(self, "_wait_channel", None)
         if channel is not None:
+            from .model_errors import stall_cause
+            summary = stall_cause(info).summary if getattr(info, "reason", "") else ""
             channel.emit(WaitEvent(kind="retry", phase=info.phase, since=time.monotonic(),
                                    silent_s=info.silent_s, threshold_s=info.window_s,
                                    noise_frames=info.noise_frames, model=info.model,
-                                   endpoint=info.endpoint, attempt=stalls, retries=retries))
+                                   endpoint=info.endpoint, attempt=stalls, retries=retries,
+                                   summary=summary))
         window = info.window_s if info.window_s > 0 else 10.0
         return _wait_for_retry(min(2 ** (stalls - 1), window, 10.0), cancel)
 
@@ -4011,7 +4092,8 @@ class LLMClient:
             rounds += 1
             if cancel is not None and cancel.is_set():
                 return ChatResult(finish_reason="cancelled")
-            watch = self._next_watch(cancel, self._ollama_url)
+            watch = self._next_watch(cancel, self._ollama_url,
+                                     _bounded_model_tokens((payload.get("options") or {}).get("num_ctx")))
             try:
                 with watch.registered():
                     r = requests.post(self._ollama_url, headers=self._headers(), json=payload,

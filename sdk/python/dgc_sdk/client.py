@@ -592,13 +592,13 @@ class DGC:
                              timeout=max(20.0, self._request_timeout))
 
     def chat(self, *, model: str | None = None, thinking: str | None = None,
-             reply_timeout: float = 600.0) -> Chats:
+             reply_timeout: float | None = None) -> Chats:
         """ChatDGC: DGC's chat app, from your program (see :mod:`dgc_sdk.chat`).
 
         It runs on a backend of its own that never opens a workspace (a private, empty folder in this
         client's state). With ``inherit_user_state=True`` these are your chats, the ones the editor lists;
         otherwise the client's own. ``model`` and ``thinking`` (off, low, medium, high, xhigh) apply to every
-        message unless one says otherwise; ``reply_timeout`` bounds each reply in seconds. Close the returned
+        message unless one says otherwise; ``reply_timeout`` bounds each reply in seconds (None, the default: no limit). Close the returned
         :class:`Chats` (or this client) when done. A CLI without ChatDGC raises :class:`DGCUnsupportedError`."""
         if self._closed:
             raise DGCRuntimeError("this DGC client is closed")
@@ -759,7 +759,7 @@ class AsyncSession:
         self,
         prompt: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         max_turns: int | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
@@ -775,7 +775,7 @@ class AsyncSession:
         self,
         prompt: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         max_turns: int | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
@@ -790,7 +790,7 @@ class AsyncSession:
         self,
         text: str,
         *,
-        timeout: float | None = 180.0,
+        timeout: float | None = None,
         output_schema: Mapping[str, Any] | None = None,
         skills: Sequence[str] | None = None,
         repair_attempts: int = 1,
@@ -1064,7 +1064,7 @@ class AsyncDGC:
         return AsyncSession(session)
 
     async def chat(self, *, model: str | None = None, thinking: str | None = None,
-                   reply_timeout: float = 600.0) -> AsyncChats:
+                   reply_timeout: float | None = None) -> AsyncChats:
         """ChatDGC, as :meth:`DGC.chat`, awaitable."""
         chats = await asyncio.to_thread(self._sync.chat, model=model, thinking=thinking, reply_timeout=reply_timeout)
         return AsyncChats(chats)

@@ -1121,6 +1121,32 @@ test("timeouts: null means no limit and long limits work; invalid ones fail befo
   });
 });
 
+test("timeouts: by default a run has no limit, and a long wait for the model never trips the ack or event timers", async () => {
+  // A big local model can take tens of minutes before its first word. Once the turn starts the run's clock is moved
+  // 200 s on (past the old 180 000 ms default); a control request is made while the model is silent (4 s here, more
+  // than the 1 s requestTimeoutMs); neither may end the run.
+  await withEnv("flow", async (env) => {
+    const session = await env.client({ requestTimeoutMs: 1000 }).session({ cwd: env.work, permissions: AUTO });
+    const handle = session.stream("quiet please");
+    const realNow = Date.now;
+    let asked = null;
+    try {
+      for await (const event of handle) {
+        if (event.type === "turn_start" && asked === null) {
+          Date.now = () => realNow() + 200_000;
+          asked = session.listPermissions();
+        }
+      }
+    } finally {
+      Date.now = realNow;
+    }
+    const result = await handle.result();
+    assert.equal(result.status, "completed", result.error);
+    assert.match(result.finalText, /LATE-OK/);
+    assert.ok(Array.isArray(await asked), "the control request was answered while the model worked");
+  });
+});
+
 test("cancel: an AbortSignal cancels the run", async () => {
   await withEnv("stall", async (env) => {
     const session = await env.client().session({ cwd: env.work, permissions: AUTO });

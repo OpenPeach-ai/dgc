@@ -87,6 +87,14 @@ export function contextSizeShown(c) {
     return served && chosen > served ? served : (c?.context_size ?? "");
 }
 
+// Settings -> Models -> Advanced: how long DGC waits for a model (model_first_token_timeout_s, model_idle_timeout_s).
+export const FIRST_WORD_CHOICES = [["auto", "Auto"], ["minutes", "Minutes"], ["never", "Never"]];
+const FIRST_WORD_MORE = "Auto: as long as a model on this computer or your network is working on your request (DGC asks "
+    + "its server every 30 seconds), and 5 minutes for a cloud model, which is then asked again. Minutes: one limit for "
+    + "every model, though a local model that is still working is never cut off. Never: no limit. Stop always ends the turn.";
+const BETWEEN_WORDS_MORE = "If a model goes quiet this long once it has started answering, DGC asks again and goes on from "
+    + "what it wrote. A local model that is still working is waited for. 0 is no limit.";
+
 const ENGINE_NAMES = { claude: "Claude Code", codex: "Codex", qwen: "Qwen", kimi: "Kimi", copilot: "Copilot" };
 /** What "Same as DGC" is right now: DGC's subscription CLI when it runs on one, else its model. */
 function followed(c) {
@@ -170,9 +178,30 @@ export function renderFields(section, main, config, providers, ui) {
                     "Stateless sends the conversation each turn. Server stored lets OpenAI keep it between turns.")
                 + (anthropic ? "" : cacheLife)
                 + field("Recheck refused features", "Seconds before it asks again.", inp("capability_cache_ttl_s", c.capability_cache_ttl_s ?? "", "number"),
-                    "When the host turns down a feature (images, tools, thinking), DGC stops asking for this long."))
+                    "When the host turns down a feature (images, tools, thinking), DGC stops asking for this long.")
+                + field("Wait for the first word", c.wait_settable ? "Auto: as long as a local model works." : old,
+                    `<span class="wait-control">${sel("wait_first_word", FIRST_WORD_CHOICES, c.wait_first_word || "auto")}`
+                    + `${inp("wait_first_word_minutes", c.wait_first_word_minutes ?? "", "number")}</span>`,
+                    c.wait_settable ? FIRST_WORD_MORE : "")
+                + field("Wait between words", c.wait_settable ? "Minutes of quiet once it answers." : old,
+                    inp("wait_between_words", c.wait_between_words ?? "5", "number"), c.wait_settable ? BETWEEN_WORDS_MORE : ""))
             + saveBar;
         if (!c.cache_settable) for (const id of ["prompt_cache_ttl", "ollama_keep_alive"]) { const el = main.querySelector("#" + id); if (el) el.disabled = true; }
+        const waitPick = main.querySelector("#wait_first_word"), waitMinutes = main.querySelector("#wait_first_word_minutes");
+        if (waitPick && waitMinutes) {
+            Object.assign(waitMinutes, { min: "0.1", max: "1440", step: "any", placeholder: "minutes" });
+            waitMinutes.setAttribute("aria-label", "Minutes to wait for the first word");
+            const show = () => {
+                waitMinutes.hidden = waitPick.value !== "minutes";
+                // Picking Minutes with nothing typed starts from 15, the wait a local model used to get.
+                if (!waitMinutes.hidden && !waitMinutes.value.trim()) { waitMinutes.value = "15"; waitMinutes.dispatchEvent(new Event("input", { bubbles: true })); }
+            };
+            waitPick.addEventListener("change", show);
+            show();
+        }
+        const between = main.querySelector("#wait_between_words");
+        if (between) Object.assign(between, { min: "0", max: "1440", step: "any" });
+        if (!c.wait_settable) for (const el of [waitPick, waitMinutes, between]) if (el) el.disabled = true;
         const pick = main.querySelector("#subscription_engine"), rows = main.querySelector("[data-when-engine]");
         if (pick && rows) pick.addEventListener("change", () => { rows.hidden = !pick.value; });
         const box = main.querySelector("#subscription_model");

@@ -18,6 +18,13 @@ shuts the socket down (before headers it is reached through a thread-local hook 
 ``_make_request``) and records a :class:`StallInfo` the client turns into a retry, a precise error,
 or a continuation.
 
+A model on this computer or network can take tens of minutes before its first token, and closing
+its request makes the server start the prompt again. So a local request carries a server check
+(dgc/server_check.py): while the request is silent the watcher asks the server every
+``check_every_s``, keeps waiting past any deadline while the server says it is working on the
+model, and closes the request only when the server is gone or no longer working on it (said more
+than once in a row). By default such a request has no first-token or load window at all.
+
 Consumers call :meth:`RequestWatch.progress` only for real work (text, reasoning, tool-call
 deltas, a finish) and :meth:`RequestWatch.noise` for bytes that are not tokens; noise never resets
 a timer. Wait notices go through a :class:`WaitChannel` that the client closes before ``chat()``
@@ -42,10 +49,21 @@ _LOCAL_FAMILIES = frozenset(("ollama", "llamacpp", "lmstudio", "vllm"))
 _LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home.arpa", ".internal", ".ts.net")
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
-AUTO_FIRST_TOKEN_LOCAL_S = 900.0
+# "auto" first-token windows. A local request DGC can check has none: the server is asked instead.
+AUTO_FIRST_TOKEN_LOCAL_S = 0.0
+AUTO_FIRST_TOKEN_UNCHECKED_S = 900.0     # a local request with no server check (room for a load)
 AUTO_FIRST_TOKEN_REMOTE_S = 300.0
+AUTO_LOAD_REMOTE_S = 900.0               # a self-hosted Ollama elsewhere: how long a load may take
 LOAD_NOTICE_S = 3.0
 MAX_WINDOW_S = 86_400.0
+# A checked local request lifts the socket's own read timeout (request_timeout) to this last
+# backstop: the server check, not socket silence, decides when such a request is dead.
+LOCAL_SOCKET_CEILING_S = 86_400.0
+CHECK_EVERY_S = 30.0                     # a silent local request asks its server this often
+RECHECK_S = 10.0                         # and sooner after a doubtful answer
+GONE_AFTER = 3                           # "gone" this many times in a row: the server is gone
+IDLE_AFTER = 2                           # "idle" this many times in a row: it is not working on it
+CHECK_ANSWER_S = 15.0                    # a check asked for at a deadline answers within this
 
 
 @dataclass(frozen=True)
@@ -59,6 +77,9 @@ class StallInfo:
     window_s: float = 0.0       # the deadline that expired
     model: str = ""
     endpoint: str = ""
+    # Why a local request was closed with no deadline passed: "server_gone" (it stopped answering
+    # DGC's checks) or "server_idle" (it answers, and is no longer working on the request).
+    reason: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -86,6 +107,9 @@ class WaitEvent:
     http_status: int = 0
     delay_s: float = 0.0        # the backoff chosen before the next attempt
     api_mode: str = ""
+    # A local request: what its server last said ("working", "loading", "idle", "gone",
+    # "unknown"; dgc/server_check.py), or "" when it was not asked.
+    server: str = ""
 
 
 class WaitChannel:
@@ -218,15 +242,36 @@ def is_ollama_cloud_model(model: str) -> bool:
     return name.endswith((":cloud", "-cloud"))
 
 
-def resolve_first_token_timeout(value, base_url: str, family: str = "", model: str = "") -> float:
-    """``"auto"`` is 900 s for a local endpoint (model load plus a large prefill), 300 s otherwise
-    -- including an Ollama cloud model reached through a local Ollama, which is remote work."""
-    if value is None or str(value).strip().lower() in ("", "auto", "default"):
-        if is_ollama_cloud_model(model):
+def is_auto(value) -> bool:
+    return value is None or str(value).strip().lower() in ("", "auto", "default")
+
+
+def is_local_work(base_url: str, family: str = "", model: str = "") -> bool:
+    """A request a server on this computer or network does itself. An Ollama cloud model reached
+    through a local Ollama is remote work: ollama.com does it."""
+    return is_local_endpoint(base_url, family) and not is_ollama_cloud_model(model)
+
+
+def resolve_first_token_timeout(value, base_url: str, family: str = "", model: str = "", *,
+                                checked: bool = True) -> float:
+    """``"auto"``: no limit for local work DGC can check on (the server is asked instead), 900 s
+    for local work it cannot (``checked=False``), 300 s for everything else -- including an Ollama
+    cloud model reached through a local Ollama, which is remote work. 0 is no limit."""
+    if is_auto(value):
+        if not is_local_work(base_url, family, model):
             return AUTO_FIRST_TOKEN_REMOTE_S
-        return (AUTO_FIRST_TOKEN_LOCAL_S if is_local_endpoint(base_url, family)
-                else AUTO_FIRST_TOKEN_REMOTE_S)
+        return AUTO_FIRST_TOKEN_LOCAL_S if checked else AUTO_FIRST_TOKEN_UNCHECKED_S
     return _number(value, AUTO_FIRST_TOKEN_REMOTE_S)
+
+
+def resolve_load_timeout(value, base_url: str, family: str = "", model: str = "", *,
+                         checked: bool = True) -> float:
+    """How long an Ollama model may show as loading. ``"auto"``: no limit for local work DGC can
+    check on (Ollama answering /api/ps without the model is a load under way), 900 s otherwise.
+    0 is no limit."""
+    if is_auto(value):
+        return 0.0 if checked and is_local_work(base_url, family, model) else AUTO_LOAD_REMOTE_S
+    return _number(value, AUTO_LOAD_REMOTE_S)
 
 
 def _without_userinfo(url) -> str:
@@ -384,7 +429,9 @@ class RequestWatch:
                  notice_s: float = 0.0, load_probe=None, load_timeout_s: float = 0.0,
                  load_poll_s: float = 5.0, channel: WaitChannel | None = None,
                  headers_deadline: bool = True, model: str = "", endpoint: str = "",
-                 poll_s: float = 0.15, clock=time.monotonic):
+                 poll_s: float = 0.15, clock=time.monotonic, server_check=None,
+                 check_every_s: float = CHECK_EVERY_S, recheck_s: float = RECHECK_S,
+                 check_at_start: bool = False):
         self.cancel = cancel
         self.first_token_s = _number(first_token_s, 0.0)
         self.idle_s = _number(idle_s, 0.0)
@@ -397,7 +444,12 @@ class RequestWatch:
         self.endpoint = str(endpoint or "")
         self.poll_s = max(0.01, float(poll_s))
         self._clock = clock
-        self._load_probe = load_probe if callable(load_probe) else None
+        # A local request asks its server instead of trusting silence (dgc/server_check.py). It
+        # replaces the load probe: the same check says whether the model is still loading.
+        self._check = server_check if callable(server_check) else None
+        self._load_probe = (load_probe if callable(load_probe) and self._check is None else None)
+        self.check_every_s = max(0.01, _number(check_every_s, CHECK_EVERY_S))
+        self.recheck_s = max(0.01, min(_number(recheck_s, RECHECK_S), self.check_every_s))
 
         self.t_start = clock()
         self.last_progress: float | None = None
@@ -416,6 +468,22 @@ class RequestWatch:
         self._load_t0: float | None = None
         self._paused_s = 0.0
         self._noticed: str | None = None    # phase of the notice outstanding in this silence
+        self._wake = threading.Event()      # a check answered: decide now, not at the next poll
+        # The server check's state. Its thread waits on _check_wanted; the watcher thread asks.
+        self._check_wanted = threading.Event()
+        self._checking = False
+        self._asked_at: float | None = None     # real time a check was asked for at a deadline
+        self.verdict = ""                       # what the server last said ("" = not asked yet)
+        self._verdict_at: float | None = None
+        self._gone_runs = 0
+        self._idle_runs = 0
+        self.checks = 0
+        self._next_check_at = self.t_start if check_at_start else self.t_start + self.check_every_s
+
+    @property
+    def local(self) -> bool:
+        """This request is checked with its server rather than judged by silence alone."""
+        return self._check is not None
 
     # ---- lifecycle ----------------------------------------------------------------------------
     def start(self) -> "RequestWatch":
@@ -425,11 +493,16 @@ class RequestWatch:
             if self._load_probe is not None:
                 threading.Thread(target=self._probe_loop, name="dgc-load-probe",
                                  daemon=True).start()
+            if self._check is not None:
+                threading.Thread(target=self._check_loop, name="dgc-server-check",
+                                 daemon=True).start()
         return self
 
     def stop(self) -> None:
         """End this attempt's watch. Any notice already being delivered finishes first."""
         self._stop.set()
+        self._wake.set()
+        self._check_wanted.set()
         if self.channel is not None:
             self.channel.barrier()
 
@@ -472,6 +545,7 @@ class RequestWatch:
         self.last_progress = self._clock()
         self.progressed = True
         self._noticed = None
+        self._gone_runs = self._idle_runs = 0   # it is working: earlier doubts are answered
         channel = self.channel
         if channel is not None and channel.shown and not self._stop.is_set():
             channel.emit(self._event("cleared"))
@@ -511,17 +585,17 @@ class RequestWatch:
             return "loading"
         return "first_token" if self.headers_seen else "headers"
 
-    def _stall_info(self, phase: str, silent: float, window: float) -> StallInfo:
+    def _stall_info(self, phase: str, silent: float, window: float, reason: str = "") -> StallInfo:
         return StallInfo(phase=phase, silent_s=round(max(0.0, silent), 3),
                          headers_seen=self.headers_seen, noise_frames=self.noise_frames,
                          progressed=self.progressed, window_s=window, model=self.model,
-                         endpoint=self.endpoint)
+                         endpoint=self.endpoint, reason=reason)
 
     def _event(self, kind: str, *, phase: str = "", since: float = 0.0, silent: float = 0.0,
                threshold: float = 0.0) -> WaitEvent:
         return WaitEvent(kind=kind, phase=phase or self.phase, since=since, silent_s=silent,
                          threshold_s=threshold, noise_frames=self.noise_frames,
-                         model=self.model, endpoint=self.endpoint)
+                         model=self.model, endpoint=self.endpoint, server=self.verdict)
 
     def _cancel_set(self) -> bool:
         try:
@@ -531,7 +605,11 @@ class RequestWatch:
 
     # ---- the watcher thread -------------------------------------------------------------------
     def _run(self) -> None:
-        while not self._stop.wait(self.poll_s):
+        while not self._stop.is_set():
+            self._wake.wait(self.poll_s)
+            self._wake.clear()
+            if self._stop.is_set():
+                return
             try:
                 self._tick()
             except Exception:
@@ -547,9 +625,18 @@ class RequestWatch:
         if self._cancel_set():
             self._abort("cancelled")
             return
+        if self._check is not None:
+            self._schedule_check(now)
+            doubt = ("server_gone" if self._gone_runs >= GONE_AFTER
+                     else "server_idle" if self._idle_runs >= IDLE_AFTER else "")
+            if doubt:
+                since = self.last_progress if self.progressed and self.last_progress is not None \
+                    else self.t_start
+                self._abort("stalled", self._stall_info(self.phase, now - since, 0.0, doubt))
+                return
         if self.progressed and self.last_progress is not None:
             silent = now - self.last_progress
-            if self.idle_s > 0 and silent >= self.idle_s:
+            if self.idle_s > 0 and silent >= self.idle_s and not self._keep_waiting(now):
                 self._abort("stalled", self._stall_info("streaming", silent, self.idle_s))
                 return
             self._maybe_notice("streaming", self.last_progress, silent, self.notice_s)
@@ -572,10 +659,91 @@ class RequestWatch:
         waited = silent - self._paused_s
         phase = "first_token" if self.headers_seen else "headers"
         applies = self.first_token_s > 0 and (self.headers_seen or self.headers_deadline)
-        if applies and waited >= self.first_token_s:
+        if applies and waited >= self.first_token_s and not self._keep_waiting(now):
             self._abort("stalled", self._stall_info(phase, silent, self.first_token_s))
             return
+        if self._noticed == "loading":
+            # The load is over while "Loading the model" is still on screen: replace it now ("Waiting for the
+            # model · the server is working on it"), not when the ordinary notice threshold comes round.
+            self._noticed = None
+            self._maybe_notice(phase, self.t_start, silent, min(self.notice_s, silent))
+            return
         self._maybe_notice(phase, self.t_start, silent, self.notice_s)
+
+    # ---- the server check (local requests) ------------------------------------------------------
+    def _schedule_check(self, now: float) -> None:
+        """Ask the server when this request has been silent for a while (at once at the start for a
+        server that can say a load is under way), every check_every_s, sooner after a doubt."""
+        if self._checking or now < self._next_check_at:
+            return
+        since = self.last_progress if self.progressed and self.last_progress is not None \
+            else self.t_start
+        if self.checks and self._loading is not True and now - since < self.check_every_s:
+            return
+        self._ask()
+
+    def _ask(self) -> None:
+        if self._checking:
+            return
+        self._checking = True
+        self._check_wanted.set()
+
+    def _keep_waiting(self, now: float) -> bool:
+        """A deadline passed. Remote: never wait. Local: wait while the server says it is working on
+        the model (or loading it); ask first when its last answer is older than a check interval,
+        and wait for that answer, at most CHECK_ANSWER_S."""
+        if self._check is None:
+            return False
+        fresh = (self._verdict_at is not None
+                 and now - self._verdict_at <= self.check_every_s + self.recheck_s)
+        if fresh and not self._checking:
+            self._asked_at = None
+            return self.verdict in ("working", "loading")
+        if self._asked_at is None:
+            self._asked_at = time.monotonic()
+            self._ask()
+        if time.monotonic() - self._asked_at > CHECK_ANSWER_S:
+            return False            # the check itself hung: the deadline applies
+        return True                 # decide when it answers (it wakes the watcher)
+
+    def _check_loop(self) -> None:
+        check = self._check
+        while True:
+            self._check_wanted.wait()
+            self._check_wanted.clear()
+            if self._stop.is_set() or self.aborted:
+                return
+            try:
+                verdict = str(check() or "unknown")
+            except Exception:
+                verdict = "unknown"
+            if self._stop.is_set() or self.aborted:
+                return
+            self._record(verdict)
+            self._wake.set()
+
+    def _record(self, verdict: str) -> None:
+        now = self._clock()
+        with self._state_lock:
+            self.checks += 1
+            self.verdict = verdict
+            self._verdict_at = now
+            self._gone_runs = self._gone_runs + 1 if verdict == "gone" else 0
+            self._idle_runs = self._idle_runs + 1 if verdict == "idle" else 0
+            if not self.progressed:
+                if verdict == "loading":
+                    self._loading = True
+                elif verdict in ("working", "idle"):
+                    self._loading = False
+            if verdict == "loading":
+                wait = self.load_poll_s
+            elif verdict in ("gone", "idle"):
+                wait = self.recheck_s
+            else:
+                wait = self.check_every_s
+            self._next_check_at = now + wait
+            self._checking = False
+            self._asked_at = None       # answered: a later deadline asks again when this one is stale
 
     def _maybe_notice(self, phase: str, since: float, silent: float, threshold: float) -> None:
         channel = self.channel

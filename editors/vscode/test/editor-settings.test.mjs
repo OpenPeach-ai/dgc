@@ -898,6 +898,53 @@ test('GitHub: Sign in with GitHub, once DGC has an app for it, connects and show
   assert.equal(plain.d.querySelector('[data-key-sign-in]'),null,'no sign-in button without an app to sign in with');
 });
 
+test('Models -> Advanced: Wait for the first word (Auto, minutes, Never) and Wait between words',()=>{
+  // 0.49. Both come from a CLI that answers model_wait_settings (the extension forwards them as the page shows them,
+  // with wait_settable); an older CLI would refuse a save that carried them, so the controls are off there.
+  const older=setup();
+  older.click('[data-nav=models]');
+  const oldPick=older.d.querySelector('#wait_first_word');
+  assert.ok(oldPick,'the row is there');
+  assert.equal(oldPick.disabled,true,'an older CLI cannot take it');
+  assert.equal(older.d.querySelector('#wait_between_words').disabled,true);
+
+  const x=setup();
+  x.message({type:'event',event:{...x.config,base_url:'http://127.0.0.1:11434/v1',wait_settable:true,
+    wait_first_word:'auto',wait_first_word_minutes:'',wait_between_words:'5'}});
+  x.click('[data-nav=models]');
+  const pick=x.d.querySelector('#wait_first_word'),minutes=x.d.querySelector('#wait_first_word_minutes'),between=x.d.querySelector('#wait_between_words');
+  assert.ok(pick.closest('details.more'),'under Advanced');
+  assert.equal(pick.disabled,false);
+  assert.deepEqual([...pick.options].map(o=>[o.value,o.textContent]),[['auto','Auto'],['minutes','Minutes'],['never','Never']]);
+  assert.equal(pick.value,'auto');
+  assert.equal(minutes.hidden,true,'no minutes box for Auto');
+  const row=pick.closest('.field');
+  assert.match(row.querySelector('label.name').textContent,/^Wait for the first word$/);
+  assert.match(row.querySelector('.hint').textContent,/Auto: as long as a local model works\./);
+  assert.match(row.querySelector('.detail').textContent,/5 minutes for a cloud model/);
+  assert.equal(row.querySelector('.detail').hidden,true,'detail one click away');
+  row.querySelector('button.info').click();
+  assert.equal(row.querySelector('.detail').hidden,false);
+  assert.match(between.closest('.field').textContent,/Wait between words/);
+  assert.equal(between.value,'5');
+
+  x.input('#wait_first_word','minutes');pick.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(minutes.hidden,false,'Minutes shows its box');
+  assert.equal(minutes.value,'15','starting from the 15 minutes a local model used to get');
+  x.input('#wait_first_word_minutes','40');x.input('#wait_between_words','10');
+  x.click('#save');
+  let saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
+  assert.deepEqual([saved.wait_first_word,saved.wait_first_word_minutes,saved.wait_between_words],['minutes','40','10']);
+  x.message({type:'settingsSaved',ok:true});
+
+  // What the CLI keeps comes back as the page shows it: a number of minutes, or Never.
+  x.message({type:'event',event:{...x.config,wait_settable:true,wait_first_word:'never',wait_first_word_minutes:'',wait_between_words:'0'}});
+  x.click('[data-nav=general]');x.click('[data-nav=models]');
+  assert.equal(x.d.querySelector('#wait_first_word').value,'never');
+  assert.equal(x.d.querySelector('#wait_first_word_minutes').hidden,true);
+  assert.equal(x.d.querySelector('#wait_between_words').value,'0');
+});
+
 test('Models: the cache lifetime and, for a local Ollama only, how long the model stays loaded',()=>{
   // 0.48. Both come from a CLI that answers cache_settings (the extension marks the config it forwards with
   // cache_settable); an older CLI would refuse a save that carried them, so the controls are off there.
