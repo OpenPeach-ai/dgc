@@ -94,6 +94,7 @@ class Stub:
         self.release = threading.Event()
         self.get_routes: dict[str, object] = {}
         self.answer_text = "done after the long prefill"
+        self.first_words = ""           # set: the chat sends these at once, then goes quiet mid-answer
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -129,6 +130,30 @@ class Stub:
                 record = {"path": self.path, "body": body, "gone": None}
                 with outer.lock:
                     outer.posts.append(record)
+                if outer.first_words and self.path.endswith("/api/chat"):
+                    # A few words at once, then silence mid-answer until released, then the rest.
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-ndjson")
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+
+                    def chunk(obj):
+                        data = json.dumps(obj).encode() + b"\n"
+                        self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+                        self.wfile.flush()
+                    try:
+                        chunk({"message": {"role": "assistant", "content": outer.first_words}, "done": False})
+                        while not outer.release.wait(0.01):
+                            if _client_closed(self.connection):
+                                record["gone"] = time.monotonic()
+                                return
+                        chunk({"message": {"role": "assistant", "content": " and the rest."}, "done": False})
+                        chunk({"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop"})
+                        self.wfile.write(b"0\r\n\r\n")
+                        self.wfile.flush()
+                    except OSError:
+                        record["gone"] = time.monotonic()
+                    return
                 # No headers until the first token: a long prefill, as llama.cpp and Ollama do it.
                 while not outer.release.wait(0.01):
                     if _client_closed(self.connection):
@@ -322,6 +347,19 @@ class WorkingLocalServerTests(LocalWaitCase):
         self.assertEqual(after.server, "working")
         self.assertLess(after.silent_s, 45)
         self.assertEqual(self.finish(thread).content, "done after the long prefill")
+
+    def test_silence_between_words_is_waited_for_while_the_server_works(self):
+        self.stub.get_routes["/api/ps"] = ollama_ps("big-local:latest")
+        self.stub.first_words = "Reading"
+        client, events = self.client(idle_timeout=300)              # Wait between words: 5 minutes
+        thread = self.chat_in_background(client)
+        wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        time.sleep(0.2)                                             # the first words land
+        self.clock.advance(1200)                                    # 20 minutes of quiet mid-answer
+        self.assertNotResent("cut off mid-answer while the server worked")
+        result = self.finish(thread)
+        self.assertEqual((result.finish_reason, result.content), ("stop", "Reading and the rest."))
+        self.assertFalse(getattr(result, "stall", None), "not a stall, not a continuation")
 
     def test_a_busy_llama_cpp_slot_is_waited_for_then_an_idle_one_is_re_sent(self):
         busy = threading.Event()
