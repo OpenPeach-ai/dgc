@@ -568,5 +568,97 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(Agent._model_wait_text(quiet)[0], "No response from the model")
 
 
+
+# ---- Settings -> Models -> Advanced through the editor protocol -------------------------------------
+class SettingsRoundTripTests(unittest.TestCase):
+    """The two waits travel in a NEW event, model_wait_settings, to an editor whose get_config `fields` named it
+    (never as new fields on `config`), and set_config takes and validates both keys."""
+
+    def setUp(self):
+        import io
+        from dgc import config as config_module
+        from dgc import headless, sessions
+        from dgc.config import Config
+        self.headless = headless
+        tmp = Path(tempfile.mkdtemp(prefix="dgc-wait-settings-")).resolve()
+        self.user = tmp / "user-dgc"
+        self.user.mkdir()
+        for name, value in (("USER_HOME", self.user), ("USER_CONFIG", self.user / "config.json"),
+                            ("USER_SECRETS", self.user / "secrets.json")):
+            patcher = mock.patch.object(config_module, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        (self.user / "config.json").write_text(json.dumps({
+            "model": "qwen3.5:122b", "base_url": "http://localhost.invalid:11434/v1", "suggest": False,
+            "artifact_autostart": False, "mcp_servers": {}}))
+        scoped = mock.patch.object(sessions, "SESSIONS_DIR", tmp / "sessions")
+        scoped.start()
+        self.addCleanup(scoped.stop)
+        (tmp / "a" / ".git").mkdir(parents=True)
+        self.wire = io.StringIO()
+        self.host = headless.Host(Config(project_root=tmp / "a"))
+        self.host.core.fp = self.wire
+        self.addCleanup(lambda: [chat.agent.mcp.stop_all() for chat in list(self.host.chats.values())])
+
+    def frames(self):
+        return [json.loads(line) for line in self.wire.getvalue().splitlines()]
+
+    def last(self, kind):
+        found = [f for f in self.frames() if f["type"] == kind]
+        self.assertTrue(found, f"no {kind} frame: {self.frames()[-3:]}")
+        return found[-1]
+
+    def test_settings_reads_and_saves_both_waits_and_the_next_request_uses_them(self):
+        from dgc import editor_protocol as ep
+        self.host.dispatch({"type": "get_config", "request_id": "c0"})
+        self.last("config")
+        self.assertEqual([f for f in self.frames() if f["type"] == "model_wait_settings"], [],
+                         "an editor that did not ask never sees the new event")
+        self.host.dispatch({"type": "get_config", "request_id": "c1", "fields": ["model_wait_settings"]})
+        frames = self.frames()
+        asked = [f for f in frames if f["type"] == "model_wait_settings"]
+        self.assertEqual(len(asked), 1)
+        self.assertEqual((asked[0]["first_token"], asked[0]["between_words_s"]), ("auto", 300))
+        self.assertIsNone(ep.event_error(asked[0]))
+        self.assertLess(frames.index(asked[0]), max(i for i, f in enumerate(frames) if f["type"] == "config"))
+        self.assertNotIn("model_first_token_timeout_s", self.last("config"), "never a new field on config")
+
+        self.host.dispatch({"type": "set_config", "request_id": "s1",
+                            "values": {"model_first_token_timeout_s": 1200, "model_idle_timeout_s": 600}})
+        self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])
+        saved = json.loads((self.user / "config.json").read_text())
+        self.assertEqual((saved["model_first_token_timeout_s"], saved["model_idle_timeout_s"]), (1200, 600))
+        client = self.host.default.agent.client
+        self.assertEqual((client.first_token_timeout, client.idle_timeout), (1200, 600),
+                         "the client this chat sends its next request with")
+        self.assertEqual((self.last("model_wait_settings")["first_token"],
+                          self.last("model_wait_settings")["between_words_s"]), ("1200", 600))
+        self.host.dispatch({"type": "set_config", "request_id": "s2",
+                            "values": {"model_first_token_timeout_s": "auto"}})
+        self.assertEqual(self.host.default.agent.client.first_token_timeout, 0, "auto: no limit for a local model")
+        self.assertEqual(self.last("model_wait_settings")["first_token"], "auto")
+        self.host.dispatch({"type": "set_config", "request_id": "s3",
+                            "values": {"model_first_token_timeout_s": "forever"}})
+        self.assertEqual(self.last("command_rejected")["command"], "set_config")
+
+    def test_validation_and_live_safety(self):
+        check = self.headless._validated_config_values
+        for good in ("auto", 0, 60, 86_400):
+            self.assertEqual(check({"model_first_token_timeout_s": good}, set()),
+                             ({"model_first_token_timeout_s": good}, None))
+        for bad in ("never", "", "300", -1, 86_401, 1.5, True, None):
+            with self.subTest(bad=bad):
+                values, problem = check({"model_first_token_timeout_s": bad}, set())
+                self.assertIsNone(values)
+                self.assertIn("model_first_token_timeout_s", problem)
+        for good in (0, 300, 86_400):
+            self.assertEqual(check({"model_idle_timeout_s": good}, set()), ({"model_idle_timeout_s": good}, None))
+        for bad in (-1, 86_401, "300", 2.5):
+            values, problem = check({"model_idle_timeout_s": bad}, set())
+            self.assertIsNone(values)
+        for key in ("model_first_token_timeout_s", "model_idle_timeout_s"):
+            self.assertIn(key, self.headless._LIVE_SAFE_CONFIG_KEYS)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1038,6 +1038,49 @@ test("the cache lifetime and keep-loaded time go only to a CLI that answered cac
   assert.deepEqual(sent(bad.commands, "ollama_keep_alive"), [], "only a duration Ollama takes");
 });
 
+test("the two waits go only to a CLI that answered model_wait_settings, as seconds, and only when changed", async () => {
+  const sent = (commands) => commands.filter((c) => c.type === "set_config"
+    && ("model_first_token_timeout_s" in (c.values || {}) || "model_idle_timeout_s" in (c.values || {})));
+  const older = harness();
+  await older.provider.saveSettings(settings({ wait_first_word: "minutes", wait_first_word_minutes: "40", wait_between_words: "10" }));
+  assert.deepEqual(sent(older.commands), [], "an older CLI refuses an unknown key, and the whole save with it");
+
+  const { provider, commands } = harness();
+  provider.onEvent({ type: "model_wait_settings", first_token: "auto", between_words_s: 300 });
+  await provider.saveSettings(settings({ wait_first_word: "auto", wait_first_word_minutes: "", wait_between_words: "5" }));
+  assert.deepEqual(sent(commands), [], "nothing changed: nothing sent");
+  await provider.saveSettings(settings({ wait_first_word: "minutes", wait_first_word_minutes: "40", wait_between_words: "10" }));
+  assert.deepEqual(sent(commands).at(-1).values.model_first_token_timeout_s, 2400);
+  assert.deepEqual(sent(commands).at(-1).values.model_idle_timeout_s, 600);
+
+  const never = harness();
+  never.provider.onEvent({ type: "model_wait_settings", first_token: "1200", between_words_s: 45 });
+  await never.provider.saveSettings(settings({ wait_first_word: "never", wait_first_word_minutes: "", wait_between_words: "0.75" }));
+  assert.equal(sent(never.commands).at(-1).values.model_first_token_timeout_s, 0, "Never is no limit");
+  assert.equal("model_idle_timeout_s" in sent(never.commands).at(-1).values, false,
+               "0.75 minutes is the 45 s already kept: a rounded number never rewrites it");
+  const back = harness();
+  back.provider.onEvent({ type: "model_wait_settings", first_token: "1200", between_words_s: 300 });
+  await back.provider.saveSettings(settings({ wait_first_word: "auto", wait_first_word_minutes: "20", wait_between_words: "5" }));
+  assert.equal(sent(back.commands).at(-1).values.model_first_token_timeout_s, "auto");
+
+  const bad = harness();
+  bad.provider.onEvent({ type: "model_wait_settings", first_token: "auto", between_words_s: 300 });
+  await bad.provider.saveSettings(settings({ wait_first_word: "minutes", wait_first_word_minutes: "soon", wait_between_words: "5" }));
+  assert.deepEqual(sent(bad.commands), [], "a number it can't take sends nothing");
+});
+
+test("Settings asks a CLI for the two waits", () => {
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("models");
+  const read = commands.find((c) => c.type === "get_config");
+  assert.ok(read?.fields.includes("model_wait_settings"), JSON.stringify(read));
+});
+
 test("settings cancellation happens before backend or SecretStorage mutation", async () => {
   const { provider, timeline } = harness({ mode: "default", engine: "codex" });
   notices.warningResponses.push(undefined);

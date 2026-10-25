@@ -52,6 +52,7 @@ const host = `(${function () {
   const config = { type: "config", mode: "auto", think: "off", base_url: "http://127.0.0.1:11434/v1", model: "deepseek-v4.1-flash:cloud",
     api_mode: "auto", max_parallel_tasks: 4, context_size: 65536, subagent_context_size: 0, list_models_at: true, turn_token_budget: 0,
     pips_settable: true, pips_model: "", cache_settable: true, prompt_cache_ttl: "5m", ollama_keep_alive: "30m",
+    wait_settable: true, wait_first_word: "minutes", wait_first_word_minutes: "40", wait_between_words: "5",
     search: "ollama", search_url: "", search_api_key_set: false, search_providers: ["duckduckgo", "brave", "tavily", "searxng", "ollama"],
     search_keys: { brave: true, tavily: false, ollama: false }, chatdgc_personality: "default", chatdgc_window: "32k", chatdgc_about: "", chatdgc_style: "",
     chatdgc_web: true, chatdgc_followups: true, sandbox: false };
@@ -88,7 +89,10 @@ const pageFor = (theme) => skeleton.replace(/<meta http-equiv="Content-Security-
 
 // Each state: the page, and how to reach it.
 const STATES = [
-  ["general"], ["models"], ["agents"], ["web"], ["chatdgc"], ["security"], ["memory"], ["voice"], ["running"], ["usage"],
+  ["general"], ["models"],
+  // Models -> Advanced open: Wait for the first word (with its minutes box) and Wait between words, one-line hints.
+  ["models-advanced", "models", async (p) => { await p.click('details[data-more="models-advanced"] > summary'); await p.waitForSelector("#wait_first_word_minutes:not([hidden])"); }],
+  ["agents"], ["web"], ["chatdgc"], ["security"], ["memory"], ["voice"], ["running"], ["usage"],
   ["plugins"], ["plugins-directory", "plugins", async (p) => { await p.click("#browse-directory"); }],
   ["plugin-page", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('.directory-open[data-open="airtable"]'); }],
   ["plugin-review", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('[data-install="granola"]'); await p.waitForSelector("#confirm-plugin"); }],

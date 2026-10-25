@@ -24,7 +24,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     dead, and only a day of total silence is a last backstop.
   Remote and cloud models (an Ollama `:cloud` model too) keep today's limits: 5 minutes for the first word, then a
   retry. A local request DGC cannot check on (a reviewed Pips specialist run), or one a caller bounds on purpose (a
-  title, a suggestion, a turn budget), keeps its old limits.
+  title, a suggestion, a turn budget), keeps its old limits. Settings → Models → Advanced has **Wait for the first
+  word** (Auto, a number of minutes, or Never) and **Wait between words** (minutes). Editors get them in a new event,
+  `model_wait_settings`, when `get_config` names it in `fields`; `set_config` takes `model_first_token_timeout_s`
+  (`"auto"` or whole seconds, 0 for no limit) and `model_idle_timeout_s`, and both apply from the next request.
 
 - **The main chat sees and sets your Pips' models.** A Work chat said a Pip's model "can only be changed in the Pips
   editor UI, not through my tools". Now, after loading its Pips tools, it can:

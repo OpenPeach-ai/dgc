@@ -2634,6 +2634,42 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "model_wait_settings"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "first_token": {
+              "type": "string"
+            },
+            "between_words_s": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "first_token",
+            "between_words_s"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "cache_clock"
             },
             "seq": {

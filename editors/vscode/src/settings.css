@@ -96,7 +96,7 @@ textarea{height:auto;padding:7px 8px}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:.85}
 :is(input,select,textarea):focus{border-color:var(--focus)}
 input[type=password]{font-family:var(--mono)}
-.field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control{width:300px;max-width:56%;flex:none}
+.field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control{width:300px;max-width:56%;flex:none}
 .field .switch{max-width:none}
 .field:has(>textarea){flex-direction:column;align-items:stretch;gap:8px}.field>textarea{width:100%;min-height:84px;resize:vertical;line-height:1.5}
 .field.is-off .name{color:var(--muted)}
@@ -124,6 +124,7 @@ details.more>summary::before{content:"";width:5px;height:5px;border-right:1.5px 
 details.more[open]>summary::before{transform:rotate(45deg)}
 details.more>summary:hover{color:var(--text)}
 .host-control{display:flex;gap:6px;flex:none}.host-control input{flex:1;min-width:0}.host-control select{flex:none;width:86px}
+.wait-control{display:flex;gap:6px;flex:none}.wait-control select{flex:1;min-width:0}.wait-control input{flex:none;width:96px}.wait-control input[hidden]{display:none}
 .field>.search-key-control{display:flex;align-items:center;gap:8px}.field>.search-key-control input{flex:1;min-width:0}
 
 /* ---- Lists of things: plugins, memories, voice models, sessions ---- */
@@ -285,7 +286,7 @@ details.more>summary:hover{color:var(--text)}
   .sidebar{display:none}.page-picker{display:flex}
   main{padding:18px 16px 0}
   .field{flex-wrap:wrap;gap:8px}.field>span:first-child,.field>.words{flex-basis:100%}
-  .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control{width:100%;max-width:none}
+  .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control{width:100%;max-width:none}
   .field:has(>.switch){flex-wrap:nowrap}.field:has(>.switch)>.words{flex-basis:auto}
   .card{padding-inline:12px}.row{gap:10px}.row-open{gap:10px}.banner{flex-wrap:wrap}
   .meta{grid-template-columns:92px minmax(0,1fr);gap:10px}.hero{gap:12px}.hero .copy{min-width:150px}
