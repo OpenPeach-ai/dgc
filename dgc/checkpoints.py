@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,12 @@ def _capture(path: Path, max_bytes: int | None = None) -> _Snapshot:
     return _Snapshot(kind, data, mode)
 
 
+def _why(exc: BaseException) -> str:
+    """An OS error as a person reads it: "Permission denied", not "[Errno 13] ... '/abs/path'"."""
+    text = getattr(exc, "strerror", None) or str(exc) or type(exc).__name__
+    return str(text)[:200]
+
+
 def _restore(path: Path, snapshot: _Snapshot) -> bool:
     if not isinstance(snapshot, _Snapshot):
         return False
@@ -79,7 +86,15 @@ class CheckpointManager:
         # in it now: another chat's edit, or the user's own, is silently destroyed and nothing says
         # so. path -> sha256 of the bytes DGC left, or "" for a file DGC removed.
         self._left: dict[str, str] = {}
+        # ...and the permission bits it left in a regular file, so a later `chmod` by somebody else is
+        # a change too. Kept apart from the hash: sessions saved before this carry bytes-only hashes.
+        self._left_modes: dict[str, int] = {}
         self.last_rewind_conflicts: list[str] = []   # paths that changed outside DGC, for the user
+        # Why each of those is a conflict: changed (not what DGC left), between (changed after DGC
+        # wrote it, and DGC wrote it again since), mode (its permissions changed), unreadable.
+        self.last_rewind_reasons: dict[str, str] = {}
+        self.last_rewind_error = ""                  # why the last rewind refused, when not a conflict
+        self.last_rewind_left: list[str] = []        # files commands changed in the rewound turns
         self.project_root = (Path(project_root).resolve(strict=False) if project_root is not None
                              else None)
         self._on_change = on_change
@@ -90,8 +105,7 @@ class CheckpointManager:
         self._chains: dict[str, tuple[str, str]] = {}  # chain hash -> (previous chain, message hash)
         self._message_blob_bytes = 0
         self._snapshot_bytes_total = 0
-        self._pending_rewind: tuple[dict[str, _Snapshot], list[str], list[dict],
-                                    dict[str, object], dict[str, tuple[str, str]], int, int] | None = None
+        self._pending_rewind: tuple | None = None   # what rollback_rewind needs, while a rewind is unsaved
         # How many points open() has added in this process: the points a turn opened are the last
         # (opened now - opened when it began) ones, which is how its Edited card finds them.
         self.opened = 0
@@ -116,6 +130,15 @@ class CheckpointManager:
         except OSError:
             return None
 
+    @staticmethod
+    def _on_disk_mode(path: Path) -> int | None:
+        """The permission bits of a regular file now; None for anything else or when unreadable."""
+        try:
+            info = path.lstat()
+        except OSError:
+            return None
+        return stat.S_IMODE(info.st_mode) if stat.S_ISREG(info.st_mode) else None
+
     def note_written(self, path: str) -> None:
         """Remember what DGC just left in a file, so a later rewind can recognise its own work."""
         try:
@@ -125,6 +148,57 @@ class CheckpointManager:
         digest = self._on_disk_hash(resolved)
         if digest is not None:
             self._left[str(resolved)] = digest
+            mode = self._on_disk_mode(resolved)
+            if mode is None:
+                self._left_modes.pop(str(resolved), None)
+            else:
+                self._left_modes[str(resolved)] = mode
+
+    def _changed_since_left(self, path: str, digest: str | None, mode: int | None) -> bool:
+        """Positive evidence that `path` holds something other than what DGC last left there.
+
+        No record, or a file DGC cannot read, is not evidence (see _rewind_conflicts)."""
+        key = str(Path(path))
+        left = self._left.get(key)
+        if left is None or digest is None:
+            return False
+        if digest != left:
+            return True
+        left_mode = self._left_modes.get(key)
+        return left_mode is not None and mode is not None and mode != left_mode
+
+    @classmethod
+    def _snapshot_digest(cls, snapshot: _Snapshot) -> str:
+        return "" if snapshot.kind == "missing" else cls._hash(snapshot.data)
+
+    @staticmethod
+    def _mark_outside(point: dict, path: str, when: str) -> bool:
+        """Mark a path whose earlier state, found as DGC came to write it again, is somebody else's.
+
+        `when` is "before" (found as this point first captured it: the point's own before-state
+        holds the change, so only a rewind past this point loses it) or "during" (found on a later
+        write in the same point: even a rewind to this point loses it). Returns whether it changed."""
+        marks = point.setdefault("outside", {})
+        if marks.get(path) in (when, "during"):
+            return False
+        marks[path] = when
+        return True
+
+    def _missing_parents(self, path: str) -> list[str]:
+        """The project folders above a missing file that do not exist yet, deepest first: the ones
+        DGC's own write is about to create, which a rewind may remove again once they are empty."""
+        relative = self._relative_project_path(path)
+        if relative is None:
+            return []
+        made: list[str] = []
+        parts = relative.split("/")[:-1]
+        while parts:
+            folder = self.project_root.joinpath(*parts)
+            if folder.exists() or folder.is_symlink():
+                break
+            made.append("/".join(parts))
+            parts = parts[:-1]
+        return made
 
     def left_hash(self, path: str) -> str | None:
         """sha256 of what DGC itself last left in `path` -- one of this chat's file tools, or an
@@ -134,37 +208,50 @@ class CheckpointManager:
         except (TypeError, ValueError):
             return None
 
-    def _rewind_conflicts(self, restore: dict) -> list[str]:
-        """Files whose current contents DGC cannot account for.
+    def _rewind_conflicts(self, restore: dict, between=()) -> list[str]:
+        """Files whose current contents DGC cannot account for, with why in `last_rewind_reasons`.
 
-        A file is accounted for when it holds exactly what DGC last left there, or already holds
-        what the rewind would put back (so restoring it is a no-op). Anything else was written by
-        another chat, another tool or the person, and a rewind must not quietly discard it.
+        A file is accounted for when it holds exactly what DGC last left there (bytes, and the
+        permission bits DGC left when it knows them), or already holds what the rewind would put back
+        (so restoring it is a no-op). Anything else was written by another chat, another tool or the
+        person, and a rewind must not quietly discard it. `between`: files somebody changed after DGC
+        wrote them and before DGC wrote them again (the `outside` marks) -- what DGC left since then is
+        theirs too, and the rewind would put back a state from before their change.
         """
-        conflicts: list[str] = []
+        reasons: dict[str, str] = {}
         for path, (prior, _durable) in restore.items():
-            now = self._on_disk_hash(Path(path))
+            p = Path(path)
+            now = self._on_disk_hash(p)
             if now is None:
-                conflicts.append(path)
+                reasons[path] = "unreadable"
                 continue
             snapshot = (prior if isinstance(prior, _Snapshot) else
                         (_Snapshot("missing") if prior is None else
                          _Snapshot("file", str(prior).encode(), 0o644)))
             target = "" if snapshot.kind == "missing" else self._hash(snapshot.data)
-            if now == target:
+            now_mode = self._on_disk_mode(p)
+            target_mode = snapshot.mode if snapshot.kind == "file" else None
+            if now == target and (target_mode is None or now_mode is None or now_mode == target_mode):
                 continue                       # restoring it would change nothing
-            left = self._left.get(str(Path(path)))
-            if left is None:
-                # DGC has no record of what it left here -- an older session, a resumed one, or an
-                # edit made before this was tracked. Absence of evidence is not evidence: refusing
-                # on "I cannot tell" would refuse EVERY rewind after a restart, which is far more
-                # common than a concurrent edit and would break the feature for everyone. The guard
-                # only ever fires on POSITIVE evidence that the file is not what DGC left.
-                continue
-            if now == left:
-                continue                       # exactly what DGC left: its own work
-            conflicts.append(path)
-        return sorted(conflicts)
+            key = str(p)
+            left = self._left.get(key)
+            if left is not None:
+                if now != left:
+                    reasons[path] = "changed"
+                    continue
+                left_mode = self._left_modes.get(key)
+                if left_mode is not None and now_mode is not None and now_mode != left_mode:
+                    reasons[path] = "mode"
+                    continue
+            if path in between:
+                reasons[path] = "between"
+            # Otherwise: no record of what DGC left here -- an older session, a resumed one, or an
+            # edit made before this was tracked. Absence of evidence is not evidence: refusing on "I
+            # cannot tell" would refuse EVERY rewind after a restart, which is far more common than a
+            # concurrent edit and would break the feature for everyone. The guard only ever fires on
+            # POSITIVE evidence that the file is not what DGC left.
+        self.last_rewind_reasons = reasons
+        return sorted(reasons)
 
     @staticmethod
     def _valid_hash(value) -> bool:
@@ -310,13 +397,20 @@ class CheckpointManager:
         if not self.points:
             self.last_record_error = "this turn has no recovery point to record into"
             return False
-        files = self.points[-1]["files"]
+        point = self.points[-1]
+        files = point["files"]
+        p = Path(path)
         if path in files:
+            # DGC is about to write a file this turn already holds a before-state for. If it no longer
+            # holds what DGC left there, somebody else wrote it in between (the person, while the turn
+            # ran), and DGC's write is about to bury that: a rewind would lose it without a word.
+            if (self._changed_since_left(path, self._on_disk_hash(p), self._on_disk_mode(p))
+                    and self._mark_outside(point, path, "during")):
+                self._notify()
             return True
         if len(files) >= _MAX_FILES_PER_POINT:
             self.last_record_error = (f"this turn has already captured {_MAX_FILES_PER_POINT} files")
             return False
-        p = Path(path)
         if self._lexically_within_project(path) and self._relative_project_path(path) is None:
             self.last_record_error = "the path leaves the project through a symlink"
             return False
@@ -344,11 +438,37 @@ class CheckpointManager:
             self.last_record_error = (f"this session's {_MAX_SNAPSHOT_BYTES // (1024 * 1024)} MB "
                                       "snapshot budget is spent")
             return False
+        made = self._missing_parents(path) if snapshot.kind == "missing" else []
+        return self._keep(point, path, snapshot, made)
+
+    def _keep(self, point: dict, path: str, snapshot: _Snapshot, made: list[str] = ()) -> bool:
+        """Put a captured before-state into the point and save it; undone entirely if saving fails.
+
+        A file DGC wrote in an earlier turn that no longer holds what DGC left there was changed by
+        somebody else in between. This point's before-state keeps that change, but a rewind to an
+        EARLIER point would put back the earlier state over it: the path is marked, and that rewind
+        stops and names it."""
+        files = point["files"]
         files[path] = snapshot
         self._snapshot_bytes_total += len(snapshot.data)
+        old_mark = (point.get("outside") or {}).get(path)
+        marked = self._changed_since_left(
+            path, self._snapshot_digest(snapshot), snapshot.mode if snapshot.kind == "file" else None)
+        if marked:
+            self._mark_outside(point, path, "before")
+        old_made = list(point.get("made_dirs") or [])
+        if made:
+            point["made_dirs"] = old_made + [folder for folder in made if folder not in old_made]
         if not self._notify():
             files.pop(path, None)
             self._snapshot_bytes_total -= len(snapshot.data)
+            if marked:
+                if old_mark is None:
+                    point["outside"].pop(path, None)
+                else:
+                    point["outside"][path] = old_mark
+            if made:
+                point["made_dirs"] = old_made
             self.last_record_error = "the session could not be saved"
             return False
         return True
@@ -388,13 +508,34 @@ class CheckpointManager:
             return False
         snapshot = _Snapshot(kind, data if kind != "missing" else b"",
                              0 if kind == "missing" else int(mode))
-        files[path] = snapshot
-        self._snapshot_bytes_total += len(snapshot.data)
-        if not self._notify():
-            files.pop(path, None)
-            self._snapshot_bytes_total -= len(snapshot.data)
-            self.last_record_error = "the session could not be saved"
+        return self._keep(self.points[-1], path, snapshot)
+
+    def note_command_change(self, path: str, status: str) -> bool:
+        """A file one of this chat's commands changed that Undo cannot put back.
+
+        There is no exact earlier state for it (it had uncommitted changes, it is not tracked, Git
+        converts it, or the turn's limits are spent), so the point cannot restore it. It is kept so the
+        turn's Edited card can say so ("Changed by a command — Undo leaves it") and so can Undo.
+        `status` is what it is now against before the command: new, modified or deleted."""
+        if (self._pending_rewind is not None or not self.points
+                or status not in ("new", "modified", "deleted")):
             return False
+        point = self.points[-1]
+        if path in point["files"]:
+            return False                       # the point restores it: not one Undo leaves
+        changed = point.setdefault("commands", {})
+        prior = changed.get(path)
+        if prior is None and len(changed) >= _MAX_FILES_PER_POINT:
+            return False
+        if prior == "new":
+            if status == "deleted":
+                changed.pop(path, None)        # made and removed again within the turn: nothing left
+        elif prior == "deleted" and status != "deleted":
+            changed[path] = "modified"
+        else:
+            changed[path] = status
+        if changed.get(path) != prior:
+            self._notify()
         return True
 
     def capture_touched_workspace(self) -> WorkspaceSnapshot | None:
@@ -488,7 +629,7 @@ class CheckpointManager:
         return [(i, pt["preview"], len(pt["files"])) for i, pt in enumerate(self.points)]
 
     def changes(self, start: int, *, limit: int = _MAX_TURN_FILES,
-                budget_s: float = _TURN_FILES_BUDGET_S) -> tuple[list[dict], int]:
+                budget_s: float = _TURN_FILES_BUDGET_S, commands: bool = False) -> tuple[list[dict], int]:
         """What a rewind to point ``start`` would change, file by file: ``(files, total)``.
 
         Each file's state before (its earliest snapshot from ``start`` on, as rewind_state picks it)
@@ -502,6 +643,10 @@ class CheckpointManager:
         project also has ``outside: True`` (its before-state lives only in this process: a restart
         leaves Undo unable to put it back). ``total`` counts every changed file, which is exactly how
         many a rewind to ``start`` restores now; at most ``limit`` rows are returned.
+
+        ``commands``: also list, after those, each file one of this chat's commands changed that the
+        rewind cannot put back (note_command_change), as ``{..., counted: False, command: True}``;
+        ``total`` then counts those too. The Edited card asks for them; Undo's counts never do.
         """
         if not (0 <= start < len(self.points)):
             return [], 0
@@ -554,13 +699,37 @@ class CheckpointManager:
             if self._lexical_project_path(path) is None:
                 row["outside"] = True
             rows.append(row)
+        if commands:
+            for path, status in self._command_changes(start, earliest).items():
+                total += 1
+                if len(rows) < limit:
+                    rows.append({"path": path, "additions": 0, "deletions": 0, "counted": False,
+                                 "status": status, "command": True})
         return rows, total
+
+    def _command_changes(self, start: int, restored) -> dict[str, str]:
+        """What commands changed in points ``start`` on that a rewind there leaves as it is: path ->
+        status, in the order first seen. A path the rewind restores (from any of those points) is not
+        one of them."""
+        out: dict[str, str] = {}
+        for point in list(self.points[start:]):
+            for path, status in list((point.get("commands") or {}).items()):
+                if path in restored:
+                    continue
+                if path in out:
+                    if out[path] == "new" and status == "deleted":
+                        out.pop(path)
+                    elif out[path] != "new":
+                        out[path] = "modified" if out[path] == "deleted" and status != "deleted" else status
+                else:
+                    out[path] = status
+        return out
 
     def discard_last_empty(self) -> bool:
         """Remove a speculative checkpoint only when it captured no filesystem state."""
         if self._pending_rewind is not None:
             return False
-        if self.points and not self.points[-1]["files"]:
+        if self.points and not self.points[-1]["files"] and not self.points[-1].get("commands"):
             old_messages, old_chains = dict(self._message_blobs), dict(self._chains)
             old_message_bytes = self._message_blob_bytes
             point = self.points.pop()
@@ -603,10 +772,26 @@ class CheckpointManager:
         self._message_blob_bytes = sum(
             len(self._message_bytes(value)[0]) for value in self._message_blobs.values())
 
-    def rewind_state(self, idx: int, *, transactional: bool = False) -> tuple[int, int, list | None]:
+    def _display(self, path: str) -> str:
+        """A path as the person would recognise it: relative inside the project, else as is."""
+        return self._lexical_project_path(path) or str(path)
+
+    def rewind_state(self, idx: int, *, transactional: bool = False,
+                     overwrite=None) -> tuple[int, int, list | None]:
         """Restore files to their state at checkpoint idx and drop later checkpoints.
-        Returns (legacy message count, files restored, exact non-system conversation if captured)."""
-        if self._pending_rewind is not None or not (0 <= idx < len(self.points)):
+        Returns (legacy message count, files restored, exact non-system conversation if captured).
+
+        `overwrite`: paths the person agreed to lose changes in ("Undo anyway", after a refusal named
+        them). The rewind still stops if any other file is a conflict, and names them all again.
+        On a refusal, `last_rewind_conflicts` names the files somebody else changed (and
+        `last_rewind_reasons` why), or `last_rewind_error` says what else stopped it."""
+        self.last_rewind_error = ""
+        self.last_rewind_left = []
+        if self._pending_rewind is not None:
+            self.last_rewind_error = "another Undo of this chat is still being applied"
+            return (-1, 0, None)
+        if not (0 <= idx < len(self.points)):
+            self.last_rewind_error = "that recovery point is no longer there"
             return (-1, 0, None)
         old_points = list(self.points)
         old_messages, old_chains = dict(self._message_blobs), dict(self._chains)
@@ -614,15 +799,31 @@ class CheckpointManager:
         old_snapshot_bytes = self._snapshot_bytes_total
         conversation = self._conversation(self.points[idx])
         restore: dict[str, tuple[_Snapshot | str | None, bool]] = {}
-        for pt in self.points[idx:]:                 # earliest saved state per file wins
+        first: dict[str, int] = {}                   # the point each file's restored state comes from
+        for offset, pt in enumerate(self.points[idx:]):   # earliest saved state per file wins
             for path, prior in pt["files"].items():
-                restore.setdefault(path, (prior, bool(pt.get("durable"))))
+                if path not in restore:
+                    restore[path] = (prior, bool(pt.get("durable")))
+                    first[path] = idx + offset
+        # A change somebody made between two of DGC's writes is lost when the rewind puts back a
+        # state from before it: marked "during" in the point whose turn wrote over it, or "before"
+        # in a LATER point than the one the restored state comes from (that point's own before-state
+        # holds the change, so a rewind to it alone keeps it).
+        between: set[str] = set()
+        for offset, pt in enumerate(self.points[idx:]):
+            for path, when in list((pt.get("outside") or {}).items()):
+                origin = first.get(path)
+                if origin is not None and (idx + offset > origin
+                                           or (when == "during" and idx + offset >= origin)):
+                    between.add(path)
 
         # Refuse rather than overwrite. A rewind is DGC undoing DGC; a file somebody else has
         # written since is not DGC's to take back, and the whole rewind stops so the person can
         # decide -- a partial rewind would leave the workspace in a state neither side chose.
-        self.last_rewind_conflicts = self._rewind_conflicts(restore)
-        if self.last_rewind_conflicts:
+        conflicts = self._rewind_conflicts(restore, between)
+        self.last_rewind_conflicts = conflicts
+        allowed = {str(path) for path in (overwrite or ())}
+        if conflicts and not set(conflicts) <= allowed:
             return (-1, 0, None)
 
         # Validate every target and capture a rollback image before changing anything. In
@@ -634,12 +835,15 @@ class CheckpointManager:
             lexical_inside = self._lexically_within_project(path)
             if ((durable and not lexical_inside)
                     or (lexical_inside and self._relative_project_path(path) is None)):
+                self.last_rewind_error = (f"{self._display(path)} now leads outside the project "
+                                          "through a link, so DGC will not write it")
                 return (-1, 0, None)
             try:
                 rollback[path] = _capture(
                     Path(path), _MAX_SNAPSHOT_BYTES - rollback_bytes)
                 rollback_bytes += len(rollback[path].data)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                self.last_rewind_error = f"DGC could not read {self._display(path)}: {_why(exc)}"
                 return (-1, 0, None)
 
         applied: list[str] = []
@@ -656,25 +860,54 @@ class CheckpointManager:
                     # "restored 3 files" after a question about 2 would be the two disagreeing.
                     continue
                 if not _restore(p, snapshot):
-                    raise OSError("checkpoint restore refused the target")
+                    raise OSError("something else is in its place")
                 applied.append(path)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
                 for changed in reversed(applied):
                     try:
                         _restore(Path(changed), rollback[changed])
                     except (OSError, ValueError):
                         pass
+                self.last_rewind_error = (f"DGC could not write {self._display(path)}: {_why(exc)}"
+                                          + ("; the files it had already put back are as they were"
+                                             if applied else ""))
                 return (-1, 0, None)
+        # The folders DGC's own writes created in those turns, now empty again: removed, deepest
+        # first. Only an empty folder goes (rmdir refuses anything else), never through a link.
+        removed_dirs: list[Path] = []
+        folders: list[str] = []
+        for pt in self.points[idx:]:
+            for folder in pt.get("made_dirs") or ():
+                if isinstance(folder, str) and folder not in folders:
+                    folders.append(folder)
+        for folder in sorted(folders, key=lambda name: name.count("/"), reverse=True):
+            target = self._project_path(folder)
+            if target is None or self._relative_project_path(str(target)) != folder:
+                continue
+            try:
+                if target.is_symlink() or not target.is_dir():
+                    continue
+                os.rmdir(target)
+                removed_dirs.append(target)
+            except OSError:
+                continue
+        self.last_rewind_left = list(self._command_changes(idx, restore))
+        # What DGC put back is now what DGC last left there: a second Undo right after this one
+        # must not take DGC's own restore for somebody else's edit.
+        old_left = {path: (self._left.get(path), self._left_modes.get(path)) for path in applied}
+        for path in applied:
+            self.note_written(path)
         msg_count = self.points[idx]["msg_count"]
         del self.points[idx:]
         self._snapshot_bytes_total = sum(
             len(snapshot.data) for point in self.points for snapshot in point["files"].values()
             if isinstance(snapshot, _Snapshot))
         self._prune_conversations()
+        self.last_rewind_conflicts = []
         if transactional:
             self._pending_rewind = (
                 rollback, applied, old_points, old_messages, old_chains,
-                old_message_bytes, old_snapshot_bytes)
+                old_message_bytes, old_snapshot_bytes, removed_dirs, old_left)
         return msg_count, len(applied), conversation
 
     def commit_rewind(self) -> bool:
@@ -688,9 +921,14 @@ class CheckpointManager:
         """Undo a transactional rewind and retain its recovery point after persistence failure."""
         if self._pending_rewind is None:
             return False
-        rollback, applied, points, messages, chains, message_bytes, snapshot_bytes = (
-            self._pending_rewind)
+        (rollback, applied, points, messages, chains, message_bytes, snapshot_bytes,
+         removed_dirs, old_left) = self._pending_rewind
         restored = True
+        for folder in reversed(removed_dirs):
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                restored = False
         for path in reversed(applied):
             lexical_inside = self._lexically_within_project(path)
             if lexical_inside and self._relative_project_path(path) is None:
@@ -700,6 +938,15 @@ class CheckpointManager:
                 restored = _restore(Path(path), rollback[path]) and restored
             except (OSError, ValueError):
                 restored = False
+        for path, (digest, mode) in old_left.items():
+            if digest is None:
+                self._left.pop(path, None)
+            else:
+                self._left[path] = digest
+            if mode is None:
+                self._left_modes.pop(path, None)
+            else:
+                self._left_modes[path] = mode
         self.points = points
         self._message_blobs, self._chains = messages, chains
         self._message_blob_bytes = message_bytes
@@ -707,32 +954,55 @@ class CheckpointManager:
         self._pending_rewind = None
         return restored
 
-    def rewind(self, idx: int) -> tuple[int, int]:
-        msg_count, restored, _conversation = self.rewind_state(idx)
+    def rewind(self, idx: int, overwrite=None) -> tuple[int, int]:
+        msg_count, restored, _conversation = self.rewind_state(idx, overwrite=overwrite)
         return msg_count, restored
 
     def _left_state(self) -> dict:
         """What DGC last left in each file, keyed by project-relative path.
 
         Carried in the session so a rewind after a restart can still tell DGC's own work from
-        somebody else's. Project-relative and bounded, like every other durable field here.
+        somebody else's. Project-relative and bounded, like every other durable field here: every
+        path a live point holds (a rewind can only touch those), then the most recent 4,096 others
+        (an earlier write that a later turn's capture compares with). "" is a file DGC removed.
         """
+        held = {path for point in self.points for path in point["files"]}
         out: dict[str, str] = {}
-        for path, digest in list(self._left.items())[-_MAX_FILES_PER_POINT:]:
+        others: list[tuple[str, str]] = []
+        for path, digest in list(self._left.items()):
             relative = self._lexical_project_path(path)
-            if relative is not None and isinstance(digest, str) and len(digest) == 64:
+            if relative is None or not isinstance(digest, str) or not (digest == "" or len(digest) == 64):
+                continue
+            if path in held:
                 out[relative] = digest
+            else:
+                others.append((relative, digest))
+        for relative, digest in others[-_MAX_FILES_PER_POINT:]:
+            out.setdefault(relative, digest)
         return out
 
-    def _adopt_left_state(self, value) -> None:
+    def _left_modes_state(self, left: dict) -> dict:
+        """The permission bits DGC left, for the files `left` names (project-relative)."""
+        out: dict[str, int] = {}
+        for path, mode in list(self._left_modes.items()):
+            relative = self._lexical_project_path(path)
+            if relative in left and isinstance(mode, int) and 0 <= mode <= 0o7777:
+                out[relative] = mode
+        return out
+
+    def _adopt_left_state(self, value, modes=None) -> None:
         if not isinstance(value, dict):
             return
-        for relative, digest in list(value.items())[:_MAX_FILES_PER_POINT]:
-            if not (isinstance(relative, str) and self._valid_hash(digest)):
+        bound = sum(len(point["files"]) for point in self.points) + _MAX_FILES_PER_POINT
+        for relative, digest in list(value.items())[:bound]:
+            if not (isinstance(relative, str) and (digest == "" or self._valid_hash(digest))):
                 continue
             resolved = self._project_path(relative)
             if resolved is not None:
                 self._left[str(resolved)] = digest
+                mode = modes.get(relative) if isinstance(modes, dict) else None
+                if isinstance(mode, int) and not isinstance(mode, bool) and 0 <= mode <= 0o7777:
+                    self._left_modes[str(resolved)] = mode
 
     def state(self) -> dict:
         """Validated JSON state embedded atomically in the private session transcript."""
@@ -758,11 +1028,32 @@ class CheckpointManager:
                                    "data": base64.b64encode(snapshot.data).decode("ascii"),
                                    "mode": snapshot.mode,
                                    "sha256": self._snapshot_hash(relative, snapshot)}
-            points.append({"msg_count": point["msg_count"], "preview": point["preview"],
-                           "files": files,
-                           "conversation_head": point.get("conversation_head", ""),
-                           "conversation_count": point.get("conversation_count", 0),
-                           "conversation_exact": bool(point.get("conversation_exact"))})
+            durable = {"msg_count": point["msg_count"], "preview": point["preview"],
+                       "files": files,
+                       "conversation_head": point.get("conversation_head", ""),
+                       "conversation_count": point.get("conversation_count", 0),
+                       "conversation_exact": bool(point.get("conversation_exact"))}
+            # Somebody else's change found between two of DGC's writes (the rewind guard's evidence),
+            # what commands changed that Undo leaves, and the folders DGC's writes created.
+            outside = {}
+            for path, when in (point.get("outside") or {}).items():
+                relative = self._lexical_project_path(path)
+                if relative in files and when in ("before", "during"):
+                    outside[relative] = when
+            commands = {}
+            for path, status in (point.get("commands") or {}).items():
+                relative = self._lexical_project_path(path)
+                if relative is not None and status in ("new", "modified", "deleted"):
+                    commands[relative] = status
+            made = [folder for folder in (point.get("made_dirs") or ())
+                    if isinstance(folder, str) and self._project_path(folder) is not None]
+            if outside:
+                durable["outside"] = outside
+            if commands:
+                durable["commands"] = commands
+            if made:
+                durable["made_dirs"] = made[:_MAX_FILES_PER_POINT]
+            points.append(durable)
 
         self._prune_conversations()
         if len(self._message_blobs) > _MAX_MESSAGE_BLOBS or len(self._chains) > _MAX_CHAIN_NODES:
@@ -779,7 +1070,8 @@ class CheckpointManager:
                 "points": points,
                 "messages": serialized_messages,
                 # What DGC left in each file, so a rewind after a restart still knows its own work.
-                "left": self._left_state(),
+                "left": (left := self._left_state()),
+                "left_modes": self._left_modes_state(left),
                 "chains": {key: {"previous": value[0], "message": value[1]}
                            for key, value in self._chains.items()}}
 
@@ -885,6 +1177,10 @@ class CheckpointManager:
                          "conversation_count": conversation_count,
                          "conversation_exact": exact,
                          "durable": True}
+                extras = manager._point_extras(raw_point, files)
+                if extras is None:
+                    return cls(project_root, on_change)
+                point.update(extras)
                 if (point["conversation_head"] and point["conversation_head"] not in manager._chains
                         or (point["conversation_exact"] and manager._conversation(point) is None)):
                     return cls(project_root, on_change)
@@ -892,7 +1188,43 @@ class CheckpointManager:
             manager._prune_conversations()
             # What DGC left in each file, so a resumed session's rewind can still recognise its own
             # work rather than treating every file as unaccounted for.
-            manager._adopt_left_state(state.get("left"))
+            manager._adopt_left_state(state.get("left"), state.get("left_modes"))
             return manager
         except (KeyError, TypeError, ValueError, UnicodeError):
             return cls(project_root, on_change)
+
+    def _point_extras(self, raw_point: dict, files: dict) -> dict | None:
+        """A saved point's optional fields (`outside`, `commands`, `made_dirs`), checked like the
+        rest: None when one is malformed, so the whole state is refused rather than half believed."""
+        extras: dict = {}
+        outside = raw_point.get("outside", {})
+        commands = raw_point.get("commands", {})
+        made = raw_point.get("made_dirs", [])
+        if (not isinstance(outside, dict) or not isinstance(commands, dict) or not isinstance(made, list)
+                or len(outside) > _MAX_FILES_PER_POINT or len(commands) > _MAX_FILES_PER_POINT
+                or len(made) > _MAX_FILES_PER_POINT):
+            return None
+        marks = {}
+        for relative, when in outside.items():
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if path is None or str(path) not in files or when not in ("before", "during"):
+                return None
+            marks[str(path)] = when
+        changed = {}
+        for relative, status in commands.items():
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if path is None or status not in ("new", "modified", "deleted"):
+                return None
+            changed[str(path)] = status
+        folders = []
+        for folder in made:
+            if not isinstance(folder, str) or self._project_path(folder) is None:
+                return None
+            folders.append(folder)
+        if marks:
+            extras["outside"] = marks
+        if changed:
+            extras["commands"] = changed
+        if folders:
+            extras["made_dirs"] = folders
+        return extras
