@@ -69,7 +69,7 @@ def _request(args):
         changes["model_choice"] = validate_model_choice(raw["model_choice"])
         if changes["model_choice"]["mode"] == "subscription" and not personal:
             from .pip_brain import PROJECT_PIPS
-            raise RegistryError("unsupported_model", PROJECT_PIPS)
+            raise RegistryError("unsupported_model", PROJECT_PIPS + " For a Personal Pip, send scope personal.")
     if "context_window" in raw:
         changes["context_window"] = context_window(raw["context_window"])
     if "source_ref" in changes and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", changes["source_ref"])

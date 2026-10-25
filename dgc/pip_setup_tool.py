@@ -83,6 +83,11 @@ def propose(args, ctx) -> str:
     root = pip_setup.validate_root(request, ctx.project_root)
     if contains_secret(request, secret_values(ctx.config)):
         raise RegistryError('secret_detected', 'Do not include credentials in a Pip setup card or retry key.')
+    if request.get('model_choice', {'mode': 'default'})['mode'] != 'default':
+        # The model the chat picked is one Pips can use here now (pips_context models), before a card shows it.
+        # Contacts DGC's configured endpoint, so before the registry opens.
+        from .pip_proposal_tool import check_model
+        check_model(ctx.config, request['model_choice'])
     callback = getattr(ctx, 'pip_proposal_origin', None)
     if not callable(callback):
         raise RegistryError('session_required', 'Setup needs an owning main-chat session.')
