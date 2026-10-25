@@ -167,6 +167,7 @@ test("its transcript draws each run after a divider: what the run before said, w
   p.$("agent-transcript-back").click();
   assert.match(p.card().textContent, /completed and integrated 1 path\(s\): billing\.py/);
   assert.match(p.row(`agent:${sid(1)}`).textContent, /Finished · Continued · 2 runs/);
+  assert.match(p.$("agent-card-meta").textContent, /^Finished · Continued · 2 runs · /, "and its card's meta line");
   assert.deepEqual(p.errors, []);
 });
 

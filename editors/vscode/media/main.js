@@ -3755,7 +3755,7 @@
     map.setAttribute("aria-label", `Open ${label} in the agent map`);
     map.addEventListener("click", () => openReportInMap(line, map));
     // A finished helper's report is where a follow-up starts: "Ask it to do more", as on its card.
-    const agentId = reportAgentId(line.dataset.agentId || "");
+    const agentId = continueAgentLive ? reportAgentId(line.dataset.agentId || "") : "";
     if (agentId) {
       const more = body.appendChild(agentMoreBox(agentId));
       more.classList.add("handback-more");
@@ -12720,7 +12720,7 @@
   }
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
-    return [amStateWord(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
+    return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
       record.background ? "background" : "foreground"].filter(Boolean).join(" · ");
   }
   function amAgentNumbers(record) {
