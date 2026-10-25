@@ -11,6 +11,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   turn's recovery point was named after the open-files note the extension puts ahead of the prompt, so Undo, which
   looks for the turn by its prompt, never found it. It is now named after the prompt as the chat shows it.
 
+- **A background helper's report reaches the chat.** When a sub-agent you sent to work in the background finishes,
+  DGC starts a turn to tell you about it. The chat said only "Woke on agent", and the helper's own report reached the
+  model but never the chat: you could read it only on the agent's page in the agent map. Now:
+  - **Editors** are sent the report itself: a new event, `agent_report` (`id`, `description`, `report`, `integrated`,
+    `turn_id`), right after that turn's `turn_start`, once the editor sends the new `watch_agent_reports` command
+    (offered as `ready.capabilities.agent_reports`). `report` is the helper's whole outcome as the model got it (what
+    became of its changes, then what it said), with secrets removed, up to 40,000 characters. A reopened chat's
+    history replays the same event after that turn, which now replays as the wake turn it was rather than as DGC's
+    notice drawn as a message you sent, and it no longer appears in the prompt outline. An editor that does not ask is
+    sent nothing new and gets the history it always did.
+  - **The terminal** draws one dim line per finished helper, `○ ▸ Woke on agent · Review billing.py`, in place of the
+    band that read like a typed message and the "Sub-task result" card. A click or `/expand` opens it to what became of
+    the helper's changes (integrated, partly integrated, or not integrated and where its worktree is kept) and its
+    report; `/expandall` opens them too. A reopened chat draws the same lines, also for a chat the editor ran.
+
 - **A slow local model is never timed out while it is working.** A big model on a slow machine can take tens of
   minutes before its first word. DGC used to give a local model 15 minutes, then close the request and send it again,
   which made the server read the whole prompt again (and a load start over), so a long first word never came: the

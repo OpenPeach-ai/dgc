@@ -3503,6 +3503,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.sessionRestoreSaved = saved?.saved !== false;
         }
         this.lastReadyEvent = ev;
+        // A finished background agent's report, drawn as its own line in the chat (agent_report). Asked with the
+        // handshake, ahead of the session this chat restores, so the history it replays has those lines too. A
+        // backend that doesn't offer it is never asked, and its wake turns keep the plain "Woke on agent" note.
+        if (Number((ev.capabilities as any)?.agent_reports) >= 1) {
+          this.backend?.sendSetup({ type: "watch_agent_reports" });
+        }
         // Memory that learns: this panel shows the line a Work session's look back adds ("Remembered: … · Forget"),
         // so it asks for memory_learned. A backend that doesn't offer it never sends one.
         if (Number((ev.capabilities as any)?.memory?.learned) >= 1) {

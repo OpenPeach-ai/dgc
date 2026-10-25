@@ -8,6 +8,15 @@
   the work, one click away on that row, live and after a reload. A monitor's card folds the same way, and a turn a
   background command woke keeps its "Woke on background command" line.
 
+- **A background helper's report, one line in the chat.** When a helper you sent to work in the background finishes,
+  the Work chat used to say only "Woke on agent · Review billing.py", and the helper's report was on its page in the
+  agent map. Now that note is a quiet line per finished helper, folded, with a › at its end. Click it (or press Enter
+  or Space) and it opens to the helper's whole report, drawn as its page draws it: what became of its changes
+  ("completed and integrated", "partly integrated", or "NOT integrated" with where its worktree is kept, in the
+  chat's own colour when work was held back), what it said, the files it named, and **Open in agent map**, which opens
+  the map at that helper's card. A reload, or a window reload that reopens the chat, draws the same lines with the
+  same reports. Needs a DGC CLI that offers `agent_reports` (0.48); with an older one the note stays as it was.
+
 - **A message you send while DGC is working shows its time**, under its bubble like every other prompt: a steered
   message, and a queued one you steer in with Steer now. A reopened chat shows each one's own time too.
 - **Settings → Models → Advanced: Wait for the first word, and Wait between words.** How long DGC waits on a model,
