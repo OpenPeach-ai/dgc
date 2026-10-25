@@ -691,7 +691,9 @@ handler = AppToolHandler(os.environ["DGC_PIPS_SECRET"], tools={
 def pips():
     return handler.flask(request)
 
-# FastAPI or Starlette: app.mount("/dgc/pips", handler.asgi). Any WSGI server: handler.wsgi.
+# FastAPI or Starlette: app.add_route("/dgc/pips", handler.asgi, methods=["POST"]). (app.mount answers the bare
+# address with a 307 to "/dgc/pips/", which DGC never follows: register a mounted handler with the trailing slash.)
+# Any WSGI server: handler.wsgi.
 # Anything else: status, headers, body = handler.handle(request_headers, raw_body)
 ```
 

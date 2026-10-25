@@ -30,7 +30,7 @@ Without a callback the handler answers 204, so an app that doesn't care loses no
 
 Nothing here imports a web framework until its adapter is used: :meth:`AppToolHandler.handle` is framework-free,
 :meth:`~AppToolHandler.flask` imports Flask, and :meth:`~AppToolHandler.wsgi` and :meth:`~AppToolHandler.asgi`
-(Starlette and FastAPI: ``app.mount("/dgc/pips", handler.asgi)``) need nothing.
+(Starlette and FastAPI: ``app.add_route("/dgc/pips", handler.asgi, methods=["POST"])``) need nothing.
 """
 
 from __future__ import annotations
@@ -519,8 +519,18 @@ class AppToolHandler:
         start_response(f"{status} {_REASONS.get(status, 'OK')}", list(headers.items()) + [("Content-Length", str(len(body)))])
         return [body]
 
-    async def asgi(self, scope: dict, receive: Callable, send: Callable) -> None:
-        """An ASGI app for Starlette and FastAPI: ``app.mount("/dgc/pips", handler.asgi)``."""
+    @property
+    def asgi(self) -> _AsgiApp:
+        """An ASGI app for Starlette and FastAPI, at the exact address you registered:
+        ``app.add_route("/dgc/pips", handler.asgi, methods=["POST"])``.
+
+        It is an app object, not a method: Starlette takes a function or a method as a request handler and anything
+        else as an ASGI app. ``app.mount("/dgc/pips", handler.asgi)`` serves it only under ``/dgc/pips/``; Starlette
+        answers the bare address with a 307 to that form, and DGC never follows a redirect, so a mounted handler is
+        registered with the trailing slash (the founder's ERP test, 25 Oct, found the mount failing)."""
+        return _AsgiApp(self._serve_asgi)
+
+    async def _serve_asgi(self, scope: dict, receive: Callable, send: Callable) -> None:
         if scope.get("type") == "lifespan":
             while True:
                 message = await receive()
@@ -556,6 +566,17 @@ class AppToolHandler:
                     "headers": [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in headers.items()]
                     + [(b"content-length", str(len(body)).encode("ascii"))]})
         await send({"type": "http.response.body", "body": body})
+
+
+class _AsgiApp:
+    """``AppToolHandler.asgi``: a plain ASGI app, so a framework never takes it for a request handler."""
+    __slots__ = ("_serve",)
+
+    def __init__(self, serve: Callable) -> None:
+        self._serve = serve
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        await self._serve(scope, receive, send)
 
 
 @dataclass(frozen=True)

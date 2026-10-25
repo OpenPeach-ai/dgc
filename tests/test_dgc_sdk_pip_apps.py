@@ -205,6 +205,42 @@ class AppToolHandlerTests(unittest.TestCase):
         self.assertEqual(sent[0]["status"], 200)
         self.assertEqual(json.loads(sent[1]["body"]), {"ok": True, "result": {"async": True}})
 
+    def test_asgi_is_an_app_a_framework_routes_at_the_exact_address(self):
+        """Starlette takes a function or a method as a request handler and anything else as an ASGI app. handler.asgi
+        was a bound method, and the way the SDK showed, app.mount("/dgc/pips", handler.asgi), answered DGC's POST to
+        /dgc/pips with a 307 it never follows (the founder's ERP test on .111, 25 Oct)."""
+        import inspect
+        app = self.handler.asgi
+        self.assertFalse(inspect.isfunction(app) or inspect.ismethod(app), "a Starlette Route serves it as an ASGI app")
+        headers, raw = signed(call())
+        sent, chunks = [], [{"type": "http.request", "body": raw, "more_body": False}]
+
+        async def receive():
+            return chunks.pop(0)
+
+        async def send(message):
+            sent.append(message)
+        asyncio.run(app({"type": "http", "method": "POST", "path": "/dgc/pips",
+                         "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}, receive, send))
+        self.assertEqual(sent[0]["status"], 200)
+        self.assertEqual(json.loads(sent[1]["body"]), {"ok": True, "result": [{"id": "ord_17", "days": 7}]})
+
+    def test_starlette_and_fastapi_serve_it_at_the_registered_address_with_no_redirect(self):
+        try:
+            from fastapi import FastAPI
+            from starlette.applications import Starlette
+            from starlette.testclient import TestClient
+        except ImportError:
+            self.skipTest("starlette, fastapi and httpx are not installed")
+        for make in (Starlette, FastAPI):
+            with self.subTest(framework=make.__name__):
+                app = make()
+                app.add_route("/dgc/pips", self.handler.asgi, methods=["POST"])
+                headers, raw = signed(call())
+                reply = TestClient(app).post("/dgc/pips", content=raw, headers=headers, follow_redirects=False)
+                self.assertEqual(reply.status_code, 200, reply.text)
+                self.assertTrue(reply.json()["ok"])
+
     def test_flask_is_imported_only_by_its_adapter(self):
         import subprocess
         code = ("import sys; sys.path.insert(0, %r); import dgc_sdk, dgc_sdk.pips_app; "

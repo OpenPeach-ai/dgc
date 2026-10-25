@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`AppToolHandler.asgi` serves your app's tools at the exact address you registered in Starlette and FastAPI:**
+  `app.add_route("/dgc/pips", handler.asgi, methods=["POST"])`. It is now an ASGI app object rather than a method, which
+  Starlette took for a request handler. The way this SDK showed before, `app.mount("/dgc/pips", handler.asgi)`, fails:
+  Starlette answers a POST to `/dgc/pips` with a 307 to `/dgc/pips/`, and DGC never follows a redirect. A mount still
+  works when the app is registered with the trailing slash. Calling `handler.asgi(scope, receive, send)` works as before.
+
 - **A run and a chat reply have no time limit by default.** `run()`, `stream()` and `followup()` (Python and
   TypeScript, sync and async) used to stop a turn after 180 seconds, a ChatDGC reply after 600 seconds
   (`reply_timeout`, TypeScript `replyTimeoutMs`) and each deep research stage after 30 minutes. A big model on your
