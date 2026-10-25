@@ -38,6 +38,8 @@ const opened = (page) => page.evaluate(() => {
     said: [...body.querySelectorAll(".handback-answer p, .handback-answer li")].map((n) => n.textContent),
     link: body.querySelector(".handback-map")?.textContent || "" };
 });
+// Every marker between turns: the wake's own note must have become the line, never sit beside it.
+const notes = (page) => page.evaluate(() => [...document.querySelectorAll("#log .resume-note")].map((n) => n.textContent.trim()));
 const users = (page) => page.evaluate(() => [...document.querySelectorAll("#log .msg.user .bubble")].map((n) => n.textContent));
 
 test("a background helper's report is one folded line, the same after a webview and a window reload", async (t) => {
@@ -55,6 +57,8 @@ test("a background helper's report is one folded line, the same after a webview 
     const live = await lines(s.page);
     assert.deepEqual(live, [{ text: "Woke on agent · Review billing.py", expanded: "false", hidden: true }]);
     assert.deepEqual(await users(s.page), ["Review billing in the background"], "nobody typed the wake");
+    const liveNotes = await notes(s.page);
+    assert.deepEqual(liveNotes, ["Woke on agent · Review billing.py"]);
     const liveReport = await opened(s.page);
     assert.match(liveReport.note, /^Sub-task 'Review billing\.py' completed/);
     assert.deepEqual(liveReport.said, ["The rounding bug is in total(): it rounded each line.", "Fixed it to round once.", "Added a test."]);
@@ -65,6 +69,7 @@ test("a background helper's report is one folded line, the same after a webview 
     const afterReload = await until(async () => { const now = await lines(s.page); return now.length ? now : null; },
       "the replayed line", 15_000).catch(() => lines(s.page));
     assert.deepEqual(afterReload, live, "a webview reload draws the same folded line");
+    assert.deepEqual(await notes(s.page), liveNotes, "and nothing beside it");
     assert.deepEqual(await opened(s.page), liveReport);
     assert.deepEqual(await users(s.page), ["Review billing in the background"]);
 
@@ -73,6 +78,7 @@ test("a background helper's report is one folded line, the same after a webview 
     const reopened = await until(async () => { const now = await lines(s.page); return now.length ? now : null; },
       "the reopened chat's line", 30_000).catch(() => lines(s.page));
     assert.deepEqual(reopened, live, "a new backend reopening the saved chat draws it too");
+    assert.deepEqual(await notes(s.page), liveNotes);
     assert.deepEqual(await opened(s.page), liveReport);
     assert.deepEqual(await users(s.page), ["Review billing in the background"], "DGC's notice is never a prompt bubble");
     assert.deepEqual(s.errors, []);

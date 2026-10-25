@@ -3686,14 +3686,16 @@
     // A live event held while the snapshot that already drew it landed: one line per agent, never two.
     if (id && t.handbacks.some((line) => line.dataset.agentId === id)) return;
     const wake = t.wake;
+    // Placed, not connected: a replayed turn is drawn into a fragment that joins the page afterwards.
+    const noted = !!wake?.note?.parentNode;
     let line;
-    if (wake?.kind === "wake" && !wake.reported && wake.note?.isConnected) {
+    if (wake?.kind === "wake" && !wake.reported && noted) {
       line = wake.note;                     // the wake's own note becomes the first agent's line
       wake.reported = true;
       line.replaceChildren();
     } else {
       line = el("div");
-      const after = t.handbacks.at(-1) || (wake?.note?.isConnected ? wake.note : null);
+      const after = t.handbacks.at(-1) || (noted ? wake.note : null);
       if (after) after.after(line);         // the next agent's line, under the one before
       else { appendTurnContent(line); breakText(); }   // a report that reached a running turn: where it came
     }

@@ -190,6 +190,10 @@ test("a reload replays the same lines with the same reports, folded", () => {
   ];
   const p = view();
   p.event({ type: "history", items });
+  // Every marker in the chat, in order: the reload draws exactly what live drew, no bare note beside a line.
+  const notes = (v) => [...v.doc.querySelectorAll("#log .resume-note")].map((n) => n.className.replace(/\s*\bhist\b/, "") + ": " + n.textContent);
+  assert.deepEqual(notes(p), notes(live));
+  assert.equal(p.doc.querySelectorAll("#log .resume-note.monitor-note:not(.handback-line)").length, 0, "the note became the line");
   assert.deepEqual(shape(p), shape(live));
   assert.deepEqual(shape(p).map((s) => [s.expanded, s.hidden]), [["false", true], ["false", true]]);
   for (const [a, b] of p.lines().map((line, i) => [line, live.lines()[i]])) {
