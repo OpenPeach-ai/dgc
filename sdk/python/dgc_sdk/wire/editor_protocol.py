@@ -985,6 +985,30 @@ EVENT_FIELDS["live_sessions"] = {"items": _A(), "request_id": _S(False), "messag
 # window was attached (an hour waiting on an answer, the twelve-hour limit, `dgc stop`), so nobody saw
 # it end. The editor offers Continue (`resume_turn`). The session's next turn clears it.
 EVENT_FIELDS["turn_interrupted"] = {"session_id": _S(), "cause": _S(), "at": _N()}
+# Where a chat another window holds is open, and what runs there (0.48): the line beside Open here.
+# Advertised as ready.capabilities.session_holder = 1 (only a Host). `editor_app {name}` says which
+# editor this window is ("Cursor", "VS Code": at most 40 characters); nothing answers it, and the
+# process's note says it until another window takes the wire. `session_holder {request_id,
+# session_id}` asks about a session another DGC process holds, read from that process's note, and is
+# answered by the `session_holder` event: `found` false when no process says (an older DGC, or none
+# holds it), else `editor` (the holding window's, "" when it hasn't said), `windowless` (kept running
+# by DGC with no window open), `folder` (the chat's folder, "~/..." under the home folder, else only
+# its last name), `working` (a turn runs there), `idle_s` (seconds since the session last changed,
+# when not working) and how many of each run or wait there: `monitors`, `helpers` (background
+# helpers), `commands` (background commands), `queued` (queued prompts), `waiting` (approvals and
+# questions waiting for an answer).
+COMMAND_FIELDS["editor_app"] = {"name": _S()}
+COMMAND_FIELDS["session_holder"] = {"request_id": _S(), "session_id": _S()}
+_HOLDER_FIELDS = {"found": _B(), "editor": _S(False), "windowless": _B(False), "folder": _S(False),
+                  "working": _B(False), "idle_s": _I(False)}
+EVENT_FIELDS["session_holder"] = {"request_id": _S(), "session_id": _S(), **_HOLDER_FIELDS,
+                                  "monitors": _I(False), "helpers": _I(False), "commands": _I(False),
+                                  "queued": _I(False), "waiting": _I(False)}
+# The same for a ChatDGC chat, offered as ready.capabilities.chatdgc.holder = 1: `chatdgc_holder
+# {request_id, conversation_id}`, answered by `chatdgc_holder` with the same facts (`working`: a reply
+# is being written there; `idle_s`: since the chat last changed).
+COMMAND_FIELDS["chatdgc_holder"] = {"request_id": _S(), "conversation_id": _S()}
+EVENT_FIELDS["chatdgc_holder"] = {"request_id": _S(), "conversation_id": _S(), **_HOLDER_FIELDS}
 
 # ---- Ask DGC to fix: a Pip report fixed in the background of its chat (dgc/pip_fix.py) ----------
 # Advertised as ready.capabilities.pip_fix = 1. `start_pip_fix {run_id}` starts a background
