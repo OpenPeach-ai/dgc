@@ -136,7 +136,8 @@ def _terminate_git(proc: subprocess.Popen) -> None:
 
 
 def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
-             text: bool, read_only: bool = False, cancelled=None) -> subprocess.CompletedProcess:
+             text: bool, read_only: bool = False, cancelled=None,
+             extra_env: dict | None = None) -> subprocess.CompletedProcess:
     executable = _git_executable(cwd)
     display_args = ["git", *args]
     if executable is None:
@@ -161,6 +162,8 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
         # versions that predate GIT_NO_LAZY_FETCH. Callers still restrict argv to read operations.
         env.update(GIT_NO_LAZY_FETCH="1", GIT_ALLOW_PROTOCOL="", GIT_OPTIONAL_LOCKS="0",
                    GIT_NO_REPLACE_OBJECTS="1")
+    if extra_env:
+        env.update(extra_env)
     popen_kwargs = {
         "cwd": str(cwd), "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env,

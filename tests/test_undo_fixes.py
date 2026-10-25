@@ -569,5 +569,91 @@ class UndoToCommandTests(HarnessCase):
         self.assertIn('"undo_to": 1', (project / "dgc/headless.py").read_text())
 
 
+
+class TerminalRewindTests(unittest.TestCase):
+    """The full-screen terminal's /rewind: the true count, a refusal's question, and its last line."""
+
+    class Fake:
+        def __init__(self, agent):
+            from types import SimpleNamespace
+            self.agent = agent
+            self.overlays, self.flashes, self.infos = [], [], []
+            self.blocks = SimpleNamespace(clear=lambda: None)
+
+        def _open_overlay(self, rows, **kw):
+            self.overlays.append((rows, kw))
+
+        def _flash(self, msg, secs=2.2):
+            self.flashes.append(msg)
+
+        def info(self, msg):
+            self.infos.append(msg)
+
+        def _render_history(self):
+            pass
+
+        def _invalidate(self):
+            pass
+
+    def fake(self, agent):
+        from dgc import tui as tui_mod
+        fake = self.Fake(agent)
+        for name in ("_do_rewind", "_ask_rewind_anyway", "_confirm_rewind"):
+            setattr(fake, name, getattr(tui_mod.TUI, name).__get__(fake))
+        return fake
+
+    def test_d16_the_question_counts_every_file_the_rewind_restores(self):
+        c = Chat(self, {"a.py": b"a\n", "b.py": b"b\n", "c.py": b"c\n"})
+        for n, name in enumerate(("a.py", "b.py", "c.py")):
+            c.turn(f"t{n}")
+            c.write(name, name.upper().encode())
+        from types import SimpleNamespace
+        fake = self.fake(SimpleNamespace(checkpoints=c.cp))
+        fake._confirm_rewind(0)
+        header = " ".join(t.plain for t in fake.overlays[-1][1]["header"])
+        self.assertIn("Reverts 3 file(s)", header, "t0 recorded one file; the rewind restores three")
+
+    def test_a_refusal_asks_keep_or_undo_anyway_and_undo_anyway_overwrites_exactly_those(self):
+        from types import SimpleNamespace
+        calls = []
+
+        def rewind(index, overwrite=None):
+            calls.append((index, overwrite))
+            if overwrite is None:
+                agent.last_rewind = {"conflicts": [{"path": "a.py", "reason": "between"}], "error": "",
+                                     "left": [], "stopped": 0}
+                return (-1, 0)
+            agent.last_rewind = {"conflicts": [], "error": "", "left": ["notes.txt"], "stopped": 1}
+            return (0, 2)
+        agent = SimpleNamespace(rewind=rewind)
+        fake = self.fake(agent)
+        fake._do_rewind(0)
+        rows, kw = fake.overlays[-1]
+        self.assertEqual([r["value"] for r in rows], ["keep", "anyway"], "Enter keeps the person's changes")
+        self.assertEqual(kw["header"][0].plain, "These files changed after DGC wrote them, by you or another "
+                         "program: a.py. Undo anyway puts back the version from before this turn and loses those "
+                         "changes.")
+        kw["on_pick"]({"value": "keep"})
+        self.assertEqual(calls, [(0, None)])
+        kw["on_pick"]({"value": "anyway"})
+        self.assertEqual(calls, [(0, None), (0, ["a.py"])])
+        self.assertEqual(fake.flashes[-1], "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as "
+                                           "it is.")
+        self.assertEqual(fake.infos, ["1 background helper from those turns was stopped."])
+
+    def test_any_other_refusal_says_why(self):
+        from types import SimpleNamespace
+        agent = SimpleNamespace()
+
+        def rewind(index, overwrite=None):
+            agent.last_rewind = {"conflicts": [], "error": "DGC could not write ro/b.py: Permission denied",
+                                 "left": [], "stopped": 0}
+            return (-1, 0)
+        agent.rewind = rewind
+        fake = self.fake(agent)
+        fake._do_rewind(0)
+        self.assertEqual(fake.flashes, ["Undo stopped: DGC could not write ro/b.py: Permission denied"])
+
+
 if __name__ == "__main__":
     unittest.main()

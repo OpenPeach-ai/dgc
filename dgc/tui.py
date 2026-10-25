@@ -3762,7 +3762,13 @@ class TUI:
         from rich.text import Text
         th = style_mod.theme()
         info = {i: (prev, nf) for (i, prev, nf) in self.agent.checkpoints.listing()}
-        prev, nf = info.get(idx, ("", 0))
+        prev, _recorded = info.get(idx, ("", 0))
+        # What the rewind restores now, across that turn and every later one -- the number it reports
+        # once it has run, not the files that one point happened to record.
+        try:
+            nf = self.agent.checkpoints.changes(idx, limit=0)[1]
+        except Exception:
+            nf = _recorded
         header = [Text.from_markup(f"[bold]Rewind to:[/] {_esc(prev)}"),
                   Text.from_markup(f"[{th.warn}]Reverts {nf} file(s) and truncates the conversation. "
                                    f"This cannot be undone.[/]")]
@@ -3771,20 +3777,49 @@ class TUI:
         self._open_overlay(rows, on_pick=lambda r: self._do_rewind(idx) if r["value"] == "yes" else None,
                            header=header, footer="Enter select · Esc cancel", accent=True)
 
-    def _do_rewind(self, idx: int) -> None:
+    def _do_rewind(self, idx: int, overwrite=None) -> None:
+        from . import rewind_words
         try:
-            msgs, nfiles = self.agent.rewind(idx)
+            msgs, nfiles = self.agent.rewind(idx, overwrite=overwrite)
         except Exception as e:
             self._flash(f"rewind failed: {type(e).__name__}"); return
+        outcome = getattr(self.agent, "last_rewind", None) or {}
         if msgs < 0:
-            self._flash("rewind could not complete; recovery point retained")
+            conflicts = [row for row in outcome.get("conflicts") or [] if row.get("path")]
+            if conflicts:
+                self._ask_rewind_anyway(idx, conflicts)
+                return
+            self._flash("Undo stopped: " + (outcome.get("error") or "recovery point retained"), secs=6)
             return
         self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._think = ""
         self._ft_cache = {}                 # cached fragments hold handlers bound to the old blocks
         self._render_history()
         self._scroll_off = 0
-        self._flash(f"{glyphs.ARROW_L if hasattr(glyphs, 'ARROW_L') else '↩'} rewound — restored {nfiles} file(s)")
+        stopped = rewind_words.stopped(int(outcome.get("stopped") or 0))
+        if stopped:
+            self.info(stopped)
+        self._flash(rewind_words.done(nfiles, len(outcome.get("left") or [])), secs=6)
         self._invalidate()
+
+    def _ask_rewind_anyway(self, idx: int, conflicts: list) -> None:
+        """Asked only after a rewind stopped over files somebody changed after DGC wrote them. Keep my
+        changes is first, so Enter keeps them; Undo anyway rewinds overwriting exactly those files."""
+        from rich.text import Text
+        from . import rewind_words
+        th = style_mod.theme()
+        paths = [str(row["path"]) for row in conflicts]
+        header = [Text(rewind_words.anyway_question(paths), style="bold")]
+        for row in conflicts[:8]:
+            header.append(Text(f"  {row['path']}: "
+                               f"{rewind_words.REASONS.get(row.get('reason'), rewind_words.REASONS['changed'])}",
+                               style=th.faint))
+        if len(conflicts) > 8:
+            header.append(Text(f"  …and {len(conflicts) - 8} more", style=th.faint))
+        rows = [{"label": f"{glyphs.CROSS}  Keep my changes", "value": "keep"},
+                {"label": f"{glyphs.CHECK}  Undo anyway", "value": "anyway"}]
+        self._open_overlay(rows, on_pick=lambda r: (self._do_rewind(idx, overwrite=paths)
+                                                    if r["value"] == "anyway" else None),
+                           header=header, footer="Enter select · Esc keeps your changes", accent=True)
 
     def _open_history(self) -> None:
         """A filterable list of your past prompts — Enter recalls one into the composer (Ctrl+R)."""

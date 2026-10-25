@@ -112,13 +112,62 @@ def _same(before: _Mark | None, path: Path) -> bool:
         return False
 
 
-def _status(repo: Path, pathspec: str) -> tuple[str | None, dict[str, str]] | None:
-    """(HEAD, {repo path: entry type}) from one `git status`, without touching the index; None when Git
-    can't say or lists too much. Entry types: "1" tracked and changed, "u" unmerged, "?" untracked."""
+class _Index:
+    """A private copy of the checkout's Git index, so `git status` can keep its file-time cache fresh
+    without ever writing the person's own index (`.git/index`).
+
+    Read-only `git status` (no optional locks) never refreshes that cache, so a stale one -- just after a
+    clone, or after a tool rewrote files with the same bytes -- makes every status re-read every such
+    file: about a second per command in a 10,000-file checkout, measured. Against a copy, the first
+    status refreshes the copy and the next ones are fast. The copy is taken again whenever the real
+    index changes (you staged something), so what it says is Git's view now."""
+
+    def __init__(self, repo: Path):
+        self.repo = repo
+        self.real: Path | None = None
+        self.copy: Path | None = None
+        self.seen: tuple | None = None
+
+    def env(self) -> dict | None:
+        from .worktree import _git
+        try:
+            if self.real is None:
+                found = _git(["rev-parse", "--path-format=absolute", "--git-path", "index"], self.repo)
+                if found.returncode != 0 or not found.stdout.strip():
+                    return None
+                self.real = Path(found.stdout.strip())
+            info = self.real.stat()
+            if any(self.real.parent.glob("sharedindex.*")):
+                return None                    # a split index: its shared part lives beside the real one
+            seen = (info.st_size, info.st_mtime_ns, info.st_ino)
+            if self.copy is None:
+                import atexit
+                import shutil
+                import tempfile
+                folder = Path(tempfile.mkdtemp(prefix="dgc-index-"))
+                os.chmod(folder, 0o700)
+                atexit.register(shutil.rmtree, folder, True)
+                self.copy = folder / "index"
+            if seen != self.seen or not self.copy.exists():
+                import shutil
+                shutil.copyfile(self.real, self.copy)
+                self.seen = seen
+            return {"GIT_INDEX_FILE": str(self.copy), "GIT_OPTIONAL_LOCKS": "1"}
+        except OSError:
+            return None
+
+
+def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[str | None, dict[str, str]] | None:
+    """(HEAD, {repo path: entry type}) from one `git status`, never writing the person's index; None when
+    Git can't say or lists too much. Entry types: "1" tracked and changed, "u" unmerged, "?" untracked."""
     from .worktree import _run_git
-    result = _run_git(["status", "--porcelain=v2", "-z", "--branch", "--no-renames",
-                       "--untracked-files=all", "--ignore-submodules=all", "--", pathspec],
-                      repo, timeout=30.0, max_stdout=64 * 1024 * 1024, text=False, read_only=True)
+    argv = ["status", "--porcelain=v2", "-z", "--branch", "--no-renames",
+            "--untracked-files=all", "--ignore-submodules=all", "--", pathspec]
+    extra = index.env() if index is not None else None
+    result = _run_git(argv, repo, timeout=30.0, max_stdout=64 * 1024 * 1024, text=False, read_only=True,
+                      extra_env=extra)
+    if result.returncode != 0 and extra:
+        result = _run_git(argv, repo, timeout=30.0, max_stdout=64 * 1024 * 1024, text=False, read_only=True)
     if result.returncode != 0:
         return None
     head: str | None = None
@@ -212,6 +261,9 @@ def _blob(repo: Path, oid: str) -> bytes | None:
     return bytes(result.stdout or b"")
 
 
+_INDEXES: dict[str, _Index] = {}
+
+
 def _repo_of(agent) -> tuple[Path, Path] | None:
     """(the Git checkout, the project inside it) for this agent, asked once."""
     cached = agent.__dict__.get("_command_watch_repo")
@@ -228,6 +280,14 @@ def _repo_of(agent) -> tuple[Path, Path] | None:
         found = False
     agent.__dict__["_command_watch_repo"] = found
     return found or None
+
+
+def _index_of(repo: Path) -> _Index:
+    """One private index copy per checkout, for this process."""
+    key = str(repo)
+    if key not in _INDEXES:
+        _INDEXES[key] = _Index(repo)
+    return _INDEXES[key]
 
 
 class Watch:
@@ -250,7 +310,7 @@ class Watch:
         small, own = [_HASH_BUDGET], [_HASH_OWN_BUDGET]
         if self.git is not None:
             repo, project = self.git
-            looked = _status(repo, str(project) if project != Path(".") else ".")
+            looked = _status(repo, str(project) if project != Path(".") else ".", _index_of(repo))
             if time.monotonic() - clock > _SLOW_S:
                 self.agent.__dict__["_command_watch_git_off"] = True
             if looked is not None:
@@ -335,7 +395,7 @@ class Watch:
         head_after = None
         if self.git is not None and self.listed is not None:
             repo, project = self.git
-            looked = _status(repo, str(project) if project != Path(".") else ".")
+            looked = _status(repo, str(project) if project != Path(".") else ".", _index_of(repo))
             if looked is not None:
                 head_after, after = looked
         changed: list[str] = []

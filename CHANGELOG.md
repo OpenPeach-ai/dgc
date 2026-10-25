@@ -6,6 +6,39 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Undo never loses your work.** A study of how Codex and DGC undo a turn found where DGC's Undo could throw away
+  work nobody asked it to, or refuse for no reason. All of these are fixed:
+  - **Your edits between turns stop an Undo of an earlier turn.** If you (or a formatter, a `git pull`, another chat)
+    changed a file after DGC wrote it, and a later turn wrote it again, undoing the earlier turn used to put back the
+    old version silently and lose your change. The same happened to a file you saved while a turn was running. Undo
+    now stops, restores nothing and names the file: "Undo stopped: a.py changed after DGC wrote it, by you or another
+    program. Nothing was restored, so those changes are intact."
+  - **Undo anyway, only when you ask.** After that, DGC asks: "These files changed after DGC wrote them, by you or
+    another program: a.py. Undo anyway puts back the version from before this turn and loses those changes." Keep my
+    changes is the default; Undo anyway goes ahead for exactly those files and stops again if another one changed.
+    Editors get this from a new command, `undo_to {index, overwrite?}`, answered by a new event, `undo_result {ok,
+    files_restored, conflicts, left, stopped, error?}` (offered as `ready.capabilities.undo_to`); `rewind` and
+    `rewound` are unchanged.
+  - **What the turn's own commands changed.** Around each `bash` command, Python code action and tool hook, DGC asks
+    Git what is changed before and after. A file Git called clean that a command changed or deleted is put back from
+    Git's copy; a file a command created is removed. A file it can't put back (it already had uncommitted changes, Git
+    doesn't track it, or Git converts it) is listed on the Edited card as "Changed by a command — Undo leaves it", and
+    after an Undo the line says so: "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is."
+    The look costs about 15-25 ms per command in an ordinary project and about 80 ms in a 10,000-file one (two `git
+    status` calls against a private copy of the index; your own `.git/index` is never written).
+  - **DGC's own command or formatter no longer locks Undo.** A `sed -i`, `black` or formatting hook after one of DGC's
+    edits made every Undo of that turn refuse as "changed outside this chat". It is DGC's own work now, and Undo
+    restores the turn.
+  - **A background helper from an undone turn is stopped**, as on /new, and Undo says so: "1 background helper from
+    those turns was stopped." It used to keep running and write its work into your files after you undid the turn.
+  - **A helper's write outside its own copy is guarded too.** It was recorded but not watched, so Undo overwrote your
+    later edit to that file without a word.
+  - **The smaller ones:** a `chmod` after DGC wrote a file stops an Undo instead of being reverted; a rewind that
+    fails says which file and why ("DGC could not write ro/b.py: Permission denied"); `/rewind` in the full-screen
+    terminal names the files it really restores across the later turns; an empty folder DGC's own write created goes
+    with the file; a second Undo right after a first one is no longer refused over DGC's own restore; and what DGC
+    left in each file is saved for every file a recovery point holds, not just the last 4,096.
+
 - **The Edited card lists every file Undo puts back, with true line counts.** When a helper changed a file in its
   own copy of the project (with a shell command, say) and DGC brought the change in, the card under the answer left
   that file out: it counted only the edits DGC made with its own file tools, while Undo restored them all. DGC now

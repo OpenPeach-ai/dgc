@@ -1395,14 +1395,35 @@ class CLI:
             if not pts:
                 self.ui.info("no checkpoints yet — run a turn first")
             else:
-                labels = [f"{prev}  [{nf} file{'' if nf == 1 else 's'}]" for (_i, prev, nf) in pts]
+                from . import rewind_words
+
+                def restores(index, recorded):
+                    try:
+                        return self.agent.checkpoints.changes(index, limit=0)[1]
+                    except Exception:
+                        return recorded
+                labels = []
+                for (index, prev, nf) in pts:
+                    n = restores(index, nf)
+                    labels.append(f"{prev}  [{n} file{'' if n == 1 else 's'}]")
                 mi = select("Rewind to (restores code + conversation)", labels)
-                if mi is not None:
-                    msgs, nfiles = self.agent.rewind(pts[mi][0])
+                overwrite = None
+                while mi is not None:
+                    msgs, nfiles = self.agent.rewind(pts[mi][0], overwrite=overwrite)
+                    outcome = getattr(self.agent, "last_rewind", None) or {}
                     if msgs >= 0:
-                        self.ui.info(f"↩ rewound — restored {nfiles} file(s); conversation truncated")
-                    else:
+                        self.ui.info(rewind_words.done(nfiles, len(outcome.get("left") or []))
+                                     + " The conversation was truncated.")
+                        break
+                    conflicts = [row for row in outcome.get("conflicts") or [] if row.get("path")]
+                    if not conflicts or overwrite is not None and set(overwrite) >= {r["path"] for r in conflicts}:
                         self.ui.error("rewind could not complete; the recovery point was retained")
+                        break
+                    paths = [str(row["path"]) for row in conflicts]
+                    choice = select(rewind_words.anyway_question(paths), ["Keep my changes", "Undo anyway"])
+                    if choice != 1:
+                        break
+                    overwrite = paths
         elif cmd == "search":
             self._search_cmd(rest)
         elif cmd == "resume":

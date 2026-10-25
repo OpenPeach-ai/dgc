@@ -2072,16 +2072,47 @@ conversation back to one of them.
   cannot be — the file changed while being read, the snapshot budget is spent, the turn has
   already captured 4,096 files, the path is not a regular file, or the session could not be
   re-saved — the edit is refused and the file is untouched.
+- **What the turn's own commands changed.** Around each command the chat runs — `bash`, the
+  Python code-action, and a tool hook such as a formatter — DGC asks Git what is changed or
+  untracked before and after. A file Git called clean before the command goes into the point as
+  Git's own copy of it, so Undo puts it back, a file the command deleted included; a file the
+  command created is removed again. This needs a Git project, and Git's copy is used only when
+  nothing converts it (no `autocrlf`, `eol`, `text` or `filter` setting for it, not marked
+  skip-worktree). A file the turn's own tools already wrote stays DGC's work when a later command
+  or formatter changes it.
 
 ## Rewind in the terminal
 
 `/rewind` lists every point, oldest first: the opening 70 characters of the prompt as DGC
 received it (a point opened by `/tasks apply` reads *apply retained task ID*) and how many files
 it captured. Pick one and confirm — *Reverts N file(s) and truncates the conversation. This
-cannot be undone.* Files touched at that turn or any later one return to their earliest saved
-state (a file the turn created is deleted; any new directories it was created in are left
-behind), the conversation returns to just before that prompt, and that point and every later one
-are consumed. If any step fails, the files and the point are rolled back and kept.
+cannot be undone.*, N being the files the rewind restores now across that turn and every later
+one. Files touched at that turn or any later one return to their earliest saved state (a file the
+turn created is deleted, and a folder DGC's own write created goes too once it is empty again),
+the conversation returns to just before that prompt, and that point and every later one are
+consumed. If any step fails, the files and the point are rolled back and kept, and DGC says which
+file and why (*Undo stopped: DGC could not write ro/b.py: Permission denied*).
+
+## When Undo stops instead
+
+Undo never writes over somebody else's work without asking. It stops, restores nothing, and names
+the files, when one of them:
+
+- changed after DGC last wrote it (you edited it, another program or another chat did, or its
+  permissions changed), or
+- changed after DGC wrote it and before DGC wrote it again, in a later turn or later in the same
+  one: undoing the earlier turn would put back a version from before that change.
+
+*Undo stopped: a.py changed after DGC wrote it, by you or another program. Nothing was restored,
+so those changes are intact.* Then it asks: *These files changed after DGC wrote them, by you or
+another program: a.py. Undo anyway puts back the version from before this turn and loses those
+changes.* **Keep my changes** is the default; **Undo anyway** goes ahead for exactly those files,
+and stops again if another file has changed by then. A file DGC has no record of writing (a session
+saved by a much older DGC) is not taken as a change: that is not evidence.
+
+A background helper that one of the undone turns started and that is still running is stopped,
+and Undo says so (*1 background helper from those turns was stopped.*): its work is kept aside in
+`/tasks`, never written into your files after you undid the turn that asked for it.
 
 It always restores both — there is no code-only or conversation-only rewind, and no redo. It is
 refused while a turn is running: stop the turn (**Esc**) or let it finish, then run `/rewind`
@@ -2094,8 +2125,11 @@ stay as they were.
 by the prompt that opened it, asks once, and performs the same rewind. The card lists exactly the
 files that rewind puts back, with the lines added and removed, counted from the state each file
 was in before the turn: DGC's own edits and a helper's integrated files alike, however the helper
-changed them. A file edited and then put back as it was is not listed, and Undo's question names
-the same number of files as the card. A helper that finishes in the background while the chat is
+changed them, and the files the turn's commands changed that Undo can put back. A file a command
+changed that Undo can't put back is listed too, as *Changed by a command — Undo leaves it*, and
+after an Undo the line says how many: *↩ Undone; DGC restored 2 files. 1 file changed by a
+command was left as it is.* A file edited and then put back as it was is not listed, and Undo's
+question names the same number of files as the card. A helper that finishes in the background while the chat is
 idle lands in the recovery point of the turn that last ended, and that turn's card shows it; the
 changes bar counts it too. Undo on an older turn's card also takes back every turn after it, and
 its question says so: how many later turns, and how many files the rewind restores across all of
@@ -2115,10 +2149,14 @@ offers it under a finished answer.
 
 ## What is not rewindable
 
-- **Shell writes.** `bash`, the Python code-action, MCP tools, `save_memory` (your project's
-  `DGC.md`) and `add_skill` are never snapshotted. A file a shell command changed comes back
-  only to the state a file tool later found it in: if a file tool snapshotted it before the shell
-  ran, the shell's change is undone; if the shell ran first, that change stays.
+- **Some of what commands change.** A file a command changed that already had uncommitted
+  changes, one Git does not track, one Git converts, and anything Git ignores (`node_modules`,
+  build output) or outside the project has no exact earlier copy, so Undo leaves it; the Edited
+  card names the ones Git can see. A background shell is looked at only as it starts. MCP tools,
+  `save_memory` (your project's `DGC.md`) and `add_skill` are never snapshotted. A file a command
+  changed and a file tool then wrote comes back to its state before the turn when the command's
+  change could be put in the point (a clean file), and otherwise to the state the file tool found
+  it in.
 - **Files outside the project.** An approved external path is rewindable in the current process
   only; its snapshot is never saved with the session.
 - **A moved project.** Points are bound to the directory they were saved from and do not load

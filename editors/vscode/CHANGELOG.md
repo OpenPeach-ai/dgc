@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Undo never loses your work** (with a DGC CLI that has it, 0.48):
+  - When files you or another program changed after DGC wrote them stop an Undo, DGC names them and asks: "These
+    files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the version from
+    before this turn and loses those changes." **Keep my changes** is the default; **Undo anyway** goes ahead for
+    exactly those files.
+  - An Undo that stops for any other reason says why: "DGC could not undo the turn: DGC could not write ro/b.py:
+    Permission denied. Nothing was changed, and the recovery point was kept."
+  - The Edited card marks a file one of the turn's commands changed that Undo can't put back as **Changed by a
+    command — Undo leaves it**, Undo's question leaves it out of its count, and the line after an Undo says how many:
+    "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is." A clean file a command changed or
+    deleted is restored like any other and listed like any other.
+  - With an older CLI, Undo works as before.
+
 - **The Edited card and Undo, four more cases** (with a DGC CLI that has them, 0.48):
   - A helper that finished in the background while the chat was idle is counted in the changes bar, and its row on
     the card opens its real diff, also in a reopened chat.

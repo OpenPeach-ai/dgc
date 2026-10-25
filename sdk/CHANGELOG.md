@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Editor protocol: command `undo_to {index, overwrite?}` and event `undo_result {request_id, index, ok, files_restored,
+  conflicts, left, stopped, error?}` (a rewind that says why it stopped and can go ahead over named files; offered as
+  `ready.capabilities.undo_to`) are in the vendored protocol and the TypeScript SDK's known events. The event only
+  ever answers that command; `rewind()` still sends `rewind`. A `turn_files` file row may carry `command: true` (a
+  file a command changed that Undo leaves). No Pips API change.
+
 - Editor protocol: command `rewind_preview {index}` and event `rewind_preview {request_id, index, files}` (how many
   files Undo on an older turn restores across every turn it takes back; offered as
   `ready.capabilities.rewind_preview`) are in the vendored protocol and the TypeScript SDK's known events. The event
