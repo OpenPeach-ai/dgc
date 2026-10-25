@@ -305,6 +305,27 @@ test("moved: the window it came from asks the side bar's backend, and says where
   sidebarBackend.dispose("restart: test");
 });
 
+test("moved, in a window whose side bar never started its backend: it is started, then asked", async () => {
+  const own = fakeServe("serve-moved-own-2", { caps: { detach: DETACH, session_holder: 1 } });
+  command = own.path;
+  const h = tab();
+  const places = { current: () => undefined, open: () => undefined, openSessions: () => new Set(), changed() {} };
+  h.host.useSessionsHome(places);                       // as the extension sets the side bar up, its view never shown
+  const be = h.provider.ensureBackend();
+  spawned.push(be.childPid);
+  assert.ok(await until(() => h.provider.sessionReady));
+  assert.equal(h.host.backend, undefined, "the side bar has no backend yet");
+  const home = fakeServe("serve-home-late", { caps: { detach: DETACH, session_holder: 1 }, holder: CURSOR_FACTS });
+  command = home.path;
+  be.send({ type: "prompt", text: `emit ${JSON.stringify({ type: "session_moved", reason: "opened_elsewhere" })}` });
+  assert.ok(await until(() => bars(h.posted).some((m) => m.state === "moved")));
+  assert.ok(await until(() => h.host.backend !== undefined, 8000), "the side bar's backend was started for it");
+  spawned.push(h.host.backend.childPid);
+  assert.ok(await until(() => bars(h.posted).some((m) => m.state === "moved" && m.note), 12000), "then asked");
+  assert.equal(bars(h.posted).at(-1).note.head, "Open in Cursor · ~/toni-erp · idle 6 min.");
+  h.host.backend.dispose("restart: test");
+});
+
 // ---- the webview ---------------------------------------------------------------------------------
 
 test("the webview: the bar says the line, its head in bold, as text; today's sentence without one", () => {

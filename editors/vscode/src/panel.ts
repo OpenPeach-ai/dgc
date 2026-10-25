@@ -1847,11 +1847,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** The bar of a read-only chat says where its session is open and what runs there: asked now (or after `first` ms),
    *  then every 30 seconds while it stays read-only, of this window's own backend, or of the side bar's once this chat
    *  let its own go (it moved). An older CLI, or a holder that doesn't say, leaves today's sentence. */
-  private watchHolder(first = 0): void {
+  private watchHolder(first = 0, tries = 0): void {
     if (this.holderTimer) { clearTimeout(this.holderTimer); this.holderTimer = undefined; }
     if (!this.sessionElsewhere) { return; }
-    if (first <= 0) { this.askHolder(); }
-    this.holderTimer = setTimeout(() => { this.holderTimer = undefined; this.watchHolder(); }, first > 0 ? first : 30_000);
+    let next = first > 0 ? first : 30_000;
+    // No backend to ask yet (the side bar's is starting): soon again, a few times, then at the usual pace.
+    if (first <= 0 && !this.askHolder() && tries < 10) { next = 3_000; tries++; }
+    this.holderTimer = setTimeout(() => { this.holderTimer = undefined; this.watchHolder(0, tries); }, next);
     (this.holderTimer as any).unref?.();
   }
 
@@ -1862,12 +1864,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return process?.ready && offered ? process : undefined;
   }
 
-  private askHolder(): void {
+  /** A tab that let its own backend go asks the side bar's: started if the side bar hasn't yet, as a ChatDGC tab
+   *  starts it. Only the Sessions home's, which holds no session of its own. */
+  private startForHolder(): void {
+    if (!this.home || this.backend) { return; }
+    try { this.ensureBackend(); } catch { /* no CLI: the bar keeps today's sentence */ }
+  }
+
+  /** False when no backend can be asked yet. */
+  private askHolder(): boolean {
     const shown = this.sessionElsewhere;
     const id = this.currentSessionId || this.sessionRestoreCandidate;
-    if (!shown || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return; }
+    if (!shown || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) { return true; }
     const asker = this.holderProcess() ?? this.tab?.host.holderProcess();
-    if (!asker) { return; }
+    if (!asker) {
+      if (!this.backend) { this.tab?.host.startForHolder(); }
+      return false;
+    }
     void asker.request({ type: "session_holder", request_id: this.nextRequestId("holder"), session_id: id } as any,
                        "session_holder" as any, 10_000)
       .then((ev: any) => {
@@ -1880,6 +1893,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         shown.note = note;
         this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
       }, () => { /* no answer: the bar keeps what it says */ });
+    return true;
   }
 
   /** "Open here": take this chat's session from the window that shows it, or from the backend that kept
