@@ -619,6 +619,35 @@ class TheTerminalCommandTest(Case):
         listing = re.sub(r"\x1b\[[0-9;]*m", "", ui._rich(ui._agents_listing()))
         self.assertIn("continued · 2 runs", listing)
 
+    def test_the_classic_terminal_does_the_same(self):
+        import io
+        from types import SimpleNamespace
+        from rich.console import Console
+        from dgc import cli
+        h = self.make_repo()
+        parent, helper = Turns(), Turns()
+        agent_id = self.review(h, parent, helper)
+        repl = object.__new__(cli.CLI)
+        buf = io.StringIO()
+        repl.console = Console(file=buf, force_terminal=False, width=140)
+        repl.config, repl.agent = h.config, h.agent
+        said = []
+        repl.ui = SimpleNamespace(info=said.append, error=lambda text: said.append("ERROR " + text))
+        repl.handle_slash("/agents")
+        self.assertIn(f"continue {agent_id[4:12]}", buf.getvalue())
+        helper.on("[Continued", self.fix, "Fixed from the classic prompt.")
+        delivered = threading.Event()
+        h.agent.monitors.queue_subtask_ended = lambda *a, **k: delivered.set()
+        with patch.object(LLMClient, "chat", Script([("REVIEWER", helper)])), \
+                patch.object(Config, "clone_for_root", clone_fixture):
+            repl.handle_slash(f"/agents continue {agent_id} Fix FINDING-1.")
+            self.assertTrue(delivered.wait(20))
+        self.assertIn("Review billing.py · continued in the background, with its memory. Its report comes back here.",
+                      said)
+        self.assertEqual((h.root / "billing.py").read_text(), FIXED)
+        repl.handle_slash("/agents continue nothing-here do it")
+        self.assertTrue(any(line.startswith("ERROR This chat has no helper") for line in said), said)
+
     def test_a_refusal_is_shown(self):
         h = self.make_repo()
         with patch.object(Config, "clone_for_root", clone_fixture):

@@ -776,6 +776,9 @@ def _check(parent, agent_id: str, text: str) -> dict:
     with lock:
         if agent_id in cache["busy"]:
             raise Refused("busy", f"{agent_id} is already being continued.")
+    if agent_id in (getattr(parent, "_detached_jobs", None) or {}):
+        # Its record says it ended, and its changes are being brought in right now.
+        raise Refused("still_running", f"{agent_id} is still bringing its changes in. Try again in a moment.")
     record = get(parent, agent_id)
     if record is None:
         raise Refused("not_kept", f"DGC didn't keep {agent_id}'s conversation (a helper of a helper, a run a restart "
