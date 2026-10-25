@@ -10306,8 +10306,9 @@ def test_isolated_subagents():
     check("task batching preserves hook ordering by falling back to the serial path",
           guarded_parallel._parallel_task_outputs(overlap_calls) == {})
     guarded_parallel.config.data["hooks"] = {}
+    from dgc.config import MAX_PARALLEL_TASKS as _MAX_PARALLEL       # one past the hard cap (32 since 25 Oct)
     oversized_calls = [_ToolCall(f"many-{i}", "task", {
-        "description": f"many {i}", "prompt": f"many {i}"}) for i in range(17)]
+        "description": f"many {i}", "prompt": f"many {i}"}) for i in range(_MAX_PARALLEL + 1)]
     check("task batching bounds pathological model fan-out before creating worktrees",
           guarded_parallel._parallel_task_outputs(oversized_calls) == {})
     guarded_parallel.mcp.stop_all()
@@ -15712,8 +15713,10 @@ def test_ultra_profile():
           DEFAULTS.get("ultra_mode") is False)
     check("Ultra native reasoning reaches xhigh without inventing a provider enum",
           native_effort(on, "low") == "xhigh" and native_effort(off, "low") == "low")
+    from dgc.config import MAX_PARALLEL_TASKS as _HARD_MAX            # 32 since 25 Oct (Settings allows up to 32)
     check("Ultra worker budget clamps to the existing hard maximum",
-          worker_limit(on) == 8 and "up to 8 parallel agents" in summary(on))
+          worker_limit(on) == _HARD_MAX and f"up to {_HARD_MAX} parallel agents" in summary(on),
+          detail=f"{worker_limit(on)}; {summary(on)!r}")
     check("Ultra maps delegated effort only to each supported route's strongest value",
           delegated_effort(on, "codex", "low", True) == "xhigh"
           and delegated_effort(on, "claude", "low", True) == "max"

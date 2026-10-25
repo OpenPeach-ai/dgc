@@ -63,7 +63,9 @@ class CuratedCompatibilityTests(unittest.TestCase):
         self.assertTrue(row['installed'])
         self.assertEqual(row['install'], 'block')
         self.assertIn('approved', row['block_reason'])
-        self.assertNotEqual(row['verification'], 'Everything works')
+        # Maintainer notes (verification, audited_on) never reach the editor since 24 Oct, so a package's own
+        # metadata can't put one there either.
+        self.assertNotIn('verification', row)
 
     def test_curated_git_sources_have_real_immutable_pins(self):
         for row in self.entries:
