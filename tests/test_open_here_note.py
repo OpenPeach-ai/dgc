@@ -346,6 +346,7 @@ class HostTests(unittest.TestCase):
         caps = self.host.default._ready_payload()["capabilities"]
         self.assertEqual(caps["session_holder"], 1)
         self.assertEqual(caps["chatdgc"]["holder"], 1)
+        self.assertTrue(self.host.default.agent.own_session(), "a chat holds its session once it opens or writes it")
         self.host.dispatch({"type": "editor_app", "name": "Cursor"})
         self.assertEqual(self.host.editor_app, "Cursor")
         note = json.loads((self.tmp / "peers" / f"{os.getpid()}.json").read_text())
@@ -445,8 +446,10 @@ class OpenHereIntegrationTests(unittest.TestCase):
         b_ready = b.wait(lambda e: e.get("type") == "ready", 90)
         self.assertEqual(b_ready["capabilities"]["detach"]["elsewhere"]["pid"], a.proc.pid)
         b.send({"type": "editor_app", "name": "VS Code"})
+        b.send({"type": "watch_session_owner"})            # as the editor does: it shows a held session read-only
         b.send({"type": "resume_session", "path": f"{session_id}.json", "request_id": "r"})
         b.wait(lambda e: e.get("type") == "session" and e.get("request_id") == "r", 60)
+        b.wait(lambda e: e.get("type") == "session_held" and e.get("session_id") == session_id, 30)
         told = self.ask(b, session_id, "h-b")
         self.assertEqual({k: told.get(k) for k in ("found", "editor", "windowless", "folder", "working")},
                          {"found": True, "editor": "Cursor", "windowless": False, "folder": world.work.name,

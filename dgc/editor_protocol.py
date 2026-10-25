@@ -1008,6 +1008,18 @@ EVENT_FIELDS["session_holder"] = {"request_id": _S(), "session_id": _S(), **_HOL
 # {request_id, conversation_id}`, answered by `chatdgc_holder` with the same facts (`working`: a reply
 # is being written there; `idle_s`: since the chat last changed).
 COMMAND_FIELDS["chatdgc_holder"] = {"request_id": _S(), "conversation_id": _S()}
+# One process writes to a session at a time, for as long as it has it open, idle or not (0.48, dgc/session_owner.py):
+# an editor window, a terminal, a DGC kept running with no window, an SDK program. Advertised as
+# ready.capabilities.session_owner = 1. `watch_session_owner` says this client shows a session another process has
+# open read-only, with Open here: from then on resume_session of such a session loads it to be read, followed by
+# `session_held {session_id}`, and nothing is written to it; `session_held` also says when this chat let its session
+# go to Open here elsewhere (a terminal, or a window that couldn't take this process). Without it, resume_session of a
+# session another process has open is refused with command_rejected reason "session_held", its message naming where it
+# is open, and nothing changes. Open here from a window (DGC_ATTACH=steal) asks a terminal (or a DGC it can't attach
+# to) to let the session go; one that keeps it, because something runs in it, leaves ready.capabilities.detach
+# .elsewhere with reason "busy".
+COMMAND_FIELDS["watch_session_owner"] = {"request_id": _S(False)}
+EVENT_FIELDS["session_held"] = {"session_id": _S()}
 EVENT_FIELDS["chatdgc_holder"] = {"request_id": _S(), "conversation_id": _S(), **_HOLDER_FIELDS}
 
 # ---- Ask DGC to fix: a Pip report fixed in the background of its chat (dgc/pip_fix.py) ----------

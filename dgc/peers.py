@@ -395,8 +395,17 @@ def session_holder(session: str, *, now: float | None = None) -> dict | None:
     """
     if not session:
         return None
-    for record in others(here=False, now=now):
-        if _same_session(record, session):
+    found = [record for record in others(here=False, now=now) if _same_session(record, session)]
+    # A DGC that says which sessions it holds (its `open_here`, 0.48) and doesn't list this one only shows it, read-only:
+    # it is not the holder. One that lists it is; an older DGC's note says nothing either way and still counts.
+    stem = os.path.splitext(os.path.basename(str(session)))[0]
+    for record in found:
+        block = record.get("open_here")
+        if isinstance(block, dict) and any(isinstance(chat, dict) and chat.get("session_id") == stem
+                                           for chat in (block.get("chats") or [])):
+            return record
+    for record in found:
+        if not isinstance(record.get("open_here"), dict):
             return record
     return None
 
@@ -440,8 +449,12 @@ def _release_path(pid: int, suffix: str) -> Path:
     return takeover_dir() / f"{int(pid)}.{suffix}.json"
 
 
-def request_release(record: dict, session: str) -> bool:
-    """Ask the peer in ``record`` to give this session up. True when the ask was left."""
+def request_release(record: dict, session: str, *, open_here: bool = False, by: str = "") -> bool:
+    """Ask the peer in ``record`` to give this session up. True when the ask was left.
+
+    ``open_here``: the person pressed Open here (in a window, or in a terminal), so a holder that has the
+    session open lets it go whenever nothing runs in it, its window on screen or not, and keeps showing it
+    read-only; ``by`` names where it goes ("the terminal", "the editor")."""
     pid = record.get("pid")
     if not isinstance(pid, int) or pid <= 0 or not _same_session(record, session):
         return False
@@ -450,6 +463,8 @@ def request_release(record: dict, session: str) -> bool:
         directory.mkdir(parents=True, exist_ok=True)
         payload = {"session": str(session)[:4096], "asker": os.getpid(),
                    "holder": pid, "at": time.time()}
+        if open_here:
+            payload.update(open_here=True, by=str(by or "")[:80])
         path = _release_path(pid, "ask")
         tmp = _staging(directory, f"{pid}.ask")
         tmp.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")

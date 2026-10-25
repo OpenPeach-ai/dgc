@@ -583,18 +583,7 @@ class TUI:
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
             self._render_history()
-            self._say_holder()
-
-    def _say_holder(self) -> None:
-        """A resumed session another window holds: where it is open and what runs there, as the editor's Open here
-        line says it (dgc/holder_note.py). Nothing when no window holds it, or an older DGC does."""
-        try:
-            from .holder_note import resume_note
-            line = resume_note(getattr(self.agent, "session_file", None))
-        except Exception:
-            line = ""
-        if line:
-            self.info(line)
+            self._check_owner()            # held by another DGC: where, what runs there, and the choices
 
     # ---- floating overlay (a dropdown/modal above the composer) ----
     def _show_picker(self, title: str, labels: list[str], cb, delete_cb=None) -> None:
@@ -2347,6 +2336,8 @@ class TUI:
         if text.startswith("!"):
             self._submit_shell(text[1:])
             return "shell"
+        if not self._may_write(text):
+            return "held"
         self._submit(text)
         return "prompt"
 
@@ -7830,7 +7821,7 @@ class TUI:
             self.blocks.clear(); self._buf = ""; self._think = ""
             self._ft_cache = {}
             self._render_history()          # show the loaded conversation, not a blank screen
-            self._say_holder()
+            self._check_owner()
             self._flash(f"resumed ({n} messages)"
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
@@ -9356,6 +9347,14 @@ class TUI:
                     "git_common_dir": (other._git_common_dir()
                                        if hasattr(other, "_git_common_dir") else ""),
                     "status": "working" if worker is not None and worker.is_alive() else "idle"})
+            # Which sessions this terminal holds, and what runs in each (dgc/holder_note.py): a window showing one says
+            # "Open in the terminal · ~/x · idle 2 min." and can take it with Open here.
+            from . import holder_note
+            block = holder_note.terminal_block(
+                (getattr(sess, "agent", None),
+                 holder_note.agent_counts(getattr(sess, "agent", None), working=bool(
+                     getattr(sess, "_worker_thread", None) is not None and sess._worker_thread.is_alive())))
+                for sess in list(getattr(self, "_sessions", None) or ()) if getattr(sess, "agent", None) is not None)
             _peers.announce(
                 kind="tui",
                 session=str(getattr(agent, "session_file", "") or ""),
@@ -9363,7 +9362,7 @@ class TUI:
                 git_common_dir=(agent._git_common_dir()
                                 if hasattr(agent, "_git_common_dir") else ""),
                 status=status, takeover=True,
-                sessions=places if len(places) > 1 else None)
+                sessions=places if len(places) > 1 else None, extra={holder_note.NOTE_KEY: block})
         except Exception:
             pass
 
@@ -9468,13 +9467,135 @@ class TUI:
             if not asked:
                 asked = [str(getattr(self.agent, "session_file", "") or "")]
             for session in asked:
-                if session and _peers.pending_release(session) is not None:
-                    _peers.answer_release(
-                        granted=False,
-                        reason="it is open in a DGC terminal, which does not hand sessions over")
+                ask = _peers.pending_release(session) if session else None
+                if ask is None:
+                    continue
+                if ask.get("open_here"):
+                    granted, reason = self._let_go_for_open_here(session, str(ask.get("by") or ""))
+                    _peers.answer_release(granted=granted, reason=reason)
                     break
+                _peers.answer_release(
+                    granted=False,
+                    reason="it is open in a DGC terminal, which hands a session over only to Open here")
+                break
         except Exception:
             pass
+
+    def _let_go_for_open_here(self, session: str, by: str) -> tuple[bool, str]:
+        """Open here in a window (or another terminal) asked for this session: let it go when nothing runs in it,
+        and say so here, where it then takes no more prompts; otherwise say what runs, and keep it."""
+        from . import holder_note, session_owner
+        sess = next((one for one in list(getattr(self, "_sessions", None) or ())
+                     if str(getattr(getattr(one, "agent", None), "session_file", "") or "") == session), None)
+        if sess is None or not sess.agent.owns_session():
+            return True, ""
+        worker = getattr(sess, "_worker_thread", None)
+        reason = holder_note.busy_reason(holder_note.agent_counts(
+            sess.agent, working=worker is not None and worker.is_alive()))
+        if reason:
+            return False, reason
+        sess.agent.let_go_session(by or session_owner.BY_EDITOR)
+        line = (f"This session is open in {sess.agent.session_taken} now (Open here). It takes no more prompts "
+                "here: send one to take it back with Open here, or start a new session.")
+        th = style_mod.theme()
+        text = self._rich(f"[{th.accent}]◆[/] {_esc(line)}")
+        if sess is self.active:
+            self._append(text)
+        else:
+            sess.blocks.append(text)
+        self._announce_peer_soon()
+        return True, ""
+
+    # ------------------------------------------------------- one writer per session ---
+    def _owner_facts(self) -> dict:
+        from . import holder_note
+        try:
+            return holder_note.session_facts(Path(str(self.agent.session_file or "")).stem)
+        except Exception:
+            return {"found": False}
+
+    def _check_owner(self) -> None:
+        """A session just opened here (dgc -c, --resume, /resume) that another DGC has open, idle or not: say where and
+        what runs there, and offer Open here, a new session, or quitting. Nothing is written to it meanwhile."""
+        agent = self.agent
+        if not agent.session_file or agent.own_session_soon():
+            self._announce_peer_soon()
+            return
+        self._offer_owner_choices()
+
+    def _may_write(self, text: str = "") -> bool:
+        """A prompt for a session this terminal doesn't hold: the choices instead, the prompt kept in the box."""
+        agent = self.agent
+        if not agent.session_file or (not agent.session_taken and agent.own_session()):
+            return True
+        if text:
+            self.input_buf.text = text
+        self._offer_owner_choices()
+        return False
+
+    def _offer_owner_choices(self) -> None:
+        from . import holder_note, session_owner
+        agent = self.agent
+        facts = self._owner_facts()
+        if agent.session_taken:
+            line = holder_note.taken_line(facts, agent.session_taken)
+        else:
+            line = holder_note.where_sentence(facts) or "This session is open in another DGC."
+        self.info(line)
+        if holder_note.usable(facts):
+            where = "DGC with no window" if facts.get("windowless") else holder_note.clean_editor(facts.get("editor"))
+        else:
+            where = agent.session_taken or "the other DGC"
+        busy = holder_note.busy_reason(facts) if holder_note.usable(facts) else ""
+        choices = [
+            ("here", f"Open here — move it into this terminal; {where} shows it read-only" if not busy
+             else f"Open here — not until nothing runs there ({busy})"),
+            ("new", f"Start a new session — this one stays open in {where}"),
+            ("quit", "Quit — leave it as it is"),
+        ]
+
+        def pick(index: int) -> None:
+            choice = choices[index][0]
+            if choice == "here":
+                self._open_here()
+            elif choice == "new":
+                self._handle_slash("/clear")
+                self._announce_peer_soon()
+            elif self.app:
+                self.app.exit()
+
+        self._show_picker("This session is open elsewhere", [label for _key, label in choices], pick)
+        if self._overlay is not None:
+            self._overlay["sel"] = 1                     # Enter alone never takes it: a new session
+        self.__dict__["_owner_choices"] = [key for key, _label in choices]
+
+    def _open_here(self) -> None:
+        """Open here: ask whoever has this session open to let it go, then hold it here and show it as it is now."""
+        from . import session_owner
+        agent, sess = self.agent, self.active
+        self._flash("Open here: asking for it…", secs=8)
+
+        def run() -> None:
+            ok, why = session_owner.take(agent, by=session_owner.BY_TERMINAL)
+            if not ok:
+                self.info(session_owner.not_now(why))
+                self._invalidate()
+                return
+            try:
+                agent.load_session(agent.session_file)          # as it was saved there, last
+            except Exception as exc:                            # noqa: BLE001
+                self.error(f"Open here: the session couldn't be read: {exc}")
+                return
+            if sess is self.active:
+                sess.blocks.clear()
+                self._ft_cache = {}
+                self._render_history()
+            self.info("Open here: this session is in this terminal now; the other side shows it read-only.")
+            self._flash("Open here: it's yours")
+            self._announce_peer_soon()
+            self._invalidate()
+
+        threading.Thread(target=run, name="dgc-open-here", daemon=True).start()
 
     def _start_peer_heartbeat(self) -> None:
         if getattr(self, "_peer_thread", None) is not None:

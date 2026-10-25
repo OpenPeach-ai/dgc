@@ -234,6 +234,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "watch_agent_reports",
     # The Edited card's files: asked once, then sent before each turn_end.
     "watch_turn_files",
+    # A client saying it shows a session another process has open read-only: nothing changes but what it is sent.
+    "watch_session_owner",
     # Ask DGC to fix: reading a chat's fixes or one file a fix changed.
     "list_pip_fixes", "get_pip_fix_change",
     # The Agent map's task list reads like the monitors list beside it, and its Stop is stop_monitor's.
@@ -397,7 +399,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
-    "watch_agent_reports", "watch_turn_files",
+    "watch_agent_reports", "watch_turn_files", "watch_session_owner",
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
@@ -2473,6 +2475,10 @@ class Backend:
                           # editor_app and session_holder: where a session another window holds is open, and
                           # what runs there, for the line beside Open here (dgc/holder_note.py). Only a Host.
                           **({"session_holder": 1} if getattr(self, "_host", None) is not None else {}),
+                          # One process writes to a session at a time, for as long as it has it open
+                          # (dgc/session_owner.py): watch_session_owner, session_held, and resume_session of a
+                          # held session refused (reason session_held) for a client that doesn't watch.
+                          "session_owner": 1,
                           # The chat panel can say what is on screen, so a takeover stops being
                           # decided by whether a process is alive. Gated: an older CLI would answer
                           # a heartbeat with command_rejected every 20s.
@@ -3151,6 +3157,14 @@ class Backend:
                  for chat in chats]
         if not any(session and _peers.pending_release(session) is not None for session in asked):
             return False
+        # Open here elsewhere (a terminal, or a window that can't take this process): the chat lets its session go
+        # when nothing runs in it, its window on screen or not, and shows it read-only (dgc/session_owner.py).
+        for chat, session in zip(chats, asked):
+            ask = _peers.pending_release(session) if session else None
+            if ask is not None and ask.get("open_here"):
+                granted, reason = chat._let_go_for_open_here(str(ask.get("by") or ""))
+                _peers.answer_release(granted=granted, reason=reason)
+                return False
         watch = getattr(self, "_editor_liveness", None)
         board = getattr(host, "switchboard", None) if host is not None else None
         if board is not None and board.opted_in:
@@ -3197,6 +3211,25 @@ class Backend:
         _peers.answer_release(granted=True)
         self._announce_peer("standing down")
         return watch.stand_down()
+
+    def _let_go_for_open_here(self, by: str) -> tuple[bool, str]:
+        """Open here elsewhere asked for this chat's session. Let it go when nothing runs in it, and say so to a
+        client that shows it read-only (session_held); otherwise say what runs, and keep it."""
+        from . import holder_note, session_owner
+        agent = self.agent
+        if not agent.owns_session():
+            return True, ""                             # not held here: the asker can take it
+        with self._turn_state_lock():
+            reason = holder_note.busy_reason(holder_note.chat_counts(self))
+            if reason:
+                return False, reason
+            agent.let_go_session(by or session_owner.BY_TERMINAL)
+        host = getattr(self, "_host", None)
+        if host is not None:
+            host.announce_peers()
+        if getattr(self, "_session_owner_on", False) and agent.session_file:
+            self.em.emit("session_held", session_id=Path(str(agent.session_file)).stem)
+        return True, ""
 
     def _announce_interrupted(self) -> None:
         """After a resume's replay: a turn of this session that a backend with no window stopped.
@@ -7438,6 +7471,20 @@ class Backend:
                 path = str(p) if p else None
             if path:
                 mode_before = getattr(self.agent, "mode", "")
+                # One process writes to a session at a time (dgc/session_owner.py). Another live process has it open:
+                # a client that shows such a session read-only (watch_session_owner) gets it to read, and is told;
+                # any other is refused, and nothing here is changed.
+                try:
+                    target = sessions_mod.resolve_path(self.agent.session_root, path, must_exist=True)
+                except (OSError, ValueError):
+                    target = None                       # load_session says why, as before
+                held = target is not None and not self.agent.own_session_soon(path=target)
+                if held and not getattr(self, "_session_owner_on", False):
+                    from . import holder_note
+                    self.em.emit("command_rejected", command=t, reason="session_held",
+                                 message=holder_note.held_elsewhere(holder_note.session_facts(target.stem)),
+                                 **_request_fields(request_id))
+                    return
                 try:
                     n = self.agent.load_session(path)
                 except (OSError, ValueError) as exc:
@@ -7462,6 +7509,11 @@ class Backend:
                 # resume -- sent first, the whole history landed in the app's first stream().
                 self._emit_mode_if_changed(mode_before)
                 self._forget_ended_shells()
+                if held:
+                    # Shown to be read: what runs there runs there; nothing is started or offered here.
+                    self.em.emit("session_held", session_id=target.stem)
+                    self._publish_cache_clock(current=True, resumed=True)
+                    return
                 # Last: the chat is on screen, in the mode it reopened in. Monitors DGC's stopping
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)
@@ -7490,6 +7542,11 @@ class Backend:
             # client says so none is sent (an older editor keeps its "Woke on agent" note; the SDK, ACP).
             # On the chat's UI, beside agent_faces: each chat on a shared `dgc serve` opts in for itself.
             self.ui._agent_reports_enabled = True
+        elif t == "watch_session_owner":
+            # This client shows a session another process has open read-only, with Open here: from now on a resume of
+            # such a session loads it to be read and says so (session_held), and so does this chat letting its own
+            # session go to Open here elsewhere. Until a client says so, such a resume is refused (session_held).
+            self._session_owner_on = True
         elif t == "watch_turn_files":
             # This client draws the Edited card from what the CLI counted: from now on each turn's
             # turn_files is sent before its turn_end. Until a client asks none is (an older editor,

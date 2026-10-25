@@ -1637,7 +1637,7 @@ class CLI:
         self.ui.info(f"resumed session ({n} messages)"
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
         self._show_restored_todos()
-        self._say_holder()
+        self._check_owner()
 
     def _say_holder(self) -> None:
         """A resumed session another window holds: where it is open and what runs there (dgc/holder_note.py), the
@@ -1649,6 +1649,126 @@ class CLI:
             line = ""
         if line:
             self.ui.info(line)
+
+    # ------------------------------------------------------- one writer per session ---
+    def _check_owner(self, *, interactive: bool = True) -> bool:
+        """A session opened here (dgc -c, --resume, /resume) that another DGC has open, idle or not: where it is open
+        and what runs there, then Open here, a new session or quitting. True once this terminal holds it."""
+        agent = self.agent
+        if not agent.session_file or (not agent.session_taken and agent.own_session_soon()):
+            return True
+        return self._owner_choices(interactive=interactive)
+
+    def _may_write(self) -> bool:
+        """A prompt for a session this terminal doesn't hold: the choices first."""
+        agent = self.agent
+        if not agent.session_file or (not agent.session_taken and agent.own_session()):
+            return True
+        return self._owner_choices()
+
+    def _owner_choices(self, *, interactive: bool = True) -> bool:
+        from . import holder_note, session_owner
+        agent = self.agent
+        try:
+            facts = holder_note.session_facts(Path(str(agent.session_file)).stem)
+        except Exception:
+            facts = {"found": False}
+        if agent.session_taken:
+            self.ui.info(holder_note.taken_line(facts, agent.session_taken))
+        else:
+            self.ui.info(holder_note.where_sentence(facts) or "This session is open in another DGC.")
+        if not interactive:
+            return False
+        if holder_note.usable(facts):
+            where = "DGC with no window" if facts.get("windowless") else holder_note.clean_editor(facts.get("editor"))
+        else:
+            where = agent.session_taken or "the other DGC"
+        busy = holder_note.busy_reason(facts) if holder_note.usable(facts) else ""
+        labels = [f"Open here — move it into this terminal; {where} shows it read-only" if not busy
+                  else f"Open here — not until nothing runs there ({busy})",
+                  f"Start a new session — this one stays open in {where}",
+                  "Quit — leave it as it is"]
+        from .menu import select
+        while True:
+            choice = select("This session is open elsewhere", labels, initial=1)   # Enter alone: a new session
+            if choice == 0:
+                ok, why = session_owner.take(agent, by=session_owner.BY_TERMINAL)
+                if not ok:
+                    self.ui.info(session_owner.not_now(why))
+                    continue
+                agent.load_session(agent.session_file)          # as it was saved there, last
+                self.ui.info("Open here: this session is in this terminal now; the other side shows it read-only.")
+                self._announce_peer()
+                return True
+            if choice == 1:
+                self.handle_slash("/new")
+                self._announce_peer()
+                return True
+            if choice == 2:
+                self._quit_requested = True
+            return False
+
+    def _announce_peer(self) -> None:
+        """This terminal's note (dgc/peers.py): the session it holds and what runs in it, so a window showing it says
+        "Open in the terminal" and can ask for it with Open here."""
+        try:
+            from . import holder_note, peers
+            agent = self.agent
+            root = str(getattr(self.config, "project_root", "") or "")
+            busy = bool(getattr(self, "_turn_running", False))
+            block = holder_note.terminal_block([(agent, holder_note.agent_counts(agent, working=busy))])
+            peers.announce(kind="tui", session=str(getattr(agent, "session_file", "") or ""), cwd=root,
+                           project_root=root, status="working" if busy else "idle", takeover=True,
+                           extra={holder_note.NOTE_KEY: block})
+        except Exception:
+            pass
+
+    def _start_peer_heartbeat(self) -> None:
+        """The classic prompt's note, refreshed, and Open here asks answered: a window asking for the session it
+        holds gets it when nothing runs, and this prompt says so before the next one."""
+        if getattr(self, "_peer_stop", None) is not None:
+            return
+        from .peers import ANNOUNCE_EVERY, TICK_S
+        stop = threading.Event()
+        self._peer_stop = stop
+        self._announce_peer()
+
+        def beat() -> None:
+            ticks = 0
+            while not stop.wait(TICK_S):
+                ticks += 1
+                if ticks % ANNOUNCE_EVERY == 0:
+                    self._announce_peer()
+                try:
+                    self._consider_release()
+                except Exception:
+                    pass
+        threading.Thread(target=beat, name="dgc-peer-heartbeat", daemon=True).start()
+
+    def _consider_release(self) -> None:
+        from . import holder_note, peers, session_owner
+        agent = self.agent
+        session = str(getattr(agent, "session_file", "") or "")
+        ask = peers.pending_release(session) if session else None
+        if ask is None:
+            return
+        if not ask.get("open_here"):
+            peers.answer_release(granted=False,
+                                 reason="it is open in a DGC terminal, which hands a session over only to Open here")
+            return
+        if not agent.owns_session():
+            peers.answer_release(granted=True)
+            return
+        reason = holder_note.busy_reason(holder_note.agent_counts(
+            agent, working=bool(getattr(self, "_turn_running", False))))
+        if reason:
+            peers.answer_release(granted=False, reason=reason)
+            return
+        agent.let_go_session(str(ask.get("by") or "") or session_owner.BY_EDITOR)
+        peers.answer_release(granted=True)
+        self._pending_line = (f"This session is open in {agent.session_taken} now (Open here). It takes no more "
+                              "prompts here: send one to take it back with Open here, or start a new session.")
+        self._announce_peer()
 
     def _set_model(self, model: str) -> None:
         previous = str(self.config.model or "")
@@ -1859,7 +1979,14 @@ class CLI:
         queue: list[str] = []
         draft = ""
         self._followup_queue = queue
+        self._start_peer_heartbeat()
         while True:
+            if getattr(self, "_quit_requested", False):
+                break
+            pending = getattr(self, "_pending_line", "")
+            if pending:
+                self._pending_line = ""
+                self.ui.info(pending)
             mode = self.agent.mode
             th = style_mod.theme()
             acc, dim, rst = style_mod.ansi_fg(th.accent), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
@@ -1908,13 +2035,30 @@ class CLI:
                 elif line.startswith("!"):
                     self.run_bang(line[1:])
                 else:
-                    self._run_turn_live(self.expand_mentions(line), queue)
+                    if not self._may_write():
+                        draft = line                    # kept in the box for after the choice
+                        if getattr(self, "_quit_requested", False):
+                            break
+                        continue
+                    self._turn_running = True
+                    try:
+                        self._run_turn_live(self.expand_mentions(line), queue)
+                    finally:
+                        self._turn_running = False
             except EOFError:
                 break
             except KeyboardInterrupt:
                 self.ui.info("interrupted")
             except Exception as e:  # keep the REPL alive
                 self.ui.error(f"{type(e).__name__}: {e}")
+        stop = getattr(self, "_peer_stop", None)
+        if stop is not None:
+            stop.set()
+            try:
+                from . import peers
+                peers.withdraw()            # a clean exit leaves no note; a crash leaves one to expire
+            except Exception:
+                pass
         self.console.print("[dim]bye[/dim]")
 
     def _run_turn_body(self, text: str):
@@ -2973,9 +3117,9 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
-            cli._say_holder()
             cli._show_restored_todos()
-            cli.agent.compact_resumed_session()
+            if cli.agent.own_session_soon():
+                cli.agent.compact_resumed_session()
         else:
             cli.ui.info("no previous session here — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -2984,9 +3128,9 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
-            cli._say_holder()
             cli._show_restored_todos()
-            cli.agent.compact_resumed_session()
+            if cli.agent.own_session_soon():
+                cli.agent.compact_resumed_session()
         else:
             cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -3000,9 +3144,9 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
-                cli._say_holder()
                 cli._show_restored_todos()
-                cli.agent.compact_resumed_session()
+                if cli.agent.own_session_soon():
+                    cli.agent.compact_resumed_session()
             else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)
         else:
@@ -3011,6 +3155,8 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
+        # A session another DGC has open: say where (the turn below is refused, and nothing is written).
+        cli._check_owner(interactive=False)
         try:
             code = _run_oneshot(cli, config, args, parser, _oneshot_engine)
             sys.stdout.flush()
@@ -3051,7 +3197,11 @@ def main(argv: list[str] | None = None) -> int | None:
                 except Exception:
                     pass
             if args.classic or not sys.stdout.isatty():
-                cli.repl()
+                # A session another DGC has open: where, what runs there, and the choices (the full screen asks
+                # in its own way, once it is up).
+                cli._check_owner()
+                if not getattr(cli, "_quit_requested", False):
+                    cli.repl()
             else:
                 from .tui import TUI
                 return TUI(config, agent=cli.agent).run()   # non-zero when a /update failed

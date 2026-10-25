@@ -110,6 +110,8 @@ def _attach(session_id: str, mode: str) -> int | None:
     while True:
         holder = find_holder(session_id)
         if holder is None:
+            if mode == "steal":
+                _take_from_other(session_id)          # a terminal, or a DGC this window can't attach to
             return None
         pid = holder.get("pid")
         if holder.get("version") != __version__ or holder.get("protocol_version") != PROTOCOL_VERSION:
@@ -152,6 +154,33 @@ def _attach(session_id: str, mode: str) -> int | None:
         else:
             _note(f"reattach skipped: pid {pid} said {reason or 'no'}")
         return None
+
+
+def _take_from_other(session_id: str) -> None:
+    """Open here for a session that a DGC this window can't attach to has open: a terminal's, or a `dgc serve` with no
+    attach socket. Ask it to let the session go (dgc/session_owner.py); it does when nothing runs in it, and keeps
+    showing it read-only. Then this process opens it as a normal serve. Refused, the window shows it read-only again,
+    and its bar says what runs there."""
+    global _refused
+    from . import peers
+    session_file = ""
+    for record in peers.others(here=False):
+        place = next((p for p in peers._places(record) if p.get("session") and _stem(p["session"]) == session_id), None)
+        if place is not None:
+            session_file = str(place["session"])
+            break
+    if not session_file:
+        return
+    from . import session_owner
+    note, granted, reason = session_owner.ask_holder(session_file, by=session_owner.BY_EDITOR)
+    if note is None:
+        return
+    pid = note.get("pid")
+    if granted and session_owner.wait_free(session_file):
+        _note(f"pid {pid} let this session go to this window (Open here)")
+        return
+    _refused = {"session_id": session_id, "pid": pid, "reason": "busy"}
+    _note(f"pid {pid} kept this session: {reason or 'it did not let it go'}; showing it read-only here")
 
 
 def _stop_older(holder: dict, session_id: str, version: str) -> int | None:

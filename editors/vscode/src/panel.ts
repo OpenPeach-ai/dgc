@@ -1855,6 +1855,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.watchHolder(3_000);           // the window that took it names its editor a moment after it has it
   }
 
+  /** This chat's session is open in another process (session_held): a terminal took it with Open here, or another
+   *  process already had it open when this chat opened it. Read-only here, with Open here, and the bar says where;
+   *  this chat keeps its backend, which writes nothing to it. */
+  private sessionHeld(sessionId: string): void {
+    const id = this.currentSessionId || this.sessionRestoreCandidate;
+    if (!sessionId || sessionId !== id) { return; }
+    if (!this.sessionElsewhere) {
+      this.sessionElsewhere = { state: "elsewhere" };
+      this.backendNote(`[extension: session ${id} is open in another DGC process; this window shows it read-only]`);
+    }
+    const shown = this.sessionElsewhere;
+    this.whenWebviewReady(() => { if (this.sessionElsewhere === shown) { this.post({ type: "session_elsewhere", ...shown }); } });
+    this.watchHolder();
+  }
+
   /** The bar of a read-only chat says where its session is open and what runs there: asked now (or after `first` ms),
    *  then every 30 seconds while it stays read-only, of this window's own backend, or of the side bar's once this chat
    *  let its own go (it moved). An older CLI, or a holder that doesn't say, leaves today's sentence. */
@@ -3572,6 +3587,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "session_live") return;          // ready.capabilities.attached has already said it
     if (ev.type === "models_at") return;             // Settings' Model boxes: answered to their own request
     if (ev.type === "session_moved") { this.sessionMoved(String((ev as any).reason || "")); return; }
+    if (ev.type === "session_held") { this.sessionHeld(String((ev as any).session_id || "")); return; }
     if (ev.type === "turn_interrupted") { this.offerTurnStoppedWithoutWindow(ev); return; }
     if (ev.type === "live_sessions") { this.liveSessionsArrived(ev); return; }
     // The request handlers project summaries and open text documents. Raw roots and file bodies
@@ -3619,6 +3635,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (Number((ev.capabilities as any)?.session_holder) >= 1) {
           const name = editorName(vscode.env?.appName);
           if (name) this.backend?.sendSetup({ type: "editor_app", name } as any);
+        }
+        // One process writes to a session at a time: this window shows one another process has open (a terminal, a
+        // DGC it can't attach to) read-only, with Open here, and is told so (session_held). Unasked, the CLI refuses
+        // to open such a session at all.
+        if (Number((ev.capabilities as any)?.session_owner) >= 1) {
+          this.backend?.sendSetup({ type: "watch_session_owner" } as any);
         }
         // Memory that learns: this panel shows the line a Work session's look back adds ("Remembered: … · Forget"),
         // so it asks for memory_learned. A backend that doesn't offer it never sends one.
