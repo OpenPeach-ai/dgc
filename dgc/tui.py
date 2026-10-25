@@ -3780,6 +3780,12 @@ class TUI:
                                    f"This cannot be undone.[/]")]
         if commanded:
             header.append(Text(rewind_words.also_puts_back(commanded)))
+        try:
+            moved = bool(self.agent.checkpoints.git_moved_since(idx))
+        except Exception:
+            moved = False
+        if moved:
+            header.append(Text(rewind_words.GIT_LEFT_QUESTION))
         rows = [{"label": f"{glyphs.CHECK}  Rewind", "value": "yes"},
                 {"label": f"{glyphs.CROSS}  Cancel", "value": "no"}]
         self._open_overlay(rows, on_pick=lambda r: self._do_rewind(idx) if r["value"] == "yes" else None,
@@ -3806,7 +3812,7 @@ class TUI:
         stopped = rewind_words.stopped(int(outcome.get("stopped") or 0))
         if stopped:
             self.info(stopped)
-        self._flash(rewind_words.done(nfiles, len(outcome.get("left") or [])), secs=6)
+        self._flash(rewind_words.done(nfiles, len(outcome.get("left") or []), bool(outcome.get("git"))), secs=8)
         self._invalidate()
 
     def _ask_rewind_anyway(self, idx: int, conflicts: list) -> None:

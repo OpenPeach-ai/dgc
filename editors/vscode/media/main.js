@@ -4050,7 +4050,7 @@
         + (v.command
             // One of the turn's own commands changed it, and DGC has no exact copy from before (uncommitted changes,
             // or Git doesn't track it): Undo leaves it, and says so here, in its count and in its last line.
-            ? `<span class="ts-uncounted ts-no-undo ts-by-command" title="A command this turn ran changed this file, and DGC has no exact copy of it from before (it had uncommitted changes, or Git doesn't track it), so Undo leaves it as it is now.">Changed by a command — Undo leaves it</span>`
+            ? `<span class="ts-uncounted ts-no-undo ts-by-command" title="${esc(byCommandWhy(v.limit))}">Changed by a command — Undo leaves it</span>`
             : v.undoable === false
             ? `<span class="ts-uncounted ts-no-undo" title="Outside the project. DGC keeps the version from before this turn only while the session that changed it is running, so Undo leaves this file as it is now.">Can't undo</span>`
             : "")
@@ -4110,14 +4110,30 @@
     const undoable = many - files.filter(([, v]) => v.undoable === false || v.command).length;
     // The files Undo puts back from Git because a command changed them (`by_command`): its question names them.
     card._byCommand = files.filter(([, v]) => v.byCommand).map(([path]) => path);
+    card._gitMoved = !!(cli && cli.gitMoved);
     card.querySelector(".ts-undo").onclick = () => {
       const byCommand = commandRestores(card);
+      const gitMoved = gitMovedFrom(card);
       vscode.postMessage({
         type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path), later: laterTurns(card),
         ...(cli ? { exact: true, total: undoable, checkpoint: cli.checkpoint } : {}),
-        ...(byCommand.length ? { byCommand } : {}) });
+        ...(byCommand.length ? { byCommand } : {}), ...(gitMoved ? { gitMoved: true } : {}) });
     };
     return card;
+  }
+  // Why a file a command changed is one Undo leaves: the limit that kept DGC from copying it first, when one did.
+  function byCommandWhy(limit) {
+    const lead = "A command this turn ran changed this file, ";
+    if (limit === "size") return `${lead}and it is over 5 MB, so DGC kept no copy of it from before: Undo leaves it as it is now.`;
+    if (limit === "count") return `${lead}and it was past the 500 files with uncommitted changes DGC copies before one command: Undo leaves it as it is now.`;
+    if (limit === "budget") return `${lead}and this session's room for copies was used up, so DGC kept no copy of it from before: Undo leaves it as it is now.`;
+    return `${lead}and DGC has no exact copy of it from before (Git converts it, or an ignore rule changed with it), so Undo leaves it as it is now.`;
+  }
+  // Did a command in this turn or a later one move HEAD, the index or a stash? Undo leaves those, and its question says so.
+  function gitMovedFrom(card) {
+    const cards = [...log.querySelectorAll(".turn-summary")];
+    const at = cards.indexOf(card);
+    return (at < 0 ? [card] : cards.slice(at)).some((each) => each._gitMoved);
   }
   // What Undo on this card puts back from Git because a command changed it, across this turn and every later one (the
   // rewind takes them all back), each named once.
@@ -4159,11 +4175,12 @@
                         counted: f.counted === true, status: String(f.status || "modified"),
                         ...(f.undoable === false ? { undoable: false } : {}),
                         ...(f.command === true ? { command: true } : {}),
-                        ...(f.by_command === true ? { byCommand: true } : {}) });
+                        ...(f.by_command === true ? { byCommand: true } : {}),
+                        ...(["size", "count", "budget"].includes(f.limit) ? { limit: f.limit } : {}) });
     }
     const checkpoint = Number.isInteger(ev.checkpoint_index) && typeof ev.checkpoint_preview === "string"
       ? { index: ev.checkpoint_index, preview: ev.checkpoint_preview } : null;
-    return { edits, total: Number(ev.total) || edits.size, checkpoint };
+    return { edits, total: Number(ev.total) || edits.size, checkpoint, gitMoved: ev.git_moved === true };
   }
   function onTurnFiles(ev) {
     const id = String(ev.turn_id || "");

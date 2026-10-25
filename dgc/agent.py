@@ -5318,7 +5318,8 @@ class Agent(GoalLifecycle):
         finds them by (its index in list_checkpoints and its preview)."""
         return {"files": [dict(row) for row in record["files"]], "total": record["total"],
                 "checkpoint_index": record["checkpoint_index"],
-                "checkpoint_preview": record["checkpoint_preview"]}
+                "checkpoint_preview": record["checkpoint_preview"],
+                **({"git_moved": True} if record.get("git_moved") else {})}
 
     def _turn_files_current(self) -> tuple[dict, int] | None:
         """The last recorded turn's record and its first point's index, while its points are still
@@ -5347,10 +5348,12 @@ class Agent(GoalLifecycle):
             return False
         record, start = current
         files, total = self._turn_files_rows(start)
+        moved = bool(self.checkpoints.git_moved_since(start))
         if (files == record["files"] and total == record["total"]
-                and start == record["checkpoint_index"]):
+                and start == record["checkpoint_index"] and moved == bool(record.get("git_moved"))):
             return True
         record["files"], record["total"], record["checkpoint_index"] = files, total, start
+        record["git_moved"] = moved
         message = record.get("message")
         if isinstance(message, dict) and any(m is message for m in self.messages):
             message["_dgc_turn_files"] = self._turn_files_view(record)
@@ -5420,7 +5423,8 @@ class Agent(GoalLifecycle):
         message = next((m for m in reversed(self.messages) if m.get("role") != "system"), None)
         record = {"manager": manager, "first": point, "last": manager.points[-1],
                   "files": files, "total": total, "checkpoint_index": start,
-                  "checkpoint_preview": str(point.get("preview") or ""), "message": message}
+                  "checkpoint_preview": str(point.get("preview") or ""), "message": message,
+                  "git_moved": bool(manager.git_moved_since(start))}
         if isinstance(message, dict):
             message["_dgc_turn_files"] = self._turn_files_view(record)
         self.turn_files_record = record
@@ -10027,7 +10031,7 @@ class Agent(GoalLifecycle):
         a rewind, `left` (files commands changed that Undo can't put back) and `stopped` (background
         helpers from the rewound turns that were stopped)."""
         from . import rewind_words
-        outcome = {"conflicts": [], "error": "", "left": [], "stopped": 0}
+        outcome = {"conflicts": [], "error": "", "left": [], "stopped": 0, "git": False}
         self.last_rewind = outcome
         info = getattr(self.ui, "info", None)
 
@@ -10113,6 +10117,9 @@ class Agent(GoalLifecycle):
                 say(rewind_words.stopped(outcome["stopped"]))
                 outcome["left"] = [self._turn_files_path(path)
                                    for path in (getattr(self.checkpoints, "last_rewind_left", ()) or ())]
+                # A command in those turns moved HEAD, the index or a stash: Undo put the files back and
+                # left Git's own state as it is (it never touches it), and says so.
+                outcome["git"] = bool(getattr(self.checkpoints, "last_rewind_git", False))
                 if conversation is not None and self.session_file:
                     # Rewinding restores the very messages a later compaction archived; keeping
                     # those rows would render them twice.

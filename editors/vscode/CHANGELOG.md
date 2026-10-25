@@ -12,6 +12,11 @@
   - **Your saves are yours.** DGC hears the files you save in the chat's folders (a new `user_saved` command, sent
     only to a CLI that offers it), so a file you save while one of DGC's commands runs, a long test run say, is never
     taken for the command's change: Undo leaves your edit as it is.
+  - **Your uncommitted work comes back.** A model's `git checkout .`, `git reset --hard`, `git clean -fd`, `git stash`
+    or `rm` over files you had not committed is undone, and Undo's question names those files. When a command moved
+    Git itself, the question and the line after say "Your files are put back; Git's commits, branches, stashes and
+    staging are left as they are." A file DGC could not copy first says why in its row's tooltip (over 5 MB, past
+    500 files in one command, or the session's room for copies used up).
   - **Nothing is put back unseen.** Undo's question names the files it puts back from Git because a command changed
     them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more").
   - The Edited card marks a file one of the turn's commands changed that Undo can't put back as **Changed by a

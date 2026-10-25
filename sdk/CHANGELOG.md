@@ -6,7 +6,9 @@
   conflicts, left, stopped, error?}` (a rewind that says why it stopped and can go ahead over named files; offered as
   `ready.capabilities.undo_to`) are in the vendored protocol and the TypeScript SDK's known events. The event only
   ever answers that command; `rewind()` still sends `rewind`. A `turn_files` file row may carry `command: true` (a
-  file a command changed that Undo leaves) or `by_command: true` (one Undo puts back from Git). The command
+  file a command changed that Undo leaves, with `limit` when a copy limit kept it) or `by_command: true` (one Undo
+  puts back); `turn_files` may carry `git_moved: true` and `undo_result` `git: true` (a command moved HEAD, the
+  index or a stash, which Undo leaves). The command
   `user_saved {paths, at?}` (the person's saves in the editor; offered as `ready.capabilities.user_saved`) is in the
   vendored protocol; an SDK session never sends it. No Pips API change.
 

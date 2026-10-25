@@ -79,6 +79,33 @@ test("Undo names what it puts back from Git because a command changed it, across
   assert.deepEqual(v.errors, []);
 });
 
+test("a file over a limit says which on the card, and Git moved by a command reaches Undo's question", () => {
+  const v = makeDom();
+  v.send({ type: "event", event: READY });
+  const event = (d) => v.send({ type: "event", event: d });
+  event({ type: "turn_start", turn_id: "t1", prompt: "reset it", kind: "prompt" });
+  event({ type: "text_delta", text: "Done." });
+  event({ type: "stream_end", message_id: "t1:1", phase: "answer" });
+  event({ type: "turn_files", turn_id: "t1", total: 4, checkpoint_index: 0, checkpoint_preview: "reset it", git_moved: true,
+          files: [{ path: "a.py", additions: 1, deletions: 1, counted: true, status: "modified", by_command: true },
+                  { path: "data.bin", additions: 0, deletions: 0, counted: false, status: "modified", command: true, limit: "size" },
+                  { path: "x.txt", additions: 0, deletions: 0, counted: false, status: "modified", command: true, limit: "count" },
+                  { path: "y.txt", additions: 0, deletions: 0, counted: false, status: "deleted", command: true, limit: "budget" }] });
+  event({ type: "turn_end", turn_id: "t1", reason: "completed", final_message_id: "t1:1" });
+  const card = v.doc.querySelector(".turn-summary");
+  card.querySelector(".ts-expand")?.click();
+  const tips = [...card.querySelectorAll(".ts-by-command")].map((n) => n.getAttribute("title"));
+  assert.equal(tips.length, 3);
+  assert.match(tips[0], /over 5 MB/);
+  assert.match(tips[1], /past the 500 files with uncommitted changes/);
+  assert.match(tips[2], /room for copies was used up/);
+  card.querySelector(".ts-undo").click();
+  const undo = JSON.parse(JSON.stringify(v.posted.at(-1)));
+  assert.equal(undo.gitMoved, true);
+  assert.deepEqual(undo.byCommand, ["a.py"]);
+  assert.deepEqual(v.errors, []);
+});
+
 // ---- the extension ----
 const here = dirname(fileURLToPath(import.meta.url));
 const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-undo-anyway-"));
@@ -220,6 +247,17 @@ test("the person's saves in the window's folders go to a CLI that offers user_sa
   make({ undo_to: 1 });                                                                 // an older CLI
   for (const fn of saveListeners.did) fn(doc(join(scratch, "README.md")));
   assert.deepEqual(sent, [], "a CLI that doesn't offer it is never sent one");
+});
+
+test("Undo's question and its line say Git's commits, branches, stashes and staging are left as they are", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo turn");
+  const { p } = provider([{ ok: true, files_restored: 2, conflicts: [], left: [], stopped: 0, git: true }]);
+  await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 2,
+                      checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["a.py"], gitMoved: true });
+  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 1 file a command changed: a.py.\n\n"
+    + "Your files are put back; Git's commits, branches, stashes and staging are left as they are.");
+  assert.equal(said.at(-1).message, "↩ Undone; DGC restored 2 files. Git's commits, branches, stashes and staging "
+    + "are left as they are.");
 });
 
 test("an older CLI is sent rewind, as before", async () => {

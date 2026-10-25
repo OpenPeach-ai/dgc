@@ -909,18 +909,22 @@ def _history_turn_files(value) -> dict | None:
             return None
         if (row.get("outside", False) not in (True, False) or row.get("undoable", True) not in (True, False)
                 or row.get("command", False) not in (True, False)
-                or row.get("by_command", False) not in (True, False)):
+                or row.get("by_command", False) not in (True, False)
+                or row.get("limit", "") not in ("", "size", "count", "budget")):
             return None
         files.append({"path": path, "additions": additions, "deletions": deletions,
                       "counted": row["counted"], "status": status,
                       **({"outside": True} if row.get("outside") is True else {}),
                       **({"command": True} if row.get("command") is True else {}),
-                      **({"by_command": True} if row.get("by_command") is True else {})})
+                      **({"by_command": True} if row.get("by_command") is True else {}),
+                      **({"limit": row["limit"]} if row.get("limit") in ("size", "count", "budget") else {})})
     total = count(value.get("total"))
     out = {"files": files, "total": max(total if total is not None else 0, len(files))}
     index, preview = count(value.get("checkpoint_index")), value.get("checkpoint_preview")
     if index is not None and isinstance(preview, str) and len(preview) <= 200:
         out["checkpoint_index"], out["checkpoint_preview"] = index, preview
+    if value.get("git_moved") is True:
+        out["git_moved"] = True
     return out
 
 
@@ -7633,6 +7637,7 @@ class Backend:
                              files_restored=nfiles if ok else 0, conflicts=conflicts,
                              left=[str(path) for path in (outcome.get("left") or [])[:500]],
                              stopped=int(outcome.get("stopped") or 0),
+                             **({"git": True} if ok and outcome.get("git") else {}),
                              **({"error": error} if error and not ok else {}))
                 # The `rewound` every client knows, for what it redraws on one (not the answer).
                 self.em.emit("rewound", ok=ok, files_restored=nfiles)

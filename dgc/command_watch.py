@@ -21,7 +21,18 @@ runs -- `bash` in the foreground, `python`, and the tool hooks -- DGC looks befo
     leaves it").
 
 What Git ignores (node_modules, build output) and files outside the project are not seen: reading them
-around every command would cost more than the command. A background shell is seen only as it starts.
+around every command would cost more than the command. A background shell is not watched at all.
+
+**Uncommitted work.** Before each command DGC also copies every file with uncommitted changes (tracked
+files Git sees as modified or deleted, untracked files it does not ignore): a model's `git checkout .`,
+`git reset --hard`, `git clean -fd`, `git stash` or `rm` over them is put back by Undo from that copy.
+The copies are content-addressed (keyed by their sha256): a file whose bytes have not changed since the
+last command is re-read and hashed, never copied again. Only the copies a command's change needs go into
+the turn's recovery point, where they are saved with the session and checked like every other snapshot,
+inside its budget, and go when that point goes. A file over 5 MB, past 500 in one command, or past the
+session's budget is not copied: the card says which, and Undo leaves it. Undo never touches Git itself
+(the index, HEAD, branches, stashes, commits): when a command moved one of those, Undo's question and its
+last line say they are left as they are.
 """
 from __future__ import annotations
 
@@ -48,6 +59,8 @@ _HASH_BUDGET = 16 * 1024 * 1024        # ...within this much reading
 _HASH_OWN = 16 * 1024 * 1024           # a file the turn's tools wrote is hashed up to this size
 _HASH_OWN_BUDGET = 64 * 1024 * 1024
 _SLOW_S = 2.0                          # a `git status` slower than this turns the Git part off
+_COPY_MAX_FILE = 5 * 1024 * 1024       # a file with uncommitted changes larger than this is not copied
+_COPY_MAX_FILES = 500                  # nor one past this many in a single command
 _NO_CONVERSION = frozenset({"unspecified", "unset"})
 
 
@@ -204,7 +217,7 @@ class _Index:
             return None
 
 
-def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[str | None, dict[str, str]] | None:
+def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[str | None, dict[str, str], str] | None:
     """(HEAD, {repo path: entry type}) from one `git status`, never writing the person's index; None when
     Git can't say or lists too much. Entry types: "1" tracked and changed, "u" unmerged, "?" untracked."""
     from .worktree import _run_git
@@ -218,6 +231,7 @@ def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[s
     if result.returncode != 0:
         return None
     head: str | None = None
+    branch = ""
     entries: dict[str, str] = {}
     for record in (result.stdout or b"").split(b"\0"):
         if not record:
@@ -225,6 +239,9 @@ def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[s
         if record.startswith(b"# branch.oid "):
             value = record[len(b"# branch.oid "):].decode("ascii", "replace").strip()
             head = value if len(value) in (40, 64) else None
+            continue
+        if record.startswith(b"# branch.head "):
+            branch = record[len(b"# branch.head "):].decode("utf-8", "replace").strip()
             continue
         if record.startswith(b"#"):
             continue
@@ -246,7 +263,7 @@ def _status(repo: Path, pathspec: str, index: "_Index | None" = None) -> tuple[s
         entries[path] = kind.decode()
         if len(entries) > _MAX_LISTED:
             return None
-    return head, entries
+    return head, entries, branch
 
 
 def _tree(repo: Path, commit: str, paths: list[str]) -> dict[str, tuple[str, str]]:
@@ -311,6 +328,82 @@ def _blob(repo: Path, oid: str) -> bytes | None:
 _INDEXES: dict[str, _Index] = {}
 
 
+_GIT_PATHS: dict[str, dict] = {}
+
+
+def _git_paths(repo: Path) -> dict | None:
+    """Where this checkout keeps its index and the reflogs of HEAD and the stash, asked once."""
+    key = str(repo)
+    if key not in _GIT_PATHS:
+        from .worktree import _git
+        found = _git(["rev-parse", "--path-format=absolute", "--git-path", "index", "--git-path", "logs/HEAD",
+                      "--git-path", "logs/refs/stash"], repo)
+        lines = (found.stdout or "").splitlines() if found.returncode == 0 else []
+        _GIT_PATHS[key] = ({"index": Path(lines[0]), "head_log": Path(lines[1]), "stash_log": Path(lines[2])}
+                           if len(lines) == 3 else None)
+    return _GIT_PATHS[key]
+
+
+def _stat_of(path: Path):
+    try:
+        info = path.stat()
+        return (info.st_size, info.st_mtime_ns, info.st_ino)
+    except OSError:
+        return None
+
+
+def _git_state(repo: Path) -> dict | None:
+    """What a commit, reset, checkout, stash or `git add` would change: the index (its bytes, read once;
+    usually under a megabyte) and the reflogs of HEAD and the stash."""
+    paths = _git_paths(repo)
+    if paths is None:
+        return None
+    try:
+        index = paths["index"].read_bytes() if (_stat_of(paths["index"]) or (0,))[0] <= 64 * 1024 * 1024 else None
+    except OSError:
+        index = None
+    return {"index": index, "index_stat": _stat_of(paths["index"]),
+            "head_log": _stat_of(paths["head_log"]), "stash_log": _stat_of(paths["stash_log"])}
+
+
+def _git_moved(repo: Path, before: dict) -> bool:
+    """Did the command move HEAD, change the index's entries or the stash? A rewritten index whose
+    entries are the same (a refresh of its file times) is not a change."""
+    paths = _git_paths(repo)
+    if paths is None:
+        return False
+    if _stat_of(paths["head_log"]) != before.get("head_log") or _stat_of(paths["stash_log"]) != before.get("stash_log"):
+        return True
+    if _stat_of(paths["index"]) == before.get("index_stat"):
+        return False
+    try:
+        now = paths["index"].read_bytes()
+    except OSError:
+        return before.get("index") is not None
+    old = before.get("index")
+    if old is None:
+        return True
+    if now[-20:] == old[-20:] and now[-32:] == old[-32:]:
+        return False                           # the same checksum: the same index
+    import tempfile
+    from .worktree import _git_bytes, _run_git
+    folder = tempfile.mkdtemp(prefix="dgc-index-before-")
+    try:
+        copy = Path(folder) / "index"
+        copy.write_bytes(old)
+        entries = []
+        for env in ({"GIT_INDEX_FILE": str(copy)}, None):
+            result = _run_git(["ls-files", "--stage", "-z"], repo, timeout=30.0, max_stdout=64 * 1024 * 1024,
+                              text=False, read_only=True, extra_env=env)
+            if result.returncode != 0:
+                return True
+            entries.append(result.stdout)
+        return entries[0] != entries[1]
+    finally:
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def _repo_of(agent) -> tuple[Path, Path] | None:
     """(the Git checkout, the project inside it) for this agent, asked once."""
     cached = agent.__dict__.get("_command_watch_repo")
@@ -351,6 +444,11 @@ class Watch:
         self.exclude: _Mark | None = None
         self.cost_s = 0.0
         self.ended: float | None = None
+        self.branch = ""
+        self.copies: dict[str, tuple] = {}       # path -> (kind, bytes, mode): exact state before the command
+        self.limits: dict[str, str] = {}         # path -> the limit that kept it from being copied
+        self.copied_new = 0                      # bytes copied now (not already in the store)
+        self.git_before: dict | None = None
         # What this look recorded, so a save the editor reports late can take it back:
         # (kind, path, point, snapshot, left before, mode before, row before).
         self.records: list[tuple] = []
@@ -358,17 +456,17 @@ class Watch:
     # ---------------------------------------------------------------- before ---
     def begin(self) -> None:
         clock = time.monotonic()
-        small, own = [_HASH_BUDGET], [_HASH_OWN_BUDGET]
+        own = [_HASH_OWN_BUDGET]
         if self.git is not None:
             repo, project = self.git
             looked = _status(repo, str(project) if project != Path(".") else ".", _index_of(repo))
             if time.monotonic() - clock > _SLOW_S:
                 self.agent.__dict__["_command_watch_git_off"] = True
             if looked is not None:
-                self.head, self.listed = looked
-                for repo_path in self.listed:
-                    self.before[str(repo / repo_path)] = _mark(repo / repo_path, small, _HASH_SMALL)
+                self.head, self.listed, self.branch = looked
+                self._copy_dirty(repo)
                 self.exclude = _mark(repo / ".git" / "info" / "exclude", [0], 0)
+                self.git_before = _git_state(repo)
         # Every file a point holds DGC's before-state for: a command that changes one of those is
         # DGC's own doing, and the guard must not take it for somebody else's. The turn's own files are
         # read (to compare with what DGC left); an earlier turn's, only looked at.
@@ -380,6 +478,71 @@ class Watch:
             if path not in self.before:
                 self.before[path] = _mark(Path(path), [0], 0)
         self.cost_s += time.monotonic() - clock
+
+    def _copy_dirty(self, repo: Path) -> None:
+        """Copy every file Git lists as changed or untracked, as it is before the command: its bytes, its
+        mode, or its absence. Content-addressed: bytes already in the store are not copied again."""
+        store: dict[str, bytes] = self.agent.__dict__.setdefault("_command_copies", {})
+        kept: dict[str, bytes] = {}
+        manager = self.manager
+        from .checkpoints import _MAX_SNAPSHOT_BYTES
+        room = max(0, _MAX_SNAPSHOT_BYTES - int(getattr(manager, "_snapshot_bytes_total", 0) or 0))
+        copied = 0
+        for repo_path in self.listed:
+            path = repo / repo_path
+            key = str(path)
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                self.before[key] = None
+                self.copies[key] = ("missing", b"", 0)
+                continue
+            except OSError:
+                self.before[key] = _Mark("other", -1, -1, -1, -1, None)
+                continue
+            mark = _Mark("other", info.st_size, info.st_mtime_ns, info.st_ino, stat.S_IMODE(info.st_mode), None)
+            if stat.S_ISLNK(info.st_mode):
+                try:
+                    data = os.fsencode(os.readlink(path))
+                except OSError:
+                    self.before[key] = mark
+                    continue
+                digest = hashlib.sha256(data).hexdigest()
+                self.before[key] = _Mark("symlink", info.st_size, info.st_mtime_ns, info.st_ino, 0o777, digest)
+                self.copies[key] = ("symlink", data, 0o777)
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                self.before[key] = mark
+                continue
+            limit = ("size" if info.st_size > _COPY_MAX_FILE else
+                     "count" if len(self.copies) >= _COPY_MAX_FILES else
+                     "budget" if copied + info.st_size > room else None)
+            if limit:
+                self.limits[key] = limit
+                self.before[key] = _Mark("file", info.st_size, info.st_mtime_ns, info.st_ino,
+                                         stat.S_IMODE(info.st_mode), None)
+                continue
+            try:
+                data = path.read_bytes()
+                again = path.lstat()
+            except OSError:
+                self.before[key] = mark
+                continue
+            if (again.st_size, again.st_mtime_ns, again.st_ino) != (info.st_size, info.st_mtime_ns, info.st_ino):
+                self.before[key] = _Mark("other", -1, -1, -1, -1, None)    # changing as it was read
+                continue
+            digest = hashlib.sha256(data).hexdigest()
+            if digest in store:
+                data = store[digest]                 # the same bytes: kept once, not copied again
+            else:
+                self.copied_new += len(data)
+            kept[digest] = data
+            copied += len(data)
+            self.before[key] = _Mark("file", info.st_size, info.st_mtime_ns, info.st_ino,
+                                     stat.S_IMODE(info.st_mode), digest)
+            self.copies[key] = ("file", data, stat.S_IMODE(info.st_mode))
+        store.clear()
+        store.update(kept)                       # what the files hold now; the rest is not needed again
 
     def _earlier(self, current: set) -> list[str]:
         seen: dict[str, None] = {}
@@ -405,6 +568,9 @@ class Watch:
             costs = self.agent.__dict__.setdefault("_command_watch_costs", [])
             costs.append(self.cost_s)
             del costs[:-200]
+            copied = self.agent.__dict__.setdefault("_command_watch_copied", [])
+            copied.append(self.copied_new)       # bytes copied before it that were not in the store yet
+            del copied[:-200]
 
     # What this look records, kept so a late save can take it back.
     def _before_note(self, path: str) -> tuple:
@@ -420,10 +586,10 @@ class Watch:
         self.records.append(("known", path, point, point["files"].get(path), *old, None))
         return True
 
-    def _command(self, path: str, status: str) -> None:
+    def _command(self, path: str, status: str, limit: str | None = None) -> None:
         point = self.manager.points[-1]
         prior = (point.get("commands") or {}).get(path)
-        if self.manager.note_command_change(path, status):
+        if self.manager.note_command_change(path, status, limit):
             self.records.append(("command", path, point, None, None, None, prior))
 
     def _renote(self, path: str) -> None:
@@ -499,11 +665,18 @@ class Watch:
         point_files = manager.points[-1]["files"]
         after: dict[str, str] = {}
         head_after = None
+        branch_after = None
         if self.git is not None and self.listed is not None:
             repo, project = self.git
             looked = _status(repo, str(project) if project != Path(".") else ".", _index_of(repo))
             if looked is not None:
-                head_after, after = looked
+                head_after, after, branch_after = looked
+        if self.git is not None and self.git_before is not None and self.listed is not None:
+            moved = ((head_after is not None and self.head is not None and head_after != self.head)
+                     or (branch_after is not None and branch_after != self.branch)
+                     or _git_moved(self.git[0], self.git_before))
+            if moved:
+                manager.note_git_moved()
         changed: list[str] = []
         clean: list[str] = []                  # repo paths Git did not list before: clean or absent
         # Files Git already listed before, and the files the points hold: compared with their marks.
@@ -556,7 +729,10 @@ class Watch:
             return
         status = "new" if mark is None else ("deleted" if not (target.exists() or target.is_symlink())
                                               else "modified")
-        self._command(path, status)
+        copy = self.copies.get(path)
+        if copy is not None and self._known(path, *copy):
+            return                             # its exact state before the command: Undo puts it back
+        self._command(path, status, self.limits.get(path))
         if mark is not None and mark.digest is not None and left is not None and mark.digest == left:
             # It held exactly what DGC left in an earlier turn: the change is DGC's own command's.
             self._renote(path)

@@ -2080,6 +2080,19 @@ conversation back to one of them.
   nothing converts it (no `autocrlf`, `eol`, `text` or `filter` setting for it, not marked
   skip-worktree). A file the turn's own tools already wrote stays DGC's work when a later command
   or formatter changes it.
+- **Your uncommitted work.** Before each of those commands DGC also copies every file with
+  uncommitted changes — tracked files Git sees as changed or deleted, and untracked files it does
+  not ignore — so a `git checkout .`, `git reset --hard`, `git clean -fd`, `git stash` or `rm` over
+  them is undone: Undo puts back each file the command changed exactly as it was just before it
+  (its bytes, its permissions, or the fact that it was deleted). A file whose bytes have not changed
+  since the last command is only re-read, not copied again, and only the copies a command's change
+  needs are kept, in the turn's point, saved and checked like every other snapshot. A file over
+  5 MB, past 500 in one command, or past the session's 128 MB of snapshots is not copied: the card
+  lists it as *Changed by a command — Undo leaves it*, and its tooltip says which limit applied.
+- **Undo never touches Git itself.** It rewrites file contents and nothing else: not the staging
+  area, HEAD, a branch, a stash or a commit. When one of the undone turns' commands committed,
+  reset, checked out a branch or stashed, Undo's question says *Your files are put back; Git's
+  commits, branches, stashes and staging are left as they are.*, and so does its last line.
 - **Your own saves are yours.** Which change is the command's is told by when it happened: during
   the command. In the editor DGC also hears every file you save in the chat's folders, so a file you
   save while a command runs (a long test run, say) is never taken for the command's: it is not put
@@ -2159,10 +2172,10 @@ offers it under a finished answer.
 
 ## What is not rewindable
 
-- **Some of what commands change.** A file a command changed that already had uncommitted
-  changes, one Git does not track, one Git converts, and anything Git ignores (`node_modules`,
-  build output) or outside the project has no exact earlier copy, so Undo leaves it; the Edited
-  card names the ones Git can see. A background shell is looked at only as it starts. MCP tools,
+- **Some of what commands change.** A file Git converts, one over the copy limits above, and
+  anything Git ignores (`node_modules`, build output) or outside the project has no exact earlier
+  copy, so Undo leaves it; the Edited card names the ones Git can see. Git's own state (staging,
+  HEAD, branches, stashes, commits) is never undone. A background shell is not watched. MCP tools,
   `save_memory` (your project's `DGC.md`) and `add_skill` are never snapshotted. A file a command
   changed and a file tool then wrote comes back to its state before the turn when the command's
   change could be put in the point (a clean file), and otherwise to the state the file tool found

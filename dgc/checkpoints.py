@@ -96,6 +96,7 @@ class CheckpointManager:
         self.last_rewind_reasons: dict[str, str] = {}
         self.last_rewind_error = ""                  # why the last rewind refused, when not a conflict
         self.last_rewind_left: list[str] = []        # files commands changed in the rewound turns
+        self.last_rewind_git = False                 # a command in those turns moved HEAD, the index or a stash
         self.project_root = (Path(project_root).resolve(strict=False) if project_root is not None
                              else None)
         self._on_change = on_change
@@ -576,13 +577,15 @@ class CheckpointManager:
         else:
             self._left_modes[key] = mode
 
-    def note_command_change(self, path: str, status: str) -> bool:
+    def note_command_change(self, path: str, status: str, limit: str | None = None) -> bool:
         """A file one of this chat's commands changed that Undo cannot put back.
 
-        There is no exact earlier state for it (it had uncommitted changes, it is not tracked, Git
-        converts it, or the turn's limits are spent), so the point cannot restore it. It is kept so the
-        turn's Edited card can say so ("Changed by a command — Undo leaves it") and so can Undo.
-        `status` is what it is now against before the command: new, modified or deleted."""
+        There is no exact earlier state for it (Git converts it, an ignore rule changed with it, or a
+        limit kept DGC from copying it first), so the point cannot restore it. It is kept so the turn's
+        Edited card can say so ("Changed by a command — Undo leaves it") and so can Undo. `status` is
+        what it is now against before the command: new, modified or deleted. `limit`: which limit kept
+        DGC from copying it ("size" over 5 MB, "count" past 500 files in one command, "budget" the
+        session's copies used up), so the card can say which."""
         if (self._pending_rewind is not None or not self.points
                 or status not in ("new", "modified", "deleted")):
             return False
@@ -600,9 +603,21 @@ class CheckpointManager:
             changed[path] = "modified"
         else:
             changed[path] = status
+        if limit in ("size", "count", "budget") and path in changed:
+            point.setdefault("command_limits", {})[path] = limit
         if changed.get(path) != prior:
             self._notify()
         return True
+
+    def note_git_moved(self) -> None:
+        """One of this turn's commands moved HEAD, changed the index or a stash: Undo puts the files back
+        and leaves Git's commits, branches, stashes and staging as they are, and its question says so."""
+        if self.points and not self.points[-1].get("git_moved"):
+            self.points[-1]["git_moved"] = True
+            self._notify()
+
+    def git_moved_since(self, start: int) -> bool:
+        return any(point.get("git_moved") for point in list(self.points[max(0, start):]))
 
     def capture_touched_workspace(self) -> WorkspaceSnapshot | None:
         """Capture exact current state for project paths touched in the active turn.
@@ -777,11 +792,17 @@ class CheckpointManager:
                 row["by_command"] = True       # Undo puts back Git's copy of it: a command changed it
             rows.append(row)
         if commands:
+            limits: dict[str, str] = {}
+            for point in list(self.points[start:]):
+                limits.update(point.get("command_limits") or {})
             for path, status in self._command_changes(start, earliest).items():
                 total += 1
                 if len(rows) < limit:
-                    rows.append({"path": path, "additions": 0, "deletions": 0, "counted": False,
-                                 "status": status, "command": True})
+                    row = {"path": path, "additions": 0, "deletions": 0, "counted": False,
+                           "status": status, "command": True}
+                    if limits.get(path) in ("size", "count", "budget"):
+                        row["limit"] = limits[path]
+                    rows.append(row)
         return rows, total
 
     def _command_changes(self, start: int, restored) -> dict[str, str]:
@@ -864,6 +885,7 @@ class CheckpointManager:
         `last_rewind_reasons` why), or `last_rewind_error` says what else stopped it."""
         self.last_rewind_error = ""
         self.last_rewind_left = []
+        self.last_rewind_git = False
         if self._pending_rewind is not None:
             self.last_rewind_error = "another Undo of this chat is still being applied"
             return (-1, 0, None)
@@ -967,6 +989,7 @@ class CheckpointManager:
             except OSError:
                 continue
         self.last_rewind_left = list(self._command_changes(idx, restore))
+        self.last_rewind_git = self.git_moved_since(idx)
         # What DGC put back is now what DGC last left there: a second Undo right after this one
         # must not take DGC's own restore for somebody else's edit.
         old_left = {path: (self._left.get(path), self._left_modes.get(path)) for path in applied}
@@ -1126,6 +1149,15 @@ class CheckpointManager:
                          if (relative := self._lexical_project_path(path)) in files]
             if commanded:
                 durable["by_command"] = commanded
+            limits = {}
+            for path, limit in (point.get("command_limits") or {}).items():
+                relative = self._lexical_project_path(path)
+                if relative in commands and limit in ("size", "count", "budget"):
+                    limits[relative] = limit
+            if limits:
+                durable["command_limits"] = limits
+            if point.get("git_moved"):
+                durable["git_moved"] = True
             if outside:
                 durable["outside"] = outside
             if commands:
@@ -1280,8 +1312,11 @@ class CheckpointManager:
         commands = raw_point.get("commands", {})
         made = raw_point.get("made_dirs", [])
         commanded = raw_point.get("by_command", [])
+        limits = raw_point.get("command_limits", {})
+        git_moved = raw_point.get("git_moved", False)
         if (not isinstance(outside, dict) or not isinstance(commands, dict) or not isinstance(made, list)
-                or not isinstance(commanded, list)
+                or not isinstance(commanded, list) or not isinstance(limits, dict)
+                or git_moved not in (True, False) or len(limits) > _MAX_FILES_PER_POINT
                 or len(outside) > _MAX_FILES_PER_POINT or len(commands) > _MAX_FILES_PER_POINT
                 or len(made) > _MAX_FILES_PER_POINT or len(commanded) > _MAX_FILES_PER_POINT):
             return None
@@ -1316,4 +1351,14 @@ class CheckpointManager:
             extras["made_dirs"] = folders
         if by_command:
             extras["by_command"] = by_command
+        command_limits = {}
+        for relative, limit in limits.items():
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if path is None or str(path) not in changed or limit not in ("size", "count", "budget"):
+                return None
+            command_limits[str(path)] = limit
+        if command_limits:
+            extras["command_limits"] = command_limits
+        if git_moved:
+            extras["git_moved"] = True
         return extras
