@@ -132,6 +132,34 @@ test("custom tool runs in the host process", async () => {
   }
 });
 
+test("resume of a session another DGC has open is refused, naming that; once it lets go, it resumes", async () => {
+  // One DGC writes to a session at a time, idle or not (0.48): a session still open in another process (here this
+  // client's own first session) is never written behind it.
+  const { server, baseUrl } = await startModel("text");
+  const work = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-work-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-state-"));
+  writeFileSync(join(work, "README.md"), "empty cart checkout\n");
+  const dgc = new DGC({
+    stateDir, model: "sdk-model", baseUrl, apiKey: "sk-local",
+    runtime: [process.env.DGC_PYTHON || join(ROOT, ".venv/bin/python"), "-m", "dgc", "serve"],
+  });
+  try {
+    const session = await dgc.session({ cwd: work, permissions: { mode: "plan", unhandled: "deny" } });
+    assert.equal((await session.run("Summarize README. Do not edit files.", { timeoutMs: 60_000 })).status, "completed");
+    const sessionId = session.sessionId;
+    await assert.rejects(dgc.resume({ sessionId, cwd: work, permissions: { mode: "plan", unhandled: "deny" } }),
+      (error) => error.name === "DGCConfigError" && /This session is open in another DGC process/.test(error.message));
+    await session.close();
+    const restored = await dgc.resume({ sessionId, cwd: work, permissions: { mode: "plan", unhandled: "deny" } });
+    assert.equal(restored.sessionId, sessionId);
+  } finally {
+    await dgc.close();
+    server.close();
+    rmSync(work, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("resume runs in the mode it asked for, and its replay never reaches the first run", async () => {
   // DGC 0.47.0 reopens a transcript in the mode it last ran in when that asks no less than the
   // mode it replaces: a session saved in plan and resumed asking for auto ran in plan.

@@ -712,6 +712,11 @@ class SdkTests(unittest.TestCase):
         with self._client() as dgc:
             first = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
             first.run("Summarize README. Do not edit files.", timeout=60)
+            # One DGC writes to a session at a time: while `first` has it open, a resume is refused, naming that.
+            with self.assertRaises(DGCConfigError) as refused:
+                dgc.resume(first.session_id, cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
+            self.assertIn("This session is open in another DGC process", str(refused.exception))
+            first.close()
             restored = dgc.resume(
                 first.session_id, cwd=self.work,
                 permissions={"mode": "auto", "unhandled": "deny"},
@@ -1249,6 +1254,7 @@ class SessionFixTests(unittest.TestCase):
             theirs = {row.get("run_id") for row in dgc.export_audit(first.session_id)}
             self.assertIn(result.run_id, mine)
             self.assertNotIn(result.run_id, theirs)
+            second.close()                       # one DGC writes to a session at a time: let it go first
             restored = dgc.resume(own, cwd=self.work,
                                   permissions={"mode": "auto", "unhandled": "deny"})
             blob = json.dumps(restored.history()).lower()
