@@ -2059,16 +2059,16 @@ A helper in a Git project never changes your checkout itself: its changes reach 
 integrates its copy. Three things keep that true:
 
 - **Its brief names its copy.** Wherever the brief names your project folder (as a whole path:
-  `/home/you/app/src/a.py`, not `/home/you/app2`), the helper reads its own copy's folder. Its
+  `/work/app/src/a.py`, not `/work/app2`), the helper reads its own copy's folder. Its
   instructions say where its copy is and that your checkout is not its to change. The same holds
   for a message sent to a running helper, and for a helper's own helper.
 - **DGC's file tools refuse a write into your checkout** from a helper, before any approval is
-  asked: *"not changed: /home/you/app/billing.py is in the user's checkout, which is not yours to
+  asked: *"not changed: /work/app/billing.py is in the user's checkout, which is not yours to
   change; make this edit in your own copy instead, at …/billing.py."* `..` and links are followed
   to where they really write. A folder you share into helpers' copies (`subagent_link_paths`)
   stays writable, as you chose.
 - **The report names what a shell command changed.** A command such as
-  `cd /home/you/app && sed -i …` cannot be fenced, so when the helper ends DGC compares your
+  `cd /work/app && sed -i …` cannot be fenced, so when the helper ends DGC compares your
   checkout with how it was when the helper started — Git's changed and new files against the same
   commit, and the exact bytes of any file you had already changed — and leaves out what DGC itself
   wrote there. A file that changed while one of the helper's own commands ran (and no other
