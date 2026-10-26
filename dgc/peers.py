@@ -378,12 +378,22 @@ REFUSED_ON_SCREEN = "its editor window is on screen"
 REFUSED_STILL_CONNECTED = "its editor window is still connected"
 
 
+def session_key(path) -> str:
+    """One spelling of a session file, however a process reached it.
+
+    Two DGCs can name one file two ways: macOS reaches /tmp and /var through symlinks (/private/tmp,
+    /private/var), and a home folder can be a symlink too. Compared as written, a terminal's Open here then
+    asked a window for "another" session and the window never let go. The resolved real path is the file's
+    identity; a part of it that does not exist yet is kept as written."""
+    return os.path.normcase(os.path.realpath(os.path.expanduser(str(path))))
+
+
 def _same_session(record: dict, session: str) -> bool:
     """Whether the note -- or any chat it lists -- holds this session."""
     if not session:
         return False
-    return any(place.get("session")
-               and os.path.normpath(str(place["session"])) == os.path.normpath(session)
+    want = session_key(session)
+    return any(place.get("session") and session_key(place["session"]) == want
                for place in _places(record))
 
 
@@ -419,7 +429,7 @@ def describe_holder(record: dict, session: str = "") -> str:
     second chat, or a background /new DIR agent, held the session."""
     place = next((item for item in _places(record)[1:]
                   if session and item.get("session")
-                  and os.path.normpath(str(item["session"])) == os.path.normpath(session)), record)
+                  and session_key(item["session"]) == session_key(session)), record)
     pid = record.get("pid")
     kind = str(record.get("kind") or "")
     where = str(place.get("cwd") or place.get("project_root") or "")

@@ -1491,9 +1491,10 @@ _OWNED_GUARD = threading.Lock()
 
 
 def _owner_key(path) -> str:
-    """One spelling per session file, to tell whether the session held is the one open now."""
-    import os
-    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+    """One spelling per session file, to tell whether the session held is the one open now: its resolved real
+    path, so a session reached through a symlinked folder (macOS /tmp, a linked home) is the same session."""
+    from .peers import session_key
+    return session_key(path)
 
 
 _HELD_SESSION_REMEDY = (
