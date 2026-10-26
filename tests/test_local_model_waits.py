@@ -257,6 +257,26 @@ class LocalWaitCase(unittest.TestCase):
         client.stall_listener = events
         return client, events
 
+    def record_watches(self) -> list:
+        """The watches this test's requests start, to wait (in real time) for what their server first said."""
+        watches: list = []
+        start = llm_module.RequestWatch
+
+        def recording(*args, **kwargs):
+            watch = start(*args, **kwargs)
+            watches.append(watch)
+            return watch
+        patcher = mock.patch.object(llm_module, "RequestWatch", recording)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return watches
+
+    @staticmethod
+    def first_answer(watches) -> None:
+        """An Ollama server is asked at once, and in real time answers long before any notice or deadline. The
+        fake clock runs 1,000 times faster: wait for that answer before moving it (a slow runner answered late)."""
+        wait_until(lambda: watches and watches[-1].verdict, what="the server's first answer")
+
     def chat_in_background(self, client, cancel=None):
         def run():
             try:
@@ -287,9 +307,11 @@ class LocalWaitCase(unittest.TestCase):
 class WorkingLocalServerTests(LocalWaitCase):
     def test_a_first_token_after_the_old_900s_limit_is_waited_for_and_never_re_sent(self):
         self.stub.get_routes["/api/ps"] = ollama_ps("big-local:latest")
+        watches = self.record_watches()
         client, events = self.client()
         thread = self.chat_in_background(client)
         wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        self.first_answer(watches)
         self.clock.advance(1500)            # 25 minutes of prefill, past 900 s (and 1200 s)
         self.assertNotResent()
         result = self.finish(thread)
@@ -317,9 +339,11 @@ class WorkingLocalServerTests(LocalWaitCase):
         loaded = threading.Event()
         self.stub.get_routes["/api/ps"] = lambda: (
             200, {"models": [{"name": "big-local:latest"}] if loaded.is_set() else []}, "application/json")
+        watches = self.record_watches()
         client, events = self.client()
         thread = self.chat_in_background(client)
         wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        self.first_answer(watches)
         self.clock.advance(2400)            # 40 minutes loading from a slow disk
         self.assertTrue(events.of("notice"), "no loading notice")
         self.assertEqual(events.of("notice")[0].phase, "loading")
@@ -333,9 +357,11 @@ class WorkingLocalServerTests(LocalWaitCase):
         loaded = threading.Event()
         self.stub.get_routes["/api/ps"] = lambda: (
             200, {"models": [{"name": "big-local:latest"}] if loaded.is_set() else []}, "application/json")
+        watches = self.record_watches()
         client, events = self.client()                      # the notice threshold stays 45 s
         thread = self.chat_in_background(client)
         wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        self.first_answer(watches)
         self.clock.advance(20, step=1.0)
         wait_until(lambda: events.of("notice"), timeout=5, what="the loading notice")
         self.assertEqual([e.phase for e in events.of("notice")], ["loading"])
@@ -408,9 +434,11 @@ class ResendTests(LocalWaitCase):
         listed.set()
         self.stub.get_routes["/api/ps"] = lambda: (
             200, {"models": [{"name": "big-local:latest"}] if listed.is_set() else []}, "application/json")
+        watches = self.record_watches()
         client, events = self.client()
         thread = self.chat_in_background(client)
         wait_until(lambda: self.stub.chat_posts(), what="the request to arrive")
+        self.first_answer(watches)
         self.clock.advance(300)
         self.assertEqual(len(self.stub.chat_posts()), 1)
         listed.clear()                      # the model went away (crashed, or unloaded)

@@ -311,6 +311,9 @@ class RunTests(AgentCase):
     def test_stopping_the_chats_background_work_stops_it(self):
         agent = self.make_agent(ultra=True, ui=Recorder())
         agent.on_detached_ended = lambda notice: None
+        # Two at a time, so what runs when it is stopped is known: as wide as the troupe (Ultra runs 8), all 8 could
+        # start before the stop on a slow machine (GitHub's ubuntu runner, 26 Oct 2026).
+        agent.config.data["max_parallel_tasks"] = 2
         gate = threading.Event()
         started = threading.Event()
 
@@ -328,7 +331,7 @@ class RunTests(AgentCase):
             agent._troupes[run_id].join(20)
         record = agent._troupes[run_id]
         self.assertEqual((record.state, record.stop_reason), ("stopped", "stopped by the user"))
-        self.assertLess(len(calls), 8, "nothing more started once it was stopped")
+        self.assertLessEqual(len(calls), 2, "nothing more started once it was stopped (two were running)")
         self.assertIn(run_id, troupe_agent.command_text(agent, ""))
 
     def test_a_bad_work_order_is_refused_with_what_to_change(self):

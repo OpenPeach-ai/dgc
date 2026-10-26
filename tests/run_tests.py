@@ -19997,6 +19997,22 @@ def test_sdk_session_key_file():
         _shutil.rmtree(key_dir, ignore_errors=True)
 
 
+UNIT_CHILD = """
+import sys, unittest, warnings
+
+def show(message, category, filename, lineno, file=None, line=None):
+    stream = file if file is not None else sys.__stderr__
+    try:
+        stream.write(warnings.formatwarning(message, category, filename, lineno, line))
+    except (AttributeError, OSError, ValueError):
+        pass
+
+warnings.showwarning = show
+sys.argv[0] = "python -m unittest"
+unittest.main(module=None)
+"""
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -20007,8 +20023,12 @@ def main():
         # test never shut down) piled up past descriptor 1024, and prompt_toolkit's input, which waits with
         # select(), then failed the real-terminal checks that run later here ("filedescriptor out of range in
         # select()", measured 2026-10-24: 734 open, the highest 1151). A child's leftovers go when it exits.
+        # Its warnings go to the process's own stderr. unittest shows them, and Python 3.13 warns of every sqlite
+        # connection the collector finds unclosed: written to sys.stderr, such a warning landed in whatever stderr a
+        # test had redirected at that moment, and a CLI test then read a warning where it expected its JSON error
+        # (GitHub's ubuntu 3.13 runner, 26 Oct 2026). Shown as before, only never inside a test's capture.
         import re
-        child = subprocess.Popen([sys.executable, "-m", "unittest", "discover", "-s", str(PROJECT / "tests"),
+        child = subprocess.Popen([sys.executable, "-c", UNIT_CHILD, "discover", "-s", str(PROJECT / "tests"),
                                   "-p", "test_*.py"], cwd=str(PROJECT), stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, errors="replace")
         ran = 0
