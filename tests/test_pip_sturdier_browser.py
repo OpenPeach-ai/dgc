@@ -412,9 +412,14 @@ class SturdierBrowserTests(unittest.TestCase):
     def test_careful_mode_asks_before_a_new_tab_on_a_new_site(self):
         self.host.end()
         self.host.begin(self.run_row["id"], self.frames, careful=True, sites=())
+        before = {tab["target"] for tab in self.host.browser.tab_list()}
         said = self.act("tabs", action="open", url=self.url + "/spec")
         self.assertIn(f"Held: {TEST_HOST} is new for this user", said)
-        self.assertEqual(len(self.host.browser.tab_list()), 1, "no tab opened")
+        # No tab opened: none that wasn't there before, and none on the held page. Not a count: on a loaded runner
+        # Chrome's own first tab can still be closing, and was counted as a second one.
+        after = self.host.browser.tab_list()
+        self.assertLessEqual({tab["target"] for tab in after}, before, f"no tab opened: {after}")
+        self.assertFalse([tab for tab in after if tab["url"].endswith("/spec")], f"the held page never opened: {after}")
 
 
 if __name__ == "__main__":
