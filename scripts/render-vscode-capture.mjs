@@ -651,9 +651,21 @@ async function main() {
       .waitFor({ state: "visible", timeout: 10_000 });
     await commandPalette(page, "DGC: Focus Chat");
     let frame = await webviewFrame(page);
-    await frame.locator("#goalbar").waitFor({ state: "visible", timeout: 12_000 });
-    await frame.getByRole("button", { name: "Expand and edit goal: Ship a verified bounds fix" })
-      .waitFor({ state: "visible" });
+    // The standing goal shows as its own row when it is the only thing in the rail, and as a chip on the rail's one
+    // line once anything else is there too (0.48: "the rail as one line of chips"); the chip names the goal.
+    const goalShown = await waitFor(async () => {
+      if (await frame.locator("#goalbar").isVisible()) return "row";
+      const chip = frame.locator('.rail-chip[data-kind="goal"]');
+      if (await chip.isVisible()
+          && /^Goal, pursuing: Ship a verified bounds fix/.test(await chip.getAttribute("aria-label") || "")) {
+        return "chip";
+      }
+      return "";
+    }, "the standing goal is not shown in the rail", 12_000);
+    if (goalShown === "row") {
+      await frame.getByRole("button", { name: "Expand and edit goal: Ship a verified bounds fix" })
+        .waitFor({ state: "visible" });
+    }
 
     const sidebar = page.locator(".part.sidebar.right");
     if (await sidebar.count()) {
