@@ -352,7 +352,12 @@ class LiveBrowserTests(unittest.TestCase):
         except browser.BrowserError as error:
             if "cannot start its sandbox" in str(error):
                 self.skipTest(f"neither Chrome's sandbox nor bubblewrap runs here: {error}"[:200])
-            raise
+            if "still starting after" not in str(error):
+                raise
+            # Slow, not broken (a loaded CI runner took more than 25 s once): DGC's message says to try again, and
+            # so does the test, once.
+            session = browser.BrowserSession(binary)
+            session.start()
         profile = session._profile
         try:
             try:

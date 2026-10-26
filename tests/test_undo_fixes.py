@@ -1450,21 +1450,25 @@ class TerminalHearsTheWindowsSavesTests(CommandHelpers, HarnessCase):
         heard = []
 
         def person():
-            time.sleep(0.8)
-            readme.write_text("# Billing\n\nSaved in VS Code.\n")
-            send({"type": "user_saved", "paths": [str(readme)], "at": time.time()})       # what the extension sends
-            send({"type": "list_checkpoints", "request_id": "sync"})
-            heard.append(wait(lambda f: f.get("type") == "checkpoints" and f.get("request_id") == "sync"))
-            # The window answers in order, so its answer means the save is in the terminal's inbox: only now may the
-            # command end. A fixed 3 s left a slow runner's window still passing the save on when it ended.
-            (root / ".git" / "dgc-person-saved").touch()
+            try:
+                time.sleep(0.8)
+                readme.write_text("# Billing\n\nSaved in VS Code.\n")
+                send({"type": "user_saved", "paths": [str(readme)], "at": time.time()})       # what the extension sends
+                send({"type": "list_checkpoints", "request_id": "sync"})
+                heard.append(wait(lambda f: f.get("type") == "checkpoints" and f.get("request_id") == "sync",
+                                  timeout=100))                  # inside the bash tool's own 120 s
+            finally:
+                # The window answers in order, so its answer means the save is in the terminal's inbox: only now may
+                # the command end. A fixed 3 s, then a 30 s cap on the command's wait, each left a loaded runner's
+                # window still passing the save on when the command ended; the wait now ends only here.
+                (root / ".git" / "dgc-person-saved").touch()
         worker = threading.Thread(target=person, daemon=True)
 
         def route(messages, results, cancel):
             if not results:
                 worker.start()
                 return ChatResult(tool_calls=[ToolCall("b1", "bash", {
-                    "command": "for i in $(seq 300); do [ -e .git/dgc-person-saved ] && break; sleep 0.1; done; "
+                    "command": "until [ -e .git/dgc-person-saved ]; do sleep 0.1; done; "
                                "perl -pi -e 's/0.05/0.07/' rates.py"})])
             return ChatResult(content="Done.")
         self.assertTrue(h.run("long command", [("long command", route)]))
