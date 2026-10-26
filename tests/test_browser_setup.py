@@ -354,7 +354,15 @@ class LiveBrowserTests(unittest.TestCase):
             raise
         profile = session._profile
         try:
-            self.assertEqual(session.navigate(f"http://127.0.0.1:{server.server_address[1]}/"), "loaded")
+            try:
+                loaded = session.navigate(f"http://127.0.0.1:{server.server_address[1]}/")
+            except Exception as error:                   # say what the browser said, where only a CI runner fails
+                try:
+                    log = Path(profile, "launch.log").read_text(errors="replace")[-3000:]
+                except OSError:
+                    log = "(no launch log)"
+                raise AssertionError(f"{binary}: {error!r}\nlaunch.log:\n{log}") from error
+            self.assertEqual(loaded, "loaded")
             lines = session.snapshot()["lines"]
             self.assertIn('- heading level=1 "25:00" [e1]', lines)
             self.assertIn('- button "Start" [e2]', lines)

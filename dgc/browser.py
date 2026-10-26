@@ -591,6 +591,10 @@ class BrowserSession:
         ]
         if not sandbox:
             flags.append("--no-sandbox")
+        if sys.platform == "darwin":
+            # A throwaway profile has nothing for the Keychain to protect, and asking it can wait on a locked
+            # login keychain forever (no window to unlock it in): the first navigation then never answers.
+            flags.append("--use-mock-keychain")
         flags.append("about:blank")
         return flags
 

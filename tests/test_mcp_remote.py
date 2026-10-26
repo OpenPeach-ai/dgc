@@ -499,7 +499,8 @@ class RemoteClientTests(unittest.TestCase):
         with patch.object(mcp_remote, "CLIENT_METADATA_URL", self.vendor.base + "/dgc-client.json"), \
                 patch.object(mcp_remote, "CLIENT_METADATA_PORT", port), patch.dict(mcp_remote._document_checked, clear=True):
             server = self.server(auth=self.browser)
-            self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics))
+            self.assertTrue(server.start(timeout=30), (server.error, server.diagnostics, self.vendor.requests,
+                                                       self.browsers, self.vendor.authorize_params, port))
         query = self.vendor.authorize_params[0]
         self.assertEqual(query["client_id"], self.vendor.base + "/dgc-client.json", "DGC names itself by its document")
         self.assertEqual(query["redirect_uri"], f"http://127.0.0.1:{port}/oauth/callback", "the IP literal, the fixed port")

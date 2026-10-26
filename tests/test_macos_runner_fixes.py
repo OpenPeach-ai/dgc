@@ -5,6 +5,8 @@
    a TypeError. Without the filter, DGC checks what it would, member by member.
 2. The PDF worker's memory watchdog read an exiting worker's resident size a moment after macOS had dropped its
    task but before waitpid could reap it (ESRCH), and reported that the sandbox hid the worker.
+3. On a Mac whose login keychain is locked (a runner, a Pip running with the screen locked), the Chrome DGC starts
+   with a throwaway profile asked the Keychain for its storage key and its first navigation never answered.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dgc import documents, troupe_routines
+from dgc import browser, documents, troupe_routines
 from dgc.workspace_registry import RegistryError
 
 
@@ -136,6 +138,22 @@ class PdfWatchdogExitRaceTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "could not sample the worker"):
             documents._wait_pdf_worker(worker, denied)
         self.assertEqual(worker.waits, [])
+
+
+class ThrowawayChromeKeychainTests(unittest.TestCase):
+    def flags(self, platform):
+        session = browser.BrowserSession(Path("/x/chrome"))
+        self.addCleanup(session.close)
+        with mock.patch.object(sys, "platform", platform):
+            return session._flags(True)
+
+    def test_on_a_mac_the_throwaway_profile_never_asks_the_keychain(self):
+        flags = self.flags("darwin")
+        self.assertIn("--use-mock-keychain", flags)
+        self.assertEqual(flags[-1], "about:blank")
+
+    def test_elsewhere_nothing_changes(self):
+        self.assertNotIn("--use-mock-keychain", self.flags("linux"))
 
 
 if __name__ == "__main__":
