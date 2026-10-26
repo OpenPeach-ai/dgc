@@ -53,10 +53,12 @@ done
 "$PYTHON" -m py_compile scripts/edit_micro.py scripts/gen_edit_corpus.py scripts/generate-sbom.py scripts/release_bundle.py
 # A hung check must fail the release, not stall it. An unbounded stdin read once held a release
 # for hours with no output, because preflight runs with stdin inherited from whatever launched it.
+# The bound is a hang backstop, not a speed target: the 0.48 suite (7,279 unit tests plus the
+# harness) takes about 50 minutes on a GB10 and was stopped at the old 45-minute bound.
 if command -v timeout >/dev/null 2>&1; then
-  timeout --kill-after=60 2700 "$PYTHON" tests/run_tests.py < /dev/null || {
+  timeout --kill-after=60 5400 "$PYTHON" tests/run_tests.py < /dev/null || {
     status=$?
-    [ "$status" -eq 124 ] && echo "the test suite exceeded its 45-minute bound and was stopped" >&2
+    [ "$status" -eq 124 ] && echo "the test suite exceeded its 90-minute bound and was stopped" >&2
     exit "$status"
   }
 else
