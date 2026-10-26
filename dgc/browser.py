@@ -709,10 +709,20 @@ class BrowserSession:
                     self._proc.kill()
                 except OSError:
                     pass
+                try:
+                    self._proc.wait(timeout=2)
+                except Exception:                        # noqa: BLE001 -- best effort: the profile goes either way
+                    pass
             self._proc = None
         if self._profile:
-            shutil.rmtree(self._profile, ignore_errors=True)
-            self._profile = ""
+            profile, self._profile = self._profile, ""
+            # Chrome's helper processes can still be writing into its profile a moment after it ends: a single
+            # pass left a throwaway profile behind on a slow machine.
+            for _attempt in range(30):
+                shutil.rmtree(profile, ignore_errors=True)
+                if not os.path.exists(profile):
+                    break
+                time.sleep(0.1)
 
     def close(self) -> None:
         self._cleanup()
