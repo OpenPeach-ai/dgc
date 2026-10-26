@@ -148,7 +148,11 @@ class LocalPipsBridgeTests(unittest.TestCase):
         event = self.control()
         self.assertTrue(event["ok"])
         result = event["result"]
-        self.assertEqual(result["workspaces"][0]["id"], result["current_workspace_id"])
+        # Listed in the order they were made, to the millisecond: the editor's own personal workspace is made in the
+        # same call, so either can come first (a tie falls to their random ids). The current one is this project's.
+        listed = {w["id"]: w for w in result["workspaces"]}
+        self.assertIn(result["current_workspace_id"], listed)
+        self.assertNotEqual(listed[result["current_workspace_id"]]["kind"], "personal")
         with WorkspaceRegistry() as registry:
             binding = registry.binding(result["current_workspace_id"])
         self.assertEqual(binding["canonical_root"], str(self.config.project_root))

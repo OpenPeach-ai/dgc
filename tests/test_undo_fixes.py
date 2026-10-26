@@ -1455,13 +1455,17 @@ class TerminalHearsTheWindowsSavesTests(CommandHelpers, HarnessCase):
             send({"type": "user_saved", "paths": [str(readme)], "at": time.time()})       # what the extension sends
             send({"type": "list_checkpoints", "request_id": "sync"})
             heard.append(wait(lambda f: f.get("type") == "checkpoints" and f.get("request_id") == "sync"))
+            # The window answers in order, so its answer means the save is in the terminal's inbox: only now may the
+            # command end. A fixed 3 s left a slow runner's window still passing the save on when it ended.
+            (root / ".git" / "dgc-person-saved").touch()
         worker = threading.Thread(target=person, daemon=True)
 
         def route(messages, results, cancel):
             if not results:
                 worker.start()
                 return ChatResult(tool_calls=[ToolCall("b1", "bash", {
-                    "command": "sleep 3 && perl -pi -e 's/0.05/0.07/' rates.py"})])
+                    "command": "for i in $(seq 300); do [ -e .git/dgc-person-saved ] && break; sleep 0.1; done; "
+                               "perl -pi -e 's/0.05/0.07/' rates.py"})])
             return ChatResult(content="Done.")
         self.assertTrue(h.run("long command", [("long command", route)]))
         worker.join(30)
