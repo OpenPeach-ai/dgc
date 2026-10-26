@@ -887,6 +887,11 @@ class _ACPUi:
                                  if isinstance(p, dict) and p.get("type") == "text")
             else:
                 text = str(content or "")
+            from .agent_reports import markdown, parse_wake_prompt
+            woke = parse_wake_prompt(text) if role == "user" else None
+            if woke is not None:
+                # The editor's notice that a background agent finished is DGC's, never the person's words.
+                role, text = "assistant", markdown(woke)
             if text:
                 update = "user_message_chunk" if role == "user" else "agent_message_chunk"
                 self._update({"sessionUpdate": update, "content": {"type": "text", "text": text}})

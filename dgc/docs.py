@@ -1206,7 +1206,9 @@ folded, never a message from you. Open it (click it, or Enter or Space in the ed
 the terminal) for the child's whole report: what became of its changes (completed and integrated,
 partly integrated, or not integrated and where its worktree is kept), then what it said and the
 files it named. In the editor the report also has **Open in agent map**, which opens the map at that
-child's card. A reopened chat draws the same lines.
+child's card. A reopened chat draws the same lines, and so do the places that read a conversation
+back: `/export` and `/copy all` write it as DGC's line with the report under it, "Show earlier
+messages" shows it under DGC, and a compaction's summary never counts it as something you said.
 
 One `task` call can also start several helpers at once: `tasks` lists 2 to 8 of them, each with
 its own `description`, `prompt` and `agent`, and they start together (some models send one `task`

@@ -61,12 +61,56 @@ def parse_wake_prompt(content) -> dict | None:
     (a carried note or a goal's context can come before it)."""
     if not isinstance(content, str) or WAKE_HEAD not in content:
         return None
+    from .agent import _COMPACT_PREFIX
+    if content.startswith(_COMPACT_PREFIX):
+        # A compaction's brief, which before 0.48.3 quoted a wake notice among "the user's own messages":
+        # it is still the brief (a marker in every reader), never the notice.
+        return None
     match = _WAKE_RE.search(content)
     if match is None:
         return None
     body = match.group(4).strip()
     return {"id": match.group(1).strip(), "description": match.group(2).strip(),
             "integrated": match.group(3) == "yes", "message": "" if body == NO_SUMMARY else body}
+
+
+# ---- The same notice wherever a conversation is read back (0.48.3) ------------------------------------------
+# The live chat draws the editor's wake notice as the hand-back line, but every other reading of a saved
+# conversation -- the Markdown export and /copy (sessions.display_rows), the archive compaction keeps
+# (Agent._recall_rows, the recall sidecar), the editor's "Show earlier messages" page (get_recall), ACP replay,
+# the compaction brief and the rewind list -- saw a user-role message and showed DGC's notice as something the
+# person had typed ("you"). They read it with parse_wake_prompt too, and show it as DGC's.
+ROW = "agent_report"            # the display row's `who` (sessions.display_rows), beside "user" and "assistant"
+
+
+def display_row(notice: dict) -> dict:
+    """The display row ({who, body, tools}) for one wake notice. Its body is the notice in wake_prompt's own shape,
+    so a reader that redacts or bounds a row's body redacts and bounds the report with it, and row_notice reads it
+    back; nothing ever shows that body as it is."""
+    return {"who": ROW, "body": wake_prompt(notice), "tools": ""}
+
+
+def row_notice(row) -> dict:
+    """The notice an agent_report display row carries: as `report` (a row the terminal built from a live notice),
+    else read back from its body. A body that no longer reads back is still DGC's: an agent finished."""
+    report = row.get("report") if isinstance(row, dict) else None
+    if isinstance(report, dict):
+        return report
+    body = row.get("body") if isinstance(row, dict) else None
+    return parse_wake_prompt(body) or {"id": "", "description": "", "integrated": False, "message": ""}
+
+
+def label(notice: dict) -> str:
+    """The hand-back line's own words: "Woke on agent · <what it was asked>"."""
+    name = " ".join(str(notice.get("description") or notice.get("id") or "").split())[:MAX_DESCRIPTION]
+    return f"Woke on agent · {name or 'agent'}"
+
+
+def markdown(notice: dict) -> str:
+    """One finished agent's report for a reader with no line to open (an export, a page of the archive): DGC's
+    line, then what became of the agent's changes, then what the agent said."""
+    note, said = split_report(str(notice.get("message") or ""))
+    return "\n\n".join([f"_DGC · {label(notice)}_", *(part for part in (note, said) if part)])
 
 
 def notice_from_item(item) -> dict | None:

@@ -12,6 +12,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   current, and a model answered "Done overnight" two days later. The line now gives the goal a short name, the day it
   stopped and how long ago: `A goal finished on 24 Oct (2 days ago): "build the 8 ranked improvements for staff".
   Don't restart it unless the user asks.`
+- **A finished background agent's report is DGC's everywhere you read the chat back, never yours.** The chat already
+  shows it as one line, "Woke on agent · Review billing.py", that opens to the report. `/export`, `dgc export` and
+  `/copy all` quoted DGC's notice as a prompt you had typed, and so did "Show earlier messages" (under "you"), the
+  prompt rail, a chat reopened in an ACP editor and the rewind list. They now show the same line with the report under
+  it, also for conversations saved before this release (the rewind list for turns from now on), and a compaction's
+  summary no longer counts the notice among the things you said.
 
 ## 0.48.2 — 2026-10-27
 

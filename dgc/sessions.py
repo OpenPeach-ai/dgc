@@ -765,7 +765,8 @@ def display_rows(messages) -> list[dict]:
 
     The compaction wrapper and its canned acknowledgement are not turns and are skipped; tool
     results are omitted exactly as the transcript omits them. Shared by the recall archive, the
-    Markdown export and the clipboard, so every reader sees one shape.
+    Markdown export and the clipboard, so every reader sees one shape. The editor's notice that a background
+    agent finished is DGC's, never the person's: an ``agent_report`` row (agent_reports.display_row).
     """
     from .agent import _COMPACT_ACK, _COMPACT_PREFIX
     rows: list[dict] = []
@@ -787,10 +788,16 @@ def display_rows(messages) -> list[dict]:
             continue
         skip_ack = False
         if role == "user":
+            from .agent_reports import display_row, parse_wake_prompt
             from .editor_context import _strip_editor_context
             from .workflows import display_prompt, notice_kind
             if notice_kind(message):
                 continue                # command output DGC delivered; nobody typed it
+            woke = parse_wake_prompt(text)
+            if woke is not None:
+                # The editor's notice that a background agent finished: DGC's, never the person's words.
+                rows.append(display_row(woke))
+                continue
             text = display_prompt(_strip_editor_context(text))
             if text.startswith(_COMPACT_PREFIX):
                 skip_ack = True
@@ -827,6 +834,10 @@ def render_markdown_transcript(rows, *, title: str = "", model: str = "", sessio
         if row.get("who") == "user":
             out.append("> " + body.replace("\n", "\n> "))
             out.append("")
+        elif row.get("who") == "agent_report":
+            # DGC's notice that a background agent finished, as its line says it: never quoted as a prompt.
+            from .agent_reports import markdown, row_notice
+            out += [markdown(row_notice(row)), ""]
         else:
             if body:
                 out += [body, ""]
@@ -903,12 +914,16 @@ def _clean_recall_row(row, secrets) -> dict | None:
     if not isinstance(row, dict) or not set(row) <= _RECALL_ROW_KEYS:
         return None
     who = str(row.get("who") or "")
-    if who not in ("user", "assistant"):
+    if who not in ("user", "assistant", "agent_report"):
         return None
+    from .agent_reports import parse_wake_prompt
     from .redaction import bounded_redacted_view, redact_text
     secrets = tuple(secrets or ())
     body = bounded_redacted_view(redact_text(str(row.get("body") or ""), secrets),
                                  _MAX_RECALL_BODY_CHARS)
+    if who == "user" and parse_wake_prompt(body) is not None:
+        # Archived before 0.48.3 as the person's: the editor's notice that a background agent finished is DGC's.
+        who = "agent_report"
     tools = redact_text(str(row.get("tools") or ""), secrets)[:200]
     if not body and not tools:
         return None

@@ -7700,8 +7700,10 @@ class TUI:
                 # A finished background agent's report: its line, as it was drawn live.
                 blocks.extend(self._handback_block(report) for report in reports)
             elif who == "agent_report":
-                # The editor delivered this agent's report (dgc/agent_reports.py): the same line.
-                blocks.append(self._handback_block(row.get("report") or {}))
+                # The editor delivered this agent's report (dgc/agent_reports.py): the same line, from a
+                # live notice or from the archive compaction kept.
+                from .agent_reports import row_notice
+                blocks.append(self._handback_block(row_notice(row)))
             elif who in ("monitor_restart", "task_interrupted"):
                 # What happened to the chat's background work when it was opened again after DGC stopped.
                 blocks.append(self._rich(f"[{th.faint}]◉ {_esc(body[:600])}[/]"))

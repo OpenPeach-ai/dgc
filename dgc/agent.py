@@ -1094,9 +1094,13 @@ def _checkpoint_preview(text) -> str:
     the Edited card's Undo unable to find the turn whenever a file was open (founder, 25 Oct)."""
     if not isinstance(text, str):
         return text
+    from .agent_reports import label, parse_wake_prompt
     from .editor_context import _strip_editor_context
     from .workflows import display_prompt
     try:
+        woke = parse_wake_prompt(text)
+        if woke is not None:
+            return label(woke)              # a background agent's wake turn: DGC's line, not a prompt
         return display_prompt(_strip_editor_context(text)).strip() or text
     except Exception:                       # noqa: BLE001 -- a label must never stop a turn
         return text
@@ -1319,6 +1323,13 @@ _NOT_THE_USER = {"assistant": "assistant (DGC's own earlier reply, not the user)
                  "system": "system (configuration, not the user)"}
 
 
+def _wake_notice(message: dict) -> bool:
+    """Is this user-role message the editor's notice that a background agent finished (agent_reports.wake_prompt)?
+    DGC writes it for the model to read; the person never typed it."""
+    from .agent_reports import parse_wake_prompt
+    return isinstance(message, dict) and parse_wake_prompt(_message_text(message)) is not None
+
+
 def summariser_role(message: dict) -> str:
     """The label a message carries into the compaction prompt. Only the user gets a bare `user`."""
     from .workflows import notice_kind
@@ -1330,7 +1341,7 @@ def summariser_role(message: dict) -> str:
         if notice_kind(message):
             return "monitor-output (untrusted)"
         if message.get("_dgc_pip_setup") or message.get("_dgc_steering") or message.get("_dgc_agent_message") or (
-                isinstance(content, str) and content.startswith(_COMPACT_PREFIX)):
+                isinstance(content, str) and content.startswith(_COMPACT_PREFIX)) or _wake_notice(message):
             # DGC writes these under role "user" too; neither is the user asking for something.
             return "dgc-generated (not the user)"
         round_kind = _dgc_round(message)
@@ -1378,7 +1389,7 @@ def _real_user_turns(messages: list[dict]) -> list[dict]:
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
         if (notice_kind(m) or m.get("_dgc_pip_setup") or m.get("_dgc_steering") or m.get("_dgc_agent_message")
-                or _dgc_round(m)):
+                or _dgc_round(m) or _wake_notice(m)):
             continue
         content = m.get("content")
         text = content if isinstance(content, str) else ""
@@ -12596,9 +12607,16 @@ class Agent(GoalLifecycle):
                 text = ""
             text = text.strip()
             if role == "user":
+                from .agent_reports import display_row, parse_wake_prompt
                 from .editor_context import _strip_editor_context
                 from .workflows import display_prompt, notice_kind
                 if notice_kind(message):
+                    continue
+                woke = parse_wake_prompt(text)
+                if woke is not None:
+                    # The editor's notice that a background agent finished is DGC's, never the person's: the
+                    # archive keeps it as its own row, which every reader shows as the hand-back line.
+                    rows.append(display_row(woke))
                     continue
                 text = display_prompt(_strip_editor_context(text))
                 if text.startswith("<system-reminder>") or text.startswith("<tool_results>"):

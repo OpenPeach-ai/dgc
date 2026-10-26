@@ -162,6 +162,46 @@ class TuiAgentReportTests(unittest.TestCase):
         self.assertEqual(self.plain(ui._handback_frags(line)), "○ ▸ Woke on agent · Review billing.py")
         self.assertIn("completed and integrated", line["note"])
 
+    def editor_ran_and_compacted(self):
+        """A chat the editor ran whose wake turn a compaction folded into the archive (no model is asked)."""
+        import time
+        from dgc import sessions
+        prompt = wake_prompt({"id": "sub-0123456789ab", "description": "Review billing.py",
+                              "message": INTEGRATED, "integrated": True})
+        self.agent.session_file = sessions.new_path(self.config.project_root)
+        self.agent.messages += [{"role": "user", "content": "review billing in the background"},
+                                {"role": "assistant", "content": "Started a helper."},
+                                {"role": "user", "content": prompt},
+                                {"role": "assistant", "content": "The helper fixed the rounding."}]
+        for n in range(12):
+            self.agent.messages += [{"role": "user", "content": f"question {n}"},
+                                    {"role": "assistant", "content": f"answer {n}"}]
+        self.assertTrue(self.agent._persist())
+        self.assertTrue(self.agent.maybe_compact(force=True, deadline=time.monotonic(), notify=False))
+        self.assertFalse(any("A background specialist finished" in str(m.get("content"))
+                             for m in self.agent.messages[2:]))
+
+    def test_the_archive_after_a_compaction_draws_the_agents_line_not_a_prompt(self):
+        self.editor_ran_and_compacted()
+        ui = self.tui()                     # a reopened chat: its history is drawn as it opens
+        [seam] = [b for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "recall"]
+        ui._toggle_recall(seam)
+        users = [b["text"] for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "user"]
+        self.assertIn("review billing in the background", users)
+        self.assertFalse([text for text in users if "background specialist" in text],
+                         "DGC's notice drawn as a band someone typed")
+        [line] = self.lines(ui, ui.blocks)
+        self.assertEqual(self.plain(ui._handback_frags(line)), "○ ▸ Woke on agent · Review billing.py")
+        self.assertIn("completed and integrated", line["note"])
+
+    def test_copy_all_writes_the_wake_as_dgcs_line(self):
+        self.editor_ran_and_compacted()
+        ui = self.tui()
+        _label, text = ui._copy_target("all")
+        self.assertIn("> review billing in the background", text)
+        self.assertIn("_DGC · Woke on agent · Review billing.py_", text)
+        self.assertNotIn("A background specialist finished", text)
+
     def test_a_monitor_wake_keeps_its_band(self):
         ui = self.tui()
         sess = ui.active

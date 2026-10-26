@@ -7704,6 +7704,11 @@ class Backend:
                 body = str(row.get("body") or "")
                 if not body.strip():
                     continue
+                if who == "agent_report":
+                    # The editor's notice that a background agent finished: DGC's, so it is drawn as DGC's
+                    # (an archived page has no hand-back line to open), never under "you".
+                    from .agent_reports import markdown, row_notice
+                    body = markdown(row_notice(row))
                 item = {
                     "role": "user" if who == "user" else "assistant",
                     "text": body[:20_000],
