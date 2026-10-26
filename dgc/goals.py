@@ -111,6 +111,156 @@ def record_transition(details: dict, status: str, reason: str) -> None:
                           {"status": status, "at": time.time(), "reason": reason[:2000]}]
 
 
+# ---- The record a goal leaves once it stops standing (Agent.system_prompt, "# Goal record") ----------------
+# A goal that is no longer active stays in the system prompt as one line, so a compaction cannot make the model
+# start again on work the user has already had. The line used to quote the objective itself, cut and undated:
+#   'The session goal is completed: the "Improvements, ranked by impact for staff", i agree with your 8 points,
+#    lets build these. I am going to sleep now, so do this unnatended, overnight as your'
+# and a model read "overnight" in it as now, opening an answer on a later day with "Done overnight". The line
+# now names the goal in a few of its own words, says the day it stopped and how long ago, and keeps the rule.
+#
+# The name is made from the objective without a model call. There is no stored title to use: the completion
+# summary update_goal saves is the model's account of the OUTCOME (up to 2,000 characters, often in the same
+# conversational register), a blocked goal's is its blocker, a paused one's says why it paused, and a goal the
+# user marked done has none. So the objective's own words are trimmed, the same way every time: the clauses
+# about the person (going to sleep, being away), the time words (tonight, overnight, today, unattended), the
+# "as you see fit" tails, agreement and pleasantries, and directives with nothing in them ("so do this").
+
+GOAL_NAME_CHARS = 100
+# Spelled out, not strftime("%b"): the same word whatever the locale.
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_RECORD_LEAD = {"completed": "A goal finished", "blocked": "A goal stopped, blocked,",
+                "paused": "A goal was paused"}
+_RECORD_RULE = {"completed": "Don't restart it unless the user asks.",
+                "blocked": "Don't restart it unless the user asks.",
+                "paused": "Don't resume it unless the user asks."}
+
+# A clause about the person rather than the work ("I am going to sleep now"): it goes whole.
+_ABOUT_THE_PERSON = re.compile(
+    r"\b(?:going|gonna|off|heading|about|got)\s+(?:to\s+)?(?:sleep|bed|nap)\b"
+    r"|\b(?:i'm|im|i\s+am|i'll|i\s+will|i'd)\s+(?:be\s+)?(?:asleep|sleeping|away|afk|offline|out|off|gone|back)\b"
+    r"|\bgood\s?night\b|\bsee\s+you\b"
+    r"|\b(?:don't|do\s+not|no\s+need\s+to|never)\s+(?:wait|ask|check)\b.*\bme\b", re.I)
+# The same said inside a clause about the work ("fix it while I'm asleep"): from there to the clause's end.
+_WHILE_AWAY = re.compile(
+    r"\s*\b(?:(?:while|when|until|till|before|after)\s+(?:i'm|im|i\s+am|i)\s+(?:be\s+)?"
+    r"(?:sleep|asleep|sleeping|away|afk|offline|out|gone|back|wake|awake|up)|without\s+me)\b.*$"
+    r"|\s*\buntil\s+(?:it's|it\s+is|it|everything\s+is|everything's|all\s+is|they\s+are|they're)\s+(?:all\s+)?"
+    r"(?:done|finished|complete|completed|green|passing)\b", re.I)
+# Words that place the request in time. "overnight" and "unattended" are also adjectives ("the overnight
+# build", "an unattended install"), so those two stay when a word of substance follows them.
+_WHEN = re.compile(
+    r"\b(?:(?P<adjective>overnight|over\s+night|un+at+en[dt]ed)"
+    r"|tonight|today|tomorrow|right\s+now|this\s+(?:morning|afternoon|evening|weekend)|in\s+the\s+morning)"
+    r"(?P<possessive>'s)?\b", re.I)
+_LIGHT_WORDS = frozenset(
+    "a an and as at but by for from if in into it its me my now of on or our please so that the then these "
+    "this those to too until when while with without you your we us i".split())
+_AS_YOU = re.compile(r"\s*\bas\s+you(?:r|'d|'ve|'ll)?\b.*$", re.I)
+_LEADING = re.compile(r"^(?:(?:so|and|then|now|ok|okay|alright|great|cool|perfect|nice|yes|yeah|yep|sure|"
+                      r"please|also|well|hey|hi|just|thanks|thank\s+you)(?:[\s,!.:]+|$))+", re.I)
+_TRAILING = re.compile(r"(?:[\s,]+(?:please|thanks|thank\s+you|now|too|asap|for\s+me|ok|okay))+$", re.I)
+_PLEASANTRY = re.compile(
+    r"^(?:(?:good|great|perfect|nice|cool|ok|okay|yes|yeah|yep|sure|thanks|thank\s+you|lgtm|agreed)\W*$"
+    r"|(?:i\s+(?:agree|think\s+so|like\s+(?:it|this|that|these|them))|sounds\s+(?:good|great|right)"
+    r"|looks\s+(?:good|great)|love\s+it|that's\s+(?:great|perfect|good))\b)", re.I)
+_EMPTY_DIRECTIVE = re.compile(
+    r"^(?:let'?s\s+|lets\s+|please\s+)?(?:do|finish|complete|handle|start|continue|proceed|go|carry\s+on|"
+    r"keep\s+going|work\s+on)(?:\s+(?:it|this|that|these|them|everything|all|all\s+of\s+(?:it|this|them)|"
+    r"ahead|on|with))*\W*$", re.I)
+
+
+def _clauses(sentence: str) -> list[str]:
+    """A sentence's clauses, split at its commas and dashes; one inside double quotes does not end one."""
+    out, start, quoted = [], 0, False
+    for at, char in enumerate(sentence):
+        if char == '"':
+            quoted = not quoted
+        elif char in ",\u2013\u2014" and not quoted:
+            out.append(sentence[start:at])
+            start = at + 1
+    out.append(sentence[start:])
+    return out
+
+
+def _drop_when(clause: str) -> str:
+    def replace(match):
+        if match["adjective"] and not match["possessive"]:
+            following = re.match(r"\s+([A-Za-z][\w'-]*)", clause[match.end():])
+            if following and following[1].lower() not in _LIGHT_WORDS:
+                return match[0]
+        return ""
+    return _WHEN.sub(replace, clause)
+
+
+def _trim_clause(clause: str) -> str:
+    clause = _WHILE_AWAY.sub("", clause)
+    if _ABOUT_THE_PERSON.search(clause):
+        return ""
+    clause = _drop_when(_AS_YOU.sub("", clause))
+    clause = " ".join(clause.split()).strip(" -:")
+    clause = _TRAILING.sub("", _LEADING.sub("", clause)).strip(" -:")
+    if not re.search(r"[^\W\d_]", clause) or _PLEASANTRY.match(clause) or _EMPTY_DIRECTIVE.match(clause):
+        return ""
+    return clause
+
+
+def goal_name(text: str, limit: int = GOAL_NAME_CHARS) -> str:
+    """A short name for a goal from its objective's own words, with the conversation around them left out.
+    "" when nothing of substance is left (a goal that was only "do this overnight, I'm off to bed")."""
+    text = str(text or "").replace("’", "'").replace("‘", "'")
+    text = text.replace("“", '"').replace("”", '"')
+    kept = []
+    for sentence in re.split(r"(?<=[.!?;])\s+|\s*\n\s*", text):
+        sentence = re.sub(r"^\s*(?:[-*•>]+|\d+[.)])\s+", "", sentence).strip().rstrip(".!?;").strip()
+        clauses = [part for part in map(_trim_clause, _clauses(sentence)) if part]
+        if clauses:
+            kept.append(", ".join(clauses))
+    name = " ".join(". ".join(kept).replace('"', "'").split()).strip(" ,;:-")
+    if len(name) > limit:
+        cut = name[:limit - 1]
+        name = (cut[:cut.rfind(" ")] if " " in cut else cut).rstrip(" ,;:-") + "…"
+    return name
+
+
+def _stopped_at(details, status: str) -> float | None:
+    """When the goal last moved to `status` (its transition history), or None when nothing says."""
+    history = details.get("history") if isinstance(details, dict) else None
+    for item in reversed(history if isinstance(history, list) else []):
+        if isinstance(item, dict) and item.get("status") == status:
+            at = item.get("at")
+            if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at) and at > 0:
+                return float(at)
+            return None
+    return None
+
+
+def goal_record(text: str, status: str, details=None, now=None) -> str:
+    """The one line a goal that no longer stands leaves in the system prompt: what it was, in a few words,
+    the day it stopped and how long ago, and that it is not to be taken up again unasked.
+
+    Stable for a whole day (the day, never the hour), like the Environment line's date, so a provider's
+    cached prompt prefix survives every turn of a working day."""
+    from datetime import datetime
+    now = now or datetime.now()
+    lead = _RECORD_LEAD.get(status, f"A goal ({status})")
+    rule = _RECORD_RULE.get(status, "Don't resume it unless the user asks.")
+    at = _stopped_at(details, status)
+    when = " earlier (DGC didn't record when)"
+    if at is not None:
+        try:
+            day = datetime.fromtimestamp(at).date()
+        except (OverflowError, OSError, ValueError):
+            day = None
+        if day is not None:
+            days = (now.date() - day).days
+            age = "today" if days <= 0 else "yesterday" if days == 1 else f"{days} days ago"
+            date = f"{day.day} {_MONTHS[day.month - 1]}" + ("" if day.year == now.year else f" {day.year}")
+            when = f" on {date} ({age})"
+    name = goal_name(text)
+    return f"{lead}{when}" + (f': "{name}". ' if name else ". ") + rule
+
+
 class Progress:
     def __init__(self):
         self.digest, self.count = hashlib.sha256(), 0

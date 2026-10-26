@@ -4643,8 +4643,12 @@ class Agent(GoalLifecycle):
                 "turn or one milestone ended.",
             ]
         elif goal:
-            parts += ["", "# Goal record", f"The session goal is {goal_status}: {goal}",
-                      "Do not resume work on it unless the user reactivates or replaces it."]
+            # A short name, the day it stopped and its age, never the objective's own words: those were
+            # the person's at the time ("I'm going to sleep, do this overnight"), and a later turn read
+            # them as now (goals.goal_record says how the name is made).
+            from .goals import goal_record
+            parts += ["", "# Goal record",
+                      goal_record(goal, goal_status, getattr(self, "_goal_details", None), datetime.now())]
 
         parts += ["", f"# Permission mode: {mode}", MODE_DESCRIPTIONS[mode]]
         if mode == "plan":

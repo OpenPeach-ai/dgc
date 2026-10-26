@@ -2374,6 +2374,14 @@ command that takes nothing, such as `/help`, still runs the moment you pick it.
 - `/goal resume` — reactivate the goal and continue work immediately.
 - `/goal clear` — remove it.
 
+A goal that is complete, blocked or paused is no longer worked on, but the model still sees one
+line about it, so a compaction never sends it back to work you already have. The line gives the
+goal a short name, the day it stopped and how long ago, for example: `A goal finished on 24 Oct
+(2 days ago): "build the 8 ranked improvements for staff". Don't restart it unless the user asks.`
+The name is the objective's own words without the conversation around them ("I'm going to
+sleep", "overnight", "as you see fit"), so an answer on a later day doesn't read them as now.
+`/goal resume` gives the model the whole objective again.
+
 ## How long an objective may be
 
 A standing goal is stated to the model in full once per context — and again after a compaction,

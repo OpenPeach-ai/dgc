@@ -69,6 +69,12 @@ request can exceed the remaining allowance. A route that does not report usage c
 under an enforceable token budget. Three consecutive cycles without distinct tool progress block
 the goal for review; successful process exit alone does not mark a goal complete.
 
+A goal that is complete, blocked or paused stays in the model's instructions as one line, so a
+compaction never sends it back to work you already have: a short name for the goal, the day it
+stopped and how long ago, and "Don't restart it unless the user asks." The name is the objective's
+own words without the conversation around them ("I'm going to sleep", "overnight"), so an answer
+on a later day doesn't read them as now. Resuming the goal gives the model the whole objective again.
+
 ## Storage and limits
 
 Goal inputs are stored with the local session and pass through DGC's credential redaction. Status

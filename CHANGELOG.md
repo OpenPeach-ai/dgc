@@ -4,6 +4,15 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- **A finished goal no longer reads as if it were still tonight.** After a goal is complete, blocked or paused, the
+  model still sees one line about it, so a compaction never sends it back to that work. The line quoted what you typed
+  when you set the goal, cut mid-sentence and with no date, so "I'm going to sleep now, do this overnight" read as
+  current, and a model answered "Done overnight" two days later. The line now gives the goal a short name, the day it
+  stopped and how long ago: `A goal finished on 24 Oct (2 days ago): "build the 8 ranked improvements for staff".
+  Don't restart it unless the user asks.`
+
 ## 0.48.2 — 2026-10-27
 
 - This is the first published build of the 0.48 line. The 0.48.1 source tag was held by the release gate on GitHub's
