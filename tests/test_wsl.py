@@ -391,6 +391,33 @@ class ModelOnWindowsTests(unittest.TestCase):
         self.assertTrue(relay.recv(100).endswith(b"HELLO"), "a fresh relay instead of the dead one")
         relay.close()
 
+    def test_a_spare_numbered_past_1023_is_still_checked(self):
+        """select() refuses a socket numbered past 1023; a long-running DGC can hold more files than that."""
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < 1500:
+            if hard != resource.RLIM_INFINITY and hard < 1500:
+                self.skipTest("this host allows fewer than 1,500 open files")
+            resource.setrlimit(resource.RLIMIT_NOFILE, (1500, hard))
+            self.addCleanup(resource.setrlimit, resource.RLIMIT_NOFILE, (soft, hard))
+
+        def numbered_high(sock: socket.socket, number: int) -> socket.socket:
+            os.dup2(sock.fileno(), number)
+            sock.close()
+            return socket.socket(fileno=number)
+        live_a, live_b = socket.socketpair()
+        dead_a, dead_b = socket.socketpair()
+        live_a, dead_a = numbered_high(live_a, 1400), numbered_high(dead_a, 1401)
+        self.addCleanup(live_a.close)
+        self.addCleanup(live_b.close)
+        self.addCleanup(dead_a.close)
+        dead_b.close()
+        live_a.settimeout(10.0)
+        spares = wsl._Spares(self.port, self.connect, keep=0)
+        self.assertTrue(spares._alive(live_a), "an open relay at fd 1400")
+        self.assertEqual(live_a.gettimeout(), 10.0, "the check leaves the relay's timeout as it was")
+        self.assertFalse(spares._alive(dead_a), "a closed one at fd 1401")
+
     def test_only_in_dgcs_own_distro_and_only_when_needed(self):
         self.assertFalse(wsl.bridge_windows_port(self.port, connect=self.connect, own_distro=False),
                          "a distro of the user's own: their port stays theirs")

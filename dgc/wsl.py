@@ -375,12 +375,21 @@ class _Spares:
         self.starting = 0
 
     def _alive(self, relay: socket.socket) -> bool:
-        import select
+        # A peek that doesn't wait, not select(): select() refuses a socket numbered past 1023, and a long-running
+        # DGC can hold more files than that.
+        timeout = relay.gettimeout()
         try:
-            readable, _, _ = select.select([relay], [], [], 0)
-            return not readable or bool(relay.recv(1, socket.MSG_PEEK))
+            relay.setblocking(False)
+            return bool(relay.recv(1, socket.MSG_PEEK))
+        except BlockingIOError:
+            return True                           # nothing to read: still open
         except OSError:
             return False
+        finally:
+            try:
+                relay.settimeout(timeout)
+            except OSError:
+                pass
 
     def _start_one(self) -> None:
         try:
