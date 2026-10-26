@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from dgc import pip_service as service
 from dgc.workspace_registry import RegistryError
+from tests.host_python import trust_host_python
 
 
 @unittest.skipUnless(sys.platform == "linux", "Linux user-systemd service lifecycle")
@@ -24,6 +25,7 @@ class ServiceTests(unittest.TestCase):
         self.home.mkdir(mode=0o700)
         self.units = self.base / "units"
         self.options = {"unit_directory": self.units}
+        trust_host_python(self)
         self.spec = service.preview(self.home, **self.options)
         self.file = Path(self.spec["unit_path"])
         self.active = "inactive"

@@ -381,6 +381,10 @@ if [ ! -f "$VDIR/.complete" ]; then
     || die "could not install DGC's dependencies — the previous version is still active"
   "$VDIR/.venv/bin/pip" install -q --no-deps "$VDIR" >/dev/null \
     || die "could not install DGC $VER — the previous version is still active"
+  # Some Pythons give their venv scripts their own modes whatever the umask (python.org's 3.10 for
+  # macOS: group-writable activate scripts). Nothing of the build may be writable by anyone else.
+  find "$VDIR" ! -type l \( -perm -020 -o -perm -002 \) -exec chmod go-w {} + \
+    || die "could not make DGC $VER writable by you alone"
 
   # The new build must start and name itself before anything points at it. -I keeps the caller's
   # PYTHONPATH from lending it a different dgc.

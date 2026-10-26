@@ -18,6 +18,9 @@ from unittest.mock import patch
 from dgc import browser, browser_setup
 
 HINT = browser.BrowserError(browser.INSTALL_HINT)
+# The fetch tests are about a computer where Chrome can sandbox itself. Where Ubuntu keeps unprivileged user namespaces
+# from programs an admin did not install (GitHub's runners), DGC rightly asks for Google's package instead
+# (needs_installed_chrome); that branch has its own tests.
 
 
 class EnsureBrowserTests(unittest.TestCase):
@@ -36,6 +39,7 @@ class EnsureBrowserTests(unittest.TestCase):
     def test_with_none_dgc_fetches_one_and_the_model_is_told_once(self):
         stop = threading.Event()
         with patch.object(browser, "discover_browser", side_effect=HINT), \
+                patch.object(browser_setup, "needs_installed_chrome", return_value=False), \
                 patch.object(browser_setup, "supported", return_value=(True, "")), \
                 patch.object(browser_setup, "fetch", return_value=(Path("/x/chrome"), "DGC downloaded Google Chrome")) as fetch:
             self.assertEqual(browser.ensure_browser("", cancelled=stop), (Path("/x/chrome"), "DGC downloaded Google Chrome"))
@@ -43,6 +47,7 @@ class EnsureBrowserTests(unittest.TestCase):
 
     def test_where_dgc_cannot_fetch_one_it_says_how_to_install_one(self):
         with patch.object(browser, "discover_browser", side_effect=HINT), \
+                patch.object(browser_setup, "needs_installed_chrome", return_value=False), \
                 patch.object(browser_setup, "supported", return_value=(False, "DGC fetches Chrome on Linux and macOS for now.")):
             with self.assertRaises(browser.BrowserError) as raised:
                 browser.ensure_browser("")
@@ -51,6 +56,7 @@ class EnsureBrowserTests(unittest.TestCase):
 
     def test_a_fetch_that_fails_says_why_and_how_to_install_one(self):
         with patch.object(browser, "discover_browser", side_effect=HINT), \
+                patch.object(browser_setup, "needs_installed_chrome", return_value=False), \
                 patch.object(browser_setup, "supported", return_value=(True, "")), \
                 patch.object(browser_setup, "fetch", side_effect=RuntimeError("DGC could not download Chrome: 404.")):
             with self.assertRaises(browser.BrowserError) as raised:

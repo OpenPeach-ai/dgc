@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 from dgc import browser, browser_user, pip_computer_box, pip_desktop, pip_execution, pip_keep_running as keep, wsl
 from dgc.workspace_registry import RegistryError
+from tests.host_python import trust_host_python
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -527,6 +528,7 @@ class KeepRunningTests(unittest.TestCase):
     """Keep Pips running, in WSL: Windows starts the runner at sign-in through wslg.exe, from the user's Run list."""
 
     def setUp(self):
+        trust_host_python(self)
         self.fake = FakeWsl(self)
         self.home = Path(tempfile.mkdtemp(prefix="dgc-wsl-home-")).resolve()
         self.addCleanup(shutil.rmtree, self.home, True)

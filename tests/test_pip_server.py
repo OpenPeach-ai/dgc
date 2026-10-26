@@ -7,6 +7,7 @@ Offline: no model, no network and no desktop. The desktop paths are patched to f
 from __future__ import annotations
 
 import contextlib
+import gc
 import io
 import json
 import os
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -31,7 +33,13 @@ PYTHON = sys.executable
 
 
 def run_cli(config, *argv):
-    with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+    # A file an earlier test left open is finalized whenever the collector next runs, and its ResourceWarning
+    # went to whatever stderr was current: on GitHub's macOS runners, this command's (argparse.py:162 "unclosed
+    # file"). Collect first, and keep that one warning out of the capture.
+    gc.collect()
+    with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()) as out, \
+            contextlib.redirect_stderr(io.StringIO()) as err:
+        warnings.simplefilter("ignore", ResourceWarning)
         code = pip_cli.handle_command(config, list(argv))
     return code, out.getvalue(), err.getvalue()
 

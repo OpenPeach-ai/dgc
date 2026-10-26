@@ -179,6 +179,23 @@ def items_for(payload: dict, *, now: datetime | None = None) -> tuple[list[str],
     return found[:troupe.MAX_ITEMS], head
 
 
+def _check_snapshot_members(tar: tarfile.TarFile, dest: Path) -> None:
+    """What tarfile's "data" filter refuses, for a Python without it: a member outside DEST, a link leaving DEST,
+    a device or FIFO. A Git archive holds files, folders and links only; anything else means it is not one."""
+    root = Path(os.path.realpath(dest))
+    for member in tar.getmembers():
+        target = Path(os.path.realpath(root / member.name))
+        if os.path.isabs(member.name) or (target != root and root not in target.parents):
+            raise RegistryError("troupe_failed", f"the snapshot holds a path outside its folder: {member.name[:200]}")
+        if member.issym() or member.islnk():
+            base = root if member.islnk() else target.parent
+            link = Path(os.path.realpath(base / member.linkname))
+            if os.path.isabs(member.linkname) or (link != root and root not in link.parents):
+                raise RegistryError("troupe_failed", f"the snapshot holds a link leaving its folder: {member.name[:200]}")
+        elif not (member.isfile() or member.isdir()):
+            raise RegistryError("troupe_failed", f"the snapshot holds something that is not a file: {member.name[:200]}")
+
+
 def snapshot(root: str, commit: str, dest: Path) -> None:
     """The committed tree at COMMIT, unpacked into DEST (no .git, nothing uncommitted)."""
     archive = subprocess.run(["git", "-C", root, "archive", "--format=tar", commit], capture_output=True, timeout=300,
@@ -189,7 +206,13 @@ def snapshot(root: str, commit: str, dest: Path) -> None:
         handle.write(archive.stdout)
         handle.seek(0)
         with tarfile.open(fileobj=handle) as tar:
-            tar.extractall(dest, filter="data")
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(dest, filter="data")
+            else:
+                # Python 3.10.0-3.10.11 and 3.11.0-3.11.3 (python.org's last macOS 3.10 is 3.10.11) have no
+                # extraction filters: check what the data filter would, member by member, then extract.
+                _check_snapshot_members(tar, dest)
+                tar.extractall(dest)
 
 
 # ---------------------------------------------------------------- running it

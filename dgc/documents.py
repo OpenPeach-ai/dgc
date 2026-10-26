@@ -1084,6 +1084,9 @@ class _DarwinRSS:
         return self._libproc.task_resident(pid)
 
 
+PDF_EXIT_GRACE_SECONDS = 1.0
+
+
 def _wait_pdf_worker(process: subprocess.Popen[bytes], rss: Callable[[int], int] | None) -> None:
     if rss is None:
         process.wait(timeout=PDF_TIMEOUT_SECONDS)
@@ -1095,10 +1098,18 @@ def _wait_pdf_worker(process: subprocess.Popen[bytes], rss: Callable[[int], int]
         try:
             resident = rss(process.pid)
         except OSError as exc:
-            # The process may exit between poll() and proc_pidinfo(). A live
-            # worker without observable RSS must not continue unmonitored.
+            # The process may exit between poll() and proc_pidinfo(). On macOS an exiting
+            # worker's task is gone (ESRCH) a moment before waitpid can reap it, so that
+            # case gets the moment. A live worker without observable RSS must not continue
+            # unmonitored.
             if process.poll() is not None:
                 return
+            if isinstance(exc, ProcessLookupError):
+                try:
+                    process.wait(timeout=PDF_EXIT_GRACE_SECONDS)
+                    return
+                except subprocess.TimeoutExpired:
+                    pass
             raise _error('PDF memory watchdog could not sample the worker; check sandbox process-info permissions') from exc
         if resident > PDF_MEMORY_BYTES:
             raise _error('PDF worker exceeded the resident-memory budget; split or simplify the PDF')

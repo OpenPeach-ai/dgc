@@ -601,8 +601,11 @@ class OllamaLoadTests(StallTestCase):
         self.assertEqual((result.finish_reason, result.content), ("stop", "loaded"))
         notices = [event for event in events.items if event.kind == "notice"]
         self.assertTrue(notices)
-        self.assertEqual(notices[0].phase, "loading")
-        self.assertEqual(Agent._model_wait_text(notices[0])[0], "Loading the model")
+        # The first notice can come before the first load probe has answered on a slow machine (GitHub's macOS
+        # runners: "headers"); once the probe sees the model loading, the wait says so.
+        loading = [event for event in notices if event.phase == "loading"]
+        self.assertTrue(loading, [event.phase for event in notices])
+        self.assertEqual(Agent._model_wait_text(loading[0])[0], "Loading the model")
         self.assertEqual(len(self.server.chat_posts("/api/chat")), 1)
 
     def test_a_model_that_never_loads_is_a_loading_stall(self):

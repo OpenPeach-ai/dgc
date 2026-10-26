@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from dgc import pip_cli, pip_keep_running as keep, pip_service as service
 from dgc.workspace_registry import RegistryError
+from tests.host_python import trust_host_python
 
 
 class Done:
@@ -24,6 +25,7 @@ class Done:
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux user-systemd")
 class LinuxSwitchTests(unittest.TestCase):
     def setUp(self):
+        trust_host_python(self)
         temp = tempfile.TemporaryDirectory(prefix="dgc-keep-")
         self.addCleanup(temp.cleanup)
         base = Path(temp.name)
@@ -132,6 +134,7 @@ class MacSwitchTests(unittest.TestCase):
     """The LaunchAgent logic, with a fake launchctl; the live test runs it on a real Mac."""
 
     def setUp(self):
+        trust_host_python(self)
         temp = tempfile.TemporaryDirectory(prefix="dgc-keep-mac-")
         self.addCleanup(temp.cleanup)
         base = Path(temp.name)

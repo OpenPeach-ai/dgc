@@ -6,10 +6,14 @@ from unittest.mock import patch
 
 from dgc import pip_service
 from tests import test_pip_cli as fixtures
+from tests.host_python import trust_host_python
 
 
 class PipServiceCliTests(unittest.TestCase):
-    setUp = fixtures.PipCliTests.setUp
+    def setUp(self):
+        fixtures.PipCliTests.setUp(self)
+        trust_host_python(self)
+
     invoke = fixtures.PipCliTests.invoke
     value = fixtures.PipCliTests.value
 
