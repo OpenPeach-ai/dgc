@@ -80,9 +80,15 @@ const host = `(${function () {
     else if (m.type === "inspectPlugin") post({ type: "pluginPreview", requested: m.name, item: { ...plugins.find((p) => p.name === m.name), supported: true, server_specs: {}, warnings: [] } });
   } });
 }})();`;
+// VS Code's own font list on Linux is system-ui, Ubuntu, Droid Sans, sans-serif, and what that becomes is the machine's:
+// Noto Sans or Ubuntu on a desktop, DejaVu Sans on GitHub's runner. DejaVu Sans is the widest of them (ChatDGC's
+// "Context window" hint was 257 px in Noto Sans, 275 px in DejaVu Sans, in a 272 px column: one line here, two on
+// the runner, every run). So the page is drawn in DejaVu Sans wherever it is installed, as on the runner: a hint that
+// fits here fits there, and in the narrower fonts too. Where it isn't (macOS), VS Code's list applies.
+const FONT = "'DejaVu Sans',system-ui,'Ubuntu','Droid Sans',sans-serif";
 const pageFor = (theme) => skeleton.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
-  .replace("<head>", "<head><style>@layer vscode-default{body{margin:0;padding:0 20px;font-family:system-ui,'Ubuntu','Droid Sans',sans-serif;font-size:13px}::-webkit-scrollbar{width:10px;height:10px}}</style>"
-    + `<style>:root{${Object.entries(THEMES[theme].tokens).map(([k, v]) => `${k}:${v}`).join(";")};--vscode-font-family:system-ui,'Ubuntu','Droid Sans',sans-serif;--vscode-font-size:13px}</style>`)
+  .replace("<head>", `<head><style>@layer vscode-default{body{margin:0;padding:0 20px;font-family:${FONT};font-size:13px}::-webkit-scrollbar{width:10px;height:10px}}</style>`
+    + `<style>:root{${Object.entries(THEMES[theme].tokens).map(([k, v]) => `${k}:${v}`).join(";")};--vscode-font-family:${FONT};--vscode-font-size:13px}</style>`)
   .replace('<link rel="stylesheet" href="STYLE">', () => `<style>${css}</style>`)
   .replace("<body>", `<body class="${THEMES[theme].body}">`)
   .replace('<script src="SCRIPT"></script>', () => `<script>${host}</script><script>${js.replace(/<\/script/g, "<\\/script")}</script>`);
@@ -136,11 +142,17 @@ const problems = (p) => p.evaluate(() => {
   if (dialog) { const r = dialog.getBoundingClientRect(); if (r.left < 0 || r.right > innerWidth + 1 || r.top < 0 || r.bottom > innerHeight + 1) out.push("the dialog leaves the tab"); }
   return out;
 });
-// Every visible row hint on one line.
+// Every visible row hint on one line: its height against its own one-line height (a copy of it holding one letter,
+// drawn beside it in the same font and size), never a count of where its pieces start, so it holds in any font: a
+// line whose words come in two fonts (a fallback glyph, a code span) is one line; a hint that wraps is two.
 const longHints = (p) => p.evaluate(() => [...document.querySelectorAll("#page .field .hint")].filter((h) => {
   if (!h.offsetParent || !h.textContent.trim()) return false;
-  const range = document.createRange(); range.selectNodeContents(h);
-  return new Set([...range.getClientRects()].filter((r) => r.width > 0.5).map((r) => Math.round(r.top))).size > 1;
+  const one = h.cloneNode(false);
+  one.textContent = "x";
+  h.after(one);
+  const lines = h.getBoundingClientRect().height / one.getBoundingClientRect().height;
+  one.remove();
+  return lines > 1.5;
 }).map((h) => h.textContent.trim()));
 const luminance = (rgb) => { const [r, g, b] = rgb.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 
@@ -169,3 +181,19 @@ for (const theme of ["dark", "light"]) {
     });
   }
 }
+
+// The one-line check itself: a hint that wraps is caught at the widest tab, and a one-line hint with words in other
+// fonts (a code span, a character DejaVu Sans lacks) is not counted as two lines.
+test("the one-line hint check catches a hint that wraps, and counts a line of mixed fonts as one", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, close } = await open(900, "dark");
+  try {
+    await go(p, "chatdgc");
+    const hint = (html) => p.evaluate((html) => { document.querySelector("#page .field .hint").innerHTML = html; }, html);
+    assert.deepEqual(await longHints(p), [], "the page as it ships");
+    await hint("Its manner, its tone, how long its answers run, and how it treats your own words below, which always come first.");
+    assert.deepEqual(await longHints(p), ["Its manner, its tone, how long its answers run, and how it treats your own words below, which always come first."]);
+    await hint("Its manner: <code>concise</code>, 温かい, ✓.");
+    assert.deepEqual(await longHints(p), [], "one line, three fonts");
+  } finally { await close(); }
+});

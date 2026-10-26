@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Settings → ChatDGC: the Context window hint fits on one line in DejaVu Sans too**, Linux's usual default font,
+  where it took two at a wide Settings tab: "What a chat holds before it summarizes."
+
 ## 0.33.0 — 2026-10-26
 
 - **One DGC writes to a session at a time, idle or not** (with a DGC CLI that has it, 0.48). A session a terminal (or
