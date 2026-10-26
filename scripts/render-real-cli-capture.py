@@ -734,6 +734,17 @@ def media_manifest_record(output_dir: Path, name: str) -> dict:
     return record
 
 
+def model_route_label(model: str) -> tuple[str, str]:
+    """How the capture names the model it recorded: (route, run) for the manifest and the site.
+
+    A `:cloud` model is served by Ollama's servers through the local Ollama daemon, so calling it
+    a "real local Ollama run" on the public site would be untrue. The route says which it was.
+    """
+    if str(model).endswith(":cloud"):
+        return f"Ollama cloud · {model}", "real Ollama cloud run"
+    return f"local Ollama · {model}", "real local Ollama run"
+
+
 def update_cli_manifest(output_dir: Path, *, model: str, dgc_version: str,
                         factor: float) -> None:
     if output_dir != (ROOT / "site" / "assets").resolve():
@@ -754,6 +765,7 @@ def update_cli_manifest(output_dir: Path, *, model: str, dgc_version: str,
     rounded = int(duration + 0.5)
     timing = ("real time, no speed adjustment" if abs(factor - 1.0) < 0.0001 else
               f"{factor:.2f}× time-compressed")
+    route, run = model_route_label(model)
     payload["captures"]["cli"] = {
         "kind": "real_cli_local_model",
         "live_model": True,
@@ -763,11 +775,11 @@ def update_cli_manifest(output_dir: Path, *, model: str, dgc_version: str,
         "duration_seconds": round(duration, 6),
         "duration_label": f"{rounded // 60}:{rounded % 60:02d}",
         "provenance": (
-            f"Actual current DGC {dgc_version} full-screen TUI · real local Ollama run · "
+            f"Actual current DGC {dgc_version} full-screen TUI · {run} · "
             f"{model} · disposable controlled fixture · one-line code edit · "
             f"python3 -m unittest -v passed 3/3 · {timing} · no user config or session persisted."
         ),
-        "model_route": f"local Ollama · {model}",
+        "model_route": route,
         "time_compression": round(factor, 6),
         "sandbox_backend": "bwrap",
         "files": files,
@@ -1031,7 +1043,7 @@ def render(args: argparse.Namespace) -> int:
             raw, args.output_dir.resolve(), raw_seconds, manifest_update=commit_manifest)
         shown_seconds = raw_seconds / factor
         print(json.dumps({
-            "model_route": f"local Ollama · {args.model}",
+            "model_route": model_route_label(args.model)[0],
             "raw_seconds": round(raw_seconds, 3),
             "published_seconds": round(shown_seconds, 3),
             "time_compression": round(factor, 4),

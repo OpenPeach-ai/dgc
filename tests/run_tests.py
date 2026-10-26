@@ -2030,6 +2030,15 @@ def unit_tests(tmp: Path):
           _changes({"sessions/x.metrics": ("f", 1, 1.0, "a")},
                    {"sessions/x.metrics": ("f", 2, 2.0, "b")}) == ["sessions/x.metrics"])
 
+    # A cloud model is not a local run: the public provenance must say which route recorded it.
+    check("a cloud capture model is labelled as an Ollama cloud run",
+          _cap.model_route_label("deepseek-v4.1-flash:cloud")
+          == ("Ollama cloud · deepseek-v4.1-flash:cloud", "real Ollama cloud run"),
+          _cap.model_route_label("deepseek-v4.1-flash:cloud"))
+    check("a local capture model keeps its local Ollama label",
+          _cap.model_route_label("qwen2.5:14b") == ("local Ollama · qwen2.5:14b", "real local Ollama run"),
+          _cap.model_route_label("qwen2.5:14b"))
+
     # ---- browser tool ---------------------------------------------------------------------
     # The transport needs a real browser, so everything reachable without one is tested here and
     # the live path in tests/test_browser_setup.py (LiveBrowserTests).
