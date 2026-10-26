@@ -11,12 +11,28 @@ import os
 import signal
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from dgc import pip_execution as execution
 from dgc.workspace_registry import RegistryError
+
+
+class _PipClock:
+    """pip_execution's own clock, and only its own: the readings in order, then the last for good. Patching
+    time.monotonic itself handed these readings to every other thread in the suite too: one took a reading and the
+    test ran out of them (StopIteration, GitHub's macOS 3.10 runner, 26 Oct 2026)."""
+
+    def __init__(self, *readings):
+        self._readings = itertools.chain(readings, itertools.repeat(readings[-1]))
+
+    def monotonic(self):
+        return next(self._readings)
+
+    def __getattr__(self, name):
+        return getattr(time, name)
 
 
 def patch_action(tests=None):
@@ -223,7 +239,7 @@ class ProcessCaptureTests(unittest.TestCase):
         self.assertEqual(result['status'], 'cancelled'); self.assertIsNone(result['exit_code'])
 
     def test_controlled_deadline_kills_owned_process_without_sleep(self):
-        with patch.object(execution.time, 'monotonic', side_effect=[0, 2]):
+        with patch.object(execution, 'time', _PipClock(0, 2)):
             result = execution._capture([execution.sys.executable, '-I', '-c', 'import os;os.read(0,1)'], maximum=64, timeout=1, env={})
         self.assertEqual(result['status'], 'timed_out')
 
