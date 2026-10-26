@@ -151,6 +151,15 @@ class TuiSessionOwnerTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         self.assertFalse(any(e.get("type") == "session_held" for e in a.events))
 
+    def test_a_prompt_that_brings_the_choices_back_does_not_repeat_where_it_is_open(self):
+        _a, _session_id, path = self.held_session()
+        ui = self.tui(path)
+        ui._overlay = None
+        self.assertEqual(ui._dispatch_composer_text("hello from the terminal"), "held")
+        self.assertIsNotNone(ui._overlay, "the choices again")
+        said = " ".join(self.said(ui).split())
+        self.assertEqual(said.count("This session is open in Cursor"), 1, said[-600:])
+
     def test_open_here_takes_it_and_a_window_open_here_takes_it_back(self):
         a, session_id, path = self.held_session()
         ui = self.tui(path)

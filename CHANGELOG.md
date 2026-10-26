@@ -32,6 +32,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   Settings going back to the `/` menu. The conversation now stays drawn, with its newest lines just above the picker,
   as each one opens and closes, whether you chose something or pressed Esc. The classic prompt (`dgc --classic`)
   never had this problem.
+- **A prompt you type in a session another DGC has open says where it is open once.** The choices come back each time,
+  and the line above them ("This session is open in VS Code · ~/toni-erp · idle 2 min") is no longer repeated unless it
+  says something new.
 
 ## 0.48.2 — 2026-10-27
 

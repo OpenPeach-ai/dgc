@@ -9705,7 +9705,11 @@ class TUI:
             line = holder_note.taken_line(facts, agent.session_taken)
         else:
             line = holder_note.where_sentence(facts) or "This session is open in another DGC."
-        self.info(line)
+        # A prompt brings the choices back: the line is said again only when it says something new.
+        shown = (str(agent.session_file or ""), line)
+        if getattr(self, "_owner_line_shown", None) != shown:
+            self.info(line)
+            self._owner_line_shown = shown
         if holder_note.usable(facts):
             where = "DGC with no window" if facts.get("windowless") else holder_note.clean_editor(facts.get("editor"))
         else:
