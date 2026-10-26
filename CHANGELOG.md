@@ -4,9 +4,19 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.48.2 — 2026-10-27
+
+- This is the first published build of the 0.48 line. The 0.48.1 source tag was held by the release gate on GitHub's
+  Linux runner: the fix below, and two tests that now wait for what they wait on.
+- **A model on Windows keeps answering in a DGC that holds a lot of files open.** DGC in WSL reaches a model that runs
+  on Windows (Ollama, LM Studio) through a bridge, and it checked each waiting connection in a way that fails for a
+  connection numbered past 1023, so once DGC had more than that many files and connections open, every request to the
+  model failed. It now checks them in a way that has no such limit.
+- Everything in 0.48.1 and 0.48.0 below is included.
+
 ## 0.48.1 — 2026-10-26
 
-- This is the first published build of the 0.48 line. The 0.48.0 source tag was held by the release gate:
+- A source tag only, held by the release gate too (see 0.48.2). The 0.48.0 source tag was held by the release gate:
   GitHub's Linux and macOS runners failed tests that assumed a Python not kept under a folder others can write and a
   computer whose Chrome can sandbox itself. Those tests now run there; what DGC does is unchanged by them.
 - **A troupe works on Python 3.10.0 to 3.10.11 and 3.11.0 to 3.11.3** (python.org's last 3.10 for macOS is 3.10.11).
