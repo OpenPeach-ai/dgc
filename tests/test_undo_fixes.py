@@ -1445,6 +1445,13 @@ class TerminalHearsTheWindowsSavesTests(CommandHelpers, HarnessCase):
         root = h.root.resolve()
         peers.announce(kind="tui", project_root=str(root), cwd=str(root), takeover=True)
         self.addCleanup(peers.withdraw)
+        # This process's one note says what the terminal works on, and the window reads it to know whom to tell. In
+        # the full suite an earlier test's session can still be beating in this process (it re-announces every 60 s,
+        # into whatever DGC home is current); one beat between this note and the window's read made the window pass
+        # the save to nobody. Only this test writes the note now.
+        quiet = patch.object(peers, "announce", lambda **_kw: None)
+        quiet.start()
+        self.addCleanup(quiet.stop)
         send, wait = self.window(root)
         readme = root / "README.md"
         heard = []
