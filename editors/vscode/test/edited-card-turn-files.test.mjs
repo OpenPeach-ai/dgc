@@ -249,6 +249,8 @@ test("the panel asks for the CLI's cards with the handshake, only from a CLI tha
   assert.match(panelSrc, /Number\(\(ev\.capabilities as any\)\?\.turn_files\) >= 1\) \{\s*this\.backend\?\.sendSetup\(\{ type: "watch_turn_files" \}\);/);
   const ask = panelSrc.indexOf('sendSetup({ type: "watch_turn_files" })');
   const ready = panelSrc.lastIndexOf("this.lastReadyEvent = ev;", ask);
-  assert.ok(ready > 0 && ask - ready < 1200, "in the ready handler, right after the capabilities are known");
+  // In the same handler, whatever else it sends first: no other method starts between them.
+  assert.ok(ready > 0 && !/\n  (?:private |public |async |protected )/.test(panelSrc.slice(ready, ask)),
+    "in the ready handler, right after the capabilities are known");
   assert.ok(ask < panelSrc.indexOf("this.syncWorkspaceRoots(backend, true);", ask), "ahead of the handshake's roots and the restore");
 });
