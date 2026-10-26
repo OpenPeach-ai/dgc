@@ -8997,6 +8997,8 @@ class Agent(GoalLifecycle):
         offered = getattr(self, "_offered_tool_names", None)
         for call in calls:
             if (call.name not in _PARALLEL_READS or perms.external_paths(call.name, call.arguments)
+                    or (isinstance(call.arguments, dict)
+                        and helper_checkout.read_refusal(self, call.name, call.arguments.get("path")))
                     or perms.decide(call.name, call.arguments)[0] != ALLOW
                     or (allow and call.name not in allow)
                     or (offered and call.name not in offered)):
@@ -9543,6 +9545,16 @@ class Agent(GoalLifecycle):
                 self.ui.tool_denied(name, display_args, refusal[len("error: "):], call_id)
                 return refusal
 
+        if name in helper_checkout.READ_TOOLS and isinstance(args, dict) and args.get("path"):
+            # ...and its reads stay in its copy too: a read of the user's checkout is refused
+            # naming the same file in the copy, and one outside both (a search up the tree into
+            # other folders) is refused plainly. Nothing changes for the main chat or a helper
+            # without a copy of its own.
+            refusal = helper_checkout.read_refusal(self, name, args.get("path"))
+            if refusal is not None:
+                self.ui.tool_denied(name, display_args, refusal[len("error: "):], call_id)
+                return refusal
+
         def current_permissions():
             with self._mode_lock:
                 rules = {action: [*(self.config.permissions.get(action, []) or []),
@@ -9819,6 +9831,8 @@ class Agent(GoalLifecycle):
                                           allow_external=True)))
                 except (ValueError, OSError):
                     pass
+            # What an isolated helper wrote outside its copy (a /tmp script) it may read back.
+            helper_checkout.note_write(self, args["path"])
         _, post = self._run_lifecycle_hooks(
             "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
             cancelled=self.cancelled)
@@ -10585,6 +10599,13 @@ class Agent(GoalLifecycle):
                     # The checkouts that are not its to change: the parent's, and every one above.
                     # Its prompt says so, and its file tools refuse a write into them.
                     sub._user_checkouts = user_checkouts
+                    # Its reads stay in its copy: the whole worktree it was given (a project that
+                    # is a folder of a bigger repository has its sibling folders there too), and
+                    # the repositories above it are named as theirs (dgc/helper_checkout.py).
+                    sub._copy_tree = Path(getattr(workspace, "path", None) or child_root)
+                    above_trees = tuple(getattr(self, "_user_trees", ()) or ())
+                    their_repo = getattr(workspace, "repo", None)
+                    sub._user_trees = (Path(their_repo), *above_trees) if their_repo else above_trees
                     sub._refresh_system()
                 if registry is not None and agent_id:
                     sub.subagents = registry             # one list per chat, whatever the depth

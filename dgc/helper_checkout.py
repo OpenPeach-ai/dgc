@@ -11,7 +11,9 @@ changes" because its own copy was untouched. Three layers keep the copy the help
    its copy is and that the user's checkout is not its to change (`prompt_lines`).
 2. DGC's own file tools refuse a write into the user's checkout (`claim`, `refusal`), naming the
    same file in the helper's copy. A write outside every checkout (/tmp, a file the task exists to
-   write) is unchanged: the parent's recovery point records it.
+   write) is unchanged: the parent's recovery point records it. DGC's own read and search tools
+   read only the helper's copy (`read_refusal`), naming the same file there when the path was the
+   user's; a shared folder, a skill's folder and what the helper itself wrote stay readable.
 3. A shell command cannot be fenced, so when the helper ends DGC compares the user's checkout with
    how it was when the helper started (`watch_end`, from Git's view) and its report names what
    changed (`settle`). Who changed it is read from the clock: each command DGC runs, in any chat
@@ -140,8 +142,8 @@ def prompt_lines(agent) -> list[str]:
         above = f" Nor are the copies of the helpers that started you ({named})."
     return [f"- This is your own copy of the user's project: {own}. The user's checkout, {user}, "
             "is not yours to change: read, edit, build and test only in your copy, never there "
-            f"(DGC's file tools refuse writes into it).{above} When you finish, DGC brings your "
-            "changes into the user's checkout itself."]
+            "(DGC's file tools refuse writes into it, and read and search only inside your copy)."
+            f"{above} When you finish, DGC brings your changes into the user's checkout itself."]
 
 
 # ---------------------------------------------------------- 2. the file tools ---
@@ -210,6 +212,159 @@ def refusal(path, own_path: Path, whose: str) -> str:
              else "the copy of the helper that started you")
     return (f"error: not changed: {path} is in {place}, which is not yours to change; "
             f"make this edit in your own copy instead, at {own_path}.")
+
+
+# ------------------------------------------------------------- 2b. the reads ---
+#
+# A helper read the user's checkout and searched up the tree into other scratch folders, while its
+# brief only asked it not to. DGC's own read and search tools now read only the helper's copy; the
+# same file in the copy is named when the path was the user's. What stays readable outside it:
+#   - a folder the user shared into the copy (subagent_link_paths), by either of its names;
+#   - a skill's own folder, since a skill's instructions point at files beside its SKILL.md;
+#   - a file the helper itself wrote outside its copy with DGC's file tools (a /tmp script).
+# The helper's brief, its memory and its instructions reach it as messages, never as files.
+# A shell command (bash, python, a monitor) cannot be fenced: the docs say so.
+
+READ_TOOLS = frozenset({"read_file", "view_image", "glob", "grep", "repo_map", "code_intel",
+                        "git_diff"})
+# How each tool's refusal says what was not done, and what to do instead.
+_READ_WORDS = {"read_file": ("not read", "Read"), "view_image": ("not viewed", "View"),
+               "glob": ("not searched", "Search"), "grep": ("not searched", "Search"),
+               "repo_map": ("not mapped", "Map"), "code_intel": ("not searched", "Search"),
+               "git_diff": ("not read", "Use")}
+_MAX_OWN_WRITES = 512
+
+
+def _copy_forms(agent) -> list[Path]:
+    """The helper's own copy: its project folder and, when the project is a folder inside a bigger
+    repository, the whole worktree it was given (a sibling package there is in its copy too)."""
+    forms = _forms(agent.config.project_root)
+    tree = getattr(agent, "_copy_tree", None)
+    if tree:
+        forms.extend(form for form in _forms(tree) if form not in forms)
+    return forms
+
+
+def _inside(path: Path, forms) -> bool:
+    return any(_within(path, form) is not None for form in forms)
+
+
+def _shared_read(agent, lexical: Path, resolved: Path) -> bool:
+    """A read in a folder the user shared into the copy, named through the copy or as theirs."""
+    shared = [str(item).strip("/") for item in getattr(agent, "_shared_dirs", ()) or ()]
+    shared = [item for item in shared if item]
+    if not shared:
+        return False
+    for form in _forms(agent.config.project_root):
+        rel = _within(lexical, form)
+        if rel is not None:
+            first = rel.as_posix()
+            if any(first == item or first.startswith(item + "/") for item in shared):
+                return True
+    for root in (agent.config.project_root, *theirs(agent)):
+        for item in shared:
+            folder_forms = _forms(Path(str(root)) / item)
+            if _inside(lexical, folder_forms) or _inside(resolved, folder_forms):
+                return True
+    return False
+
+
+def _skill_read(agent, resolved: Path) -> bool:
+    """A file in the folder of one of the helper's skills, with its links followed."""
+    skills = getattr(agent, "skills", None)
+    if not isinstance(skills, dict):
+        return False
+    for skill in skills.values():
+        if not getattr(skill, "enabled", True):
+            continue
+        source = getattr(skill, "path", None)
+        if not source:
+            continue
+        if _inside(resolved, _forms(Path(str(source)).parent)):
+            return True
+    return False
+
+
+def _their_places(agent) -> list[tuple[Path, Path, str]]:
+    """(a checkout that is not the helper's, the same place in its copy, whose), longest first."""
+    roots = theirs(agent)
+    own = Path(str(agent.config.project_root))
+    tree = Path(str(getattr(agent, "_copy_tree", None) or own))
+    trees = tuple(getattr(agent, "_user_trees", ()) or ())
+    places: list[tuple[Path, Path, str]] = []
+    for group, target in ((roots, own), (trees, tree)):
+        for place, root in enumerate(group):
+            whose = "user" if place == len(group) - 1 else "helper"
+            for form in _forms(root):
+                places.append((form, target, whose))
+    places.sort(key=lambda item: len(str(item[0])), reverse=True)
+    return places
+
+
+def note_write(agent, path) -> None:
+    """A file an isolated helper wrote outside its copy with DGC's file tools stays readable to it."""
+    if not theirs(agent) or path in (None, ""):
+        return
+    try:
+        raw = Path(os.path.expanduser(str(path)))
+        if not raw.is_absolute():
+            raw = Path(str(agent.config.project_root)) / raw
+        resolved = raw.resolve(strict=False)
+    except (TypeError, ValueError, OSError, RuntimeError):
+        return
+    if _inside(resolved, _copy_forms(agent)):
+        return
+    written = agent.__dict__.setdefault("_outside_writes", set())
+    if len(written) < _MAX_OWN_WRITES:
+        written.add(str(resolved))
+
+
+def read_refusal(agent, name: str, path) -> str | None:
+    """For an isolated helper's read or search with DGC's own tools: the refusal to return, or None
+    when it may go on (to the permission check, as before).
+
+    Its own copy is decided on the path with its links followed, so neither `..` nor a link out of
+    the copy reads elsewhere. The main chat and a helper without a copy of its own are never
+    refused here, and a call without a path reads the copy's root.
+    """
+    if name not in READ_TOOLS or not theirs(agent) or path is None or str(path) == "":
+        return None
+    own_text = str(agent.config.project_root)
+    try:
+        raw = Path(os.path.expanduser(str(path)))
+        if not raw.is_absolute():
+            raw = Path(own_text) / raw
+        lexical = Path(os.path.normpath(str(raw)))
+        try:
+            resolved = raw.resolve(strict=False)
+        except (OSError, RuntimeError):
+            resolved = lexical
+    except (TypeError, ValueError, OSError):
+        return None                    # the tool's own check refuses a path it cannot read
+    if _inside(resolved, _copy_forms(agent)) or _shared_read(agent, lexical, resolved):
+        return None
+    done, verb = _READ_WORDS.get(name, ("not read", "Read"))
+    for form, target, whose in _their_places(agent):
+        for candidate in (resolved, lexical):
+            rel = _within(candidate, form)
+            if rel is None:
+                continue
+            mine = target / rel
+            place = ("the user's checkout" if whose == "user"
+                     else "the copy of the helper that started you")
+            if os.path.exists(candidate) and not os.path.exists(mine):
+                return (f"error: {done}: {path} is in {place}, outside this helper's own copy, and "
+                        f"the copy has no {mine}: a file Git ignores is not copied into it. Work "
+                        "from what your copy has; if the task needs that file, say so in your report.")
+            return (f"error: {done}: {path} is in {place}. {verb} {mine} instead: this helper "
+                    "works in its own copy.")
+    # Outside every checkout: a skill's folder, and what the helper wrote there itself. Never a
+    # way into a checkout that is not its own, even for a skill kept inside one.
+    written = getattr(agent, "_outside_writes", None) or ()
+    if _skill_read(agent, resolved) or str(resolved) in written:
+        return None
+    return (f"error: {done}: {path} is outside this helper's own copy ({own_text}), and a helper "
+            "reads only its own copy. If the task needs it, say so in your report.")
 
 
 # ------------------------------------------------------- 3. who changed what ---

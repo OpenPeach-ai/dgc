@@ -2058,7 +2058,7 @@ change to your files and is captured by the parent chat, which is what can undo 
 ## A helper's copy is its only place to work
 
 A helper in a Git project never changes your checkout itself: its changes reach you when DGC
-integrates its copy. Three things keep that true:
+integrates its copy. Here is what keeps that true, and where it stops:
 
 - **Its brief names its copy.** Wherever the brief names your project folder (as a whole path:
   `/work/app/src/a.py`, not `/work/app2`), the helper reads its own copy's folder. Its
@@ -2069,6 +2069,19 @@ integrates its copy. Three things keep that true:
   change; make this edit in your own copy instead, at …/billing.py."* `..` and links are followed
   to where they really write. A folder you share into helpers' copies (`subagent_link_paths`)
   stays writable, as you chose.
+- **DGC's read and search tools read only its copy.** `read_file`, `view_image`, `glob`, `grep`,
+  `repo_map`, `code_intel` and `git_diff` refuse a path in your checkout and name the same file in
+  the helper's copy: *"not read: /work/app/src/a.py is in the user's checkout. Read …/src/a.py
+  instead: this helper works in its own copy."* A path outside both, such as a search up the tree
+  into other folders, is refused as outside the helper's copy. `..` and links are followed first,
+  so neither reads somewhere else. Still readable: a folder you share into its copy
+  (`subagent_link_paths`), the folder of one of your skills (a skill points at files beside it),
+  and a file the helper wrote outside its copy itself with DGC's file tools. The main chat, and a
+  helper without a copy of its own (in a folder that is not a Git project), read as before.
+- **A shell command can still read anything.** `bash`, `python` and a monitor run real programs,
+  and DGC can't fence what a program opens: a helper that runs `cat /work/app/src/a.py` reads your
+  checkout. Its instructions and the read tools' refusals send it to its copy, but only DGC's own
+  file tools are enforced.
 - **The report names what a shell command changed.** A command such as
   `cd /work/app && sed -i …` cannot be fenced, so when the helper ends DGC compares your
   checkout with how it was when the helper started — Git's changed and new files against the same

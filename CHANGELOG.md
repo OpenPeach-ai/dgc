@@ -18,6 +18,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   prompt rail, a chat reopened in an ACP editor and the rewind list. They now show the same line with the report under
   it, also for conversations saved before this release (the rewind list for turns from now on), and a compaction's
   summary no longer counts the notice among the things you said.
+- **A helper reads only its own copy of your project.** A helper in a Git project works in a copy of its own, and
+  only its instructions asked it to stay out of your checkout: a review helper was seen searching up the folder tree
+  into other folders. DGC's read and search tools (`read_file`, `view_image`, `glob`, `grep`, `repo_map`,
+  `code_intel`, `git_diff`) now refuse a helper a path in your checkout and name the same file in its copy ("Read
+  …/src/a.py instead: this helper works in its own copy"), and refuse a path outside both. `..` and links are
+  followed first. A folder you share with helpers (`subagent_link_paths`), a skill's own folder and a file the
+  helper wrote itself stay readable. A shell command can still read anything, and the docs say so. The main chat,
+  and a helper without a copy of its own, read as before.
 
 ## 0.48.2 — 2026-10-27
 
