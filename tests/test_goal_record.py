@@ -206,6 +206,15 @@ class TheRecordIsShortTests(AgentCase):
                          "run the unattended install script and fix whatever fails")
         self.assertEqual(goal_name("ship the release"), "ship the release")
 
+    def test_two_words_of_time_together_both_go(self) -> None:
+        # The founder's 0.48 release goal: "unattended" was kept as if it named the work ("unattended overnight"),
+        # so "do this all unattended" survived and the cut ended the name on a dangling "do…".
+        objective = ("build and push the 0.48.0 version live, on the website, on extension marketplace and on github, "
+                     "do this all unattended overnight")
+        self.assertEqual(goal_name(objective), "build and push the 0.48.0 version live, on the website, "
+                                               "on extension marketplace and on github")
+        self.assertEqual(goal_name("fix the parser overnight unattended"), "fix the parser")
+
     def test_a_long_objective_is_cut_at_a_word(self) -> None:
         name = goal_name("Rewrite " + "the billing module carefully " * 20)
         self.assertLessEqual(len(name), 100)

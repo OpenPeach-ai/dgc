@@ -187,7 +187,8 @@ def _drop_when(clause: str) -> str:
     def replace(match):
         if match["adjective"] and not match["possessive"]:
             following = re.match(r"\s+([A-Za-z][\w'-]*)", clause[match.end():])
-            if following and following[1].lower() not in _LIGHT_WORDS:
+            # "unattended overnight": the word after it is another word of time, not the work's noun.
+            if following and following[1].lower() not in _LIGHT_WORDS and not _WHEN.fullmatch(following[1]):
                 return match[0]
         return ""
     return _WHEN.sub(replace, clause)
