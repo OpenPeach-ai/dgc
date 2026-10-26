@@ -278,6 +278,10 @@
   card inside the first, the Pip's face and name again. Its first run is now the card's own status line ("First run:
   working", then "First run: report ready").
 
+- **Build and test tools: @azure/msal-node 7.1.1, undici 8.12.3, fast-uri 3.1.9** (GHSA-xcx6-jx8p-x3h5 and the
+  undici and fast-uri advisories of 24 October). msal-node is pinned under the publishing tools (vsce, ovsx), undici
+  comes with the test DOM (jsdom), fast-uri with the JSON-schema checker (ajv).
+
 - **DOMPurify 3.4.17** for Mermaid's diagram rendering (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr,
   GHSA-c6gr-qvv4-5v3f).
 
