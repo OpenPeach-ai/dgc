@@ -57,17 +57,27 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 - **Undo never loses your work.** A study of how Codex and DGC undo a turn found where DGC's Undo could throw away
   work nobody asked it to, or refuse for no reason. All of these are fixed:
-  - **Your edits between turns stop an Undo of an earlier turn.** If you (or a formatter, a `git pull`, another chat)
-    changed a file after DGC wrote it, and a later turn wrote it again, undoing the earlier turn used to put back the
-    old version silently and lose your change. The same happened to a file you saved while a turn was running. Undo
-    now stops, restores nothing and names the file: "Undo stopped: a.py changed after DGC wrote it, by you or another
-    program. Nothing was restored, so those changes are intact."
-  - **Undo anyway, only when you ask.** After that, DGC asks: "These files changed after DGC wrote them, by you or
-    another program: a.py. Undo anyway puts back the version from before this turn and loses those changes." Keep my
-    changes is the default; Undo anyway goes ahead for exactly those files and stops again if another one changed.
-    Editors get this from a new command, `undo_to {index, overwrite?}`, answered by a new event, `undo_result {ok,
-    files_restored, conflicts, left, stopped, error?}` (offered as `ready.capabilities.undo_to`); `rewind` and
-    `rewound` are unchanged.
+  - **Your edits after DGC's are merged, not lost.** If you (or a formatter, a `git pull`, another chat) changed a
+    file after DGC wrote it, between two of its writes or after the last one, undoing the turn used to put back the old
+    version silently and lose your change. The same happened to a file you saved while a turn was running. Undo now
+    merges: your edits stay and DGC's are taken out. Each recovery point keeps what DGC left in each text file at the
+    end of each run of its writes (up to 1 MiB a file, counted in the session's snapshot budget, saved with the point
+    and hash-checked on load like the before-states, gone with the point), and Undo merges three ways with `git
+    merge-file` as helper integration does: what DGC left, the file as it is now, the version from before. The
+    question says what it does with each file, "a.py: your later edits are kept and DGC's are taken out", and the line
+    after it how many it merged: "↩ Undone; DGC restored 2 files and merged 1 with your edits."
+  - **Where your edits overlap DGC's, the file is left as it is** and named: "a.py: your edits overlap DGC's; it is
+    left as it is"; the rest is undone. **Undo anyway** puts it back too and loses your edits there.
+  - **Undo anyway, only when you ask.** A file it can't merge (binary, over 1 MiB, a link, deleted, or changed only in
+    its permissions) still stops it, restores nothing and names the file: "Undo stopped: a.py changed after DGC wrote
+    it, by you or another program. Nothing was restored, so those changes are intact." Then DGC asks: "These files
+    changed after DGC wrote them, by you or another program: a.py. Undo anyway puts back the version from before this
+    turn and loses those changes." Keep my changes is the default; Undo anyway goes ahead for exactly those files and
+    stops again if another one changed; Undo the rest, for a file whose edits came to overlap DGC's since the
+    question, leaves it as it is. Editors get this from a new command, `undo_to {index, overwrite?, keep?}`, answered
+    by a new event, `undo_result {ok, files_restored, conflicts, left, stopped, merged?, kept?, error?}` (offered as
+    `ready.capabilities.undo_to`; merging as `ready.capabilities.undo_merge`, with `rewind_preview` naming the files
+    it merges, holds back and puts back because of a command); `rewind` and `rewound` are unchanged.
   - **What the turn's own commands changed.** Around each `bash` command, Python code action and tool hook, DGC asks
     Git what is changed before and after. A file Git called clean that a command changed or deleted is put back from
     Git's copy; a file a command created is removed. A file it can't put back (it already had uncommitted changes, Git
@@ -75,14 +85,21 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     after an Undo the line says so: "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is."
     The look costs about 15-25 ms per command in an ordinary project and about 80 ms in a 10,000-file one (two `git
     status` calls against a private copy of the index; your own `.git/index` is never written).
-  - **Your saves are yours.** Which change is a command's is told by when it happened. In the editor DGC now also
-    hears every file you save in the chat's folders (a new command, `user_saved {paths, at}`, offered as
-    `ready.capabilities.user_saved`), so a file you save while a command runs, a 3-minute test run say, is never taken
-    for the command's change, is not put back by Undo and is not listed as the command's, even when the save reaches
-    DGC just after the command ended. In the terminal it stays by time.
-  - **Nothing is put back unseen.** Undo's question names the files it restores from Git because a command changed
-    them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more"), in the
-    editor and in `/rewind`. A `turn_files` row marks them `by_command: true`.
+  - **Your saves are yours, in the terminal too.** Which change is a command's is told by when it happened. In the
+    editor DGC now also hears every file you save in the chat's folders (a new command, `user_saved {paths, at}`,
+    offered as `ready.capabilities.user_saved`), so a file you save while a command runs, a 3-minute test run say, is
+    never taken for the command's change, is not put back by Undo and is not listed as the command's, even when the
+    save reaches DGC just after the command ended. The window's DGC passes each save on to every other DGC working in
+    that folder, a terminal `dgc` included, through a private inbox in DGC's home folder: an owner-only directory per
+    process, a token only that process and your user can read in every message, plain files of yours only, nothing
+    listening on any port. So a terminal user who edits in VS Code or Cursor is covered.
+  - **Nothing is put back unseen, and you can keep what you edited.** Undo's question names the files it puts back
+    because they changed while a command ran: "Also puts back 2 files changed while a command ran: rates.py,
+    README.md." (five at most, then "and N more"), in the editor and in `/rewind`. A save from an editor DGC can't hear
+    (vim, a JetBrains IDE) is told by time and looks like the command's, so the question offers **Restore all** or
+    **Keep the ones I edited…**, a checklist of those files: the ticked ones are left as they are. A `turn_files` row
+    marks them `by_command: true`. `dgc --classic`'s /rewind asks the same. It also no longer fails at once (its
+    menu was never imported on that path).
   - **A model's `git checkout .`, `git reset --hard`, `git clean -fd`, `git stash` or `rm` over your uncommitted
     work is undone.** Before each command DGC copies every file with uncommitted changes (tracked files Git sees as
     changed or deleted, untracked files it does not ignore), keyed by their contents so an unchanged file is not
