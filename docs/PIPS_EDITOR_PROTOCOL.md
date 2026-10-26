@@ -3,7 +3,7 @@
 This page is for integrators who drive `dgc serve` over the editor protocol. Pips add
 a few commands and events to **protocol v14**; the protocol version does not change.
 The Pips controls themselves are versioned separately as the **Pips API** (currently
-40). The authoritative declarations are in `dgc/editor_protocol.py`, which also
+66). The authoritative declarations are in `dgc/editor_protocol.py`, which also
 generates the JSON schemas and the extension's `protocol.generated.ts`.
 
 The SDKs wrap the same controls as `session.pips`; see [sdk/PIPS.md](../sdk/PIPS.md).
