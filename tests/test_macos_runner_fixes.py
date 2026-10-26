@@ -1,4 +1,4 @@
-"""Two things GitHub's macOS runners found in 0.48.0 that a newer Python or a slower machine hid.
+"""What GitHub's macOS runners found in 0.48.0 that a newer Python, a slower machine or a quicker network hid.
 
 1. A troupe's snapshot unpacked its Git archive with tarfile's ``filter="data"``, which Python 3.10.0-3.10.11 and
    3.11.0-3.11.3 do not have (python.org's last 3.10 for macOS is 3.10.11): every troupe routine failed there with
@@ -7,6 +7,9 @@
    task but before waitpid could reap it (ESRCH), and reported that the sandbox hid the worker.
 3. On a Mac whose login keychain is locked (a runner, a Pip running with the screen locked), the Chrome DGC starts
    with a throwaway profile asked the Keychain for its storage key and its first navigation never answered.
+4. A remote MCP sign-in's loopback listener named itself by a reverse DNS lookup of 127.0.0.1 and ::1 (HTTPServer
+   does, and macOS asks the network): where nothing answers it, the sign-in waited for that lookup to time out
+   before its browser could open, past the 30 s a connection is given.
 """
 from __future__ import annotations
 
@@ -20,10 +23,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dgc import browser, documents, troupe_routines
+from dgc import browser, documents, mcp_remote, troupe_routines
 from dgc.workspace_registry import RegistryError
 
 
@@ -154,6 +158,25 @@ class ThrowawayChromeKeychainTests(unittest.TestCase):
 
     def test_elsewhere_nothing_changes(self):
         self.assertNotIn("--use-mock-keychain", self.flags("linux"))
+
+
+class SignInListenerTests(unittest.TestCase):
+    def test_the_sign_in_listener_never_looks_up_its_own_address(self):
+        asked = []
+
+        def getfqdn(name=""):
+            asked.append(name)
+            return name
+        port = mcp_remote.free_port()
+        with mock.patch("socket.getfqdn", side_effect=getfqdn):
+            callback = mcp_remote._Callback(port, "the-state")
+        self.addCleanup(callback.close)
+        self.assertEqual(asked, [], "no reverse lookup of the loopback address")
+        self.assertEqual(callback.servers[0].server_name, "127.0.0.1")
+        with urlopen(f"http://127.0.0.1:{port}/oauth/callback?state=the-state&code=the-code", timeout=10) as reply:
+            self.assertIn(b"DGC is signed in", reply.read())
+        self.assertTrue(callback.done.wait(5))
+        self.assertEqual(callback.code, "the-code")
 
 
 if __name__ == "__main__":

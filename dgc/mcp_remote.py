@@ -37,6 +37,7 @@ import queue
 import re
 import secrets
 import socket
+import socketserver
 import threading
 import time
 from dataclasses import dataclass, field
@@ -298,6 +299,18 @@ class SSE:
 
 # ------------------------------------------------------------------------------------------------- sign-in
 
+class _LoopbackListener(ThreadingHTTPServer):
+    """The callback's listener. HTTPServer names itself by a reverse DNS lookup of the address it bound
+    (socket.getfqdn): macOS asks the network for 127.0.0.1 and ::1, and where nothing answers that lookup a sign-in
+    waited for it to time out before its browser could open (GitHub's macOS runners: past a 30 s start, 26 Oct 2026).
+    A loopback listener needs no name."""
+    daemon_threads = True
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), int(self.server_address[1])
+
+
 class _Callback:
     """The loopback listener the browser returns to: one code, for one state, then it closes."""
 
@@ -343,7 +356,7 @@ class _Callback:
 
         self.servers = []
         for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
-            server_class = type("Listener", (ThreadingHTTPServer,), {"address_family": family, "daemon_threads": True})
+            server_class = type("Listener", (_LoopbackListener,), {"address_family": family})
             try:
                 server = server_class((host, port), Handler)
             except OSError as exc:
