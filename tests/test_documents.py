@@ -10,6 +10,7 @@ import struct
 import subprocess
 import sys
 import types
+from module_clock import own_clock
 import unittest
 from unittest import mock
 from typing import Iterator
@@ -970,7 +971,7 @@ class DarwinWatchdogTests(unittest.TestCase):
         process.poll.return_value = None
         process.wait.side_effect = [subprocess.TimeoutExpired('worker', 0.05), 0]
         sample = mock.Mock(side_effect=[1024, d.PDF_MEMORY_BYTES])
-        with mock.patch.object(d.time, 'monotonic', side_effect=[0, 0, 0, 0.05, 0.05]):
+        with own_clock(d, 0, 0, 0, 0.05, 0.05):
             d._wait_pdf_worker(process, sample)
         self.assertEqual(sample.call_args_list, [mock.call(123), mock.call(123)])
         self.assertEqual(process.wait.call_args_list, [mock.call(timeout=d.PDF_RSS_POLL_SECONDS)] * 2)
@@ -1013,7 +1014,7 @@ class DarwinWatchdogTests(unittest.TestCase):
         sample = mock.Mock(return_value=100)
         with mock.patch.object(d.sys, 'platform', 'darwin'), mock.patch.object(d, '_DarwinRSS', return_value=sample), \
              mock.patch.object(d.subprocess, 'Popen', return_value=process), \
-             mock.patch.object(d.time, 'monotonic', side_effect=[0, 0, 0, d.PDF_TIMEOUT_SECONDS]):
+             own_clock(d, 0, 0, 0, d.PDF_TIMEOUT_SECONDS):
             with self.assertRaisesRegex(d.DocumentError, 'resource budget'):
                 d._pdf_request(pdf(), 'text', max_chars=10)
         process.kill.assert_called_once()
@@ -1023,7 +1024,7 @@ class DarwinWatchdogTests(unittest.TestCase):
     def test_last_poll_wait_is_clamped_to_remaining_wall_budget(self) -> None:
         process = mock.Mock(pid=123)
         process.poll.return_value = None
-        with mock.patch.object(d.time, 'monotonic', side_effect=[0, 11.99, 11.99]):
+        with own_clock(d, 0, 11.99, 11.99):
             d._wait_pdf_worker(process, mock.Mock(return_value=1))
         self.assertAlmostEqual(process.wait.call_args.kwargs['timeout'], 0.01)
 

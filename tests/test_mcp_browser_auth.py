@@ -3,6 +3,8 @@ import unittest
 from urllib.parse import urlencode
 
 from dgc.mcp import bridge_callback_url, sanitize_input_request, MCPInputError
+from dgc import mcp as mcp_module
+from module_clock import own_clock
 
 
 class McpBrowserAuthTests(unittest.TestCase):
@@ -67,7 +69,7 @@ class McpBrowserWaitTests(unittest.TestCase):
         reply = Reply()
         lifecycle = threading.Event()
         with patch('dgc.mcp.threading.Event', side_effect=[reply, lifecycle]), \
-             patch('dgc.mcp.time.monotonic', side_effect=[0, 0, 1000, 1000, 1000, 1000]), \
+             own_clock(mcp_module, 0, 0, 1000, 1000, 1000, 1000), \
              patch.object(server, '_write_to', return_value=(True, None)):
             return server._request(method, {}, 10, cancel, modern=False)
 

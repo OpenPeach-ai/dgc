@@ -6,33 +6,17 @@ import errno
 import hashlib
 import json
 import io
-import itertools
 import os
 import signal
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from dgc import pip_execution as execution
 from dgc.workspace_registry import RegistryError
-
-
-class _PipClock:
-    """pip_execution's own clock, and only its own: the readings in order, then the last for good. Patching
-    time.monotonic itself handed these readings to every other thread in the suite too: one took a reading and the
-    test ran out of them (StopIteration, GitHub's macOS 3.10 runner, 26 Oct 2026)."""
-
-    def __init__(self, *readings):
-        self._readings = itertools.chain(readings, itertools.repeat(readings[-1]))
-
-    def monotonic(self):
-        return next(self._readings)
-
-    def __getattr__(self, name):
-        return getattr(time, name)
+from module_clock import own_clock
 
 
 def patch_action(tests=None):
@@ -239,7 +223,7 @@ class ProcessCaptureTests(unittest.TestCase):
         self.assertEqual(result['status'], 'cancelled'); self.assertIsNone(result['exit_code'])
 
     def test_controlled_deadline_kills_owned_process_without_sleep(self):
-        with patch.object(execution, 'time', _PipClock(0, 2)):
+        with own_clock(execution, 0, 2, then_last=True):
             result = execution._capture([execution.sys.executable, '-I', '-c', 'import os;os.read(0,1)'], maximum=64, timeout=1, env={})
         self.assertEqual(result['status'], 'timed_out')
 
@@ -283,7 +267,7 @@ class ProcessCaptureTests(unittest.TestCase):
         # The fake clock advances deterministically; no elapsed-time assertion. It stays past the
         # deadline once there: a loaded machine makes _capture look at the clock more often, and a
         # fixed list of four readings ran out (StopIteration) under the full suite.
-        with patch.object(execution.time, 'monotonic', side_effect=itertools.chain([0, 0, 0], itertools.repeat(2))):
+        with own_clock(execution, 0, 0, 0, 2, then_last=True):
             result = execution._capture([execution.sys.executable, '-I', '-c', code], maximum=64, timeout=1, env={})
         self.assertEqual(result['status'], 'timed_out')
 
