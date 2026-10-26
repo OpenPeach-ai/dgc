@@ -4,6 +4,20 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.48.1 — 2026-10-26
+
+- This is the first published build of the 0.48 line. The 0.48.0 source tag was held by the release gate:
+  GitHub's Linux and macOS runners failed tests that assumed a Python not kept under a folder others can write and a
+  computer whose Chrome can sandbox itself. Those tests now run there; what DGC does is unchanged by them.
+- **A troupe works on Python 3.10.0 to 3.10.11 and 3.11.0 to 3.11.3** (python.org's last 3.10 for macOS is 3.10.11).
+  Its snapshot of your commit was unpacked with a tar filter those versions do not have, so every troupe routine
+  failed there. DGC now checks each file of the snapshot itself where the filter is missing.
+- **Reading a PDF no longer fails when its worker finishes at an unlucky moment** on macOS ("the PDF memory watchdog
+  could not sample the worker").
+- **The installer leaves nothing of DGC writable by another user**, also where Python's own venv scripts would be
+  (python.org's 3.10 for macOS), so Keep Pips running never refuses a fresh install.
+- Everything in 0.48.0 below is included.
+
 ## 0.48.0 — 2026-10-26
 
 - **One DGC writes to a session at a time, idle or not.** The session's lock used to be held only during a turn, so

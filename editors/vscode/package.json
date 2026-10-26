@@ -711,7 +711,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.48.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.48.1 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }
@@ -790,5 +790,5 @@
     },
     "@azure/msal-node": "7.1.1"
   },
-  "dgcCliVersion": "0.48.0"
+  "dgcCliVersion": "0.48.1"
 }
