@@ -13,6 +13,10 @@ from typing import NamedTuple
 LIBRARY = "/usr/lib/libproc.dylib"   # absolute: find_library may spawn helpers
 PROC_PIDTBSDINFO = 3
 PROC_PIDTASKINFO = 4
+PROC_PIDLISTFDS = 1
+PROC_PIDFDPIPEINFO = 6
+PROX_FDTYPE_PIPE = 6
+PROC_UID_ONLY = 4
 RUSAGE_INFO_V0 = 0
 _ESRCH = 3
 
@@ -45,6 +49,35 @@ class RusageInfo(ctypes.Structure):
         'ri_proc_exit_abstime')]
 
 
+class FdInfo(ctypes.Structure):
+    # Public proc_fdinfo ABI (8 bytes).
+    _fields_ = [('proc_fd', ctypes.c_int32), ('proc_fdtype', ctypes.c_uint32)]
+
+
+class _FileInfo(ctypes.Structure):
+    # Public proc_fileinfo ABI (24 bytes).
+    _fields_ = [('fi_openflags', ctypes.c_uint32), ('fi_status', ctypes.c_uint32), ('fi_offset', ctypes.c_int64),
+                ('fi_type', ctypes.c_int32), ('fi_guardflags', ctypes.c_uint32)]
+
+
+class _VinfoStat(ctypes.Structure):
+    # Public vinfo_stat ABI (136 bytes).
+    _fields_ = [('vst_dev', ctypes.c_uint32), ('vst_mode', ctypes.c_uint16), ('vst_nlink', ctypes.c_uint16),
+                ('vst_ino', ctypes.c_uint64), ('vst_uid', ctypes.c_uint32), ('vst_gid', ctypes.c_uint32)] + [
+        (name, ctypes.c_int64) for name in (
+            'vst_atime', 'vst_atimensec', 'vst_mtime', 'vst_mtimensec', 'vst_ctime', 'vst_ctimensec',
+            'vst_birthtime', 'vst_birthtimensec', 'vst_size', 'vst_blocks')] + [
+        ('vst_blksize', ctypes.c_int32), ('vst_flags', ctypes.c_uint32), ('vst_gen', ctypes.c_uint32),
+        ('vst_rdev', ctypes.c_uint32), ('vst_qspare', ctypes.c_int64 * 2)]
+
+
+class PipeFdInfo(ctypes.Structure):
+    # Public pipe_fdinfo ABI (184 bytes): proc_fileinfo, then pipe_info (its vinfo_stat, the end's own handle,
+    # the other end's handle, status). The handles name pipe ends as the kernel does, the same in every process.
+    _fields_ = [('pfi', _FileInfo), ('pipe_stat', _VinfoStat), ('pipe_handle', ctypes.c_uint64),
+                ('pipe_peerhandle', ctypes.c_uint64), ('pipe_status', ctypes.c_int32), ('rfu_1', ctypes.c_int32)]
+
+
 class Identity(NamedTuple):
     pid: int
     ppid: int
@@ -67,6 +100,12 @@ class Libproc:
         self._rusage = library.proc_pid_rusage
         self._rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
         self._rusage.restype = ctypes.c_int
+        self._listpids = library.proc_listpids
+        self._listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+        self._listpids.restype = ctypes.c_int
+        self._fdinfo = library.proc_pidfdinfo
+        self._fdinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+        self._fdinfo.restype = ctypes.c_int
         self._task = TaskInfo()
 
     def task_resident(self, pid: int) -> int:
@@ -118,3 +157,32 @@ class Libproc:
 
     def group(self, pgid: int, capacity: int) -> list[int]:
         return self._list(self._group, pgid, capacity)
+
+    def uid_pids(self, uid: int, capacity: int) -> list[int]:
+        """The processes whose effective user is UID (at most CAPACITY)."""
+        buffer = (ctypes.c_int * capacity)()
+        size = self._listpids(PROC_UID_ONLY, uid, buffer, ctypes.sizeof(buffer))   # in bytes, unlike the two above
+        if size < 0:
+            raise OSError(ctypes.get_errno(), 'could not list processes')
+        return [pid for pid in buffer[:min(size // ctypes.sizeof(ctypes.c_int), capacity)] if pid > 0]
+
+    def pipe_end(self, pid: int, fd: int) -> tuple[int, int] | None:
+        """(this end's handle, the other end's) for a pipe open as FD in PID; None when it is not one, or gone."""
+        info = PipeFdInfo()
+        if self._fdinfo(pid, fd, PROC_PIDFDPIPEINFO, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info):
+            return None
+        return int(info.pipe_handle), int(info.pipe_peerhandle)
+
+    def pipe_ends(self, pid: int, capacity: int = 1024) -> list[tuple[int, int]]:
+        """Every pipe end PID holds open, as pipe_end() names them; [] once it is gone or can't be read."""
+        buffer = (FdInfo * capacity)()
+        size = self._pidinfo(pid, PROC_PIDLISTFDS, 0, ctypes.byref(buffer), ctypes.sizeof(buffer))
+        if size <= 0:
+            return []
+        ends = []
+        for entry in buffer[:min(size // ctypes.sizeof(FdInfo), capacity)]:
+            if entry.proc_fdtype == PROX_FDTYPE_PIPE:
+                end = self.pipe_end(pid, entry.proc_fd)
+                if end is not None:
+                    ends.append(end)
+        return ends

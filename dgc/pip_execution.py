@@ -771,7 +771,7 @@ class _LinuxProcesses:
     def __init__(self, scratch=None):
         self._root = None
 
-    def attach(self, pid):
+    def attach(self, pid, output=None):
         self._root = pid
 
     def exceeded(self):
@@ -807,14 +807,52 @@ class _DarwinProcesses:
         self._root = None
         self._scratch = scratch
         self._samples = 0
+        self._output = 0         # the kernel's handle for the write end of the run's output pipe
 
-    def attach(self, pid):
+    def attach(self, pid, output=None):
         # The controller has not reaped its child yet, so the pid is still this process. A
         # child that already exited is a zombie with no identity: record a start no process
         # can have, so the pid is never accepted again once it is reaped and recycled.
         info = self._identity(pid)
         self._root = pid
         self._known[pid] = info.start if info is not None and info.uid == self._uid else -1.0
+        if output is not None:
+            # OUTPUT is the controller's read end; its peer, the write end, is what the run inherited.
+            try:
+                end = self._proc.pipe_end(os.getpid(), output)
+            except (AttributeError, OSError):
+                end = None
+            self._output = end[1] if end is not None else 0
+
+    def _end_output_holders(self):
+        """Kill what still holds the run's output pipe once no sample finds a member: a program the run left running
+        that started, left its group and lost its parent between two samples (a fork whose parent exits at once, on
+        a busy machine). Only a process of this user, started since the run began, holding that very pipe: nothing
+        else can have it."""
+        if not self._output:
+            return
+        me = os.getpid()
+        try:
+            for _ in range(20):
+                found = []
+                for pid in self._proc.uid_pids(self._uid, 16384):
+                    if pid == me:
+                        continue
+                    info = self._identity(pid)
+                    if info is None or info.uid != self._uid or info.start < self._since:
+                        continue
+                    if any(handle == self._output for handle, _peer in self._proc.pipe_ends(pid)):
+                        found.append(pid)
+                if not found:
+                    return
+                for pid in found:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                time.sleep(0.01)
+        except (AttributeError, OSError, RegistryError):
+            return              # the samples' own stop stands; this pass only ever adds to it
 
     def _identity(self, pid):
         try:
@@ -900,6 +938,7 @@ class _DarwinProcesses:
         for _ in range(200):
             live = self._members(4096)
             if not live:
+                self._end_output_holders()
                 return
             # A member's group belongs to the session the root started or to one a member
             # created, never the controller's; while it has a member its id cannot be recycled.
@@ -933,7 +972,7 @@ def _capture(argv, *, maximum, timeout, env, cancelled=None, monitor=False, cwd=
     deadline = time.monotonic() + timeout
     try:
         if watch is not None:
-            watch.attach(proc.pid)
+            watch.attach(proc.pid, output=proc.stdout.fileno())
         os.set_blocking(proc.stdout.fileno(), False)
         selector.register(proc.stdout, selectors.EVENT_READ)
         while True:

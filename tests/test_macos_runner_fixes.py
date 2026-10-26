@@ -9,17 +9,22 @@
    with a throwaway profile asked the Keychain for its storage key and its first navigation never answered.
 4. A remote MCP sign-in's loopback listener named itself by a reverse DNS lookup of 127.0.0.1 and ::1 (HTTPServer
    does, and macOS asks the network): where nothing answers it, the sign-in waited for that lookup to time out
-   before its browser could open, past the 30 s a connection is given.
+   before its browser could open, past the 30 s a connection is given (35 s each, measured on the runner).
+5. A program a reviewed line left running escaped the Mac's sampled process accounting when it forked, left its
+   group and lost its parent between two samples: its line then waited for it to end. What still holds the line's
+   output pipe is ended too.
 """
 from __future__ import annotations
 
 import io
 import os
+import signal
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -27,7 +32,7 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dgc import browser, documents, mcp_remote, troupe_routines
+from dgc import browser, documents, mcp_remote, pip_execution, troupe_routines
 from dgc.workspace_registry import RegistryError
 
 
@@ -177,6 +182,60 @@ class SignInListenerTests(unittest.TestCase):
             self.assertIn(b"DGC is signed in", reply.read())
         self.assertTrue(callback.done.wait(5))
         self.assertEqual(callback.code, "the-code")
+
+
+@unittest.skipUnless(sys.platform == "darwin", "libproc is the Mac's")
+class OutputHolderTests(unittest.TestCase):
+    def test_libproc_names_both_ends_of_a_pipe_and_who_holds_them(self):
+        from dgc.darwin_libproc import Libproc
+        lib = Libproc()
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        mine_read, mine_write = lib.pipe_end(os.getpid(), read), lib.pipe_end(os.getpid(), write)
+        self.assertTrue(mine_read and mine_read[0] and mine_read[1])
+        self.assertEqual((mine_read[0], mine_read[1]), (mine_write[1], mine_write[0]), "each end is the other's peer")
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"], stdout=write,
+                                 stdin=subprocess.DEVNULL, start_new_session=True)
+        os.close(write)
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        self.assertIn(mine_read[1], [handle for handle, _ in lib.pipe_ends(child.pid)], "the child holds the write end")
+        self.assertIn(child.pid, lib.uid_pids(os.getuid(), 16384))
+        with tempfile.TemporaryFile() as regular:
+            self.assertIsNone(lib.pipe_end(os.getpid(), regular.fileno()), "a file is no pipe")
+        self.assertIsNone(lib.pipe_end(os.getpid(), 4000), "nor is an fd no one opened")
+
+    def test_a_program_the_samples_never_saw_is_ended_with_its_line(self):
+        real = pip_execution._DarwinProcesses._members
+
+        def blind(monitor, limit):              # the samples see the reviewed command and nothing it starts
+            return {pid: info for pid, info in real(monitor, limit).items() if pid == monitor._root}
+        line = ("import os, time\npid = os.fork()\nif pid:\n    print(pid, flush=True)\n    os._exit(0)\n"
+                "os.setsid()\ntime.sleep(20)\n")
+        began = time.monotonic()
+        with mock.patch.object(pip_execution._DarwinProcesses, "_members", blind):
+            result = pip_execution._capture([sys.executable, "-I", "-c", line], maximum=4096, timeout=10, env={},
+                                            monitor=True)
+        left = int(result["data"].split()[0])
+        self.addCleanup(lambda: os.kill(left, signal.SIGKILL) if _alive(left) else None)
+        self.assertLess(time.monotonic() - began, 8, result)
+        self.assertEqual(result["status"], "passed", result)
+        for _ in range(50):
+            if not _alive(left):
+                break
+            time.sleep(0.05)
+        self.assertFalse(_alive(left), "the program it left running holding its output ended with it")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
 
 
 if __name__ == "__main__":
