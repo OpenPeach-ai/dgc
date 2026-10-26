@@ -82,7 +82,9 @@ class TurnOutcomeTests(unittest.TestCase):
 
     def test_cli_exit_and_editor_terminal_event_agree_on_deadline(self):
         from dgc import cli
-        facade = types.SimpleNamespace(agent=self.agent, ui=self.agent.ui, expand_mentions=lambda text: text)
+        # The real CLI's -p path asks whether another DGC has the session open (CLI._check_owner, 0.48); nobody does here.
+        facade = types.SimpleNamespace(agent=self.agent, ui=self.agent.ui, expand_mentions=lambda text: text,
+                                       _check_owner=lambda **_kw: True)
         with patch.object(cli, "Config", return_value=self.agent.config), \
                 patch.object(cli, "CLI", return_value=facade), \
                 patch.object(cli.sessions_mod, "new_path", return_value=None), \
