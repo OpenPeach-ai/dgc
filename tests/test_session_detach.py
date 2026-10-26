@@ -888,7 +888,7 @@ class World:
     def __init__(self, test, scale, handler=None):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler or Model)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.base = Path(tempfile.mkdtemp(prefix="dgc-detach-", dir="/tmp"))
+        self.base = Path(tempfile.mkdtemp(prefix="dgc-detach-", dir="/tmp")).resolve()
         self.home, self.work = self.base / "home", self.base / "work"
         self.home.mkdir()
         self.work.mkdir()

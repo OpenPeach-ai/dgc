@@ -11416,12 +11416,14 @@ def test_site_hero_mark_lockstep_and_undimmed():
     dimmed = critical_css.replace("width:50vw;height:50vw}", "width:50vw;height:50vw;opacity:.22}", 1)
     moved = site_css.replace(".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:50vw",
                              ".kinetic-mark{top:calc(14px - 14vw);right:calc(20px - 9vw);width:54vw", 1)
-    drifted = site_css.replace("gap:11px 36px", "gap:12px 36px", 1)
-    check("site: the hero lockstep checks catch dimming, a moved mark and a drifted stat band",
+    # The hero's stat band is gone from the site; the row of actions under the headline is styled twice the same way.
+    drifted = site_css.replace(".hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;",
+                               ".hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;", 1)
+    check("site: the hero lockstep checks catch dimming, a moved mark and a drifted action row",
           dimmed != critical_css and moved != site_css and drifted != site_css
           and any("opacity .22" in problem for problem in _hero_mark_problems(site_common, dimmed, site_css))
           and any("54vw" in problem for problem in _hero_mark_problems(site_common, critical_css, moved))
-          and any(".stat-grid gap" in problem for problem in _hero_mirror_problems(site_common, critical_css, drifted)))
+          and any(".hero-actions gap" in problem for problem in _hero_mirror_problems(site_common, critical_css, drifted)))
 
 
 def test_site_sitemap_and_robots():

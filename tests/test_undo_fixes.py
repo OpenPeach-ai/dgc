@@ -451,7 +451,7 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
         h = self.repo({"a.py": "a = 1\n", "b.py": "x = 1\n"})
         card = self.turn(h, "edit and sed", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "1",
                                                                         "new_string": "2"}),
-                         ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' b.py"}))
+                         ToolCall("b1", "bash", {"command": "perl -pi -e 's/1/2/' b.py"}))
         self.assertEqual(self.rows(card), {"a.py": ("modified", False), "b.py": ("modified", False)})
         (count, restored), outcome = self.undo(h)
         self.assertGreaterEqual(count, 0, outcome)
@@ -488,7 +488,7 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
     def test_a_file_with_uncommitted_changes_a_command_changed_is_put_back_from_its_copy(self):
         h = self.repo({"c.py": "c = 1\n"})
         (h.root / "c.py").write_text("c = 1\n# the person's uncommitted line\n")
-        card = self.turn(h, "sed c", ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' c.py"}))
+        card = self.turn(h, "sed c", ToolCall("b1", "bash", {"command": "perl -pi -e 's/1/2/' c.py"}))
         self.assertEqual(self.rows(card), {"c.py": ("modified", False)})
         self.assertGreaterEqual(self.undo(h)[0][0], 0)
         self.assertEqual((h.root / "c.py").read_text(), "c = 1\n# the person's uncommitted line\n")
@@ -499,14 +499,14 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
                 h = self.repo({"a.py": "x = 1\n"}, git=git)
                 self.turn(h, "edit then sed", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
                                                                            "new_string": "x = 1\ny = 1"}),
-                          ToolCall("b1", "bash", {"command": "sed -i 's/1/2/g' a.py"}))
+                          ToolCall("b1", "bash", {"command": "perl -pi -e 's/1/2/g' a.py"}))
                 self.assertEqual((h.root / "a.py").read_text(), "x = 2\ny = 2\n")
                 (count, _), outcome = self.undo(h)
                 self.assertGreaterEqual(count, 0, outcome)
                 self.assertEqual((h.root / "a.py").read_text(), "x = 1\n")
 
     def test_d6_a_formatter_hook_after_an_edit_does_not_lock_undo(self):
-        hooks = {"PostToolUse": [{"command": "sed -i 's/ugly/pretty/' a.py"}]}
+        hooks = {"PostToolUse": [{"command": "perl -pi -e 's/ugly/pretty/' a.py"}]}
         h = self.repo({"a.py": "x = 1\n"}, hooks=hooks)
         self.turn(h, "edit with hook", ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 1",
                                                                     "new_string": "x = 'ugly'"}))
@@ -517,7 +517,7 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
 
     def test_d7_a_sed_before_the_edit_is_undone_too(self):
         h = self.repo({"a.py": "x = 1\n"})
-        self.turn(h, "sed then edit", ToolCall("b1", "bash", {"command": "sed -i 's/1/2/' a.py"}),
+        self.turn(h, "sed then edit", ToolCall("b1", "bash", {"command": "perl -pi -e 's/1/2/' a.py"}),
                   ToolCall("e1", "edit_file", {"path": "a.py", "old_string": "x = 2", "new_string": "x = 3"}))
         self.assertGreaterEqual(self.undo(h)[0][0], 0)
         self.assertEqual((h.root / "a.py").read_text(), "x = 1\n", "Git's copy was the file's exact state")
@@ -531,7 +531,7 @@ class CommandUndoTests(CommandHelpers, HarnessCase):
                                                                            "new_string": "x = 2"})])
             if len(results) == 1:
                 (h.root / "a.py").write_text("x = 2\n# typed by the person\n")
-                return ChatResult(tool_calls=[ToolCall("b1", "bash", {"command": "sed -i 's/2/3/' a.py"})])
+                return ChatResult(tool_calls=[ToolCall("b1", "bash", {"command": "perl -pi -e 's/2/3/' a.py"})])
             return ChatResult(content="Done.")
         self.assertTrue(h.run("racing", [("racing", person_then_sed)]))
         (count, _), outcome = self.undo(h)
@@ -774,7 +774,7 @@ class SaveDuringCommandTests(HarnessCase):
             readme.write_text("# Billing\n\nMy own paragraph.\n")
             command_watch.note_saves([str(readme)], time.time())         # the editor's user_saved
         card = self.run_with_person(h, [ToolCall("b1", "bash", {
-            "command": "sleep 1.5 && sed -i 's/0.05/0.07/' rates.py"})], person)
+            "command": "sleep 1.5 && perl -pi -e 's/0.05/0.07/' rates.py"})], person)
         self.assertEqual({row["path"]: row.get("by_command", False) for row in card["files"]}, {"rates.py": True},
                          "README.md is the person's, not the command's: not on the card")
         self.assertGreaterEqual(h.agent.rewind(0)[0], 0, h.agent.last_rewind)
@@ -1264,7 +1264,7 @@ class ClassicPickerTests(CommandHelpers, HarnessCase):
     def test_keep_the_ones_i_edited(self):
         h = self.repo({"rates.py": "RATE = 0.05\n", "README.md": "# Billing\n"})
         self.turn(h, "change rates", ToolCall("b1", "bash", {
-            "command": "sed -i 's/0.05/0.07/' rates.py && printf 'more\\n' >> README.md"}))
+            "command": "perl -pi -e 's/0.05/0.07/' rates.py && printf 'more\\n' >> README.md"}))
         cli, lines = self.cli(h)
         # The point; Keep the ones I edited…; tick README.md; Undo, keeping 1 file.
         answers = iter(["change rates", "Keep the ones I edited…", "[ ] README.md", "Undo, keeping 1 file"])
@@ -1461,7 +1461,7 @@ class TerminalHearsTheWindowsSavesTests(CommandHelpers, HarnessCase):
             if not results:
                 worker.start()
                 return ChatResult(tool_calls=[ToolCall("b1", "bash", {
-                    "command": "sleep 3 && sed -i 's/0.05/0.07/' rates.py"})])
+                    "command": "sleep 3 && perl -pi -e 's/0.05/0.07/' rates.py"})])
             return ChatResult(content="Done.")
         self.assertTrue(h.run("long command", [("long command", route)]))
         worker.join(30)

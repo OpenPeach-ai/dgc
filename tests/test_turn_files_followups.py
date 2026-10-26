@@ -44,7 +44,7 @@ class IdleIntegrationChangesTests(HarnessCase):
         h.agent.session_file = sessions.new_path(h.root)
         go, updates = threading.Event(), []
         h.agent.on_turn_files = lambda record: updates.append(record)
-        script = "sed -i 's/rate = 0.1/rate = 0.25/' billing.py"
+        script = "perl -pi -e 's/rate = 0.1/rate = 0.25/' billing.py"
 
         def parent(messages, results, cancel):
             if not results:
