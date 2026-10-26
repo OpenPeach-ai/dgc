@@ -128,6 +128,7 @@ globalThis.__DGC_TEST_VSCODE = {
       said.push({ kind: "warning", message: String(message), options, items }); return answers.shift(); },
     showErrorMessage: async (message) => { said.push({ kind: "error", message: String(message) }); },
     showInformationMessage: async (message) => { said.push({ kind: "info", message: String(message) }); },
+    showQuickPick: async (items, options) => { said.push({ kind: "pick", items, options }); return answers.shift(); },
   },
   workspace: { isTrusted: true, workspaceFolders: [{ uri: { fsPath: scratch } }],
                onDidSaveTextDocument: listen(saveListeners.did), onWillSaveTextDocument: listen(saveListeners.will),
@@ -143,7 +144,7 @@ await build({ entryPoints: [join(here, "../src/panel.ts")], bundle: true, format
   } }] });
 const { DgcViewProvider } = createRequire(import.meta.url)(bundle);
 
-function provider(results, capabilities = { turn_files: 1, rewind_preview: 1, undo_to: 1 }) {
+function provider(results, capabilities = { turn_files: 1, rewind_preview: 1, undo_to: 1 }, preview = undefined) {
   const asked = [];
   const p = new DgcViewProvider({
     extension: { packageJSON: { version: "0.32.0", dgcCliVersion: "0.48.0" } }, extensionUri: { fsPath: "/ext" },
@@ -156,6 +157,7 @@ function provider(results, capabilities = { turn_files: 1, rewind_preview: 1, un
     asked.push(JSON.parse(JSON.stringify(command)));
     if (command.type === "list_checkpoints") return { type: "checkpoints", items: [{ index: 0, preview: "turn 1", files: 1 }] };
     if (command.type === "rewind") return { type: "rewound", ok: true, files_restored: 1 };
+    if (command.type === "rewind_preview") return { type: "rewind_preview", request_id: "p", index: command.index, ...preview };
     return { type: "undo_result", request_id: "u", index: command.index, ...results.shift() };
   };
   return { p, asked };
@@ -217,10 +219,10 @@ test("the question names the files Undo puts back from Git because a command cha
                           { ok: true, files_restored: 9, conflicts: [], left: [], stopped: 0 }]);
   await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 3,
                       checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["rates.py", "README.md"] });
-  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 2 files a command changed: rates.py, README.md.");
+  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 2 files changed while a command ran: rates.py, README.md.");
   await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 9,
                       checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["a", "b", "c", "d", "e", "f", "g"] });
-  assert.match(said.at(-2).options.detail, /Also puts back 7 files a command changed: a, b, c, d, e and 2 more\.$/);
+  assert.match(said.at(-2).options.detail, /Also puts back 7 files changed while a command ran: a, b, c, d, e and 2 more\.$/);
 });
 
 test("the question quotes a long prompt as one line cut at a word, with an ellipsis", async () => {
@@ -264,7 +266,7 @@ test("Undo's question and its line say Git's commits, branches, stashes and stag
   const { p } = provider([{ ok: true, files_restored: 2, conflicts: [], left: [], stopped: 0, git: true }]);
   await p.onMessage({ type: "undoTurn", prompt: "turn 1", files: ["a.py"], exact: true, total: 2,
                       checkpoint: { index: 0, preview: "turn 1" }, byCommand: ["a.py"], gitMoved: true });
-  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 1 file a command changed: a.py.\n\n"
+  assert.equal(said[0].options.detail, "turn 1\n\nAlso puts back 1 file changed while a command ran: a.py.\n\n"
     + "Your files are put back; Git's commits, branches, stashes and staging are left as they are.");
   assert.equal(said.at(-1).message, "↩ Undone; DGC restored 2 files. Git's commits, branches, stashes and staging "
     + "are left as they are.");
@@ -276,4 +278,77 @@ test("an older CLI is sent rewind, as before", async () => {
   await undoTurn(p);
   assert.deepEqual(asked.at(-1), { type: "rewind", index: 0 });
   assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file(s).");
+});
+
+// ---- Undo merges the person's edits (the founder, 25 Oct: "yes want them now in 0.48.0 only") ----
+const MERGING = { turn_files: 1, rewind_preview: 1, undo_to: 1, undo_merge: 1 };
+const PLAN = { files: 4, merged: ["a.py"], held: [{ path: "b.py", reason: "overlap" }], commands: ["rates.py", "README.md"] };
+
+test("a merging CLI's question says what Undo does with each file, and offers Keep the ones I edited and Undo anyway", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo turn");
+  const { p, asked } = provider([{ ok: true, files_restored: 3, merged: ["a.py"], kept: ["b.py"], conflicts: [], left: [],
+                                   stopped: 0 }], MERGING, PLAN);
+  await undoTurn(p);
+  assert.deepEqual(asked.find((c) => c.type === "rewind_preview"), { type: "rewind_preview", index: 0 },
+                   "asked for the newest turn too");
+  const question = said[0];
+  assert.equal(question.options.detail, "turn 1\n\n"
+    + "a.py: your later edits are kept and DGC's are taken out\n"
+    + "b.py: your edits overlap DGC's; it is left as it is\n\n"
+    + "Undo anyway puts b.py back too and loses your edits there.\n\n"
+    + "Also puts back 2 files changed while a command ran: rates.py, README.md.");
+  assert.deepEqual(question.items, ["Undo turn", "Keep the ones I edited…", "Undo anyway"]);
+  assert.deepEqual(asked.at(-1), { type: "undo_to", index: 0, keep: ["b.py"] }, "the held-back file is left as it is");
+  assert.deepEqual(said.at(-1), { kind: "info",
+    message: "↩ Undone; DGC restored 2 files and merged 1 with your edits. b.py was left as it is." });
+});
+
+test("Keep the ones I edited lists the files a command changed, and leaves the ticked ones", async () => {
+  said.length = 0; answers.length = 0;
+  answers.push("Keep the ones I edited…", [{ label: "README.md" }]);
+  const { p, asked } = provider([{ ok: true, files_restored: 2, merged: ["a.py"], kept: ["b.py", "README.md"],
+                                   conflicts: [], left: [], stopped: 0 }], MERGING, PLAN);
+  await undoTurn(p);
+  const pick = said.find((s) => s.kind === "pick");
+  assert.deepEqual(pick.items.map((item) => item.label), ["rates.py", "README.md"]);
+  assert.equal(pick.items[0].description, "changed while a command ran");
+  assert.equal(pick.options.canPickMany, true);
+  assert.deepEqual(asked.at(-1), { type: "undo_to", index: 0, keep: ["b.py", "README.md"] });
+  assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file and merged 1 with your edits. "
+    + "b.py and README.md were left as they are.");
+});
+
+test("Undo anyway in the question puts the held-back file back too; closing the picker does nothing", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo anyway");
+  const { p, asked } = provider([{ ok: true, files_restored: 4, merged: ["a.py"], conflicts: [], left: [], stopped: 0 }],
+                                MERGING, PLAN);
+  await undoTurn(p);
+  assert.deepEqual(asked.at(-1), { type: "undo_to", index: 0, overwrite: ["b.py"] });
+  said.length = 0; answers.length = 0; answers.push("Keep the ones I edited…", undefined);
+  const second = provider([], MERGING, PLAN);
+  await undoTurn(second.p);
+  assert.equal(second.asked.filter((c) => c.type === "undo_to").length, 0, "Esc in the picker undoes nothing");
+});
+
+test("a refusal over a file whose edits came to overlap offers Undo the rest", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo turn", "Undo the rest");
+  const { p, asked } = provider([
+    { ok: false, files_restored: 0, conflicts: [{ path: "a.py", reason: "overlap" }], left: [], stopped: 0 },
+    { ok: true, files_restored: 1, kept: ["a.py"], conflicts: [], left: [], stopped: 0 }], MERGING,
+    { files: 2, merged: ["a.py"] });
+  await undoTurn(p);
+  const refusal = said[1];
+  assert.deepEqual(refusal.items, ["Keep my changes", "Undo the rest", "Undo anyway"]);
+  assert.match(refusal.message, /Undo the rest leaves a\.py as it is\.$/);
+  assert.equal(refusal.options.detail, "a.py: your edits overlap DGC's");
+  assert.deepEqual(asked.at(-1), { type: "undo_to", index: 0, keep: ["a.py"] });
+  assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file. a.py was left as it is.");
+});
+
+test("a CLI that doesn't merge gets the question as before, with no plan asked for the newest turn", async () => {
+  said.length = 0; answers.length = 0; answers.push("Undo turn");
+  const { p, asked } = provider([{ ok: true, files_restored: 1, conflicts: [], left: [], stopped: 0 }]);
+  await undoTurn(p);
+  assert.equal(asked.filter((c) => c.type === "rewind_preview").length, 0);
+  assert.deepEqual(said[0].items, ["Undo turn"]);
 });

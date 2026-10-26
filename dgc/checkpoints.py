@@ -38,6 +38,10 @@ _MAX_MESSAGE_STORE_BYTES = 128 * 1024 * 1024
 _MAX_MESSAGE_BLOBS = 100_000
 _MAX_CHAIN_NODES = 200_000
 _HEX = frozenset("0123456789abcdef")
+# DGC's after-bytes, the base a 3-way merge needs on Undo: text files up to this size (inside the
+# session's snapshot budget). Larger, binary or link files are not merged: Undo stops for them as before.
+_MERGE_MAX_BYTES = 1024 * 1024
+_MAX_SEGMENTS = 32                     # a file's runs of DGC writes within one point, at most
 # What a turn's Edited card lists (changes): rows sent, and how long counting lines may take.
 _MAX_TURN_FILES = 500
 _TURN_FILES_BUDGET_S = 3.0
@@ -141,8 +145,9 @@ class CheckpointManager:
             return None
         return stat.S_IMODE(info.st_mode) if stat.S_ISREG(info.st_mode) else None
 
-    def note_written(self, path: str) -> None:
-        """Remember what DGC just left in a file, so a later rewind can recognise its own work."""
+    def note_written(self, path: str, *, segment: bool = True) -> None:
+        """Remember what DGC just left in a file, so a later rewind can recognise its own work (and,
+        for a file the current point holds, merge somebody else's later edits with it on Undo)."""
         try:
             resolved = Path(path)
         except (TypeError, ValueError):
@@ -155,6 +160,8 @@ class CheckpointManager:
                 self._left_modes.pop(str(resolved), None)
             else:
                 self._left_modes[str(resolved)] = mode
+            if segment:
+                self._note_after(str(path), digest, mode)
 
     def _changed_since_left(self, path: str, digest: str | None, mode: int | None) -> bool:
         """Positive evidence that `path` holds something other than what DGC last left there.
@@ -185,6 +192,94 @@ class CheckpointManager:
             return False
         marks[path] = when
         return True
+
+    # ---- DGC's writes, for the merge on Undo ---------------------------------------------------
+    # A point keeps, per file, the runs of DGC's own writes ("segments"): each starts from a state
+    # (the point's before-state for the first; for a later one, what somebody else left in between,
+    # found when DGC came to write again) and ends with what DGC left (`after`: its bytes when it is a
+    # text file up to _MERGE_MAX_BYTES, and always its sha256 and mode). Undo walks them newest first:
+    # a file that still holds what DGC left goes back to the segment's start; one somebody changed is
+    # merged three ways -- base what DGC left, ours what is there now, theirs the segment's start --
+    # so their edits stay and DGC's are taken out, or it is held back when the two overlap.
+    @staticmethod
+    def _segment(before=None, opaque: str = "") -> dict:
+        return {"before": before, "opaque": opaque, "after": None, "after_sha": None, "after_mode": None}
+
+    @staticmethod
+    def _segment_bytes(segment: dict) -> int:
+        total = 0
+        for key in ("before", "after"):
+            value = segment.get(key)
+            if isinstance(value, _Snapshot):
+                total += len(value.data)
+        return total
+
+    def _point_bytes(self, point: dict) -> int:
+        total = sum(len(snapshot.data) for snapshot in point["files"].values() if isinstance(snapshot, _Snapshot))
+        for segments in (point.get("writes") or {}).values():
+            total += sum(self._segment_bytes(segment) for segment in segments)
+        return total
+
+    def _mergeable_capture(self, path: Path) -> tuple[_Snapshot | None, str]:
+        """(a text file's exact state, "") or (None, why it can't be merged: binary, large, link)."""
+        try:
+            snapshot = _capture(path, _MERGE_MAX_BYTES)
+        except (OSError, ValueError):
+            return None, "large"
+        if snapshot.kind != "file":
+            return None, "deleted" if snapshot.kind == "missing" else "link"
+        if b"\0" in snapshot.data:
+            return None, "binary"
+        if self._snapshot_bytes_total + len(snapshot.data) > _MAX_SNAPSHOT_BYTES:
+            return None, "large"
+        return snapshot, ""
+
+    def begin_segment(self, path: str, before: "_Snapshot | None" = None, *, read: bool = True) -> None:
+        """Somebody changed a file this point holds after DGC wrote it, and DGC is about to write it
+        again (or a command just did): a new run of DGC writes starts from what they left, so an Undo
+        can keep their change. `before`: that state when the caller has it exactly (a command's
+        pre-copy); otherwise it is read now."""
+        if not self.points:
+            return
+        point = self.points[-1]
+        if path not in point["files"]:
+            return
+        segments = point.setdefault("writes", {}).setdefault(path, [self._segment()])
+        if len(segments) >= _MAX_SEGMENTS:
+            segments[-1]["opaque"] = segments[-1].get("opaque") or "large"
+            return
+        why = ""
+        if before is None and not read:
+            why = "large"                      # their state was not kept: nothing to merge from
+        elif before is None:
+            before, why = self._mergeable_capture(Path(path))
+        elif before.kind != "file" or b"\0" in before.data or len(before.data) > _MERGE_MAX_BYTES:
+            why = "binary" if before.kind == "file" and b"\0" in before.data else (
+                "large" if before.kind == "file" else ("deleted" if before.kind == "missing" else "link"))
+            before = None
+        if before is not None:
+            self._snapshot_bytes_total += len(before.data)
+        segments.append(self._segment(before, why))
+
+    def _note_after(self, path: str, digest: str, mode: int | None) -> None:
+        """What DGC left at the end of its latest write in this point: the end of the file's current
+        segment (bytes kept for a text file up to the cap, inside the budget)."""
+        if not self.points or self._pending_rewind is not None:
+            return
+        point = self.points[-1]
+        if path not in point["files"]:
+            return
+        segments = point.setdefault("writes", {}).setdefault(path, [self._segment()])
+        segment = segments[-1]
+        old = segment.get("after")
+        if isinstance(old, _Snapshot):
+            self._snapshot_bytes_total -= len(old.data)
+        after, _why = self._mergeable_capture(Path(path))
+        if after is not None and hashlib.sha256(after.data).hexdigest() != digest:
+            after = None                       # it moved between the two reads: keep only the hash
+        if after is not None:
+            self._snapshot_bytes_total += len(after.data)
+        segment["after"], segment["after_sha"], segment["after_mode"] = after, digest, mode
 
     def _missing_parents(self, path: str) -> list[str]:
         """The project folders above a missing file that do not exist yet, deepest first: the ones
@@ -380,9 +475,7 @@ class CheckpointManager:
         old_snapshot_bytes = self._snapshot_bytes_total
         try:
             if len(self.points) >= _MAX_POINTS:
-                self._snapshot_bytes_total -= sum(
-                    len(snapshot.data) for snapshot in self.points[0]["files"].values()
-                    if isinstance(snapshot, _Snapshot))
+                self._snapshot_bytes_total -= self._point_bytes(self.points[0])
                 del self.points[0]
                 self._prune_conversations()
             exact, head, conversation_count = self._ingest_messages(messages)
@@ -423,8 +516,9 @@ class CheckpointManager:
             # DGC is about to write a file this turn already holds a before-state for. If it no longer
             # holds what DGC left there, somebody else wrote it in between (the person, while the turn
             # ran), and DGC's write is about to bury that: a rewind would lose it without a word.
-            if (self._changed_since_left(path, self._on_disk_hash(p), self._on_disk_mode(p))
-                    and self._mark_outside(point, path, "during")):
+            if self._changed_since_left(path, self._on_disk_hash(p), self._on_disk_mode(p)):
+                self._mark_outside(point, path, "during")
+                self.begin_segment(path)       # their state: the start of DGC's next run of writes
                 self._notify()
             return True
         if len(files) >= _MAX_FILES_PER_POINT:
@@ -470,6 +564,7 @@ class CheckpointManager:
         files = point["files"]
         files[path] = snapshot
         self._snapshot_bytes_total += len(snapshot.data)
+        point.setdefault("writes", {})[path] = [self._segment()]
         old_mark = (point.get("outside") or {}).get(path)
         marked = self._changed_since_left(
             path, self._snapshot_digest(snapshot), snapshot.mode if snapshot.kind == "file" else None)
@@ -480,6 +575,7 @@ class CheckpointManager:
             point["made_dirs"] = old_made + [folder for folder in made if folder not in old_made]
         if not self._notify():
             files.pop(path, None)
+            point["writes"].pop(path, None)
             self._snapshot_bytes_total -= len(snapshot.data)
             if marked:
                 if old_mark is None:
@@ -548,6 +644,8 @@ class CheckpointManager:
             return False
         point["files"].pop(path, None)
         self._snapshot_bytes_total -= len(getattr(snapshot, "data", b"") or b"")
+        for segment in (point.get("writes") or {}).pop(path, None) or []:
+            self._snapshot_bytes_total -= self._segment_bytes(segment)
         if path in (point.get("by_command") or ()):
             point["by_command"].remove(path)
         (point.get("outside") or {}).pop(path, None)
@@ -875,17 +973,21 @@ class CheckpointManager:
         return self._lexical_project_path(path) or str(path)
 
     def rewind_state(self, idx: int, *, transactional: bool = False,
-                     overwrite=None) -> tuple[int, int, list | None]:
+                     overwrite=None, keep=None) -> tuple[int, int, list | None]:
         """Restore files to their state at checkpoint idx and drop later checkpoints.
         Returns (legacy message count, files restored, exact non-system conversation if captured).
 
         `overwrite`: paths the person agreed to lose changes in ("Undo anyway", after a refusal named
-        them). The rewind still stops if any other file is a conflict, and names them all again.
+        them). `keep`: paths to leave exactly as they are (a file held back because the person's edits
+        overlap DGC's, or one a command changed that they say they edited themselves). The rewind still
+        stops if any other file is a conflict, and names them all again.
         On a refusal, `last_rewind_conflicts` names the files somebody else changed (and
         `last_rewind_reasons` why), or `last_rewind_error` says what else stopped it."""
         self.last_rewind_error = ""
         self.last_rewind_left = []
         self.last_rewind_git = False
+        self.last_rewind_merged = []
+        self.last_rewind_kept = []
         if self._pending_rewind is not None:
             self.last_rewind_error = "another Undo of this chat is still being applied"
             return (-1, 0, None)
@@ -916,14 +1018,33 @@ class CheckpointManager:
                                            or (when == "during" and idx + offset >= origin)):
                     between.add(path)
 
-        # Refuse rather than overwrite. A rewind is DGC undoing DGC; a file somebody else has
-        # written since is not DGC's to take back, and the whole rewind stops so the person can
-        # decide -- a partial rewind would leave the workspace in a state neither side chose.
-        conflicts = self._rewind_conflicts(restore, between)
+        # A file somebody else changed since DGC wrote it is merged: their edits stay and DGC's are
+        # taken out (_walk). One that can't be (their edits overlap DGC's, binary, too large, a link,
+        # a permissions change) is a conflict: the rewind stops and names it, unless the person chose
+        # to leave it as it is (`keep`) or to lose their change in it (`overwrite`, Undo anyway).
+        # Files from a session saved before DGC kept its writes go through the old guard.
+        plans = {path: self._walk(idx, path) for path in restore}
+        legacy = {path: restore[path] for path, plan in plans.items() if plan[0] == "legacy"}
+        self._rewind_conflicts(legacy, between)
+        reasons = dict(self.last_rewind_reasons)
+        for path, plan in plans.items():
+            if plan[0] == "held":
+                reasons[path] = plan[1]
+        conflicts = sorted(reasons)
+        self.last_rewind_reasons = reasons
         self.last_rewind_conflicts = conflicts
         allowed = {str(path) for path in (overwrite or ())}
-        if conflicts and not set(conflicts) <= allowed:
+        kept = {str(path) for path in (keep or ())}
+        if conflicts and not set(conflicts) <= (allowed | kept):
             return (-1, 0, None)
+        merged_paths = [path for path, plan in plans.items()
+                        if plan[0] == "merge" and path not in kept and path not in allowed]
+        targets: dict[str, object] = {}
+        for path, (prior, _durable) in restore.items():
+            if path in kept:
+                continue                       # left as it is, by the person's choice
+            plan = plans[path]
+            targets[path] = plan[1] if plan[0] == "merge" and path not in allowed else prior
 
         # Validate every target and capture a rollback image before changing anything. In
         # particular, a project-relative path loaded from disk must not become an external write
@@ -931,6 +1052,8 @@ class CheckpointManager:
         rollback: dict[str, _Snapshot] = {}
         rollback_bytes = 0
         for path, (_prior, durable) in restore.items():
+            if path not in targets:
+                continue
             lexical_inside = self._lexically_within_project(path)
             if ((durable and not lexical_inside)
                     or (lexical_inside and self._relative_project_path(path) is None)):
@@ -946,7 +1069,7 @@ class CheckpointManager:
                 return (-1, 0, None)
 
         applied: list[str] = []
-        for path, (prior, _durable) in restore.items():
+        for path, prior in targets.items():
             p = Path(path)
             try:
                 # Accept legacy in-memory checkpoints created before exact byte/symlink snapshots.
@@ -990,16 +1113,16 @@ class CheckpointManager:
                 continue
         self.last_rewind_left = list(self._command_changes(idx, restore))
         self.last_rewind_git = self.git_moved_since(idx)
+        self.last_rewind_merged = [path for path in merged_paths if path in applied]
+        self.last_rewind_kept = sorted(path for path in kept if path in restore)
         # What DGC put back is now what DGC last left there: a second Undo right after this one
         # must not take DGC's own restore for somebody else's edit.
         old_left = {path: (self._left.get(path), self._left_modes.get(path)) for path in applied}
         for path in applied:
-            self.note_written(path)
+            self.note_written(path, segment=False)
         msg_count = self.points[idx]["msg_count"]
         del self.points[idx:]
-        self._snapshot_bytes_total = sum(
-            len(snapshot.data) for point in self.points for snapshot in point["files"].values()
-            if isinstance(snapshot, _Snapshot))
+        self._snapshot_bytes_total = sum(self._point_bytes(point) for point in self.points)
         self._prune_conversations()
         self.last_rewind_conflicts = []
         if transactional:
@@ -1052,9 +1175,168 @@ class CheckpointManager:
         self._pending_rewind = None
         return restored
 
-    def rewind(self, idx: int, overwrite=None) -> tuple[int, int]:
-        msg_count, restored, _conversation = self.rewind_state(idx, overwrite=overwrite)
+    def rewind(self, idx: int, overwrite=None, keep=None) -> tuple[int, int]:
+        msg_count, restored, _conversation = self.rewind_state(idx, overwrite=overwrite, keep=keep)
         return msg_count, restored
+
+    # ---- the merge -----------------------------------------------------------------------------
+    def _walk(self, idx: int, path: str) -> tuple[str, object]:
+        """What an Undo to point `idx` does with `path`: ("exact", None) puts back its earliest saved
+        state; ("merge", snapshot) writes a merge that keeps somebody else's edits and takes DGC's out;
+        ("held", why) can't do either without losing their change; ("legacy", None) has no record of
+        DGC's writes (an older session), so the old guard decides."""
+        chain: list[tuple[object, dict]] = []
+        for k in range(len(self.points) - 1, idx - 1, -1):
+            point = self.points[k]
+            if path not in point["files"]:
+                continue
+            segments = (point.get("writes") or {}).get(path)
+            if not segments:
+                return ("legacy", None)
+            for i in range(len(segments) - 1, -1, -1):
+                segment = segments[i]
+                before = point["files"][path] if i == 0 else segment.get("before")
+                chain.append((before, segment))
+        try:
+            current = _capture(Path(path), _MAX_SNAPSHOT_BYTES)
+        except (OSError, ValueError):
+            return ("held", "unreadable")
+        merged = False
+        for before, segment in chain:
+            if segment.get("after_sha") is None:
+                if before is not None and isinstance(before, _Snapshot) and current == before:
+                    continue                   # a capture DGC never wrote over: nothing of DGC's here
+                return ("legacy", None) if not merged else ("held", "changed")
+            if self._holds_after(current, segment):
+                if not isinstance(before, _Snapshot):
+                    return ("held", segment.get("opaque") or "large")
+                current = before
+                continue
+            # Somebody changed it after this write of DGC's: merge, or hold it back.
+            why = self._why_unmergeable(current, segment, before)
+            if why:
+                return ("held", why)
+            result = self._merge(segment["after"], current, before, path)
+            if result is None:
+                return ("held", "overlap")
+            current = result
+            merged = True
+        return ("merge", current) if merged else ("exact", None)
+
+    @classmethod
+    def _holds_after(cls, current: _Snapshot, segment: dict) -> bool:
+        digest = "" if current.kind == "missing" else cls._hash(current.data)
+        if digest != segment.get("after_sha"):
+            return False
+        mode = segment.get("after_mode")
+        return current.kind != "file" or mode is None or current.mode == mode
+
+    @staticmethod
+    def _why_unmergeable(current: _Snapshot, segment: dict, before) -> str:
+        after = segment.get("after")
+        if current.kind == "missing":
+            return "deleted"
+        if current.kind != "file":
+            return "link"
+        if b"\0" in current.data:
+            return "binary"
+        if not isinstance(after, _Snapshot) or not isinstance(before, _Snapshot):
+            return segment.get("opaque") or "large"
+        if before.kind not in ("file", "missing"):
+            return "link"
+        if b"\0" in before.data or b"\0" in after.data:
+            return "binary"
+        if len(current.data) > _MERGE_MAX_BYTES or len(before.data) > _MERGE_MAX_BYTES:
+            return "large"
+        if current.data == after.data:
+            return "mode"                      # only its permissions changed
+        return ""
+
+    def _merge(self, base: _Snapshot, ours: _Snapshot, theirs: _Snapshot, path: str) -> _Snapshot | None:
+        """Three ways, as helper integration does (`git merge-file -p`, nothing written): base what
+        DGC left, ours what is there now, theirs the state before DGC's write. None when they overlap.
+        A file DGC created (theirs absent) keeps only what somebody else added to it."""
+        if theirs.kind == "missing":
+            return self._merge_into_absent(base, ours)
+        from .worktree import _FileState, _merge_file
+        cwd = self.project_root if self.project_root is not None else Path(path).parent
+        result = _merge_file(_FileState("file", base.data, base.mode), _FileState("file", ours.data, ours.mode),
+                             _FileState("file", theirs.data, theirs.mode), cwd)
+        if result is None:
+            return None
+        return _Snapshot("file", bytes(result.data), int(result.mode))
+
+    @staticmethod
+    def _merge_into_absent(base: _Snapshot, ours: _Snapshot) -> _Snapshot | None:
+        """DGC created the file and somebody added to it: what they added is theirs, DGC's lines go.
+        Only pure additions can be told apart; a change to one of DGC's own lines overlaps."""
+        import difflib
+        old = base.data.splitlines(keepends=True)
+        new = ours.data.splitlines(keepends=True)
+        kept: list[bytes] = []
+        for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+            if tag in ("replace", "delete"):
+                return None
+            if tag == "insert":
+                kept.extend(new[j1:j2])
+        data = b"".join(kept).lstrip(b"\r\n")
+        if not data.strip():
+            return _Snapshot("missing")        # nothing of theirs but blank lines
+        return _Snapshot("file", data, ours.mode)
+
+    def undo_plan(self, idx: int) -> dict:
+        """What an Undo to point `idx` would do with each file somebody else changed since DGC wrote
+        it, for Undo's question: {"merged": [paths], "held": [{path, reason}]} (no files written)."""
+        merged, held = [], []
+        if not (0 <= idx < len(self.points)):
+            return {"merged": merged, "held": held}
+        paths: list[str] = []
+        for point in list(self.points[idx:]):
+            for path in list(point["files"]):
+                if path not in paths:
+                    paths.append(path)
+        legacy: dict = {}
+        first: dict = {}
+        for path in paths:
+            plan = self._walk(idx, path)
+            if plan[0] == "merge":
+                merged.append(path)
+            elif plan[0] == "held":
+                held.append({"path": path, "reason": plan[1]})
+            elif plan[0] == "legacy":
+                for offset, point in enumerate(self.points[idx:]):
+                    if path in point["files"]:
+                        legacy[path] = (point["files"][path], bool(point.get("durable")))
+                        first[path] = idx + offset
+                        break
+        if legacy:
+            saved = dict(self.last_rewind_reasons)
+            between = {path for offset, point in enumerate(self.points[idx:])
+                       for path, when in (point.get("outside") or {}).items()
+                       if path in first and (idx + offset > first[path]
+                                             or (when == "during" and idx + offset >= first[path]))}
+            for path in self._rewind_conflicts(legacy, between):
+                held.append({"path": path, "reason": self.last_rewind_reasons.get(path, "changed")})
+            self.last_rewind_reasons = saved
+        return {"merged": merged, "held": held}
+
+    def undo_question(self, idx: int, name=None) -> dict:
+        """Undo's question about point `idx`, file by file, each path as `name` shows it: `merged`
+        (somebody's later edits are kept and DGC's taken out), `held` [{path, reason}] (left as it is
+        when their edits overlap DGC's; anything else stops the Undo and is named), and `commands`, the
+        files it puts back because a command changed them while it ran (the person may have edited
+        one meanwhile in an editor DGC can't hear; the question lets them keep it)."""
+        show = name if callable(name) else str
+        plan = self.undo_plan(idx)
+        try:
+            rows, _total = self.changes(idx)
+        except Exception:                      # noqa: BLE001 -- the question still asks without them
+            rows = []
+        held = {row["path"] for row in plan["held"]}
+        return {"merged": [show(path) for path in plan["merged"]],
+                "held": [{"path": show(row["path"]), "reason": row["reason"]} for row in plan["held"]],
+                "commands": [show(row["path"]) for row in rows
+                             if row.get("by_command") and row["path"] not in held]}
 
     def _left_state(self) -> dict:
         """What DGC last left in each file, keyed by project-relative path.
@@ -1158,6 +1440,28 @@ class CheckpointManager:
                 durable["command_limits"] = limits
             if point.get("git_moved"):
                 durable["git_moved"] = True
+            # DGC's runs of writes, with its after-bytes: the merge base an Undo needs after a restart.
+            writes = {}
+            for path, segments in (point.get("writes") or {}).items():
+                relative = self._lexical_project_path(path)
+                if relative not in files:
+                    continue
+                saved = []
+                for segment in segments[:_MAX_SEGMENTS]:
+                    snap = {}
+                    for key in ("before", "after"):
+                        value = segment.get(key)
+                        if isinstance(value, _Snapshot):
+                            snapshot_bytes += len(value.data)
+                            if snapshot_bytes > _MAX_SNAPSHOT_BYTES:
+                                raise ValueError("checkpoint snapshots exceed the durable size limit")
+                            snap[key] = {"kind": value.kind, "data": base64.b64encode(value.data).decode("ascii"),
+                                         "mode": value.mode, "sha256": self._snapshot_hash(relative, value)}
+                    saved.append({**snap, "opaque": str(segment.get("opaque") or ""),
+                                  "after_sha": segment.get("after_sha"), "after_mode": segment.get("after_mode")})
+                writes[relative] = saved
+            if writes:
+                durable["writes"] = writes
             if outside:
                 durable["outside"] = outside
             if commands:
@@ -1361,4 +1665,60 @@ class CheckpointManager:
             extras["command_limits"] = command_limits
         if git_moved:
             extras["git_moved"] = True
+        writes = raw_point.get("writes", {})
+        if not isinstance(writes, dict) or len(writes) > _MAX_FILES_PER_POINT:
+            return None
+        loaded: dict[str, list] = {}
+        for relative, raw_segments in writes.items():
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if (path is None or str(path) not in files or not isinstance(raw_segments, list)
+                    or not raw_segments or len(raw_segments) > _MAX_SEGMENTS):
+                return None
+            segments = []
+            for raw in raw_segments:
+                if not isinstance(raw, dict):
+                    return None
+                segment = self._segment(opaque=str(raw.get("opaque") or ""))
+                if segment["opaque"] not in ("", "large", "binary", "link", "deleted"):
+                    return None
+                for key in ("before", "after"):
+                    value = raw.get(key)
+                    if value is None:
+                        continue
+                    snapshot = self._load_snapshot(relative, value)
+                    if snapshot is None:
+                        return None
+                    segment[key] = snapshot
+                after_sha, after_mode = raw.get("after_sha"), raw.get("after_mode")
+                if after_sha is not None and not (after_sha == "" or self._valid_hash(after_sha)):
+                    return None
+                if after_mode is not None and (isinstance(after_mode, bool) or not isinstance(after_mode, int)
+                                               or not 0 <= after_mode <= 0o7777):
+                    return None
+                segment["after_sha"], segment["after_mode"] = after_sha, after_mode
+                segments.append(segment)
+            loaded[str(path)] = segments
+        if loaded:
+            extras["writes"] = loaded
         return extras
+
+    def _load_snapshot(self, relative: str, value) -> "_Snapshot | None":
+        """A saved after- or before-state of a segment, checked like the point's own snapshots and
+        counted in the budget; None when malformed, tampered with, or over the budget."""
+        if not isinstance(value, dict) or value.get("kind") not in ("missing", "file", "symlink"):
+            return None
+        encoded, mode, digest = value.get("data", ""), value.get("mode", 0), value.get("sha256")
+        if (not isinstance(encoded, str) or isinstance(mode, bool) or not isinstance(mode, int)
+                or not 0 <= mode <= 0o7777):
+            return None
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return None
+        snapshot = _Snapshot(value["kind"], data, mode)
+        if not self._valid_hash(digest) or self._snapshot_hash(relative, snapshot) != digest:
+            return None
+        if self._snapshot_bytes_total + len(data) > _MAX_SNAPSHOT_BYTES:
+            return None
+        self._snapshot_bytes_total += len(data)
+        return snapshot

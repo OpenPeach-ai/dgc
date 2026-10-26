@@ -49,22 +49,29 @@
   when DGC can't tell, the bar says what it always did.
 
 - **Undo never loses your work** (with a DGC CLI that has it, 0.48):
-  - When files you or another program changed after DGC wrote them stop an Undo, DGC names them and asks: "These
-    files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the version from
-    before this turn and loses those changes." **Keep my changes** is the default; **Undo anyway** goes ahead for
-    exactly those files.
+  - **Your edits after DGC's are merged.** Undo's question says what it does with each file you or another program
+    changed after DGC wrote it: "a.py: your later edits are kept and DGC's are taken out", or, where your edits
+    overlap DGC's, "a.py: your edits overlap DGC's; it is left as it is" (**Undo anyway** puts it back too). The line
+    after it says how many it merged: "↩ Undone; DGC restored 2 files and merged 1 with your edits."
+  - When files it can't merge stop an Undo (binary, over 1 MiB, a link, deleted, permissions only), DGC names them and
+    asks: "These files changed after DGC wrote them, by you or another program: a.py, b.py. Undo anyway puts back the
+    version from before this turn and loses those changes." **Keep my changes** is the default; **Undo anyway** goes
+    ahead for exactly those files; **Undo the rest** leaves a file whose edits came to overlap DGC's as it is.
   - An Undo that stops for any other reason says why, in the same words as the chat: "Undo stopped: couldn't write
     ro/b.py (Permission denied). Nothing was changed, and the recovery point was kept."
   - **Your saves are yours.** DGC hears the files you save in the chat's folders (a new `user_saved` command, sent
     only to a CLI that offers it), so a file you save while one of DGC's commands runs, a long test run say, is never
-    taken for the command's change: Undo leaves your edit as it is.
+    taken for the command's change: Undo leaves your edit as it is. The window's DGC passes your saves on to a
+    terminal `dgc` working in the same folder, so its Undo leaves them too.
   - **Your uncommitted work comes back.** A model's `git checkout .`, `git reset --hard`, `git clean -fd`, `git stash`
     or `rm` over files you had not committed is undone, and Undo's question names those files. When a command moved
     Git itself, the question and the line after say "Your files are put back; Git's commits, branches, stashes and
     staging are left as they are." A file DGC could not copy first says why in its row's tooltip (over 5 MB, past
     500 files in one command, or the session's room for copies used up).
-  - **Nothing is put back unseen.** Undo's question names the files it puts back from Git because a command changed
-    them: "Also puts back 2 files a command changed: rates.py, README.md." (five at most, then "and N more").
+  - **Nothing is put back unseen.** Undo's question names the files it puts back because they changed while a
+    command ran: "Also puts back 2 files changed while a command ran: rates.py, README.md." (five at most, then "and
+    N more"). **Keep the ones I edited…** lists them to tick the ones you edited yourself meanwhile, in an editor DGC
+    can't hear: those are left as they are.
   - The Edited card marks a file one of the turn's commands changed that Undo can't put back as **Changed by a
     command — Undo leaves it**, Undo's question leaves it out of its count, and the line after an Undo says how many:
     "↩ Undone; DGC restored 2 files. 1 file changed by a command was left as it is." A clean file a command changed or

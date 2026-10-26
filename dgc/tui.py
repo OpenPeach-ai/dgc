@@ -3851,19 +3851,26 @@ class TUI:
         prev, _recorded = info.get(idx, ("", 0))
         # What the rewind restores now, across that turn and every later one -- the number it reports
         # once it has run, not the files that one point happened to record.
-        from . import rewind_words
-        commanded: list[str] = []
+        from . import command_watch, rewind_words
+        command_watch.hear_saves()          # a save a window's DGC passed on is the person's, not a command's
+        question = {"merged": [], "held": [], "commands": []}
         try:
-            rows, nf = self.agent.checkpoints.changes(idx)
-            # Nothing is restored unseen: the files it puts back because a command changed them are named.
-            name = getattr(self.agent, "_turn_files_path", None)
-            commanded = [name(row["path"]) if callable(name) else str(row["path"])
-                         for row in rows if row.get("by_command")]
+            _rows, nf = self.agent.checkpoints.changes(idx)
+            asked = getattr(self.agent.checkpoints, "undo_question", None)
+            if callable(asked):
+                question = asked(idx, getattr(self.agent, "_turn_files_path", None))
         except Exception:
             nf = _recorded
+        commanded = list(question.get("commands") or [])
+        held = rewind_words.overlapping(question)
         header = [Text.from_markup(f"[bold]Rewind to:[/] {_esc(prev)}"),
                   Text.from_markup(f"[{th.warn}]Reverts {nf} file(s) and truncates the conversation. "
                                    f"This cannot be undone.[/]")]
+        # Somebody's edits after DGC's: kept and DGC's taken out, or, where they overlap, the file left alone.
+        for line in rewind_words.question_lines(question):
+            header.append(Text(line))
+        # Nothing is restored unseen: the files it puts back because they changed while a command ran are named,
+        # and the person can keep the ones they edited themselves meanwhile (an editor DGC can't hear).
         if commanded:
             header.append(Text(rewind_words.also_puts_back(commanded)))
         try:
@@ -3872,22 +3879,65 @@ class TUI:
             moved = False
         if moved:
             header.append(Text(rewind_words.GIT_LEFT_QUESTION))
-        rows = [{"label": f"{glyphs.CHECK}  Rewind", "value": "yes"},
-                {"label": f"{glyphs.CROSS}  Cancel", "value": "no"}]
-        self._open_overlay(rows, on_pick=lambda r: self._do_rewind(idx) if r["value"] == "yes" else None,
-                           header=header, footer="Enter select · Esc cancel", accent=True)
+        rows = [{"label": f"{glyphs.CHECK}  " + (rewind_words.RESTORE_ALL if commanded else "Rewind"), "value": "yes"}]
+        if commanded:
+            rows.append({"label": f"   {rewind_words.KEEP_EDITED}", "value": "pick"})
+        if held:
+            rows.append({"label": f"   {rewind_words.anyway_overlap(held)}", "value": "anyway"})
+        rows.append({"label": f"{glyphs.CROSS}  Cancel", "value": "no"})
 
-    def _do_rewind(self, idx: int, overwrite=None) -> None:
+        def picked(row):
+            if row["value"] == "yes":
+                self._do_rewind(idx, keep=held or None)
+            elif row["value"] == "pick":
+                self._pick_kept(idx, commanded, held)
+            elif row["value"] == "anyway":
+                self._do_rewind(idx, overwrite=held)
+        self._open_overlay(rows, on_pick=picked, header=header, footer="Enter select · Esc cancel", accent=True)
+
+    def _pick_kept(self, idx: int, commanded: list, held: list, chosen=None, sel: int = 0) -> None:
+        """Keep the ones I edited: tick the files a command changed that the person edited themselves while it
+        ran (saved from an editor DGC can't hear); those are left as they are and the rest put back."""
+        from rich.text import Text
         from . import rewind_words
+        th = style_mod.theme()
+        chosen = set(chosen or ())
+        rows = [{"label": f"{'[x]' if path in chosen else '[ ]'} {path}", "value": "toggle", "path": path}
+                for path in commanded]
+        n = len(chosen)
+        rows.append({"label": f"{glyphs.CHECK}  Undo, keeping {rewind_words.files(n)}" if n
+                     else f"{glyphs.CHECK}  Undo, keeping none", "value": "go"})
+        rows.append({"label": "   Back", "value": "back"})
+        header = [Text(rewind_words.PICK_QUESTION, style="bold"),
+                  Text("Each one changed while a command ran; no editor said you saved it.", style=th.faint)]
+
+        def picked(row):
+            if row["value"] == "toggle":
+                chosen.symmetric_difference_update({row["path"]})
+                self._pick_kept(idx, commanded, held, chosen, sel=commanded.index(row["path"]))
+            elif row["value"] == "go":
+                keep = [*held, *[path for path in commanded if path in chosen]]
+                self._do_rewind(idx, keep=keep or None)
+            elif row["value"] == "back":
+                self._confirm_rewind(idx)
+        self._open_overlay(rows, on_pick=picked, header=header,
+                           footer="Enter tick or untick · Esc cancel", accent=True)
+        overlay = getattr(self, "_overlay", None)
+        if isinstance(overlay, dict):
+            overlay["sel"] = sel
+
+    def _do_rewind(self, idx: int, overwrite=None, keep=None) -> None:
+        from . import rewind_words
+        chosen = {key: value for key, value in (("overwrite", overwrite), ("keep", keep)) if value}
         try:
-            msgs, nfiles = self.agent.rewind(idx, overwrite=overwrite)
+            msgs, nfiles = self.agent.rewind(idx, **chosen)
         except Exception as e:
             self._flash(f"rewind failed: {type(e).__name__}"); return
         outcome = getattr(self.agent, "last_rewind", None) or {}
         if msgs < 0:
             conflicts = [row for row in outcome.get("conflicts") or [] if row.get("path")]
             if conflicts:
-                self._ask_rewind_anyway(idx, conflicts)
+                self._ask_rewind_anyway(idx, conflicts, keep=keep)
                 return
             self._flash("Undo stopped: " + (outcome.get("error") or "recovery point retained"), secs=6)
             return
@@ -3898,12 +3948,15 @@ class TUI:
         stopped = rewind_words.stopped(int(outcome.get("stopped") or 0))
         if stopped:
             self.info(stopped)
-        self._flash(rewind_words.done(nfiles, len(outcome.get("left") or []), bool(outcome.get("git"))), secs=8)
+        self._flash(rewind_words.done(nfiles, len(outcome.get("left") or []), bool(outcome.get("git")),
+                                      merged=len(outcome.get("merged") or []),
+                                      kept_paths=outcome.get("kept") or []), secs=8)
         self._invalidate()
 
-    def _ask_rewind_anyway(self, idx: int, conflicts: list) -> None:
-        """Asked only after a rewind stopped over files somebody changed after DGC wrote them. Keep my
-        changes is first, so Enter keeps them; Undo anyway rewinds overwriting exactly those files."""
+    def _ask_rewind_anyway(self, idx: int, conflicts: list, keep=None) -> None:
+        """Asked only after a rewind stopped over files somebody changed after DGC wrote them that it can't
+        merge. Keep my changes is first, so Enter keeps them; Undo anyway rewinds overwriting exactly those
+        files (and still leaves the ones the person chose to keep)."""
         from rich.text import Text
         from . import rewind_words
         th = style_mod.theme()
@@ -3915,10 +3968,20 @@ class TUI:
                                style=th.faint))
         if len(conflicts) > 8:
             header.append(Text(f"  …and {len(conflicts) - 8} more", style=th.faint))
-        rows = [{"label": f"{glyphs.CROSS}  Keep my changes", "value": "keep"},
-                {"label": f"{glyphs.CHECK}  Undo anyway", "value": "anyway"}]
-        self._open_overlay(rows, on_pick=lambda r: (self._do_rewind(idx, overwrite=paths)
-                                                    if r["value"] == "anyway" else None),
+        overlaps = [str(row["path"]) for row in conflicts if row.get("reason") == "overlap"]
+        if overlaps:
+            header.insert(1, Text(rewind_words.undo_the_rest(overlaps)))
+        rows = [{"label": f"{glyphs.CROSS}  Keep my changes", "value": "keep"}]
+        if overlaps:
+            rows.append({"label": f"   {rewind_words.UNDO_THE_REST}", "value": "rest"})
+        rows.append({"label": f"{glyphs.CHECK}  Undo anyway", "value": "anyway"})
+
+        def picked(row):
+            if row["value"] == "anyway":
+                self._do_rewind(idx, overwrite=paths, keep=keep)
+            elif row["value"] == "rest":
+                self._do_rewind(idx, keep=[*(keep or []), *overlaps])
+        self._open_overlay(rows, on_pick=picked,
                            header=header, footer="Enter select · Esc keeps your changes", accent=True)
 
     def _open_history(self) -> None:

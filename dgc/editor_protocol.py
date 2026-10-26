@@ -1164,8 +1164,20 @@ EVENT_FIELDS["turn_files"] = {"turn_id": _S(), "files": _A(), "total": _I(),
 # one `rewind_preview` naming the request: `files`, how many files a rewind to that point restores now
 # across all of those turns -- the number `rewound.files_restored` reports once it has run (0 for an
 # index that is not a recovery point).
+#
+# Undo merges the person's edits (0.48). Advertised as ready.capabilities.undo_merge = 1. A file somebody
+# changed after DGC wrote it is merged three ways (what DGC left, what is there now, the state before):
+# their edits stay and DGC's are taken out. `rewind_preview` then also names, as the Edited card names
+# them: `merged`, the files merged so; `held` [{path, reason}], the ones it can't merge -- reason overlap
+# (their edits overlap DGC's: left as it is when the Undo goes ahead with it in `keep`, or put back by
+# Undo anyway with it in `overwrite`), or binary, large, link, deleted, mode, changed (the Undo stops and
+# names it, as before); and `commands`, the files it puts back because they changed while one of the
+# turns' commands ran and no editor said the person saved them. `undo_to` takes `keep`: files left
+# exactly as they are (the held ones, or the ones a command changed that the person says they edited
+# themselves). `undo_result` then also carries `merged` (counted in files_restored) and `kept`.
 COMMAND_FIELDS["rewind_preview"] = {"index": _I(), "request_id": _S()}
-EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I()}
+EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I(),
+                                  "merged": _A(False), "held": _A(False), "commands": _A(False)}
 
 # ---- Undo that says why it stopped, and Undo anyway (0.48) -----------------------------------------
 # Advertised as ready.capabilities.undo_to = 1. `undo_to {index, overwrite?, request_id}` rewinds to
@@ -1183,7 +1195,9 @@ EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I
 # The person's own saves (0.48). Advertised as ready.capabilities.user_saved = 1. `user_saved {paths, at?}`
 # says the person saved these files (absolute paths, at most 256) in the editor, `at` seconds since the
 # epoch (now when absent); the editor sends it from onWillSaveTextDocument and onDidSaveTextDocument for
-# files in the chat's folders. Nothing answers it. A file saved while one of the chat's commands ran is
+# files in the chat's folders. Nothing answers it. The backend passes each save on to every other live DGC
+# working in a folder that holds the file -- a terminal `dgc` too -- through that process's inbox under
+# the DGC home (dgc/save_inbox.py: an owner-only directory and a per-process token; nothing listens). A file saved while one of the chat's commands ran is
 # the person's change, never the command's: it is not put in the recovery point and not listed on the
 # Edited card as the command's, and a save reported after the command was looked at takes that back.
 #
@@ -1195,10 +1209,10 @@ EVENT_FIELDS["rewind_preview"] = {"request_id": _S(), "index": _I(), "files": _I
 # as the event is): one of those turns' commands moved HEAD, changed the index or a stash, which Undo
 # leaves as they are; `undo_result` then carries `git: true` after an Undo of such a turn.
 COMMAND_FIELDS["user_saved"] = {"paths": _A(), "at": _N(False)}
-COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "request_id": _S()}
+COMMAND_FIELDS["undo_to"] = {"index": _I(), "overwrite": _A(False), "keep": _A(False), "request_id": _S()}
 EVENT_FIELDS["undo_result"] = {"request_id": _S(), "index": _I(), "ok": _B(), "files_restored": _I(),
                                "conflicts": _A(), "left": _A(), "stopped": _I(), "error": _S(False),
-                               "git": _B(False)}
+                               "git": _B(False), "merged": _A(False), "kept": _A(False)}
 
 # ---- the models at a host as Settings has it typed (0.48) -----------------------------------------
 # Each Model box in the editor's Settings lists the models at its own card's host, before anything is

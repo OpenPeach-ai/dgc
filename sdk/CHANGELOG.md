@@ -30,9 +30,10 @@
   the vendored protocol and the TypeScript SDK's known events. The events only ever answer those commands; an SDK
   session never sends them. No Pips API change.
 
-- Editor protocol: command `undo_to {index, overwrite?}` and event `undo_result {request_id, index, ok, files_restored,
-  conflicts, left, stopped, error?}` (a rewind that says why it stopped and can go ahead over named files; offered as
-  `ready.capabilities.undo_to`) are in the vendored protocol and the TypeScript SDK's known events. The event only
+- Editor protocol: command `undo_to {index, overwrite?, keep?}` and event `undo_result {request_id, index, ok,
+  files_restored, conflicts, left, stopped, merged?, kept?, error?}` (a rewind that says why it stopped and can go
+  ahead over named files, or leave named files as they are; offered as `ready.capabilities.undo_to`, merging as
+  `ready.capabilities.undo_merge`) are in the vendored protocol and the TypeScript SDK's known events. The event only
   ever answers that command; `rewind()` still sends `rewind`. A `turn_files` file row may carry `command: true` (a
   file a command changed that Undo leaves, with `limit` when a copy limit kept it) or `by_command: true` (one Undo
   puts back); `turn_files` may carry `git_moved: true` and `undo_result` `git: true` (a command moved HEAD, the
@@ -40,8 +41,9 @@
   `user_saved {paths, at?}` (the person's saves in the editor; offered as `ready.capabilities.user_saved`) is in the
   vendored protocol; an SDK session never sends it. No Pips API change.
 
-- Editor protocol: command `rewind_preview {index}` and event `rewind_preview {request_id, index, files}` (how many
-  files Undo on an older turn restores across every turn it takes back; offered as
+- Editor protocol: command `rewind_preview {index}` and event `rewind_preview {request_id, index, files, merged?,
+  held?, commands?}` (how many files Undo on an older turn restores across every turn it takes back, and with
+  `undo_merge` which it merges, holds back and puts back because a command changed them; offered as
   `ready.capabilities.rewind_preview`) are in the vendored protocol and the TypeScript SDK's known events. The event
   only ever answers that command. A `turn_files` file row may carry `outside: true`, and `undoable: false` when a
   reopened chat replays it to an editor. No Pips API change.

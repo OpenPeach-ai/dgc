@@ -2184,14 +2184,21 @@ conversation back to one of them.
   reset, checked out a branch or stashed, Undo's question says *Your files are put back; Git's
   commits, branches, stashes and staging are left as they are.*, and so does its last line.
 - **Your own saves are yours.** Which change is the command's is told by when it happened: during
-  the command. In the editor DGC also hears every file you save in the chat's folders, so a file you
-  save while a command runs (a long test run, say) is never taken for the command's: it is not put
-  in the point and not listed as the command's, and Undo leaves your edit alone — even when your save
-  reaches DGC a moment after the command ended. In the terminal there is no editor to say so, and it
-  stays by time: a file you save elsewhere while a command runs counts as the command's.
-- **Nothing is put back unseen.** Undo's question names the files it puts back from Git because a
-  command changed them: *Also puts back 2 files a command changed: rates.py, README.md.* (five at
-  most, then *and N more*).
+  the command. In VS Code or Cursor with DGC running, DGC also hears every file you save in the
+  chat's folders, so a file you save while a command runs (a long test run, say) is never taken for
+  the command's: it is not put in the point and not listed as the command's, and Undo leaves your
+  edit alone — even when your save reaches DGC a moment after the command ended. That window's DGC
+  passes each save on to every other DGC working in the same folder, a terminal `dgc` included,
+  through a private inbox in DGC's home folder (only your user can read it, each message carries
+  that DGC's own token, and nothing listens on the network), so a terminal user who edits in VS Code
+  or Cursor is covered too.
+- **What no editor reports is told by time.** A file you save from an editor DGC can't hear (vim,
+  a JetBrains IDE, or VS Code with DGC not running) while a command runs counts as the command's,
+  and Undo would put it back. So Undo's question names those files — *Also puts back 2 files changed
+  while a command ran: rates.py, README.md.* (five at most, then *and N more*) — and offers
+  **Restore all** or **Keep the ones I edited…**, a list where you tick the ones you edited
+  yourself: those are left as they are and the rest are put back. In the editor's Undo question it
+  is the same choice, then a checklist.
 
 ## Rewind in the terminal
 
@@ -2206,22 +2213,35 @@ consumed. If any step fails, the files and the point are rolled back and kept, a
 file and why (*Undo stopped: couldn't write ro/b.py (Permission denied). Nothing was changed, and
 the recovery point was kept.*).
 
+## Your edits after DGC's are merged
+
+Undo never writes over somebody else's work without asking. A file you (or another program, or
+another chat) changed after DGC wrote it — after its last write, or between two of its writes, in a
+later turn or later in the same one — is merged: your edits stay and DGC's are taken out. For that
+each point keeps what DGC left in each text file at the end of each run of its writes, up to 1 MiB
+a file and counted in the session's 128 MB of snapshots, saved with the point and checked like
+the rest; Undo merges three ways (what DGC left, the file as it is now, the version from before),
+as helper integration does. Undo's question says what it does with each file:
+
+- *a.py: your later edits are kept and DGC's are taken out*;
+- *a.py: your edits overlap DGC's; it is left as it is* — the rest is undone and that file stays
+  exactly as you left it. **Undo anyway** puts it back too and loses your edits there.
+
+And its last line says how many were merged: *↩ Undone; DGC restored 2 files and merged 1 with
+your edits.*
+
 ## When Undo stops instead
 
-Undo never writes over somebody else's work without asking. It stops, restores nothing, and names
-the files, when one of them:
-
-- changed after DGC last wrote it (you edited it, another program or another chat did, or its
-  permissions changed), or
-- changed after DGC wrote it and before DGC wrote it again, in a later turn or later in the same
-  one: undoing the earlier turn would put back a version from before that change.
-
-*Undo stopped: a.py changed after DGC wrote it, by you or another program. Nothing was restored,
-so those changes are intact.* Then it asks: *These files changed after DGC wrote them, by you or
-another program: a.py. Undo anyway puts back the version from before this turn and loses those
-changes.* **Keep my changes** is the default; **Undo anyway** goes ahead for exactly those files,
-and stops again if another file has changed by then. A file DGC has no record of writing (a session
-saved by a much older DGC) is not taken as a change: that is not evidence.
+A file it can't merge stops it: one that changed after DGC wrote it and is binary, over 1 MiB, a
+link, deleted, or changed only in its permissions, or one from a session saved before DGC kept its
+writes. It restores nothing and names the files: *Undo stopped: a.py changed after DGC wrote it, by
+you or another program. Nothing was restored, so those changes are intact.* Then it asks: *These
+files changed after DGC wrote them, by you or another program: a.py. Undo anyway puts back the
+version from before this turn and loses those changes.* **Keep my changes** is the default; **Undo
+anyway** goes ahead for exactly those files, and stops again if another file has changed by then;
+**Undo the rest**, offered for a file whose edits came to overlap DGC's since the question, leaves
+it as it is. A file DGC has no record of writing (a session saved by a much older DGC) is not taken
+as a change: that is not evidence.
 
 A background helper that one of the undone turns started and that is still running is stopped,
 and Undo says so (*1 background helper from those turns was stopped.*): its work is kept aside in
@@ -2229,7 +2249,8 @@ and Undo says so (*1 background helper from those turns was stopped.*): its work
 
 It always restores both — there is no code-only or conversation-only rewind, and no redo. It is
 refused while a turn is running: stop the turn (**Esc**) or let it finish, then run `/rewind`
-again. `dgc --classic` skips the confirmation. The standing goal, the todos and Context Notes
+again. `dgc --classic` skips the confirmation unless there is a choice to make (a file it holds back, or files
+that changed while a command ran). The standing goal, the todos and Context Notes
 stay as they were.
 
 ## Undo in the editor

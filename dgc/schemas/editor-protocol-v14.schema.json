@@ -6511,6 +6511,15 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "merged": {
+              "type": "array"
+            },
+            "held": {
+              "type": "array"
+            },
+            "commands": {
+              "type": "array"
             }
           },
           "required": [
@@ -6570,6 +6579,12 @@
             },
             "git": {
               "type": "boolean"
+            },
+            "merged": {
+              "type": "array"
+            },
+            "kept": {
+              "type": "array"
             }
           },
           "required": [
@@ -11812,6 +11827,9 @@
               "maximum": 9007199254740991
             },
             "overwrite": {
+              "type": "array"
+            },
+            "keep": {
               "type": "array"
             },
             "request_id": {
