@@ -1396,6 +1396,7 @@ class CLI:
                 self.ui.info("no checkpoints yet — run a turn first")
             else:
                 from . import rewind_words
+                from .menu import select        # local to handle_slash: another branch imports it too
 
                 def restores(index, recorded):
                     try:
@@ -1407,24 +1408,51 @@ class CLI:
                     n = restores(index, nf)
                     labels.append(f"{prev}  [{n} file{'' if n == 1 else 's'}]")
                 mi = select("Rewind to (restores code + conversation)", labels)
+                overwrite = keep = None
                 if mi is not None:
+                    from . import command_watch
+                    command_watch.hear_saves()
                     try:
-                        rows, _n = self.agent.checkpoints.changes(pts[mi][0])
-                        commanded = [self.agent._turn_files_path(row["path"]) for row in rows
-                                     if row.get("by_command")]
+                        question = self.agent.checkpoints.undo_question(pts[mi][0], self.agent._turn_files_path)
                     except Exception:
-                        commanded = []
+                        question = {"merged": [], "held": [], "commands": []}
+                    commanded = list(question.get("commands") or [])
+                    held = rewind_words.overlapping(question)
+                    for line in rewind_words.question_lines(question):
+                        self.ui.info(line)
                     if commanded:
                         self.ui.info(rewind_words.also_puts_back(commanded))
                     if self.agent.checkpoints.git_moved_since(pts[mi][0]):
                         self.ui.info(rewind_words.GIT_LEFT_QUESTION)
-                overwrite = None
+                    keep = held or None
+                    if commanded or held:
+                        choices = [rewind_words.RESTORE_ALL if commanded else "Undo"]
+                        if commanded:
+                            choices.append(rewind_words.KEEP_EDITED)
+                        if held:
+                            choices.append(rewind_words.anyway_overlap(held))
+                        choices.append("Cancel")
+                        choice = select("Undo these turns?", choices)
+                        picked = choices[choice] if choice is not None else "Cancel"
+                        if picked == "Cancel":
+                            mi = None
+                        elif picked == rewind_words.KEEP_EDITED:
+                            mine = self._pick_kept(commanded)
+                            if mine is None:
+                                mi = None
+                            else:
+                                keep = [*held, *mine] or None
+                        elif held and picked == rewind_words.anyway_overlap(held):
+                            overwrite, keep = held, None
                 while mi is not None:
-                    msgs, nfiles = self.agent.rewind(pts[mi][0], overwrite=overwrite)
+                    chosen = {key: value for key, value in (("overwrite", overwrite), ("keep", keep)) if value}
+                    msgs, nfiles = self.agent.rewind(pts[mi][0], **chosen)
                     outcome = getattr(self.agent, "last_rewind", None) or {}
                     if msgs >= 0:
                         self.ui.info(rewind_words.done(nfiles, len(outcome.get("left") or []),
-                                                       bool(outcome.get("git")))
+                                                       bool(outcome.get("git")),
+                                                       merged=len(outcome.get("merged") or []),
+                                                       kept_paths=outcome.get("kept") or [])
                                      + " The conversation was truncated.")
                         break
                     conflicts = [row for row in outcome.get("conflicts") or [] if row.get("path")]
@@ -1432,8 +1460,17 @@ class CLI:
                         self.ui.error("rewind could not complete; the recovery point was retained")
                         break
                     paths = [str(row["path"]) for row in conflicts]
-                    choice = select(rewind_words.anyway_question(paths), ["Keep my changes", "Undo anyway"])
-                    if choice != 1:
+                    overlaps = [str(row["path"]) for row in conflicts if row.get("reason") == "overlap"]
+                    labels = ["Keep my changes", *([rewind_words.UNDO_THE_REST] if overlaps else []), "Undo anyway"]
+                    question = rewind_words.anyway_question(paths)
+                    if overlaps:
+                        question = f"{question} {rewind_words.undo_the_rest(overlaps)}"
+                    choice = select(question, labels)
+                    picked = labels[choice] if choice is not None else ""
+                    if picked == rewind_words.UNDO_THE_REST:
+                        keep = [*(keep or []), *overlaps]
+                        continue
+                    if picked != "Undo anyway":
                         break
                     overwrite = paths
         elif cmd == "search":
@@ -1585,6 +1622,24 @@ class CLI:
                 self.console.print(
                     f"[dim]unknown command /{_markup_literal(cmd)} — try /help[/dim]")
         return True
+
+    def _pick_kept(self, commanded: list[str]) -> list[str] | None:
+        """Keep the ones I edited: tick the files a command changed that the person edited themselves while it
+        ran. The ticked ones, or None when cancelled."""
+        from . import rewind_words
+        from .menu import select
+        chosen: set[str] = set()
+        cursor = 0
+        while True:
+            labels = [f"{'[x]' if path in chosen else '[ ]'} {path}" for path in commanded]
+            labels += [f"Undo, keeping {rewind_words.files(len(chosen))}" if chosen else "Undo, keeping none", "Cancel"]
+            choice = select(rewind_words.PICK_QUESTION, labels, initial=cursor)
+            if choice is None or choice == len(commanded) + 1:
+                return None
+            if choice == len(commanded):
+                return [path for path in commanded if path in chosen]
+            chosen.symmetric_difference_update({commanded[choice]})
+            cursor = choice
 
     def _search_cmd(self, rest: str) -> None:
         cfg = self.config

@@ -1320,6 +1320,24 @@ class CheckpointManager:
             self.last_rewind_reasons = saved
         return {"merged": merged, "held": held}
 
+    def undo_question(self, idx: int, name=None) -> dict:
+        """Undo's question about point `idx`, file by file, each path as `name` shows it: `merged`
+        (somebody's later edits are kept and DGC's taken out), `held` [{path, reason}] (left as it is
+        when their edits overlap DGC's; anything else stops the Undo and is named), and `commands`, the
+        files it puts back because a command changed them while it ran (the person may have edited
+        one meanwhile in an editor DGC can't hear; the question lets them keep it)."""
+        show = name if callable(name) else str
+        plan = self.undo_plan(idx)
+        try:
+            rows, _total = self.changes(idx)
+        except Exception:                      # noqa: BLE001 -- the question still asks without them
+            rows = []
+        held = {row["path"] for row in plan["held"]}
+        return {"merged": [show(path) for path in plan["merged"]],
+                "held": [{"path": show(row["path"]), "reason": row["reason"]} for row in plan["held"]],
+                "commands": [show(row["path"]) for row in rows
+                             if row.get("by_command") and row["path"] not in held]}
+
     def _left_state(self) -> dict:
         """What DGC last left in each file, keyed by project-relative path.
 

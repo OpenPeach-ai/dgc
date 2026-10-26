@@ -10208,16 +10208,22 @@ class Agent(GoalLifecycle):
         except (ValueError, OSError):
             return text
 
-    def rewind(self, idx: int, overwrite=None) -> tuple[int, int]:
+    def rewind(self, idx: int, overwrite=None, keep=None) -> tuple[int, int]:
         """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored).
 
+        A file somebody else changed after DGC wrote it is merged: their edits stay, DGC's go.
         `overwrite`: the files a refusal named whose changes the person agreed to lose ("Undo
-        anyway"), as the refusal named them. `last_rewind` says how it went: `conflicts` [{path,
+        anyway"), as the refusal named them. `keep`: files to leave exactly as they are (one held
+        back because their edits overlap DGC's, or one a command changed that they say they edited
+        themselves), as the question named them. `last_rewind` says how it went: `conflicts` [{path,
         reason}] when somebody else's changes stopped it, `error` when anything else did, and after
-        a rewind, `left` (files commands changed that Undo can't put back) and `stopped` (background
-        helpers from the rewound turns that were stopped)."""
-        from . import rewind_words
-        outcome = {"conflicts": [], "error": "", "left": [], "stopped": 0, "git": False}
+        a rewind, `merged` and `kept` (counted in files_restored, and not), `left` (files commands
+        changed that Undo can't put back) and `stopped` (background helpers from the rewound turns
+        that were stopped)."""
+        from . import command_watch, rewind_words
+        command_watch.hear_saves()             # a save another DGC passed on takes back what a command's look recorded
+        outcome = {"conflicts": [], "error": "", "left": [], "stopped": 0, "git": False,
+                   "merged": [], "kept": []}
         self.last_rewind = outcome
         info = getattr(self.ui, "info", None)
 
@@ -10242,10 +10248,11 @@ class Agent(GoalLifecycle):
             before_changes = self.chat_changes.begin()
             rewind_pending = False
             try:
-                allowed = [self._rewind_target(path) for path in (overwrite or ())]
-                msg_count, n_files, conversation = (
-                    self.checkpoints.rewind_state(idx, transactional=True, overwrite=allowed) if allowed
-                    else self.checkpoints.rewind_state(idx, transactional=True))
+                chosen = {}
+                for key, paths in (("overwrite", overwrite), ("keep", keep)):
+                    if paths:
+                        chosen[key] = [self._rewind_target(path) for path in paths]
+                msg_count, n_files, conversation = self.checkpoints.rewind_state(idx, transactional=True, **chosen)
                 if msg_count < 0:
                     # Say WHY. A bare "rewind failed" over a file someone else has since edited reads
                     # as a bug; it is the one case where DGC declining to act is the whole point.
@@ -10303,6 +10310,9 @@ class Agent(GoalLifecycle):
                 say(rewind_words.stopped(outcome["stopped"]))
                 outcome["left"] = [self._turn_files_path(path)
                                    for path in (getattr(self.checkpoints, "last_rewind_left", ()) or ())]
+                for key in ("merged", "kept"):
+                    outcome[key] = [self._turn_files_path(path)
+                                    for path in (getattr(self.checkpoints, f"last_rewind_{key}", ()) or ())]
                 # A command in those turns moved HEAD, the index or a stash: Undo put the files back and
                 # left Git's own state as it is (it never touches it), and says so.
                 outcome["git"] = bool(getattr(self.checkpoints, "last_rewind_git", False))

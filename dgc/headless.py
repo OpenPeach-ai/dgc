@@ -628,6 +628,33 @@ def _mcp_url_has_credentials(value: str) -> bool:
     return mcp_url_has_credentials(value)
 
 
+def _hear_user_saved(cmd: dict) -> None:
+    """The person saved these files in the editor: noted here, and passed on to every other DGC working in
+    a folder that holds them (a terminal `dgc` too), through each one's inbox (dgc/save_inbox.py)."""
+    from . import command_watch, save_inbox
+    paths = [str(path) for path in (cmd.get("paths") or []) if isinstance(path, str)]
+    at = cmd.get("at")
+    if not isinstance(at, (int, float)) or isinstance(at, bool):
+        at = time.time()
+    command_watch.note_saves(paths, at)
+    save_inbox.forward(paths, at)
+
+
+def _undo_question(agent, index) -> dict:
+    """What Undo to point `index` would do with each file (CheckpointManager.undo_question), named as the
+    Edited card names them; {} when the point can't say."""
+    from . import command_watch
+    command_watch.hear_saves()
+    question = getattr(getattr(agent, "checkpoints", None), "undo_question", None)
+    if not callable(question) or not isinstance(index, int):
+        return {}
+    try:
+        plan = question(index, getattr(agent, "_turn_files_path", None))
+    except Exception:                          # noqa: BLE001 -- the count still answers
+        return {}
+    return {"merged": plan["merged"][:500], "held": plan["held"][:500], "commands": plan["commands"][:500]}
+
+
 def _request_fields(request_id: str | None) -> dict[str, str]:
     """Attach a correlation ID only when the optional command field was present and valid."""
     return {"request_id": request_id} if request_id else {}
@@ -2523,6 +2550,11 @@ class Backend:
                           # user_saved {paths, at}: the person's saves in the editor, so a file saved
                           # while a command ran is never taken for the command's change.
                           "user_saved": 1,
+                          # Undo merges the person's edits: rewind_preview names the files it merges
+                          # (`merged`), the ones it holds back (`held` [{path, reason}]) and the ones a command
+                          # changed (`commands`); undo_to takes `keep` (left as they are); undo_result says
+                          # which it merged and kept.
+                          "undo_merge": 1,
                           # A Pip computer's full screen streams over pip_desktop / pip_desktop_data.
                           "pips_desktop": 1,
                           # Troupes (dgc/troupe.py): troupe_started/progress/finished, list_troupes, stop_troupe.
@@ -7699,23 +7731,27 @@ class Backend:
                 _rows, files = self.agent.checkpoints.changes(index, limit=0)
             except Exception:                    # noqa: BLE001 -- an unreadable point answers 0, never a crash
                 files = 0
-            self.em.emit("rewind_preview", index=index, files=files, request_id=str(cmd["request_id"]))
+            plan = _undo_question(self.agent, index)
+            self.em.emit("rewind_preview", index=index, files=files, request_id=str(cmd["request_id"]),
+                         **{key: value for key, value in plan.items() if value})
         elif t == "user_saved":
-            from . import command_watch
-            command_watch.note_saves([str(path) for path in (cmd.get("paths") or []) if isinstance(path, str)],
-                                     cmd.get("at"))
+            _hear_user_saved(cmd)
         elif t in ("rewind", "undo_to"):
             agents_before = self._agents_total()
             index = int(cmd.get("index", -1))
-            overwrite = None
+            chosen: dict = {}
             if t == "undo_to":
-                overwrite = [str(path) for path in (cmd.get("overwrite") or [])
+                for key in ("overwrite", "keep"):
+                    paths = [str(path) for path in (cmd.get(key) or [])
                              if isinstance(path, str) and 0 < len(path) <= 4096][:4096]
-            msgs, nfiles = (self.agent.rewind(index) if overwrite is None
-                            else self.agent.rewind(index, overwrite=overwrite))
+                    if paths:
+                        chosen[key] = paths
+            msgs, nfiles = self.agent.rewind(index, **chosen)
             ok = msgs >= 0
             if t == "undo_to":
                 outcome = getattr(self.agent, "last_rewind", None) or {}
+                merged = [str(path) for path in (outcome.get("merged") or [])[:500]] if ok else []
+                kept = [str(path) for path in (outcome.get("kept") or [])[:500]] if ok else []
                 conflicts = [{"path": str(row.get("path", "")), "reason": str(row.get("reason", "changed"))}
                              for row in (outcome.get("conflicts") or [])[:500] if isinstance(row, dict)]
                 error = str(outcome.get("error") or "")[:500]
@@ -7724,6 +7760,7 @@ class Backend:
                              left=[str(path) for path in (outcome.get("left") or [])[:500]],
                              stopped=int(outcome.get("stopped") or 0),
                              **({"git": True} if ok and outcome.get("git") else {}),
+                             **({"merged": merged} if merged else {}), **({"kept": kept} if kept else {}),
                              **({"error": error} if error and not ok else {}))
                 # The `rewound` every client knows, for what it redraws on one (not the answer).
                 self.em.emit("rewound", ok=ok, files_restored=nfiles)
@@ -9444,9 +9481,7 @@ class Host:
             problem = command_error(cmd)
             if problem:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
-            from . import command_watch
-            command_watch.note_saves([str(path) for path in (cmd.get("paths") or []) if isinstance(path, str)],
-                                     cmd.get("at"))
+            _hear_user_saved(cmd)
             return
         if isinstance(kind, str) and kind.startswith("voice_"):
             # The process's too: the same voice models in every folder (dgc/voice).

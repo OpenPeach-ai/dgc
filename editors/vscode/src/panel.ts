@@ -518,6 +518,44 @@ interface ChatSlot {
 
 /** The prompt as Undo's question quotes it: one line of at most 70 characters, cut at a word with "…" when longer
  *  (it read "…and nothing els" before, the founder's screenshot, 25 Oct). */
+/** "a.py", "a.py and b.py", "a.py, b.py and c.py", "a.py, b.py, c.py, d.py and 3 more" (rewind_words.names). */
+function undoNames(paths: string[], shown = 4): string {
+  if (paths.length > shown) return `${paths.slice(0, shown).join(", ")} and ${paths.length - shown} more`;
+  if (paths.length <= 1) return paths.join("");
+  return `${paths.slice(0, -1).join(", ")} and ${paths[paths.length - 1]}`;
+}
+
+/** Why a file stops an Undo, as the person reads it (rewind_words.REASONS). */
+const UNDO_REASONS: Record<string, string> = {
+  changed: "changed after DGC last wrote it",
+  between: "changed after DGC wrote it, before DGC wrote it again",
+  overlap: "your edits overlap DGC's",
+  binary: "changed after DGC wrote it, and DGC can't merge a binary file",
+  large: "changed after DGC wrote it, and is too large for DGC to merge",
+  link: "changed after DGC wrote it, and DGC can't merge a link",
+  deleted: "deleted after DGC wrote it",
+  mode: "its permissions changed after DGC last wrote it",
+  unreadable: "DGC can't read it now",
+};
+
+/** The line after an Undo (rewind_words.done): how many files it put back and merged, which it left as they are. */
+function undoDoneLine(result: any): string {
+  const plural = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+  const restored = Number(result?.files_restored) || 0;
+  const merged = Math.min(restored, Array.isArray(result?.merged) ? result.merged.length : 0);
+  const putBack = restored - merged;
+  let line = merged && putBack ? `↩ Undone; DGC restored ${plural(putBack)} and merged ${merged} with your edits.`
+    : merged ? `↩ Undone; DGC merged ${plural(merged)} with your edits.`
+    : `↩ Undone; DGC restored ${plural(restored)}.`;
+  const kept = Array.isArray(result?.kept) ? result.kept.map(String) : [];
+  if (kept.length) line += ` ${undoNames(kept)} ${kept.length === 1 ? "was left as it is" : "were left as they are"}.`;
+  const left = Array.isArray(result?.left) ? result.left.length : 0;
+  line += left === 1 ? " 1 file changed by a command was left as it is."
+    : left > 1 ? ` ${left} files changed by commands were left as they are.` : "";
+  if (result?.git === true) line += " Git's commits, branches, stashes and staging are left as they are.";
+  return line;
+}
+
 function undoPromptLine(text: string): string {
   const one = String(text || "").replace(/\s+/g, " ").trim();
   if (one.length <= 70) { return one; }
@@ -6443,16 +6481,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const newest = later === 0 && match.index === Math.max(...indexes);
     let count = counted ? counted.total : (Number(match.files) || files.length);
     let upTo = false;
-    if (!newest) {
+    // A CLI that merges says, file by file, what Undo does with the files somebody changed after DGC wrote them
+    // (kept and DGC's taken out, or left as it is), and which it puts back because they changed while a command ran.
+    const merges = Number((this.lastReadyEvent?.capabilities as any)?.undo_merge) >= 1;
+    let plan: { merged: string[]; held: string[]; commands: string[] } | undefined;
+    if (!newest || merges) {
       let restores: number | undefined;
       if ((this.lastReadyEvent?.capabilities as any)?.rewind_preview === 1) {
         try {
           const answer = await this.requestState(
             be, "rewind-preview", { type: "rewind_preview", index: match.index }, "rewind_preview", 5000);
           if (Number.isInteger(answer?.files) && answer.index === match.index) restores = answer.files;
+          if (merges && answer?.index === match.index) {
+            const list = (value: any) => (Array.isArray(value) ? value.map(String).filter(Boolean) : []);
+            plan = { merged: list(answer.merged), commands: list(answer.commands),
+                     held: (Array.isArray(answer.held) ? answer.held : [])
+                       .filter((row: any) => row && row.reason === "overlap" && typeof row.path === "string" && row.path)
+                       .map((row: any) => String(row.path)) };
+          }
         } catch { /* the bound below, then */ }
       }
-      if (restores === undefined) {
+      if (newest) { /* the card's own count stands */ }
+      else if (restores === undefined) {
         // Every file any of those recovery points recorded: never fewer than the rewind restores.
         count = items.filter((item) => Number.isInteger(item?.index) && item.index >= match.index)
           .reduce((sum, item) => sum + (Number(item.files) || 0), 0);
@@ -6461,21 +6511,42 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const turns = later === 0 ? "this turn"
       : later === 1 ? "this turn and the turn after it" : `this turn and the ${later} turns after it`;
-    // Nothing is restored unseen: the files Undo puts back from Git because one of the turns' commands changed them
-    // are named (the cards marked them `by_command`), five at most.
-    const restored = byCommand.slice(0, 5).join(", ") + (byCommand.length > 5 ? ` and ${byCommand.length - 5} more` : "");
-    const also = (byCommand.length
-      ? `\n\nAlso puts back ${byCommand.length === 1 ? "1 file" : `${byCommand.length} files`} a command changed: ${restored}.`
-      : "")
+    // Nothing is restored unseen: the files Undo puts back because they changed while one of the turns' commands ran
+    // are named (the cards marked them `by_command`; a merging CLI names them across every turn it takes back),
+    // five at most. A save no editor reported counts by time as the command's: Keep the ones I edited leaves them.
+    const commanded = plan ? plan.commands : byCommand;
+    const held = plan ? plan.held : [];
+    const fileLines = plan ? [...plan.merged.map((path) => `${path}: your later edits are kept and DGC's are taken out`),
+                              ...held.map((path) => `${path}: your edits overlap DGC's; it is left as it is`)] : [];
+    const shownLines = fileLines.length > 8 ? [...fileLines.slice(0, 8), `…and ${fileLines.length - 8} more`] : fileLines;
+    const restored = commanded.slice(0, 5).join(", ") + (commanded.length > 5 ? ` and ${commanded.length - 5} more` : "");
+    const also = (shownLines.length ? `\n\n${shownLines.join("\n")}` : "")
+      + (held.length ? `\n\nUndo anyway puts ${undoNames(held)} back too and loses your edits there.` : "")
+      + (commanded.length
+        ? `\n\nAlso puts back ${commanded.length === 1 ? "1 file" : `${commanded.length} files`} changed while a command ran: ${restored}.`
+        : "")
       // Undo rewrites files only, never Git's own state: a command that committed, reset, checked out or stashed
       // left history and staging that Undo leaves alone, and the question says so.
       + (gitMoved ? "\n\nYour files are put back; Git's commits, branches, stashes and staging are left as they are." : "");
+    const KEEP = "Keep the ones I edited…";
+    const buttons = ["Undo turn", ...(plan && commanded.length ? [KEEP] : []), ...(held.length ? ["Undo anyway"] : [])];
     const choice = await vscode.window.showWarningMessage(
       `Undo ${turns}? DGC restores ${upTo ? "up to " : ""}${count} file${count === 1 ? "" : "s"} and rewinds the `
       + "conversation to just before this prompt.",
-      { modal: true, detail: undoPromptLine(prompt.trim() || wanted) + also }, "Undo turn");
-    if (choice !== "Undo turn") return;
-    await this.runUndo(be, match.index);
+      { modal: true, detail: undoPromptLine(prompt.trim() || wanted) + also }, ...buttons);
+    if (choice === "Undo turn") {
+      await this.runUndo(be, match.index, held.length ? { keep: held } : {});
+    } else if (choice === "Undo anyway") {
+      await this.runUndo(be, match.index, { overwrite: held });
+    } else if (choice === KEEP) {
+      const picked: any = await vscode.window.showQuickPick(
+        commanded.map((label) => ({ label, description: "changed while a command ran" })),
+        { canPickMany: true, title: "Keep the ones you edited",
+          placeHolder: "Tick the files you edited yourself while the command ran; the rest are put back" });
+      if (!Array.isArray(picked)) return;
+      const keep = [...held, ...picked.map((item: any) => String(item.label))];
+      await this.runUndo(be, match.index, keep.length ? { keep } : {});
+    }
   }
 
   /**
@@ -6485,26 +6556,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * says what; after it, how many files the turns' commands changed that Undo left as they are. An older CLI is
    * sent `rewind` and answered with `rewound`, as before.
    */
-  async runUndo(be: any, index: number): Promise<void> {
-    const plural = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+  async runUndo(be: any, index: number, chosen: { keep?: string[]; overwrite?: string[] } = {}): Promise<void> {
     if (Number((this.lastReadyEvent?.capabilities as any)?.undo_to) >= 1) {
-      let overwrite: string[] | undefined;
+      let overwrite: string[] | undefined = chosen.overwrite?.length ? chosen.overwrite : undefined;
+      let keep = chosen.keep?.length ? chosen.keep : undefined;
       for (let round = 0; round < 4; round++) {
         let result: any;
         try {
           result = await this.requestState(be, "undo",
-            { type: "undo_to", index, ...(overwrite ? { overwrite } : {}) }, "undo_result", 30000);
+            { type: "undo_to", index, ...(overwrite ? { overwrite } : {}), ...(keep ? { keep } : {}) },
+            "undo_result", 30000);
         } catch (err: any) {
           void vscode.window.showErrorMessage(err?.message || "DGC could not queue the undo.");
           return;
         }
         if (result?.ok === true) {
-          const restored = Number(result.files_restored) || 0;
-          const left = Array.isArray(result.left) ? result.left.length : 0;
-          const tail = (left === 1 ? " 1 file changed by a command was left as it is."
-            : left > 1 ? ` ${left} files changed by commands were left as they are.` : "")
-            + (result.git === true ? " Git's commits, branches, stashes and staging are left as they are." : "");
-          void vscode.window.showInformationMessage(`↩ Undone; DGC restored ${plural(restored)}.${tail}`);
+          void vscode.window.showInformationMessage(undoDoneLine(result));
           return;
         }
         const conflicts = (Array.isArray(result?.conflicts) ? result.conflicts : [])
@@ -6517,20 +6584,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             + "Nothing was changed, and the recovery point was kept.");
           return;
         }
-        const why: Record<string, string> = {
-          changed: "changed after DGC last wrote it",
-          between: "changed after DGC wrote it, before DGC wrote it again",
-          mode: "its permissions changed after DGC last wrote it",
-          unreadable: "DGC can't read it now",
-        };
+        const why = UNDO_REASONS;
         const paths = conflicts.map((row: any) => String(row.path));
+        // A file whose edits overlap DGC's can also be left as it is while the rest is undone (Undo the rest).
+        const overlaps = conflicts.filter((row: any) => row.reason === "overlap").map((row: any) => String(row.path));
         const answer = await vscode.window.showWarningMessage(
           `These files changed after DGC wrote them, by you or another program: ${paths.join(", ")}. `
-          + "Undo anyway puts back the version from before this turn and loses those changes.",
+          + "Undo anyway puts back the version from before this turn and loses those changes."
+          + (overlaps.length ? ` Undo the rest leaves ${undoNames(overlaps)} as ${overlaps.length === 1 ? "it is" : "they are"}.` : ""),
           { modal: true, detail: conflicts.slice(0, 12).map((row: any) =>
               `${row.path}: ${why[String(row.reason)] || why.changed}`).join("\n")
               + (conflicts.length > 12 ? `\n…and ${conflicts.length - 12} more` : "") },
-          "Keep my changes", "Undo anyway");
+          "Keep my changes", ...(overlaps.length ? ["Undo the rest"] : []), "Undo anyway");
+        if (answer === "Undo the rest") {
+          keep = [...(keep || []), ...overlaps];
+          continue;
+        }
         if (answer !== "Undo anyway") return;
         overwrite = paths;
       }

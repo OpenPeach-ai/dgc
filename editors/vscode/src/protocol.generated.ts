@@ -4963,6 +4963,24 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": true
+    },
+    "merged": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "held": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "commands": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "undo_result": {
@@ -5017,6 +5035,18 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "git": {
       "types": [
         "boolean"
+      ],
+      "required": false
+    },
+    "merged": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "kept": {
+      "types": [
+        "array"
       ],
       "required": false
     }
@@ -8285,6 +8315,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     },
     "overwrite": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "keep": {
       "types": [
         "array"
       ],

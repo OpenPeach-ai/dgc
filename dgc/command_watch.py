@@ -70,7 +70,10 @@ _NO_CONVERSION = frozenset({"unspecified", "unset"})
 # is the person's, whatever the clock says, and is never taken for the command's change. Process-wide:
 # a save is a fact about a file, whichever chat's command was running. A save that reaches DGC only
 # after the command was looked at takes back what that look recorded for the file (note_saves).
-# Without an editor (the terminal) there is nothing to tell DGC: attribution stays by time.
+# A terminal DGC hears them too when a window's DGC works in the same folder: that backend passes each
+# save on to this process's inbox (dgc/save_inbox.py), read here before a command's changes are
+# attributed and before an Undo. A save from an editor no DGC hears (vim, JetBrains) is attributed by
+# time, and Undo's question lets the person keep a file a command changed (Keep the ones I edited).
 _SAVE_SLACK_S = 2.0                    # a save this close to a command's start or end counts as during it
 _CLOCK_SLACK_S = 0.015                 # the kernel stamps file times from a coarse clock, a few ms behind
 _SAVES: "deque[tuple[str, float]]" = deque(maxlen=4096)
@@ -91,6 +94,24 @@ def _saved_between(path, start: float, end: float) -> bool:
         return any(saved == key and start <= at <= end for saved, at in _SAVES)
 
 
+def listen_for_saves() -> None:
+    """Open this process's inbox for the saves other DGCs pass on (once; never raises)."""
+    try:
+        from . import save_inbox
+        save_inbox.open_inbox()
+    except Exception:                          # noqa: BLE001 -- hearing saves is a courtesy
+        pass
+
+
+def hear_saves() -> int:
+    """Apply the saves other DGCs passed on since the last look. How many messages were believed."""
+    try:
+        from . import save_inbox
+        return save_inbox.drain()[0]
+    except Exception:                          # noqa: BLE001
+        return 0
+
+
 def note_saves(paths, at: float | None = None) -> int:
     """The person saved these files (absolute paths) at `at` (seconds since the epoch; now when absent).
 
@@ -100,9 +121,13 @@ def note_saves(paths, at: float | None = None) -> int:
     when = float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else time.time()
     keys = [_key(path) for path in paths if isinstance(path, str) and path][:256]
     with _LOCK:
+        known = set(_SAVES)
+        keys = [key for key in keys if (key, when) not in known]   # the same save heard twice (direct and passed on)
         for key in keys:
             _SAVES.append((key, when))
         watches = list(_RECENT)
+    if not keys:
+        return 0
     taken = 0
     for watch in watches:
         if watch.started - _SAVE_SLACK_S <= when <= (watch.ended or time.time()) + _SAVE_SLACK_S:
@@ -559,6 +584,7 @@ class Watch:
     def finish(self) -> None:
         clock = time.monotonic()
         try:
+            hear_saves()                         # what other DGCs passed on, before anything is attributed
             with self.manager.batch():
                 self._settle()
         finally:
@@ -813,6 +839,7 @@ def begin(agent, name: str, args=None) -> Watch | None:
             or getattr(agent, "_edit_checkpoints_required", True) is False
             or not callable(getattr(manager, "note_command_change", None))):
         return None
+    listen_for_saves()
     git = None if agent.__dict__.get("_command_watch_git_off") else _repo_of(agent)
     watch = Watch(agent, manager, git)
     try:
