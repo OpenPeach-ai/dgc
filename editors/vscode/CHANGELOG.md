@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **ChatDGC: at the end of an open thinking box, the wheel goes on to the chat on its first turn.** The box's lines
+  were 18.6 px, so where it sat on the page could put its end between two pixels: following its words left it a
+  fraction short, and the first turn of the wheel there (a whole swipe on a trackpad) moved it that fraction instead of
+  scrolling the chat. Its lines are whole pixels now. Seen first in DejaVu Sans, Linux's usual default font.
+
 - **Settings → ChatDGC: the Context window hint fits on one line in DejaVu Sans too**, Linux's usual default font,
   where it took two at a wide Settings tab: "What a chat holds before it summarizes."
 

@@ -51,13 +51,13 @@ function screenHtml() {
   return cached;
 }
 
-async function openScreen({ width = 900, height = 700, theme = "dark-modern", state, reducedMotion = false } = {}) {
+async function openScreen({ width = 900, height = 700, theme = "dark-modern", state, reducedMotion = false, font = "system-ui, sans-serif" } = {}) {
   const { html, js, markdownJs } = screenHtml();
   const page = await browser.newPage({ viewport: { width, height }, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.setContent(html, { waitUntil: "load" });
-  await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
+  await page.addStyleTag({ content: `:root { --vscode-font-family: ${font}; --vscode-editor-font-family: ui-monospace, monospace; ${THEMES[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(t.startsWith("light") ? "vscode-light" : "vscode-dark"), theme);
   await page.evaluate(([code, md, saved]) => {
     window.__posted = []; window.__state = saved;
@@ -243,9 +243,33 @@ test("while it thinks, no streamed part redraws 'Thinking' or the working line, 
 
 // "I am not able to scroll just the thinking section to read it all" (founder, 2026-10-18): each streamed part put a
 // new thinking box in the page, its scroll back at the top, and the chat's follow pulled it away as the answer came.
-test("an open thinking box scrolls on its own while it streams: wheel and keys, the chat doesn't pull it away, and at its end the wheel goes on to the chat", async (t) => {
+//
+// Every scroll here is waited for by its own events, never by a fixed delay: a wheel or a key that scrolls animates,
+// and a slower runner is still animating when a fixed delay runs out.
+//
+// And it runs in DejaVu Sans too, the font GitHub's runner draws system-ui in, where it failed every run: the box's
+// lines were 18.6 px, so its end fell between two pixels; Chromium puts scrollTop on a whole pixel, the box's follow
+// (scrollTop = scrollHeight) left it a fraction short of its real end, and the wheel there took that fraction and
+// stopped, held by the box. Where the box sits on the page decides whether its end falls between pixels, and the font
+// decides where it sits. Its lines are whole pixels now, so its end is one wherever it sits.
+for (const [font, where] of [["system-ui, sans-serif", ""], ["'DejaVu Sans', system-ui, sans-serif", " (in DejaVu Sans, as on GitHub's runner)"]]) {
+test(`an open thinking box scrolls on its own while it streams: wheel and keys, the chat doesn't pull it away, and at its end the wheel goes on to the chat${where}`, async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openScreen({ height: 640 });
+  const s = await openScreen({ height: 640, font });
+  // Arm before the act, await after it: a scroller's scrollTop once it has scrolled and come to rest (scrollend), or
+  // null when it hasn't moved within the time allowed.
+  const armScroll = (selector, ms = 5000) => s.page.evaluate(([selector, ms]) => {
+    const n = document.querySelector(selector);
+    (window.__scrolled ||= {})[selector] = new Promise((resolve) => {
+      let moved = false;
+      const onScroll = () => { moved = true; };
+      const finish = () => { clearTimeout(timer); n.removeEventListener("scroll", onScroll); n.removeEventListener("scrollend", onEnd); resolve(moved ? n.scrollTop : null); };
+      const onEnd = () => { if (moved) finish(); };
+      const timer = setTimeout(finish, ms);
+      n.addEventListener("scroll", onScroll); n.addEventListener("scrollend", onEnd);
+    });
+  }, [selector, ms]);
+  const scrolled = (selector) => s.page.evaluate((selector) => window.__scrolled[selector], selector);
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "turn", state: "started", replyId: M(2) });
@@ -266,10 +290,11 @@ test("an open thinking box scrolls on its own while it streams: wheel and keys, 
     // The reader wheels up inside it while it goes on thinking.
     const r = await words.boundingBox();
     await s.page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+    await armScroll(".cd-thought");
     await s.page.mouse.wheel(0, -300);
-    await s.page.waitForTimeout(250);
+    assert.notEqual(await scrolled(".cd-thought"), null, "the wheel scrolled the box itself");
     const read = (await box()).top;
-    assert.ok(read < b.end - 200, `the wheel scrolled the box itself (${read} of ${b.end})`);
+    assert.ok(read < b.end - 200, `and well up from its end (${read} of ${b.end})`);
     for (let i = 41; i <= 60; i++) await part(i);
     b = await box();
     assert.ok(Math.abs(b.top - read) < 2, `the reader's place held while 20 more parts came (${b.top}, was ${read})`);
@@ -283,19 +308,32 @@ test("an open thinking box scrolls on its own while it streams: wheel and keys, 
     // The keys, once it has focus.
     await words.focus();
     assert.equal(await words.evaluate((n) => [n.tabIndex, n.getAttribute("role"), n.getAttribute("aria-label")].join("|")), "0|region|The model's thinking");
+    await armScroll(".cd-thought");
     await s.page.keyboard.press("Home");
-    await s.page.waitForTimeout(250);
-    assert.equal((await box()).top, 0, "Home: its first words");
+    assert.equal(await scrolled(".cd-thought"), 0, "Home: its first words");
+    await armScroll(".cd-thought");
     await s.page.keyboard.press("PageDown");
-    await s.page.waitForTimeout(250);
-    assert.ok((await box()).top > 100, "Page Down scrolls it");
-    // At its end, the wheel isn't held: it goes on to the chat.
+    assert.ok(await scrolled(".cd-thought") > 100, "Page Down scrolls it");
+    await armScroll(".cd-thought");
+    await s.page.keyboard.press("End");
+    assert.notEqual(await scrolled(".cd-thought"), null, "End scrolls it");
+    b = await box();
+    assert.ok(b.end - b.top < 1, `End: its last words (${b.top} of ${b.end})`);
+    // At its end, the wheel isn't held: it goes on to the chat. At the end its follow leaves it at, as it streams.
+    await armScroll(".cd-thought");
+    await s.page.keyboard.press("Home");
+    assert.equal(await scrolled(".cd-thought"), 0);
     await words.evaluate((n) => { n.scrollTop = n.scrollHeight; });
+    assert.equal(await words.evaluate((n) => Number.isInteger(parseFloat(getComputedStyle(n).lineHeight))), true,
+                 `its lines are whole pixels, so its end is one (${await words.evaluate((n) => getComputedStyle(n).lineHeight)})`);
+    await s.frame();
     await s.page.mouse.move(r.x + r.width / 2, (await words.boundingBox()).y + 40);
     const chat0 = await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop);
+    await armScroll("#cd-scroll");
     await s.page.mouse.wheel(0, 400);
-    await s.page.waitForTimeout(300);
-    assert.ok(await s.page.evaluate(() => document.getElementById("cd-scroll").scrollTop) > chat0 + 100, "the chat scrolled on");
+    const chat1 = await scrolled("#cd-scroll");
+    assert.ok(chat1 !== null && chat1 > chat0 + 100, `the chat scrolled on (${chat0} -> ${chat1})`);
+    assert.ok(b.end - (await box()).top < 1, "and the box stayed at its end");
     // The reply finishing draws the chat again: the box keeps the reader's place.
     await words.evaluate((n) => { n.scrollTop = 150; });
     await s.send({ type: "message", message: { id: M(2), role: "assistant", text: "Day 1: a full day out.", thinking: (await words.textContent()), finish: "stop" } });
@@ -307,6 +345,7 @@ test("an open thinking box scrolls on its own while it streams: wheel and keys, 
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
+}
 
 test("for a reader who asked for less motion, the wave is still: all three slashes lit", async (t) => {
   if (skipOrFail(t)) return;
