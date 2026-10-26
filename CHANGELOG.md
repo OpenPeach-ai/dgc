@@ -16,6 +16,15 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   could not sample the worker").
 - **The installer leaves nothing of DGC writable by another user**, also where Python's own venv scripts would be
   (python.org's 3.10 for macOS), so Keep Pips running never refuses a fresh install.
+- **DGC's browser works on a Mac whose login keychain is locked** (a Pip running with the screen locked): its
+  throwaway Chrome asked the Keychain for a key, and its first page never loaded.
+- **Closing a browser session leaves nothing behind**: what was left of Chrome's helpers is ended and its throwaway
+  profile, with the session's cookies, is removed, on a slow computer too.
+- **Signing in to a hosted plugin on a Mac no longer waits on your network first**: the sign-in's own listener looked
+  up the name of its loopback address, and where nothing answered that lookup (35 s a time) the connection timed out
+  before the browser opened.
+- **On a Mac, a program a live-data line leaves running is stopped even when it detached at once** (it forked, left its
+  group and lost its parent before DGC looked): it kept the line waiting until it ended.
 - Everything in 0.48.0 below is included.
 
 ## 0.48.0 — 2026-10-26
