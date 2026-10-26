@@ -10,7 +10,8 @@ const sid = (n) => `sub-${String(n).padStart(12, "0")}`;
 const READY = { type: "ready", model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 1 };
 const CAPS = { agents: true, agent_control: true, agent_reports: 1, continue_agent: 1 };
-const AT = Date.parse("2026-10-25T18:42:00") / 1000;
+// Today at 18:42, local: a fixed calendar day reads "Yesterday 6:42 PM" the day after it was written (26 Oct).
+const AT = (() => { const d = new Date(); d.setHours(18, 42, 0, 0); return d.getTime() / 1000; })();
 const FINDING = "FINDING-1: total() rounds each line instead of rounding the sum once.";
 
 function view(capabilities = CAPS) {
@@ -130,7 +131,8 @@ test("an older CLI shows no box, whatever it is sent, and the host only sends co
   const method = panelSrc.slice(panelSrc.indexOf("private async continueAgent("), panelSrc.indexOf("private backgroundTasks("));
   assert.match(method, /Number\(\(this\.lastReadyEvent\?\.capabilities as any\)\?\.continue_agent\) < 1\) \{ return; \}/);
   assert.match(method, /type: "continue_agent", id: agentId, text: request/);
-  assert.match(panelSrc, /"startPipFix", "undoPipFix", "continueAgent"\]\)/, "read-only while the session is open elsewhere");
+  assert.match(panelSrc, /WORK_READ_ONLY_REFUSES = new Set\(\[[^\]]*"continueAgent"[^\]]*\]\)/,
+    "read-only while the session is open elsewhere");
   assert.deepEqual(p.errors, []);
 });
 
