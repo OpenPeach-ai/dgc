@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.48.3 — 2026-10-27
 
 - **A finished goal no longer reads as if it were still tonight.** After a goal is complete, blocked or paused, the
   model still sees one line about it, so a compaction never sends it back to that work. The line quoted what you typed

@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.33.1 — 2026-10-27
 
+- Requires DGC CLI 0.48.3.
 - **The prompt cache's clock is always in Work's footer.** Where DGC can't time the cache (Ollama Cloud, OpenAI,
   DeepSeek, a subscription CLI) it used to be hidden, which looked broken; it is now there, dimmed, with no minutes,
   and its tooltip names the provider: "Ollama Cloud may cache your prompt, but it doesn't say for how long, so DGC

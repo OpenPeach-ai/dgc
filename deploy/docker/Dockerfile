@@ -6,11 +6,11 @@
 #
 # Build from the repository root, at the tag of the release you install:
 #
-#   docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.2 -t dgc-pips .
+#   docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.3 -t dgc-pips .
 #
 # or from a release archive you built yourself (scripts/build-release.sh writes dist/release):
 #
-#   docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.2 \
+#   docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.3 \
 #     --build-context release=dist/release -t dgc-pips .
 
 ARG PYTHON_IMAGE=python:3.12-slim
@@ -20,7 +20,7 @@ FROM scratch AS release
 
 FROM ${PYTHON_IMAGE}
 
-# The DGC release to install, for example 0.48.2. install.sh refuses any other version.
+# The DGC release to install, for example 0.48.3. install.sh refuses any other version.
 ARG DGC_VERSION
 # Where install.sh downloads the release from, when no release context is given.
 ARG DGC_BASE_URL=https://vibedgc.com
