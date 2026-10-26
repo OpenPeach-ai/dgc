@@ -214,6 +214,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       type: "workspace_roots", roots: command.roots,
       ...(command.request_id ? { request_id: command.request_id } : {}),
     });
+  } else if (command.type === "list_sessions") {
+    // The side bar is the Sessions home (0.48): a disposable project has no saved sessions yet.
+    send({ type: "sessions", items: [], ...(command.request_id ? { request_id: command.request_id } : {}) });
   } else if (command.type === "get_config") {
     sendConfig(command.request_id);
   } else if (command.type === "status") {

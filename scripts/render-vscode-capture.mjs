@@ -521,10 +521,11 @@ async function dismissNotifications(page) {
 }
 
 async function webviewFrame(page) {
+  // The side bar's Sessions home keeps a hidden chat of its own, so the session is the webview whose box is SHOWN.
   return await waitFor(async () => {
     for (const frame of page.frames()) {
       try {
-        if (await frame.locator("#input").count()) return frame;
+        if (await frame.locator("#input").isVisible()) return frame;
       } catch { /* a provisional webview frame may detach */ }
     }
     return null;
@@ -649,8 +650,26 @@ async function main() {
     await page.locator(".editor-group-container .view-line")
       .filter({ hasText: "return min(lower, max(upper, value))" })
       .waitFor({ state: "visible", timeout: 10_000 });
-    await commandPalette(page, "DGC: Focus Chat");
+    // 0.48: the side bar is the Sessions home and a session opens in an editor tab of its own. clamp.py stays in
+    // view on the left; the new session's tab opens in the group to its right.
+    await commandPalette(page, "View: Split Editor Right");
+    await waitFor(async () => (await page.locator(".editor-group-container").count()) >= 2,
+      "VS Code did not open a second editor group", 10_000);
+    await commandPalette(page, "DGC: New Session");
     let frame = await webviewFrame(page);
+    // The split left a second clamp.py behind the session's tab: that group shows the session alone.
+    await commandPalette(page, "View: Close Other Editors in Group");
+    await waitFor(async () => (await page.locator(".editor-group-container").nth(1).locator(".tab").count()) === 1,
+      "the session's group still holds another editor", 10_000);
+    if (await page.locator(".part.sidebar:visible").count()) {
+      await commandPalette(page, "View: Close Primary Side Bar");
+      await page.locator(".part.sidebar").waitFor({ state: "hidden", timeout: 10_000 });
+    }
+    if (await page.locator(".part.auxiliarybar:visible").count()) {
+      await commandPalette(page, "View: Toggle Secondary Side Bar Visibility");
+      await page.locator(".part.auxiliarybar").waitFor({ state: "hidden", timeout: 10_000 });
+    }
+    frame = await webviewFrame(page);
     // The standing goal shows as its own row when it is the only thing in the rail, and as a chip on the rail's one
     // line once anything else is there too (0.48: "the rail as one line of chips"); the chip names the goal.
     const goalShown = await waitFor(async () => {
@@ -666,30 +685,17 @@ async function main() {
       await frame.getByRole("button", { name: "Expand and edit goal: Ship a verified bounds fix" })
         .waitFor({ state: "visible" });
     }
-
-    const sidebar = page.locator(".part.sidebar.right");
-    if (await sidebar.count()) {
-      const box = await sidebar.boundingBox();
-      if (box && box.width < 540) {
-        const desiredWidth = 560;
-        await page.mouse.move(box.x + 1, box.y + box.height / 2);
-        await page.mouse.down();
-        await page.mouse.move(Math.max(640, box.x - (desiredWidth - box.width)), box.y + box.height / 2,
-          { steps: 8 });
-        await page.mouse.up();
-        frame = await webviewFrame(page);
-      }
-    }
-    const finalSidebar = await sidebar.boundingBox();
-    if (!finalSidebar || finalSidebar.width < 520 || finalSidebar.width > 620) {
-      throw new Error(`DGC capture sidebar width is not publication-safe: ${finalSidebar?.width || 0}`);
-    }
-    if (await page.locator(".part.auxiliarybar:visible").count()) {
-      throw new Error("unrelated secondary sidebar remained visible in the capture surface");
+    const groups = page.locator(".editor-group-container");
+    const chatGroup = await groups.nth(1).boundingBox();
+    if (!chatGroup || chatGroup.width < 520 || chatGroup.width > 760) {
+      throw new Error(`DGC session tab width is not publication-safe: ${chatGroup?.width || 0}`);
     }
     await page.locator(".editor-group-container .tab.active").filter({ hasText: "clamp.py" })
       .waitFor({ state: "visible", timeout: 10_000 });
     await dismissNotifications(page);
+    // Off every tab and control, so no hover tooltip is on screen when the recording starts.
+    await page.mouse.move(340, 640);
+    await page.waitForTimeout(600);
 
     if (process.env.DGC_CAPTURE_TRACE === "1") {
       await frame.evaluate(() => {
@@ -751,6 +757,12 @@ async function main() {
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
     await frame.locator('.tool[data-tool-name="edit_file"] .tool-status')
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
+    // 0.48: a finished turn's work folds into its "Worked for" row. Open it, as a reader would, to show the edit.
+    const workToggle = frame.locator(".msg.dgc.has-work-fold.work-folded > .work-toggle").last();
+    if (await workToggle.count()) {
+      await workToggle.click();
+      await frame.locator(".msg.dgc.has-work-fold.work-folded").waitFor({ state: "detached", timeout: 10_000 });
+    }
     const editTool = frame.locator('.tool[data-tool-name="edit_file"]').first();
     const editGroup = editTool.locator('xpath=ancestor::details[contains(@class,"tool-group")][1]');
     if (await editGroup.count() && await editGroup.getAttribute("open") === null) {
@@ -775,6 +787,7 @@ async function main() {
       .waitFor({ state: "hidden", timeout: 10_000 });
     // The fixture edits on disk outside VS Code's extension host. Force the real editor to reload
     // that file, then prove the visible Monaco buffer agrees with the rendered diff and test result.
+    await commandPalette(page, "View: Focus First Editor Group");
     await commandPalette(page, "File: Revert File");
     const correctedEditorLine = page.locator(".editor-group-container .view-line")
       .filter({ hasText: "return max(lower, min(upper, value))" });
