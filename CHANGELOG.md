@@ -26,6 +26,12 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   followed first. A folder you share with helpers (`subagent_link_paths`), a skill's own folder and a file the
   helper wrote itself stay readable. A shell command can still read anything, and the docs say so. The main chat,
   and a helper without a copy of its own, read as before.
+- **The full-screen terminal keeps your conversation on screen around a picker.** Opening `/resume`, `/settings`,
+  the `/` menu or the Open here choices (a session another DGC has open) above the prompt box could blank the whole
+  conversation behind it until you pressed another key, and so could closing one into a taller one, such as Esc in
+  Settings going back to the `/` menu. The conversation now stays drawn, with its newest lines just above the picker,
+  as each one opens and closes, whether you chose something or pressed Esc. The classic prompt (`dgc --classic`)
+  never had this problem.
 
 ## 0.48.2 — 2026-10-27
 

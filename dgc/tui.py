@@ -2410,10 +2410,19 @@ class TUI:
     def _scroll_top_offset(self):
         """Keep the cursor pinned to the BOTTOM row of the transcript window (top-offset = height-1)
         so a paged/wheeled scroll moves the view IMMEDIATELY at any terminal height — otherwise PT
-        (wrap_lines) leaves the cursor merely 'visible' and small scrolls on a tall window do nothing."""
-        ri = getattr(self, "_transcript_win", None)
-        ri = getattr(ri, "render_info", None) if ri else None
-        return max(0, ri.window_height - 1) if ri else 0
+        (wrap_lines) leaves the cursor merely 'visible' and small scrolls on a tall window do nothing.
+
+        The height is the one this frame draws the transcript at, never the last frame's: a picker or
+        modal opening above the composer makes the transcript shorter, and an offset taller than the
+        window makes PT treat the cursor's empty last line as taller than the window and scroll to
+        it -- the whole transcript drew blank behind /resume or the Open here choices until the next
+        key drew a second frame."""
+        win = getattr(self, "_transcript_win", None)
+        height = getattr(win, "drawn_height", None) if win is not None else None
+        if height is None:
+            ri = getattr(win, "render_info", None) if win is not None else None
+            height = ri.window_height if ri else 0
+        return max(0, height - 1)
 
     def _wheel(self, delta: int) -> None:
         """Mouse-wheel scroll of the transcript. delta>0 scrolls up into history (drops follow so
@@ -5703,9 +5712,9 @@ class TUI:
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
-        transcript = Window(_ClickControl(self._transcript, on_scroll=self._wheel), wrap_lines=True,
-                            scroll_offsets=ScrollOffsets(top=self._scroll_top_offset),
-                            height=Dimension(weight=1))   # scroll is driven by the cursor marker (_cursor_ft)
+        transcript = _TranscriptWindow(_ClickControl(self._transcript, on_scroll=self._wheel), wrap_lines=True,
+                                       scroll_offsets=ScrollOffsets(top=self._scroll_top_offset),
+                                       height=Dimension(weight=1))   # scroll follows the cursor marker (_cursor_ft)
         self._transcript_win = transcript
         status = Window(FormattedTextControl(self._status), height=1, style="class:status")
         secret_input = Condition(lambda: self._input is not None and self._input.get("secret") is True)
@@ -9887,6 +9896,20 @@ def _tui_help() -> str:
                 f"[{th.faint}]{_esc(d)}[/]")
     out.append(f"[{th.faint}]  /rewind, /init, /search live in the classic REPL: dgc --classic[/]")
     return "\n".join(out)
+
+
+class _TranscriptWindow(Window):
+    """The transcript's Window, which knows the height it is being drawn at in the frame being drawn.
+
+    Its scroll offset (TUI._scroll_top_offset) depends on that height, and `render_info` only has the
+    previous frame's: one frame stale is wrong exactly when something above the composer (a picker, the
+    Open here choices, a modal, the task list) has just made the transcript shorter."""
+
+    drawn_height: int | None = None
+
+    def write_to_screen(self, screen, mouse_handlers, write_position, parent_style, erase_bg, z_index) -> None:
+        self.drawn_height = write_position.height
+        super().write_to_screen(screen, mouse_handlers, write_position, parent_style, erase_bg, z_index)
 
 
 class _ClickControl(FormattedTextControl):
