@@ -770,7 +770,7 @@ SUPERVISION_TOOL_SCHEMAS = [
         "already doing. Either way it is read at the child's next tool boundary: it starts no new "
         "task, restarts nothing, and does not wait for a reply. Not for conversing: a child's "
         "instructions belong in the `task` prompt, and one that has already finished cannot read "
-        "anything.",
+        "anything (continue_task gives a finished one more work).",
         {"id": {"type": "string", "description": "The background sub-task's id (from `task` or "
                                                  "`list_tasks`)"},
          "text": {"type": "string", "description": "What the child should know or do differently, "
@@ -779,6 +779,25 @@ SUPERVISION_TOOL_SCHEMAS = [
                        "what the child is already doing still stands. False (the default) when it "
                        "corrects or narrows what it is doing. Getting this backwards tells the "
                        "child the opposite of what you mean"}},
+        ["id", "text"]),
+    # A finished helper continued with its memory (dgc/helper_memory.py). Its own tool, not message_task widened:
+    # message_task's contract is "read at the next tool boundary, starts nothing, returns nothing", and this starts a
+    # run and returns its result. One name meaning both, by the child's state, is the kind of choice a model gets
+    # backwards; two names, each saying which state it is for, it doesn't.
+    _fn("continue_task", "Give MORE WORK to a sub-agent of this conversation that has already FINISHED (or failed, "
+        "or was stopped): the SAME helper continues, with its memory of its earlier run -- what it was asked, what it "
+        "read, what it found -- instead of a new one that reads everything again. Use it for a follow-up on that "
+        "helper's own work: fix what its review found, extend or correct what it built. It works in a fresh copy of "
+        "the project as it is now and is told which files changed since it finished. Its result comes back like a "
+        "`task` result, its changes are integrated like any helper's, and it is asked for like a `task`. For a "
+        "sub-agent that is still running use message_task; for unrelated work start a new `task`.",
+        {"id": {"type": "string", "description": "The finished sub-agent's id (sub-..., from its task result, its "
+                                                 "report, or list_tasks)"},
+         "text": {"type": "string", "description": "The new request, self-contained. It remembers its own earlier "
+                  "work, so refer to it plainly (\"fix the three problems you found in billing.py\"); it cannot see "
+                  "this conversation"},
+         "background": {"type": "boolean", "description": "Run it in the background and keep working; its result "
+                        "arrives later, as a background task's does"}},
         ["id", "text"]),
     _fn("close_task", "Stop a background sub-task that is still running, when its work is no "
         "longer wanted: the request changed, you did it yourself, or it is going the wrong way. "

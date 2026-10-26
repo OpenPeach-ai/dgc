@@ -2178,6 +2178,28 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 /* What became of an agent's changes, above its report on its page. */
 .agent-page-outcome { margin: 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
 .agent-page-outcome[data-held] { color: var(--text); }
+/* A helper asked to do more (continue_agent): each later run after a divider -- what the run before reported, then
+   "Continued 18:42 · asked by you" and what it was asked -- on its page and in its transcript. */
+.agent-run-divider { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; min-width: 0; }
+.agent-run-report { color: var(--text); font: var(--w-reg) var(--t-sm)/1.55 var(--sans); overflow-wrap: anywhere; min-width: 0; }
+.agent-run-mark { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
+.agent-run-mark::before, .agent-run-mark::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--border); }
+.agent-run-mark::before { flex: 0 0 var(--sp-3); }
+/* "Ask it to do more": its card's box, and its report line's. */
+.agent-more { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; min-width: 0; }
+.agent-more[hidden] { display: none; }
+.agent-more-text { width: 100%; min-height: calc(2 * var(--t-sm) * 1.5 + 2 * var(--sp-2)); padding: var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text);
+  font: var(--w-reg) var(--t-sm)/1.5 var(--sans); resize: vertical; }
+.agent-more-text::placeholder { color: var(--faint); }
+.agent-more-text:disabled { opacity: .7; }
+.agent-more-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-width: 0; }
+.agent-more-row > .am-note { flex: 1 1 auto; margin: 0; min-width: 0; }
+.agent-more-send { flex: none; }
+.agent-more-send:disabled { opacity: .55; cursor: default; }
+.handback-more { margin-top: var(--sp-1); }
+.am-call.am-call-run { margin-top: var(--sp-1); color: var(--muted); font-weight: var(--w-med); }
 /* A row jump marks the task card for a moment; with reduced motion the outline alone says it. */
 .tool.flash { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-md);
   animation: agent-flash 1.2s ease-out; }

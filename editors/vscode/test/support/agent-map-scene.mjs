@@ -45,7 +45,7 @@ export const AGENTS = [
 // agents pill. The agents arrive live, so the panel as it was before the map lists every one of
 // them too; the page's clock is moved on between them so the durations read like a real run.
 export async function openMapScene(browser, { width, height = 720, theme = "dark-modern", root = here, open = true,
-  forcedColors = false, reducedMotion = true, faces = false } = {}) {
+  forcedColors = false, reducedMotion = true, faces = false, capabilities = {} } = {}) {
   const { html, mainJs, markdownJs } = mapPanelHtml(root);
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2,
     reducedMotion: reducedMotion ? "reduce" : "no-preference", forcedColors: forcedColors ? "active" : "none" });
@@ -78,7 +78,8 @@ export async function openMapScene(browser, { width, height = 720, theme = "dark
   const model = "qwen3.8:27b";
   await post({ type: "session_ready", sessionId: "s1" });
   await send({ type: "ready", version: "0.48.0", protocol_version: 14, session_id: "s1", session_name: "Harden the auth flow",
-    capabilities: { live_steering: true, agents: true, agent_control: true, monitors: true, troupe: true, background_tasks: { version: 1 } },
+    capabilities: { live_steering: true, agents: true, agent_control: true, monitors: true, troupe: true, background_tasks: { version: 1 },
+      ...capabilities },
     model, mode: "default", think: "off", base_url: "http://127.0.0.1:11434/v1", workspace_trusted: true, commands: [],
     custom_commands: [], goal: { text: "", status: "none" }, context_size: 1048576 });
   await post({ type: "state", state: { model, mode: "default", think: "off" } });

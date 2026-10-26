@@ -3545,6 +3545,8 @@ class TUI:
                  "waiting": (glyphs.AGENT_WAIT, th.err), "finished": (glyphs.CHECK, th.faint),
                  "failed": (glyphs.CROSS, th.err), "stopped": (glyphs.BLOCKED, th.warn)}
         main_model = str(getattr(self.config, "model", "") or "")
+        from .helper_memory import terminal_marks
+        runs = terminal_marks(self.agent)
         rows = []
         for level, item in tree_items(snap["items"]):
             if shown is not None and item.get("id") not in shown:
@@ -3553,6 +3555,9 @@ class TUI:
             desc = " ".join(desc.split())
             meta = meta_text(item, main_model=main_model, fmt_tokens=render_mod.fmt_tokens,
                              finished_word=False)
+            mark = runs.get(str(item.get("id") or ""))
+            if mark:
+                meta = " · ".join(part for part in (meta, mark) if part)
             rows.append((level, item.get("state"), desc, " ".join(style_mod.terminal_safe_text(meta).split())))
         width = min(32, max((cell_len(desc) + 2 * level for level, _s, desc, _m in rows), default=0))
         lines = [f"[bold {th.accent}]agents in this chat[/] "
@@ -3571,7 +3576,38 @@ class TUI:
                              f" · /agents all lists them[/]")
         elif hidden > 0:
             lines.append(f"  [{th.faint}]{glyphs.ELLIPSIS_V} {hidden} more not listed[/]")
+        if any("continue " in mark for mark in runs.values()):
+            lines.append(f"  [{th.faint}]/agents continue <id> <what to do> gives a finished helper more work, "
+                         "with its memory[/]")
         return "\n".join(lines) + "\n"
+
+    def _continue_helper_command(self, spec: str) -> None:
+        """`/agents continue <id> <what it should do now>`: a finished helper continues with its memory, in the
+        background (dgc/helper_memory.py). Its report comes back like a background helper's. The copy it works in is
+        made off the terminal's thread: that reads the project and can wait for its write lease."""
+        from . import helper_memory
+        parts = spec.split(maxsplit=1)
+        if len(parts) < 2:
+            self._flash("usage: /agents continue <id> <what it should do now>")
+            return
+        ident, text = parts
+        agent, th = self.agent, style_mod.theme()
+
+        def go() -> None:
+            try:
+                helper_memory.continue_helper(agent, ident, text, by="you", background=True)
+            except helper_memory.Refused as refused:
+                self._append(self._rich(f"[{th.err}]{_esc(str(refused))}[/]"))
+                return
+            except Exception as exc:                    # noqa: BLE001 -- said, never thrown at the terminal
+                self._append(self._rich(f"[{th.err}]DGC couldn't continue the helper: {_esc(type(exc).__name__)}: "
+                                        f"{_esc(str(exc))}[/]"))
+                return
+            name = agent._task_description(helper_memory.find(agent, ident)) or ident
+            self._append(self._rich(
+                f"[{th.ok}]{glyphs.AGENT_RUN}[/] [{th.text}]{_esc(' '.join(name.split()))}[/] "
+                f"[{th.faint}]· continued in the background, with its memory. Its report comes back here.[/]"))
+        threading.Thread(target=go, name="dgc-continue-helper", daemon=True).start()
 
     @staticmethod
     def _agents_working_desc(agent) -> str:
@@ -4640,7 +4676,7 @@ class TUI:
                   "add_skill": "Install skill", "save_memory": "Save to DGC.md", "remember": "Remember", "forget": "Forget",
                   # The sub-agent supervision tools, in the editor card's own words.
                   "list_tasks": "Check sub-agents", "wait_tasks": "Wait for a sub-agent",
-                  "message_task": "Message", "close_task": "Stop"}
+                  "message_task": "Message", "close_task": "Stop", "continue_task": "Continue"}
 
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
@@ -4654,7 +4690,7 @@ class TUI:
                  "view_image": "Viewing image",
                  "list_tasks": "Checking sub-agents", "wait_tasks": "Waiting for a sub-agent",
                  # The agent follows as the summary: "Sending message to Write the parser".
-                 "message_task": "Sending message to", "close_task": "Stopping"}
+                 "message_task": "Sending message to", "close_task": "Stopping", "continue_task": "Continuing"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "monitor": "Started monitor", "monitor_stop": "Stopped monitor",
                 "monitor_event": "Monitor event", "subtask_result": "Sub-task result",
@@ -4665,7 +4701,7 @@ class TUI:
                 "add_skill": "Installed skill", "save_memory": "Saved to DGC.md", "remember": "Remembered", "forget": "Forgot",
                 "view_image": "Viewed image",
                 "list_tasks": "Checked sub-agents", "wait_tasks": "Waited for a sub-agent",
-                "message_task": "Sent message to", "close_task": "Stopped"}
+                "message_task": "Sent message to", "close_task": "Stopped", "continue_task": "Continued"}
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
@@ -7226,6 +7262,8 @@ class TUI:
                     f"  [{th.err}]{catalog['invalid']} invalid or unsupported entry(s)[/]")
             self._append(self._rich(
                 f"[bold {th.accent}]lifecycle hooks[/]\n" + "\n".join(lines)))
+        elif cmd == "agents" and rest.strip().lower().split(maxsplit=1)[:1] == ["continue"]:
+            self._continue_helper_command(rest.strip()[len("continue"):].strip())
         elif cmd == "agents":
             sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"
@@ -9818,7 +9856,7 @@ def _arg_summary(args: dict, name: str = "") -> str:
         from .ui import task_batch_summary
         v = style_mod.terminal_safe_text(task_batch_summary(args)).replace("\n", " ")
         return v[:100] + ("…" if len(v) > 100 else "")
-    if name in ("message_task", "close_task") and isinstance(args, dict):
+    if name in ("message_task", "close_task", "continue_task") and isinstance(args, dict):
         # The agent, by what it was asked to do (the agent resolves it into `agent`), else its id.
         v = style_mod.terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
         return v[:100] + ("…" if len(v) > 100 else "")

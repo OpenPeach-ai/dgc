@@ -34,11 +34,12 @@ SUPERVISION = {fn["function"]["name"] for fn in tools.SUPERVISION_TOOL_SCHEMAS}
 
 class WhereTheSchemasLiveTest(unittest.TestCase):
     def test_the_set_is_the_set_the_docs_name(self):
-        # Two read-only (list_tasks, wait_tasks) and two control (message_task, close_task). Every
-        # one of them is kept out of `ready.tools` for the same reason, which the next test proves
-        # against the real SDK refusal rather than restating here.
+        # Two read-only (list_tasks, wait_tasks), two control (message_task, close_task) and the
+        # one that continues a finished helper (continue_task, dgc/helper_memory.py). Every one of
+        # them is kept out of `ready.tools` for the same reason, which the next test proves against
+        # the real SDK refusal rather than restating here.
         self.assertEqual(SUPERVISION,
-                         {"list_tasks", "wait_tasks", "message_task", "close_task"})
+                         {"list_tasks", "wait_tasks", "message_task", "close_task", "continue_task"})
 
     def test_neither_name_is_published_in_ready_tools(self):
         """The invariant, against the real SDK's real refusal rather than a restatement of it."""

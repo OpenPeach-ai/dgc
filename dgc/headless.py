@@ -232,6 +232,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "watch_pip_runs",
     # A client saying it draws finished agents' reports: nothing changes but what it is sent.
     "watch_agent_reports",
+    # ...or a helper's runs (Continued, the box that continues it): the same.
+    "watch_agent_runs",
     # The Edited card's files: asked once, then sent before each turn_end.
     "watch_turn_files",
     # A client saying it shows a session another process has open read-only: nothing changes but what it is sent.
@@ -399,7 +401,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
-    "watch_agent_reports", "watch_turn_files", "watch_session_owner",
+    "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs",
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
@@ -2386,6 +2388,8 @@ class Backend:
         self._agents_timer_lock = threading.Lock()
         self.agent.subagents.listener = self._on_subagent
         self.agent.on_detached_ended = self._on_detached_ended
+        # A helper's runs changed: one ended and its conversation is kept, or it was continued (agent_runs).
+        self.agent.on_helper_runs = self._on_helper_runs
         # An earlier turn's Edited card changed after that turn ended (turn_files).
         self.agent.on_turn_files = self._on_turn_files
         self._agent_wakes: list[dict] = []
@@ -2518,6 +2522,10 @@ class Backend:
                           # client sends watch_agent_reports, each wake turn's turn_start is followed by an
                           # agent_report per agent it delivers, and get_history replays them.
                           "agent_reports": 1,
+                          # A finished helper can be asked to do more, with its memory (dgc/helper_memory.py):
+                          # continue_agent {id, text}; once the client sends watch_agent_runs, agent_runs says
+                          # which helpers can be continued and each one's runs.
+                          "continue_agent": 1,
                           # The Edited card lists what the turn's recovery point restores, counted here:
                           # once the client sends watch_turn_files, a turn_files before each turn_end.
                           "turn_files": 1,
@@ -7576,6 +7584,14 @@ class Backend:
             # such a session loads it to be read and says so (session_held), and so does this chat letting its own
             # session go to Open here elsewhere. Until a client says so, such a resume is refused (session_held).
             self._session_owner_on = True
+        elif t == "watch_agent_runs":
+            # This client draws a helper's runs (Continued, its dividers) and the box that continues a finished one:
+            # answered now, then after every agents snapshot and whenever a helper's runs change. Until a client asks
+            # none is sent. On the chat's UI, beside agent_reports: each chat on a shared `dgc serve` opts in itself.
+            self.ui._agent_runs_enabled = True
+            self._emit_agent_runs(request_id=request_id)
+        elif t == "continue_agent":
+            self._continue_agent(cmd, request_id)
         elif t == "watch_turn_files":
             # This client draws the Edited card from what the CLI counted: from now on each turn's
             # turn_files is sent before its turn_end. Until a client asks none is (an older editor,
@@ -8127,6 +8143,12 @@ class Backend:
             if name is None:
                 if kind == "resync":
                     self._schedule_agents_snapshot()
+                elif kind == "continued":
+                    # A finished helper went back to work (dgc/helper_memory.py): its own row, running again, said
+                    # by a snapshot now, before any frame of its new run (an older client ignores agent_updated for
+                    # a row it has as ended), then agent_runs to a client that watches runs. Safe here: the registry
+                    # notifies outside its record lock, and its publish lock is re-entrant.
+                    self._emit_agents()
                 return
             fields = dict(payload)
             if not self._agent_faces_on():
@@ -8313,6 +8335,75 @@ class Backend:
             items=snap["items"] if faces else [{key: value for key, value in item.items()
                                                 if key != "face_slot"} for item in snap["items"]],
             total=snap["total"], active=snap["active"], **_request_fields(request_id)))
+        self._emit_agent_runs()                 # its helpers' runs, after the rows they belong to
+
+    # ---- a finished helper continued with its memory (0.48, dgc/helper_memory.py) -----------------
+    def _agent_runs_on(self) -> bool:
+        """This chat's client draws a helper's runs (it sent watch_agent_runs)."""
+        return getattr(getattr(self, "ui", None), "_agent_runs_enabled", False) is True
+
+    def _emit_agent_runs(self, only=None, request_id: str | None = None) -> None:
+        """`agent_runs`: the helpers that can be continued, or have been, with each one's runs. Only to a client that
+        asked; with `only`, just those (a reply to continue_agent, or one helper's runs changing)."""
+        if not self._agent_runs_on():
+            return
+        from . import helper_memory
+        try:
+            items = helper_memory.runs_items(self.agent, only)
+        except Exception:                               # noqa: BLE001 -- a view, never the chat's work
+            items = []
+        if only is not None and not items and request_id is None:
+            return
+        secrets = secret_values(getattr(self, "config", None))
+        self.em.emit("agent_runs", items=redact_value(items, secrets), **_request_fields(request_id))
+
+    def _on_helper_runs(self, ids) -> None:
+        """A helper's runs changed on some thread: a run ended and was kept, or a continuation started or failed."""
+        try:
+            self._emit_agent_runs([str(item) for item in ids or ()])
+        except Exception:
+            pass
+
+    def _continue_agent(self, cmd: dict, request_id: str | None) -> None:
+        """The person's "Ask it to do more": the finished helper `id` continues, with its memory, in the background.
+
+        No turn starts and the chat stays free; its report comes back like a background helper's (a wake turn and its
+        agent_report). Answered by `agent_runs` carrying the request_id, or command_rejected with a reason and a
+        sentence to show. Making its copy reads the project and waits for the write lease, so it runs off the stdin
+        loop, in the order the requests came (the Pip fixes' queue)."""
+        from . import helper_memory
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command="continue_agent", reason=reason, message=message[:1000],
+                         **_request_fields(request_id))
+
+        agent_id = str(cmd.get("id") or "").strip()
+        text = cmd.get("text")
+        if not helper_memory.ID_RE.match(agent_id):
+            reject("unknown_agent", "That is not one of this chat's helpers.")
+            return
+        if not isinstance(text, str) or not text.strip():
+            reject("invalid_text", "Say what the helper should do now.")
+            return
+        agent = self.agent
+
+        def go() -> None:
+            with self._dispatch_guard():
+                changed = self.agent is not agent
+            if changed:
+                reject("chat_changed", "This chat changed before the helper could start. Ask again.")
+                return
+            try:
+                helper_memory.continue_helper(agent, agent_id, text, by="you", background=True)
+            except helper_memory.Refused as refused:
+                reject(refused.reason, str(refused))
+                return
+            except Exception as exc:                    # noqa: BLE001 -- said, never thrown at stdin
+                reject("failed", f"DGC couldn't continue the helper: {type(exc).__name__}: {exc}")
+                return
+            self._emit_agent_runs([agent_id], request_id=request_id or "")
+
+        self._pip_fix_job(go)
 
     def _agent_reports_on(self) -> bool:
         """This chat's client draws finished agents' reports (it sent watch_agent_reports)."""

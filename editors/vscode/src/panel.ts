@@ -102,7 +102,7 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
   "setContextSize", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
   "options_response", "mcp_input_response", "askSkip", "steerQueued", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
-  "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow"]);
+  "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
 /** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
@@ -2249,6 +2249,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** "Ask it to do more" on a finished helper (ready.capabilities.continue_agent): it continues in the background with
+   *  its memory. The CLI answers with agent_runs (the map then shows it working again) or a refusal, said on the box. */
+  private async continueAgent(id: string, text: string): Promise<void> {
+    const agentId = String(id || "");
+    const request = text.trim();
+    if (!/^sub-[0-9a-f]{12}$/i.test(agentId) || !request || request.length > 16000
+        || Number((this.lastReadyEvent?.capabilities as any)?.continue_agent) < 1) { return; }
+    try {
+      await this.ensureBackend().request({ type: "continue_agent", id: agentId, text: request,
+        request_id: this.nextRequestId("agent-continue") } as any, "agent_runs" as DgcEvent["type"], 60000);
+      this.post({ type: "agent_continue_state", id: agentId, state: "started" });
+    } catch (err: any) {
+      this.post({ type: "agent_continue_state", id: agentId, state: "error",
+        error: err?.message || "DGC couldn't continue the helper." });
+    }
+  }
+
   /** Background shells (`bash` with background:true) reach the map only from a CLI that advertises
    *  `background_tasks`. The commands are new in that version, so nothing here is sent to one that is not. */
   private backgroundTasks(): boolean {
@@ -3646,6 +3663,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // backend that doesn't offer it is never asked, and its wake turns keep the plain "Woke on agent" note.
         if (Number((ev.capabilities as any)?.agent_reports) >= 1) {
           this.backend?.sendSetup({ type: "watch_agent_reports" });
+        }
+        // A finished helper can be asked to do more (continue_agent): its runs and whether it can be continued come
+        // as agent_runs, asked here for the same reason, so a reopened chat's map has them. An older CLI has none.
+        if (Number((ev.capabilities as any)?.continue_agent) >= 1) {
+          this.backend?.sendSetup({ type: "watch_agent_runs" });
         }
         // Each turn's Edited card from the CLI's count (turn_files): asked here too, for the same reason, so a reopened
         // chat's history carries the cards it saved. The CLI replays them only to a client that asked.
@@ -5297,6 +5319,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "backgroundNow":
         void this.backgroundNow(String(msg.agentId || ""), String(msg.callId || ""));
+        break;
+      case "continueAgent":
+        void this.continueAgent(String(msg.id || ""), typeof msg.text === "string" ? msg.text : "");
         break;
       case "listBackgroundShells":
         if (this.backgroundTasks()) {

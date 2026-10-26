@@ -876,6 +876,9 @@ class TaskWorkspace:
     # treats such a file like any other: applied when untouched since, merged or held back if not.
     # A class attribute, not a field: every construction of this dataclass is positional.
     protect_dirty = True
+    # Uncommitted files that are a continued helper's OWN earlier work, exactly as it landed (dgc/helper_memory.py):
+    # not the user's, so its next run's change to them integrates like any file's. Set per checkout.
+    own_dirty: frozenset = frozenset()
 
     @classmethod
     def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None,
@@ -1108,7 +1111,7 @@ class TaskWorkspace:
         if not changed:
             cleanup_error = self.cleanup() or ""
             return TaskIntegration("clean", cleanup_error=cleanup_error)
-        protected = ([path for path in changed if path in self.initial_dirty]
+        protected = ([path for path in changed if path in self.initial_dirty and path not in self.own_dirty]
                      if self.protect_dirty else [])
         if protected:
             conflicts = [self._display_path(path) for path in protected]
