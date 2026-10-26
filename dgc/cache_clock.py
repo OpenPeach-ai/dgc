@@ -14,8 +14,9 @@ cache is in use:
   gone.
 
 Every other route -- OpenAI, DeepSeek, an Ollama ``:cloud`` model (never listed in /api/ps), a
-subscription CLI -- does not publish a lifetime DGC can read, so the clock stays hidden there. The
-caching itself (cache markers, a stable request start, Ollama's keep-alive) applies everywhere.
+subscription CLI -- does not publish a lifetime DGC can read, so the clock shows no minutes there
+(the editor dims it and names the provider). The caching itself (cache markers, a stable request
+start, Ollama's keep-alive) applies everywhere.
 
 A record is what one reply taught: ``{"source", "anchor_ms", "ttl_s"?, "tokens", "model",
 "endpoint"}`` plus ``compacted_ms`` once the conversation was compacted past it. ``wire_state`` turns
@@ -46,7 +47,7 @@ def _count(value) -> int:
 def record_from_reply(client, result, sent_at: float, previous: dict | None = None) -> dict | None:
     """What a finished main-conversation request says about the chat's prompt cache, or None.
 
-    None means DGC cannot know for this route (or this reply showed no cache in use): the clock hides.
+    None means DGC cannot know for this route (or this reply showed no cache in use): no minutes.
     """
     try:
         model = str(getattr(client, "model", "") or "")
@@ -125,7 +126,7 @@ def wire_state(record: dict | None, *, now_ms: int | None = None, listed=None) -
     """The ``cache_clock`` event's fields for ``record``.
 
     ``listed`` is an Ollama /api/ps answer for the record's model: (True, expires_ms) while loaded,
-    (False, 0) once unloaded, None when Ollama could not be asked (the clock hides: DGC does not know).
+    (False, 0) once unloaded, None when Ollama could not be asked (unknown: DGC does not know).
     """
     record = clean(record)
     if record is None:

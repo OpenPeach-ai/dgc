@@ -3972,16 +3972,19 @@ this conversation cached, so the next message is read from the cache instead of 
   never in seconds. Its tooltip says "Prompt cache warm, about 4 min left."
 - **The clock alone, in the error colour:** the cache has gone. The tooltip says why: likely
   expired after so long idle, the conversation was compacted past it, or Ollama unloaded the model.
-- **No clock:** DGC cannot know. It is shown only where the provider says so itself, and only
-  after a reply used a cache: Anthropic's own cache report, and the lifetime its cache write used
-  (`prompt_cache_ttl`, 5 minutes or 1 hour, counted from the start of the request), and a local
-  Ollama's own unload time for the loaded model (`ollama_keep_alive`). OpenAI, DeepSeek, Ollama
-  cloud models and subscription CLIs do not publish one, so no clock is shown for them, though their
-  caches still work.
+- **The clock dimmed, with no minutes:** DGC can't time this cache. Minutes are shown only where the
+  provider says how long itself, and only after a reply used a cache: Anthropic's own cache report,
+  and the lifetime its cache write used (`prompt_cache_ttl`, 5 minutes or 1 hour, counted from the
+  start of the request), and a local Ollama's own unload time for the loaded model
+  (`ollama_keep_alive`). OpenAI, DeepSeek, Ollama Cloud and subscription CLIs don't say, though their
+  caches still work. The tooltip names the provider: "Ollama Cloud may cache your prompt, but it
+  doesn't say for how long, so DGC can't show a timer." On Anthropic or a local Ollama it means
+  nothing is cached yet: "No timer yet: Anthropic says how long its cache lasts after a reply."
 
-Reopening a chat whose cache has gone adds one line to it: "Idle 2h 5m. The prompt cache has likely
-expired, so your next message will re-cache about 180k tokens." The clock is in Work only, not in
-ChatDGC or Pips. `dgc serve` sends it as a `cache_clock` event.
+Click the clock to open the context meter's details: they show the tokens the provider reported as
+cached. Reopening a chat whose cache has gone adds one line to it: "Idle 2h 5m. The prompt cache has
+likely expired, so your next message will re-cache about 180k tokens." The clock is in Work only, not
+in ChatDGC or Pips. `dgc serve` sends it as a `cache_clock` event.
 
 ## Privacy
 

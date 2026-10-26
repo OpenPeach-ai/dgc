@@ -2468,7 +2468,7 @@ class Agent(GoalLifecycle):
         """What this main-conversation reply says about the chat's prompt cache (dgc/cache_clock.py).
 
         Only the main agent's own conversation counts: a sub-agent, a title or a summary sends another
-        prefix. A reply on a route whose cache DGC cannot see hides the clock again.
+        prefix. A reply on a route whose cache DGC cannot see takes the clock's minutes away again.
         """
         if self.depth:
             return

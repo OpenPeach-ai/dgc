@@ -1427,6 +1427,7 @@
     return detail + " Ultra adds guidance for deeper work and bounded parallel agents; it cannot guarantee better answers.";
   }
   let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
+  let curBaseUrl = "";              // the chat's endpoint, as the host's state says it: whose prompt cache it is
   let curWorkers = 4;
   let lastConfig = null;
   let contextBreakdown = null;      // what fills the window, part by part (context_breakdown), once asked for
@@ -1529,8 +1530,16 @@
     const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
     const thresholdPct = Math.round(threshold * 100);
     $("ctx-auto").textContent = `auto at ${thresholdPct}%`;
-    $("ctx-usage").textContent = `${fmtTokens(contextState.input_tokens)} in · ` +
-      `${fmtTokens(contextState.output_tokens)} out · ${fmtTokens(contextState.requests)} requests`;
+    // What the provider reported, cached included: where the cache clock's click lands when it can't time the cache.
+    // Each figure stays with its word ("0 cached", never "0" / "cached"): a narrow details box wraps between them.
+    const requests = Number(contextState.requests || 0);
+    const usage = [`${fmtTokens(contextState.input_tokens)} in`, `${fmtTokens(contextState.output_tokens)} out`,
+      `${fmtTokens(contextState.cached_input_tokens)} cached`, `${fmtTokens(requests)} ${requests === 1 ? "request" : "requests"}`];
+    $("ctx-usage").replaceChildren(...usage.flatMap((part, i) => {
+      const figure = el("span", "context-usage-part");
+      figure.textContent = part;
+      return i ? [" · ", figure] : [figure];
+    }));
     syncContextSizeControl();
     // What fills the window, part by part (as Claude's Usage sheet), once the backend has counted it: its bar and its
     // list take the place of the single bar and the free/auto line.
@@ -1599,10 +1608,13 @@
     renderContextMenu();
   }
   // ---- the prompt cache's clock (0.48, Work only; dgc/cache_clock.py) ----------------------------------
-  // Copied from Claude Code: unknown -> hidden; warm -> a clock and the whole minutes left ("4m"), changed
-  // at most once a minute (no seconds, no animation); gone -> the clock alone in the error colour. Shown
-  // only where the backend knows it from the provider itself (Anthropic's own cache report, a local
-  // Ollama's /api/ps), after a reply that used a cache. Reopening a chat whose cache has gone says so once.
+  // Copied from Claude Code: warm -> a clock and the whole minutes left ("4m"), changed at most once a minute
+  // (no seconds, no animation); gone -> the clock alone in the error colour. Timed only where the backend knows it
+  // from the provider itself (Anthropic's own cache report, a local Ollama's /api/ps), after a reply that used a
+  // cache. Reopening a chat whose cache has gone says so once. Unknown (0.48.3) -> the clock still there, dimmed,
+  // no minutes, its tooltip naming the provider that doesn't say ("Ollama Cloud may cache your prompt, ..."); it
+  // used to be hidden, and a missing clock read as a broken one. A click, in any state, opens the context meter's
+  // details, which say how many tokens the provider reported as cached.
   let cacheClock = null, cacheClockTimer = null;
   const cacheClockNoted = new Set();
   function cacheIdle(ms) {
@@ -1642,6 +1654,37 @@
     if (win.reason === "unloaded") return `Prompt cache expired: Ollama unloaded the model (idle ${cacheIdle(win.idleMs)}).`;
     return `Prompt cache likely expired (idle ${cacheIdle(win.idleMs)}).`;
   }
+  // Whose cache it is, from what the panel already knows of the chat's route (its model, its endpoint, the
+  // transport): the provider's name for the tooltip, and whether DGC can time that provider's cache at all.
+  function cacheProvider() {
+    if (curSubscription || lastConfig?.subscription_engine) return { name: "", timed: false };
+    const model = String(curModel || lastConfig?.model || "").trim().toLowerCase().replace(/:latest$/, "");
+    const base = String(curBaseUrl || lastConfig?.base_url || "");
+    let host = "", port = "";
+    try { const url = new URL(base); host = url.hostname.toLowerCase().replace(/\.$/, ""); port = url.port; } catch { /* no endpoint yet */ }
+    const at = (domain) => host === domain || host.endsWith("." + domain);
+    if (/[:-]cloud$/.test(model) || at("ollama.com")) return { name: "Ollama Cloud", timed: false };
+    if (at("openai.com")) return { name: "OpenAI", timed: false };
+    if (at("deepseek.com")) return { name: "DeepSeek", timed: false };
+    const mode = String(lastConfig?.api_mode || "");
+    if (at("anthropic.com") || mode === "anthropic") return { name: "Anthropic", timed: true };
+    // An Ollama on this computer or network (dgc/model_watch.is_local_endpoint): its /api/ps says when it unloads.
+    const local = host === "localhost" || !host.includes(".") || /\.(local|lan|home|internal)$/.test(host)
+      || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.)/.test(host)
+      || /^\[(::1|f[cd][0-9a-f]*:|fe80:)/.test(host);
+    if (host && local && (mode === "ollama" || port === "11434")) return { name: "Ollama", timed: true };
+    return { name: "", timed: false };
+  }
+  // The dimmed clock's tooltip: why there are no minutes.
+  function cacheUnknownTip() {
+    const { name, timed } = cacheProvider();
+    if (timed && lastConfig?.prompt_cache === false && name === "Anthropic") {
+      return "Prompt caching is off (Settings → Models), so DGC can't show a timer.";
+    }
+    if (name === "Anthropic") return "No timer yet: Anthropic says how long its cache lasts after a reply.";
+    if (name === "Ollama") return "No timer yet: Ollama says how long it keeps the model loaded after a reply.";
+    return `${name || "This model's provider"} may cache your prompt, but it doesn't say for how long, so DGC can't show a timer.`;
+  }
   function cacheReopenNote(win) {
     if (win.kind !== "cold") return "";
     if (win.reason === "compacted") return "The conversation was compacted, so your next message will re-cache it.";
@@ -1653,13 +1696,14 @@
     if (!node) return;
     if (cacheClockTimer) { clearTimeout(cacheClockTimer); cacheClockTimer = null; }
     const win = cacheWindow();
-    node.hidden = win.kind === "unknown";
     node.dataset.cacheWindow = win.kind;
     node.classList.toggle("cold", win.kind === "cold");
     $("cache-clock-left").textContent = cacheLeftText(win);
-    const tip = cacheTooltip(win);
-    node.title = tip;
-    if (tip) node.setAttribute("aria-label", tip); else node.removeAttribute("aria-label");
+    const tip = win.kind === "unknown" ? cacheUnknownTip() : cacheTooltip(win);
+    // Through the hover label: a title set under a label that is showing would come back as the browser's own
+    // tooltip beside it (the panel's state and config, which name the provider, arrive at any time).
+    hoverTip.retitle(node, tip);
+    node.setAttribute("aria-label", tip);
     // The next change is the next whole minute (or the moment it runs out): one wake-up, never a tick.
     if (win.kind === "warm" && !win.kept) {
       cacheClockTimer = setTimeout(renderCacheClock, win.msLeft - (win.minutesLeft - 1) * 60000 + 50);
@@ -1676,6 +1720,9 @@
   function cacheClockOnSessionReset() { cacheClock = null; renderCacheClock(); }
   // A cold clock's "idle" is read when you look at it, not counted on screen.
   $("cache-clock")?.addEventListener("mouseenter", () => { if (cacheWindow().kind === "cold") renderCacheClock(); });
+  // A click opens the context meter's details beside it (the tokens the provider reported as cached). A mouse
+  // shortcut: the meter itself is the keyboard's way there, one Tab stop, so the clock adds none.
+  $("cache-clock")?.addEventListener("click", (e) => { e.stopPropagation(); toggleContextMenu(); });
   function toggleContextMenu() {
     const menu = $("ctxmenu");
     if (!menu.hidden) { hideContextMenu(); return; }
@@ -2428,6 +2475,7 @@
     }
     return { show, hide, retitle, node };
   })();
+  renderCacheClock();             // the clock's first paint: in the footer from the start, its words through the label
   const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
   // Focus DGC puts back for the reader as a dialog closes is not a request for a label: the label on
   // the control it lands on (the agents pill) would cover what the dialog was opened over, such as a
@@ -7012,6 +7060,7 @@
         reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         lastConfig = ev;
         renderContext();                 // the window you chose, beside the one in use ("· this model's max")
+        renderCacheClock();              // an untimed clock names the chat's provider
         nativeSteering = liveSteering && !ev.subscription_engine;
         renderComposerControls();
         paintMonitorsRow();              // Wake on monitor events decides whether events are "waiting"
@@ -10265,6 +10314,8 @@
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
       curSubscription = msg.state.subscriptionEngine || "";
+      curBaseUrl = String(msg.state.baseUrl || "");
+      renderCacheClock();                        // a model change can change whose cache it is
       curUltra = msg.state.ultra === true;
       updateModelControl();
       agentMapChanged();                         // the map's root names the model

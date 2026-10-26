@@ -1412,12 +1412,19 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .context-kicker { color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; }
 .context-head strong { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
 /* The prompt cache's clock, after the context meter (as Claude Code shows it): whole minutes in tabular
-   figures, the clock alone in the error colour once the cache has gone. Not a control: no hover fill. */
-.cache-clock { cursor: default; gap: 2px; }
+   figures, the clock alone in the error colour once the cache has gone. No hover fill: a click opens the
+   meter's details beside it, so the meter's own button is the control. */
+.cache-clock { cursor: pointer; gap: 2px; }
 .cache-clock:hover, .cache-clock:active { background: transparent; }
 .cache-clock svg { display: block; width: 16px; height: 16px; flex: none; }
 .cache-clock .cache-clock-left { display: inline-block; font-variant-numeric: tabular-nums; }
 .cache-clock.cold { color: var(--vscode-errorForeground, var(--err-text)); }
+/* Unknown: the provider doesn't say how long its cache lasts, so no minutes. The clock stays, dimmed as the
+   founder's mockup (the same box as a cold one, so the footer never moves), its tooltip saying why; pointed at,
+   it comes up to full strength. On white, a little less dimmed: about 1.5:1, as findable as on a dark theme. */
+.cache-clock[data-cache-window="unknown"] { opacity: .5; }
+body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
+.cache-clock[data-cache-window="unknown"]:hover, body.vscode-light .cache-clock[data-cache-window="unknown"]:hover { opacity: 1; }
 /* "256k · this model's max": the window in use is the model's own, smaller than the one you chose. */
 .context-max { color: var(--muted); font: var(--t-xs)/1.3 var(--sans); }
 #ctx-pct { color: var(--accent-text); font: var(--w-bold) var(--t-xl)/1 var(--mono); font-variant-numeric: tabular-nums; }
@@ -1433,6 +1440,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 /* "Set by the server: 32K": a vLLM or llama.cpp server sized the window when it started; nothing to choose here. */
 .context-size-server { color: var(--text-strong); font: var(--w-semi) var(--t-xs)/24px var(--sans); font-variant-numeric: tabular-nums; }
 .context-usage { margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); background: var(--code); font: var(--w-med) var(--t-xs)/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.context-usage-part { white-space: nowrap; }
 .context-last { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-last .codicon { flex: none; margin-top: 0; color: var(--accent-text); }
 .context-detail { margin: var(--sp-1) 0 0 var(--sp-5); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }

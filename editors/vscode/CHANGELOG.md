@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The prompt cache's clock is always in Work's footer.** Where DGC can't time the cache (Ollama Cloud, OpenAI,
+  DeepSeek, a subscription CLI) it used to be hidden, which looked broken; it is now there, dimmed, with no minutes,
+  and its tooltip names the provider: "Ollama Cloud may cache your prompt, but it doesn't say for how long, so DGC
+  can't show a timer." On Anthropic or a local Ollama before anything is cached it says the timer starts after a reply.
+  Click the clock to open the context meter's details, which now list the tokens the provider reported as cached
+  beside in, out and requests. Warm (the minutes left) and cold (the clock in the error colour) look as before, and
+  the footer no longer moves as you switch between models DGC can and can't time.
+
 - **ChatDGC: at the end of an open thinking box, the wheel goes on to the chat on its first turn.** The box's lines
   were 18.6 px, so where it sat on the page could put its end between two pixels: following its words left it a
   fraction short, and the first turn of the wheel there (a whole swipe on a trackpad) moved it that fraction instead of

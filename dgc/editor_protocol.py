@@ -363,7 +363,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "model_wait_settings": {"request_id": _S(False), "first_token": _S(), "between_words_s": _I()},
     # 0.48: the prompt cache's clock for this chat, only where DGC knows it from the provider itself:
     # Anthropic (the reply's own cache read/write and the TTL it wrote) and a local Ollama (its own
-    # /api/ps unload time). "unknown" hides the clock (every other provider). "warm": the cache lasts
+    # /api/ps unload time). "unknown": no minutes (every other provider). "warm": the cache lasts
     # until expires_ms (epoch ms; the client turns it cold once that passes). "cold": gone, with
     # `reason` compacted (the conversation was summarised past it) or unloaded (Ollama let the model
     # go); a warm clock that runs out is "expired" on the client. anchor_ms is the send time of the

@@ -358,6 +358,11 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       "the label on screen changes with the state");
     await page.evaluate(() => window.__event({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0 }));
     await page.waitForTimeout(60);
+    // Queue goes with the turn, so the footer closes up and the pill moves out from under the pointer (what is under
+    // it now, the permission mode once the cache clock is always in the footer, labels itself): point at it again.
+    await page.hover("#agents-pill");
+    await page.waitForFunction(() => document.getElementById("hover-tip").textContent.startsWith("No agents")
+      && !document.getElementById("hover-tip").hidden, null, { timeout: 10000 });
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
     assert.deepEqual(after, { hidden: false, tip: "No agents working · Click to open the agent map", text: "0 agents" },
