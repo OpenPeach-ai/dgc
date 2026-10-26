@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## Unreleased
+## 0.48.0 — 2026-10-26
 
 - **One DGC writes to a session at a time, idle or not.** The session's lock used to be held only during a turn, so
   `dgc -c` in a terminal could run a turn on a session a VS Code window had open while it was idle, and both then wrote

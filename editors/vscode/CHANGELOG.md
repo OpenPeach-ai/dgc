@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.33.0 — 2026-10-26
 
 - **One DGC writes to a session at a time, idle or not** (with a DGC CLI that has it, 0.48). A session a terminal (or
   another DGC this window can't take over) has open shows read-only with Open here, and the bar says "Open in the

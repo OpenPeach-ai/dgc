@@ -1,6 +1,12 @@
 # DGC SDK changelog
 
-## Unreleased
+## 0.7.0 — 2026-10-26
+
+Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips` (TypeScript)
+read and manage the Pips of the session's DGC profile: list, inspect and run Pips, read reports,
+and save proposals, setups and handoffs for review. Every mutation needs the host's explicit
+`approved=True`, and each command is refused before it is sent when the runtime's Pips API is too
+old for it. CLI 0.48.0 advertises Pips API 66. See [PIPS.md](PIPS.md).
 
 - `resume` of a session another DGC has open (a VS Code window, a terminal, a DGC kept running with no window) is
   refused with `DGCConfigError`, naming where it is open ("This session is open in VS Code · ~/toni-erp · idle 6 min.
@@ -328,14 +334,8 @@ mutations `decide_pip_computer_action`, `always_allow_pip_computer_action`, `sto
 `open_pip_computer` and `use_pip_computer_view`; `changes.computer_plan` is accepted on a reviewed update. All of them
 are refused before sending to a runtime below API 42. See [PIPS.md](PIPS.md#pip-computers-api-42).
 
-## 0.7.0 — 2026-10-04
-
-Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips` (TypeScript)
-read and manage the Pips of the session's DGC profile: list, inspect and run Pips, read reports,
-and save proposals, setups and handoffs for review. Every mutation needs the host's explicit
-`approved=True`, and each command is refused before it is sent when the runtime's Pips API is too
-old for it. The CLI advertises Pips API 41, which adds the daily digest, notification
-settings, finding outcomes and reviewed GitHub reads (`changes.github_plan`). See [PIPS.md](PIPS.md).
+Pips API 41 adds the daily digest, notification settings, finding outcomes and reviewed GitHub reads
+(`changes.github_plan`).
 
 `get_pip_usage` and `set_pip_daily_cap` read a Pip's token usage and set its daily limit. `export_pip` returns a Pip's
 job as a shareable file. `set_pip_feedback` rates a finished result up or down with a note that the Pip's later runs
