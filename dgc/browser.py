@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -561,6 +562,25 @@ def _start_boxed(argv: list[str], log) -> subprocess.Popen:
     return started[0]
 
 
+def _end_group(leader) -> None:
+    """End what is left of the browser's process group once the browser has ended. It starts in a session of its own
+    (or its box does), so its helpers share that group, and one can outlive it for a moment, still writing into the
+    throwaway profile: Chrome's network service, on GitHub's ubuntu runner. While the group has a member its number
+    can be no other group's; with none left, there is nothing to signal."""
+    if not isinstance(leader, int) or isinstance(leader, bool) or leader <= 0 or not hasattr(os, "killpg"):
+        return
+    try:
+        os.killpg(leader, signal.SIGKILL)
+    except OSError:
+        return                                   # nothing was left of it
+    for _attempt in range(40):                   # up to 2 s for the last of them to go
+        try:
+            os.killpg(leader, 0)
+        except OSError:
+            return
+        time.sleep(0.05)
+
+
 class BrowserSession:
     """One browser process, launched on first use and reused until the DGC session ends."""
 
@@ -701,19 +721,20 @@ class BrowserSession:
             self._ws.close()
             self._ws = None
         if self._proc is not None:
+            proc, self._proc = self._proc, None
             try:
-                self._proc.terminate()
-                self._proc.wait(timeout=5)
+                proc.terminate()
+                proc.wait(timeout=5)
             except Exception:
                 try:
-                    self._proc.kill()
+                    proc.kill()
                 except OSError:
                     pass
                 try:
-                    self._proc.wait(timeout=2)
+                    proc.wait(timeout=2)
                 except Exception:                        # noqa: BLE001 -- best effort: the profile goes either way
                     pass
-            self._proc = None
+            _end_group(getattr(proc, "pid", None))
         if self._profile:
             profile, self._profile = self._profile, ""
             # Chrome's helper processes can still be writing into its profile a moment after it ends: a single

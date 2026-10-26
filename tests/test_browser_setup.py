@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -378,6 +379,56 @@ class LiveBrowserTests(unittest.TestCase):
         left = subprocess.run(["pgrep", "-f", profile], capture_output=True, text=True).stdout.split()
         self.assertEqual(left, [], "the browser ended with the session")
         self.assertFalse(os.path.exists(profile), "its throwaway profile is gone")
+
+
+@unittest.skipUnless(hasattr(os, "killpg"), "process groups")
+class HelpersOutlivingTheBrowserTests(unittest.TestCase):
+    """Chrome's helpers share its process group; one that outlived it kept writing into the throwaway profile, and
+    the profile was left behind (GitHub's ubuntu runner: the network service, a moment after the browser)."""
+
+    def test_closing_ends_a_helper_that_outlives_the_browser_and_removes_the_profile(self):
+        profile = tempfile.mkdtemp(prefix="dgc-browser-")
+        self.addCleanup(shutil.rmtree, profile, True)
+        helper_pid = Path(profile, "helper.pid")
+        # The "browser" forks a helper that ignores SIGTERM and writes into the profile until killed, then ends.
+        code = ("import os, signal, sys, time\n"
+                "p = sys.argv[1]\n"
+                "if os.fork() == 0:\n"
+                "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "    open(os.path.join(p, 'helper.pid'), 'w').write(str(os.getpid()))\n"
+                "    while True:\n"
+                "        os.makedirs(os.path.join(p, 'Default', 'Network'), exist_ok=True)\n"
+                "        open(os.path.join(p, 'Default', 'Network', 'Cookies'), 'w').write('x')\n"
+                "        time.sleep(0.02)\n"
+                "signal.pause()\n")
+        proc = subprocess.Popen([sys.executable, "-c", code, profile], start_new_session=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(200):
+            if helper_pid.exists() and helper_pid.read_text():
+                break
+            time.sleep(0.02)
+        helper = int(helper_pid.read_text())
+        self.addCleanup(lambda: os.kill(helper, signal.SIGKILL) if _alive(helper) else None)
+        session = browser.BrowserSession(Path("/x/chrome"))
+        session._proc, session._profile = proc, profile
+        session.close()
+        self.assertFalse(_alive(helper), "the helper ended with the browser")
+        self.assertFalse(os.path.exists(profile), "its throwaway profile is gone")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:                                     # a zombie no one reaped yet has ended
+        with open(f"/proc/{pid}/stat") as stat:
+            return stat.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                              text=True).stdout.strip()[:1] not in ("Z", "")
 
 
 class StartOrderTests(unittest.TestCase):
