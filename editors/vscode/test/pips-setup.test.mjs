@@ -5,6 +5,9 @@ import {JSDOM} from 'jsdom';
 import {chromium} from 'playwright';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+// Chromium the way the other layout tests start it: a machine without it skips (GitHub's release job installs
+// none, and a launch here failed the 0.48.2 release), and DGC_REQUIRE_CHROMIUM=1 makes that a failure.
+async function launchOrSkip(t){try{return await chromium.launch({args:['--headless=new','--no-sandbox']});}catch(error){if(process.env.DGC_REQUIRE_CHROMIUM==='1')throw error;t.skip('Chromium could not start: '+String(error?.message||error).split('\n')[0]);return null;}}
 const require=createRequire(import.meta.url),base=new URL('../src/',import.meta.url);
 const bundle=async file=>(await build({entryPoints:[new URL(file,base).pathname],bundle:true,write:false,platform:'node',format:'cjs',external:['vscode'],loader:{'.css':'empty'}})).outputFiles[0].text;
 const load=(code,req=require)=>{const m={exports:{}};new Function('module','exports','require',code)(m,m.exports,req);return m.exports;};
@@ -89,8 +92,8 @@ test('changing selected Pip while setup details load discards the obsolete respo
 });
 
 
-test('setup inbox and New stay visible at 300px without showing the duplicate detail pane',async()=>{
- const browser=await chromium.launch({args:['--headless=new','--no-sandbox']});
+test('setup inbox and New stay visible at 300px without showing the duplicate detail pane',async(t)=>{
+ const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:300,height:900}});
   await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html',body:'<div id="host" style="width:100%;height:900px"></div>'}):route.abort());

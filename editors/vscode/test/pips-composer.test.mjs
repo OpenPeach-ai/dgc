@@ -5,6 +5,9 @@ import {JSDOM} from 'jsdom';
 import {chromium} from 'playwright';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+// Chromium the way the other layout tests start it: a machine without it skips (GitHub's release job installs
+// none, and a launch here failed the 0.48.2 release), and DGC_REQUIRE_CHROMIUM=1 makes that a failure.
+async function launchOrSkip(t){try{return await chromium.launch({args:['--headless=new','--no-sandbox']});}catch(error){if(process.env.DGC_REQUIRE_CHROMIUM==='1')throw error;t.skip('Chromium could not start: '+String(error?.message||error).split('\n')[0]);return null;}}
 const require=createRequire(import.meta.url),base=new URL('../src/',import.meta.url);
 const client=(await build({entryPoints:[new URL('pipsClient.js',base).pathname],bundle:true,write:false,format:'iife',loader:{'.css':'empty'}})).outputFiles[0].text;
 const markdownCode=(await build({entryPoints:[new URL('markdown.ts',base).pathname],bundle:true,write:false,platform:'node',format:'cjs'})).outputFiles[0].text;
@@ -49,8 +52,8 @@ test('malformed inference metadata disables sends instead of defaulting silently
 
 test('host refuses new options before API24 while preserving legacy sends',()=>{for(const api of [23,24]){const sent=[],posted=[],mod={exports:{}};new Function('module','exports','require',bridge)(mod,mod.exports,name=>name==='vscode'?{}:require(name));const editor=new mod.exports.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});const request={type:'send_pip_message',pip_id:'a',text:'Hello',idempotency_key:'retry',chat_options:{context_size:8192,thinking:'off'}};editor.receive({type:'pipsRequest',id:'new',request});assert.equal(sent.length,api===24?1:0);if(api===23)assert.match(posted.at(-1).error.message,/change context and thinking/);else assert.deepEqual(sent[0].request.chat_options,request.chat_options);editor.receive({type:'pipsRequest',id:'legacy',request:{type:'send_pip_message',pip_id:'a',text:'Hello',idempotency_key:'old'}});assert.equal(sent.length,api===24?2:1);}});
 
-test('at narrow and wide sizes only the transcript scrolls while composer position stays fixed',async()=>{
- const browser=await chromium.launch({args:['--headless=new','--no-sandbox']});
+test('at narrow and wide sizes only the transcript scrolls while composer position stays fixed',async(t)=>{
+ const browser=await launchOrSkip(t);if(!browser)return;
  try{for(const embedded of [false,true]){
   const page=await browser.newPage({viewport:{width:300,height:700}});
   await page.route('**/*',route=>route.request().isNavigationRequest()?route.fulfill({contentType:'text/html',body:'<style>html,body{margin:0;height:100%;overflow:hidden}#host{width:100%;height:100%}</style>'+(embedded?'<div id="host"></div>':'<main id="app"></main><div id="review-root"></div>')}):route.abort());
@@ -129,8 +132,8 @@ test('a Personal Pip\'s context menu shows its window part by part, as text, and
   const plain=old.d.querySelector('.composer-context-menu');assert.equal(plain.querySelector('.bd'),null,'none sent, or one that doesn\'t fit its window');assert.ok(plain.querySelector('.ctx-track'));assert.match(plain.querySelector('.ctx-split').textContent,/2 recent messages/);}
 });
 
-test('the Pip in a chat\'s header is never clipped when it hops: only its name is cut to fit',async()=>{
- const browser=await chromium.launch({args:['--headless=new','--no-sandbox']});
+test('the Pip in a chat\'s header is never clipped when it hops: only its name is cut to fit',async(t)=>{
+ const browser=await launchOrSkip(t);if(!browser)return;
  try{
   const page=await browser.newPage({viewport:{width:320,height:200}});
   const css=readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');

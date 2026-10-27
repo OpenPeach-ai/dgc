@@ -1,7 +1,7 @@
 // The formatted canvas's page (src/canvasEditor.ts in canvasDoc.ts's document) in Chromium: it shows the canvas's
 // Markdown formatted, sends what you type as Markdown that leaves every other block as it was, formats from its
 // toolbar, flashes what the model changed, and asks about a selection with its lines in the file.
-import { test, after } from "node:test";
+import { test as nodeTest, after } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { chromium } from "playwright";
@@ -26,8 +26,20 @@ const ORIGIN = "https://canvas.invalid";
 const html = canvasDocDocument((name) => `${ORIGIN}/${name}`, ORIGIN);
 const FILE = "# Plan\n\nDay one.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nThe sum is $x^2$, for $5 and $10.\n";
 
-const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
-after(() => browser.close());
+// Chromium the way the other layout tests start it: a machine without it skips (GitHub's release job installs none,
+// and this launch failed the 0.48.2 release), and DGC_REQUIRE_CHROMIUM=1 makes that a failure.
+let browser = null, launchError = "";
+try { browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] }); }
+catch (error) { launchError = String(error?.message || error).split("\n")[0]; }
+after(() => browser?.close());
+const test = (name, fn) => nodeTest(name, async (t) => {
+  if (!browser) {
+    if (process.env.DGC_REQUIRE_CHROMIUM === "1") assert.fail(`DGC_REQUIRE_CHROMIUM=1: Chromium could not start: ${launchError}`);
+    t.skip(`Chromium could not start: ${launchError}`);
+    return;
+  }
+  return fn(t);
+});
 
 async function open(file = FILE) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
