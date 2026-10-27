@@ -3,6 +3,9 @@
 ## 0.33.2 — 2026-10-27
 
 - Requires DGC CLI 0.48.4. Everything in 0.33.1 below, which was not published on its own.
+- **Lens's eyes keep their rounded ends everywhere.** They were clipped to the inside of its glasses, and Safari and
+  every iPhone browser drew the clipped eyes square-ended, as rectangles. They are no longer clipped: Lens's eyes move
+  a little less than the other Pips' and stay inside its glasses on their own.
 
 ## 0.33.1 — 2026-10-27
 

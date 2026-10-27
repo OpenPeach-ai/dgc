@@ -9,7 +9,8 @@ test('eight plush characters expose all eight states without shaders, external i
  const {d,api}=setup(t);
  for(let i=0;i<8;i++)for(const state of phases){const node=d.createElement('div');node.innerHTML=api.markup({index:i,name:'<img src=x onerror=alert(1)>'},state,`plush-${i}-${state}`,{includeStyles:false});d.body.append(node);assert.equal(node.querySelector('.dgc-plush').dataset.state,state);assert.equal(node.querySelectorAll('[data-face]').length,2);assert.equal(node.querySelector('canvas,script,img,[data-face=mouth]'),null);assert.equal(node.querySelector('image').getAttribute('href'),'../media/pips/plush-bodies.webp');assert.equal(node.querySelectorAll('style').length,0);assert.equal(node.querySelector('.dgc-plush').dataset.name,'<img src=x onerror=alert(1)>');}
  const ids=[...d.querySelectorAll('[id]')].map(e=>e.id);assert.equal(new Set(ids).size,ids.length);
- assert.equal(d.querySelectorAll('[data-character=lens] clipPath').length,8);
+ // No clip anywhere: WebKit (every iPhone browser) drew Lens's clipped eyes square-ended, as rectangles.
+ assert.equal(d.querySelectorAll('clipPath,[clip-path]').length,0,'no Pip is clipped');
  for(const args of [[{index:8},'idle','safe'],[{index:0},'bad','safe'],[{index:0},'idle','bad id']])assert.throws(()=>api.markup(...args));
  assert.match(api.styles,/prefers-reduced-motion/);assert.match(api.styles,/motion-offscreen/);assert.match(api.styles,/data-paused/);
 });
@@ -31,7 +32,9 @@ test('packaged artwork is a bounded WebP atlas with alpha and the declared dimen
 test('every state has its own motion: eyes look around in a group under the lenses, the body leans with them',t=>{
  const {d,api}=setup(t);const node=d.createElement('div');d.body.append(node);
  node.innerHTML=api.markup({index:2},'idle','lens-look',{includeStyles:false});
- assert.equal(node.querySelectorAll('[clip-path] > .dgc-plush-look > .dgc-plush-track > .dgc-plush-eye').length,2,'Lens looks around inside its glasses');
+ assert.equal(node.querySelectorAll('.dgc-plush-look > .dgc-plush-track > .dgc-plush-eye').length,2,'Lens looks around');
+ for(const [state,motion] of [['idle','dgc-lens-look'],['thinking','dgc-lens-ponder'],['working','dgc-lens-scan']])
+  assert.match(api.styles,new RegExp(`\\[data-character=lens\\]\\[data-state=${state}\\] \\.dgc-plush-look\\{animation-name:${motion}\\}`),`Lens ${state}`);
  node.innerHTML=api.markup({index:0},'working','core-look',{includeStyles:false});
  assert.equal(node.querySelectorAll('.dgc-plush-look > .dgc-plush-track > .dgc-plush-eye').length,2);
  for(const [state,motion] of [['thinking','dgc-plush-ponder'],['working','dgc-plush-scan']])
@@ -70,3 +73,25 @@ test('with reduced motion the eyes do not follow the pointer',t=>{
  const {d,api,frames,move,pip}=pointer(t,{reduce:true});const node=pip('idle','still');
  api.mount(d.body);move(0,120);assert.equal(frames.length,0);assert.equal(node.dataset.tracking,undefined);
 });
+test("Lens's eyes stay inside its glasses at every extreme of every look, with no clip",t=>{
+ // The lenses are the glasses drawn in the artwork: circles of radius 9 round each eye's x at y 52.5 (the old clip).
+ // Each eye is a stroke 6.4 wide with round ends, so a capsule; it must stay whole inside with room to spare.
+ const {d,api}=setup(t);
+ const moves=name=>[...api.styles.match(new RegExp(`@keyframes ${name}\\{(.*?)\\}\\}`))[1].matchAll(/translate\((-?[\d.]+)px,(-?[\d.]+)px\)/g)].map(m=>[+m[1],+m[2]]);
+ const track=+api.styles.match(/\[data-character=lens\] \.dgc-plush-track\{transform:translate\(calc\(var\(--plush-gx,0px\) \* ([\d.]+)\)/)[1];
+ const reach=+api.styles.match(/\[data-character=lens\]\{--plush-reach:([\d.]+)px\}/)[1];
+ const pointer=[[0,0],[reach,0],[-reach,0],[0,reach*.6],[0,-reach*.6],[reach,reach*.6],[-reach,-reach*.6],[reach,-reach*.6],[-reach,reach*.6]];
+ const looks={idle:[[0,0],...moves('dgc-lens-look')],thinking:[[0,0],...moves('dgc-lens-ponder')],working:moves('dgc-lens-scan'),failure:[[0,1.2]],listening:[[0,0]],waiting_approval:[[0,0]]};
+ let worst=0;
+ for(const [state,offsets] of Object.entries(looks)){
+  const node=d.createElement('div');node.innerHTML=api.markup({index:2},state,`lens-${state}`,{includeStyles:false});
+  for(const eye of node.querySelectorAll('.dgc-plush-eye')){
+   const [,x,y1,y2]=eye.getAttribute('d').match(/M ([\d.]+) ([\d.]+) L [\d.]+ ([\d.]+)/).map(Number);const r=+eye.getAttribute('stroke-width')/2;
+   for(const [lx,ly] of offsets)for(const [gx,gy] of pointer)for(const y of [y1,y2]){
+    const far=Math.hypot(lx+gx*track,y+ly+gy*track-52.5)+r;worst=Math.max(worst,far);
+   }
+  }
+ }
+ assert.ok(worst<=8.6,`an eye reaches ${worst.toFixed(2)} of the lens's 9`);
+});
+
