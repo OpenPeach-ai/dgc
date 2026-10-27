@@ -161,19 +161,39 @@ _CORE_FIELDS = frozenset({"pid", "proc_start", "kind", "session", "cwd", "projec
                           "git_common_dir", "status", "takeover", "heartbeat", "sessions"})
 
 
+def note_dir(owner) -> Path:
+    """The peers folder `owner` (a session, a host, a terminal) writes its note in: the one of the DGC
+    home it first wrote in, kept on it. A process has one home, so this changes nothing for a person;
+    in one process that runs many DGCs in turn (the test suite), a leftover one's heartbeat wrote its
+    note into the home of whichever came next, and its cleanup failed on the folder."""
+    pinned = getattr(owner, "_peers_note_dir", None)
+    if pinned is None:
+        pinned = peers_dir()
+        try:
+            owner._peers_note_dir = pinned
+        except Exception:            # noqa: BLE001 -- an owner that takes no attribute writes where it is now
+            pass
+    return pinned
+
+
 def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str = "",
              git_common_dir: str = "", status: str = "idle",
              takeover: bool = False, sessions: list | None = None,
-             extra: dict | None = None) -> Path | None:
+             extra: dict | None = None, directory: Path | None = None) -> Path | None:
     """Write (or refresh) this process's note. Returns the path, or None if it could not be left.
 
     ``sessions`` lists every chat a backend holds, each in its own folder. The top-level fields
     stay the first chat's, so a DGC that predates the list still reads a true note. ``extra`` adds
     fields of the writer's own (a `dgc serve` that can run without a window says where its socket
     is, whether a window is attached, and what it is doing); readers that predate them ignore them.
+    ``directory`` is the writer's own (note_dir): when the folder its DGC home was in is gone, the
+    note is not left, and nothing of that home is made again.
     """
     try:
-        directory = peers_dir()
+        if directory is None:
+            directory = peers_dir()
+        elif not directory.parent.parent.is_dir():
+            return None              # the folder its .dgc was in is gone (a finished test's home)
         directory.mkdir(parents=True, exist_ok=True)
         try:
             directory.chmod(0o700)
@@ -220,10 +240,10 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
         return None                  # a peer note is a courtesy; never fail a turn over one
 
 
-def withdraw() -> None:
+def withdraw(directory: Path | None = None) -> None:
     """Remove this process's note on a clean exit. A crash leaves it for liveness to judge."""
     try:
-        (peers_dir() / f"{os.getpid()}.json").unlink()
+        ((directory or peers_dir()) / f"{os.getpid()}.json").unlink()
     except OSError:
         pass
 

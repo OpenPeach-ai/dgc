@@ -3174,7 +3174,7 @@ class Backend:
                 cwd=root, project_root=root,
                 git_common_dir=(agent._git_common_dir() if agent is not None
                                 and hasattr(agent, "_git_common_dir") else ""),
-                status=status, takeover=True)
+                status=status, takeover=True, directory=_peers.note_dir(self))
         except Exception:
             pass
 
@@ -4626,7 +4626,7 @@ class Backend:
                 clock_stop.set()                # the prompt cache's Ollama watcher
             if process:     # one chat of a Host leaves the process's note to the Host
                 from . import peers as _peers
-                _peers.withdraw()      # a clean exit leaves no note; a crash leaves one to expire
+                _peers.withdraw(_peers.note_dir(self))   # a clean exit leaves no note; a crash leaves one to expire
         except Exception:
             pass
         """Stop foreground work and release pending controller decisions on backend exit.
@@ -9724,7 +9724,8 @@ class Host:
                             git_common_dir=first.get("git_common_dir", ""),
                             status="working" if any(p["status"] == "working" for p in places)
                             else "idle",
-                            sessions=places if len(places) > 1 else None, extra=extra)
+                            sessions=places if len(places) > 1 else None, extra=extra,
+                            directory=_peers.note_dir(self))
         except Exception:
             pass
 
@@ -9787,7 +9788,7 @@ class Host:
             chat_closer.join(timeout=6.0)
         try:
             from . import peers as _peers
-            _peers.withdraw()           # a clean exit leaves no note; a crash leaves one to expire
+            _peers.withdraw(_peers.note_dir(self))   # a clean exit leaves no note; a crash leaves one to expire
         except Exception:
             pass
         self._finalizer_wait = "; ".join(

@@ -302,3 +302,52 @@ class ProcessIdentityWithoutProcfsTest(unittest.TestCase):
             self.assertTrue(peers._procfs())
             self.assertTrue(peers._proc_start(os.getpid()).isdigit(),
                             "/proc returns clock ticks, not a date")
+
+
+class NoteStaysInItsOwnHomeTest(unittest.TestCase):
+    """A DGC writes its note in the home it started in. In one process that runs many DGCs in turn (the test
+    suite), a leftover one's heartbeat wrote its note into the home of whichever came next, and that one's
+    cleanup failed on the folder ("Directory not empty: 'peers'", the 0.48.3 release run)."""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp(prefix="dgc-note-home-")).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(base, True))
+        self.first, self.second = base / "first", base / "second"
+        for home in (self.first, self.second):
+            home.mkdir()
+        env = patch.dict(os.environ, {"DGC_HOME": str(self.first)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def mine(self, home: Path) -> Path:
+        return home / ".dgc" / "peers" / f"{os.getpid()}.json"
+
+    def test_a_sessions_note_stays_in_the_home_it_started_in(self):
+        from dgc.headless import Backend
+        session = SimpleNamespace(_host=None, agent=None, config=SimpleNamespace(project_root="/w"))
+        Backend._announce_peer(session, "idle")
+        self.assertTrue(self.mine(self.first).is_file())
+        with patch.dict(os.environ, {"DGC_HOME": str(self.second)}):     # the next DGC in this process
+            Backend._announce_peer(session, "working")                     # the first one's heartbeat
+            self.assertFalse((self.second / ".dgc" / "peers").exists(), "nothing in the next one's home")
+            self.assertEqual(json.loads(self.mine(self.first).read_text())["status"], "working")
+            peers.withdraw(peers.note_dir(session))
+        self.assertFalse(self.mine(self.first).exists(), "its clean exit takes back its own note")
+
+    def test_a_home_that_is_gone_is_never_made_again(self):
+        owner = SimpleNamespace()
+        self.assertIsNotNone(peers.announce(kind="serve", cwd="/w", project_root="/w",
+                                            directory=peers.note_dir(owner)))
+        __import__("shutil").rmtree(self.first)
+        self.assertIsNone(peers.announce(kind="serve", cwd="/w", project_root="/w",
+                                         directory=peers.note_dir(owner)))
+        self.assertFalse(self.first.exists())
+
+    def test_a_note_left_without_an_owner_goes_where_the_home_is_now(self):
+        peers.announce(kind="tui", cwd="/w", project_root="/w")
+        with patch.dict(os.environ, {"DGC_HOME": str(self.second)}):
+            peers.announce(kind="tui", cwd="/w", project_root="/w")
+            self.assertTrue(self.mine(self.second).is_file())
+            peers.withdraw()
+        self.assertTrue(self.mine(self.first).is_file())
+        peers.withdraw()

@@ -1797,7 +1797,7 @@ class CLI:
             block = holder_note.terminal_block([(agent, holder_note.agent_counts(agent, working=busy))])
             peers.announce(kind="tui", session=str(getattr(agent, "session_file", "") or ""), cwd=root,
                            project_root=root, status="working" if busy else "idle", takeover=True,
-                           extra={holder_note.NOTE_KEY: block})
+                           extra={holder_note.NOTE_KEY: block}, directory=peers.note_dir(self))
         except Exception:
             pass
 
@@ -2134,7 +2134,7 @@ class CLI:
             stop.set()
             try:
                 from . import peers
-                peers.withdraw()            # a clean exit leaves no note; a crash leaves one to expire
+                peers.withdraw(peers.note_dir(self))   # a clean exit leaves no note; a crash leaves one to expire
             except Exception:
                 pass
         self.console.print("[dim]bye[/dim]")

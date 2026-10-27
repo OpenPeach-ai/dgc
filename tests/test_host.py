@@ -124,7 +124,7 @@ class HostTest(unittest.TestCase):
         second = self.second_chat()
         withdrawn = []
         with patch.object(headless.Backend, "_busy", lambda backend: backend is second), \
-                patch("dgc.peers.withdraw", lambda: withdrawn.append(1)):
+                patch("dgc.peers.withdraw", lambda directory=None: withdrawn.append(1)):
             outcome = self.host.close(grace_s=0)
         self.assertEqual(outcome, "cancelled", "one chat's cancelled turn is the process's outcome")
         self.assertEqual(withdrawn, [1], "the process note is withdrawn once, by the process")

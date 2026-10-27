@@ -9523,7 +9523,8 @@ class TUI:
                 git_common_dir=(agent._git_common_dir()
                                 if hasattr(agent, "_git_common_dir") else ""),
                 status=status, takeover=True,
-                sessions=places if len(places) > 1 else None, extra={holder_note.NOTE_KEY: block})
+                sessions=places if len(places) > 1 else None, extra={holder_note.NOTE_KEY: block},
+                directory=_peers.note_dir(self))
         except Exception:
             pass
 
@@ -9794,7 +9795,7 @@ class TUI:
             if stop is not None:
                 stop.set()
             from . import peers as _peers
-            _peers.withdraw()      # a clean exit leaves no note; a crash leaves one to expire
+            _peers.withdraw(_peers.note_dir(self))      # a clean exit leaves no note; a crash leaves one to expire
         except Exception:
             pass
 

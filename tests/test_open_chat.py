@@ -395,7 +395,7 @@ class OpenChatTest(unittest.TestCase):
                 built.append(backend)
             return real(backend, *args, **kwargs)
         with patch.object(headless.Backend, "__init__", slow_init), \
-                patch("dgc.peers.withdraw", lambda: None):
+                patch("dgc.peers.withdraw", lambda directory=None: None):
             self.host.dispatch({"type": "open_chat", "request_id": "late", "cwd": str(self.tmp / "b")})
             self.host.close(grace_s=0)
             release.set()
@@ -707,7 +707,7 @@ class OpenChatTest(unittest.TestCase):
         self.host.dispatch({"type": "get_config", "request_id": "q", "chat_id": opened["chat_id"]})
         self.assertTrue(started.wait(5))
         threading.Timer(0.3, release.set).start()
-        with patch("dgc.peers.withdraw", lambda: None):
+        with patch("dgc.peers.withdraw", lambda directory=None: None):
             self.host.close(grace_s=0)
         self.assertEqual(ran, ["rewind"], "shutdown cut the rewind off, or started what was queued")
 
