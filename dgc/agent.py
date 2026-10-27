@@ -10606,6 +10606,8 @@ class Agent(GoalLifecycle):
                     above_trees = tuple(getattr(self, "_user_trees", ()) or ())
                     their_repo = getattr(workspace, "repo", None)
                     sub._user_trees = (Path(their_repo), *above_trees) if their_repo else above_trees
+                    # A file or folder its task names outside every checkout is its to read.
+                    helper_checkout.note_named(sub, prompt)
                     sub._refresh_system()
                 if registry is not None and agent_id:
                     sub.subagents = registry             # one list per chat, whatever the depth

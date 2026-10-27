@@ -125,7 +125,9 @@ def hand_to(child, text: str) -> str:
     roots = theirs(child)
     if not roots:
         return text
-    return map_paths(text, roots, child.config.project_root)
+    text = map_paths(text, roots, child.config.project_root)
+    note_named(child, text)
+    return text
 
 
 def prompt_lines(agent) -> list[str]:
@@ -319,6 +321,49 @@ def note_write(agent, path) -> None:
         written.add(str(resolved))
 
 
+# A path the helper's task names, outside every checkout: "implement what ~/Downloads/spec.pdf
+# describes" is the task, not wandering (the founder, 27 Oct). Absolute or ~ paths only; not a URL's
+# path, and not a relative one (that is inside the copy anyway).
+_NAMED_PATH = re.compile(r"(?<![\w/~.:-])(~/[^\s'\"`<>|;,(){}\[\]]*|/[^\s'\"`<>|;,(){}\[\]]+)")
+MAX_NAMED_PATHS = 64
+
+
+def note_named(agent, text) -> None:
+    """Keep the paths an isolated helper's task names (its brief, or a later message from the agent
+    that started it), so read_refusal lets the helper read them."""
+    if not theirs(agent):
+        return
+    named = agent.__dict__.setdefault("_task_paths", [])
+    for match in _NAMED_PATH.finditer(str(text or "")):
+        raw = match.group(1).rstrip(".:!?")
+        if len(raw) < 2 or len(named) >= MAX_NAMED_PATHS:
+            continue
+        try:
+            path = str(Path(os.path.expanduser(raw)).resolve(strict=False))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if path not in named:
+            named.append(path)
+
+
+def _named_read(agent, resolved: Path) -> bool:
+    """A file or folder the task named, or a file inside a named folder. A named folder that holds a
+    checkout, the helper's copy, the home folder or the root never counts: naming it is not naming
+    what it holds."""
+    named = getattr(agent, "_task_paths", None) or ()
+    if not named:
+        return False
+    holds = [form for form, _target, _whose in _their_places(agent)] + _copy_forms(agent)
+    homes = {Path("/"), *(_forms(Path.home()))}
+    for text in named:
+        for form in _forms(text):
+            if form in homes or any(_within(place, form) is not None for place in holds):
+                continue
+            if resolved == form or (os.path.isdir(form) and _within(resolved, form) is not None):
+                return True
+    return False
+
+
 def read_refusal(agent, name: str, path) -> str | None:
     """For an isolated helper's read or search with DGC's own tools: the refusal to return, or None
     when it may go on (to the permission check, as before).
@@ -361,7 +406,7 @@ def read_refusal(agent, name: str, path) -> str | None:
     # Outside every checkout: a skill's folder, and what the helper wrote there itself. Never a
     # way into a checkout that is not its own, even for a skill kept inside one.
     written = getattr(agent, "_outside_writes", None) or ()
-    if _skill_read(agent, resolved) or str(resolved) in written:
+    if _skill_read(agent, resolved) or str(resolved) in written or _named_read(agent, resolved):
         return None
     return (f"error: {done}: {path} is outside this helper's own copy ({own_text}), and a helper "
             "reads only its own copy. If the task needs it, say so in your report.")

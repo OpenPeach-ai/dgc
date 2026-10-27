@@ -353,6 +353,28 @@ class ReadToolsStayInTheCopyTest(Case):
         ])
         self.assertNotIn("another task's notes", "\n".join(child.results))
 
+    def test_a_file_its_task_names_outside_every_checkout_is_read_and_its_neighbour_is_not(self):
+        h = self.make_repo()
+        downloads = Path(tempfile.mkdtemp(prefix="dgc-downloads-")).resolve()
+        self.addCleanup(shutil.rmtree, downloads, True)
+        (downloads / "spec.txt").write_text("Totals round once, at the end.\n")
+        (downloads / "bank.txt").write_text("account 0000\n")
+        seen = {}
+
+        def calls(messages):
+            seen["own"] = system_root(messages)
+            return [ToolCall("n1", "read_file", {"path": str(downloads / "spec.txt")}),
+                    ToolCall("n2", "read_file", {"path": str(downloads / "bank.txt")})]
+
+        child = Recorder(calls, "read the spec")
+        self.run_parent(h, [[ToolCall("t1", "task", {"description": "spec", "prompt":
+                                                     f"READER-9 implement what {downloads / 'spec.txt'} says"})],
+                            ("READER-9", child)], "parent: delegate")
+        self.assertIn("Totals round once", child.results[0], "the file the task named")
+        self.assertEqual(child.results[1], f"error: not read: {downloads / 'bank.txt'} is outside this helper's own "
+                         f"copy ({seen['own']}), and a helper reads only its own copy. If the task needs it, say so "
+                         "in your report.")
+
     def test_a_shared_folder_stays_readable_and_an_ignored_folder_it_was_not_given_does_not(self):
         h = self.make_repo(subagent_link_paths=["assets"])
         root = h.root.resolve()
@@ -481,6 +503,56 @@ class ReadRulesTest(unittest.TestCase):
     def mapped(self, path, mine, done="not read", verb="Read") -> str:
         return (f"error: {done}: {path} is in the user's checkout. {verb} {mine} instead: this helper "
                 "works in its own copy.")
+
+    def test_a_path_its_task_names_outside_every_checkout_is_read(self):
+        agent = self.agent()
+        other = self.base / "elsewhere"
+        (other / "y.txt").write_text("y\n")
+        helper_checkout.note_named(agent, f"Implement what {other / 'x.txt'} says.")
+        self.assertIsNone(helper_checkout.read_refusal(agent, "read_file", str(other / "x.txt")))
+        self.assertEqual(helper_checkout.read_refusal(agent, "read_file", str(other / "y.txt")),
+                         self.outside(other / "y.txt"), "only what it named")
+
+    def test_a_named_folder_is_read_inside_but_never_one_that_holds_a_checkout(self):
+        agent = self.agent()
+        other = self.base / "elsewhere"
+        helper_checkout.note_named(agent, f"The fixtures are in {other}/, and everything is under {self.base}.")
+        self.assertIsNone(helper_checkout.read_refusal(agent, "read_file", str(other / "x.txt")))
+        self.assertIsNone(helper_checkout.read_refusal(agent, "grep", str(other)))
+        (self.base / "notes.txt").write_text("n\n")
+        self.assertEqual(helper_checkout.read_refusal(agent, "read_file", str(self.base / "notes.txt")),
+                         self.outside(self.base / "notes.txt"), "a folder that holds the checkout opens nothing")
+        target = self.user / "src" / "a.py"
+        self.assertEqual(helper_checkout.read_refusal(agent, "read_file", str(target)),
+                         self.mapped(target, self.own / "src" / "a.py"), "the user's checkout is still the copy's")
+
+    def test_the_home_folder_or_the_root_named_opens_nothing_and_a_url_names_no_path(self):
+        home = self.base / "home"
+        (home / "Downloads").mkdir(parents=True)
+        (home / "Downloads" / "spec.pdf").write_bytes(b"%PDF-1.4\n")
+        (home / "diary.txt").write_text("d\n")
+        with patch.dict(os.environ, {"HOME": str(home)}):
+            agent = self.agent()
+            helper_checkout.note_named(agent, "Read ~/Downloads/spec.pdf; my files are in ~ and / anyway.")
+            self.assertIsNone(helper_checkout.read_refusal(agent, "read_file", str(home / "Downloads" / "spec.pdf")))
+            self.assertIsNotNone(helper_checkout.read_refusal(agent, "read_file", str(home / "diary.txt")))
+            self.assertIsNotNone(helper_checkout.read_refusal(agent, "read_file", "/etc/hostname"))
+        agent = self.agent()
+        helper_checkout.note_named(agent, "See https://example.com/elsewhere/x.txt and src/a.py")
+        self.assertEqual(getattr(agent, "_task_paths", []), [])
+
+    def test_a_later_message_from_the_agent_that_started_it_names_paths_too(self):
+        agent = self.agent()
+        other = self.base / "elsewhere"
+        self.assertIsNotNone(helper_checkout.read_refusal(agent, "read_file", str(other / "x.txt")))
+        said = helper_checkout.hand_to(agent, f"Also check {other / 'x.txt'} against {self.user / 'src' / 'a.py'}")
+        self.assertIn(str(self.own / "src" / "a.py"), said, "its own copy, as before")
+        self.assertIsNone(helper_checkout.read_refusal(agent, "read_file", str(other / "x.txt")))
+
+    def test_the_main_chat_keeps_no_named_paths(self):
+        agent = self.agent(roots=())
+        helper_checkout.note_named(agent, f"Read {self.base / 'elsewhere' / 'x.txt'}")
+        self.assertFalse(getattr(agent, "_task_paths", None))
 
     def test_its_own_copy_is_read_relative_absolute_and_by_default(self):
         agent = self.agent()

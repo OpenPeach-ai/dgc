@@ -2076,7 +2076,9 @@ integrates its copy. Here is what keeps that true, and where it stops:
   into other folders, is refused as outside the helper's copy. `..` and links are followed first,
   so neither reads somewhere else. Still readable: a folder you share into its copy
   (`subagent_link_paths`), the folder of one of your skills (a skill points at files beside it),
-  and a file the helper wrote outside its copy itself with DGC's file tools. The main chat, and a
+  a file or folder its task names outside every project ("implement what ~/Downloads/spec.pdf
+  says"; never a folder that holds a project, your home folder or `/`), and a file the helper
+  wrote outside its copy itself with DGC's file tools. The main chat, and a
   helper without a copy of its own (in a folder that is not a Git project), read as before.
 - **A shell command can still read anything.** `bash`, `python` and a monitor run real programs,
   and DGC can't fence what a program opens: a helper that runs `cat /work/app/src/a.py` reads your

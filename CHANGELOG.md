@@ -23,7 +23,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   into other folders. DGC's read and search tools (`read_file`, `view_image`, `glob`, `grep`, `repo_map`,
   `code_intel`, `git_diff`) now refuse a helper a path in your checkout and name the same file in its copy ("Read
   …/src/a.py instead: this helper works in its own copy"), and refuse a path outside both. `..` and links are
-  followed first. A folder you share with helpers (`subagent_link_paths`), a skill's own folder and a file the
+  followed first. A folder you share with helpers (`subagent_link_paths`), a skill's own folder, a file or
+  folder its task names outside every project ("implement what ~/Downloads/spec.pdf says") and a file the
   helper wrote itself stay readable. A shell command can still read anything, and the docs say so. The main chat,
   and a helper without a copy of its own, read as before.
 - **The full-screen terminal keeps your conversation on screen around a picker.** Opening `/resume`, `/settings`,
