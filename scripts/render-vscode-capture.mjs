@@ -501,9 +501,18 @@ function encode(raw, outputDir, rawSeconds, manifestUpdate = null) {
 }
 
 async function commandPalette(page, command) {
-  await page.keyboard.press("F1");
   const input = page.locator(".quick-input-widget:visible input");
-  await input.waitFor({ state: "visible", timeout: 10_000 });
+  // F1 pressed while a webview is still taking the focus can go nowhere (its key forwarding is not there yet: the
+  // palette stayed shut in 4 of 5 runs for 0.33.1): pressed again, a few times, before giving up.
+  for (let attempt = 1; ; attempt += 1) {
+    await page.keyboard.press("F1");
+    try {
+      await input.waitFor({ state: "visible", timeout: 5_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 4) throw error;
+    }
+  }
   await input.fill(`>${command}`);
   await page.keyboard.press("Enter");
 }
