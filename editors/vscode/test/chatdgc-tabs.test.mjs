@@ -1049,7 +1049,9 @@ test("export: the save dialog's choice says where and in which format, and the r
   const before = sent.length;
   panel.say({ type: "menu" });
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(sent.length, before, "cancelled: nothing written");
+  // Not a count of every message: a loaded machine let an earlier test's late message land in this wait (5 !== 3).
+  const late = sent.slice(before).map((c) => c.type);
+  assert.deepEqual(late.filter((type) => type === "chatdgc_export"), [], `cancelled: nothing written (sent: ${late.join(", ")})`);
 });
 
 test("the context window: its commands go as such, and its events reach the tabs showing the chat", () => {
