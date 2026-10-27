@@ -4,8 +4,20 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.48.4 — 2026-10-27
+
+- This is the first published build since 0.48.2. The 0.48.3 source tag was held by its release gate on GitHub's
+  macOS runner, which this release's change ends: the six fixes listed under 0.48.3 are in it.
+- **A DGC writes its note for the other DGCs in the home it started in.** Each DGC leaves a small note saying
+  which folder it works in, so a window and a terminal know about each other. A DGC now keeps writing it in the
+  home it started in, and never makes a home again that has been removed. Nothing changes for a DGC that keeps
+  one home all its life, which is every DGC you run; in the test suite, where many run in one process, a leftover
+  one wrote into the next one's home.
+- Everything in 0.48.3, 0.48.2, 0.48.1 and 0.48.0 below is included.
+
 ## 0.48.3 — 2026-10-27
 
+- A source tag only, held by the release gate (see 0.48.4).
 - **A finished goal no longer reads as if it were still tonight.** After a goal is complete, blocked or paused, the
   model still sees one line about it, so a compaction never sends it back to that work. The line quoted what you typed
   when you set the goal, cut mid-sentence and with no date, so "I'm going to sleep now, do this overnight" read as

@@ -9,7 +9,7 @@ Pips are careful by design. Everything a Pip does that matters, from its own set
 to a file fix or an email, is a proposal that you review first. The model drafts;
 you approve.
 
-Pips ship in DGC CLI 0.48.3 (`dgc pips …` and the main chat's Pips tools), the VS
+Pips ship in DGC CLI 0.48.4 (`dgc pips …` and the main chat's Pips tools), the VS
 Code extension 0.33.0 (the Pips view, setup cards and review dialogs) and SDK 0.7.0
 (`session.pips`). For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).

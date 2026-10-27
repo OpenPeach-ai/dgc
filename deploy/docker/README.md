@@ -18,7 +18,7 @@ What's in it:
 From the repository root, at the tag of the release you install:
 
 ```sh
-docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.3 -t dgc-pips .
+docker build -f deploy/docker/Dockerfile --build-arg DGC_VERSION=0.48.4 -t dgc-pips .
 ```
 
 `install.sh` downloads that release from vibedgc.com, checks its SHA-256 and refuses any other version. To build from
@@ -62,7 +62,7 @@ the log repeats the reason.
 It is healthy within seconds. The log has one plain line for each event, with its time in UTC:
 
 ```
-2026-10-24T01:25:00.953Z runner_started: server mode, DGC 0.48.3, Pips state /data/.dgc/pips
+2026-10-24T01:25:00.953Z runner_started: server mode, DGC 0.48.4, Pips state /data/.dgc/pips
 2026-10-24T01:28:46.111Z pip_run_queued pip=pip_5faa… run=run_b9ec… by=local-routine
 2026-10-24T01:28:54.894Z pip_run_succeeded pip=pip_5faa… run=run_b9ec…
 2026-10-24T01:29:24.292Z runner_stopped reason=emergency_stop

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.2 — 2026-10-27
+
+- Requires DGC CLI 0.48.4. Everything in 0.33.1 below, which was not published on its own.
+
 ## 0.33.1 — 2026-10-27
 
 - Requires DGC CLI 0.48.3.
