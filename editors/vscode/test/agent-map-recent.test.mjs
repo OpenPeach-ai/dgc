@@ -1,4 +1,4 @@
-// The agent map shows what matters now; the rest is one click away (the founder, 25 Oct). A long chat
+// The agent map shows what matters now; the rest is one click away (reported 25 Oct). A long chat
 // lists every helper it ever ran, so the map opens on: every agent working, every agent the chat's
 // latest turn that started any started, and any older one whose changes were held back -- each with its
 // parents, so the tree stays honest. Everything else is one row, "Earlier in this chat · N agents", a

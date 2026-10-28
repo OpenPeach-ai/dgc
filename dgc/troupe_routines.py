@@ -1,4 +1,4 @@
-"""A troupe as a Pip routine (founder, 2026-10-14): "every Monday, review last week's changes and double-check the
+"""A troupe as a Pip routine (reported 2026-10-14): "every Monday, review last week's changes and double-check the
 findings", on its own, with the results in a Pip's chat.
 
 A Personal Pip's routine (pip_routines) may carry a troupe instead of a prompt to act on. When it is due, the Pips

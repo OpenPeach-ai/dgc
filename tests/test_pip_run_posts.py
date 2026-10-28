@@ -1,6 +1,6 @@
 """A finished Pip run posts its result in that Pip's own chat, as Grok Bots and OpenAI Dots do.
 
-The founder (19 Oct): "instead of showing these Runs under the Runs tab of Pips, they should just simply be
+Reported 19 Oct: "instead of showing these Runs under the Runs tab of Pips, they should just simply be
 part of the chat?" -- "Yes, post in its chat". Each run's result is a short message from the Pip in its own
 conversation; the Runs tab becomes History.
 
@@ -277,7 +277,7 @@ class ReplyPromptTests(unittest.TestCase):
         self.assertIn("Current user message:\nIs the greeting one new?", prompt)
 
     def test_the_model_is_told_the_user_saw_each_post_as_its_own_message(self):
-        # "The Pip speaks" (founder, 21 Oct): the chat shows each run as the Pip saying it ("I found 4 issues, 3 of
+        # "The Pip speaks" (reported 21 Oct): the chat shows each run as the Pip saying it ("I found 4 issues, 3 of
         # them serious"). Asked "why did you say three were serious?", the Pip answers for it, not "DGC posted that".
         self.setup_job()
         self.audit()

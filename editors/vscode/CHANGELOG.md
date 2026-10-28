@@ -30,7 +30,7 @@
 
 - **One DGC writes to a session at a time, idle or not** (with a DGC CLI that has it, 0.48). A session a terminal (or
   another DGC this window can't take over) has open shows read-only with Open here, and the bar says "Open in the
-  terminal · ~/toni-erp · idle 2 min."; Open here takes it from the terminal, which says so. When Open here in a
+  terminal · ~/shop-api · idle 2 min."; Open here takes it from the terminal, which says so. When Open here in a
   terminal takes a session this window shows, the window turns read-only with the same bar, and its Open here takes it
   back. The window tells the CLI it shows such sessions read-only (`watch_session_owner`).
 
@@ -64,7 +64,7 @@
   between them.
 
 - **"Open here" says where the chat is open and what runs there** (with a DGC CLI that has it, 0.48). The read-only
-  bar of a Work session another window holds now says "**Open in Cursor · ~/toni-erp · idle 6 min.** 2 monitors and
+  bar of a Work session another window holds now says "**Open in Cursor · ~/shop-api · idle 6 min.** 2 monitors and
   1 background helper run there. Open here moves them to this window." instead of "This session is open in another
   window.": "working now" while a turn runs there, "Kept running by DGC with no window open" when no window has it,
   and each thing that runs or waits there named only when there is one (monitors, background helpers, background
@@ -1193,7 +1193,7 @@
   **Settings** list its **Apps**, with **Disconnect**.
 - A Pip the main chat proposes docks above the chat box, where questions dock: its face and name,
   what it will do, and chips for when it runs, what it reads and its model, with **Create Pip**,
-  **Details** and **Not now** (the founder chose this over the card in the reply). **×** puts it
+  **Details** and **Not now** (the maintainers chose this over the card in the reply). **×** puts it
   aside; the reply keeps one line that says what became of it ("Waiting for you", "Morning Brief is
   on · First run Thu 8:00 AM", "Not created") with **Review**, **Open in Pips** and **Details**. A
   question that arrives meanwhile takes the place; the Pip docks again after it. In auto mode the Pip

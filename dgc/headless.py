@@ -1035,7 +1035,7 @@ _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "think
 #
 # This exists because a backend cannot tell "my window closed" from "my user is thinking". Its
 # stdin stays open as long as the *process* that spawned it lives, and an editor can leave that
-# process behind: a Cursor reload on 192.168.1.111 left an extension host alive for 25 hours with
+# process behind: a Cursor reload on a test machine left an extension host alive for 25 hours with
 # its `dgc serve` child still holding the session lease, so every new window was refused with
 # "this session has an active turn in another DGC process" and no way out. The parent was alive,
 # so every liveness check we had said everything was fine.
@@ -1048,7 +1048,7 @@ ABANDON_CHECK_EVERY_S = 30.0
 # 0.44.0 used the 15-minute figure for both, and that made the takeover useless for the case it
 # exists for: a window reloads (network drop, Reload Window), the old backend keeps the session,
 # and the new window is told "its editor window is still connected" because the old editor had
-# only been quiet for seconds. The founder hit exactly this on 192.168.1.111 and still had to wait.
+# only been quiet for seconds. A user hit exactly this and still had to wait.
 #
 # The editor pings every 60s (backend.ts LIVENESS_PING_MS), so a live one is never silent for two
 # whole intervals. Missing two is strong evidence it is gone, and someone is waiting.
@@ -3109,7 +3109,7 @@ class Backend:
     def _steer_queued(self, request_ids) -> tuple[list[str], str]:
         """Move queued prompts into the running turn as steering, in queue order ("Steer now", "Steer all").
 
-        The founder (2026-10-19): a queued message sat as "you · queued" with nothing to do but wait for the
+        Reported 2026-10-19: a queued message sat as "you · queued" with nothing to do but wait for the
         turn to end. Only the user's own prompts move (never a continue, resume or Pip-setup turn), and only
         while a model turn is running that can take steering; each one that moves is announced exactly as an
         Enter-while-working message is (prompt_accepted "steered", then steering_update "applied"). Returns

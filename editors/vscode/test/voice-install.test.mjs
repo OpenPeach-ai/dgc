@@ -1,7 +1,7 @@
 // Installing DGC Voice (src/voiceInstall.ts). It isn't on the Marketplace or Open VSX yet, so DGC carries it as
 // dist/dgc-voice.vsix: Install uses the editor's gallery only when the gallery has DGC Voice and it isn't older than
 // that file, and otherwise installs the file. A failure says what happened and where the file is, with Install from
-// VSIX…; it never ends in an empty Extensions search (what the founder saw: "@id:vibedgc.dgc-voice", and nothing).
+// VSIX…; it never ends in an empty Extensions search (what a user saw: "@id:vibedgc.dgc-voice", and nothing).
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

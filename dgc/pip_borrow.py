@@ -1,6 +1,6 @@
 """Borrow your own signed-in Chrome, with your consent each time (Pips API 59).
 
-The founder (2026-10-20, item 7 of the OpenMausBot study): a Personal Pip may, when the user allows it, use the user's
+Reported 2026-10-20, item 7 of the OpenMausBot study): a Personal Pip may, when the user allows it, use the user's
 own signed-in Chrome for one task -- a site they are already logged in to (a bank, a hospital portal, an order history)
 -- instead of its own computer. This reverses "Pips keep their own computers" (2026-10-13) for that one task only: every
 borrow is asked for anew, and nothing is remembered.

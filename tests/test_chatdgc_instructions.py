@@ -221,7 +221,7 @@ class SettingsTests(unittest.TestCase):
         self.fail(f"no {kind} frame: {self.frames()[-3:]}")
 
     def test_settings_sets_them_and_reads_them_back(self):
-        values = {"chatdgc_about": "I'm a founder in Bengaluru.", "chatdgc_style": "Use numbers.",
+        values = {"chatdgc_about": "I'm a designer in Lisbon.", "chatdgc_style": "Use numbers.",
                   "chatdgc_personality": "warm"}
         self.host.dispatch({"type": "set_config", "request_id": "s", "values": values})
         self.assertEqual([f for f in self.frames() if f["type"] == "command_rejected"], [])

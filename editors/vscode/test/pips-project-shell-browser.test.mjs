@@ -1,4 +1,4 @@
-// A Project Pip's page is the Personal Pips page (the founder, 24 Oct: "yes, do it"), drawn by the real client and its
+// A Project Pip's page is the Personal Pips page (reported 24 Oct: "yes, do it"), drawn by the real client and its
 // CSS in real Chromium at the side bar's narrow width and a wide editor tab: the project's home with its menu and setup
 // card, a Project Pip's chat with Run now and its menu open, History, Settings, the project's context, the new-Pip dialog
 // and the describe-the-job page. Nothing may stick out of the page or be cut off by a box it sits in, and the top bar's

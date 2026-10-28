@@ -41,7 +41,7 @@ ROLE = {
               "there are any.",
 }
 
-# A verifier's role when it has its read-only shell (dgc/checker_box.py; the founder, 2026-10-18).
+# A verifier's role when it has its read-only shell (dgc/checker_box.py; reported 2026-10-18.
 VERIFIER_SHELL = (
     "You are a verifier: try to prove the claim given to you wrong. You have a read-only shell (bash) in a sealed "
     "box: the project is at /mnt and read only, the only place you can write is a private /tmp, credential files "
@@ -174,7 +174,7 @@ class TroupeRunner(troupe.Runner):
         role = ROLE.get(stage.agent, "")
         box, relay, tool_env, secrets = None, None, None, ()
         if stage.agent == "verifier":
-            # The founder (2026-10-18): checkers get a sandboxed read-only shell and a read-only database account.
+            # Reported 2026-10-18: checkers get a sandboxed read-only shell and a read-only database account.
             from . import checker_box
             box, relay, note = checker_box.prepare(agent.config.project_root, self.database())
             if box is not None:

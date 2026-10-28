@@ -243,7 +243,7 @@ test("a withheld block is a static row, merged with a directly preceding one, pl
 
 // D7 used to make every thought end the tool group. An inline note still does (it is prose the reader
 // sees); the main model's collapsed thinking no longer does: it rides on the step it led to as a mark,
-// and the stretch stays one line (tool-rows-one-line.test.mjs has the founder's whole sequence).
+// and the stretch stays one line (tool-rows-one-line.test.mjs has a user's whole sequence).
 test("tool order: a note between two tool calls opens a new tool group; a collapsed thought joins the next step", () => {
   const { send, doc } = makeDom();
   send(start());

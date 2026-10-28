@@ -1,7 +1,7 @@
 // Pip reports reach the chat, end to end: the REAL panel, the REAL `dgc serve` of this checkout, a
 // real Pip registry in the session's HOME, and media/main.js in Chromium (test/support/panel-live.mjs).
 // A Pip attached to the chat finishes a run; its card arrives in the open chat by itself (no turn);
-// Ask DGC to fix starts a BACKGROUND fix (the founder, 19 Oct): no turn, the card is its status, the
+// Ask DGC to fix starts a BACKGROUND fix (reported 19 Oct): no turn, the card is its status, the
 // fixer reads the whole finding, its change is applied with Undo and the card says so; a reload draws
 // the same card; Dismiss is saved; and the card fits a narrow panel.
 // DGC_REQUIRE_CHROMIUM=1 turns a missing browser or Python into a failure.

@@ -170,7 +170,7 @@ class AppLinkTests(unittest.TestCase):
         self.assertEqual(links.listing(self.registry, self.pip["id"])[0]["status"], "requested")
 
     def test_a_pip_is_told_its_app_tools_and_whether_composio_is_set_up_beside_your_message(self):
-        # The founder's Test Pip (2026-10-08) kept saying "I don't have a Composio connector": its
+        # A user's Test Pip (2026-10-08) kept saying "I don't have a Composio connector": its
         # chat held replies from before it had app tools, and "Nothing is connected yet" read as
         # "Composio is not connected".
         run = "run_" + "b" * 32

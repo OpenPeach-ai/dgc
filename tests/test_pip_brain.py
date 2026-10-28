@@ -1,6 +1,6 @@
 """A Personal Pip on the user's own Claude Code or Codex (Pips API 55, pip_brain).
 
-The founder (2026-10-20, "Let's do it"): a Pip on "Same as DGC" couldn't run when DGC's default was a subscription,
+Reported 2026-10-20, "Let's do it"): a Pip on "Same as DGC" couldn't run when DGC's default was a subscription,
 and a Pip couldn't be given one. Now its turns run on that CLI with the CLI's own tools off and the Pip's tools
 served by DGC over MCP, so every Pip rule still holds. These tests drive a stand-in CLI that speaks each engine's
 real output and talks MCP to DGC's relay (tests/fake_subscription_cli.py); the lock-down flags themselves were

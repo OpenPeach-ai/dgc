@@ -145,7 +145,7 @@ class PerModelMemory(IsolatedHome):
 
 class ReportedMaximum(IsolatedHome):
     def test_a_cloud_model_starts_at_a_moderate_window_not_the_tables_local_64k_or_its_whole_maximum(self):
-        # Founder, 2026-10-22: an unset window starts moderate; the maximum is the user's choice.
+        # Reported 2026-10-22: an unset window starts moderate; the maximum is the user's choice.
         self.server.show_context = 1_048_576
         cfg = self.config(model="qwen2.5:14b", base_url=self.server.url, api_mode="ollama")
         agent = self.agent(cfg)

@@ -1,4 +1,4 @@
-"""Work's own Chrome (the founder, 2026-10-13): a Chrome you have is used; with none, DGC fetches one (on Linux
+"""Work's own Chrome (reported 2026-10-13): a Chrome you have is used; with none, DGC fetches one (on Linux
 the one Pip computers download, on a Mac Google's installer, kept only when Google signed it); where Chrome's
 own sandbox can't start, it runs in a bubblewrap box that holds nothing of yours."""
 import io

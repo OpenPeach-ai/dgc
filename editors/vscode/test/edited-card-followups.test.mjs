@@ -1,4 +1,4 @@
-// The Edited card's follow-ups for 0.48 (the founder, 25 Oct): a reopened card that marks a file Undo can no longer
+// The Edited card's follow-ups for 0.48 (reported 25 Oct): a reopened card that marks a file Undo can no longer
 // put back, a late redraw that reaches a card drawn from history, Undo on an older turn saying how many later turns it
 // also takes back and how many files it really restores, and the changes bar refreshing when a background helper's
 // idle integration lands. The CLI side is tests/test_turn_files_followups.py.

@@ -1,4 +1,4 @@
-// A running Pip is visible in its own chat while it runs (the founder, 24 Oct). He pressed ▶ Run now: the top bar said
+// A running Pip is visible in its own chat while it runs (reported 24 Oct). A user pressed ▶ Run now: the top bar said
 // "Running…" and the chat said nothing until the run ended. Now, from the moment a run starts, its chat has ONE live
 // post: the Pip's face at work, what it is doing now (from the run's activity), a clock, Stop, and how it started
 // ("Started by you", "On schedule · 9:00 AM", "Asked by DGC", "First run"). When the run ends that same post becomes

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {buildSync} from 'esbuild';
 import {JSDOM} from 'jsdom';
 
-// The Sessions home's Pips strip (pipHomeStrip.js): the founder, 2026-10-18, "my 3 Pips ran and failed ...
+// The Sessions home's Pips strip (pipHomeStrip.js): reported 2026-10-18, "my 3 Pips ran and failed ...
 // there should be a dismiss option there too", and "what if there were 100 Pips". The 3 most urgent rows,
 // then "N more need you · Show all"; news rows (failed runs, new findings) dismiss for good (Pips API 48).
 const bundle=buildSync({entryPoints:[new URL('../src/pipHomeStrip.js',import.meta.url).pathname],bundle:true,write:false,format:'iife',globalName:'Strip',loader:{'.css':'empty'}}).outputFiles[0].text;

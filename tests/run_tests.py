@@ -1984,7 +1984,7 @@ def unit_tests(tmp: Path):
     # ---- capture contamination guard --------------------------------------------------------
     # The CLI capture aborts if the real ~/.dgc changed while it ran. A live DGC elsewhere
     # heartbeats its session metrics every ~121s and the capture takes ~4 minutes, so the guard
-    # used to make a release impossible while the founder had a panel open. It now forgives that
+    # used to make a release impossible while a user had a panel open. It now forgives that
     # one shape and nothing else.
     import importlib.util as _cap_util
     _cap_spec = _cap_util.spec_from_file_location(
@@ -2076,7 +2076,7 @@ def unit_tests(tmp: Path):
           "document.querySelector('[data-dgc-ref=\"e12\"]')",
           _browser_mod.BrowserSession._locator("e12"))
 
-    # With none, DGC now fetches one (founder, 2026-10-13; tests/test_browser_setup.py); where it can't, the
+    # With none, DGC now fetches one (reported 2026-10-13; tests/test_browser_setup.py); where it can't, the
     # browser still says how to install one.
     check("browser discovery says how to install a browser",
           "install one" in _browser_mod.INSTALL_HINT.lower() and "browser_path" in _browser_mod.INSTALL_HINT,

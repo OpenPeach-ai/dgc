@@ -51,7 +51,7 @@ test('the tab is a desktop with nothing open, a dock of three apps below; the Br
  const x=setup();await x.drain();
  assert.match(x.d.querySelector('.pc-title h1').textContent,/Shopper · Computer/);
  assert.deepEqual([...x.d.querySelectorAll('.pc-dock [data-app]')].map(b=>b.getAttribute('aria-label')),['Browser','Files','Terminal']);
- // The founder: "lets show default OS screen, with nothing opened".
+ // A user: "lets show default OS screen, with nothing opened".
  assert.equal(x.d.querySelector('.pc-window'),null,'the bare desktop');
  assert.equal(x.d.querySelectorAll('.pc-dock .open').length,0,'nothing open in the dock');
  assert.equal(x.requests('open_pip_computer').length,0,'opening the tab starts no browser');
@@ -101,7 +101,7 @@ test('what you type in the address bar stays while the screen refreshes; Escape,
  const bar=()=>x.d.querySelector('#pc-url');
  bar().focus();bar().value='example.or';bar().dispatchEvent(new x.w.Event('input',{bubbles:true}));
  await x.tick();await x.tick();
- // The founder: "i am trying to type an address, and it auto removes, as soon as i type a letter".
+ // A user: "i am trying to type an address, and it auto removes, as soon as i type a letter".
  assert.equal(bar().value,'example.or','two refreshes later, still what you typed');
  assert.equal(x.d.activeElement,bar(),'and still where you are typing');
  bar().dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
@@ -269,12 +269,12 @@ test('with the desktop installed, the tab is the Pip\'s real screen, streamed th
 });
 
 test('the first time, DGC sets the desktop up itself: the tab shows how far it has got, then opens the screen',async()=>{
- // The founder: "why does my system need that? Doesn't a Pip create its own virtual OS?"
+ // A user: "why does my system need that? Doesn't a Pip create its own virtual OS?"
  const {Viewer,made}=fakeViewer(),MB=1048576;
  const running=(done,step='Downloading Google Chrome and the desktop')=>({available:false,reason:"Setting up this computer's desktop.",install:'',using:false,browser:'Chromium',chrome_install:'',setup:{state:'running',step,done,total:133*MB,error:''}});
  const x=setup({screen:true,viewer:Viewer,desktop:running(44*MB)});await x.drain();
  const note=()=>x.d.querySelector('.pc-setup');
- // Plain words: the founder, "lets not show Downloading Google Chrome and desktop ... just Setting up your Pip".
+ // Plain words: a user, "lets not show Downloading Google Chrome and desktop ... just Setting up your Pip".
  assert.match(note().textContent,/Setting up your Pip…/);
  assert.match(note().textContent,/Getting its computer ready. This happens once./);
  assert.doesNotMatch(note().textContent,/Chrome|MB|Downloading|package/,'no technical words');

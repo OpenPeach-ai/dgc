@@ -4,7 +4,7 @@
 // update, and `after()` MOVES a node that is already in the document. So each agent's row was
 // dragged down to its own newest tool group -- and with two agents working, every tool call yanked
 // one below the other. They swapped places under the reader for the whole turn, which is exactly
-// what the founder reported: "they keep switching their place... in codex, they maintain their place".
+// what a user reported: "they keep switching their place... in codex, they maintain their place".
 //
 // The rows are now one line per batch, and the line holds the names in call order: the faces and
 // the names never move, only the words between them change. What this file holds is that ORDER,

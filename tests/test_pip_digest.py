@@ -124,7 +124,7 @@ class DigestTests(unittest.TestCase):
         return run_id
 
     def test_dismissing_one_pips_news_hides_only_its_news_until_it_does_something_new(self):
-        """The Sessions home's dismiss (founder, 2026-10-18: "3 Pips ran and failed ... a dismiss option")."""
+        """The Sessions home's dismiss (reported 2026-10-18: "3 Pips ran and failed ... a dismiss option")."""
         other = self.store.create(self.workspace["id"], "Second", "Inspect source evidence", "HEAD", "fixture")
         self.fail_run()
         self.complete([self.finding("Unchecked user id", severity="high")], job=other)

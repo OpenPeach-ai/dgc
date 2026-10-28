@@ -87,7 +87,7 @@ function pips({apiVersion=60,pipValue=pulse(),postsValue=[],runs=[LIVE_RUN],repl
     onMessage:listener=>{const handle=e=>listener(e.data);w.addEventListener('message',handle);return()=>w.removeEventListener('message',handle);},
     onAskDgc:ask=>{asks.push(JSON.parse(JSON.stringify(ask)));return true;}});
   const send=data=>w.dispatchEvent(new w.MessageEvent('message',{data}));
-  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:'ws',name:'toni-erp'}],current_workspace_id:'ws'}),list_pip_types:()=>({types}),list_pips:()=>({pips:[pipValue]}),
+  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:'ws',name:'shop-api'}],current_workspace_id:'ws'}),list_pip_types:()=>({types}),list_pips:()=>({pips:[pipValue]}),
     get_pip_runner:()=>({runner}),get_workspace_context:()=>({context:{workspace_id:'ws',revision:0,entries:[]}}),get_pip:()=>({pip:pipValue}),
     list_pip_runs:()=>({runs}),get_pip_run:()=>({run:runs.find(x=>x.id===r.run_id)}),get_pip_execution:()=>({execution:{available:true,platform:'linux',backend:'bwrap',limits:{}}}),
     list_pip_messages:()=>({pip_id:PIP,workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),

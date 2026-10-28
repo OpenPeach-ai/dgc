@@ -164,7 +164,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
         + DRAFTS
         + ("" if voice else CHARTS)
-        # Main DGC's rule (dgc/presentation.py), as the founder decided for ChatDGC too.
+        # Main DGC's rule (dgc/presentation.py), as the maintainers decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
         + (ASK + CANVAS + WIDGETS if ask and not voice else "")

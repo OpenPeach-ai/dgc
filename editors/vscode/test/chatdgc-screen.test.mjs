@@ -117,7 +117,7 @@ test("a click opens the thinking while it still thinks, even when a delta redraw
     await s.send({ type: "delta", messageId: M(2), thinking: "First the beaches. " });
     await s.frame();
     const box = s.page.locator(".cd-assistant details.cd-thinking"), label = s.page.locator(".cd-thinking-label");
-    assert.equal(await box.getAttribute("open"), null, "collapsed while it thinks: the founder's default");
+    assert.equal(await box.getAttribute("open"), null, "collapsed while it thinks: a user's default");
     // A press, a streamed delta that redraws the reply, then the release: one click, as a reader makes it mid-stream.
     const at = await label.boundingBox();
     await s.page.mouse.move(at.x + 20, at.y + at.height / 2);
@@ -179,7 +179,7 @@ test("with no click, the thinking is collapsed while it thinks, as the answer st
   } finally { await s.page.close(); }
 });
 
-// "The 'Thinking' word flickers a lot" (founder, 2026-10-18): every streamed part drew the reply again, taking the
+// "The 'Thinking' word flickers a lot" (reported 2026-10-18): every streamed part drew the reply again, taking the
 // thinking box out of the page and putting it back, so the pointer's hover over the label came and went with each part,
 // and the working line's pulse started over with each one. Now nothing a part doesn't change is touched, and the label
 // is Work's status line: DGC's slashes lighting in turn, beside words that hold still.
@@ -241,7 +241,7 @@ test("while it thinks, no streamed part redraws 'Thinking' or the working line, 
   } finally { await s.page.close(); }
 });
 
-// "I am not able to scroll just the thinking section to read it all" (founder, 2026-10-18): each streamed part put a
+// "I am not able to scroll just the thinking section to read it all" (reported 2026-10-18): each streamed part put a
 // new thinking box in the page, its scroll back at the top, and the chat's follow pulled it away as the answer came.
 //
 // Every scroll here is waited for by its own events, never by a fixed delay: a wheel or a key that scrolls animates,
@@ -920,7 +920,7 @@ test("a reply that searches: what it looks for while it looks, its words with no
   const s = await openScreen();
   try {
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
-    // Web search is always there, and the box has no switch for it (founder, 2026-10-18: "it anyway uses web, so
+    // Web search is always there, and the box has no switch for it (reported 2026-10-18: "it anyway uses web, so
     // let's not confuse users"): the model looks things up when an answer depends on it. Settings turns it off.
     assert.equal(await s.page.locator("#cd-search, #cd-websearch, .cd-tools .codicon-globe").count(), 0, "no web switch in the box");
     assert.deepEqual(await s.page.locator(".cd-tools .cd-tool").evaluateAll((tools) => tools.map((b) => b.getAttribute("aria-label"))),
@@ -943,7 +943,7 @@ test("a reply that searches: what it looks for while it looks, its words with no
       text: "Sunny and 21°C [1], dry week [2][3][9].\n\n```\nlist[1]\n```" } });
     await s.send({ type: "turn", state: "ended", replyId: M(2) });
     await s.frame();
-    // Sources only at the end (founder, 2026-10-18): no chip in the words, and the marks taken out cleanly. [2][3][9] is
+    // Sources only at the end (reported 2026-10-18): no chip in the words, and the marks taken out cleanly. [2][3][9] is
     // one group naming sources the reply has, so all of it goes; in code, [1] is code.
     assert.equal(await s.page.locator(".cd-body button:not(.copy), .cd-body .cd-fav, [class*='cd-cite']").count(), 0, "nothing but words in the reply (and its code block's Copy)");
     assert.equal(await s.page.locator(".cd-body p").first().textContent(), "Sunny and 21°C, dry week.");
@@ -972,7 +972,7 @@ test("a reply that searches: what it looks for while it looks, its words with no
   } finally { await s.page.close(); }
 });
 
-// "In ChatDGC, the mid-response source chips — let's not have them there; only show sources at the end" (founder,
+// "In ChatDGC, the mid-response source chips — let's not have them there; only show sources at the end" (reported
 // 2026-10-18). The marks the model cites with stay in the reply as kept (its Sources say which were cited) and are
 // taken out of what's read and copied, with the space before them; a reply's own brackets stay.
 test("sources only at the end: no chips in a reply, its citation marks out cleanly (spacing, punctuation), kept in code and where they name no source, and out of Copy", async (t) => {
@@ -1831,7 +1831,7 @@ test("the welcome: ChatDGC's mark and a line for the time of day, chosen once a 
   } finally { await s.page.close(); }
 });
 
-// The founder (2026-10-18): Work's tab opens on the three slashes, "DGC" and a "|" that move; ChatDGC's should too, with
+// Reported 2026-10-18: Work's tab opens on the three slashes, "DGC" and a "|" that move; ChatDGC's should too, with
 // its own mark, the bubble with the slashes inside it, and those slashes moving as Work's do. Both pages side by side.
 test("the header's wordmark moves as Work's does: the slashes in the bubble breathe in turn, the cursor blinks, in both themes; reduced motion stills them", async (t) => {
   if (skipOrFail(t)) return;
@@ -1890,7 +1890,7 @@ test("the header's wordmark moves as Work's does: the slashes in the bubble brea
       assert.ok(chat.level < 0.75 && ours.level < 0.75, `the mark, the word and the caret on one line (${chat.level}, ${ours.level})`);
       assert.equal(chat.inset, ours.inset, "as far in from the header's edge");
       assert.deepEqual(ours.markSize, [14, 14]);
-      assert.deepEqual(chat.markSize, ours.markSize, "the bubble at the size of Work's mark (the founder: the size and looks of Work's)");
+      assert.deepEqual(chat.markSize, ours.markSize, "the bubble at the size of Work's mark (reported: the size and looks of Work's)");
       // The whole header is Work's, not only the wordmark: its height, padding, no rule below, the title's type and colour,
       // and the small faint buttons.
       const header = (page, head, title, button) => page.evaluate(([head, title, button]) => {
@@ -3054,7 +3054,7 @@ test("files a reply made: a card with what each is, Open and Save a copy…, liv
   } finally { await s.page.close(); }
 });
 
-// Widgets in a chat, option C1 (founder, 2026-10-18): "Widgets N" in the header while the chat has any, a list of them
+// Widgets in a chat, option C1 (reported 2026-10-18): "Widgets N" in the header while the chat has any, a list of them
 // with when each was made and the prompt that asked, Open, Show it in the chat, Delete asked in the row, and the
 // Library a click away. A long chat opens on its latest pages: the rest come from its outline, and Show it in the chat
 // loads the pages before what's shown until the widget's card is there.
@@ -3185,7 +3185,7 @@ test("widgets in a chat at side-bar width: the mark and the count, a list that f
   } finally { await s.page.close(); }
 });
 
-// The prompt rail (founder, 2026-10-18: "The rail looks good"), ChatGPT's table of contents with ours added: a tick
+// The prompt rail (reported 2026-10-18: "The rail looks good"), ChatGPT's table of contents with ours added: a tick
 // per prompt from five prompts, the one being read bright; a card on hover with every prompt, its time under day
 // headings and the widget its reply made; a click or Alt+Up/Down goes there. ChatGPT's broke when a chat loaded in
 // pieces; this one lists every prompt from the chat's outline and loads what a jump needs first.
@@ -3426,9 +3426,9 @@ test("Open here for a chat: the bar says where it is open and whether it writes 
     await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID });
     assert.equal((await text.textContent()).trim(), "This chat is open in another window.");
     await s.send({ type: "elsewhere", state: "elsewhere", conversation: ID,
-                   note: { head: "Open in Cursor · ~/toni-erp · writing a reply now.", detail: "Open here moves it to this window." } });
-    assert.equal(await s.page.locator("#cd-elsewhere-text strong.elsewhere-where").textContent(), "Open in Cursor · ~/toni-erp · writing a reply now.");
-    assert.equal((await text.textContent()).trim(), "Open in Cursor · ~/toni-erp · writing a reply now. Open here moves it to this window.");
+                   note: { head: "Open in Cursor · ~/shop-api · writing a reply now.", detail: "Open here moves it to this window." } });
+    assert.equal(await s.page.locator("#cd-elsewhere-text strong.elsewhere-where").textContent(), "Open in Cursor · ~/shop-api · writing a reply now.");
+    assert.equal((await text.textContent()).trim(), "Open in Cursor · ~/shop-api · writing a reply now. Open here moves it to this window.");
     assert.equal(await s.page.locator("#cd-elsewhere-text strong").evaluate((n) => Number(getComputedStyle(n).fontWeight) >= 600), true);
     assert.equal(await box.isDisabled(), true, "still read-only");
     const bar = await s.page.locator("#cd-elsewhere").boundingBox(), open = await s.page.locator("#cd-elsewhere-open").boundingBox();

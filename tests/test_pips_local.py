@@ -347,7 +347,7 @@ class LocalPipsTests(unittest.TestCase):
         self.assertIn("its quoted code isn't at that line", result["limitations"][0])
 
     def test_a_long_or_missing_summary_never_loses_the_report(self):
-        # The founder's .111 ERP Pips failed three runs in a row on "report summary must be text between 1 and 4000
+        # A user's .111 ERP Pips failed three runs in a row on "report summary must be text between 1 and 4000
         # characters" (2026-10-19): a request error, so even the format repair never ran.
         self.commit()
         finding = {"title": "Example", "severity": "low", "path": "source.py", "line": 2, "evidence": "    return 'hello'"}

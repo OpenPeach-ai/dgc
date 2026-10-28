@@ -1,6 +1,6 @@
 """A plugin's own key, saved on its page (dgc/plugin_keys.py), and Sign in with GitHub (its device flow).
 
-The founder clicked Connect on GitHub and was told "Configure GITHUB_PAT_TOKEN in MCP server settings before
+A user clicked Connect on GitHub and was told "Configure GITHUB_PAT_TOKEN in MCP server settings before
 connecting." These tests drive the real pieces against a stand-in for GitHub's MCP server and its sign-in server on
 127.0.0.1: a plugin installed from a package that names GITHUB_PAT_TOKEN, its key saved the way the page saves it,
 DGC's MCPManager connecting with it (and with no environment variable), the environment as the fallback, the words a
@@ -581,7 +581,7 @@ class GitHubSignInTests(Fixture):
 
 
 class GitHubSignInPermissionTests(Fixture):
-    """What DGC may do on GitHub: the user chooses the scopes a Sign in with GitHub asks for (founder, 19 Oct 2026).
+    """What DGC may do on GitHub: the user chooses the scopes a Sign in with GitHub asks for (reported 19 Oct 2026).
     Before, the sign-in asked for every scope GitHub's MCP server lists in its metadata."""
 
     config_values = {"github_sign_in_client_id": "Iv1.fixture"}

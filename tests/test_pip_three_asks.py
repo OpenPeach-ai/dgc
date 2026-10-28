@@ -1,4 +1,4 @@
-"""The founder's three real asks (2026-10-20): "pay these medical bills", "design me my birthday shirts and order 20 of
+"""A user's three real asks (2026-10-20): "pay these medical bills", "design me my birthday shirts and order 20 of
 them in large size", "help me stay on top of my office email". What the end-to-end test found, kept fixed:
 
 - A Pip with a computer is told it may pay and order (each held for the user's Allow) and can type card details; only

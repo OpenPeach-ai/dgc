@@ -21,7 +21,7 @@ const rows = (turn) => [...turn.children].filter((n) => !n.matches(".role"))
     : n.matches(".reasoning") ? "body" : n.matches(".text") ? "text" : n.matches(".thinking") ? "act"
     : n.matches(".answer") ? "answer" : n.matches(".card") ? "card" : n.className);
 
-test("the founder's six think-and-run pairs between two sentences are one line, six steps, a thought mark on each", () => {
+test("a user's six think-and-run pairs between two sentences are one line, six steps, a thought mark on each", () => {
   const { event, doc, turn, errors } = panel();
   for (const frame of founderTurn()) event(frame);
   const groups = [...doc.querySelectorAll(".tool-group")];

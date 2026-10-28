@@ -1,6 +1,6 @@
 """A Troupe checker's read-only boxed shell and the project's read-only database account.
 
-The founder (2026-10-18): "Troupe checker agents get a sandboxed read-only shell, together with a read-only database
+Reported 2026-10-18: "Troupe checker agents get a sandboxed read-only shell, together with a read-only database
 account, so a checker can't change data." In the ERP review, shell-less verifiers voted findings "not real" because
 they couldn't re-run a query. Boxed commands here really run in this machine's bubblewrap (skipped where it can't);
 the database is a stand-in TCP server on 127.0.0.1 (the live check used a real Postgres).

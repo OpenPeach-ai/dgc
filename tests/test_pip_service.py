@@ -217,7 +217,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_files_writable_only_by_your_own_group_run_and_a_shared_group_is_named_with_the_fix(self):
         # An install made under Ubuntu's umask 0002 left every DGC file 664: Keep Pips running refused it with
-        # "DGC service entry points must be trusted regular files" on the founder's .111 although the group
+        # "DGC service entry points must be trusted regular files" on a user's .111 although the group
         # was his alone.
         import grp
         import pwd

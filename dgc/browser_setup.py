@@ -1,4 +1,4 @@
-"""Work's own Chrome, when this computer has none (the founder, 2026-10-13: "yes build it").
+"""Work's own Chrome, when this computer has none (reported 2026-10-13: "yes build it").
 
 A Work session's browser tool checks the pages it builds. It uses a Chrome the user already has
 (browser.discover_browser); with none, it used to stop at "No Chrome found", and a session that built

@@ -1,4 +1,4 @@
-"""The Edited card's four follow-ups for 0.48 (the founder, 25 Oct: fix the gaps, now).
+"""The Edited card's four follow-ups for 0.48 (reported 25 Oct: fix the gaps, now).
 
 1. A background helper that integrates while the chat is idle is in the chat's change set: the bar counts it and a
    row on the card opens its real diff, live and after a reload.

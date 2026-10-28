@@ -277,7 +277,7 @@ class TheHolderDecides(_Home):
 class AReloadedWindowGetsItBack(_Home):
     """The case the whole feature exists for, and the one 0.44.0 still failed.
 
-    The founder's network dropped mid-turn on 192.168.1.111, he reloaded the window, typed
+    A user's network dropped mid-turn, they reloaded the window, typed
     "continue", and was told "its editor window is still connected" — because the OLD backend
     judged a takeover with the same 15-minute figure it uses to end ITSELF. Its editor had been
     silent for seconds, so by that test it was still there. He had to wait out the full fifteen
@@ -331,7 +331,7 @@ class AReloadedWindowGetsItBack(_Home):
         self.assertEqual(remaining, 0.0)
 
     def test_it_does_NOT_wait_the_fifteen_minutes_that_shipped(self):
-        """The regression itself. 0.44.0 answered False here and sent the founder away."""
+        """The regression itself. 0.44.0 answered False here and sent a user away."""
         from dgc.headless import ABANDONED_AFTER_S
         watch = self.watch(200.0)                       # over three minutes of silence
         self.assertFalse(watch.editor_gone(),
@@ -360,9 +360,9 @@ class AReloadedWindowGetsItBack(_Home):
 
 
 class AMovedSessionSaysWhatToDo(_Home):
-    """The SECOND dead end the founder hit, and the fix that is actually safe.
+    """The SECOND dead end a user hit, and the fix that is actually safe.
 
-    Sequence on 192.168.1.111: network drops mid-turn, he reloads the window, the new window opens
+    Sequence: network drops mid-turn, they reload the window, the new window opens
     the session at revision N, the backend it replaced finishes and persists N+1, and the next
     "continue" is refused with "Resume the latest generation or start a new session."
 

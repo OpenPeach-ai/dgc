@@ -1,4 +1,4 @@
-// A Pip's runs in its own chat (Pips API 51), as the Pip saying them. The founder (21 Oct) picked "The Pip speaks":
+// A Pip's runs in its own chat (Pips API 51), as the Pip saying them. Reported 21 Oct picked "The Pip speaks":
 // each finished run is a chat message from the Pip, its face and name and the time, in its own short words; the
 // detail (findings, the report, Ask DGC to fix) is a small attachment under it, one click away; and repeated all-clear
 // runs fold into ONE message that updates itself ("Both checks passed again" · "✓ Passed 12 times since Monday").
@@ -331,7 +331,7 @@ export function postMarkup(p,{name,face='',now=Date.now(),personal=false,ask=fal
   return `<article class="pip-message assistant dgc run-post${runs?' run-post-streak':''}" data-run-post="${id}" data-outcome="${esc(p.outcome)}"${runs?` data-runs="${runs.length}"`:''} tabindex="-1" aria-label="${esc(`${name}: ${text}${runs?` ${foldWords(runs,now)}.`:''}`)}">${head}<div class="answer"><div class="message-body text final run-post-body">${body}</div></div><div class="run-post-attach">${attach}</div></article>`;
 }
 
-// ---- A run while it runs (the founder, 24 Oct) ----------------------------------------------------------------------
+// ---- A run while it runs (reported 24 Oct) ----------------------------------------------------------------------
 // From the moment a run starts its chat has ONE live post for it: the Pip's face at work, its name, what it is doing
 // now (from the run's activity, pipRunActivity.js), a clock, Stop, and how it started ("Started by you", "On schedule ·
 // 9:00 AM", "From a new commit", "Asked by DGC", "First run"). It stands where the run's own post will: at the end of the

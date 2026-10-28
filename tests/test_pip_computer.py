@@ -395,7 +395,7 @@ if __name__ == "__main__":
 
 
 class ComputerStepsTests(unittest.TestCase):
-    """A Pip with a computer gets more steps per run (founder, 2026-10-07): at 12, a Google search ran out."""
+    """A Pip with a computer gets more steps per run (reported 2026-10-07): at 12, a Google search ran out."""
     setUp_base = fixtures.LocalPipsTests.setUp
 
     def setUp(self):

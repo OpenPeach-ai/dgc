@@ -68,7 +68,7 @@ class PipProposalToolTests(unittest.TestCase):
         return agent, approvals
 
     def test_the_tool_says_it_changes_a_model(self):
-        # On a real project the model told the founder a Pip's model "isn't changeable through my tools" (2026-10-19,
+        # On a real project the model told a user a Pip's model "isn't changeable through my tools" (2026-10-19,
         # and again 10-24). Since Pips API 66 this tool changes it itself, and says so first.
         from dgc import tools
         text = next(t["function"]["description"] for t in tools.TOOL_SCHEMAS if t["function"]["name"] == "pips_propose")

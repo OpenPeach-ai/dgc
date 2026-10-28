@@ -85,7 +85,7 @@ after(() => {
 
 const SESSION = "20261025-101500-a1b2c3";
 const DETACH = { version: 1, idle_exit_s: 120, waiting_exit_s: 3600, max_windowless_s: 43200 };
-const CURSOR_FACTS = { found: true, editor: "Cursor", windowless: false, folder: "~/toni-erp", working: false, idle_s: 380,
+const CURSOR_FACTS = { found: true, editor: "Cursor", windowless: false, folder: "~/shop-api", working: false, idle_s: 380,
                        monitors: 2, helpers: 1, commands: 0, queued: 0, waiting: 0 };
 
 /**
@@ -164,10 +164,10 @@ const bars = (posted) => posted.filter((m) => m.type === "session_elsewhere");
 
 test("the line: where and idle, then what runs there, and what Open here moves", () => {
   assert.deepEqual(words.holderLine(words.holderFacts(CURSOR_FACTS)), {
-    head: "Open in Cursor · ~/toni-erp · idle 6 min.",
+    head: "Open in Cursor · ~/shop-api · idle 6 min.",
     detail: "2 monitors and 1 background helper run there. Open here moves them to this window." });
   assert.deepEqual(words.holderLine(words.holderFacts({ ...CURSOR_FACTS, monitors: 0, helpers: 0 })),
-                   { head: "Open in Cursor · ~/toni-erp · idle 6 min.", detail: "" }, "nothing runs: nothing more is said");
+                   { head: "Open in Cursor · ~/shop-api · idle 6 min.", detail: "" }, "nothing runs: nothing more is said");
   assert.deepEqual([0, 59, 60, 3599, 3600, 47 * 3600, 49 * 3600].map((s) => words.idleWords(s)),
                    ["idle under a minute", "idle under a minute", "idle 1 min", "idle 59 min", "idle 1 h", "idle 47 h", "idle 2 days"]);
 });
@@ -176,17 +176,17 @@ test("the line: working now, and a ChatDGC chat writing a reply", () => {
   const working = words.holderFacts({ ...CURSOR_FACTS, working: true, idle_s: 5, monitors: 0, helpers: 0 });
   assert.equal(working.idle_s, undefined, "never idle while it works");
   assert.deepEqual(words.holderLine(working),
-                   { head: "Open in Cursor · ~/toni-erp · working now.", detail: "Open here moves it to this window." });
+                   { head: "Open in Cursor · ~/shop-api · working now.", detail: "Open here moves it to this window." });
   assert.deepEqual(words.holderLine(working, "chat"),
-                   { head: "Open in Cursor · ~/toni-erp · writing a reply now.", detail: "Open here moves it to this window." });
+                   { head: "Open in Cursor · ~/shop-api · writing a reply now.", detail: "Open here moves it to this window." });
   assert.deepEqual(words.holderLine(words.holderFacts({ found: true, editor: "VS Code", folder: "~", working: false, idle_s: 7200 }), "chat"),
                    { head: "Open in VS Code · ~ · idle 2 h.", detail: "" });
 });
 
 test("the line: kept running by DGC with no window open", () => {
-  assert.deepEqual(words.holderLine(words.holderFacts({ found: true, windowless: true, editor: "", folder: "~/toni-erp",
+  assert.deepEqual(words.holderLine(words.holderFacts({ found: true, windowless: true, editor: "", folder: "~/shop-api",
                                                        working: true, monitors: 1 })),
-                   { head: "Kept running by DGC with no window open · ~/toni-erp · working now.",
+                   { head: "Kept running by DGC with no window open · ~/shop-api · working now.",
                      detail: "1 monitor runs there. Open here moves them to this window." });
 });
 
@@ -215,9 +215,9 @@ test("nothing invented: an older CLI, a holder that can't say where, or none at 
 
 test("the folder is shown with ~, never as a full path; the editor by the name people use", () => {
   const head = (folder) => words.holderLine(words.holderFacts({ found: true, editor: "Cursor", folder })).head;
-  assert.equal(head("~/toni-erp"), "Open in Cursor · ~/toni-erp.");
-  assert.equal(head("toni-erp"), "Open in Cursor · toni-erp.");
-  assert.equal(head("/home/bob/secret/toni-erp"), "Open in Cursor · toni-erp.", "whatever arrives, never another user's path");
+  assert.equal(head("~/shop-api"), "Open in Cursor · ~/shop-api.");
+  assert.equal(head("shop-api"), "Open in Cursor · shop-api.");
+  assert.equal(head("/home/bob/secret/shop-api"), "Open in Cursor · shop-api.", "whatever arrives, never another user's path");
   assert.equal(head("C:\\Users\\bob\\proj"), "Open in Cursor · proj.");
   assert.deepEqual(["Visual Studio Code", "Visual Studio Code - Insiders", "Cursor", "Windsurf", "VSCodium", "", undefined]
     .map((name) => words.editorName(name)), ["VS Code", "VS Code Insiders", "Cursor", "Windsurf", "VSCodium", "", ""]);
@@ -252,7 +252,7 @@ test("elsewhere: the read-only chat asks its own backend and the bar says where 
   assert.equal(asked[0].session_id, SESSION);
   const bar = bars(h.posted).at(-1);
   assert.equal(bar.state, "elsewhere");
-  assert.deepEqual(bar.note, { head: "Open in Cursor · ~/toni-erp · idle 6 min.",
+  assert.deepEqual(bar.note, { head: "Open in Cursor · ~/shop-api · idle 6 min.",
                                detail: "2 monitors and 1 background helper run there. Open here moves them to this window." });
   // Open here: the chat is this window's, and nothing more is asked about it.
   const taker = fakeServe("serve-elsewhere-taken", { caps: { detach: DETACH, session_holder: 1 }, holder: CURSOR_FACTS });
@@ -300,7 +300,7 @@ test("moved: the window it came from asks the side bar's backend, and says where
   assert.equal(h.provider.backend, undefined, "its own backend was let go");
   assert.ok(await until(() => bars(h.posted).some((m) => m.state === "moved" && m.note), 8000), "the line about the new owner");
   assert.deepEqual(home.commands().filter((c) => c.type === "session_holder").map((c) => c.session_id), [SESSION]);
-  assert.deepEqual(bars(h.posted).at(-1).note, { head: "Open in VS Code · ~/toni-erp · working now.",
+  assert.deepEqual(bars(h.posted).at(-1).note, { head: "Open in VS Code · ~/shop-api · working now.",
                                                  detail: "1 monitor runs there. Open here moves them to this window." });
   sidebarBackend.dispose("restart: test");
 });
@@ -322,12 +322,12 @@ test("moved, in a window whose side bar never started its backend: it is started
   assert.ok(await until(() => h.host.backend !== undefined, 8000), "the side bar's backend was started for it");
   spawned.push(h.host.backend.childPid);
   assert.ok(await until(() => bars(h.posted).some((m) => m.state === "moved" && m.note), 12000), "then asked");
-  assert.equal(bars(h.posted).at(-1).note.head, "Open in Cursor · ~/toni-erp · idle 6 min.");
+  assert.equal(bars(h.posted).at(-1).note.head, "Open in Cursor · ~/shop-api · idle 6 min.");
   h.host.backend.dispose("restart: test");
 });
 
 test("held: a session a terminal has open is read-only here, with the line, and this chat keeps its backend", async () => {
-  const terminal = { found: true, editor: "the terminal", windowless: false, folder: "~/toni-erp", working: false, idle_s: 130 };
+  const terminal = { found: true, editor: "the terminal", windowless: false, folder: "~/shop-api", working: false, idle_s: 130 };
   const fixture = fakeServe("serve-held", { caps: { detach: DETACH, session_holder: 1, session_owner: 1 }, holder: terminal });
   command = fixture.path;
   const h = tab();
@@ -339,7 +339,7 @@ test("held: a session a terminal has open is read-only here, with the line, and 
   assert.ok(await until(() => bars(h.posted).some((m) => m.note)), "the line");
   const bar = bars(h.posted).at(-1);
   assert.equal(bar.state, "elsewhere");
-  assert.deepEqual(bar.note, { head: "Open in the terminal · ~/toni-erp · idle 2 min.", detail: "" });
+  assert.deepEqual(bar.note, { head: "Open in the terminal · ~/shop-api · idle 2 min.", detail: "" });
   assert.equal(h.provider.backend, be, "its backend stays; it writes nothing to the session");
   // Read-only: what would change the session is refused here, and nothing reaches the backend.
   const sent = fixture.types().length;
@@ -377,10 +377,10 @@ test("the webview: the bar says the line, its head in bold, as text; today's sen
   const text = () => x.doc.getElementById("elsewhere-text");
   x.send({ type: "session_elsewhere", state: "elsewhere" });
   assert.equal(text().textContent, "This session is open in another window.");
-  x.send({ type: "session_elsewhere", state: "elsewhere", note: { head: "Open in Cursor · ~/toni-erp · idle 6 min.",
+  x.send({ type: "session_elsewhere", state: "elsewhere", note: { head: "Open in Cursor · ~/shop-api · idle 6 min.",
     detail: "2 monitors and 1 background helper run there. Open here moves them to this window." } });
-  assert.equal(text().querySelector("strong.elsewhere-where").textContent, "Open in Cursor · ~/toni-erp · idle 6 min.");
-  assert.equal(text().textContent, "Open in Cursor · ~/toni-erp · idle 6 min. 2 monitors and 1 background helper run there. "
+  assert.equal(text().querySelector("strong.elsewhere-where").textContent, "Open in Cursor · ~/shop-api · idle 6 min.");
+  assert.equal(text().textContent, "Open in Cursor · ~/shop-api · idle 6 min. 2 monitors and 1 background helper run there. "
                                    + "Open here moves them to this window.");
   assert.equal(x.doc.getElementById("elsewhere-bar").hidden, false);
   assert.equal(x.doc.getElementById("input").getAttribute("contenteditable"), "false", "still read-only");

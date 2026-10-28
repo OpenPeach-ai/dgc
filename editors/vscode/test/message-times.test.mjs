@@ -1,4 +1,4 @@
-// When each prompt was sent and each reply written, in DGC's chat (Work), ChatDGC and Pips (founder, 2026-10-17:
+// When each prompt was sent and each reply written, in DGC's chat (Work), ChatDGC and Pips (reported 2026-10-17:
 // "there is no timestamp or date for user sent prompts and model's responses"). One formatter, media/msgtime.js,
 // draws all three. Work's saved turns carry their times as {role: "time"} history markers (dgc/headless.py):
 // a field on turn_start would be a field on an existing event, which the SDK refuses.
@@ -113,7 +113,7 @@ test("Pips: a prompt's time is last in its row (under the bubble's edge), a repl
     "no saved time, no time");
 });
 
-// The founder, 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while a
+// Reported 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while a
 // turn runs is folded into that turn, so no turn start ever stamped it.
 function typed(v, text, { queue = false } = {}) {
   const input = v.doc.getElementById("input"), win = v.dom.window;

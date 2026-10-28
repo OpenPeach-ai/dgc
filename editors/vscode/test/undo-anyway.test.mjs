@@ -1,4 +1,4 @@
-// Undo never loses the person's work (the founder, 25 Oct: "fix all of these for 0.48").
+// Undo never loses the person's work (reported 25 Oct: "fix all of these for 0.48").
 //
 // 1. A file one of the turn's own commands changed, that Undo can't put back, is on the Edited card as "Changed by a
 //    command — Undo leaves it", with no line count, and Undo's question leaves it out of its count.
@@ -226,7 +226,7 @@ test("the question names the files Undo puts back from Git because a command cha
 });
 
 test("the question quotes a long prompt as one line cut at a word, with an ellipsis", async () => {
-  // It read "Run exactly this one shell command with the bash tool, and nothing els" (the founder, 25 Oct).
+  // It read "Run exactly this one shell command with the bash tool, and nothing els" (reported 25 Oct).
   said.length = 0; answers.length = 0; answers.push("Cancel");
   const long = "Run exactly this one shell command with the bash tool, and nothing else: git stash && git clean -fd";
   const { p } = provider([]);
@@ -280,7 +280,7 @@ test("an older CLI is sent rewind, as before", async () => {
   assert.equal(said.at(-1).message, "↩ Undone; DGC restored 1 file(s).");
 });
 
-// ---- Undo merges the person's edits (the founder, 25 Oct: "yes want them now in 0.48.0 only") ----
+// ---- Undo merges the person's edits (reported 25 Oct: "yes want them now in 0.48.0 only") ----
 const MERGING = { turn_files: 1, rewind_preview: 1, undo_to: 1, undo_merge: 1 };
 const PLAN = { files: 4, merged: ["a.py"], held: [{ path: "b.py", reason: "overlap" }], commands: ["rates.py", "README.md"] };
 

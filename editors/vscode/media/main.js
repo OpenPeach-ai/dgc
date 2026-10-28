@@ -860,7 +860,7 @@
         document,
         postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
         onOpenRun: navigation => { showPips(); pipsApp?.navigate?.(navigation); },
-        // A waiting Pip docks where questions dock (the founder chose it over a card in the reply).
+        // A waiting Pip docks where questions dock (the maintainers chose it over a card in the reply).
         // A question docked first keeps the place; the Pip docks again when it is answered.
         dock: { show: dockPipCard, hide: undockPipCard },
         // The Pip runs this chat started are background tasks: the pill counts them, the map lists them.
@@ -903,7 +903,7 @@
   // The Pips bar above the composer: today's digest, shown when the backend says it is due.
   let pipDigestBar = null;
   // The bar above the composer is the single-chat page's. A session's tab is about its session (the
-  // founder: a Pips notice there "has nothing to do with that session"), and the side bar's
+  // reported: a Pips notice there "has nothing to do with that session"), and the side bar's
   // Sessions home shows the Pips above its list instead (homePips).
   function digestBar() {
     if (!pipDigestBar && chatPlace === "chat" && window.DgcPips?.mountDigestBar && document.documentElement.dataset.pipsDocumentId) {
@@ -2556,7 +2556,7 @@
     if (!words) { if (note) note.remove(); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
     note.textContent = words;
-    // A queued message can be steered into the running turn instead of waiting for it to end (the founder,
+    // A queued message can be steered into the running turn instead of waiting for it to end (reported
     // 19 Oct): the same as pressing Enter while the model works, so it keeps going and reads it at its next step.
     if (state === "queued" && steerQueuedLive && !replaying) {
       const now = el("button", "steer-now", "Steer now");
@@ -2890,7 +2890,7 @@
   });
   // ---- end 0.47 pinned prompt ----
 
-  // ---- the prompt rail (media/promptrail.js, the same as ChatDGC's; the founder chose it for Work chats 2026-10-18) ----
+  // ---- the prompt rail (media/promptrail.js, the same as ChatDGC's; the maintainers chose it for Work chats 2026-10-18) ----
   // From five prompts, a short tick per prompt in the transcript's right margin, the one being read bright; hover or
   // Tab to it for a card of every prompt with its time; a click, or Alt+Up and Alt+Down from anywhere (the message box
   // too), goes there and outlines it. A chat opens on its latest pages, so the prompts before what's on screen come
@@ -3909,7 +3909,7 @@
   // 43s ›" row, which moves to the top of the turn: the one-line progress updates, the tool rows and
   // their groups, thinking, a reconnect that recovered, a sub-agent line whose agents are done, and the
   // card of a background command or monitor that reported while it worked (up to 40 lines of build
-  // output each, which stayed open under the answer: founder, 25 Oct). One
+  // output each, which stayed open under the answer: reported 25 Oct. One
   // click shows them again, in place under the row, and the row folds them again once the next turn has
   // answered. What a reader still needs stays: a detailed message (a diagnosis, a plan), a message you
   // sent mid-turn, question and approval cards, notices, the files and artifacts the turn made, a
@@ -5993,7 +5993,7 @@
 
   // One kind of work showing keeps its full row above the box. Two or more fold into one line of chips
   // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any. Pip fixes count
-  // as a kind (founder, 24 Oct): a fix's chip beside this chat's changes folds the changes into a chip too, as the
+  // as a kind (reported 24 Oct): a fix's chip beside this chat's changes folds the changes into a chip too, as the
   // checklist does, so the space above the box stays one line.
   function syncComposerRail() {
     const present = RAIL_KINDS.filter(([, bar]) => !bar.hidden).map(([kind]) => kind);
@@ -6406,7 +6406,7 @@
     const mini = typeof spec.share === "number"
       ? `<span class="chip-mini troupe-bar" aria-hidden="true"><span style="width:${spec.share}%"></span></span>` : "";
     const extra = (spec.extra || []).map(([text, cls]) => part(`chip-extra ${cls}`.trim(), text)).join("");
-    // What needs you is said in words and coloured as the rows were before the chip line (the founder, 19 Oct):
+    // What needs you is said in words and coloured as the rows were before the chip line (reported 19 Oct):
     // blocked or failed in the error red, the icon with it; waiting or an alert in amber. No dot, no outline.
     const need = spec.need ? part("chip-need", spec.needWord) : "";
     return icon + part("chip-word", spec.word) + part("chip-num", spec.num) + part("chip-word", spec.after) + mini + extra + need;
@@ -8150,7 +8150,7 @@
     pendingPrompts.set(requestId, { text: pastes.length ? typed : text,
       attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession, sentAt });
     // A message sent while a turn runs is folded into that turn, so no turn start ever stamps it: it gets its time
-    // now, as every prompt does (the founder, 25 Oct: steered prompts had none).
+    // now, as every prompt does (reported 25 Oct: steered prompts had none).
     if (streaming && delivery === "steer") stampPrompt(m, sentAt);
     // The restore draft rides along for the extension, which keeps it while the message is queued (a
     // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
@@ -9363,7 +9363,7 @@
       + `${how}, check each finding against the code, and fix the real ones here in the project. `
       + `Ask me before you change any live data or services.`;
   }
-  // Ask DGC to fix sends the prompt at once (the founder, 19 Oct: filling the box let a second click paste it again).
+  // Ask DGC to fix sends the prompt at once (reported 19 Oct: filling the box let a second click paste it again).
   // The click is the user's ask; the prompt still says to ask before touching live data or services. It goes as
   // its own message, queued behind a turn that is running, and never touches a draft in the box. A report that
   // has been asked about says so, also after a reload: the chat already holds the prompt naming its run.
@@ -9471,7 +9471,7 @@
     try {
       if (window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
         { index: PIP_REPORT_TYPES.indexOf(r.pip_type), name: r.name }, pose, `pip-report-${r.run_id.slice(4, 16)}`,
-        { includeStyles: !document.getElementById("plush-styles") && !document.getElementById("pips-plush-styles") });   // alive like the Pips button's Core (the founder, 19 Oct)
+        { includeStyles: !document.getElementById("plush-styles") && !document.getElementById("pips-plush-styles") });   // alive like the Pips button's Core (reported 19 Oct)
     } catch { face.replaceChildren(); }
     const main = el("div", "pip-report-main");
     const head = el("div", "pip-report-head");
@@ -9534,7 +9534,7 @@
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
-    // Two lines until opened (the founder, 19 Oct: the cards took too much room). Line one: the Pip, what it found,
+    // Two lines until opened (reported 19 Oct: the cards took too much room). Line one: the Pip, what it found,
     // when, and a chevron; line two: the worst finding or why it failed, with Fix, Open and Dismiss. A clean run is
     // the first line alone. Opening shows the whole card below them (today's), so nothing is drawn twice.
     card.classList.add("slim"); card.dataset.shown = "closed";
@@ -9597,7 +9597,7 @@
              where: typeof top?.path === "string" && top.path ? top.path.slice(0, 300) + (Number.isSafeInteger(top.line) && top.line > 0 ? `:${top.line}` : "") : "" };
   }
   // Two or more reports with nothing between them are one line until opened: "3 Pip reports · 1 failed · 5 findings"
-  // (from two since the founder, 24 Oct: two still stacked as two cards).
+  // (from two since reported 24 Oct: two still stacked as two cards).
   function groupPipReports(card) {
     if (!card?.parentNode) return;
     // A card with a fix is the fix's status: it stays a card of its own, and breaks a run of reports.
@@ -9668,7 +9668,7 @@
     if (stick || following) scroll(); else noteNewContent();
   }
   // ---- Ask DGC to fix, in the background (ready.capabilities.pip_fix) ----
-  // The founder (19 Oct): the fix is a background sub-agent of this chat, never a turn, so the chat stays free. Its
+  // Reported 19 Oct: the fix is a background sub-agent of this chat, never a turn, so the chat stays free. Its
   // report's card IS its status: what it is doing, Watch (the agent's page) and Stop; a permission it needs is asked
   // on the card; when it ends, what changed, whether tests ran in the fix copy, Review and Undo. Every state comes
   // from the backend as `pip_fix`; a replayed card carries its latest fix as `report.fix`, so a reload draws the same.
@@ -9764,7 +9764,7 @@
   }
   // Paint one card from its fix. The fix area is its own line under the card's two, shown open or closed, and the card
   // leaves a folded group of reports: a running fix is never out of sight behind "3 Pip reports".
-  // A finished fix is one line (founder, 24 Oct): what it did, the totals, its time, Review / Undo / Watch. What it changed,
+  // A finished fix is one line (reported 24 Oct): what it did, the totals, its time, Review / Undo / Watch. What it changed,
   // its tests and summary open under that line with a click on it, and stay as the user left them while the card repaints.
   const pipFixOpen = new Set();
   function paintPipFixCard(card, fix) {
@@ -9989,7 +9989,7 @@
       .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
   }
   // ---- Pips running now (ready.capabilities.pip_runs_running) ----
-  // The founder (24 Oct): a Pip that reports to this chat runs in the Pips runner, and the chat said nothing until its
+  // Reported 24 Oct: a Pip that reports to this chat runs in the Pips runner, and the chat said nothing until its
   // card arrived. Now a chip says so while it runs ("Billing audit running · 0:42", "2 Pips running"); a click opens
   // that Pip's chat on the Pips page, at the run's live post (with two or more, a list to pick from). It goes when the
   // run ends, and the card arrives as before. Pips that report to other chats show nothing here.
@@ -10653,7 +10653,7 @@
   function agentMarkMotionOk() {
     return !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
-  // A working agent's face swirls (its -animated artwork) everywhere it is drawn, chips included: the founder
+  // A working agent's face swirls (its -animated artwork) everywhere it is drawn, chips included: a user
   // chose it back on 2026-10-18 after 0.26.3 had kept the still frame at chip size. `live` is false once the
   // agent ends, and under reduced motion (paintAgentMark), so those get the still frame.
   function agentMarkSrc(index, live) {
@@ -10698,7 +10698,7 @@
   // top-level agents started together, where each used to get a full-width row of its own. Faces first, then a sentence in
   // which only the names are controls, each opening that agent's page: "Durable rules review, Remote
   // web and Paper pip concept started working". The names keep their call order and never move --
-  // the founder reported agents "switching their place" when every one had its own row, and Codex
+  // a user reported agents "switching their place" when every one had its own row, and Codex
   // keeps an agent where it started. Only the words between the names change: one word per agent,
   // and neighbours that share a word share it, "A and B finished · C running".
   const AGENT_START_MS = 2000, AGENT_NAMES_SHOWN = 3, AGENT_LINE_CAP = 4;
@@ -11370,7 +11370,7 @@
     renderComposerControls();
   }
   // Where it is open and what runs there, when the DGC holding it said so (the host's holderWords.ts): "Open in Cursor ·
-  // ~/toni-erp · idle 6 min." in bold, then what runs and waits there. Otherwise the plain sentence. Text only.
+  // ~/shop-api · idle 6 min." in bold, then what runs and waits there. Otherwise the plain sentence. Text only.
   function elsewhereWords(node, note, plain) {
     if (!node) return;
     const head = typeof note?.head === "string" ? note.head.slice(0, 300) : "";
@@ -14538,11 +14538,11 @@
   // target, so Enter, a click on it or Next takes it; Skip stays a separate, explicit control, and
   // nothing is sent without a user action. A pick settles its question and moves on. A single
   // question is sent by its pick; a card of several is sent only by Submit, so the last answer stays
-  // on screen with the others to check (founder, 2026-10-21: "user should need to press submit button
+  // on screen with the others to check (reported 2026-10-21: "user should need to press submit button
   // to send all answers, not auto send"). The answered state renders inside the step's tool card,
   // identically live and on replay.
   const ASK_KEY_GUARD_MS = 400, ASK_CHOSEN_MS = 150, ASK_MAX_TEXT = 4096;
-  // Moving on to another question has to be seen (founder, 2026-10-21: "so quick, it gets hard for me to
+  // Moving on to another question has to be seen (reported 2026-10-21: "so quick, it gets hard for me to
   // realise it has moved to the second question"). The pick holds a little longer, the next question
   // streams in a word at a time and its options pop in one after another, and for a moment after the
   // step a second click or a held key cannot answer the new question by landing where the last one was.
@@ -15101,7 +15101,7 @@
   }
 
   // ---- the answered state, inside the step's tool card ----
-  // As Claude Code keeps it (founder, 2026-10-17): "Questions · Answered · 4 questions", open, with every
+  // As Claude Code keeps it (reported 2026-10-17): "Questions · Answered · 4 questions", open, with every
   // question and every option still there, the ones picked marked (a filled circle for one choice, a ticked
   // box for several) and the rest quieter, so the transcript says what was asked as well as what was chosen.
   function askedSummary(ev) {

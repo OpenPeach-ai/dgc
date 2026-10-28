@@ -1,4 +1,4 @@
-"""ChatDGC's plugins (founder decision 6): every plugin turned on is the chat's, with no "use this plugin?" card. A read
+"""ChatDGC's plugins (decision 6): every plugin turned on is the chat's, with no "use this plugin?" card. A read
 runs at once; a change waits on a card under the reply until the user sends it (as they edited it), hands it to a Pip,
 or doesn't. A payment plugin always asks, and nothing the chat read from the user's apps leaves without the card (the
 careful check Pips use): not in a change the level would let through, not in a web search."""

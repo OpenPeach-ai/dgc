@@ -1,4 +1,4 @@
-"""The per-turn token cap in Settings (founder, 2026-10-14: "Off, but shown in Settings"). `turn_token_budget` already
+"""The per-turn token cap in Settings (reported 2026-10-14: "Off, but shown in Settings"). `turn_token_budget` already
 capped a turn, sub-agents included, but only config.json could set it. Now Settings -> General shows and saves it, and
 the `config` event carries it only to an editor that asks (get_config `fields`), so an older editor never sees a field
 it would reject."""

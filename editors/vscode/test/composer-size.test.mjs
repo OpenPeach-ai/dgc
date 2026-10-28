@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 
 // The prompt box grows with its text, and that measurement needs a real layout. A turn that stopped
-// while the founder was on another view restarted the backend, which restores the draft and resizes
+// while a user was on another view restarted the backend, which restores the draft and resizes
 // the box — measured while the panel was hidden, it came back 160px tall and empty (collapsed to zero
 // width) or 0px (display:none). Only a real browser lays text out, so these run in Chromium.
 const here = dirname(fileURLToPath(import.meta.url));

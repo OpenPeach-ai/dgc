@@ -201,7 +201,7 @@ test("a live face breathes, and stops for a reader who asked for less motion; th
     assert.ok(a.length > 0 && a.every((f) => f.img), "the live faces are the shipped SVGs");
     assert.ok(a.every((f) => f.animation === "agent-mark-breathe"), JSON.stringify(a));
     assert.ok(b.length === a.length && b.every((f) => f.animation === "none"), JSON.stringify(b));
-    // The artwork swirls too (founder, 2026-10-18), and a reader who asked for less motion gets the still frame.
+    // The artwork swirls too (reported 2026-10-18), and a reader who asked for less motion gets the still frame.
     assert.ok(a.every((f) => f.src.endsWith("-animated.svg")), JSON.stringify(a));
     assert.ok(b.every((f) => f.img && !f.src.includes("-animated")), JSON.stringify(b));
     const m = await still.evaluate(measure, CONTRAST_SOURCE);

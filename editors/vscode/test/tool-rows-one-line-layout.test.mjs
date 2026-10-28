@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CONTRAST_SOURCE, openThinkingPage } from "./render-thinking.mjs";
 import { founderTurn } from "./support/tool-rows-scene.mjs";
 
-// One line per stretch of work, as Chromium lays it out. The founder's deepseek turn drew twelve rows
+// One line per stretch of work, as Chromium lays it out. A user's deepseek turn drew twelve rows
 // (452px) between two sentences: "Thought for 2s · raw", "Ran 1 command", six times over. The same
 // six think-and-run pairs are now one line -- under 80px from the first sentence to what follows the
 // stretch, at a side bar's width and an editor tab's -- six steps when opened, each with its thought
@@ -49,7 +49,7 @@ const STRETCH_SOURCE = `() => {
 }`;
 
 for (const width of [460, 900]) {
-  test(`the founder's six think-and-run pairs are one line at ${width}px, at most 80px between the sentences`, async (t) => {
+  test(`a user's six think-and-run pairs are one line at ${width}px, at most 80px between the sentences`, async (t) => {
     if (skipOrFail(t)) return;
     const page = await open({ width, events: founderTurn() });
     try {

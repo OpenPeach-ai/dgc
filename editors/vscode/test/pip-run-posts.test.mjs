@@ -1,4 +1,4 @@
-// A Pip's runs in its own chat (Pips API 51), as the Pip speaking. The founder (21 Oct) picked "The Pip speaks":
+// A Pip's runs in its own chat (Pips API 51), as the Pip speaking. Reported 21 Oct picked "The Pip speaks":
 // each run is a chat message from the Pip (its face, name and the time) in its own short words, grounded in the run's
 // report; the detail sits in a small attachment under it (Report · 4 findings ›, Ask DGC to fix, See what happened,
 // Run again now, Open run); all-clear runs in a row are ONE message that updates itself ("Both checks passed again",
@@ -20,7 +20,7 @@ const posts=await import(new URL('../src/pipRunPosts.js',import.meta.url).href);
 const windows=[];after(()=>windows.forEach(w=>w.close()));
 
 const PIP='pip_'+'a'.repeat(32),R1='run_'+'1'.repeat(32),R2='run_'+'2'.repeat(32),R3='run_'+'3'.repeat(32),CHAT='run_'+'9'.repeat(32);
-const ws={id:'ws',name:'toni-erp'};
+const ws={id:'ws',name:'shop-api'};
 const iso=ms=>new Date(ms).toISOString();
 // Noon today, and the page's clock with it (setup), so the posts 1 to 5 hours "ago" stay on today's date and
 // the next run stays ahead at any hour: from Date.now() they read "Yesterday's audit" between midnight and 5 AM,

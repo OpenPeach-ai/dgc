@@ -1,4 +1,4 @@
-// A Pip connects your apps from its own chat, like Grok's connectors (Pips API 43). The founder's Gmail
+// A Pip connects your apps from its own chat, like Grok's connectors (Pips API 43). A user's Gmail
 // Pip answered "I can't set up the Gmail connection myself — I've got no tool for it"; now it asks with
 // connect_app and this card is the user's side. The host opens the sign-in page from the backend's
 // reply: the webview never sees the link.
@@ -130,7 +130,7 @@ test("Grok's A/B card: the Pip's choices sit under its latest reply, and a tap a
  assert.equal(x.d.querySelector('[data-message="a1"] .msg-choices')!==null,true,'under the reply');
  choices[0].click();await flush();
  const sent=x.requests('send_pip_message').at(-1);assert.ok(sent,'the tap is the reply');assert.equal(sent.request.text,'Yes, connect Gmail');
- // The founder (2026-10-07): the choice showed in the prompt box first, then sent. It is a bubble at once.
+ // Reported 2026-10-07: the choice showed in the prompt box first, then sent. It is a bubble at once.
  assert.equal(x.d.getElementById('chatText').value,'','never in the box');
  assert.equal([...x.d.querySelectorAll('.pip-message.user .prompt-text')].at(-1)?.textContent,'Yes, connect Gmail','already in the chat');
  assert.match(x.d.querySelector('.pip-working')?.textContent||'',/getting ready/);

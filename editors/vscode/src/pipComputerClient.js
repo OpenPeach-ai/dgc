@@ -9,14 +9,14 @@ import {esc,errorText,record,requestBroker,pipComputer,pipComputerView,pipComput
 
 const vscode=acquireVsCodeApi();
 const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
-// The computer opens on its desktop with nothing open, like a computer you switch on (the founder:
+// The computer opens on its desktop with nothing open, like a computer you switch on (a user:
 // "show default OS screen, with nothing opened"). The browser comes up when you open it from the
 // dock, or by itself when the Pip starts using it, so you can watch.
 const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
  terminal:{entries:[],error:'',running:false,draft:''},busy:false,
  // What you are typing in the address bar. Every new frame redraws the bar with the page's address,
- // and that wiped each letter as you typed it (the founder's report); it shows yours until you go,
+ // and that wiped each letter as you typed it (a user's report); it shows yours until you go,
  // press Escape or leave the bar.
  address:null,
  // The full screen, like Grok's bots: the CLI can stream it (screenCapable) and this machine has it (desktop.available).
@@ -183,7 +183,7 @@ function installMarkup(){
  const d=S.desktop;if(!S.screenCapable||!d||d.available)return '';
  const s=d.setup;
  if(s&&(s.state==='running'||s.state==='none'&&!d.install)){
-  // Plain words, no package names or megabytes (the founder: "just show it as Setting up your Pip").
+  // Plain words, no package names or megabytes (reported: "just show it as Setting up your Pip").
   // Downloading is most of the wait; unpacking finishes the bar.
   const share=s.total>0?(s.step==='Unpacking'?90+Math.round(s.done/s.total*10):Math.round(s.done/s.total*90)):null;
   return `<div class="pc-notice pc-setup" role="status"><strong>Setting up your Pip…</strong>`

@@ -1,4 +1,4 @@
-// Steer now / Steer all (the founder, 2026-10-19): a queued message ("you · queued") could only wait for the
+// Steer now / Steer all (reported 2026-10-19): a queued message ("you · queued") could only wait for the
 // running turn to end. With ready.capabilities.steer_queued it offers Steer now, and Steer all when several wait;
 // the backend moves them into the turn and answers each with prompt_accepted "steered", or refuses with a reason.
 import { test } from "node:test";

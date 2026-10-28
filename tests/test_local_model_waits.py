@@ -2,7 +2,7 @@
 
 A model on this computer or network can take tens of minutes before its first token (a load from a
 slow disk, then a long prefill). Each re-send makes the server start the prompt again, so the old
-900 s first-token window, the 900 s load window and the 1800 s socket ceiling made the founder's
+900 s first-token window, the 900 s load window and the 1800 s socket ceiling made a user's
 case fail after about 45 minutes. Now a local request asks its server (dgc/server_check.py) and is
 closed only when the server is gone or no longer working on it; a cloud request keeps its limits.
 

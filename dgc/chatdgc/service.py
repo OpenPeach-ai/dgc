@@ -33,10 +33,10 @@ FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
 CLOSE_GRACE_S = 5.0
 
-# Open here for a chat (one window writes to a chat at a time; the founder, 23 Oct 2026). A window's process holds the
+# Open here for a chat (one window writes to a chat at a time; reported 23 Oct 2026. A window's process holds the
 # chats its tabs show and the ones it is writing, and says so in its note (dgc/peers.py, "chatdgc_held"); another
 # window's process finds it there and asks it over its socket (dgc/serve_detach.py) to let one chat go. Holding a chat
-# means holding its lock (dgc/chatdgc/held.py; the founder, 24 Oct 2026): notes are written now and then, and two windows
+# means holding its lock (dgc/chatdgc/held.py; reported 24 Oct 2026: notes are written now and then, and two windows
 # opening one chat in that gap both read "nobody holds it". The kernel's lock lets exactly one of them have it.
 TAKE_ANSWER_S = 40.0          # how long a take waits for the holder's answer (its chat's name and follow-ups land first)
 SETTLE_S = 30.0               # how long a holder waits for what follows a reply (name, follow-ups, a look back)

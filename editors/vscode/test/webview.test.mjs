@@ -1482,7 +1482,7 @@ test("a tool batch shows the work while it runs, bounded, with the rest one clic
   dom.window.close();
 });
 
-// The turn the founder actually hit: an answer, a gate that continued the loop, more tool work,
+// The turn a user actually hit: an answer, a gate that continued the loop, more tool work,
 // and then the real answer. The panel used to promote the LAST prose node it could see, which was
 // the gate round's, and leave the block he had read as bare unclassified text.
 test("a gate round promotes the answer the backend designated, and demotes everything else", () => {
@@ -1636,13 +1636,13 @@ test("a turn made only of tool calls counts the arguments the model wrote", () =
   dom.window.close();
 });
 
-// The founder's screenshot: while a command ran, the panel printed it three times -- in the tool
+// A user's screenshot: while a command ran, the panel printed it three times -- in the tool
 // group header, on the card, and again on the activity row at the bottom. The card is the one place
 // the argument belongs; the header summarises and the row says what kind of step is running.
 test("a running command is shown once, on its card, while the header and activity row summarise", () => {
   const { dom, errors, send, doc } = makeDom();
   const event = value => send({ type: "event", event: value });
-  const command = "cd /home/founder/projects/app && npm test -- --runInBand --watch=false";
+  const command = "cd /home/me/projects/app && npm test -- --runInBand --watch=false";
   event({ type: "turn_start", turn_id: "t1", prompt: "Run the tests" });
   event({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: command.slice(0, 120) });
   event({ type: "tool_call", call_id: "c1", name: "bash", args: { command }, summary: command });
@@ -2067,7 +2067,7 @@ test("a link says where it goes, and its mark discloses the host and nothing mor
     "each link is classified by where it points");
 
   // This test used to assert that NOTHING was fetched for a link mark. That was DGC's policy and
-  // is no longer: links wear the site's real favicon, as they do in Codex, which the founder
+  // is no longer: links wear the site's real favicon, as they do in Codex, which a user
   // asked for after being shown what it discloses. What survives is the bound on the disclosure
   // -- the icon service is asked about an ORIGIN, so a URL's path and query never leave, and the
   // service fetches the site itself, so the site's operator sees Google rather than the reader.
@@ -3256,7 +3256,7 @@ test("a finished turn summarises what it changed and offers Undo and Review", ()
 });
 
 test("a long list of edited files expands AND collapses again", () => {
-  // The founder expanded a file list and found no way back: the control hid itself on open, with a
+  // A user expanded a file list and found no way back: the control hid itself on open, with a
   // comment saying "there is nothing to re-collapse to". Three rows is the collapsed shape, so
   // there always was.
   const { errors, send, doc } = makeDom();
@@ -3597,8 +3597,8 @@ test("a selected control is a filled pill, not a pill with a bar under it", () =
 });
 
 test("auto mode colours the model pill too, not just the box around it", () => {
-  // Auto mode used to ring the whole composer: an accent border plus a 3px glow on focus. The
-  // founder asked for that to go (2026-09-24) -- a bright halo round the box you look at all day
+  // Auto mode used to ring the whole composer: an accent border plus a 3px glow on focus. A user
+  // asked for that to go (2026-09-24) -- a bright halo round the box you look at all day
   // is an accent spent as decoration, the same complaint that moved links off --accent. What it
   // must NOT do is take the box's own fill; it is announced by the controls, on the ordinary
   // surface.
@@ -4678,7 +4678,7 @@ test("an answer offers Make this a Pip only when Pips can take it, and only draf
 });
 
 test("the model menu's note is three lines with Show more, and Show more opens it in place", () => {
-  // The founder (2026-10-07): Ollama's note ("Off turns thinking off. Low, Medium and High are sent as
+  // Reported 2026-10-07: Ollama's note ("Off turns thinking off. Low, Medium and High are sent as
   // Ollama's thinking levels…") took over the model selector.
   const { dom, errors, send, doc } = makeDom();
   send({ type: "event", event: { type: "ready", provider_capabilities: { reasoning_control: "ollama-levels" } } });

@@ -48,7 +48,7 @@ const hostFor = (opts = {}) => `(${function (opts) {
     context_size: 65536, suggest: true, monitor_wake: true, tool_profile: "standard" };
   const memory = { type: "memory_state", enabled: true, projects: [], facts: opts.facts ? [{ id: "f1", text: "Prefers metric units and short answers",
     source: { surface: "chat", where: "Weekend in Lisbon" }, updated_at: "2026-10-17T10:00:00Z" }] : [] };
-  if (opts.facts) memory.projects = [{ name: "evolving-fungi", folder: "/home/me/evolving-fungi", when: "today", remember: true, recent: ["Fix the narrow settings layout"] }];
+  if (opts.facts) memory.projects = [{ name: "notes-app", folder: "/home/me/notes-app", when: "today", remember: true, recent: ["Fix the narrow settings layout"] }];
   // dgc/voice/catalog.py's dictation models: Nemotron's facts line is the longest.
   const models = [
     { id: "moonshine-base-en", role: "dictation", name: "Moonshine", summary: "Fast. English only.", languages: "English", licence: "MIT", size: 111266225 },

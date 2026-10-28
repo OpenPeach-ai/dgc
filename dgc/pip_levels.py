@@ -33,7 +33,7 @@ from .workspace_registry import RegistryError, utc_now
 
 ASK, APPROVE, FULL = "ask", "approve", "full"
 LEVELS = (ASK, APPROVE, FULL)
-# The level of every Pip nobody chose one for, new and old: no silent change in behaviour (founder, 2026-10-20).
+# The level of every Pip nobody chose one for, new and old: no silent change in behaviour (reported 2026-10-20).
 DEFAULT = ASK
 KEY = "pip_level:"                       # metadata: a Pip's chosen level, JSON {level, at, by}
 FLOOR_KEY = "pip_floor_allowed:"         # metadata: Terminal commands the user let through the floor, once each
@@ -82,7 +82,7 @@ def level(registry, pip_id) -> str:
     return value
 
 
-# A Personal Pip made from now on starts at Approve for me (founder, 2026-10-21): it removed every Allow tap in the
+# A Personal Pip made from now on starts at Approve for me (reported 2026-10-21): it removed every Allow tap in the
 # bills and shirts tests while orders, payments, new recipients, posts and deletes still ask. A Pip made before has no
 # saved level and stays at DEFAULT (Ask) until someone changes it.
 NEW_PIP = APPROVE

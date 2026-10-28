@@ -1,6 +1,6 @@
 // A file the model made, shown as a chip you can click.
 //
-// The founder's case was "record a video and show me". DGC could show an IMAGE — a thumbnail
+// A user's case was "record a video and show me". DGC could show an IMAGE — a thumbnail
 // inside a collapsed tool card — and nothing else. Codex shows a chip; clicking it opens the file
 // in the editor. Neither Codex nor Claude Code's extension offers a download, because the file is
 // already on the user's own disk.

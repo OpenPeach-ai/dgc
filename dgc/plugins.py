@@ -1433,7 +1433,7 @@ def uninstall(name: str, *, config, manager=None) -> dict:
 # always_ask asks even before it reads; any_changes reads at once and asks before any change; important (the
 # default) reads at once and asks before an important action (sending, creating, editing, deleting, sharing,
 # paying); never_ask asks nothing, and is never offered for a plugin that can move money. Turning a plugin on
-# in Settings is the consent to use it at all (founder, 2026-10-09): no "use this plugin?" card anywhere.
+# in Settings is the consent to use it at all (reported 2026-10-09): no "use this plugin?" card anywhere.
 PERMISSIONS = ('always_ask', 'any_changes', 'important', 'never_ask')
 DEFAULT_PERMISSION = 'important'
 

@@ -1,4 +1,4 @@
-"""Undo never loses the person's work (the founder, 25 Oct: "fix all of these for 0.48").
+"""Undo never loses the person's work (reported 25 Oct: "fix all of these for 0.48").
 
 The study (dgc-work/codex-undo-study/REPORT.md, cases D1-D16) drove DGC's real CheckpointManager and
 found where a rewind discarded work nobody asked it to discard, or refused for no reason:
@@ -70,7 +70,7 @@ MODULE = (b"def total(items):\n    return sum(items)\n\n\n"
 
 
 class BetweenTurnsTests(unittest.TestCase):
-    """§4.1, merged (the founder, 25 Oct: "yes want them now in 0.48.0"): a change somebody made after
+    """§4.1, merged (reported 25 Oct: "yes want them now in 0.48.0"): a change somebody made after
     DGC wrote a file -- between two of DGC's writes, during a turn, or after its last one -- is kept,
     and DGC's own changes are taken out, by a 3-way merge with what DGC left (its after-bytes). Only
     when their edits overlap DGC's is the file held back and named."""
@@ -901,7 +901,7 @@ class FailureLineTests(HarnessCase):
 
 
 # ---------------------------------------------------------------------------------------------------
-# Uncommitted work (the founder, 25 Oct): a model's git checkout . / reset --hard / clean -fd / stash / rm
+# Uncommitted work (reported 25 Oct): a model's git checkout . / reset --hard / clean -fd / stash / rm
 # over uncommitted changes is undoable. DGC copies every file with uncommitted changes before each of the
 # chat's own commands, and Undo puts back the copy of each one the command changed. It never touches Git.
 # ---------------------------------------------------------------------------------------------------
@@ -1066,7 +1066,7 @@ class UncommittedWorkTests(CommandHelpers, HarnessCase):
 
 
 # ---------------------------------------------------------------------------------------------------
-# Undo merges the person's edits, and the terminal hears their saves (the founder, 25 Oct: "yes want them
+# Undo merges the person's edits, and the terminal hears their saves (reported 25 Oct: "yes want them
 # now in 0.48.0 only"). Each fails on chatdgc at ef98964f and passes now.
 # ---------------------------------------------------------------------------------------------------
 import sys

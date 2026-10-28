@@ -497,7 +497,7 @@ class PipSetupTests(unittest.TestCase):
 
     def test_an_allowed_setup_creates_the_pip_with_no_daily_limit(self):
         # Auto mode, an allow rule or the user's Allow on an ask rule: the agent marks the call, and
-        # that permission is the approval. Pips have no daily token limit (founder, 2026-10-14).
+        # that permission is the approval. Pips have no daily token limit (reported 2026-10-14).
         with patch('dgc.pip_runtime.require_supervisor', return_value={'online': True}):
             result = self.tool({**self.request(), '_dgc_create_now': True})
         self.assertTrue(result['created'])
@@ -514,7 +514,7 @@ class PipSetupTests(unittest.TestCase):
                          .fetchone()[0], 0, 'no limit is stored')
 
     def test_outside_auto_mode_a_setup_is_a_card_whose_create_is_the_approval(self):
-        # The founder: the setup "can come in the chat and user can click it to approve". Without the
+        # A user: the setup "can come in the chat and user can click it to approve". Without the
         # agent's mark the call saves the card the editor docks above the chat box; nothing exists yet.
         with patch('dgc.pip_runtime.require_supervisor', side_effect=AssertionError('no runner needed for a card')):
             result = self.tool(self.request())
@@ -533,7 +533,7 @@ class PipSetupTests(unittest.TestCase):
 
     def test_a_setup_that_needs_its_own_review_stays_a_card(self):
         # A project Pulse with commands keeps a card in every mode. Reading connected accounts does not
-        # (founder, 2026-10-07): auto mode creates that Pip like any other; its sends wait for Allow.
+        # (reported 2026-10-07): auto mode creates that Pip like any other; its sends wait for Allow.
         self.assertFalse(pip_setup.needs_card({'app_plan': {'schema_version': 1}}))
         self.assertTrue(pip_setup.needs_card({'pip_type': 'pulse'}))
         self.assertFalse(pip_setup.needs_card({'pip_type': 'pulse', 'scope': 'personal'}))

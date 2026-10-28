@@ -157,7 +157,7 @@ test("an icon that fails to load falls back to the bundled mark", () => {
 });
 
 test("a link in the MODEL's answer wears the favicon too", () => {
-  // The line DGC used to draw and Codex does not. The founder asked for Codex's behaviour.
+  // The line DGC used to draw and Codex does not. The maintainers asked for Codex's behaviour.
   const dom = makeDom();
   // Backend events reach the panel wrapped, the way panel.ts forwards them.
   const event = (data) => dom.send({ type: "event", event: data });

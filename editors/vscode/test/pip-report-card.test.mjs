@@ -1,6 +1,6 @@
 // Pip reports reach the chat: a finished run of a Pip that reports to this chat is a card IN THE
 // TRANSCRIPT where it arrived -- never another row above the composer, never a turn by itself. Ask DGC
-// to fix sends one message naming the run, once (the founder, 19 Oct: filling the box let a second click
+// to fix sends one message naming the run, once (reported 19 Oct: filling the box let a second click
 // paste the prompt again); Open report opens the Pips view at that run;
 // Dismiss removes it and tells the backend, which saves it with the chat. Live (`pip_report`) and
 // replay ({role: "pip_report"} in history) go through one renderer, so a reload draws the same card.
@@ -133,7 +133,7 @@ test("a clean run is one quiet line with no fix to ask for", () => {
   assert.equal(card.querySelector(".pip-report-line2"), null, "one line");
 });
 
-// The founder (19 Oct): the cards took too much room ("just 2 lines"); three that arrive together are one line.
+// Reported 19 Oct: the cards took too much room ("just 2 lines"); three that arrive together are one line.
 test("a report is two lines until opened: what it found, then the worst finding with Fix, Open and ✕", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
@@ -169,7 +169,7 @@ test("a failed run's second line says why", () => {
 });
 
 test("two or more reports that arrive together are one line, opened to their rows; one alone is a card", () => {
-  // The founder, 24 Oct: the folded line was perfect, but two reports still stacked as two cards. It starts at two.
+  // Reported 24 Oct: the folded line was perfect, but two reports still stacked as two cards. It starts at two.
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });
   assert.equal(s.doc.querySelector("#log .pip-report-group"), null, "one card is not grouped");

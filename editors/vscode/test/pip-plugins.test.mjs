@@ -204,7 +204,7 @@ test('Pips settings → Plugins: which Pips use each plugin, Remove for one, and
 });
 
 test('Pips settings → Plugins (Pips API 45): every plugin is every Pip\'s, with what it may do without asking',async()=>{
- // Founder, 2026-10-09: a plugin turned on in Settings is consent; ChatGPT's four levels decide what asks.
+ // Reported 2026-10-09: a plugin turned on in Settings is consent; ChatGPT's four levels decide what asks.
  const levels=['always_ask','any_changes','important','never_ask'];
  const uses={plugins:[{plugin:'aave',name:'Aave',money:true,about:'Live markets',permission:'important'},
   {plugin:'airtable',name:'Airtable',money:false,about:'',permission:'any_changes'}],levels,installed};

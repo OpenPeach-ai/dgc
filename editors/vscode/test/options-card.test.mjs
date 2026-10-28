@@ -301,7 +301,7 @@ test("pointer: a pick shows for 400 ms when a question follows, then advances; S
   assert.deepEqual(p.errors, []);
 });
 
-// Founder, 2026-10-21: after a pick the card moved on "so quick, it gets hard for me to realise it has moved to the
+// Reported 2026-10-21: after a pick the card moved on "so quick, it gets hard for me to realise it has moved to the
 // second question".
 test("the step to the next question is seen: the pick holds, the question streams in, a second click answers nothing", () => {
   const SYNC = q("q2", "Which machines should sync first?", [opt("Laptop"), opt("NAS"), opt("Both")]);
@@ -333,7 +333,7 @@ test("the step to the next question is seen: the pick holds, the question stream
   p.key(p.rows()[0], "3", { repeat: true });
   p.advance(400);
   assert.deepEqual(p.responses(), [], "an auto-repeated key is not a choice");
-  // The last pick sends nothing (founder, 2026-10-21: "user should need to press submit button to send all
+  // The last pick sends nothing (reported 2026-10-21: "user should need to press submit button to send all
   // answers, not auto send"): every answer stays to check, Submit takes focus, and only Submit sends.
   p.click(p.rows()[2]);
   p.advance(150);
@@ -505,7 +505,7 @@ test("the answered state renders inside the tool card, identical live, replayed 
   assert.equal(expected.verb, "Questions");
   assert.equal(expected.arg, "· Answered · 2 questions");
   assert.equal(expected.glyph, "circle-help");
-  assert.equal(expected.open, true, "open, as Claude Code keeps an answered question (founder, 2026-10-17)");
+  assert.equal(expected.open, true, "open, as Claude Code keeps an answered question (reported 2026-10-17)");
   assert.equal(expected.badge, "");
   assert.deepEqual(shape(reversed), expected);
   assert.deepEqual(shape(replayed), expected);
@@ -551,7 +551,7 @@ test("the answered state renders inside the tool card, identical live, replayed 
 });
 
 test("a question the model asked stands in the transcript, between the tool groups, not folded inside one", () => {
-  // Founder, 2026-10-17: kept the way Claude Code keeps "Questions". Inside "Used 1 tool" it folded away the
+  // Reported 2026-10-17: kept the way Claude Code keeps "Questions". Inside "Used 1 tool" it folded away the
   // moment the model moved on. A sub-agent's question is that agent's step, and stays with its other steps.
   const bash = (id) => ({ type: "tool_call", call_id: id, name: "bash", args: { command: "ls" }, summary: "ls" });
   const done = (id) => ({ type: "tool_result", call_id: id, name: "bash", output: "a.txt", is_error: false, is_diff: false, diff: "" });

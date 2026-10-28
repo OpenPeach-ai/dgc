@@ -39,7 +39,7 @@
 .pip-run-owned{display:none!important}
 @media(max-width:300px){.pip-run-line{flex-wrap:wrap}.pip-run-open{max-width:calc(100% - 24px)}}
 
-/* The line in the reply, and the card docked above the chat box (the founder's choice, 2026-10-07). */
+/* The line in the reply, and the card docked above the chat box (the maintainers' choice, 2026-10-07). */
 .pip-setup-line{margin:6px 0;border-radius:var(--r-md,8px);background:var(--surface)}
 .pip-setup-line[data-status=pending]{background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
 .pip-setup-line .pip-setup-summary{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 8px}

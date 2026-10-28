@@ -1,6 +1,6 @@
 """Short updates between tool calls: the Work agent keeps the user informed, a sub-agent does not.
 
-The founder watched turns where many tool calls went by before the model said anything, with only
+A user watched turns where many tool calls went by before the model said anything, with only
 its thinking to read. Codex ("preamble messages") and Claude Code both tell their models to say in
 a sentence what they are about to do before the first tool call, and to give a one-line update when
 they find something or change course. DGC's Work prompt now says the same. Its cadence is by time,

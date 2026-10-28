@@ -294,10 +294,10 @@ class PickerKeepsTheTranscriptDrawnTests(unittest.TestCase):
     def setUp(self):
         home = Path(os.path.realpath(tempfile.mkdtemp(prefix="dgc-picker-redraw-")))
         self.addCleanup(shutil.rmtree, home, True)
-        project = home / "toni-erp"
+        project = home / "shop-api"
         (home / ".dgc").mkdir(parents=True)
         project.mkdir()
-        (project / "README.md").write_text("# Toni ERP\n")
+        (project / "README.md").write_text("# Shop API\n")
         (home / ".gitconfig").write_text("[user]\n\tname = DGC Tests\n\temail = tests@dgc.invalid\n")
         genv = {"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "baseline"]):

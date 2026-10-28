@@ -1,6 +1,6 @@
 // A parallel sub-agent's own page shows its work WHILE it works.
 //
-// Reported from the founder's 192.168.1.111 box: a delegated agent ran for 27 minutes and its page
+// Reported by a user: a delegated agent ran for 27 minutes and its page
 // showed nothing but a running timer. Not a rendering bug — a parallel child buffers its whole
 // trace (`_SubUI(buffered=True)`) so the PARENT transcript can replay each child atomically
 // instead of interleaving four of them. Right for the parent, wrong for the child's own page,

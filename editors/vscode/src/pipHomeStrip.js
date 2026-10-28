@@ -1,8 +1,8 @@
-// The Sessions home's Pips: which of your Pips need you, above your sessions (the founder, #3: a
+// The Sessions home's Pips: which of your Pips need you, above your sessions (reported: a
 // Pips notice above a coding session's composer "has nothing to do with that session"). A Pip that
 // needs you is a row with its face waiting and what is waiting; when none does, your Pips sit in a
 // quiet row of faces. Each opens that Pip in the Pips view. Names are the user's words: text only.
-// The home is a doorway to Pips, not their list (founder, 2026-10-18: "what if there were 100 Pips"):
+// The home is a doorway to Pips, not their list (reported 2026-10-18: "what if there were 100 Pips"):
 // the 3 most urgent rows, then one line to the Pips view's Needs attention. A row that is news (failed
 // runs, new findings) has a dismiss: its news is marked seen for good (mark_pip_news_seen, Pips API 48)
 // and the Pip comes back only when it does something new. A row waiting for you needs an answer: none.

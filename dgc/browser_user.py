@@ -1,4 +1,4 @@
-"""The user's own Chrome, signed in as them, for a Work session (the founder, 2026-10-13: "main DGC could use the
+"""The user's own Chrome, signed in as them, for a Work session (reported 2026-10-13: "main DGC could use the
 logged-in Chrome"; Pips have computers of their own).
 
 Claude Code and Codex reach the user's browser through extensions of their own. DGC needs none: Chrome 144 and later

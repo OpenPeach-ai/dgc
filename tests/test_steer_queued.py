@@ -1,4 +1,4 @@
-"""Steer now / Steer all: a queued message moves into the running turn as steering (the founder, 2026-10-19).
+"""Steer now / Steer all: a queued message moves into the running turn as steering (reported 2026-10-19).
 
 A message queued while a turn ran ("you · queued", from Alt+Enter or a Pip report's Ask DGC to fix) could only wait
 for the turn to end. `steer_queued {request_ids}` moves the user's own queued prompts, in queue order, into the running

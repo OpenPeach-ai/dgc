@@ -229,7 +229,7 @@ class RuntimeControlsTests(unittest.TestCase):
         self.assertTrue(proc.stdout.closed)
 
     def test_several_pips_run_at_once_and_each_pip_one_run_at_a_time(self):
-        """Founder, 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip."""
+        """Reported 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip."""
         import threading
         import time as clock
         other = self.store.create(self.workspace["id"], "Second", "Read committed source", "paired-browser",

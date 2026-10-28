@@ -1601,8 +1601,8 @@ test("Open here: a read-only chat's bar says where it is open and whether it wri
   const ask = last("chatdgc_holder");
   assert.deepEqual({ ...ask, request_id: "" }, { type: "chatdgc_holder", conversation_id: ID(6), request_id: "" });
   chat.onEvent({ type: "chatdgc_holder", request_id: ask.request_id, conversation_id: ID(6), found: true, editor: "Cursor",
-                 windowless: false, folder: "~/toni-erp", working: true });
-  const line = { head: "Open in Cursor · ~/toni-erp · writing a reply now.", detail: "Open here moves it to this window." };
+                 windowless: false, folder: "~/shop-api", working: true });
+  const line = { head: "Open in Cursor · ~/shop-api · writing a reply now.", detail: "Open here moves it to this window." };
   assert.deepEqual(panel.last("elsewhere"), { type: "elsewhere", state: "elsewhere", conversation: ID(6), note: line });
   // A reloaded page shows the line at once.
   panel.say({ type: "ready" });

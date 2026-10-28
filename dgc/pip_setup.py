@@ -140,7 +140,7 @@ def needs_card(request) -> bool:
     """A setup that keeps its own card whatever the permission mode: a project Pulse that runs
     commands on a schedule. Everything else, including a Pip that reads connected accounts, is
     approved by the tool call's ordinary permission like any other tool, so auto mode creates it
-    (founder, 2026-10-07: reads are free, sends wait for Allow)."""
+    (reported 2026-10-07: reads are free, sends wait for Allow)."""
     if not isinstance(request, dict):
         return True
     return request.get("pip_type") == "pulse" and request.get("scope") != "personal"

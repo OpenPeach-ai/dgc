@@ -1,4 +1,4 @@
-// Pips settings and a reply's details, laid out in real Chromium at side-bar widths. The founder's screenshot
+// Pips settings and a reply's details, laid out in real Chromium at side-bar widths. A user's screenshot
 // (2026-10-17): in Pips settings -> Apps, "How many Pips you can have" broke one letter per line, because the
 // page-wide input rule gave the number box width:100% and it claimed the whole row. The visual pass then found a
 // reply's "Response details" opening inside the row of small buttons, a few pixels wide. jsdom has no layout, so

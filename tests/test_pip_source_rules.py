@@ -296,7 +296,7 @@ class SourcePipTests(unittest.TestCase):
             return pips._execute_run(self.registry, row, self.cfg)
 
     def test_existing_v1_pip_keeps_failing_until_v2_is_approved_then_runs_and_the_pip_is_told(self):
-        """End to end: the founder's shape in small. Real queue, controller and worker process."""
+        """End to end: a user's shape in small. Real queue, controller and worker process."""
         self.commit_files({'backend/server.py': 'def health():\n    return "ok"\n', 'frontend/intro.mp4': 5 * MiB,
                            'portal/intro.mp4': 5 * MiB})
         job = self.create(source_policy={'mode': 'committed_only'})      # a Pip from before this change

@@ -1,4 +1,4 @@
-// The Work chat's prompt rail (the founder, 2026-10-18: Work chats get the rail ChatDGC has), in real Chromium: the
+// The Work chat's prompt rail (reported 2026-10-18: Work chats get the rail ChatDGC has), in real Chromium: the
 // shared module (media/promptrail.js) over the real panel. From five prompts a tick per prompt in the log's right
 // padding, the one being read bright; a card on hover with every prompt and its time; a click, Alt+Up/Down and the
 // card's keys go there. A session opens on its latest pages: the rest of its prompts come from its outline
@@ -339,7 +339,7 @@ test("the rail stays with this chat's own transcript: hidden while Pips or an ag
   } finally { await s.page.close(); }
 });
 
-// Founder, 2026-10-23: in a Work chat the rail appears only when wanted. Its ticks stay out of sight until the pointer
+// Reported 2026-10-23: in a Work chat the rail appears only when wanted. Its ticks stay out of sight until the pointer
 // nears the transcript's right edge, or Alt+Up/Down steps; the rail is still there for the keyboard and a screen reader.
 test("the Work chat's ticks stay out of sight until the pointer nears the right edge, or Alt+Up/Down steps", async (t) => {
   if (skipOrFail(t)) return;

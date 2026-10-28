@@ -359,7 +359,7 @@ def search(query: str, provider: str, api_key: str = "", url: str = "", n: int =
 
 
 def shared_settings(config) -> tuple[str, str, str]:
-    """The one web search set in Settings (founder, 2026-10-09: Work, ChatDGC and Pips share it): provider, key
+    """The one web search set in Settings (reported 2026-10-09: Work, ChatDGC and Pips share it): provider, key
     and address, read fresh from the files Settings and `dgc setup` write (a process started before a change has
     not seen it), else this process's config."""
     import json

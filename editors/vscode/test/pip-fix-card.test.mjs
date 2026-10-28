@@ -1,4 +1,4 @@
-// Ask DGC to fix, in the background (ready.capabilities.pip_fix; dgc/pip_fix.py). The founder, 19 Oct: the fix is a
+// Ask DGC to fix, in the background (ready.capabilities.pip_fix; dgc/pip_fix.py). Reported 19 Oct: the fix is a
 // background sub-agent of the chat, never a turn, so the chat stays free; the report's card IS its live status (what it
 // is doing, Watch, Stop); a permission it needs is asked on the card, and the agents pill says an agent needs you; when it
 // ends, the card says what changed, whether tests ran in the fix copy, and offers Review and Undo. A "Pip fixes" chip on

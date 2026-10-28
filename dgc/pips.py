@@ -260,7 +260,7 @@ TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 _THREAD_LOCK = threading.Lock()
 _THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_RUNS: dict[str, set] = {}      # state directory -> the runs this process is executing
-# Runs at once (founder, 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip): one at
+# Runs at once (reported 2026-10-14: a Pip run keeps going, so one long run must not hold up every other Pip): one at
 # a time per Pip, several Pips together. `pips_parallel_runs` in DGC's settings; a model served on this machine still
 # answers one request at a time if it can't do more.
 PARALLEL_DEFAULT = 4
@@ -354,7 +354,7 @@ PRIMARY_GOAL = ("Be my Primary Pip: help with everyday tasks, look after my othe
 
 
 def computer_by_default() -> bool:
-    """A new Personal Pip gets its own computer wherever this machine can run one (founder, 2026-10-09: the battle
+    """A new Personal Pip gets its own computer wherever this machine can run one (reported 2026-10-09: the battle
     test's commonest Pip failure was wanting the web without one). It starts on first use and closes when idle;
     its page can remove it."""
     try:
@@ -453,7 +453,7 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     if computer_plan is not None:
         if source_policy != {'mode': 'personal'}:
             raise RegistryError('unsupported_computer_plan', 'A computer is for Personal Pips.')
-        # A Pip may browse and read the user's apps, like Grok's bots (the founder, 2026-10-07: "exactly
+        # A Pip may browse and read the user's apps, like Grok's bots (reported 2026-10-07: "exactly
         # like Grok"); what it would send or change still waits for the user's Allow.
         definition['computer_plan'] = computer_plan
     if len(_json(definition).encode()) > 16384:
@@ -537,7 +537,7 @@ def source_revision(root, ref):
     return revision
 
 
-# A Pip run keeps going (founder, 2026-10-14): no step limit (0, as DGC's own max_turns), no wall clock, and main
+# A Pip run keeps going (reported 2026-10-14): no step limit (0, as DGC's own max_turns), no wall clock, and main
 # DGC's output budget per request, in the Pip's own context window (pip_chat_options). It compacts as any DGC session
 # does and ends when its work is done, when the user stops it, or when the Agent's loop guards see it repeating
 # itself. A patch run with reviewed specialists too: they share its lifetime (pip_specialists, policy version 2).
@@ -2539,7 +2539,7 @@ def personal_skills(config) -> dict:
 def _app_tools_note(apps_pin) -> str:
     """Said beside the user's message, where a model weighs it most: the earlier conversation above
     may hold replies from before these tools existed ("I don't have a Composio connector"), and a
-    model kept faith with them over its instructions (2026-10-08, the founder's Test Pip)."""
+    model kept faith with them over its instructions (2026-10-08, a user's Test Pip)."""
     composio = apps_pin.get("composio")
     return ("\n\nNote from DGC, current for this reply: your tools include connect_app and read_app, which reach the "
             "user's apps through their Composio" + (" (set up in DGC)" if composio is True else
@@ -4616,7 +4616,7 @@ def _controller_failure(exc):
     if isinstance(exc, RegistryError) and getattr(exc, "code", "") == "schema_version":
         # A newer DGC moved the database on (an update, `dgc update`) while this process kept the
         # code it started with. It used to read "controller stopped (RegistryError)" -- the
-        # founder's runner stopped 24 seconds after his DGC was updated, and nothing said why.
+        # a user's runner stopped 24 seconds after their DGC was updated, and nothing said why.
         # `updated` lets `dgc pips serve` start itself again on the new code (pip_cli).
         return {"code": "runner_failed", "updated": True, "message":
                 "DGC was updated while the Pips runner was running. Start the runner again to use the new version."}
@@ -5632,7 +5632,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             from . import pip_keep_running
             if actor in ("editor-user", "local-console") and pip_keep_running.needs_runner(command, result):
                 # A schedule, trigger or routine runs only while the runner does: keep it running with the
-                # editor closed (founder, 2026-10-18), unless the user chose that off. Never fails the change.
+                # editor closed (reported 2026-10-18), unless the user chose that off. Never fails the change.
                 from .pip_daemon import runner_status
                 told = pip_keep_running.for_schedule(registry, runner_online=bool(runner_status(registry).get("online")))
                 if told is not None:

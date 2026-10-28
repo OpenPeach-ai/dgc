@@ -294,7 +294,7 @@ class ResolverTableTests(unittest.TestCase):
         # The unit table shows R2 fires for no row: the downgrade is a guard, never the mechanism.
 
     def test_private_hosts_never_yield_provider_sources(self):
-        hosts = ["http://[::1]:11434", "http://100.101.1.1:8000/v1", "http://gb10:11434",
+        hosts = ["http://[::1]:11434", "http://100.101.1.1:8000/v1", "http://gpu-box:11434",
                  "http://mac-studio.local:1234/v1", "https://box.tail123.ts.net/v1", "http://NAS.LAN:8000/v1",
                  "http://LOCALHOST:11434", "http://127.0.0.1.:11434", "http://user:pw@127.0.0.1:11434",
                  "http://10.0.0.5:8080/v1", "http://192.168.1.60:11434", "http://172.16.0.1/v1",

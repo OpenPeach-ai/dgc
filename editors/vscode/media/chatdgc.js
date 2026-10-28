@@ -43,7 +43,7 @@
     .observe(log, { childList: true, subtree: true });
   const modelPick = $("cd-model"), thinkingPick = $("cd-thinking"), notice = $("cd-notice");
   // Web search is always there, as in ChatGPT: the model looks things up whenever an answer depends on it, so the box
-  // has no switch for it (founder, 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
+  // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
   const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [], breakdown: null,
@@ -96,7 +96,7 @@
 
   // ---- messages
   const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
-  // ---- sources: only at the end of a reply, as the founder asked (2026-10-18): "mid-response source chips make it
+  // ---- sources: only at the end of a reply, as a user asked (2026-10-18): "mid-response source chips make it
   // difficult to read the responses". The words read as prose; a reply that used the web ends with its sources
   // (favicons and "Sources · N"), which open beside the chat. A favicon comes from Google's icon service, asked about
   // the origin only, as Work's panel does; with dgc.linkFavicons off (or when one fails) it's a globe, and nothing is asked.
@@ -1969,7 +1969,7 @@
     setTimeout(() => node.classList.remove("cd-flash"), 1600);
   }
 
-  // ---- widgets in this chat (option C1, the founder's pick): a "Widgets N" button in the header while the chat has
+  // ---- widgets in this chat (option C1, the maintainers' pick): a "Widgets N" button in the header while the chat has
   // any, opening a list of them: each one's name, when it was made and the prompt that asked, with Open, Show it in the
   // chat (its earlier pages loaded first when it isn't on screen) and Delete (asked in the row, then the Library's
   // delete: its card stays, marked deleted). Every chat's widgets are in the Library, a click away.

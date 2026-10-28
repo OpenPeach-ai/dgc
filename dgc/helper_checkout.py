@@ -322,7 +322,7 @@ def note_write(agent, path) -> None:
 
 
 # A path the helper's task names, outside every checkout: "implement what ~/Downloads/spec.pdf
-# describes" is the task, not wandering (the founder, 27 Oct). Absolute or ~ paths only; not a URL's
+# describes" is the task, not wandering (reported 27 Oct). Absolute or ~ paths only; not a URL's
 # path, and not a relative one (that is inside the copy anyway).
 _NAMED_PATH = re.compile(r"(?<![\w/~.:-])(~/[^\s'\"`<>|;,(){}\[\]]*|/[^\s'\"`<>|;,(){}\[\]]+)")
 MAX_NAMED_PATHS = 64

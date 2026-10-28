@@ -1,6 +1,6 @@
 """The Mac's read-only box: a live-data Pip's commands and a Troupe checker's shell under Seatbelt (sandbox-exec).
 
-The founder (2026-10-23), on "the live-data Pip needs Linux or WSL": "what about ... Mac?" The Mac gets the same
+Reported 2026-10-23, on "the live-data Pip needs Linux or WSL": "what about ... Mac?" The Mac gets the same
 read-only box, built with Seatbelt, as close to the bubblewrap one as Seatbelt allows, and what is weaker is said once
 on the Pip's card. The first group checks the profile and the wiring with the platform stood in for (they run
 anywhere); the second really runs sandbox-exec, and runs only on a Mac.

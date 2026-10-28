@@ -1,6 +1,6 @@
 """Pip reports reach the chat: a finished run is a card in the chats it reports to, never a turn.
 
-The founder's ERP chat (ERP_SESSION_REVIEW_2026-10-18 §7): no Pip could hand its findings to the chat,
+A user's ERP chat (ERP_SESSION_REVIEW_2026-10-18 §7): no Pip could hand its findings to the chat,
 so the model built a monitor that woke a 1,276-message chat on every run and applied "AUTO-OK" fixes
 to a live database by itself. Agreed answer: the report appears in the chat as an item to act on
 (Ask DGC to fix fills the composer, the user sends), and nothing changes unless the user says so.

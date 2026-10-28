@@ -594,7 +594,7 @@ test("ordinary text never raises the paste notice", async (t) => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// What a paste puts in the composer. The founder pasted a numbered list with blank lines between
+// What a paste puts in the composer. A user pasted a numbered list with blank lines between
 // the items and got it back as one run of lines. None of this reproduces in the Chromium this
 // harness runs, which is the point: the composer's contents must not depend on which Chromium is
 // embedding it.

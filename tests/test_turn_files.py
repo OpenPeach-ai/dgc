@@ -1,4 +1,4 @@
-"""The Edited card lists exactly the files the turn's recovery point will restore (the founder, 25 Oct: "this
+"""The Edited card lists exactly the files the turn's recovery point will restore (reported 25 Oct: "this
 should go into 0.48").
 
 The 0.48 marketing take 5: a worker fixed billing.py in its own checkout with a shell command, DGC integrated it, and

@@ -1,8 +1,8 @@
 """DGC sets up a Pip computer's desktop itself: no admin password, nothing installed on the system.
 
-The founder: "why does my system need that? Doesn't a Pip create its own virtual OS?" These drive
+A user: "why does my system need that? Doesn't a Pip create its own virtual OS?" These drive
 the real pip_screen_setup against stand-in apt-get, apt-cache, dpkg-deb, dpkg and gpg that record
-what they were asked (a real download is 130 MB and needs the network; it was run on the GB10:
+what they were asked (a real download is 130 MB and needs the network; it was run on a Linux arm64 machine:
 Chrome 155 and the desktop in 33 seconds, a daily re-check in 12 with nothing downloaded).
 """
 from __future__ import annotations

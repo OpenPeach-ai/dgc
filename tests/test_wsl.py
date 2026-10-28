@@ -1,4 +1,4 @@
-"""DGC inside WSL (founder, 2026-10-14: "WSL fixes now"). A Windows user's DGC is a Linux install inside WSL, and four
+"""DGC inside WSL (reported 2026-10-14: "WSL fixes now"). A Windows user's DGC is a Linux install inside WSL, and four
 things differ there: WSL 1 can't box anything, WSL stops a distro when nothing on Windows holds it open, the user's own
 Chrome runs on Windows, and notifications are Windows' own.
 

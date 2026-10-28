@@ -12,7 +12,7 @@ import time
 from . import style
 
 # The "///" mark — three tapered, staggered, forward-leaning bars (the DGC logo). Rendered from the
-# founder's slash-logo art (site/slash-logo.txt) at terminal scale, in braille cells. Middle bar
+# a user's slash-logo art (site/slash-logo.txt) at terminal scale, in braille cells. Middle bar
 # tallest, right bar shortest — like the logo. Leading spaces on each row create the diagonal, so these
 # lines are NOT lstripped, and the rows must be laid out as ONE block (see shimmer_lines): centring
 # rows one by one gives each a different offset and turns the /// into a zig-zag.

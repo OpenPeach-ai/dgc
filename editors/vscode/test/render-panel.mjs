@@ -794,7 +794,7 @@ if (process.argv.includes("--quote")) {
     "> We currently use `Auth`, `GenerateIRN` and `CancelIRN`. When an IRN response is lost on our\n",
     "> side the invoice later returns \"2150 – Duplicate IRN\", and your gateway offers no way to\n",
     "> recover the number, because `GetEInvoiceDetails` requires the IRN itself.\n>\n",
-    "> Thanks,\n> Mohit\n\n",
+    "> Thanks,\n> Sam\n\n",
     "Send that as-is — the copy button on the block lifts the mail without the quote markers.\n",
   ].join("") });
   await page.waitForTimeout(400);
@@ -845,7 +845,7 @@ if (process.argv.includes("--command")) {
       --vscode-input-background:#FFFFFF; --vscode-foreground:#3B3B3B; --vscode-editor-foreground:#1F1F1F;
       --vscode-descriptionForeground:#616161; --vscode-panel-border:#E5E5E5; --vscode-widget-border:#E5E5E5; }` });
   }
-  const command = "cd /home/founder/projects/release-gate && npm test -- --runInBand --watch=false";
+  const command = "cd /home/me/projects/release-gate && npm test -- --runInBand --watch=false";
   await send({ type: "turn_activity", turn_id: "t1", state: "tool", label: "Running a command", detail: command });
   await send({ type: "tool_call", call_id: "c4", name: "bash", args: { command }, summary: command });
   await page.waitForTimeout(1300);            // let the turn and step clocks tick past zero

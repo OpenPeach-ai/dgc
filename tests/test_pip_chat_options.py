@@ -100,7 +100,7 @@ class PipChatOptionsTests(unittest.TestCase):
         self.assertEqual(manifest['model_settings']['thinking'], 'off')
 
     def test_everything_the_pip_does_uses_its_prompt_box_choices(self):
-        """Founder, 2026-10-14: the prompt box sets the Pip's context window and thinking, for its replies and for the
+        """Reported 2026-10-14: the prompt box sets the Pip's context window and thinking, for its replies and for the
         work it does on its own."""
         self.setup_job()
         self.finish(self.send({'context_size': 8192, 'thinking': 'high'}))

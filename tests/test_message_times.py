@@ -1,4 +1,4 @@
-"""When each prompt was sent and each reply written, for the chat to show (founder, 2026-10-17: "there is no
+"""When each prompt was sent and each reply written, for the chat to show (reported 2026-10-17: "there is no
 timestamp or date for user sent prompts and model's responses").
 
 The agent stamps ``_dgc_at`` (seconds since 1970) on the prompt and on every reply it writes. Like every ``_dgc_``
@@ -173,7 +173,7 @@ if __name__ == "__main__":
 
 
 class SteeringTimeTests(unittest.TestCase):
-    """The founder, 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while
+    """Reported 25 Oct: "the mid-turn sent prompts do not get the timestamp like usual prompts". A message sent while
     a turn runs keeps the time it was sent, and a reopened chat shows it under that message's own bubble."""
 
     def agent(self):

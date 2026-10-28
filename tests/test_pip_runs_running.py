@@ -1,6 +1,6 @@
 """A Pip that reports to a chat is seen running there: `pip_runs_running`, the chip above the box.
 
-The founder (24 Oct): his Work chat said nothing while a Pip that reports to it ran, until its card arrived. Pip
+Reported 24 Oct: a Work chat said nothing while a Pip that reports to it ran, until its card arrived. Pip
 runs happen in the Pips runner, not in the chat's session, so the chat reads which of ITS Pips are running from the
 registry (dgc/pip_report_delivery.py running) and is told whenever that changes, once its client asks
 (watch_pip_runs, ready.capabilities.pip_runs_running). An older editor, the SDK or ACP never asks and is sent none:

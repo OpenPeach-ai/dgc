@@ -1,5 +1,5 @@
 // Every section in Settings' side menu has an icon of its own. Web search and ChatDGC had none, so both fell back to
-// the Plugins icon and three rows looked alike (founder, 2026-10-21: "the ChatDGC icon is the same as Web Search").
+// the Plugins icon and three rows looked alike (reported 2026-10-21: "the ChatDGC icon is the same as Web Search").
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

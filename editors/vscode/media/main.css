@@ -435,7 +435,7 @@ body.vscode-light .agent-mark:not(:has(img)).is-live {
    agent that was actually RUNNING looked exactly like one that had finished. The glow belongs to
    the state, not to the fallback geometry, so it is put back here for the image case and made to
    breathe. The artwork swirls too (the -animated file, agentMarkSrc), everywhere, chips included:
-   0.26.3 kept the still frame at 16px, and the founder chose the swirl back on 2026-10-18. */
+   0.26.3 kept the still frame at 16px, and the maintainers chose the swirl back on 2026-10-18. */
 .agent-mark:has(img).is-live {
   filter: drop-shadow(0 0 2px color-mix(in srgb, var(--mark, #7D8CA3) 60%, transparent));
   animation: agent-mark-breathe 2.6s ease-in-out infinite;
@@ -1201,7 +1201,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-chip[data-kind="troupe"][data-live] .chip-mark .tm-part:nth-of-type(4) { animation-delay: 1.8s; }
 /* A running Pip's name is the chip's number: a long one is cut, its whole name is on the chip's tooltip. */
 .rail-chip[data-kind="piprunning"] .chip-num { min-width: 0; max-width: 18em; overflow: hidden; text-overflow: ellipsis; }
-/* Needs you: the reason in words, in the colours the rows had before the chip line (the founder, 19 Oct): blocked
+/* Needs you: the reason in words, in the colours the rows had before the chip line (reported 19 Oct): blocked
    or failed in --err-text with the icon, waiting or an alert in --need-text (4.5:1). No dot, no outline. */
 .rail-chip[data-need] { color: var(--text); }
 .rail-chip[data-need="error"] > .codicon, .rail-chip[data-need="error"] .chip-need { color: var(--err-text); }
@@ -1420,7 +1420,7 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cache-clock .cache-clock-left { display: inline-block; font-variant-numeric: tabular-nums; }
 .cache-clock.cold { color: var(--vscode-errorForeground, var(--err-text)); }
 /* Unknown: the provider doesn't say how long its cache lasts, so no minutes. The clock stays, dimmed as the
-   founder's mockup (the same box as a cold one, so the footer never moves), its tooltip saying why; pointed at,
+   a user's mockup (the same box as a cold one, so the footer never moves), its tooltip saying why; pointed at,
    it comes up to full strength. On white, a little less dimmed: about 1.5:1, as findable as on a dark theme. */
 .cache-clock[data-cache-window="unknown"] { opacity: .5; }
 body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
@@ -1931,7 +1931,7 @@ textarea[data-held="1"], input[data-held="1"]:not([type="radio"]):not([type="che
 .prompt-fold .codicon { font-size: var(--t-sm); color: var(--muted); }
 .prompt-fold:hover { border-color: var(--accent); }
 /* The pill gets a strip of its own under the three lines, so it never sits on the text: over the faded last line it
-   read as text running into it (the founder, 19 Oct). */
+   read as text running into it (reported 19 Oct). */
 .user .bubble[data-fold="folded"] { padding-bottom: calc(var(--sp-2) + 26px); }
 .user .bubble[data-fold="folded"] > .prompt-fold { position: absolute; right: var(--sp-2); bottom: var(--sp-1); z-index: 1; opacity: 0; transition: opacity .12s; }
 .user .bubble[data-fold="folded"]:hover > .prompt-fold,
@@ -2939,7 +2939,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
    this card (.pip-fix below), or, with an older CLI, sends one prompt. A clean run is one quiet line. Narrow panels wrap the row, never clip the actions. */
 .pip-report { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; margin: var(--sp-3) 0;
   padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
-/* No thick accent bar down a card's left edge (founder, 24 Oct): the card's border and its own words say what it is. */
+/* No thick accent bar down a card's left edge (reported 24 Oct): the card's border and its own words say what it is. */
 .pip-report.quiet { align-items: center; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-3);
   border-color: transparent; background: transparent; box-shadow: none; }
 .pip-report-face, .pip-report-face .dgc-plush { display: block; flex: none; width: 28px; height: 28px; }
@@ -2972,7 +2972,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report.quiet .pip-report-actions button.act { min-height: 0; padding: 2px var(--sp-2); border-color: transparent;
   background: transparent; color: var(--link); font-size: var(--t-xs); }
 .pip-report.quiet .pip-report-actions button.act:hover { border-color: var(--border-strong); }
-/* Two lines until opened (the founder, 19 Oct: two quiet cards took 134px). Line one: the Pip, what it found, when,
+/* Two lines until opened (reported 19 Oct: two quiet cards took 134px). Line one: the Pip, what it found, when,
    a chevron; line two: the worst finding or why it failed, with Fix · Open · ✕. A clean run is line one alone.
    Opened, line two goes and the whole card shows under line one. Cards that arrive together sit together. */
 /* The space between transcript blocks is #log's gap (var(--sp-4)); cards add none of their own, and cards that arrive
@@ -3037,7 +3037,7 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .pip-report-group > .pip-report.slim:last-child { border-radius: 0 0 var(--r-md) var(--r-md); }
 /* Rows of a group are stacked by their own top border. `.pip-report.slim + .pip-report.slim` pulls a standalone card up
    12px so two cards' borders meet; it outranked the `margin: 0` above, and an opened group's rows sat on top of each
-   other (the founder, 25 Oct). */
+   other (reported 25 Oct). */
 .pip-report-group > .pip-report.slim + .pip-report.slim { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .pip-report-chevron { transition: none; } }
 /* Ask DGC to fix, in the background: the report's card is the fix's status. One line (what it is doing or what it

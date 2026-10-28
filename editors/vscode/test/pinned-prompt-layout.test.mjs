@@ -737,7 +737,7 @@ test("with a translucent sidebar colour, nothing of the answer shows through the
 
 // A prompt sent with an image or a file pins like any other. The image in it is the chip it was in the
 // composer -- a small tile beside its type and size -- not a tool's 150px picture: that made the prompt
-// taller than a third of the window, so it never pinned (the founder's report, 0.32.1, at his panel size).
+// taller than a third of the window, so it never pinned (a user's report, 0.32.1, at their panel size).
 for (const kind of ["image", "file"]) {
   test(`a prompt sent with ${kind === "image" ? "an image pins, and the image is the composer's chip" : "a file pins"}`, async (t) => {
     if (skipOrFail(t)) return;
@@ -764,7 +764,7 @@ for (const kind of ["image", "file"]) {
         return { height: Math.round(chip.getBoundingClientRect().height), tile: tile ? Math.round(tile.getBoundingClientRect().height) : 0,
           caption: chip.querySelector(".image-caption")?.textContent || "" };
       });
-      // The founder's own prompt: two lines at his panel's width.
+      // A user's own prompt: two lines at their panel's width.
       const text = 'On Visits page, the "My visits" section, check the attached screen shot, the search and filters are very poorly aligned, fix the alignment and make them look proper.';
       const id = await s.type(text);
       await s.send({ type: "event", event: { type: "prompt_accepted", request_id: id } });
@@ -794,7 +794,7 @@ for (const kind of ["image", "file"]) {
   });
 }
 
-// A pasted image's chip names its file, as Claude Code's does (founder, 2026-10-22): the name cut to
+// A pasted image's chip names its file, as Claude Code's does (reported 2026-10-22): the name cut to
 // fit, the full name with its type, size and dimensions on hover. An image with no file name keeps
 // its type and size.
 test("a pasted image's chip shows its file name, cut to fit", async (t) => {

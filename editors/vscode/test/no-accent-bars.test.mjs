@@ -1,4 +1,4 @@
-// The founder, 24 Oct: no thick accent bar down the left edge of a card, "on these cards or anywhere else". A card's
+// Reported 24 Oct: no thick accent bar down the left edge of a card, "on these cards or anywhere else". A card's
 // border and its own words say what it is. This scans every stylesheet the extension ships for that bar, drawn either
 // way: an inset box-shadow or a left border of 2px or more in an accent colour. Grey rules (a quote, thinking) are not
 // accents and stay; diff lines keep their green and red markers.

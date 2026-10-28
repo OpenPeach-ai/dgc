@@ -1,6 +1,6 @@
 // The computer tab in real Chromium, served the way the editor serves it: an ES module (noVNC needs
 // one) from dist/, the Pip's sprite and wallpaper from media/. A module script has no
-// document.currentScript, and the face's sprite resolved against the page instead: the founder's
+// document.currentScript, and the face's sprite resolved against the page instead: a user's
 // computer tab showed Chromium's broken-image picture where the Pip's face belongs.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";

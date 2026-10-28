@@ -1,6 +1,6 @@
 """Ask DGC to fix, as a Pip's own chat on the Pips page sees it (Pips API 65).
 
-The founder (24 Oct): "when in chat we do Ask DGC to fix for a Pip card, and it gets fixed, the Pips page, for that
+Reported 24 Oct: "when in chat we do Ask DGC to fix for a Pip card, and it gets fixed, the Pips page, for that
 Pip under chat, its card still gives an option 'Ask DGC to fix'. Should its status also get updated as fixed?" Yes.
 The fix runs in a Work chat (dgc/pip_fix.py) and keeps its record on disk, per project; list_pip_run_fixes {pip_id}
 reads the latest fix of each of the Pip's runs from there, so the run's post can say fixing, Fixed, failed or undone,

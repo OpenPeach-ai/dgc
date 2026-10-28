@@ -1,6 +1,6 @@
 """Troupe: many sub-agents following one fixed work order, in the background; the chat wakes with the results.
 
-The founder's design (2026-10-14): for a job too big for one agent to do reliably, the model writes a work order and
+The maintainers' design (2026-10-14): for a job too big for one agent to do reliably, the model writes a work order and
 DGC runs it exactly as written -- every item gets its agent, every finding gets its checkers -- instead of one agent
 deciding each step as it goes and losing track, skipping parts or stopping early. Claude Code calls its version a
 Workflow and has the model write JavaScript; a troupe's work order is data (JSON), which local models write far more

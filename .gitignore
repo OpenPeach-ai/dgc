@@ -31,22 +31,11 @@ dgc.tar.gz
 /scripts/sync-site-version.sh
 /.github/workflows/site-metrics.yml
 
-# Maintainer/release scripts are source-controlled build inputs. Private notes remain local.
-HANDOFF.md
-OVERNIGHT_PLAN.md
-DGC_HARNESS_IMPROVEMENT_PLAN.md
 node_modules/
 *.vsix
 editors/vscode/dist/
-HARNESS_SYNTHESIS.md
-
-# internal-only, never publish
-docs/FRONTIER_AUDIT_AND_ROADMAP.md
-docs/NON_CODING_SURFACE_TESTS.md
 docs/fixtures/*
 !docs/fixtures/noncoding-surface-commands.ndjson
-PI_VS_DGC_COMPARISON.md
-PI_VS_DGC_COMPARISON_raw.json
 output/
 .playwright-cli/
 .wrangler/

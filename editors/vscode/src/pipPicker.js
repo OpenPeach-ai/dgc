@@ -1,4 +1,4 @@
-// A big face with a dropdown beside it (the founder, 24 Oct): how New Pip picks a Project Pip's job or a Personal Pip's
+// A big face with a dropdown beside it (reported 24 Oct): how New Pip picks a Project Pip's job or a Personal Pip's
 // character, and how a Personal Pip's page picks its face. The face shows what is chosen and changes with the choice.
 // A native <select> can't show the small faces, so the dropdown is the WAI-ARIA collapsible listbox: a button with
 // aria-haspopup="listbox" and aria-expanded opens a role="listbox" popup of role="option" rows, aria-selected on the

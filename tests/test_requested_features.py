@@ -82,7 +82,7 @@ class RequestedFeatures(unittest.TestCase):
 
     def test_plan_or_design_doc_lifts_document_in_auto_without_asking_for_a_browser(self):
         asks = (
-            "write a design doc for the agent toni workflow",
+            "write a design doc for the agent review workflow",
             "propose an implementation plan for the FSM",
             "create a technical spec in docs/AGENT_TONI_WORKFLOW_PLAN.md",
             "draft a report on the rollout",
@@ -191,25 +191,90 @@ class RequestedFeatures(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('public_content', script)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        (self.root / 'docs').mkdir()
         # Kept: ordinary product documentation, including names that merely contain a keyword.
-        keep = ['providers.md', 'GIT_REVIEW.md', 'COMPATIBILITY.md', 'HANDOFF_FORMAT_NOTES.md']
+        keep = ['docs/providers.md', 'docs/GIT_REVIEW.md', 'docs/COMPATIBILITY.md', 'docs/HANDOFF_FORMAT_NOTES.md']
         for name in keep:
             (self.root / name).write_text('Claude and Codex subscription provider setup.\n')
         # Rejected: the private-record names. Every one of the prefixed forms was published for
         # three days because the wildcard sat on `_AUDIT` alone -- a bare `AUDIT.md` escaped it
         # too, since `[^/]*_AUDIT` demanded a prefix ending in an underscore.
-        private = ['WORK-LOG.md', 'AUDIT.md', 'SETTINGS_HANDOFF.md',
-                   'SETTINGS_PLUGINS_MIGRATION_HANDOFF.md', 'PLUGIN_COMPATIBILITY_AUDIT.md',
-                   'RELEASE_TAKEOVER.md', 'sprint-NEXT-STEPS.md']
+        private = ['docs/WORK-LOG.md', 'docs/AUDIT.md', 'docs/SETTINGS_HANDOFF.md',
+                   'docs/SETTINGS_PLUGINS_MIGRATION_HANDOFF.md', 'docs/PLUGIN_COMPATIBILITY_AUDIT.md',
+                   'docs/RELEASE_TAKEOVER.md', 'docs/sprint-NEXT-STEPS.md']
         for name in private:
             (self.root / name).write_text('Private release notes.\n')
-        (self.root / 'export.txt').write_text('<send_user_message_' + 'question_reply>')
+        (self.root / 'docs/export.txt').write_text('<send_user_message_' + 'question_reply>')
         subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
         errors = module.check(self.root)
         flagged = {error.split(':')[0] for error in errors}
-        self.assertEqual(flagged, set(private) | {'export.txt'},
+        self.assertEqual(flagged, set(private) | {'docs/export.txt'},
                          'a private work record that reaches the public product repo is a '
                          'publication, and a flagged product doc is an outage of this gate')
+
+    def _public_content(self):
+        import importlib.util
+        script = Path(__file__).resolve().parent.parent / 'scripts/check-public-content.py'
+        spec = importlib.util.spec_from_file_location('public_content_wide', script)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        return module
+
+    def test_a_new_top_level_file_is_refused_until_the_product_lists_it(self):
+        """Plans and comparisons were written at the top of the tree and kept out only by naming each one in
+        .gitignore, which published their names. The top level is a fixed list now."""
+        module = self._public_content()
+        for name in ('README.md', 'install.sh', 'dgc/x.py', 'docs/GOALS.md', 'PLAN.md', 'notes/today.md'):
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_text('x\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+        flagged = {error.split(':')[0] for error in module.check(self.root)}
+        self.assertEqual(flagged, {'PLAN.md', 'notes/today.md'})
+
+    def test_a_real_home_folder_an_agent_scratch_folder_and_the_local_deny_list_are_refused(self):
+        module = self._public_content()
+        (self.root / 'dgc').mkdir()
+        files = {
+            'dgc/example.py': 'cwd = "/home/me/project"; other = "/Users/alice/work" # FileNotFoundError\n',
+            # Split here so this file is not itself what the gate refuses.
+            'dgc/real_home.py': 'ROOT = "/home/' + 'jdoe/projects/app"\n',
+            'dgc/scratch.mjs': 'const OUT = "/tmp/claude-' + '1000/-home-x/scratchpad";\n',
+            'dgc/private.md': 'Tested on the Saturn-Box, as the Owner asked.\n',
+        }
+        for name, text in files.items():
+            (self.root / name).write_text(text)
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+        self.assertEqual({e.split(':')[0] for e in module.check(self.root)}, {'dgc/real_home.py', 'dgc/scratch.mjs'},
+                         'example homes pass; with no local deny-list, nothing more is refused')
+        # The deny-list lives in .git/info, never in the tree: its words are the private ones.
+        (self.root / '.git/info').mkdir(exist_ok=True)
+        (self.root / '.git/info/public-denylist').write_text('# private words\nsaturn-box\nowner\nfounder\n')
+        errors = module.check(self.root)
+        self.assertIn('dgc/private.md: a word from the local deny-list (saturn-box)', errors)
+        self.assertIn('dgc/private.md: a word from the local deny-list (owner)', errors)
+        self.assertFalse([e for e in errors if e.startswith('dgc/example.py')],
+                         f'a word inside a longer one is not it (FileNotFoundError): {errors}')
+
+    def test_a_commit_about_to_be_published_carries_a_github_noreply_address(self):
+        """A personal address on a public commit cannot be taken back. What origin/main already has is public
+        either way; what is about to be published must use the account's noreply address."""
+        module = self._public_content()
+
+        def commit(email: str) -> None:
+            (self.root / 'f.txt').write_text(email + '\n')
+            subprocess.run(['git', '-C', str(self.root), 'add', '-A'], check=True)
+            subprocess.run(['git', '-C', str(self.root), '-c', f'user.email={email}', '-c', 'user.name=dev',
+                            'commit', '-q', '-m', 'a change'], check=True)
+
+        commit('someone@example.com')
+        subprocess.run(['git', '-C', str(self.root), 'update-ref', 'refs/remotes/origin/main', 'HEAD'], check=True)
+        self.assertEqual(module.check_identity(self.root), [], 'already published: not this gate\'s to decide')
+        commit('123+dev@users.noreply.github.com')
+        self.assertEqual(module.check_identity(self.root), [])
+        commit('dev@example.com')
+        errors = module.check_identity(self.root)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn('dev@example.com', errors[0])
 
     def test_published_history_carries_no_agent_attribution_trailer(self):
         """A trailer cannot be unpushed, and it maps the commit to a third-party contributor.

@@ -1,4 +1,4 @@
-// The Pips header with the runner stopped, in real Chromium. The founder's screenshot (2026-10-06):
+// The Pips header with the runner stopped, in real Chromium. A user's screenshot (2026-10-06):
 // the runner's error sat inside the header's one row, so "Pips" broke onto two lines ("Pi / ps"),
 // "Start runner" wrapped and ran into "Controls". The error now takes its own row under the bar, and
 // the title and the runner's buttons keep their words on one line at every panel width.

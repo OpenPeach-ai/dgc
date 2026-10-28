@@ -344,7 +344,7 @@ def set_on(enabled, *, runner_online, dgc_home=None, **options) -> dict:
     raise RegistryError("service_unsupported", status(dgc_home)["reason"])
 
 
-# ---------------------------------------------------------------- turned on for a schedule (founder, 2026-10-18)
+# ---------------------------------------------------------------- turned on for a schedule (reported 2026-10-18)
 
 # The user's own switch (the Pips view's Controls, dgc pips keep-running) records their choice in the
 # registry's metadata. DGC turns the switch on by itself only while no "off" is recorded.

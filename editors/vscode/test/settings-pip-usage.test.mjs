@@ -42,12 +42,12 @@ test('the Pips view shows each Pip and its share of everything in the same range
 });
 
 test('the Pips view shows which models the Pips used, and each Pip\'s own models',()=>{
- // The founder: "we are showing Pips token usage, but not showing by model".
+ // A user: "we are showing Pips token usage, but not showing by model".
  const x=setup();x.click('[data-nav=usage]');x.click('[data-usage-view=pips]');
  const asked=x.sent.at(-1);
  const models=[{model:'glm-5.3:cloud',provider:'ollama',host:'localhost',input_tokens:6000,output_tokens:600,requests:3},
                {model:'deepseek-v4.1-flash:cloud',provider:'ollama',host:'localhost',input_tokens:3000,output_tokens:300,requests:4},
-               {model:'qwen3:32b',provider:'ollama',host:'gb10',input_tokens:10,output_tokens:1,requests:1}];
+               {model:'qwen3:32b',provider:'ollama',host:'gpu-box',input_tokens:10,output_tokens:1,requests:1}];
  x.message({type:'event',event:report(asked,{
   by_pip:[{pip_id:'pip_'+'1'.repeat(32),name:'Market brief',pip_type:'lens',scope:'personal',project:'',status:'active',input_tokens:70000,output_tokens:5000,runs:9,daily_cap:null,models},
           {pip_id:'pip_'+'2'.repeat(32),name:'Old runs',pip_type:'rook',scope:'personal',project:'',status:'active',input_tokens:5000,output_tokens:500,runs:2,daily_cap:null,models:[]}],

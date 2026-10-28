@@ -1,4 +1,4 @@
-// Two gaps in the image viewer the founder asked to close (2026-09-24): you could cycle and flip
+// Two gaps in the image viewer a user asked to close (2026-09-24): you could cycle and flip
 // between fit/actual, but you could not KEEP a picture, and you could not meet it halfway.
 //
 // Worth recording what was already there, because the first survey got it wrong: images the MODEL

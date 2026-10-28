@@ -1,6 +1,6 @@
 """Ask DGC to fix: what a Pip reported, fixed in the background of the chat it reported to.
 
-The founder's decisions (18-19 Oct): a Pip's report reaches its chat as a card, never a turn; its
+The maintainers' decisions (18-19 Oct): a Pip's report reaches its chat as a card, never a turn; its
 **Ask DGC to fix** starts a BACKGROUND sub-agent in that chat's session, so there is no main turn
 and the user keeps chatting. The card is the fix's live status (what it is doing, Watch, Stop); a
 question or a permission it needs is asked on the card. When it finishes, its changes are APPLIED,

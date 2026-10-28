@@ -1,6 +1,6 @@
 """A Pip's inference choices: its context window and how much it thinks, independent of its approved job.
 
-Chosen in the Pip's prompt box, as DGC's own and ChatDGC's are, and kept per Pip (founder, 2026-10-14): they
+Chosen in the Pip's prompt box, as DGC's own and ChatDGC's are, and kept per Pip (reported 2026-10-14): they
 apply to its chat replies and to everything it does on its own (schedules, routines, triggers, tasks, handoffs).
 A new Pip starts with main DGC's context window and thinking off. No modes, tools, endpoints or credentials are
 accepted here; these are not standing job permissions.

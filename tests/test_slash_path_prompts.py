@@ -6,7 +6,7 @@ from dgc.commands import is_slash_command_text
 class SlashPathPromptTests(unittest.TestCase):
     def test_absolute_and_network_paths_are_prompt_text(self):
         self.assertFalse(is_slash_command_text(
-            "/home/fungigb10/pregnancy-tracker , this is the directory that runs bearbloom"))
+            "/home/me/garden-notes , this is the directory that runs leafline"))
         self.assertFalse(is_slash_command_text("//server/share contains the fixtures"))
 
     def test_real_and_unknown_command_tokens_remain_commands(self):

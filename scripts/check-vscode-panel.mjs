@@ -2,7 +2,7 @@
 /**
  * Look at the REAL extension, in REAL VS Code, under Xvfb.
  *
- * My Chromium harness renders main.js and main.css against the panel's own skeleton, which is close
+ * The Chromium harness renders main.js and main.css against the panel's own skeleton, which is close
  * but is not the shipping surface: it has no VS Code theme variables, no extension host, and no
  * real panel geometry. The slash menu collapsing to one clipped row is exactly the class of defect
  * that harness cannot see -- it was a flex-shrink fight with the workbench's own layout.
@@ -19,7 +19,7 @@ import { chromium } from "playwright";
 
 const VSIX = process.env.DGC_VSIX || "/tmp/vsix-out/dgc-0.31.0-selfhost.vsix";
 const OUT = process.env.DGC_SHOT_DIR
-  || "/tmp/claude-1000/-home-fungigb10-evolving-fungi/149af3bd-5e8e-428b-b4a6-1892f29a8dfc/scratchpad";
+  || join(tmpdir(), "dgc-panel-check");
 const VIEWPORT = { width: 1280, height: 860 };
 const DISPLAY = ":" + (90 + Math.floor(process.pid % 9));
 
@@ -62,7 +62,7 @@ try {
 
   // Unpack the VSIX rather than shelling out to `code --install-extension`: that call hangs here
   // (it wants a window it never gets), and unpacking is exactly what an install does -- it is how
-  // this same build reaches the founder's Cursor.
+  // this same build reaches a user's Cursor.
   const staging = join(extensions, ".staging");
   const unzip = spawnSync("unzip", ["-q", VSIX, "-d", staging], { encoding: "utf8" });
   if (unzip.status !== 0) throw new Error(`unzip failed: ${unzip.stderr}`);

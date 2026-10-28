@@ -1,6 +1,6 @@
 """Ask DGC to fix: a Pip's report fixed in the background of the chat it reported to.
 
-The founder's decisions (pips-report-to-chat-decisions, 18-19 Oct, final): the fix is a BACKGROUND
+The maintainers' decisions (pips-report-to-chat-decisions, 18-19 Oct, final): the fix is a BACKGROUND
 sub-agent in the main chat's session -- no main turn, the user keeps chatting -- started by a new
 command; the report's card is its live status; it APPLIES with Undo when it finishes, holding back a
 file the user changed on the same lines; the card says what changed and whether tests ran in the fix

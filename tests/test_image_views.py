@@ -497,7 +497,7 @@ class ModelFormatTests(unittest.TestCase):
                 server.close()
 
     def test_read_file_on_an_image_is_a_viewing_step(self):
-        """Founder decision 4: with vision, read_file on an image shows it (chat and model, source
+        """Decision 4: with vision, read_file on an image shows it (chat and model, source
         read_file) instead of an error; without vision the error stays and nothing is shown."""
         for vision in (True, False):
             with self.subTest(vision=vision), tempfile.TemporaryDirectory(prefix="dgc-images-read-") as directory:

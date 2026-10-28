@@ -18,7 +18,7 @@ from .workspace_registry import RegistryError
 
 ROLES = ('explorer', 'critic', 'worker')
 MAX_CALLS = 3
-# Version 2 (founder, 2026-10-14): specialists share their Patch run's lifetime with no request, tool-call, output or
+# Version 2 (reported 2026-10-14): specialists share their Patch run's lifetime with no request, tool-call, output or
 # time limit, as every Pip run does; the reviewed grant (roles, how many calls) is the only bound. Version 1 pinned 12
 # requests, 64 tool calls, 4,096 output tokens per request and 300 s; its saved runs and receipts still validate.
 VERSION = 2

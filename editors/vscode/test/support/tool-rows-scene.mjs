@@ -1,4 +1,4 @@
-// The founder's turn for the one-line tool rows tests (tool-rows-one-line*.test.mjs): a sentence, six
+// A user's turn for the one-line tool rows tests (tool-rows-one-line*.test.mjs): a sentence, six
 // times (think, run a command), then the answer -- what a real deepseek turn drew as twelve rows.
 export const COMMANDS = ["python -m erp.gst.export --date yesterday", "grep -n \"cess\" erp/gst/totals.py",
   "pytest tests/gst/test_totals.py -q", "git log --oneline -5 -- erp/gst", "python scripts/compare_tally.py",

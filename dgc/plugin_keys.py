@@ -3,7 +3,7 @@
 Some plugins connect with a key the user creates at the vendor, not a browser sign-in: GitHub's personal access
 token, Brevo's MCP key, Arize's API key. The plugin's server names the variable it reads the key from
 (``bearer_token_env_var`` in the package, ``auth_env`` in DGC's saved server), and until this module the only way to
-supply it was to set that variable in the environment DGC started with -- the founder got "Configure
+supply it was to set that variable in the environment DGC started with -- a user got "Configure
 GITHUB_PAT_TOKEN in MCP server settings before connecting." for clicking Connect on GitHub.
 
 A saved key is kept where DGC keeps a plugin's sign-in: the system keychain, or an owner-only file where there is

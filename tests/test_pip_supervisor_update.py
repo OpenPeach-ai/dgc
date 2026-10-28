@@ -1,6 +1,6 @@
 """DGC updated under a running Pips supervisor.
 
-The founder's runner stopped at 15:10:55 IST, 24 seconds after his everyday DGC was updated to a
+A user's runner stopped at 15:10:55 IST, 24 seconds after their everyday DGC was updated to a
 build that moved the Pips database to a new schema: the long-running supervisor still had the old
 code, its next drain could not open the newer database, and all it said was "The local Pips
 controller stopped (RegistryError)". Now it says DGC was updated, and `dgc pips serve` starts itself

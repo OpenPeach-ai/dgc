@@ -83,7 +83,7 @@ test("300px: a reconnect line and an inline summary each end a tool group; Escap
       // after the box -- a line, a waiting prompt -- would make it match nothing.
       const block = [...document.querySelectorAll("#log .turn")].at(-1) || document.getElementById("log");
       const kinds = [];
-      // A question the model asked stands in the transcript on its own (founder, 2026-10-17), not in a group.
+      // A question the model asked stands in the transcript on its own (reported 2026-10-17), not in a group.
       for (const node of block.querySelectorAll(".tool-group, .model-retry, .thought-note, .tool.asked-standalone")) {
         if (node.classList.contains("agent-owned")) continue;
         if (node.parentElement.closest(".tool-group, .model-retry, .thought-note")) continue;

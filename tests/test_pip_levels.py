@@ -72,7 +72,7 @@ class LevelSettingTests(Store):
         self.assertIn("payment", got["levels"][2]["says"])
 
     def test_a_personal_pip_made_now_starts_at_approve_for_me_and_one_made_before_keeps_ask(self):
-        # Founder, 2026-10-21: new Personal Pips start at Approve for me; existing ones stay at Ask.
+        # Reported 2026-10-21: new Personal Pips start at Approve for me; existing ones stay at Ask.
         self.cfg.data["pips_enabled"] = True
         before = self.personal()                                   # made before: nothing saved for it
         made = self.control("create_pip", workspace_id=self.registry.personal()["id"], name="Shopper",

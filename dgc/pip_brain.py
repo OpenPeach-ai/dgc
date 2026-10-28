@@ -1,6 +1,6 @@
 """A Personal Pip's turns on the user's own Claude Code or Codex: their subscription, DGC's tools only.
 
-The founder's ask (2026-10-20): a Pip that follows DGC's subscription default, or is given one, runs. The CLI is
+The maintainers' ask (2026-10-20): a Pip that follows DGC's subscription default, or is given one, runs. The CLI is
 the Pip's model and nothing more:
 
 * Its own tools are off. Claude Code gets no built-in tool (``--tools ""``), restricted mode, no settings files,

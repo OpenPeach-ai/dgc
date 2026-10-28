@@ -222,7 +222,7 @@ const scenarios = {
     await panel.settle();
     await restartAndRepaint(panel);
   },
-  // The same, while the founder was on another view: the restored blocks are measured for skipping
+  // The same, while a user was on another view: the restored blocks are measured for skipping
   // with nothing laid out, and only get a size once the panel is shown again.
   "repainted after a backend restart while hidden": async (panel) => {
     await answeredThenPrompted(panel);

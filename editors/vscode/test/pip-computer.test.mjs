@@ -103,7 +103,7 @@ test('a held submit is reviewed with its screenshot; Send once sends that exact 
 });
 
 test('a payment held in its browser asks every time: Send once and Reject, never Always allow',async()=>{
- // Founder, 2026-10-19: "Payments are never Always-allow", however the Pip clicked (a ref, or by position).
+ // Reported 2026-10-19: "Payments are never Always-allow", however the Pip clicked (a ref, or by position).
  const x=setup({pip:job({computer_plan:PLAN}),status:computer({pending:1,actions:[action({frame:null,summary:{...action().summary,payment:true}})]})});await x.openJob();
  x.click(`[data-computer-action="${actionId}"]`);await flush();
  assert.match(x.d.querySelector('[role=dialog]').textContent,/This sends payment card details\./,'a payment is said plainly');

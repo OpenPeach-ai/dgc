@@ -33,7 +33,7 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
   other window closes becomes this window's by itself. Two windows opening one chat, or pressing Open here on it, at
   the same moment can't both have it: one does, and the other stays read-only and says so. A window whose DGC exits
   or is killed lets go of its chats at once. The bar says where the chat is open and whether it is writing there:
-  "Open in Cursor · ~/toni-erp · writing a reply now. Open here moves it to this window." (or "idle 6 min"), the
+  "Open in Cursor · ~/shop-api · writing a reply now. Open here moves it to this window." (or "idle 6 min"), the
   folder with `~` for your home folder; after Open here, the window it came from says the same about this one. When
   DGC can't tell (an older DGC holds it), the bar says "This chat is open in another window", as before.
 - **Dictate.** Press the microphone beside Send and speak. While you speak, the box's bottom row becomes the voice

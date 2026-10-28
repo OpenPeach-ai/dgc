@@ -106,7 +106,7 @@ test("the group header wears the leading action of the sentence it prints", () =
       label: "Edited 1 file and ran 2 commands" },
     // The lone-card refinement: five tools and nine CLI names live in the `other` bucket, whose
     // finished sentence can only say "Used 1 tool". A wrench on top of that told the reader
-    // nothing at all — which is the founder's complaint, exactly.
+    // nothing at all — which is a user's complaint, exactly.
     { steps: [["todo", "t1"]], icon: "list-todo", label: "Used 1 tool" },
     { steps: [["skill", "s1"]], icon: "sparkle", label: "Used 1 tool" },
     { steps: [["bash_output", "o1"]], icon: "square-terminal", label: "Used 1 tool" },

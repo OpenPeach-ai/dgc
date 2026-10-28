@@ -1,6 +1,6 @@
 """A Troupe checker's shell: commands in DGC's bubblewrap box, reading only.
 
-The founder (2026-10-18): Troupe checker agents get a sandboxed read-only shell, together with a read-only database
+Reported 2026-10-18: Troupe checker agents get a sandboxed read-only shell, together with a read-only database
 account, so a checker can't change data. Verifiers with no shell had voted findings "not real" only because they
 could not re-run a query (ERP session review, 2026-10-18).
 
@@ -18,7 +18,7 @@ What a command sees in the box (Linux, bubblewrap; built by `wrap`):
   that connects only to that host and port), and $DGC_READONLY_DATABASE_URL points at it;
 - no capabilities, no new user namespaces, a new session, and it dies with DGC.
 
-On macOS the box is Seatbelt's (``sandbox-exec``, built by the same `wrap`; the founder, 2026-10-23), as close to the
+On macOS the box is Seatbelt's (``sandbox-exec``, built by the same `wrap`; reported 2026-10-23, as close to the
 Linux one as Seatbelt allows:
 
 - every write denied but one private temporary folder per command ($TMPDIR, with HOME inside it), made 0700 in a

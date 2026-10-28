@@ -1,6 +1,6 @@
 """A live-data Pip: a project Pulse whose job is a fixed list of read-only commands, and its model's short summary.
 
-The founder (2026-10-18): "A Pip for live data (approved read-only commands + a model summary)". Pips detect, the chat
+Reported 2026-10-18: "A Pip for live data (approved read-only commands + a model summary)". Pips detect, the chat
 fixes; nothing it runs changes a live system. On his ERP the models had improvised a watcher that applied fixes to a
 live database as superuser (ERP session review, 2026-10-18). Real registry, the real runner path (_execute_run with the
 real worker subprocess and a scripted model), and the real bubblewrap box where this computer has one.

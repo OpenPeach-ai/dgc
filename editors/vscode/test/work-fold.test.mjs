@@ -243,7 +243,7 @@ test("a reload, a reattach and a resume draw the same fold as the live turn", ()
 
 // A command run in the background (or a monitor) that reports while the turn works draws a card with up to 40
 // lines of its output. It is work like a tool row: once the answer is there it folds with the rest, one click
-// away, instead of staying open above and below the answer (the founder's .111 Docker build, 25 Oct).
+// away, instead of staying open above and below the answer (a user's .111 Docker build, 25 Oct).
 const exited = (id, turn, delivery = "inline") => ({ type: "monitor_event", id, description: `docker build ${id}`,
   event_index: 1, lines: [`background task ${id} exited 0 after 20s`, "#12 DONE 1.7s", "#13 DONE 0.1s"], omitted_lines: 0,
   kind: "background_exit", delivery, turn_id: turn });

@@ -1,4 +1,4 @@
-"""The one web search Work, ChatDGC and Pips share (founder, 2026-10-09) is set in the editor's Settings.
+"""The one web search Work, ChatDGC and Pips share (reported 2026-10-09) is set in the editor's Settings.
 
 `dgc setup` and `/search` could set it; the editor could set only the provider: `set_config` refused a
 SearXNG address or a Brave or Tavily key as unknown keys. Now Settings sets all three. The key goes where

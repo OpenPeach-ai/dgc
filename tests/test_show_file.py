@@ -1,6 +1,6 @@
 """Showing the user a file the model produced.
 
-The founder's case: "I ask the model to record a video and show me, and it shows me a chip I can
+A user's case: "I ask the model to record a video and show me, and it shows me a chip I can
 click." DGC could not do that. It could show an IMAGE -- as a thumbnail inside a collapsed tool
 card -- and nothing else.
 

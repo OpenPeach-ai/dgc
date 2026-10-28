@@ -1,6 +1,6 @@
 """A finished helper continued with its memory (dgc/helper_memory.py).
 
-The founder (25 Oct): the coordinator sent follow-up work to helpers that had FINISHED, and each one resumed with its
+Reported 25 Oct: the coordinator sent follow-up work to helpers that had FINISHED, and each one resumed with its
 memory: a study, then six fixes, then a follow-up fix, then a feature, without re-learning the code. DGC could not:
 `message_task` reaches only a background helper still running, so a follow-up was a fresh helper reading everything
 again. Now the model (`continue_task`), the person ("Ask it to do more", the editor's `continue_agent`) and the

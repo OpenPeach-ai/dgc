@@ -46,7 +46,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   as each one opens and closes, whether you chose something or pressed Esc. The classic prompt (`dgc --classic`)
   never had this problem.
 - **A prompt you type in a session another DGC has open says where it is open once.** The choices come back each time,
-  and the line above them ("This session is open in VS Code · ~/toni-erp · idle 2 min") is no longer repeated unless it
+  and the line above them ("This session is open in VS Code · ~/shop-api · idle 2 min") is no longer repeated unless it
   says something new.
 
 ## 0.48.2 — 2026-10-27
@@ -89,14 +89,14 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   the same file. Now the process that has a session open (a window, a terminal, a DGC kept running with no window, an
   SDK program) holds it until it lets it go, and the operating system frees it if that process dies, a crash included.
   - **The terminal:** `dgc -c`, `dgc --resume ID` and `/resume` of a session another DGC has open say where it is open
-    and what runs there ("This session is open in VS Code · ~/toni-erp · idle 6 min. 1 monitor runs there.") and offer
+    and what runs there ("This session is open in VS Code · ~/shop-api · idle 6 min. 1 monitor runs there.") and offer
     **Open here** (the window lets it go and shows it read-only with the line about the terminal), **Start a new
     session** (highlighted: Enter alone never takes it) or **Quit**, in the full screen and the classic prompt. A
     message typed meanwhile brings the choices back and is not sent; `dgc -c -p` says where and writes nothing. While
     something runs there (a turn, a monitor, a background helper or command, a queued prompt, a question), Open here
     says what and leaves it where it is, so nothing running is lost to a move.
   - **The other way round:** a window opening a session a terminal has open shows it read-only, "Open in the terminal
-    · ~/toni-erp · idle 2 min.", and its Open here takes it from the terminal, which says "This session is open in the
+    · ~/shop-api · idle 2 min.", and its Open here takes it from the terminal, which says "This session is open in the
     editor now" and takes no more prompts for it (Open here takes it back, or start a new session). The classic prompt
     now leaves a note, as the full screen does, so a window can find it.
   - **The SDK:** `resume` of a session another DGC has open is refused (`DGCConfigError`, from `command_rejected`
@@ -154,7 +154,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     existing event changed.
 
 - **"Open here" says where the chat is open and what runs there.** A session another window holds used to be shown as
-  "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/toni-erp ·
+  "This session is open in another window." Now the read-only bar says, in one line: "**Open in Cursor · ~/shop-api ·
   idle 6 min.** 2 monitors and 1 background helper run there. Open here moves them to this window." It says "working
   now" while a turn runs there, "Kept running by DGC with no window open" when no window has it, and names each thing
   that runs or waits there only when there is one (monitors, background helpers, background commands, queued prompts,
@@ -163,7 +163,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   chat's bar says it too ("writing a reply now"). When DGC can't tell, because an older DGC holds the chat, the bar
   says what it always did.
   - **In the terminal**, `dgc -c`, `dgc --resume ID` and `/resume` of a session a window holds now say the same facts:
-    "This session is open in Cursor · ~/toni-erp · working now. 1 monitor runs there. Carry on there, or start a new
+    "This session is open in Cursor · ~/shop-api · working now. 1 monitor runs there. Carry on there, or start a new
     session here." A message sent there that is refused because the window's panel is on screen names them too.
   - **For editors**: new commands `editor_app {name}` (which editor this window is; nothing answers it) and
     `session_holder {request_id, session_id}`, answered by a new event `session_holder {request_id, session_id, found,
@@ -1449,7 +1449,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
   - **The card is the confirmation.** The plugin instructions now say so: with deepseek-v4.1-flash, "supply 100
     USDC from my wallet 0x…" made the card in 1 of 3 runs (the others asked the user to confirm the address
     first); with the sentence, 3 of 3.
-- **What fills the context window, part by part** (founder, from Claude's Usage sheet; phase 1 of
+- **What fills the context window, part by part** (as in Claude's Usage sheet; phase 1 of
   CONTEXT_BREAKDOWN_PLAN.md: ChatDGC; main DGC, the SDKs and Pips follow). `dgc/context_breakdown.py` puts any
   surface's parts in one shape: `{window, used, source, compact_at, categories: [{id, label, tokens, items?}], buffer,
   free, deferred?}`, biggest first, scaled to the model's own count where it reported one, with the room kept before
@@ -1480,7 +1480,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
 - **A welcome for the time of day.** "What can I help with?" gives way to ChatDGC's mark, its slashes drawn in one
   by one (still, with reduced motion), and a line for the hour (three each for morning, afternoon, evening and night;
   a temporary chat: "Off the record. Nothing here is kept."), chosen once a chat and kept in place across renders.
-- **ChatDGC's box, as main DGC's** (founder: the purple ring off, the model and thinking pickers and the context
+- **ChatDGC's box, as main DGC's** (reported: the purple ring off, the model and thinking pickers and the context
   meter as main DGC has them, thinking "something creative": he chose a dial). The box keeps its border on focus with
   main DGC's shadow; the tools are borderless. The two native selects stay as what a send reads, hidden behind one
   pill (the model's name, a 16px arc for the level) opening a menu: the models (menuitemradio) and a dial (an SVG
@@ -1720,7 +1720,7 @@ For the editor's agent map. Older clients are unaffected: everything new is a ne
     `"unchecked": true`. The report counts them ("2 kept (1 of them unchecked)") and marks each one
     ("UNCHECKED: none of 3 could check it", "1 of 1 agreed, 2 could not check").
 - **Troupe verifiers get a read-only shell in a sealed box, and a project can give them a read-only database
-  account** (the founder's decision). A `verifier` now has bash, every command run in DGC's bubblewrap box: the
+  account** (the maintainers' decision). A `verifier` now has bash, every command run in DGC's bubblewrap box: the
   project read only (at `/mnt` and its own path), a private `/tmp` the one writable place, credential files hidden
   as from a Pip snapshot (`.env*`, keys, `.git`, `.ssh`, cloud configs; dependency and build folders stay so tests
   run), homes and `/run` (Docker's socket, D-Bus) empty, no capabilities, and no network. Its bash needs no approval
@@ -2102,7 +2102,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   The chat search uses a full-text index over every Pip's chat (registry schema 43; plain matching
   where SQLite has no FTS5); DGC's own turns in a chat never match.
 - **A Pip whose chat began before it had app tools no longer repeats that it has none.** Asked again
-  "what about using Composio connector?", the founder's Test Pip still said "I don't have a Composio
+  "what about using Composio connector?", a user's Test Pip still said "I don't have a Composio
   connector": its chat held its own earlier replies, and "Nothing is connected yet" read as "Composio
   is not connected". A Pip is now told whether your Composio is set up, that connect_app and read_app
   are its app tools, and, beside your message, that earlier replies saying otherwise are out of date;
@@ -2260,7 +2260,7 @@ it there). DGC now notices it is in WSL and handles the four ways WSL differs.
   tools reach DGC over a per-run socket only that run's token opens). New Pips commands (API 43,
   unreleased): `list_pip_app_links`, `start_pip_app_link`, `check_pip_app_link`,
   `decline_pip_app_link`, `disconnect_pip_app_link`; the Pip is told when an app connects.
-- A Pip with a computer may also read connected apps (the founder chose Grok's model: one Pip can
+- A Pip with a computer may also read connected apps (the maintainers chose Grok's model: one Pip can
   browse and read your mail; what it would send or change still waits for Allow).
 - Outside auto mode, a Pip the main chat proposes is no longer an "Allow this tool?" prompt: the
   `pips_setup` call only saves its card, which the editor docks above the chat box, and the user's
@@ -2842,7 +2842,7 @@ work are all here, under one version number.
 ### A held session, decided on whether a window exists
 
 - **A reloaded window gets its session back in about two minutes, not fifteen.** This is the bug
-  the founder hit twice. Reloading an editor window leaves its extension host running, and nothing
+  a user hit twice. Reloading an editor window leaves its extension host running, and nothing
   in the editor API tells that host it was orphaned -- so it goes on saying "I am alive", truthfully
   and uselessly, on a timer. Every one of those was read as "the window is fine", which is how a
   session stayed stranded for 25 hours. The chat panel's own webview now says it is on screen every

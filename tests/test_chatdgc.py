@@ -1,4 +1,4 @@
-"""ChatDGC Phase 1: its own store and engine (founder, 2026-10-09: a chat engine of its own, chats that never
+"""ChatDGC Phase 1: its own store and engine (reported 2026-10-09: a chat engine of its own, chats that never
 depend on the folder DGC runs in, replies as long as the model allows, the model and thinking kept per chat)."""
 import json
 import os

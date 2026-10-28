@@ -168,7 +168,7 @@ class TurnProseIdentityTests(unittest.TestCase):
         return [row for row in rows if not kind or row["type"] == kind]
 
     def test_a_gate_round_never_leaves_the_answer_ambiguous(self):
-        # The exact shape the founder hit: an answer, a gate that continued the turn, tool work,
+        # The exact shape a user hit: an answer, a gate that continued the turn, tool work,
         # then the real answer. Every block is classified and the turn names the last one.
         self.ui.on_text("A first, finished-looking answer.")
         self.ui.end_stream("answer")

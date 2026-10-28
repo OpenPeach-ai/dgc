@@ -1,7 +1,7 @@
 """Where a remote plugin's sign-in is kept: the system keychain, or an owner-only file where there is none.
 
 One entry per remote MCP server, named by the server: its OAuth client registration, its tokens and where it signs
-in. ``plugin_credentials_store`` chooses how (founder, 2026-10-15; Codex's ``mcp_oauth_credentials_store``):
+in. ``plugin_credentials_store`` chooses how (reported 2026-10-15; Codex's ``mcp_oauth_credentials_store``):
 
 - ``auto`` (the default): the system keychain when this computer has one DGC can use, else the file;
 - ``keyring``: the keychain or nothing (a sign-in that can't be kept there fails, never falls back to a file);

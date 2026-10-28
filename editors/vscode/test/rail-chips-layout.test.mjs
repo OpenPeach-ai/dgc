@@ -1,4 +1,4 @@
-// The chip line (B2) is a layout fact, so it is measured in real Chromium. The founder's case -- a goal, a troupe, two
+// The chip line (B2) is a layout fact, so it is measured in real Chromium. A user's case -- a goal, a troupe, two
 // monitors, a checklist and this chat's changes all showing -- stacked five rows above the prompt box: 204px of a
 // 460x820 side bar. Folded into one line of chips it must take at most 40px at 460 and at 900; each chip's popover
 // must float over the transcript (moving nothing), hold the kind's real row with controls that take their clicks,

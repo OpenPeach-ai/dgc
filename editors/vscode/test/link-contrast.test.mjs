@@ -2,7 +2,7 @@
 //
 // It was not. `--accent` (#7C5CFF) is a saturated mid-tone that scores 4.08:1 on the panel's dark
 // ground and 4.09:1 on its light one -- below the 4.5:1 this codebase already enforces for card
-// text -- so it failed AA on BOTH themes at once. The founder described it as hurting the eyes,
+// text -- so it failed AA on BOTH themes at once. A user described it as hurting the eyes,
 // which is what reading sub-threshold text for an hour feels like.
 //
 // No single purple fixes it: a tone light enough for the dark ground (#A78BFA, 6.5:1) collapses to

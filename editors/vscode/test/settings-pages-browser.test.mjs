@@ -65,13 +65,13 @@ const host = `(${function () {
     if (m.type === "ready") { event(config); post({ type: "plugins", items: plugins }); }
     else if (m.type === "listModelsAt") post({ type: "modelsAt", token: m.token, role: m.role, ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"] });
     else if (m.type === "getMemory") event({ type: "memory_state", enabled: true, facts: [{ id: "f1", text: "Prefers metric units and short answers", source: { surface: "chat", where: "Weekend in Lisbon" }, updated_at: "2026-10-17T10:00:00Z" }],
-      projects: [{ name: "evolving-fungi", folder: "/home/me/evolving-fungi", when: "today", remember: true, recent: ["Fix the narrow settings layout"] }] });
+      projects: [{ name: "notes-app", folder: "/home/me/notes-app", when: "today", remember: true, recent: ["Fix the narrow settings layout"] }] });
     else if (m.type === "getMemoryHistory") event({ type: "memory_history", entries: [] });
     else if (m.type === "getVoice") event({ type: "voice_state", runtime: { installed: false, size_mb: 50 }, models: [
       { id: "moonshine-base-en", role: "dictation", name: "Moonshine", summary: "Fast. English only.", languages: "English", licence: "MIT", size: 111266225 },
       { id: "nemotron-3.5-asr", role: "dictation", name: "Nemotron 3.5", summary: "Most accurate. 40 languages, found by itself.", languages: "40 languages", licence: "NVIDIA Open Model (OpenMDW-1.1)", size: 475271763 },
       { id: "kitten", role: "read_aloud", name: "Kitten", summary: "Small and clear. English.", languages: "English", licence: "Apache-2.0", size: 68000000 }] });
-    else if (m.type === "listRunning") post({ type: "running", items: [{ kind: "session", pid: 4242, instance: "i1", session: "s1", name: "Fix the narrow settings layout", cwd: "/home/me/evolving-fungi", windowless_s: 400, working: true, work: "running the tests" }] });
+    else if (m.type === "listRunning") post({ type: "running", items: [{ kind: "session", pid: 4242, instance: "i1", session: "s1", name: "Fix the narrow settings layout", cwd: "/home/me/notes-app", windowless_s: 400, working: true, work: "running the tests" }] });
     else if (m.type === "listMcp") event({ type: "mcp_servers", items: [{ name: "local-files", enabled: true, state: "connected", command: "npx -y @modelcontextprotocol/server-filesystem", tool_count: 12 }] });
     else if (m.type === "getUsage") event({ type: "usage_report", request_id: m.requestId, range: m.range, timezone: "IST, UTC+05:30", generated_at: "2026-10-17T15:26:00Z",
       totals: { input_tokens: 17346, output_tokens: 459, cached_input_tokens: 0, requests: 3 },

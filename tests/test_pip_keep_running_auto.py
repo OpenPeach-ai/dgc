@@ -110,10 +110,10 @@ class KeepRunningForScheduleTests(unittest.TestCase):
         self.assertIn("dgc pips keep-running on", told["notice"])
         with patch.object(keep, "status", return_value=OFF), patch.object(keep, "_account_home", return_value=True), \
              patch.object(keep, "_turned_off_before", return_value=False), \
-             patch.object(keep, "set_on", return_value={**ON, "while_logged_out": False}), patch.dict("os.environ", {"USER": "founder"}):
+             patch.object(keep, "set_on", return_value={**ON, "while_logged_out": False}), patch.dict("os.environ", {"USER": "sam"}):
             told = keep.for_schedule(self.registry, runner_online=False)
         self.assertTrue(told["turned_on"])
-        self.assertIn("sudo loginctl enable-linger founder", told["notice"])
+        self.assertIn("sudo loginctl enable-linger sam", told["notice"])
         with patch.object(keep, "status", return_value={**OFF, "supported": False, "reason": "Keeping Pips running is available on Linux and macOS."}), \
              patch.object(keep, "_account_home", return_value=True):
             told = keep.for_schedule(self.registry, runner_online=False)

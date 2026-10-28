@@ -1,4 +1,4 @@
-"""Each web search provider keeps its own key (founder, 2026-10-21).
+"""Each web search provider keeps its own key (reported 2026-10-21).
 
 Brave, Tavily and Ollama shared one saved `search_api_key`. Switching provider kept it, so a Brave key went to Tavily
 in its request body, or to ollama.com as a Bearer token when the Ollama on this computer couldn't search: a credential

@@ -1,4 +1,4 @@
-// Project Pips get the Personal Pips page (the founder, 24 Oct: "yes, do it"). Before, a Project Pip had its own page:
+// Project Pips get the Personal Pips page (reported 24 Oct: "yes, do it"). Before, a Project Pip had its own page:
 // a side bar of Pips with "Back to Pips", a Chat / History / Settings / More tab row, a header with its status and Run
 // now under History, the setup cards and the "waiting for you" section, and the old create form. Now a project's Pips
 // are the simple page's: its paged list with New Pip, a Pip's top bar (back, its face and name, a "…" menu) and the

@@ -1,5 +1,5 @@
 // Personal | Project: two tabs on the Pips page, as the Sessions home has Chat | Work, where a dropdown listed your
-// Personal Pips and every project DGC knows. The founder, 2026-10-21: "tabs would look better and make more sense", and
+// Personal Pips and every project DGC knows. Reported 2026-10-21: "tabs would look better and make more sense", and
 // "for Project Pips, it should only show the opened project's Pips, not other projects', as that might confuse the
 // user, who might ask that project's main DGC to fix another project's Pips." With no folder open the Project tab says
 // so in one line; the chosen tab is remembered per window. The side bar's Pips view, mounted as main.js mounts it.

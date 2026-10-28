@@ -4,7 +4,7 @@
 // landed (dgc/agent.py, _drain_steer) -- on the grounds that such a frontend shows each as its own
 // bubble. The editor is that frontend, and what it "showed" was the .role element, which is
 // screen-reader-only: 1px, clipped, invisible. So a sighted user sent a message mid-turn and got
-// no sign at all that the model had picked it up. The founder noticed it had gone.
+// no sign at all that the model had picked it up. A user noticed it had gone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeDom, mainCss } from "./support/webview-dom.mjs";
@@ -82,7 +82,7 @@ test("the applied line is the one that stands out", () => {
 test("the note sits under the bubble, not inside it", () => {
   // It lived in the bubble for one release-candidate, purely to keep the transcript's spacing
   // measurements quiet. Inside, a status line about the message reads as words the user typed --
-  // the founder caught it in a recording. The spacing check now measures the prompt's real foot.
+  // a user caught it in a recording. The spacing check now measures the prompt's real foot.
   const p = panel();
   const id = steerDuringTurn(p);
   p.event({ type: "prompt_accepted", request_id: id, state: "steered" });

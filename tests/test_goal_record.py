@@ -1,6 +1,6 @@
-"""A finished goal's record is dated and short (0.48.3, founder-approved 26 Oct).
+"""A finished goal's record is dated and short (0.48.3, approved 26 Oct).
 
-Found on .111 (session 20260930-050447-c62af3b6): the system prompt's "# Goal record" quoted the founder's raw
+Found on .111 (session 20260930-050447-c62af3b6): the system prompt's "# Goal record" quoted a user's raw
 prompt, cut mid-sentence and undated --
   'The session goal is completed: the "Improvements, ranked by impact for staff", i agree with your 8 points, lets
    build these. I am going to sleep now, so do this unnatended, overnight as your'
@@ -28,16 +28,16 @@ from dgc.config import Config, DEFAULTS
 from dgc.goals import goal_name, goal_record
 from dgc.llm import ChatResult, LLMClient
 
-# The founder's objective, as the record quoted it (cut where the record cut it), and whole.
-FOUNDER_CUT = ('the "Improvements, ranked by impact for staff", i agree with your 8 points, lets build these. '
+# A user's objective, as the record quoted it (cut where the record cut it), and whole.
+OBJECTIVE_CUT = ('the "Improvements, ranked by impact for staff", i agree with your 8 points, lets build these. '
                'I am going to sleep now, so do this unnatended, overnight as your')
-FOUNDER = ('"Improvements, ranked by impact for staff", i agree with your 8 points, lets build these. I am going '
+OBJECTIVE = ('"Improvements, ranked by impact for staff", i agree with your 8 points, lets build these. I am going '
            'to sleep now, so do this unnatended, overnight as your judgement says is best.')
 # Words that placed the request in time or were about the person, never the goal.
 TIME_WORDS = re.compile(r"tonight|overnight|over night|sleep|unn?att?ended|i'?m going|i am going|as your|"
                         r"right now|today|tomorrow|this morning|in the morning|be back|off to bed", re.I)
 VARIANTS = (
-    FOUNDER_CUT, FOUNDER,
+    OBJECTIVE_CUT, OBJECTIVE,
     "Tonight, fix the flaky tests and ship 0.48. I'm going to sleep.",
     "Work overnight on the parser rewrite, I'll be back in the morning",
     "ok great, now refactor billing.py so totals round once. Don't wait for me, just keep going until it's done",
@@ -116,7 +116,7 @@ class AgentCase(unittest.TestCase):
 class TheRecordIsDatedTests(AgentCase):
     def test_the_record_carries_the_day_the_goal_finished_and_its_age(self) -> None:
         agent = self.agent()
-        at = self.finished(agent, FOUNDER_CUT, days_ago=2)
+        at = self.finished(agent, OBJECTIVE_CUT, days_ago=2)
         record = record_of(agent.system_prompt())
         self.assertTrue(record.startswith(f"A goal finished on {day_label(at)} (2 days ago): \""), record)
         self.assertTrue(record.endswith(RULE), record)
@@ -136,7 +136,7 @@ class TheRecordIsDatedTests(AgentCase):
     def test_the_founders_example_reads_as_agreed(self) -> None:
         details = {"history": [{"status": "completed", "at": datetime(2026, 10, 24, 6, 10).timestamp(), "reason": ""}]}
         self.assertEqual(
-            goal_record(FOUNDER, "completed", details, datetime(2026, 10, 26, 15, 38)),
+            goal_record(OBJECTIVE, "completed", details, datetime(2026, 10, 26, 15, 38)),
             "A goal finished on 24 Oct (2 days ago): \"'Improvements, ranked by impact for staff', "
             "lets build these\". Don't restart it unless the user asks.")
 
@@ -145,7 +145,7 @@ class TheRecordIsDatedTests(AgentCase):
                                    ("paused", "A goal was paused on", "Don't resume it unless the user asks.")):
             with self.subTest(status=status):
                 agent = self.agent()
-                at = self.finished(agent, FOUNDER_CUT, days_ago=1, status=status)
+                at = self.finished(agent, OBJECTIVE_CUT, days_ago=1, status=status)
                 record = record_of(agent.system_prompt())
                 self.assertTrue(record.startswith(f"{lead} {day_label(at)} (yesterday): \""), record)
                 self.assertTrue(record.endswith(rule), record)
@@ -153,7 +153,7 @@ class TheRecordIsDatedTests(AgentCase):
 
     def test_a_reopened_session_keeps_the_day_it_finished(self) -> None:
         agent = self.agent()
-        at = self.finished(agent, FOUNDER_CUT, days_ago=3)
+        at = self.finished(agent, OBJECTIVE_CUT, days_ago=3)
         agent.messages.append({"role": "user", "content": "x"})
         self.assertTrue(agent._persist())
         reopened = self.agent()
@@ -163,7 +163,7 @@ class TheRecordIsDatedTests(AgentCase):
         self.assertTrue(record.startswith(f"A goal finished on {day_label(at)} (3 days ago): "), record)
 
     def test_a_record_with_no_recorded_day_says_so_and_keeps_the_rule(self) -> None:
-        record = goal_record(FOUNDER_CUT, "completed", {"history": []})
+        record = goal_record(OBJECTIVE_CUT, "completed", {"history": []})
         self.assertTrue(record.startswith("A goal finished earlier (DGC didn't record when): \""), record)
         self.assertTrue(record.endswith(RULE), record)
         self.assertIsNone(TIME_WORDS.search(record), record)
@@ -172,7 +172,7 @@ class TheRecordIsDatedTests(AgentCase):
 class TheRecordIsShortTests(AgentCase):
     def test_none_of_the_original_time_words_survive(self) -> None:
         agent = self.agent()
-        self.finished(agent, FOUNDER_CUT)
+        self.finished(agent, OBJECTIVE_CUT)
         prompt = agent.system_prompt()
         record = record_of(prompt)
         self.assertIn("Improvements, ranked by impact for staff", record)
@@ -183,7 +183,7 @@ class TheRecordIsShortTests(AgentCase):
 
     def test_the_name_drops_the_conversation_around_the_goal(self) -> None:
         expected = {
-            FOUNDER_CUT: "the 'Improvements, ranked by impact for staff', lets build these",
+            OBJECTIVE_CUT: "the 'Improvements, ranked by impact for staff', lets build these",
             "Tonight, fix the flaky tests and ship 0.48. I'm going to sleep.": "fix the flaky tests and ship 0.48",
             "Work overnight on the parser rewrite, I'll be back in the morning": "Work on the parser rewrite",
             VARIANTS[4]: "refactor billing.py so totals round once",
@@ -207,7 +207,7 @@ class TheRecordIsShortTests(AgentCase):
         self.assertEqual(goal_name("ship the release"), "ship the release")
 
     def test_two_words_of_time_together_both_go(self) -> None:
-        # The founder's 0.48 release goal: "unattended" was kept as if it named the work ("unattended overnight"),
+        # A user's 0.48 release goal: "unattended" was kept as if it named the work ("unattended overnight"),
         # so "do this all unattended" survived and the cut ended the name on a dangling "do…".
         objective = ("build and push the 0.48.0 version live, on the website, on extension marketplace and on github, "
                      "do this all unattended overnight")
@@ -232,7 +232,7 @@ class TheRecordIsShortTests(AgentCase):
 class TheRuleHoldsAfterCompactionTests(AgentCase):
     def test_after_a_compaction_the_next_request_still_carries_the_dated_rule(self) -> None:
         agent = self.agent(compact_threshold=0.0, context_size=65_536)
-        at = self.finished(agent, FOUNDER_CUT, days_ago=2)
+        at = self.finished(agent, OBJECTIVE_CUT, days_ago=2)
         for n in range(30):
             agent.messages += [{"role": "user", "content": f"question {n}: " + "detail " * 60},
                                {"role": "assistant", "content": f"answer {n}: " + "words " * 60}]
@@ -265,10 +265,10 @@ class AnActiveGoalIsUnaffectedTests(AgentCase):
     def test_a_standing_goal_is_stated_in_full_and_has_no_record(self) -> None:
         # A guard rather than a change: the standing goal is the person's words, every one of them.
         agent = self.agent()
-        self.assertTrue(agent.set_goal(FOUNDER))
+        self.assertTrue(agent.set_goal(OBJECTIVE))
         prompt = agent.system_prompt()
         self.assertIn("# Standing goal", prompt)
-        self.assertIn(FOUNDER, prompt)
+        self.assertIn(OBJECTIVE, prompt)
         self.assertNotIn("# Goal record", prompt)
         self.assertNotIn(OLD_RULE, prompt)
 

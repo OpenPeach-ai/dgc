@@ -208,7 +208,7 @@ class AppToolHandlerTests(unittest.TestCase):
     def test_asgi_is_an_app_a_framework_routes_at_the_exact_address(self):
         """Starlette takes a function or a method as a request handler and anything else as an ASGI app. handler.asgi
         was a bound method, and the way the SDK showed, app.mount("/dgc/pips", handler.asgi), answered DGC's POST to
-        /dgc/pips with a 307 it never follows (the founder's ERP test on .111, 25 Oct)."""
+        /dgc/pips with a 307 it never follows (a user's ERP test on .111, 25 Oct)."""
         import inspect
         app = self.handler.asgi
         self.assertFalse(inspect.isfunction(app) or inspect.ismethod(app), "a Starlette Route serves it as an ASGI app")

@@ -219,7 +219,7 @@ _CHROME_FLAGS = (
     f"--proxy-server=http://127.0.0.1:{BOX_PROXY_PORT}", "--proxy-bypass-list=<-loopback>",
     "--remote-debugging-pipe", "--user-data-dir=/home/pip/.browser",
     # Like Chrome on Grok's bots: not marked as automated (navigator.webdriver), so Google's search
-    # answers instead of asking "are you a robot" every time (founder, 2026-10-07). A check that
+    # answers instead of asking "are you a robot" every time (reported 2026-10-07). A check that
     # still appears stops the Pip and asks the user (pip_computer.human_check); it never solves one.
     "--disable-blink-features=AutomationControlled",
 )

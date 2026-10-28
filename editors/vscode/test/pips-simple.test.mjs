@@ -70,7 +70,7 @@ test('New Pip is a character and a name: no name, no Pip; then it is made and sa
  const x=setup({jobs:[core]});await x.drain();
  assert.ok(x.d.querySelector(`[data-job="${core.id}"]`));assert.match(x.d.querySelector('.pip-rows').textContent,/Core/);
  x.click('#simple-new');
- // The character is picked from its dropdown (the founder, 24 Oct: a big face with a dropdown beside it).
+ // The character is picked from its dropdown (reported 24 Oct: a big face with a dropdown beside it).
  const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);assert.equal(dialog.querySelectorAll('#new-pip-character-list [role=option]').length,7,'every character but Core');
  x.click('#new-pip-character');x.click('#new-pip-character-list [data-pick="quill"]');
  assert.equal(x.d.querySelector('#new-pip-character-list [data-pick="quill"]').getAttribute('aria-selected'),'true');
@@ -110,7 +110,7 @@ test('while a Pip answers it is in the chat at work, with its name, and its repl
 });
 
 test('until its computer is set up, a Pip\'s header says "Setting up your Pip…"; then the computer button appears',async()=>{
- // The founder: "once downloaded, only then the personal computer icon appears, so user can open it".
+ // A user: "once downloaded, only then the personal computer icon appears, so user can open it".
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const status=state=>({desktop:{pip_id:gmail.id,available:state==='ready',reason:'',install:'',using:false,browser:'Chromium',chrome_install:'',
   setup:{state,step:state==='running'?'Downloading Google Chrome and the desktop':'',done:5,total:10,error:''}}});
@@ -144,7 +144,7 @@ test('the computer button gives a Pip a computer, or opens the one it has in an 
  assert.equal(y.d.querySelector('[role=dialog]'),null);
 });
 
-// The founder: archiving a Pip "takes me back to its chat, it should just take me to Pips home".
+// A user: archiving a Pip "takes me back to its chat, it should just take me to Pips home".
 test('archiving a Pip from its Settings returns to your Pips',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail]});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
@@ -361,7 +361,7 @@ test('Start in the chat brings Pips back, and Core, like any Pip, takes the mess
 });
 
 test('a Personal Pip has no Run now: you chat with it, or it works on its schedule',async()=>{
- // Founder, 2026-10-07: "why do we need a manual Run Now button at all? grok bots don't have that".
+ // Reported 2026-10-07: "why do we need a manual Run Now button at all? grok bots don't have that".
  const results=async p=>{const x=setup({jobs:[p]});await x.drain();x.click(`[data-job="${p.id}"]`);await x.drain();x.click('.pip-menu [data-tab="runs"]');await x.drain();return x;};
  const chat=await results(pip('pip_'+'g'.repeat(32),'Gmail','scout'));
  assert.equal(chat.d.querySelector('#run'),null);assert.match(chat.d.body.textContent,/When Gmail works on its own, on a schedule/);

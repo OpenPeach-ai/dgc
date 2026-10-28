@@ -1,4 +1,4 @@
-"""Ollama web search (founder, 2026-10-21: "for Web Search, we could give option to use Ollama cloud web search").
+"""Ollama web search (reported 2026-10-21: "for Web Search, we could give option to use Ollama cloud web search").
 
 Two ways in, tried in order. A signed-in Ollama on this computer serves POST /api/experimental/web_search (Ollama 0.18
 and later) and signs the request to ollama.com with its own sign-in, so no key is needed. Otherwise ollama.com's

@@ -9,7 +9,7 @@ and save proposals, setups and handoffs for review. Every mutation needs the hos
 old for it. CLI 0.48.0 advertises Pips API 66. See [PIPS.md](PIPS.md).
 
 - `resume` of a session another DGC has open (a VS Code window, a terminal, a DGC kept running with no window) is
-  refused with `DGCConfigError`, naming where it is open ("This session is open in VS Code · ~/toni-erp · idle 6 min.
+  refused with `DGCConfigError`, naming where it is open ("This session is open in VS Code · ~/shop-api · idle 6 min.
   …"): one DGC writes to a session at a time. Before, it opened the session and a run could write it between the
   other's turns. Editor protocol: `ready.capabilities.session_owner`, command `watch_session_owner`, event
   `session_held {session_id}` (vendored, and in the TypeScript SDK's known events), `command_rejected` reason

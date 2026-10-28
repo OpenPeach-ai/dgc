@@ -38,11 +38,11 @@ from dgc.headless import Backend, HeadlessUI               # noqa: E402
 from dgc.llm import ChatResult, ToolCall                   # noqa: E402
 from dgc.protocol import PendingRequests                   # noqa: E402
 
-FOUNDER = ("I want to see how this DGC proposes options to user, can you do a test and propose me "
+USER_ASK = ("I want to see how this DGC proposes options to user, can you do a test and propose me "
            "options to select from ?")
 
 ASKS = [
-    FOUNDER,
+    USER_ASK,
     "propose_options",
     "Give me a few options to choose from.",
     "can you give me a couple of choices so I can pick one",
@@ -265,7 +265,7 @@ class OptionsIntentTests(unittest.TestCase):
 
     def test_untrusted_editor_context_cannot_ask(self):
         text = ('<editor-context-json trust="untrusted-reference-data">\n'
-                f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
+                f'[{{"text":"{USER_ASK}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("options", _tool_intents(text))
 
     def test_a_take_back_is_left_to_the_model(self):
@@ -342,7 +342,7 @@ class ToolListMatrixTests(AgentTests):
         for profile in ("adaptive", "full"):
             for mode in ("default", "acceptEdits", "plan"):
                 agent = self.agent(mode=mode, tool_profile=profile)
-                for text in ("fix the parser", FOUNDER):
+                for text in ("fix the parser", USER_ASK):
                     self.assertTrue(self.offered(agent, text), (profile, mode, text))
                     self.assertNotIn("# Options picker", agent.system_prompt(), (profile, mode, text))
 
@@ -353,7 +353,7 @@ class ToolListMatrixTests(AgentTests):
                 label = (profile, ultra)
                 self.assertFalse(self.offered(agent, "fix the parser"), label)
                 self.assertNotIn("# Options picker", agent.system_prompt(), label)
-                self.assertTrue(self.offered(agent, FOUNDER), label)
+                self.assertTrue(self.offered(agent, USER_ASK), label)
                 self.assertNotIn("# Options picker", agent.system_prompt(), label)
                 self.assertIn("propose_options", agent._text_protocol_section(), label)
                 self.assertFalse(self.offered(agent, "now add the tests"), f"{label}: per turn only")
@@ -379,7 +379,7 @@ class ToolListMatrixTests(AgentTests):
             self.assertNotIn("# Options picker", agent.system_prompt(), text)
 
     def test_full_auto_offers_the_picker_when_the_ask_is_misspelled(self):
-        """The founder's real turn: "propse" and "recomendation" defeated the spelled-out matcher,
+        """A user's real turn: "propse" and "recomendation" defeated the spelled-out matcher,
         full-auto removed the tool, and the model wrote the choices in chat instead."""
         agent = self.agent(mode="auto")
         for text in ('"...fill themselves on the voucher form." - ask me what it is and propse '
@@ -394,7 +394,7 @@ class ToolListMatrixTests(AgentTests):
         for text in ("Continue the active goal.", "now fix the failing test"):
             self.assertFalse(self.offered(agent, text), text)
             self.assertNotIn("# Options picker", agent.system_prompt(), text)
-        self.assertTrue(self.offered(agent, FOUNDER), "the user's own ask still counts during a goal")
+        self.assertTrue(self.offered(agent, USER_ASK), "the user's own ask still counts during a goal")
         # A goal still activates its other intents (the monitor tool here).
         agent.set_goal("watch the dev server log")
         agent._activate_tool_intents("keep going", replace=True)
@@ -405,12 +405,12 @@ class ToolListMatrixTests(AgentTests):
             def __getattr__(self, name):
                 return lambda *a, **k: None
         agent = self.agent(ui=Permissive(), mode="auto")
-        self.assertTrue(self.offered(agent, FOUNDER))
+        self.assertTrue(self.offered(agent, USER_ASK))
 
     def test_a_sub_agent_in_full_auto_is_told_why_and_what_to_do(self):
         agent = self.agent(mode="auto")
         agent.depth = 1
-        self.assertFalse(self.offered(agent, FOUNDER))
+        self.assertFalse(self.offered(agent, USER_ASK))
         prompt = agent.system_prompt()
         self.assertIn("# Options picker", prompt)
         self.assertIn("sub-agent", prompt)
@@ -428,7 +428,7 @@ class ToolListMatrixTests(AgentTests):
                                 ("interactive", UI(), False)):
             agent = self.agent(ui=ui, mode="auto")
             agent.depth, agent._monitor_turn = 1, wake
-            self.assertFalse(self.offered(agent, FOUNDER), label)
+            self.assertFalse(self.offered(agent, USER_ASK), label)
             # The note is its own section; the sub-agent decision line that follows it is not the note.
             note = agent.system_prompt().split("# Options picker", 1)[1].split("\n\n", 1)[0]
             self.assertIn("Your task asks for a choice between options", note, label)
@@ -437,7 +437,7 @@ class ToolListMatrixTests(AgentTests):
 
     def test_a_non_interactive_run_in_full_auto_is_told_why_and_what_to_do(self):
         agent = self.agent(ui=OneShotUI(), mode="auto")
-        self.assertFalse(self.offered(agent, FOUNDER))
+        self.assertFalse(self.offered(agent, USER_ASK))
         prompt = agent.system_prompt()
         self.assertIn("# Options picker", prompt)
         self.assertIn("non-interactive `dgc -p` run", prompt)
@@ -465,7 +465,7 @@ class TurnTests(AgentTests):
             text_protocol.append(agent._text_protocol_section())
             return options_if_offered(agent, request)
         calls = scripted(agent, [options_if_offered, after_the_answer, ChatResult(content="You picked B.")])
-        self.assertTrue(agent.run_turn(FOUNDER))
+        self.assertTrue(agent.run_turn(USER_ASK))
         self.assertIn("propose_options", calls[0]["tools"])
         # One round of questions answers the ask: the rest of the turn is full-auto again.
         self.assertNotIn("propose_options", calls[1]["tools"])
@@ -535,7 +535,7 @@ class TurnTests(AgentTests):
         calls = scripted(agent, [options_if_offered, cycle_one, ChatResult(content="cycle one done"),
                                  options_if_offered, cycle_two, complete,
                                  ChatResult(content="Both files written.")])
-        self.assertTrue(agent.run_turn(FOUNDER))
+        self.assertTrue(agent.run_turn(USER_ASK))
         self.assertEqual(agent.goal_status, "completed")
         self.assertGreaterEqual(agent.goal_snapshot()["cycles"], 2)
         self.assertIn("propose_options", calls[0]["tools"])
@@ -630,17 +630,17 @@ class SubscriptionTests(unittest.TestCase):
     def test_a_delegated_turn_that_asks_is_told_the_picker_is_dgcs_own(self):
         from dgc.ultra import delegated_prompt
         cfg = make_config(Path(tempfile.gettempdir()))
-        wrapped = delegated_prompt(cfg, FOUNDER, "auto")
+        wrapped = delegated_prompt(cfg, USER_ASK, "auto")
         self.assertIn("<dgc-options-note>", wrapped)
         self.assertIn("numbered list", wrapped)
-        self.assertTrue(wrapped.endswith(FOUNDER))
+        self.assertTrue(wrapped.endswith(USER_ASK))
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, "fix the parser", "auto"))
         context = ('<editor-context-json trust="untrusted-reference-data">\n'
-                   f'[{{"text":"{FOUNDER}"}}]\n</editor-context-json>\n\nfix the parser')
+                   f'[{{"text":"{USER_ASK}"}}]\n</editor-context-json>\n\nfix the parser')
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, context, "auto"))
         from dgc.skills import format_skill_instructions
         skill = format_skill_instructions({"deploy": {"name": "deploy",
-                                                      "instructions": "Notes. " + FOUNDER}})
+                                                      "instructions": "Notes. " + USER_ASK}})
         framed = skill + "\n\n" + context
         self.assertNotIn("<dgc-options-note>", delegated_prompt(cfg, framed, "auto"))
 
@@ -705,7 +705,7 @@ class EditorBackendTests(unittest.TestCase):
             return next(event for event in self.events if event["type"] == kind
                         and all(event.get(k) == v for k, v in fields.items()))
 
-    def test_the_founder_prompt_raises_the_card_and_the_choice_returns(self):
+    def test_the_user_prompt_raises_the_card_and_the_choice_returns(self):
         requests = []
 
         def chat(messages, **kwargs):
@@ -716,7 +716,7 @@ class EditorBackendTests(unittest.TestCase):
                              {"question": "Which approach?", "options": ["Approach A", "Approach B"]})])
             return ChatResult(content="Going with it.")
         with patch.object(self.agent.client, "chat", side_effect=chat):
-            self.backend.dispatch({"type": "prompt", "text": FOUNDER, "request_id": "ask"})
+            self.backend.dispatch({"type": "prompt", "text": USER_ASK, "request_id": "ask"})
             request = self.wait("options_request")
             question = request["questions"][0]
             self.assertEqual(question["question"], "Which approach?")
@@ -747,7 +747,7 @@ class EditorBackendTests(unittest.TestCase):
                                   tool_calls=[ToolCall("pick", "propose_options", copy.deepcopy(ask))])
             return ChatResult(content="Going with it.")
         with patch.object(self.agent.client, "chat", side_effect=chat):
-            self.backend.dispatch({"type": "prompt", "text": FOUNDER, "request_id": "ask"})
+            self.backend.dispatch({"type": "prompt", "text": USER_ASK, "request_id": "ask"})
             request = self.wait("options_request")
             first, second = request["questions"]
             self.assertEqual([(o["label"], o["description"], o["recommended"]) for o in first["options"]],

@@ -1,5 +1,5 @@
 """An isolated SDK session (DGC_HOME) keeps its runtime files in its own home, never the account's ~/.dgc: peer notes
-and the pasted-image spool (founder, 2026-10-14: isolation wins). Workspace locks stay the account's on purpose: they
+and the pasted-image spool (reported 2026-10-14: isolation wins). Workspace locks stay the account's on purpose: they
 keep two DGCs from writing the same project files at once (tests/test_pip_runtime.py checks that too). The SDK's own end-to-end check
 (test_dgc_sdk, "does not touch host") caught a peer note only when the child had not yet cleaned up: this one is exact."""
 import os

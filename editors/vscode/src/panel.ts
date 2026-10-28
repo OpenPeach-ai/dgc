@@ -517,7 +517,7 @@ interface ChatSlot {
 
 
 /** The prompt as Undo's question quotes it: one line of at most 70 characters, cut at a word with "…" when longer
- *  (it read "…and nothing els" before, the founder's screenshot, 25 Oct). */
+ *  (it read "…and nothing els" before, a user's screenshot, 25 Oct). */
 /** "a.py", "a.py and b.py", "a.py, b.py and c.py", "a.py, b.py, c.py, d.py and 3 more" (rewind_words.names). */
 function undoNames(paths: string[], shown = 4): string {
   if (paths.length > shown) return `${paths.slice(0, shown).join(", ")} and ${paths.length - shown} more`;
@@ -8304,7 +8304,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try { this.backendLog.dispose(); } catch { /* already gone */ }
   }
 
-  /** Q3 (founder, 19 Oct 2026): a session's tab closed while it works is asked about once, "keep it
+  /** Q3 (reported 19 Oct 2026): a session's tab closed while it works is asked about once, "keep it
    *  running in the background, or stop it", and the answer is remembered if ticked
    *  (dgc.closingAWorkingTab, closingTab.ts). Until it is answered the work goes on; dismissed, it keeps running,
    *  where Settings -> Running sessions and the Sessions list show it, with Stop. */

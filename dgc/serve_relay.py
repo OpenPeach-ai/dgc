@@ -16,7 +16,7 @@ this becomes a normal `dgc serve`, and the editor reopens the session from disk 
 An older CLI ignores both variables. Both are removed from the environment here, so nothing a
 normal serve starts -- above all a `dgc serve` a command runs -- inherits them.
 
-The update rule (founder, 19 Oct 2026): a session still running in a different DGC version is
+The update rule (reported 19 Oct 2026): a session still running in a different DGC version is
 stopped (it saves first) and opened in this one, never attached to across versions. A window
 showing it on screen is the exception: that window is never taken from.
 """

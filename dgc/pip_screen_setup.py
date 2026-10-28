@@ -1,6 +1,6 @@
 """Setting up a Pip computer's desktop, with no admin password and nothing installed on the system.
 
-The founder: "why does my system need that? Doesn't a Pip create its own virtual OS?" A Pip's
+A user: "why does my system need that? Doesn't a Pip create its own virtual OS?" A Pip's
 computer is a sealed box on this machine that runs this machine's programs, so the desktop's own
 programs (pip_screen.PROGRAMS) and Google Chrome have to come from somewhere. Here they come from the
 machine's own package sources and Google's, through a private copy of apt's state in DGC's folder:

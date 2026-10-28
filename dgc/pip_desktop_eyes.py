@@ -1,4 +1,4 @@
-"""A Pip's eyes and hands on its whole desktop (founder, 2026-10-20: "Pips use the whole desktop").
+"""A Pip's eyes and hands on its whole desktop (reported 2026-10-20: "Pips use the whole desktop").
 
 Beside the browser's own steps (text and refs, and its page by position: pip_eyes), a Pip whose model can see
 gets the whole screen: a look at all of it, the mouse anywhere (click, double and right click, hover, a drag with

@@ -1,4 +1,4 @@
-// A Pip's run while it runs, in words (the founder, 24 Oct): what it is doing now, how long it has been at it, and how it
+// A Pip's run while it runs, in words (reported 24 Oct): what it is doing now, how long it has been at it, and how it
 // started. Read from the run itself -- its saved activity (list_pip_run_activity: pip_run_progress events and the run's
 // own steps) and its manifest -- never from what an editor remembers, so the live post in the Pip's chat
 // (pipsClient.js), the agent map's row for a run the Work chat started (pipRunCards.js) and a reload all say the same.

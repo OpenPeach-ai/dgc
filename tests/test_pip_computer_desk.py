@@ -185,7 +185,7 @@ class DeskTests(unittest.TestCase):
                          [op for op in pip_computer.OPS if op == "drag" or op not in pip_computer.POINT_OPS + pip_computer.DESKTOP_OPS])
 
     def test_a_robot_check_stops_the_pip_and_waits_for_the_user_who_finishes_it(self):
-        # The founder's Google search answered "unusual traffic"; like Grok's bots, a Pip never solves a
+        # A user's Google search answered "unusual traffic"; like Grok's bots, a Pip never solves a
         # robot check: it stops, the chat says it needs the user, and "I've done it" lets it carry on.
         for url, title, text, frames, expected in [
                 ("https://www.google.com/sorry/index?continue=x", "", "", [], True),
@@ -241,7 +241,7 @@ class DeskTests(unittest.TestCase):
 
     @unittest.skipUnless(BOXES, "needs Linux and a working bubblewrap")
     def test_the_terminal_is_online_like_grok_but_never_this_computer_or_the_network(self):
-        # The founder: "Terminal internet: lets copy grok". Public sites through DGC's egress proxy (here a
+        # A user: "Terminal internet: lets copy grok". Public sites through DGC's egress proxy (here a
         # stand-in public site served on this machine), and nothing on this computer or the local network.
         import http.server, threading
         from dgc import pip_computer_box

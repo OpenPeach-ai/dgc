@@ -76,7 +76,7 @@ test("a live line and its inner page share the identity face, swirling while it 
   assert.ok(lineMark.classList.contains("is-live"));
   assert.ok(lineImg, "the line paints the SVG face");
   assert.match(lineImg.getAttribute("src"), /agent-0[1-8]-[a-z]+-animated\.svg$/,
-    "a working agent's face swirls, in the chat's chip too (founder, 2026-10-18)");
+    "a working agent's face swirls, in the chat's chip too (reported 2026-10-18)");
   doc.querySelector(`.agent-name[data-agent-id="${sid(4)}"]`).click();
   const pageMark = $("agent-mark");
   const pageImg = pageMark.querySelector("img");

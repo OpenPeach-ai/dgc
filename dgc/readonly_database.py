@@ -1,6 +1,6 @@
 """A project's read-only database account, for the agents that check claims about its data.
 
-The founder (2026-10-18): "Troupe checker agents get a sandboxed read-only shell, together with a read-only database
+Reported 2026-10-18: "Troupe checker agents get a sandboxed read-only shell, together with a read-only database
 account, so a checker can't change data." A Troupe audit had run psql as the postgres superuser, read-only only by
 request (ERP session review, 2026-10-18). This keeps one connection string per project, for a database role the user
 made read-only; DGC never creates or changes a role.

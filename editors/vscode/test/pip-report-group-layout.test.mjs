@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openThinkingPage } from "./render-thinking.mjs";
 
 // Two or more Pip reports fold into one line ("2 Pip reports · 2 clear"); opened, each report is a row under it. The
-// founder's screenshot (25 Oct): opened, the second row sat on top of the first. A standalone slim card after another
+// a user's screenshot (25 Oct): opened, the second row sat on top of the first. A standalone slim card after another
 // is pulled up 12px so their borders meet (`.pip-report.slim + .pip-report.slim`), and that rule outranked the group's
 // own `margin: 0`. jsdom computes no layout, so pip-report-card.test.mjs could not see it: this is Chromium.
 // DGC_REQUIRE_CHROMIUM=1 turns a missing browser into a failure.

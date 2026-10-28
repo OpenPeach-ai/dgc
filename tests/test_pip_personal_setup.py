@@ -45,7 +45,7 @@ class PersonalSetupTests(unittest.TestCase):
         self.assertEqual(self.store.list(draft['workspace_id']),[])
         self.assertEqual(draft['status'],'pending')
     def test_a_new_personal_pip_gets_its_own_computer_by_default(self):
-        # Founder, 2026-10-09: every new Personal Pip gets one where this machine can run it; false opts out.
+        # Reported 2026-10-09: every new Personal Pip gets one where this machine can run it; false opts out.
         with patch.object(pips, 'computer_by_default', return_value=True):
             draft = self.draft(request_key='default1')
             self.assertTrue(draft['computer'])

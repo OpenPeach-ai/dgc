@@ -68,7 +68,7 @@ def validate_snapshot(value):
 
 
 # Discovery starts each workflow connector's server and lists its tools: seconds on every message
-# (the founder saw a delay before each prompt was sent). The same saved connectors give the same
+# (a user saw a delay before each prompt was sent). The same saved connectors give the same
 # metadata for a few minutes; an action re-checks its tool's schema before it runs either way.
 _CACHE={}
 _CACHE_LOCK=__import__('threading').Lock()

@@ -58,7 +58,7 @@ function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
  return {w,d,app,sent,answer,requests,drain,click};
 }
 
-// The Sessions home's "34 more need you · Show all" (founder, 2026-10-18): from a Pip's chat or a search,
+// The Sessions home's "34 more need you · Show all" (reported 2026-10-18): from a Pip's chat or a search,
 // the Pips home at Needs attention, open in full, with your Pips under it.
 test('Show all from the Sessions home opens the Pips home at Needs attention, all of it',async()=>{
  const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));

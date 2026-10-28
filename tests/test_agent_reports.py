@@ -1,6 +1,6 @@
 """A finished background agent's report in the chat: one quiet line per agent that opens to it.
 
-The founder (25 Oct): in Claude Code a background sub-agent's final report arrives as one muted line
+Reported 25 Oct: in Claude Code a background sub-agent's final report arrives as one muted line
 with a › that opens the whole report. DGC drew "Woke on agent · <label>" and nothing else: the report
 reached the model, never the chat, and a reopened chat showed DGC's own notice as a prompt nobody
 typed. Now a client that says it draws them (watch_agent_reports, ready.capabilities.agent_reports)

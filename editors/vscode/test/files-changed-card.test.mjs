@@ -1,4 +1,4 @@
-// The end-of-turn "Edited N files" card, rebuilt to the shape Codex ships (founder, 2026-09-24).
+// The end-of-turn "Edited N files" card, rebuilt to the shape Codex ships (reported 2026-09-24).
 //
 // The bug this carries a fix for: DGC recorded every edit as a pair of line counts and nothing
 // else, so a file it could not diff -- a brand-new file, a binary write, a change past

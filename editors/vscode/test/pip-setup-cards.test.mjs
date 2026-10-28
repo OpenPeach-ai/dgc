@@ -60,7 +60,7 @@ test('without a dock the line itself offers Create Pip, Not now and Details, and
  x.answer(x.requests('get_pip_setup').at(-1),{setup:s});await flush();assert.equal(x.requests('accept_pip_setup').length,1);
 });
 
-// The founder's design D: with the panel's dock, a waiting Pip docks above the chat box (one at a
+// The maintainers' design D: with the panel's dock, a waiting Pip docks above the chat box (one at a
 // time); Later keeps it waiting in the reply, Review docks it again; deciding undocks it.
 test('with a dock a waiting Pip docks above the chat box; Later and Review move it; deciding undocks it',async t=>{
  const docked=[];const dock={show:el=>{docked.push(el);x.d.body.append(el);return true;},hide:el=>{el.remove();docked.splice(docked.indexOf(el),1);}};
@@ -146,7 +146,7 @@ test('a personal card offers the user\'s own subscriptions from API 55, and says
   const select=x.d.querySelector('select');select.value='subscription|codex';select.dispatchEvent(new x.w.Event('change'));assert.match(x.d.body.textContent,/Its replies and routines use your Codex plan’s usage\./);x.find('Use this model').click();assert.deepEqual(JSON.parse(JSON.stringify(x.requests('revise_pip_setup')[0].request.model_choice)),{mode:'subscription',engine:'codex'});}
  const project=harness(t,{api:55});await project.loaded(setup());project.find('Choose model').click();project.answer(project.requests('list_pip_models')[0],catalog);await flush();assert.equal([...project.d.querySelectorAll('select option')].some(o=>/subscription/.test(o.textContent)),false,'a project card offers none');});
 
-// Founder, 2026-10-23: the Pip's card showed its face twice, the card's own and a second run card's under it. Its first
+// Reported 2026-10-23: the Pip's card showed its face twice, the card's own and a second run card's under it. Its first
 // run is the card's own status line now: one face, and the line follows the run ("First run: report ready").
 test('an accepted Pip with a first run shows one face; the run is its status line', async t => {
  const x=harness(t),s={...setup(),run_now:true,run_now_policy:'It runs once, right after you create it.'},run='run_'+'5'.repeat(32);

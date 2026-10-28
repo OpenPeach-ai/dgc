@@ -284,7 +284,7 @@ def state_words(facts: dict, working: str = "working now") -> str:
 
 
 def where_words(facts: dict, working: str = "working now") -> str:
-    """"Cursor · ~/toni-erp · idle 6 min", or "kept running by DGC with no window open · ~/toni-erp · working now"."""
+    """"Cursor · ~/shop-api · idle 6 min", or "kept running by DGC with no window open · ~/shop-api · working now"."""
     place = WINDOWLESS if facts.get("windowless") is True else clean_editor(facts.get("editor"))
     return " · ".join(part for part in (place, str(facts.get("folder") or ""), state_words(facts, working)) if part)
 
@@ -336,7 +336,7 @@ def terminal_line(facts: dict | None, pid=None) -> str:
 
 
 def where_sentence(facts: dict | None) -> str:
-    """"This session is open in VS Code · ~/toni-erp · idle 6 min. 1 monitor runs there." -- "" when it can't say."""
+    """"This session is open in VS Code · ~/shop-api · idle 6 min. 1 monitor runs there." -- "" when it can't say."""
     if not usable(facts):
         return ""
     tail = " ".join(part for part in (running_sentence(facts), waiting_sentence(facts)) if part)

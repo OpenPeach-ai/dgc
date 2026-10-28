@@ -4,7 +4,7 @@
 // never seconds, no animation; cold -> the clock alone in the error colour, with the reason in its
 // tooltip. Reopening a chat whose cache went cold adds one note to the transcript. unknown (0.48.3) ->
 // the clock still there, dimmed, no minutes, its tooltip naming the provider that doesn't say how long
-// it caches (it was hidden, and the founder, on Ollama Cloud, took the missing clock for a broken one).
+// it caches (it was hidden, and a user, on Ollama Cloud, took the missing clock for a broken one).
 // A click opens the context meter's details, with the tokens the provider reported as cached.
 // Main DGC only: ChatDGC and Pips never show it.
 import { test } from "node:test";

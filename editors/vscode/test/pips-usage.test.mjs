@@ -1,5 +1,5 @@
 // A Pip's usage in its Job tab (API 41): plain numbers and a 14-day chart. Pips have no daily limit
-// (founder, 2026-10-14): nothing to set, and a limit an older DGC reports is not shown.
+// (reported 2026-10-14): nothing to set, and a limit an older DGC reports is not shown.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';

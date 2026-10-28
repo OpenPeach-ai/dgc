@@ -140,7 +140,7 @@ class AgentShellCommandTests(unittest.TestCase):
                 self.assertFalse(pip_cli.agent_shell_allows(parse(*argv)))
 
     def test_usage_has_no_daily_limit_to_set(self):
-        """Pips have no daily token limit (founder, 2026-10-14): the option is gone, not ignored."""
+        """Pips have no daily token limit (reported 2026-10-14): the option is gone, not ignored."""
         pip_id = self.personal()
         code, _, err = self.cli("usage", pip_id, "--daily-limit", "200k")
         self.assertNotEqual(code, 0)

@@ -839,7 +839,7 @@ class WindowResolutionTests(unittest.TestCase):
         # 0.48: a local model is never timed out while its server says it is working, so "auto" has
         # no first-token limit there; one DGC cannot check on keeps the old 900 s.
         for url in ("http://127.0.0.1:8080/v1", "http://192.168.1.60:11434",
-                    "http://100.89.32.80:1234/v1", "http://gpu-box.local:8000/v1"):
+                    "http://100.80.1.2:1234/v1", "http://gpu-box.local:8000/v1"):
             with self.subTest(url=url):
                 self.assertEqual(resolve_first_token_timeout("auto", url), 0)
                 self.assertEqual(resolve_first_token_timeout("auto", url, checked=False), 900)

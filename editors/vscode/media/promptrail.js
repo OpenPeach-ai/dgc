@@ -1,4 +1,4 @@
-// window.DgcPromptRail: the prompt rail (ChatGPT's "table of contents", the founder approved 2026-10-18), the same in
+// window.DgcPromptRail: the prompt rail (ChatGPT's "table of contents", the maintainers approved 2026-10-18), the same in
 // ChatDGC (chatdgc.js) and the Work chat (main.js). From five prompts, a short tick per prompt in the transcript's
 // right margin, centred, the one being read bright. Hovering it (or Tab to it) opens a card of every prompt with its
 // time under day headings, and the widget a reply made; a click goes there and outlines it. Alt+Up and Alt+Down step
@@ -20,7 +20,7 @@
 //   more(list) null, or {label, run} when the pages before what's on screen can't be listed yet
 //   announce(text), input (the message box: Alt+Up/Down work in it too)
 //   reveal     "hover": the ticks stay out of sight until the pointer comes near the transcript's right edge (or
-//              Alt+Up/Down, focus or the open card asks for them), as the Work chat has it (founder, 2026-10-23)
+//              Alt+Up/Down, focus or the open card asks for them), as the Work chat has it (reported 2026-10-23)
 // and calls refresh() when the prompts may have changed. It returns {refresh, track, close, step, rail, card}.
 (function () {
   "use strict";

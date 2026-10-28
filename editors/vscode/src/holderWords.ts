@@ -1,7 +1,7 @@
 /**
  * Where a chat another window holds is open, and what runs there: the line beside Open here.
  *
- *   Open in Cursor · ~/toni-erp · idle 6 min. 2 monitors and 1 background helper run there. Open here moves them
+ *   Open in Cursor · ~/shop-api · idle 6 min. 2 monitors and 1 background helper run there. Open here moves them
  *   to this window.
  *
  * Built only from what the holding DGC said (session_holder, chatdgc_holder: dgc/holder_note.py, which says the same in
@@ -46,7 +46,7 @@ export function editorName(appName: unknown): string {
   return clean(name, MAX_EDITOR);
 }
 
-/** A folder as the CLI gave it ("~/toni-erp", or only a folder's own name): never a full path, whatever arrives. */
+/** A folder as the CLI gave it ("~/shop-api", or only a folder's own name): never a full path, whatever arrives. */
 function folderShown(value: unknown): string {
   const folder = clean(value, 200);
   if (!folder || folder === "~" || folder.startsWith("~/")) return folder;

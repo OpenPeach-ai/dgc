@@ -1,8 +1,8 @@
-"""The apps on a Pip computer's desktop besides the browser, Files and Terminal (founder, 2026-10-20: "Pips use
+"""The apps on a Pip computer's desktop besides the browser, Files and Terminal (reported 2026-10-20: "Pips use
 the whole desktop"): an image editor, a document editor and a PDF viewer, on its dock and for the Pip to open.
 
 - **Image editor:** LibreOffice Draw (text, shapes, colours, photos; File > Export makes a PNG). Picked for the
-  founder's "design me my birthday shirts" because it is already on most Linux desktops, so nothing is downloaded
+  a user's "design me my birthday shirts" because it is already on most Linux desktops, so nothing is downloaded
   or set up; GIMP and Inkscape are not here, and their downloads would be one more thing to keep working.
 - **Document editor:** LibreOffice Writer.
 - **PDF viewer:** Evince.
@@ -10,7 +10,7 @@ the whole desktop"): an image editor, a document editor and a PDF viewer, on its
 Each app opens in a box of its own (bubblewrap, like the browser and the Terminal): the system's programs
 read-only, the computer's Files as the only folder it sees, its settings in a private folder beside Files
 (``home/.apps``, which the Terminal never sees), and its window on the Pip's screen. **Online like the Terminal**
-(founder, 2026-10-20, as OpenMausBot's desktops are): its only way out is the computer's egress proxy, through an
+(reported 2026-10-20, as OpenMausBot's desktops are): its only way out is the computer's egress proxy, through an
 in-box relay and the standard proxy settings, which reaches public websites and never this computer, the local
 network, link-local or cloud metadata addresses. An app can send to a public website without an Allow card, as the
 Terminal can; only the browser holds what it would submit for the user's Allow.

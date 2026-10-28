@@ -76,7 +76,7 @@ test('grouped tool receipt places the run outside the disclosure',async t=>{
  assert.equal(x.d.querySelector('.pip-run-state').textContent,'Failed');assert.equal(x.d.querySelector('.pip-run-open').disabled,false);
 });
 
-// The agent map's row for a run this chat started stays live while the Pip works (the founder, 24 Oct): what it is doing
+// The agent map's row for a run this chat started stays live while the Pip works (reported 24 Oct): what it is doing
 // now, from the run's own activity; since when; and Stop, which cancels the run as History's Cancel run does.
 const STARTED='2026-10-24T09:00:00.000Z';
 const activity=(events,next)=>({run_id:run,pip_id:pip,workspace_id:workspace,events,next_cursor:next,has_more:false,history_may_be_truncated:false,retention_limit:1000,retention_scope:'workspace'});

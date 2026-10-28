@@ -1,4 +1,4 @@
-// A Pip that reports to this chat is seen running here (the founder, 24 Oct): Pip runs happen in the Pips runner, not in
+// A Pip that reports to this chat is seen running here (reported 24 Oct): Pip runs happen in the Pips runner, not in
 // the chat's session, and the Work chat said nothing until the report card arrived. Now the backend tells the chat which
 // of ITS Pips are running (pip_runs_running, gated by ready.capabilities.pip_runs_running) and a chip on the rail's line
 // says so: "Billing audit running · 0:42", or "2 Pips running". A click opens that Pip's chat on the Pips page, at the

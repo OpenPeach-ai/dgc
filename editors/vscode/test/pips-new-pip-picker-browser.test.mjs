@@ -1,4 +1,4 @@
-// New Pip's big face and dropdown (the founder, 24 Oct: "a big face with a dropdown beside it") in real Chromium, drawn
+// New Pip's big face and dropdown (reported 24 Oct: "a big face with a dropdown beside it") in real Chromium, drawn
 // by the real client and its CSS at a narrow 300 px side bar, 460 px and a wide 900 px editor tab, dark and light: the Project and
 // Personal dialogs closed and with their list open, and a Personal Pip's face on its page. Nothing sticks out of the page
 // or is cut off by a box it sits in, there is no sideways scroll, the face sits beside the dropdown, and the open list
@@ -297,7 +297,7 @@ test("with motion allowed the faces move; with reduced motion they are still", a
   }
 });
 
-// The founder, 24 Oct: "remove the outline cube around the main Pip face". The big face stands on its own, in both
+// Reported 24 Oct: "remove the outline cube around the main Pip face". The big face stands on its own, in both
 // themes, in New Pip and on a Pip's Face page: no border, no filled box behind it.
 test("the big face has no box around it: no border and no fill, in both themes", async (t) => {
   if (skipOrFail(t)) return;

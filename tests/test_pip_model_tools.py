@@ -1,4 +1,4 @@
-"""The main chat sees and sets Pips' models (Pips API 66; the founder, 24 Oct 2026).
+"""The main chat sees and sets Pips' models (Pips API 66; reported 24 Oct 2026.
 
 His Work chat told him: "The Pips all run on the default model deepseek-v4.1-flash:cloud. That is per-Pip and can only
 be changed in the Pips editor UI (per-Pip model picker), not through my tools." Half wrong then, and now wholly: the
@@ -102,7 +102,7 @@ class TheChatSeesWhichModelsPipsCanUse(Fixture):
                                                   "runs_on": "deepseek-v4.1-flash:cloud"})
         self.assertIn("Use only these ids", listed["notice"])
 
-    # The founder, 25 Oct (after an 81 GB local model load took the machine down): when the chat picks a model itself it
+    # Reported 25 Oct (after an 81 GB local model load took the machine down): when the chat picks a model itself it
     # prefers the Pips default or a cloud model, and a local one only when asked for or already loaded. So the list says
     # where each model runs and, for a local Ollama, which are loaded now.
     def test_each_model_says_where_it_runs_and_a_local_one_whether_it_is_loaded_now(self):

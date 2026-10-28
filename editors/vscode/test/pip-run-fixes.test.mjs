@@ -1,4 +1,4 @@
-// A Pip's own chat says what Ask DGC to fix did for each run (Pips API 65). The founder (24 Oct): "when in chat we do
+// A Pip's own chat says what Ask DGC to fix did for each run (Pips API 65). Reported 24 Oct: "when in chat we do
 // Ask DGC to fix for a Pip card, and it gets fixed, the Pips page, for that Pip under chat, its card still gives an
 // option 'Ask DGC to fix'. Should its status also get updated as fixed?" Yes. The fix runs in a Work chat and keeps its
 // record (dgc/pip_fix.py); the run's post reads it with list_pip_run_fixes and says fixing, Fixed, failed or undone, as

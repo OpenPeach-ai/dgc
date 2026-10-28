@@ -200,7 +200,7 @@ aside>button:not(.job){margin:6px 6px 0 0}
 /* The runner's words stay whole: squeezed, "Start runner" wrapped and ran into Controls. */
 .simple-bar .compact-runner button,.simple-bar .runner-controls summary,.simple-bar .runner-status{white-space:nowrap;flex:none}
 /* The runner's error is its own row under the bar. In the bar's row it took the room the title and
-   the buttons needed ("Pi / ps", the founder's screenshot). */
+   the buttons needed ("Pi / ps", a user's screenshot). */
 .simple-bar>.notice{flex:1 0 100%;margin:0;order:9}
 .simple-note{margin:10px 14px 0}
 .simple-content{padding:16px 14px 28px;max-width:760px;margin:0 auto;width:100%;box-sizing:border-box}
@@ -262,7 +262,7 @@ button.pill{border-radius:999px;padding:6px 16px}
    lies over what is under it, inside the dialog; it flips up when there is more room above. */
 .pip-picker{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:center;margin:4px 0 12px}
 .pip-picker.large{grid-template-columns:104px minmax(0,1fr);gap:16px;margin:0 0 6px}
-/* The face stands on its own, with no box around it (the founder, 24 Oct). */
+/* The face stands on its own, with no box around it (reported 24 Oct). */
 .pip-picker-face{width:72px;height:72px;display:grid;place-items:center}
 .pip-picker.large .pip-picker-face{width:104px;height:104px}
 .pip-picker-face .avatar{width:58px;height:56px}

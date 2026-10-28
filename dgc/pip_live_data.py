@@ -1,7 +1,7 @@
 """A live-data Pip: a project Pulse whose job is a fixed list of read-only commands, and a short summary of
 what they printed.
 
-The founder (2026-10-18): "A Pip for live data (approved read-only commands + a model summary)"; Pips detect, the
+Reported 2026-10-18: "A Pip for live data (approved read-only commands + a model summary)"; Pips detect, the
 chat fixes; nothing it runs changes a live system. On his ERP the models had improvised a ``pip_watch.py`` that
 applied "AUTO-OK" fixes to a live database as superuser (ERP session review, 2026-10-18). This replaces it:
 

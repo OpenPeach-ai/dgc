@@ -45,7 +45,7 @@ class ViewerInputTests(unittest.TestCase):
             gate.feed(b"\x63" + b"\x00" * 20)
 
     def test_every_message_the_editors_novnc_sends_passes_whole(self):
-        """The founder typed a web address on a Pip's screen and it closed: noVNC sends keys as QEMU
+        """A user typed a web address on a Pip's screen and it closed: noVNC sends keys as QEMU
         extended key events (255) once Xtigervnc offers them, which the filter could not frame. These
         bytes come from the noVNC the editor ships, so a new message there fails here, not live."""
         import shutil
@@ -458,7 +458,7 @@ class RealScreenTests(unittest.TestCase):
         self.assertTrue(host.browser.alive(), "the browser runs as a window on the screen")
         self.assertEqual(host.browser.display_dir, host.desktop.x11_dir)
         # The desktop's Terminal is online through the computer's egress, like the browser: the desktop
-        # box runs its own relay to it (Grok's terminal has internet; the founder: "lets copy grok").
+        # box runs its own relay to it (Grok's terminal has internet; a user: "lets copy grok").
         def parent(pid):
             try:
                 return int(next(l for l in open(f"/proc/{pid}/status") if l.startswith("PPid:")).split()[1])

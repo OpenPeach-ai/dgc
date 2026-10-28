@@ -1,4 +1,4 @@
-"""The user's own Chrome for a Work session (the founder, 2026-10-13): found through the DevToolsActivePort a Chrome that
+"""The user's own Chrome for a Work session (reported 2026-10-13): found through the DevToolsActivePort a Chrome that
 allows remote debugging writes; one tab of DGC's in a window of its own; only on sites the user allowed, every mode."""
 import http.server
 import json

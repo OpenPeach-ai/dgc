@@ -1,6 +1,6 @@
 """Changing the model or the thinking level while a turn runs.
 
-The founder's report: in the editor, on Ollama cloud models, he switched the main model while a
+A user's report: in the editor, on Ollama cloud models, they switched the main model while a
 turn was running. The chat said the model had changed, then showed "working" for about fifteen
 minutes and did nothing until he pressed Stop and sent "continue".
 

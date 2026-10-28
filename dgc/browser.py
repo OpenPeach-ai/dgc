@@ -187,7 +187,7 @@ def install_request_for(error: BrowserError, cancelled=None) -> str:
 
 
 def ensure_browser(configured: str = "", *, cancelled=None) -> tuple[Path, str]:
-    """A browser to drive, fetching one when this computer has none (founder, 2026-10-13): (binary, a note
+    """A browser to drive, fetching one when this computer has none (reported 2026-10-13): (binary, a note
     for the model when DGC just downloaded it). An explicit ``browser_path`` that is wrong is said, never
     replaced by a download."""
     from . import browser_setup

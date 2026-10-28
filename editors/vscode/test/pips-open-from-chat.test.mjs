@@ -1,4 +1,4 @@
-// Opening a Pip from a chat (its run line, the agent map, a setup card's "Open in Pips"): the founder, 2026-10-18,
+// Opening a Pip from a chat (its run line, the agent map, a setup card's "Open in Pips"): reported 2026-10-18,
 // "in the chat I could see the model ran my Pips ... when I click the Pip, it opens the Pips page, but I can only see
 // the Core Pip, and it says 'This Pip is not available in the selected workspace. Refresh the dashboard.'" The Pips
 // view opens on your Personal Pips; a project's Pip lives in its project. It opens there now, and one that is gone

@@ -12,7 +12,7 @@ function submit(text) {
 }
 
 test("an absolute project path at the start of a prompt is sent as prose", () => {
-  const text = "/home/fungigb10/pregnancy-tracker , this is the directory that runs bearbloom";
+  const text = "/home/me/garden-notes , this is the directory that runs leafline";
   const h = submit(text);
   assert.equal(h.posted.some((message) => message.type === "slashText"), false);
   assert.equal(h.posted.findLast((message) => message.type === "prompt")?.text, text);

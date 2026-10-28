@@ -1,6 +1,6 @@
 // Personal | Project in real Chromium: the side bar's real page (panel.ts, main.css, main.js) with the real Pips view
 // in its shadow root, at 300 and 460 px, dark and light. The tabs are the Sessions home's Chat | Work over again (the
-// founder, 2026-10-21: "tabs would look better"), so the two pages read as one: the same box, type and colours, read
+// reported 2026-10-21: "tabs would look better"), so the two pages read as one: the same box, type and colours, read
 // from computed style; they fit; their words clear 4.5:1; and switching tabs never moves them.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";

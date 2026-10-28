@@ -1,4 +1,4 @@
-"""A Pip's eyes: whether its model can see, and when it can't, how it sees (founder, 2026-10-19).
+"""A Pip's eyes: whether its model can see, and when it can't, how it sees (reported 2026-10-19).
 
 A Personal Pip's computer is used two ways, and the model picks: by the page's text and refs (read,
 click e12), and, when its model can see, by eyes and a cursor -- a screenshot of the browser (look) and

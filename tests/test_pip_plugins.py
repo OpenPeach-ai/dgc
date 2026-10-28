@@ -83,7 +83,7 @@ class PluginWorld:
 
 
 class PluginAccessTests(PluginWorld, unittest.TestCase):
-    """Every plugin turned on in Settings is every Pip's (founder, 2026-10-09): no "use this plugin?" card.
+    """Every plugin turned on in Settings is every Pip's (reported 2026-10-09): no "use this plugin?" card.
     What runs at once and what waits for Allow is the plugin's level, ChatGPT's four."""
 
     RUN = "run_" + "a" * 32

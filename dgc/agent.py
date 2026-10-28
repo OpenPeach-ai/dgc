@@ -681,7 +681,7 @@ def recommended_window(config, client, model: str, *, probe: bool = True) -> int
     if limit:
         # A cloud model starts at a moderate window, never its whole maximum: a larger window means more
         # input on every turn before DGC compacts, which a paid API bills and an Ollama plan counts
-        # (founder, 2026-10-22). The family's window, at least CLOUD_START_WINDOW (the table's small
+        # (reported 2026-10-22). The family's window, at least CLOUD_START_WINDOW (the table's small
         # numbers are for memory on this machine), capped by what the model holds. Its maximum is one
         # choice away in the context meter, and a window chosen there is remembered for the model.
         return min(max(table or 0, CLOUD_START_WINDOW), limit)
@@ -1091,7 +1091,7 @@ THINK_KEYWORDS = [
 def _checkpoint_preview(text) -> str:
     """A turn's checkpoint label: the prompt as the chat shows it. The editor puts the open files ahead of the
     prompt as an <editor-context-json> block; labelling the checkpoint with that (its first 70 characters) left
-    the Edited card's Undo unable to find the turn whenever a file was open (founder, 25 Oct)."""
+    the Edited card's Undo unable to find the turn whenever a file was open (reported 25 Oct)."""
     if not isinstance(text, str):
         return text
     from .agent_reports import label, parse_wake_prompt
@@ -1489,7 +1489,7 @@ def _mechanical_compaction_brief(prior: str, transcript_lines: list[str],
 
 
 # A refusal with no way out is what turned a stale lease into a dead end for 25 hours: the
-# founder's reload left a backend holding the session and every new window was told only to
+# a user's reload left a backend holding the session and every new window was told only to
 # "wait". Say what will actually happen and what can be done meanwhile.
 def peers_refused_on_screen() -> str:
     from .peers import REFUSED_ON_SCREEN

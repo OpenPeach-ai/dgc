@@ -1,4 +1,4 @@
-"""What each Pip costs in tokens. There is no daily limit (founder, 2026-10-14)."""
+"""What each Pip costs in tokens. There is no daily limit (reported 2026-10-14)."""
 import contextlib
 import io
 import json
@@ -54,7 +54,7 @@ class SpendTests(unittest.TestCase):
         self.assertEqual(spend.usage(self.registry, job["id"])["today"]["tokens"], 48_500, "the imported total wins")
 
     def test_no_daily_limit_stops_a_pip(self):
-        """Founder, 2026-10-14: no daily budgets. A limit an older DGC stored is ignored, whatever was spent."""
+        """Reported 2026-10-14: no daily budgets. A limit an older DGC stored is ignored, whatever was spent."""
         job = self.job()
         with self.registry.transaction():
             self.registry.db.execute("INSERT INTO metadata VALUES(?,?)", ("pip_daily_token_cap:" + job["id"], "10000"))

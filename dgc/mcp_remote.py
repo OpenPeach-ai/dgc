@@ -1,6 +1,6 @@
 """DGC's own client for remote MCP servers, with OAuth 2.1 sign-in. It replaces the mcp-remote bridge.
 
-The founder chose this on 2026-10-15 so that a plugin's sign-in can live in the system keychain (plugin_credentials),
+The maintainers chose this on 2026-10-15 so that a plugin's sign-in can live in the system keychain (plugin_credentials),
 as Codex and Claude Code keep theirs, and not in files a bridge writes. MCPServer drives it exactly as it drove the
 bridge process: JSON-RPC lines go in on ``stdin`` and come back on ``stdout``, so everything above the transport
 (framing, cancellation, timeouts, server requests) is unchanged. A saved remote server keeps its

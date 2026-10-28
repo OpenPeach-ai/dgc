@@ -1,4 +1,4 @@
-// The Edited card lists exactly the files the turn's recovery point will restore (the founder, 25 Oct: "this should
+// The Edited card lists exactly the files the turn's recovery point will restore (reported 25 Oct: "this should
 // go into 0.48"). The 0.48 marketing take 5: a worker fixed billing.py in its own checkout with a shell command, DGC
 // integrated it, then wrote test_billing.py with its edit tools. The card said "Edited 1 file · test_billing.py"
 // while Undo restored both, because the panel counted only its own edit tools' diffs.

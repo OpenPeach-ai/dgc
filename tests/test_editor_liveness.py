@@ -1,6 +1,6 @@
 """A backend whose editor has gone away lets go of the session.
 
-The founder hit this live: a Cursor reload on 192.168.1.111 left the old extension host alive for
+A user hit this live: a Cursor reload on a test machine left the old extension host alive for
 25 hours with its `dgc serve` child still holding the session lease, so every new window was
 refused with "this session has an active turn in another DGC process" and offered no way out. The
 backend was behaving correctly by every check it had -- its stdin was open and its parent process

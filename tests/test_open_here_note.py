@@ -38,7 +38,7 @@ SESSION = "20261025-101500-abc123"
 
 
 def facts(**over) -> dict:
-    base = {"found": True, "editor": "Cursor", "windowless": False, "folder": "~/toni-erp", "working": False,
+    base = {"found": True, "editor": "Cursor", "windowless": False, "folder": "~/shop-api", "working": False,
             "idle_s": 6 * 60 + 20, "monitors": 0, "helpers": 0, "commands": 0, "queued": 0, "waiting": 0}
     base.update(over)
     return base
@@ -47,9 +47,9 @@ def facts(**over) -> dict:
 # --------------------------------------------------------------------------------- words ---
 class WordsTests(unittest.TestCase):
     def test_where_and_idle(self):
-        self.assertEqual(holder_note.where_words(facts()), "Cursor · ~/toni-erp · idle 6 min")
+        self.assertEqual(holder_note.where_words(facts()), "Cursor · ~/shop-api · idle 6 min")
         self.assertEqual(holder_note.terminal_line(facts()),
-                         "This session is open in Cursor · ~/toni-erp · idle 6 min. "
+                         "This session is open in Cursor · ~/shop-api · idle 6 min. "
                          "Carry on there, or start a new session here.")
 
     def test_idle_rounds_down_and_grows_into_hours_and_days(self):
@@ -58,11 +58,11 @@ class WordsTests(unittest.TestCase):
                           "idle 47 h", "idle 2 days"])
 
     def test_working_now(self):
-        self.assertEqual(holder_note.where_words(facts(working=True, idle_s=None)), "Cursor · ~/toni-erp · working now")
+        self.assertEqual(holder_note.where_words(facts(working=True, idle_s=None)), "Cursor · ~/shop-api · working now")
 
     def test_windowless(self):
         line = holder_note.terminal_line(facts(windowless=True, editor="", working=True), pid=4242)
-        self.assertEqual(line, "This session is kept running by DGC with no window open · ~/toni-erp · working now. "
+        self.assertEqual(line, "This session is kept running by DGC with no window open · ~/shop-api · working now. "
                                "Open it in the editor to pick it up, or run `dgc stop 4242`.")
 
     def test_each_running_thing_is_counted_and_none_named_when_none(self):
@@ -95,7 +95,7 @@ class WordsTests(unittest.TestCase):
 
     def test_the_folder_is_shown_with_a_tilde_never_another_users_path(self):
         home = "/home/ana"
-        self.assertEqual(holder_note.folder_label("/home/ana/toni-erp", home), "~/toni-erp")
+        self.assertEqual(holder_note.folder_label("/home/ana/shop-api", home), "~/shop-api")
         self.assertEqual(holder_note.folder_label("/home/ana/work/app/", home), "~/work/app")
         self.assertEqual(holder_note.folder_label("/home/ana", home), "~")
         self.assertEqual(holder_note.folder_label("/home/bob/secret/proj", home), "proj")
@@ -175,11 +175,11 @@ class ReadTests(unittest.TestCase):
         os.utime(self.session_file, (changed, changed))
 
     def write(self, pid=4242, block=None, **over):
-        record = {"pid": pid, "kind": "serve", "session": str(self.session_file), "cwd": "/home/ana/toni-erp",
-                  "project_root": "/home/ana/toni-erp", "status": "idle", "heartbeat": time.time(), "attached": True}
+        record = {"pid": pid, "kind": "serve", "session": str(self.session_file), "cwd": "/home/ana/shop-api",
+                  "project_root": "/home/ana/shop-api", "status": "idle", "heartbeat": time.time(), "attached": True}
         if block is not False:
             record["open_here"] = block or {"version": 1, "editor": "Cursor", "chats": [
-                {"session_id": SESSION, "session": str(self.session_file), "cwd": "/home/ana/toni-erp",
+                {"session_id": SESSION, "session": str(self.session_file), "cwd": "/home/ana/shop-api",
                  "working": False, "monitors": 2, "helpers": 1, "commands": 0, "queued": 0, "waiting": 0}]}
         record.update(over)
         (self.directory / f"{pid}.json").write_text(json.dumps(record))
@@ -189,16 +189,16 @@ class ReadTests(unittest.TestCase):
         got = holder_note.session_facts(SESSION, home="/home/ana")
         self.assertEqual({k: got[k] for k in ("found", "editor", "windowless", "folder", "working", "monitors",
                                                "helpers", "commands", "queued", "waiting", "pid")},
-                         {"found": True, "editor": "Cursor", "windowless": False, "folder": "~/toni-erp",
+                         {"found": True, "editor": "Cursor", "windowless": False, "folder": "~/shop-api",
                           "working": False, "monitors": 2, "helpers": 1, "commands": 0, "queued": 0, "waiting": 0,
                           "pid": 4242})
         self.assertGreaterEqual(got["idle_s"], 6 * 60)
         self.assertLess(got["idle_s"], 8 * 60)
-        self.assertEqual(holder_note.where_words(got), "Cursor · ~/toni-erp · idle 6 min")
+        self.assertEqual(holder_note.where_words(got), "Cursor · ~/shop-api · idle 6 min")
 
     def test_working_now_has_no_idle_time(self):
         self.write(block={"version": 1, "editor": "Cursor", "chats": [
-            {"session_id": SESSION, "session": str(self.session_file), "cwd": "/home/ana/toni-erp", "working": True}]})
+            {"session_id": SESSION, "session": str(self.session_file), "cwd": "/home/ana/shop-api", "working": True}]})
         got = holder_note.session_facts(SESSION, home="/home/ana")
         self.assertTrue(got["working"])
         self.assertNotIn("idle_s", got)
@@ -231,12 +231,12 @@ class ReadTests(unittest.TestCase):
 
     def test_a_chatdgc_chat(self):
         chat = "chat_" + "a" * 32
-        record = {"pid": 7, "kind": "serve", "cwd": "/home/ana/toni-erp", "attached": True,
+        record = {"pid": 7, "kind": "serve", "cwd": "/home/ana/shop-api", "attached": True,
                   "open_here": {"version": 1, "editor": "VS Code", "chats": []},
                   "chatdgc": [{"conversation_id": chat, "title": "x"}]}
         got = holder_note.chatdgc_facts(record, chat, time.time() - 600, home="/home/ana")
         self.assertEqual({k: got[k] for k in ("found", "editor", "folder", "working")},
-                         {"found": True, "editor": "VS Code", "folder": "~/toni-erp", "working": True})
+                         {"found": True, "editor": "VS Code", "folder": "~/shop-api", "working": True})
         self.assertNotIn("idle_s", got)
         record["chatdgc"] = []
         got = holder_note.chatdgc_facts(record, chat, time.time() - 600, home="/home/ana")
@@ -419,7 +419,7 @@ class TerminalTests(unittest.TestCase):
     def test_resuming_a_session_a_window_holds_says_where_and_what_runs(self):
         with patch.object(holder_note, "session_facts", lambda stem, **kw: facts(monitors=2, helpers=1, pid=99)):
             line = holder_note.resume_note(Path(f"/x/{SESSION}.json"))
-        self.assertEqual(line, "This session is open in Cursor · ~/toni-erp · idle 6 min. 2 monitors and 1 "
+        self.assertEqual(line, "This session is open in Cursor · ~/shop-api · idle 6 min. 2 monitors and 1 "
                                "background helper run there. Carry on there, or start a new session here.")
         with patch.object(holder_note, "session_facts", lambda stem, **kw: {"found": False}):
             self.assertEqual(holder_note.resume_note(Path(f"/x/{SESSION}.json")), "")
@@ -431,7 +431,7 @@ class TerminalTests(unittest.TestCase):
                                ui=SimpleNamespace(info=said.append))
         with patch.object(holder_note, "session_facts", lambda stem, **kw: facts(working=True, waiting=1, pid=9)):
             cli.CLI._say_holder(fake)
-        self.assertEqual(said, ["This session is open in Cursor · ~/toni-erp · working now. 1 question waits for "
+        self.assertEqual(said, ["This session is open in Cursor · ~/shop-api · working now. 1 question waits for "
                                 "an answer there. Carry on there, or start a new session here."])
 
     def test_a_message_refused_because_its_panel_is_on_screen_names_the_same_facts(self):
@@ -440,7 +440,7 @@ class TerminalTests(unittest.TestCase):
                                _held_session_reason=peers.REFUSED_ON_SCREEN, _sibling_holding=None)
         with patch.object(holder_note, "session_facts", lambda stem: facts(monitors=1)):
             text = agent_module.Agent._held_session_message(fake, "No model request or workspace action was started.")
-        self.assertEqual(text, "This session is open in Cursor · ~/toni-erp · idle 6 min, and its DGC panel is on "
+        self.assertEqual(text, "This session is open in Cursor · ~/shop-api · idle 6 min, and its DGC panel is on "
                                "screen. 1 monitor runs there. Carry on there, or start a new session here. No model "
                                "request or workspace action was started.")
         # An older DGC's note: named as before.

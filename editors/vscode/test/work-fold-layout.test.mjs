@@ -108,7 +108,7 @@ test("the row takes keyboard focus: Enter opens it, Space folds it, and the focu
   }
 });
 
-// The founder's .111 Docker build (25 Oct): two commands run in the background exited while the turn worked, and
+// A user's .111 Docker build (25 Oct): two commands run in the background exited while the turn worked, and
 // their cards (up to 40 lines of build output each) stayed drawn under the answer. Folded, they are not drawn;
 // opened, they are drawn under the row with the rest of the work.
 test("a background command's card folds with the work and opens under the row (dark-modern, 460px)", async (t) => {

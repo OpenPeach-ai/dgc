@@ -24,7 +24,7 @@ before(async () => {
 after(async () => { await browser?.close(); });
 
 const NOW = Date.UTC(2026, 9, 27, 9, 0, 0);
-// Each model the founder uses, as the panel learns it, and what its backend says of the cache.
+// Each model a user uses, as the panel learns it, and what its backend says of the cache.
 const ROUTES = {
   "ollama-cloud": { model: "deepseek-v4.1-flash:cloud", base_url: "http://127.0.0.1:11434/v1", clock: { state: "unknown" } },
   openai: { model: "gpt-5.2", base_url: "https://api.openai.com/v1", clock: { state: "unknown" } },

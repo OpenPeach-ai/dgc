@@ -527,7 +527,7 @@ class AppToolHandler:
         It is an app object, not a method: Starlette takes a function or a method as a request handler and anything
         else as an ASGI app. ``app.mount("/dgc/pips", handler.asgi)`` serves it only under ``/dgc/pips/``; Starlette
         answers the bare address with a 307 to that form, and DGC never follows a redirect, so a mounted handler is
-        registered with the trailing slash (the founder's ERP test, 25 Oct, found the mount failing)."""
+        registered with the trailing slash (a user's ERP test, 25 Oct, found the mount failing)."""
         return _AsgiApp(self._serve_asgi)
 
     async def _serve_asgi(self, scope: dict, receive: Callable, send: Callable) -> None:

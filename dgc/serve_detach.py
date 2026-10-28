@@ -26,7 +26,7 @@ it is let go; mid-reply, the socket becomes that one chat's link until the reply
 only while it holds that chat's lock (dgc/chatdgc/held.py, ``chatdgc_locks`` in its note), so two windows that
 open one chat in the same instant can't both have it.
 
-How long a windowless backend lives (the founder's decisions, 19 Oct 2026):
+How long a windowless backend lives (the maintainers' decisions, 19 Oct 2026):
 
 * no work: it saves and exits ``IDLE_EXIT_S`` (2 minutes) after its work finished -- at once when
   nothing was running as its window went;

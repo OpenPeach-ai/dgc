@@ -1,4 +1,4 @@
-// Your Pips on the Sessions home, in real Chromium with the real Pips bundle and faces. The founder:
+// Your Pips on the Sessions home, in real Chromium with the real Pips bundle and faces. A user:
 // a Pips notice above a coding session's composer "has nothing to do with that session"; the side
 // bar's home shows the Pips that need you above your sessions instead, and session tabs show none.
 import { after, before, test } from "node:test";
@@ -90,7 +90,7 @@ test("the Pips that need you sit above your sessions, each with its face, what i
     });
     assert.deepEqual(m.rows, [["India Market Brief", "2 waiting for you", "2", "quill", "waiting_approval"],
       ["Core", "3 new findings", "", "core", "success"]],
-      "what waits for you first (founder, 2026-10-18); only the Pips that need you; an archived Pip never; Gmail has nothing and is not listed");
+      "what waits for you first (reported 2026-10-18); only the Pips that need you; an archived Pip never; Gmail has nothing and is not listed");
     assert.equal(m.above, true, "above the Sessions heading");
     assert.equal(m.faceLoaded, true, "the real faces");
     await page.click(".home-pip-row:has-text('India Market Brief')");
@@ -112,7 +112,7 @@ test("when nothing is waiting, your Pips sit in a quiet row of faces; each opens
       rows: document.querySelectorAll(".home-pip-row").length }));
     assert.equal(m.text, "All quiet. Nothing is waiting for you.");
     assert.deepEqual(m.faces, ["Open Core", "Open Gmail"]);
-    // The founder: "the 3 pips faces are too close together and looks weird". Each face has room.
+    // A user: "the 3 pips faces are too close together and looks weird". Each face has room.
     assert.ok(m.boxes[1][0] - m.boxes[0][1] >= 4, `faces apart, not overlapping: ${JSON.stringify(m.boxes)}`);
     assert.equal(m.rows, 0);
     assert.deepEqual(errors, []);
@@ -154,7 +154,7 @@ test("cards waiting in a Pip's chat count on the home, and its row opens the Pip
   } finally { await page.context().close(); }
 });
 
-// The founder, 2026-10-18: "my 3 Pips ran and failed ... there should be a dismiss option there too" and
+// Reported 2026-10-18: "my 3 Pips ran and failed ... there should be a dismiss option there too" and
 // "what if there were 100 Pips". News rows have a ✕ beside them; the home shows the 3 most urgent and a line.
 const longId = (n) => "pip_" + n.toString(16).padStart(32, "0");
 const listed = (n, name, waiting = 0) => ({ id: longId(n), name, pip_type: n === 0 ? "core" : "scout", workspace_id: P, status: "active", pending_review_count: waiting, version: 1 });

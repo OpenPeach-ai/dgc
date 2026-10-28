@@ -140,7 +140,7 @@ class NoPhantomDeletionsTest(Budgeted):
         self.assertFalse(changes.report()["complete"])
 
     def test_a_file_that_becomes_ignored_is_not_deleted(self) -> None:
-        """The founder's session untracked and ignored 120 template files that were still on disk."""
+        """A user's session untracked and ignored 120 template files that were still on disk."""
         root = tree(repo=True)
         (root / "a" / "tmpl").mkdir()
         for index in range(5):
@@ -351,7 +351,7 @@ class OldJournalsAreRepairedTest(unittest.TestCase):
             "gone/really.txt": [{"before": snapshot("gone\n"), "after": snapshot(None)}],
         }}
 
-    def test_the_premise_old_journal_reads_as_the_founder_saw_it(self) -> None:
+    def test_the_premise_old_journal_reads_as_the_user_saw_it(self) -> None:
         report = ChatChanges.from_state(self.root, copy.deepcopy(self.value)).report()
         self.assertEqual(sum(row["deleted"] for row in report["files"]), 4)
 
@@ -372,7 +372,7 @@ class OldJournalsAreRepairedTest(unittest.TestCase):
                          "the old runs may still have missed changes, so the journal stays partial")
 
     def test_a_002_umask_doesnt_keep_the_phantoms(self) -> None:
-        # The founder's real journal (192.168.1.111, 19 Oct): all 497 phantoms matched the files on disk byte for
+        # A user's real journal (19 Oct): all 497 phantoms matched the files on disk byte for
         # byte, but the old scan recorded 0o644 and Ubuntu's 002 umask keeps them at 0o664 (0o775 for a script), so
         # the repair compared the mode too and dropped none.
         for name in ("kept/real.txt", "phantom/one.txt", "phantom/twice.txt", "edited/then_phantom.txt",

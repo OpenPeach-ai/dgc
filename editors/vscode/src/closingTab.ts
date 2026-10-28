@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 export interface ClosingWords { title: string; keep: string; stop: string }
 
 /**
- * Q3 (founder, 19 Oct 2026): a tab closed while it works is asked about once, "keep it running in the background,
+ * Q3 (reported 19 Oct 2026): a tab closed while it works is asked about once, "keep it running in the background,
  * or stop it", and the answer is remembered if ticked (dgc.closingAWorkingTab). A Work session's tab and a ChatDGC
  * chat's tab ask the same question and share the setting. Until it is answered the work goes on; dismissed, it keeps
  * running. Resolves true to keep it running.

@@ -1,4 +1,4 @@
-"""A Personal Pip searches the web with the one search set in Settings (founder, 2026-10-09: Work, ChatDGC and
+"""A Personal Pip searches the web with the one search set in Settings (reported 2026-10-09: Work, ChatDGC and
 Pips share it). The search runs in the controller, over the run's socket; a query never carries what the Pip
 read from the user's apps (careful mode), and the results reach the Pip as untrusted data."""
 import json

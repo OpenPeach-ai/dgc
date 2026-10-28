@@ -1,4 +1,4 @@
-"""ChatDGC's plugins (founder decision 6): every plugin turned on in Settings → Plugins is the chat's to use, as it
+"""ChatDGC's plugins (decision 6): every plugin turned on in Settings → Plugins is the chat's to use, as it
 is every Pip's. Turning a plugin on is the consent: there is no "use this plugin?" card.
 
 A read (the vendor's ``readOnlyHint``, or DGC's reviewed reads) runs at once and its answer goes to the model as

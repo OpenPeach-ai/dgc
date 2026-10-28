@@ -697,7 +697,7 @@ test('Settings -> Voice lists each model with its size and licence; Install show
   assert.match(x.d.querySelector('.banner.error').textContent,/Update the DGC CLI/);
 });
 
-// A plugin that connects with a key the user makes at the vendor (GitHub's personal access token). The founder got
+// A plugin that connects with a key the user makes at the vendor (GitHub's personal access token). A user got
 // "Configure GITHUB_PAT_TOKEN in MCP server settings before connecting." for Connect; the plugin's own page now has
 // the field. The rows are what dgc serve's plugin list says: whether a key is saved, never the key.
 const githubKey={server:'github',env:'GITHUB_PAT_TOKEN',saved:false,from_environment:false,sign_in:'',label:'GitHub personal access token',
@@ -790,7 +790,7 @@ test('GitHub: a token from the environment is named as the fallback; a half-type
   assert.equal(x.d.querySelector('[data-key-input]').value,'github_pat_half');
 });
 
-// "What DGC may do on GitHub" (founder, 19 Oct 2026: "make the user decide"). The rows are dgc serve's: each
+// "What DGC may do on GitHub" (reported 19 Oct 2026: "make the user decide"). The rows are dgc serve's: each
 // permission, whether the next sign-in asks for it (chosen), whether the sign-in made has it (held), and whether a
 // tool asked for it.
 const permission=(id,label,short,scope,always=false)=>({id,label,short,scope,always,chosen:always,held:false,asked:false,description:`What ${label} lets DGC do.`});

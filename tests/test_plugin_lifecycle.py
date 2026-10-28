@@ -325,7 +325,7 @@ class PluginLifecycleTests(unittest.TestCase):
             terminal()
 
     def test_sources_are_not_machine_specific(self):
-        self.assertNotIn('/home/fungigb10',Path(plugins.__file__).read_text())
+        self.assertNotRegex(Path(plugins.__file__).read_text(),r'/home/[a-z][\w.-]*/|/Users/[A-Za-z][\w.-]*/')
 
     def test_figma_timeout_is_not_reported_as_a_vendor_approval_rejection(self):
         from dgc.headless import Backend

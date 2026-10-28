@@ -1,5 +1,5 @@
 // The real Work page in Chromium with the pile above the prompt box: a chat long enough to fill the transcript, a
-// running turn, and any of a goal, a troupe, two monitors, a checklist and this chat's changes -- the founder's
+// running turn, and any of a goal, a troupe, two monitors, a checklist and this chat's changes -- a user's
 // "troupe, then a watcher, and maybe tasks and also a Goal". Shared by rail-chips-layout.test.mjs (assertions) and
 // capture scripts. setContent only; no port is opened. Not a *.test.mjs file.
 import { THEMES, panelHtml } from "./options-scene.mjs";

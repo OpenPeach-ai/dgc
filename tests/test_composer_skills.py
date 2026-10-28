@@ -142,7 +142,7 @@ class ComposerTests(SkillFixture):
             self.assertEqual(tui._overlay_rows(), [], text)
 
     def test_terminal_palette_sends_an_absolute_path_as_a_prompt(self):
-        text = "/home/fungigb10/pregnancy-tracker , this is the directory that runs bearbloom"
+        text = "/home/me/garden-notes , this is the directory that runs leafline"
         tui = self.tui(text)
         prompts, commands = [], []
         tui._send_composer_text = prompts.append

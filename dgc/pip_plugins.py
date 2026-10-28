@@ -1,6 +1,6 @@
 """A Personal Pip's plugins: every plugin turned on in Settings → Plugins is every Pip's.
 
-Turning a plugin on is the consent to use it (founder, 2026-10-09): no "use this plugin?" card. The Pip reads
+Turning a plugin on is the consent to use it (reported 2026-10-09): no "use this plugin?" card. The Pip reads
 a plugin's tool list (``plugin_tools``) and calls a tool (``call_plugin``) through the controller, over the
 run's socket (pip_app_links.RunSocket): the Pip's own process never connects to a server or holds a credential.
 

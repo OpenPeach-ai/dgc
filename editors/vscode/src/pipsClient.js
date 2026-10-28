@@ -441,7 +441,7 @@ function postFor(runId){return S.posts.find(p=>p.run_id===runId)||null;}
 // Ask DGC to fix goes to a Work chat, which only the host can reach: the chat the Pip reports to, else a new one.
 function canAskDgc(){return typeof options.onAskDgc==='function'&&!remoteHost&&!personalPip();}
 function canRunNow(){return supportedSource()&&(!executionPip(S.pip)||livePip(S.pip)&&S.apiVersion>=60)&&S.runner?.online&&!S.runner.paused&&S.pip?.status==='active'&&!!pipType(S.pip,S.types)?.available&&!S.pip.active_run&&!S.runs.some(r=>active(r.status))&&!S.busy&&usable();}
-// ---- A run while it runs: its live post (the founder, 24 Oct; pipRunPosts.js livePostMarkup) ----
+// ---- A run while it runs: its live post (reported 24 Oct; pipRunPosts.js livePostMarkup) ----
 // From the moment a run starts, its chat has one post for it at the end: the Pip at work, what it is doing now (the run's
 // activity, read every 1.5 s while the chat is on screen), a clock, Stop, and how it started. When the run ends, its
 // own post (list_pip_run_posts) takes that place. All of it is read from the run -- get_pip's active run, list_pip_runs,
@@ -858,7 +858,7 @@ function githubProposalMarkup(proposal){
  const list=v=>v?`${esc(v.repository)}<ul class="web-reads">${v.reads.map(r=>`<li>${esc(githubReadLabel(r))}</li>`).join('')}</ul>`:'None';
  return `<h3>GitHub reads</h3><dl class="meta"><dt>Current</dt><dd>${list(current)}</dd><dt>Proposed</dt><dd>${list(proposed)}</dd></dl><p class="muted">Read-only, with your own GitHub login. DGC makes these reads before each run; the model never chooses what to read.</p>`;
 }
-// Usage (API 41): what this Pip's runs cost. Pips have no daily limit (founder, 2026-10-14).
+// Usage (API 41): what this Pip's runs cost. Pips have no daily limit (reported 2026-10-14).
 let usageState={pip:'',value:null,loading:false,error:''};
 async function loadUsage(){
  const pip=S.selected;if(S.apiVersion<41||!usable()||!pip||usageState.loading&&usageState.pip===pip)return;
@@ -1058,7 +1058,7 @@ function webReadsMarkup(){
 let computerState={pip:'',value:null,loading:false,error:''},computerViewTimer=null;
 // Whether this machine is still setting a Pip computer up (DGC downloading its desktop the first time;
 // asking starts it). Until it is ready the header says "Setting up your Pip…" instead of offering the
-// computer (the founder: "once downloaded, only then the personal computer icon appears").
+// computer (reported: "once downloaded, only then the personal computer icon appears").
 let screenSetup={pip:'',value:null,loading:false},screenSetupPoll=null;
 async function loadDesktopStatus(){
  const pip=S.selected;
@@ -1942,7 +1942,7 @@ function detailMarkup() {
 // Personal Pips the way people meet them: Core is your Primary Pip, a new Pip is a character
 // and a name, and each Pip is a chat that sets itself up. The detailed sections (results,
 // settings, memory) stay one tap away in the chat's menu.
-// Project Pips have the same page (the founder, 24 Oct: "yes, do it"), from Pips API 51, when their runs post in their
+// Project Pips have the same page (reported 24 Oct: "yes, do it"), from Pips API 51, when their runs post in their
 // chat: the paged list, a top bar with the Pip's name, Run now where a Personal Pip has its computer, and every section
 // of the old page (History, Settings, Schedule, Handoffs, Changes, Memory, Context, Notifications) in its "…" menu. A
 // new one is a character too, then its job and the code it reads. A remote view and an older DGC keep the old page.
@@ -1950,12 +1950,12 @@ const SIMPLE_CHARACTERS=['core','scout','lens','patch','rook','pulse','lock','qu
 const PROJECT_SIMPLE_API=51;
 function simpleMode(){return !remoteHost&&!!S.workspace&&S.apiVersion>=(S.workspace.kind==='personal'?43:PROJECT_SIMPLE_API);}
 function projectHome(){return S.workspace?.kind!=='personal';}
-// The chat (the founder, 24 Oct: "It should look and feel the same"): every Pip's, Personal and Project, is the one the
+// The chat (reported 24 Oct: "It should look and feel the same"): every Pip's, Personal and Project, is the one the
 // simple Pips brought: short bubbles, the Pip at work with its face and name, its reply written into bubbles as it
 // comes, time marks, actions under the pointer, the same box. A Project Pip keeps its page (list, History, Settings)
 // and what only it has in its chat: its runs with Ask DGC to fix, and its source. A remote view keeps the one before.
 function chatStyle(){return S.apiVersion>=43&&!remoteHost;}
-// Personal | Project (the founder, 2026-10-21): two tabs, as the Sessions home has Chat | Work, where a dropdown listed
+// Personal | Project (reported 2026-10-21): two tabs, as the Sessions home has Chat | Work, where a dropdown listed
 // every project DGC knows. Project is this window's folder and nothing else: another project's Pips are for that
 // project's DGC to look after ("the user might ask this project's DGC to fix another project's Pips"). No folder
 // open, the Project tab says so in one line. A remote view, and a CLI with no Personal Pips, have no tabs, as before.
@@ -2309,7 +2309,7 @@ function openNewPip(){
  openReview({title:'New Pip',description:'Pick a character and give it a name.',body:newPipBody(),confirm:'Create',newPip:true,request:{type:'create_pip'}});
  $('newPipName')?.focus();
 }
-// A new Project Pip (the founder, 24 Oct): the Personal flow's character picker, where the character is the kind of work
+// A new Project Pip (reported 24 Oct): the Personal flow's character picker, where the character is the kind of work
 // it does, so its list is of jobs ("Review the code for bugs", Rook beside it), then what the old form asked: its name,
 // what it does, the branch or commit it reads, and its model. It sends the old form's create_pip, so it makes the same
 // Pip; Patch and Pulse still show what they can do before they are made. Describing the job to DGC, a common job and a
@@ -2407,7 +2407,7 @@ function simpleTabContent(){
 }
 // A Project Pip's status sits beside its name on its chat, as it sat under its name on the old page: what its latest
 // run found ("Today’s audit: 5 findings"), which goes to that run's post in the chat.
-// Run now, for a Project Pip (the founder, 24 Oct): where a Personal Pip has its main action, its computer, one click
+// Run now, for a Project Pip (reported 24 Oct): where a Personal Pip has its main action, its computer, one click
 // from its chat. It runs what History's button runs (an audit, a draft, its live-data commands or its approved command
 // plan) with the same checks; a Patch runs only on a handoff you approve, and a Pulse with no command plan has none. While
 // one of its runs is going it says so, and opens that run in History.
@@ -3150,7 +3150,7 @@ function renderReview() {
   picker.restore();
 }
 function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
-// "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (the founder,
+// "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
 function lastRunLink(p,label){
@@ -3228,13 +3228,13 @@ async function navigateFromHost(value) {
   }
   if(!S.jobs.some(p=>p.id===value.pip)){
    // A Pip opened from elsewhere (a chat's run line, a notification, the Sessions home) may be past the pages read
-   // so far, or another workspace's: a project's Pip while Personal shows (the founder, 2026-10-18, saw only Core and
+   // so far, or another workspace's: a project's Pip while Personal shows (reported 2026-10-18, saw only Core and
    // "not available in the selected workspace"). Read it, open its own workspace, then it. One that is gone says so
    // (get_pip: "That Pip isn’t on this computer").
    const found=(await send('get_pip',{pip_id:value.pip})).pip;
    if(!record(found)||found.id!==value.pip||typeof found.workspace_id!=='string')throw Error('That Pip isn’t on this computer any more. It may have been deleted.');
    if(found.workspace_id!==S.workspace.id){
-    // Only Personal and this folder's project (the founder, 2026-10-21): another project's Pip is not opened here.
+    // Only Personal and this folder's project (reported 2026-10-21): another project's Pip is not opened here.
     let target=openableSpaces().find(w=>w.id===found.workspace_id);
     if(!target){const listed=await send('list_workspaces');if(Array.isArray(listed?.workspaces)){S.workspaces=listed.workspaces;if(typeof listed.current_workspace_id==='string')S.currentWorkspaceId=listed.current_workspace_id;}target=openableSpaces().find(w=>w.id===found.workspace_id);}
     const name=typeof found.name==='string'&&found.name?found.name:'This Pip';
@@ -3874,7 +3874,7 @@ document.addEventListener('click',event=>{
           S.context=c;S.notice=result.replayed?'This result was already added. Nothing was added twice.':'Added to context. Nothing ran.';commandLoaded=false;void loadCommandReceipts();return;
         }
         if(['archive_pip','restore_pip'].includes(review.request.type)){const v=archivalResult(result,{...review.request,reason},S.workspace.id);S.pip=v.pip;S.jobs=S.jobs.map(p=>p.id===v.pip.id?v.pip:p);draft.findingReviewReason='';S.notice=v.replayed?`${v.pip.name} is already ${v.pip.status==='archived'?'archived':'restored'}.`:v.receipt.operation==='archive'?`${v.pip.name} is archived. Its chats and history are kept; Show archived brings it back.`:`${v.pip.name} is restored and paused. Resume it when you want it working again.`;
-          // The founder: archiving "takes me back to its chat, it should just take me to Pips home".
+          // A user: archiving "takes me back to its chat, it should just take me to Pips home".
           if(v.receipt.operation==='archive'){chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();}
           return;}
         if(['record_pip_statement','revoke_pip_statement'].includes(review.request.type)){

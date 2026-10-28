@@ -1,6 +1,6 @@
 // Careful mode on a Personal Pip's page (harness from pip-page.test.mjs). A Personal Pip's page, as on Grok's bots (Pips API 43): Info (Instructions, Routines, Notifications,
 // Share as template), Links, Media and Files; its face and colour; routines the Pip suggests in its chat;
-// and Pips settings for every computer and app. The founder: "Bots main settings are just Instructions
+// and Pips settings for every computer and app. A user: "Bots main settings are just Instructions
 // and Routines... Very very easy. Pips should work this same way."
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';

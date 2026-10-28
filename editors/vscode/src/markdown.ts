@@ -57,7 +57,7 @@ export function linkTarget(value: string): LinkTarget | undefined {
 //
 // They used to be the ONLY mark model output got, on the reasoning that a link a model wrote is
 // not a link the user chose. Codex does not draw that line -- a link in one of its answers wears
-// the site's real favicon -- and the founder asked for that behaviour, having been shown what it
+// the site's real favicon -- and the maintainers asked for that behaviour, having been shown what it
 // discloses. The disclosure is bounded: the icon service is asked about an ORIGIN, it fetches the
 // site itself, so the site's operator sees a hit from Google rather than from the reader.
 const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [

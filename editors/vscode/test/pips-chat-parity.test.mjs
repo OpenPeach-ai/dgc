@@ -1,4 +1,4 @@
-// A Project Pip's chat looks and works like a Personal Pip's (the founder, 24 Oct): "Why is how chat works for Project
+// A Project Pip's chat looks and works like a Personal Pip's (reported 24 Oct): "Why is how chat works for Project
 // Pip and for Personal Pip different? It should look and feel the same. The one we have for Personal Pip is better.
 // Project Pip should also chat and respond the same way." Before, simpleMode() gave the newer chat to Personal Pips
 // only; a Project Pip had typing dots, a "Still writing…" block, one long reply, no time marks and its own box. Now

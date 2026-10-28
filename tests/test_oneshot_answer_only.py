@@ -1,4 +1,4 @@
-"""`dgc -p` into a pipe or a file writes the answer and nothing else (founder, 2026-10-18).
+"""`dgc -p` into a pipe or a file writes the answer and nothing else (reported 2026-10-18).
 
 The run's thinking, tool steps and notices used to be printed to stdout with the answer, so
 `answer=$(dgc -p …)` held the model's reasoning too. As `codex exec` does, they go to stderr now, where a

@@ -1,4 +1,4 @@
-// New Pip picks a character with a big face and a dropdown beside it (the founder, 24 Oct: "Agree with your suggestion,
+// New Pip picks a character with a big face and a dropdown beside it (reported 24 Oct: "Agree with your suggestion,
 // do it"), not a grid of seven tiles. For a Project Pip the character is the job, so its list says what each does ("Review
 // the code for bugs", Rook beside it); for a Personal Pip it is only a face and a name, so its list is the names. Each row
 // has its small face and the big face follows the choice. The dropdown is a listbox a keyboard and a screen reader can

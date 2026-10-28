@@ -4,7 +4,7 @@ Tokens per run come from the usage the runner imports when the run finishes (pip
 counts every request, including those of a run that failed or timed out. A run whose usage is not
 imported yet counts what its own result reported. Days are local days, like the digest's.
 
-Pips have no daily token limit (founder, 2026-10-14: no daily budgets). Older registries may still
+Pips have no daily token limit (reported 2026-10-14: no daily budgets). Older registries may still
 hold a limit a user once set (`pip_daily_token_cap:<pip>`): it is ignored. The usage answer keeps its
 `daily_cap` (always null) and `capped_today` (always false), which editors since API 41 expect.
 """
