@@ -4669,7 +4669,7 @@ class Agent(GoalLifecycle):
             *(["- To SHOW the user a page — a dashboard, chart, report or small app — call the "
                "`artifact` tool. That call is what makes the page live; describing it is not."]
               if (mode != "plan" and profile != "adaptive"
-                  and bool(self.config.get("artifact_autostart", True))) else []),
+                  and bool(self.config.get("artifact_autostart", True)) and not self._artifacts_exposed()) else []),
             "",
             "# Response cadence",
             RESPONSE_GUIDANCE,
@@ -4870,6 +4870,18 @@ class Agent(GoalLifecycle):
         """How to SHOW the user a page (~450 tokens): carried only when the artifact surface is live --
         always in the full profile with the shared server set to autostart, else for the request that
         asks to see one. A headless run with artifacts off (the benchmark) never pays for it."""
+        if self._artifacts_exposed():
+            return [
+                "# Saved Outputs: pages, dashboards, documents, slides and sheets",
+                "Use make_artifact to make a new Output that the user can reopen from Library. Its card opens "
+                "in the editor and DGC keeps its versions. Use edit_artifact with the existing ar_… id when "
+                "the user asks to fix or change an Output made earlier, even if the Output chip is Auto or "
+                "not selected this turn. Read it first with edit_artifact(id=…) if its current content is "
+                "uncertain. If several Outputs could match and you cannot identify the right id from the "
+                "conversation, ask which one. Do not create a replacement or hand the user a raw localhost "
+                "link for a revision. For a chart in an HTML Page, give percentage-height bars a definite "
+                "height on their parent and check the rendered result before claiming it is fixed.",
+            ]
         return [
             "# Artifacts — how to SHOW the user a page (READ THIS CAREFULLY)",
             "An \"artifact\" is a live local web page that becomes real ONLY when you call the "

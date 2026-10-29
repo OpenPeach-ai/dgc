@@ -26,6 +26,32 @@ after(async () => { await browser?.close(); });
 const text = (page, selector) => page.evaluate((s) => document.querySelector(s)?.textContent ?? null, selector);
 const texts = (page, selector) => page.evaluate((s) => [...document.querySelectorAll(s)].map((n) => n.textContent), selector);
 
+test("Page and Dashboard expose a working Copy text action", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const kind of ["page", "dashboard"]) {
+    const s = await openPanel(browser, { kind });
+    try {
+      await s.page.getByRole("button", { name: "Copy text" }).click();
+      if (kind === "page") {
+        assert.deepEqual(await s.posted("copyPageText"), [{ type: "copyPageText" }]);
+        await s.send({ type: "copySource", html: "<html><body><h1>Monthly Sales</h1><p>October ₹12 Cr</p><script>hidden()</script></body></html>" });
+      }
+      const copied = await s.posted("copyText");
+      assert.equal(copied.length, 1);
+      assert.ok(copied[0].text.length > 0);
+      if (kind === "page") {
+        assert.match(copied[0].text, /Monthly Sales/);
+        assert.doesNotMatch(copied[0].text, /hidden/);
+        await s.page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+          data: { type: "copySource", html: "<p>forged from page</p>" }, source: document.querySelector(".art-page").contentWindow,
+        })));
+        assert.equal((await s.posted("copyText")).length, 1, "a framed Page cannot impersonate the extension host");
+      }
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
+});
+
 test("restoring or reloading a sheet and a deck replaces their visible content without reopening", async (t) => {
   if (skipOrFail(t)) return;
   for (const kind of ["sheet", "slides"]) {

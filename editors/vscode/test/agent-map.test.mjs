@@ -668,19 +668,55 @@ function background(p) {
   p.event({ type: "artifact_ready", id: "art1", name: "settings preview", url: "http://127.0.0.1:8765/?a=art1", rel: "settings" });
 }
 
+test("a live Page preview is labelled as a preview, not agent work", () => {
+  const p = view({}, BG);
+  p.event({ type: "artifact_ready", id: "art1", name: "Sales page", url: "http://127.0.0.1:8765/?a=art1", rel: "sales" });
+  assert.equal(p.pill().label, "1 preview");
+  p.open();
+  assert.equal(p.$("agent-map-tasks-title").textContent, "1 live preview · click a task for details");
+  assert.match(p.tasks()[0][1], /^Sales page · live preview · up 0s$/);
+  assert.deepEqual(p.errors, []);
+});
+
+test("stopping a preview refreshes the map without posting unrelated Artifacts in chat", () => {
+  const p = view({}, BG);
+  p.event({ type: "artifact_ready", id: "art1", name: "Sales page", url: "http://127.0.0.1:8765/?a=art1", rel: "sales" });
+  const cards = () => p.doc.querySelectorAll(".artifact-list").length;
+  const before = cards();
+  p.event({ type: "artifacts", request_id: "artifact-stop-12", items: [
+    { id: "art2", name: "Another preview", url: "http://127.0.0.1:8765/?a=art2", rel: "other" }] });
+  assert.equal(cards(), before);
+  p.open();
+  assert.deepEqual(p.tasks().map(([key]) => key), ["preview:art2"]);
+  assert.deepEqual(p.errors, []);
+});
+
+test("the Artifacts list card disappears after its last preview is stopped", () => {
+  const p = view({}, BG);
+  p.event({ type: "artifacts", request_id: "artifacts-1", items: [
+    { id: "art1", name: "First", url: "http://127.0.0.1:8765/?a=art1", rel: "first" },
+    { id: "art2", name: "Second", url: "http://127.0.0.1:8765/?a=art2", rel: "second" }] });
+  assert.equal(p.doc.querySelectorAll(".artifact-list-row").length, 2);
+  p.send({ type: "artifact_stop_state", id: "art1", state: "stopped" });
+  assert.equal(p.doc.querySelectorAll(".artifact-list-row").length, 1);
+  p.send({ type: "artifact_stop_state", id: "art2", state: "stopped" });
+  assert.equal(p.doc.querySelectorAll(".artifact-list").length, 0);
+  assert.deepEqual(p.errors, []);
+});
+
 test("background tasks: running monitors, shells, troupes and previews, each with its kind; ended ones drop out", () => {
   const p = view({}, BG);
   p.start(sid(1), { description: "dev server agent" });
   background(p);
   p.open();
   assert.equal(p.$("agent-map-tasks").hidden, false);
-  assert.equal(p.$("agent-map-tasks-title").textContent, "4 background tasks · click a task for details");
+  assert.equal(p.$("agent-map-tasks-title").textContent, "3 background tasks · 1 live preview · click a task for details");
   const rows = p.tasks();
   assert.deepEqual(rows.map(([key]) => key), ["monitor:mon1", "shell:bg3", "troupe:tr-0123456789", "preview:art1"]);
   assert.match(rows[0][1], /^Watch the dev server logmonitor · 1h 2m · 14 events$/);
   assert.match(rows[1][1], /^npm run devshell · 3m \d+s$/);
   assert.equal(rows[2][1], "Review every API handlertroupe · review 5/8");
-  assert.match(rows[3][1], /^settings previewpreview · up 0s$/);
+  assert.match(rows[3][1], /^settings preview · live preview · up 0s$/);
   assert.ok(p.doc.querySelectorAll("#agent-map-task-list .agent-dot[data-state=running]").length === 4, "green while they run");
   // The troupe finishes, the shell exits, the preview is stopped: each leaves the list.
   p.event({ type: "troupe_finished", run_id: "tr-0123456789", title: "Review every API handler", state: "done", reason: "",

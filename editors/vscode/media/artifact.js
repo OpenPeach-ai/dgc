@@ -42,6 +42,16 @@
     frame._source = html;
     frame.srcdoc = themed;
   }
+  function copyHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    doc.querySelectorAll("script,style,noscript,template,svg").forEach((node) => node.remove());
+    doc.querySelectorAll("br").forEach((node) => node.replaceWith(doc.createTextNode("\n")));
+    doc.querySelectorAll("p,div,section,article,header,footer,li,tr,h1,h2,h3,h4,h5,h6").forEach((node) => node.append(doc.createTextNode("\n")));
+    const text = String(doc.body?.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n").trim().slice(0, 200000);
+    if (!text) { announce("There is no text to copy in this view."); return; }
+    vscode.postMessage({ type: "copyText", text });
+  }
   function viewFrame(title) {
     const frame = el("iframe", "art-frame");
     frame.setAttribute("sandbox", "");
@@ -255,11 +265,14 @@
     return {
       mount(main) {
         const bar = el("div", "art-toolbar");
+        const copy = el("button", "art-btn", "Copy text"); copy.type = "button";
+        copy.title = "Copy the page's text to your clipboard";
+        copy.addEventListener("click", () => vscode.postMessage({ type: "copyPageText" }));
         const reload = el("button", "art-btn", ""); reload.type = "button";
         reload.append(icon("refresh"), el("span", "art-btn-label", "Reload"));
         reload.addEventListener("click", () => vscode.postMessage({ type: "preview" }));
         note = el("span", "art-toolbar-note", "Loading the page…");
-        bar.append(note, el("span", "art-spacer"), reload);
+        bar.append(note, el("span", "art-spacer"), copy, reload);
         frame = el("iframe", "art-frame art-page");
         frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
         frame.setAttribute("referrerpolicy", "no-referrer");
@@ -288,7 +301,7 @@
 
   /** A dashboard: its sources (what each reads, and whether you allowed it), Refresh, and DGC's page of its numbers. */
   editors.dashboard = () => {
-    let frame, sourcesBox, stamp, refreshing = false, refreshBtn;
+    let frame, sourcesBox, stamp, refreshing = false, refreshBtn, renderedHtml = "";
     const local = new Map();              // source id -> allowed, as this panel last set it
     const asking = new Set();
     function data() { return state.content && typeof state.content === "object" ? state.content : { sources: [], widgets: [] }; }
@@ -359,12 +372,15 @@
     return {
       mount(main) {
         const bar = el("div", "art-toolbar");
+        const copy = el("button", "art-btn", "Copy text"); copy.type = "button";
+        copy.title = "Copy the dashboard's text to your clipboard";
+        copy.addEventListener("click", () => copyHtml(renderedHtml));
         refreshBtn = el("button", "art-btn art-btn-primary"); refreshBtn.type = "button";
         refreshBtn.append(icon("refresh"), el("span", "art-btn-label", "Refresh"));
         refreshBtn.title = "Run its queries again now, on this computer, with no model";
         refreshBtn.addEventListener("click", () => { refreshing = true; paintStamp(); vscode.postMessage({ type: "refresh" }); });
         stamp = el("span", "art-toolbar-note");
-        bar.append(refreshBtn, stamp);
+        bar.append(refreshBtn, stamp, el("span", "art-spacer"), copy);
         sourcesBox = el("section", "art-sources"); sourcesBox.setAttribute("aria-label", "Sources");
         frame = viewFrame(`${state.view.title}: the dashboard`);
         const wrap = el("div", "art-dash");
@@ -375,6 +391,7 @@
       update() { asking.clear(); renderSources(); paintStamp(); },
       render(msg) {
         if (msg.error) { banner("error", msg.error); return; }
+        renderedHtml = msg.html;
         frameHtml(frame, msg.html);
       },
       refreshed(msg) { refreshing = false; if (msg.state) state.dstate = msg.state; paintStamp(); renderSources(); },
@@ -412,6 +429,8 @@
   });
 
   window.addEventListener("message", (event) => {
+    // A Page runs in a child frame. Only the extension host may drive this panel's actions.
+    if (event.source && event.source !== window) return;
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
@@ -472,6 +491,9 @@
         return;
       case "render": state.editor?.render?.(msg); return;
       case "frame": state.editor?.frame?.(msg); return;
+      case "copySource": copyHtml(msg.html); return;
+      case "copyFailed": banner("error", msg.message); return;
+      case "copied": announce("Text copied to clipboard."); return;
       case "refreshed": state.editor?.refreshed?.(msg); return;
       case "allowed": state.editor?.allowed?.(msg); return;
     }

@@ -1266,6 +1266,7 @@
   }
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
+  $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
   // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
@@ -1548,6 +1549,7 @@
   function artifactsOffered(capability) {
     outputOffered = capability && typeof capability === "object" && Number(capability.version) >= 1 ? capability : null;
     $("output-picker").hidden = !outputOffered;
+    if ($("work-library")) $("work-library").hidden = !outputOffered;
     if (!outputOffered) { hideOutputMenu(); setOutput("auto"); }
   }
   function setOutput(value) {
@@ -5630,7 +5632,12 @@
       const stop = node.querySelector("[data-artifact-stop]");
       node.classList.remove("stopping");
       if (message.state === "stopped") {
-        if (node.classList.contains("artifact-list-row")) { node.remove(); return; }
+        if (node.classList.contains("artifact-list-row")) {
+          const card = node.closest(".card");
+          node.remove();
+          if (card && !card.querySelector(".artifact-list-row")) card.remove();
+          return;
+        }
         node.classList.add("stopped");
         node.querySelectorAll("button").forEach((button) => { button.disabled = true; });
         const label = node.querySelector(".anm"); if (label) label.textContent = "Artifact stopped";
@@ -8071,11 +8078,12 @@
       }
       case "artifacts": {
         amPreviewList(ev);
+        // A Stop asks for the refreshed list so the host can confirm the target went away. It is
+        // an internal reply, not a request to insert every other preview into this conversation.
+        if (String(ev.request_id || "").startsWith("artifact-stop-")) break;
         const items = ev.items || [];
         if (!items.length) {
-          if (!String(ev.request_id || "").startsWith("artifact-stop-")) {
-            sysLine("No artifact previews are running.");
-          }
+          sysLine("No artifact previews are running.");
           break;
         }
         const c = decisionCard(`<div class="q">${icon("app-window")} Artifacts</div><div class="artifact-list"></div>`);
@@ -12209,8 +12217,10 @@
   function renderAgentsPill() {
     const picker = $("agents-picker"), pill = $("agents-pill");
     if (!picker || !pill) return;
-    const c = agentCounts(), tasks = amRunningTasks().length;
-    if (c.total <= 0 && tasks <= 0) {
+    const c = agentCounts(), active = amRunningTasks();
+    const tasks = active.filter((task) => task.kind !== "preview").length;
+    const previews = active.length - tasks;
+    if (c.total <= 0 && tasks <= 0 && previews <= 0) {
       hoverTip.hide();
       picker.hidden = true;
       return;
@@ -12218,17 +12228,17 @@
     picker.hidden = false;
     const n = c.active;
     const state = c.waiting > 0 ? "waiting" : n > 0 || tasks > 0 ? "running" : "idle";
-    const label = n > 0 && tasks > 0 ? `${agentPlural(n, "agent")} · ${agentPlural(tasks, "task")}`
-      : tasks > 0 ? agentPlural(tasks, "task") : agentPlural(n, "agent");
+    const label = [n > 0 || !tasks && !previews ? agentPlural(n, "agent") : "",
+      tasks ? agentPlural(tasks, "task") : "", previews ? agentPlural(previews, "preview") : ""].filter(Boolean).join(" · ");
     const inBackground = tasks > 0 ? `${agentPlural(tasks, "background task")} running` : "";
     const said = state === "waiting"
       ? [c.waitingPermission > 0 ? "An agent is waiting for your permission" : "An agent is waiting for your answer", inBackground]
       : state === "idle" ? ["No agents working"]
       : [n > 0 ? (tasks > 0 ? `${agentPlural(n, "agent")} working and ${inBackground}` : "Agents are working") : inBackground];
-    const title = [...said.filter(Boolean), "Click to open the agent map"].join(" · ");
+    const title = [...said.filter(Boolean), previews ? `${agentPlural(previews, "live preview")} serving a page` : "", "Click to open the agent map"].filter(Boolean).join(" · ");
     pill.dataset.state = state;
     agentsSetText(pill.querySelector(".agents-text"), label);
-    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks));
+    agentsSetText(pill.querySelector(".agents-short"), String(n + tasks + previews));
     pill.querySelector(".agents-need").hidden = state !== "waiting";
     hoverTip.retitle(pill, title);
     pill.setAttribute("aria-label", `${label} · ${title}`);
@@ -12535,8 +12545,8 @@
   function amPreviewTask(preview) {
     const key = `preview:${preview.id}`, running = preview.state !== "stopped";
     const up = Number.isFinite(preview.readyWall) ? elapsedWords(Date.now() - preview.readyWall) : String(preview.uptime || "");
-    return { key, kind: "preview", id: preview.id, running, name: String(preview.name || preview.id), word: running ? "Running" : "Stopped",
-      label: "preview", ms: 0, stoppable: running, preview, meta: ["preview", up ? `up ${up}` : ""].filter(Boolean) };
+    return { key, kind: "preview", id: preview.id, running, name: String(preview.name || preview.id), word: running ? "Serving" : "Stopped",
+      label: "preview", ms: 0, stoppable: running, preview, meta: ["live preview", up ? `up ${up}` : ""].filter(Boolean) };
   }
   function amPipRuns() {
     try { return (pipSetupCards?.runs?.() || []).filter((run) => run && typeof run.id === "string"); } catch { return []; }
@@ -12573,7 +12583,7 @@
     const state = amTaskState(task);
     if (entry.dot.dataset.state !== state) entry.dot.dataset.state = state;
     agentsSetText(entry.desc, task.name);
-    agentsSetText(entry.meta, task.meta.join(" · "));
+    agentsSetText(entry.meta, (task.kind === "preview" ? " · " : "") + task.meta.join(" · "));
     amLabel(entry, [task.name, task.word, ...task.meta].join(", "), task.name);
   }
 
@@ -12926,8 +12936,10 @@
       return entry.item;
     }));
     $("agent-map-tasks").hidden = !tasks.length;
-    const running = tasks.length - stoppedByRestart;
+    const running = tasks.filter((task) => task.running && task.kind !== "preview").length;
+    const livePreviews = tasks.filter((task) => task.running && task.kind === "preview").length;
     agentsSetText($("agent-map-tasks-title"), [running ? agentPlural(running, "background task") : "",
+      livePreviews ? agentPlural(livePreviews, "live preview") : "",
       stoppedByRestart ? `${stoppedByRestart} stopped by a restart` : "", "click a task for details"].filter(Boolean).join(" · "));
     // One tab stop in the tree and one in the tasks; the arrow keys move within each.
     amRove($("agent-map-tree"), focusedKey);
@@ -13125,8 +13137,11 @@
       n.states.replaceChildren(...lines.map((line) => { const li = el("li"); li.textContent = line; return li; }));
     }
     n.states.hidden = !lines.length;
-    const running = amRunningTasks().length;
-    agentsSetText(n.tasks, running ? `${agentPlural(running, "background task")} running` : "Nothing running in the background");
+    const runningTasks = amRunningTasks();
+    const running = runningTasks.filter((task) => task.kind !== "preview").length;
+    const previews = runningTasks.length - running;
+    agentsSetText(n.tasks, [running ? `${agentPlural(running, "background task")} running` : "",
+      previews ? `${agentPlural(previews, "live preview")} serving a page` : ""].filter(Boolean).join(" · ") || "Nothing running in the background");
     const size = Math.max(0, Number(contextState.size || 0)), used = Math.max(0, Number(contextState.used || 0));
     agentsSetText(n.context, size ? `${fmtTokens(used)} of ${fmtTokens(size)} tokens in its context window` : "");
     n.context.hidden = !size;

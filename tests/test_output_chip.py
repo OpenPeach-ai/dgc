@@ -109,6 +109,14 @@ class OutputChipTest(unittest.TestCase):
                 agent._turn_output = ""
                 self.assertIn("artifact", {t["function"]["name"] for t in agent._tool_schemas()})
 
+    def test_follow_up_page_guidance_edits_saved_output_without_new_chip(self):
+        agent = self.agent(tool_profile="full", artifact_autostart=True)
+        agent._turn_output = ""
+        guidance = "\n".join(agent._artifact_guidance())
+        self.assertIn("edit_artifact", guidance)
+        self.assertIn("even if the Output chip is Auto", guidance)
+        self.assertNotIn("call the `artifact` tool", guidance)
+
 
 if __name__ == "__main__":
     unittest.main()

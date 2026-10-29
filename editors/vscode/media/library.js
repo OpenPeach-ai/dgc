@@ -342,7 +342,11 @@
     } else if (msg.type === "view") {
       // Opened from a chat's Widgets list: the Widgets tab (the host says so only to a backend that keeps them).
       if (msg.view === "widgets" && state.offered) show("widgets");
-      if (msg.view === "artifacts" && state.artifactsOffered) show("artifacts");
+      if ((msg.view === "artifacts" || msg.view === "artifacts-work") && state.artifactsOffered) {
+        state.made = msg.view === "artifacts-work" ? "work" : "";
+        try { vscode.setState({ ...(vscode.getState() || {}), made: state.made }); } catch {}
+        if (state.view === "artifacts") { render(); ask(); } else show("artifacts");
+      }
     } else if (msg.type === "refresh") {
       ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {

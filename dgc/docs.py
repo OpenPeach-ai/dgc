@@ -568,6 +568,12 @@ An artifact is something DGC makes that you keep: a **Document**, **Slides**, a 
 reports in one. Every artifact lives on this computer, in `~/.dgc/artifacts/`, whichever part of
 DGC made it, and nothing is hosted anywhere: exporting is how you share one.
 
+Open **Library → Artifacts** in Chat to find Outputs made in Chat, Work or Pips. **Work → Library**
+opens that same saved collection filtered to Work. From either place, reopen, export or remove an
+Output; removal moves its versions to DGC's trash. A Page or Dashboard has a **Copy text** button
+in its editor panel, so its readable text can be copied even when the embedded preview does not
+offer a working copy command.
+
 - **You and DGC both edit it, and every change is a version**, marked with who made it (you, DGC
   or a Pip's name) and when. Restoring an old version makes a new one, so nothing is lost.
 - **The model writes data, never layout.** A deck is slides with a layout and notes, a sheet is
@@ -591,6 +597,9 @@ edits before charting them.
 The **Output** chip under the prompt (in Chat and in Work) chooses what the reply makes: Auto (the
 model decides), Document, Slides, Spreadsheet, Page or Dashboard. **A choice is a promise**: choose
 Slides and you get slides, or a plain line saying why not. After the reply it goes back to Auto.
+To revise an Output from the same conversation, name it or refer to its card: DGC should edit
+that saved Output as a new version even when you do not choose an Output again. If several could
+match, tell it which one you mean.
 
 In the terminal: `dgc chat --make slides "A 6-slide pitch for the tea shop"`, `/make slides TEXT`
 in `dgc chat`, and `/make TYPE TEXT` in a coding session.

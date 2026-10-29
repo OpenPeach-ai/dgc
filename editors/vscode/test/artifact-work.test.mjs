@@ -67,6 +67,17 @@ test("the Output chip shows only for a CLI that offers artifacts", async (t) => 
   } finally { await s.page.close(); }
 });
 
+test("Work home opens the saved Output Library", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openWork();
+  try {
+    assert.equal(await s.page.locator("#work-library").evaluate((n) => n.hidden), false);
+    await s.page.locator("#work-library").evaluate((n) => n.click());
+    assert.deepEqual(await s.posted("workLibrary"), [{ type: "workLibrary" }]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("chosen by keyboard, the chip says so, goes with the next message only, and is Auto again", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openWork();

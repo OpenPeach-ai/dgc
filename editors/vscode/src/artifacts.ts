@@ -149,6 +149,7 @@ class ArtifactPanel {
   private ready = false;
   private queue: Record<string, unknown>[] = [];
   private servedFor = 0;           // the version the last render was asked for
+  private servedUrl = "";
 
   constructor(private readonly hub: Artifacts, readonly id: string, readonly panel: vscode.WebviewPanel) {
     panel.webview.onDidReceiveMessage((message) => { void this.fromPage(message); });
@@ -181,11 +182,13 @@ class ArtifactPanel {
   serve(): void {
     const version = this.view?.version ?? 0;
     this.servedFor = version;
+    this.servedUrl = "";
     this.hub.ask({ type: "artifact_open", id: this.id }, {
       ok: async (ev) => {
         const url = String(ev.url || "");
         if (!/^https?:\/\//i.test(url)) return;
         if (this.view?.type === "page") {
+          this.servedUrl = url;
           let shown = url;
           try { shown = (await vscode.env.asExternalUri(vscode.Uri.parse(url, true))).toString(true); } catch { /* as it is */ }
           this.post({ type: "frame", url: shown, version });
@@ -221,6 +224,19 @@ class ArtifactPanel {
         return;
       case "reload": this.load(); return;
       case "preview": if (view && view.type !== "doc") this.serve(); return;
+      case "copyPageText":
+        if (view?.type === "page" && this.servedUrl && this.servedFor === view.version) {
+          try { this.post({ type: "copySource", html: await fetchPage(this.servedUrl) }); }
+          catch (err: any) { this.post({ type: "copyFailed", message: `Could not read the page's text: ${String(err?.message || err)}` }); }
+        }
+        return;
+      case "copyText":
+        if ((view?.type === "page" || view?.type === "dashboard") && typeof message.text === "string"
+            && message.text.length > 0 && message.text.length <= 200000) {
+          try { await vscode.env.clipboard.writeText(message.text); this.post({ type: "copied" }); }
+          catch { this.post({ type: "copyFailed", message: "Could not write to the clipboard here." }); }
+        }
+        return;
       case "save": {
         if (!view || !Number.isSafeInteger(message.base_version)) return;
         const content = message.content;
