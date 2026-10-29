@@ -15048,7 +15048,7 @@ def test_steering():
         "and delegate one part to a sub-agent.", replace=True)
     _intent_names = {tool["function"]["name"] for tool in a._tool_schemas()}
     check("explicit intent activates every matching optional tool",
-          _optional <= _intent_names and "# Artifacts" in a.system_prompt())
+          _optional <= _intent_names and "# Saved Outputs" in a.system_prompt())
     _intent_protocol = a._text_protocol_section()
     _intent_protocol_names = {
         tool["name"] for tool in json.loads(
@@ -15073,7 +15073,7 @@ def test_steering():
     check("mid-turn steering activates newly requested tools and prompt guidance",
           a._drain_steer() is True
           and "artifact" in {tool["function"]["name"] for tool in a._tool_schemas()}
-          and "# Artifacts" in a.system_prompt()
+          and "# Saved Outputs" in a.system_prompt()
           and "dgc-design" in {skill.name for skill in a._skill_catalog()})
 
     _observed_turn_tools = set()
