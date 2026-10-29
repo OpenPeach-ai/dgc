@@ -416,7 +416,7 @@ exec 9>&-
 # A pinned older service otherwise accepts new jobs but executes them with old policy bytes.
 # The helper verifies the exact DGC-owned unit and leaves active/queued work alone.
 if [ -z "${DGC_SKIP_PIPS_SERVICE_UPDATE:-}" ]; then
-  if PIPS_NOTE=$(cd / && "$VDIR/.venv/bin/python" -I -c \
+  if PIPS_NOTE=$(cd / && "$VDIR/.venv/bin/python3" -I -c \
       'from dgc.pip_keep_running import upgrade_after_install; print(upgrade_after_install())' 2>&1); then
     [ -z "$PIPS_NOTE" ] || say "$PIPS_NOTE"
   else
