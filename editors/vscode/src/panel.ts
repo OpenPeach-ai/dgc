@@ -8605,10 +8605,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
+    const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
     const breakdownScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "breakdown.js"));
+    const toolInsightsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "tool-insights.js"));
     const pipSetupStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pip-setup-cards.css"));
     const pipsStyle = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.css"));
     // Mermaid is fetched by the webview only when a diagram is actually rendered, so its ~5MB is
@@ -8648,6 +8650,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
+<link rel="stylesheet" href="${genuiCss}">
 <link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 </head><body data-mermaid-src="${mermaid}" data-agent-marks="${agentMarks}" data-link-favicons="${favicons}">
@@ -8881,6 +8884,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
+<script nonce="${nonce}" src="${toolInsightsScript}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>

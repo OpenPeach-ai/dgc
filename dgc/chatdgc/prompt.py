@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from ..genui_prompt import GUIDANCE as GENUI_GUIDANCE
 
 
 SEARCH_AUTO = (
@@ -176,6 +177,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
         + (ASK + CANVAS + WIDGETS + ARTIFACTS if ask and not voice else "")
+        + (GENUI_GUIDANCE if not voice else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

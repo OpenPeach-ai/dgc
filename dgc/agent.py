@@ -4766,6 +4766,9 @@ class Agent(GoalLifecycle):
         if self._artifact_guidance_static() or (adaptive and self._artifact_guidance_wanted()):
             parts += ["", *self._artifact_guidance()]
 
+        from .genui_prompt import GUIDANCE as _GENUI_GUIDANCE
+        parts += ["", _GENUI_GUIDANCE]
+
         if self._monitor_exposed():
             parts += ["", _MONITOR_GUIDANCE]
 

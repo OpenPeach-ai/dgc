@@ -28,8 +28,8 @@ const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.ends
 const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
 const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
-export function pipsDocument(scriptUri = '', styleUri = '', cspSource = ''): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div><script src="${attr(scriptUri)}"></script></body></html>`;
+export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = ''): string {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
 
 /** A Pip's computer in an editor tab: its Browser, Files and Terminal. */
@@ -139,7 +139,7 @@ export class PipsEditor implements vscode.Disposable {
     panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible }));
     panel.webview.onDidReceiveMessage(message => this.receive(message));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
-    panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource);
+    panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'));
     this.connect();
   }
   ready(capabilities: any, backendIdentity?: object): void {

@@ -1,6 +1,7 @@
 import {createConnectorInputs,mountConnectorInputs,readConnectorInputs,mountConnectorSummary} from './pipsConnectorForm.js';
 import {connectorDraft,connectorDraftsPage,connectorCall,connectorInspection,actionStatus,calendarAccounts,calendarDraft,calendarDetails,extendedCalendar,sendAccounts,messageDraft,messageReview,messageHistory,messageStates,emailDraft,emailDraftsPage} from './pipsMessageReviews.js';
 import './pips.css';
+import '../media/genui.css';
 import {accountChoices,accountReadPlan,appLabels,appReadNotices,appReadWords,extraReadTools,combineReadPlans} from './pipsAppPicker.js';
 import './pipsTranscript.css';
 import '../media/breakdown.js'; // window.DgcBreakdown: the context window part by part, as main DGC and ChatDGC draw it
@@ -388,6 +389,13 @@ function waitingMarkup(){
  return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>`<div class="waiting-row"><p>${esc(changeSummary(p))}</p><div class="actions"><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></div>`).join('')}</section>`;
 }
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
+document.addEventListener('click',event=>{
+  const button=event.target?.closest?.('button.genui-draft');
+  if(!button||!button.closest('.pip-app-root'))return;
+  const text=String(button.dataset.genuiDraft||'').slice(0,500);
+  if(!text||!S.selected)return;
+  draft.chatText=text;chatDrafts.set(S.selected,text);render();$('chatText')?.focus();
+});
 // Core's catalog entry is "unavailable" (it cannot be made as a background Pip), but a Personal Core is
 // the user's Primary Pip and takes messages like any Pip: battle test 4 found its chat could never send.
 function takesMessages(){return !!(pipType(S.pip,S.types)?.available||personalPip()&&S.pip?.pip_type==='core');}

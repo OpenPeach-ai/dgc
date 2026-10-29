@@ -37,6 +37,15 @@
   }
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("button.genui-draft");
+    if (!button) return;
+    const draft = String(button.dataset.genuiDraft || "").slice(0, 500);
+    if (!draft) return;
+    input.value = draft;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  });
   // A formula drawn as soon as its reply is (or streams) on screen.
   let mathFrame = 0;
   new MutationObserver(() => { if (!mathFrame) mathFrame = requestAnimationFrame(() => { mathFrame = 0; renderMath(log); }); })

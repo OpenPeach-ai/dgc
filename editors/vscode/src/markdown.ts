@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import { renderGenerativeUi } from "./generativeUi";
 import { addMath } from "./markdownMath";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -169,7 +170,14 @@ parser.renderer.rules.image = (tokens, index) => {
   const kind = target.kind === "file" ? ` data-file-kind="${fileKind(target.target)}"` : "";
   return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${kind} title="${escape(target.target)}">${label}</button>`;
 };
-parser.renderer.rules.fence = (tokens, index) => codeBlock(tokens[index].content, tokens[index].info);
+parser.renderer.rules.fence = (tokens, index) => {
+  const info = String(tokens[index].info || "").trim().toLowerCase();
+  if (info === "dgc-ui") {
+    const card = renderGenerativeUi(tokens[index].content);
+    if (card) return card;
+  }
+  return codeBlock(tokens[index].content, tokens[index].info);
+};
 parser.renderer.rules.code_block = (tokens, index) => codeBlock(tokens[index].content, "");
 
 function codeBlock(content: string, info: string): string {

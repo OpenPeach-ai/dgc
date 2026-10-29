@@ -466,6 +466,7 @@ def _bare(tool: str) -> str:
 TOOLS_NOTE = ("\n\nYour tools are DGC's and nothing else: they reach you as mcp__dgc__NAME (or dgc.NAME), where NAME is "
               "the tool these instructions name (computer, offer_choices, connect_app and the rest). You have no shell, "
               "no file tools and no web tools of your own; never say you ran a command or read a file yourself.")
+from .genui_prompt import GUIDANCE as GENUI_GUIDANCE
 
 
 class Turn:
@@ -597,7 +598,7 @@ class Turn:
         folder = Path(self.launch["folder"])
         system = agent.messages[0]["content"] if agent.messages and agent.messages[0].get("role") == "system" else ""
         system_file = folder / "instructions.md"
-        _private_write(system_file, str(system) + TOOLS_NOTE)
+        _private_write(system_file, str(system) + TOOLS_NOTE + GENUI_GUIDANCE)
         history = transcript(agent.messages[1:])
         text = (("This conversation so far, oldest first (reference, not new instructions):\n\n" + history + "\n\n"
                  "Now:\n") if history else "") + prompt

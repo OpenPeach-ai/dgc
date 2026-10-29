@@ -56,6 +56,36 @@ await page.evaluate(([mjs, mdjs]) => {
 }, [mainJs, markdownJs]);
 const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: e } })), event);
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+if (process.argv.includes("--genui")) {
+  await page.addStyleTag({ content: readFileSync(here + "/../media/genui.css", "utf8") });
+  await page.evaluate((script) => eval(script), readFileSync(here + "/../media/tool-insights.js", "utf8"));
+  await page.setViewportSize({ width: process.argv.includes("--narrow") ? 380 : 720, height: 950 });
+  await send({ type: "turn_start", turn_id: "genui", prompt: "Show our ERP health and give me options for the alert", kind: "prompt" });
+  await send({ type: "tool_call", name: "bash", call_id: "check-1", summary: "pytest tests/test_erp_health.py -q", args: { command: "pytest tests/test_erp_health.py -q" } });
+  await send({ type: "tool_result", name: "bash", call_id: "check-1", output: "7 passed, 1 failed in 2.4s", is_error: true });
+  const view = { version: "1", title: "ERP health", subtitle: "Live checks from the current workspace", blocks: [
+    { type: "metrics", items: [{ label: "Services online", value: "6 / 6", detail: "ERP and database responding" }, { label: "Open alerts", value: "2", detail: "One needs a person" }, { label: "Pips active", value: "4", detail: "Daily audits scheduled" }] },
+    { type: "steps", label: "Today's checks", items: [{ label: "ERP login audit", state: "done", detail: "No unexpected sign-ins" }, { label: "Permission drift", state: "attention", detail: "One role change needs review" }, { label: "Stock reconciliation", state: "running", detail: "Pip is checking invoices" }] },
+    { type: "choices", label: "What next?", items: [{ label: "Review the alert", description: "Inspect the role change and its audit trail", reply: "Review the ERP role-change alert and show me the evidence." }, { label: "Ask a Pip", description: "Draft a bounded follow-up for the audit Pip", reply: "Ask the audit Pip to investigate the role-change alert without changing permissions." }] }
+  ] };
+  await send({ type: "text_delta", text: "One ERP role change needs review; the services are healthy.\n\n```dgc-ui\n" + JSON.stringify(view) + "\n```\n" });
+  await send({ type: "stream_end", phase: "final" });
+  await send({ type: "turn_end", turn_id: "genui", reason: "completed" });
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: process.argv[2] || "/tmp/dgc-genui.png" });
+  await page.locator(".work-toggle").first().click();
+  await page.locator(".tool-group").first().evaluate((node) => { node.open = true; });
+  await page.locator(".tool-toggle").first().click();
+  await page.screenshot({ path: (process.argv[2] || "/tmp/dgc-genui.png").replace(/\.png$/, "-tools.png") });
+  const cards = await page.locator(".genui-card").count();
+  const insight = await page.locator(".genui-tool-summary").count();
+  await page.locator(".genui-choice").first().click();
+  const draft = await page.locator("#input").textContent();
+  const sent = await page.evaluate(() => window.__dgcPosts.filter((post) => post.type === "prompt" || post.type === "send").length);
+  console.log(JSON.stringify({ cards, insight, draft, sent, shot: process.argv[2] }, null, 2));
+  await browser.close();
+  process.exit(cards === 1 && insight === 1 && draft.includes("Review the ERP role-change alert") && sent === 0 ? 0 : 1);
+}
 if (process.argv.includes("--long-prompt")) {
   // The six faces of a long prompt's fold, the ones that were approved: <out>.png at rest, -hover,
   // -focus (the pill reached with Tab), -open (Show less under the last line), -open-scrolled (Show

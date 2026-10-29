@@ -5559,6 +5559,43 @@
     card.classList.toggle("has-output", !!value.trim());
     return value;
   }
+  function enrichToolResult(card, ev) {
+    if (canonicalTool(ev.name) !== "bash") return;
+    const counts = window.DgcToolInsights?.testCounts?.(ev.output);
+    if (!counts || !counts.total) return;
+    card.classList.add("genui-test-tool");
+    card.querySelector(".genui-tool-summary")?.remove();
+    card.querySelector(".genui-tool-insight")?.remove();
+    const compact = el("span", "genui-tool-summary", `${counts.passed}/${counts.total} passed`);
+    if (counts.failed) compact.classList.add("failed");
+    card.querySelector(".head")?.appendChild(compact);
+    const panel = el("div", "genui-tool-insight");
+    const heading = el("div", "genui-tool-insight-head");
+    heading.appendChild(el("strong", "", counts.failed ? "Tests need attention" : "Test run complete"));
+    heading.appendChild(el("span", "", `${counts.passed} passed · ${counts.failed} failed${counts.skipped ? ` · ${counts.skipped} skipped` : ""}`));
+    panel.appendChild(heading);
+    const track = el("div", "genui-tool-track");
+    track.setAttribute("role", "img");
+    track.setAttribute("aria-label", `${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped`);
+    for (const [kind, count] of [["passed", counts.passed], ["failed", counts.failed], ["skipped", counts.skipped]]) {
+      if (!count) continue;
+      const segment = el("span", `genui-tool-${kind}`);
+      segment.style.width = `${count / counts.total * 100}%`;
+      track.appendChild(segment);
+    }
+    panel.appendChild(track);
+    if (counts.failed) {
+      const fix = el("button", "genui-tool-fix", "Ask DGC to fix the failures");
+      fix.type = "button";
+      fix.onclick = (event) => {
+        event.stopPropagation();
+        setComposerText("Inspect the failures in the last test run, fix their root cause, and rerun the relevant tests.");
+        input.focus();
+      };
+      panel.appendChild(fix);
+    }
+    card.querySelector(".body")?.prepend(panel);
+  }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");
     const newPath = (diff.match(/^\+\+\+\s+([^\n\t]+)/m) || [])[1];
@@ -7703,6 +7740,7 @@
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
+          enrichToolResult(c, ev);
           setupCards()?.toolResult(c, ev);
           if (c.classList.contains("pip-run-owned")) refreshToolGroup(c.closest(".tool-group"));
         }
@@ -8940,6 +8978,15 @@
     setComposerRange(start + text.length);
   }
   function setComposerText(text) { editComposer(0, composerText().length, String(text ?? "")); }
+  // A model-authored UI choice may prepare a follow-up. It never sends one or bypasses permissions.
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("button.genui-draft");
+    if (!button || button.closest("#pips-host")) return;
+    const draft = String(button.dataset.genuiDraft || "").slice(0, 500);
+    if (!draft) return;
+    setComposerText(draft);
+    input.focus();
+  });
   function clearComposer() { recordComposerEdit(emptyComposer); }
   function emptyComposer() {
     // A composer holding nothing but pills serializes to the empty string -- a skill pill's wire
