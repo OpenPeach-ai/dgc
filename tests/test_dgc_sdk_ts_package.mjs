@@ -107,9 +107,15 @@ test("npm install <packed tarball> gives an importable, typed package", async (t
     mkdirSync(bin);
     writeFileSync(join(bin, "dgc"), "#!/bin/sh\n", { mode: 0o755 });
     assert.deepEqual(installedRuntime.defaultRuntime({ PATH: bin, HOME: scratch }), [join(bin, "dgc"), "serve"]);
-    assert.deepEqual(installedRuntime.defaultRuntime({ PATH: bin, HOME: scratch, DGC_PYTHON: "/opt/py" }),
-      ["/opt/py", "-m", "dgc", "serve"]);
-    assert.deepEqual(installedRuntime.defaultRuntime({ PATH: "", HOME: scratch }), ["python3", "-m", "dgc", "serve"]);
+    for (const [env, executable] of [
+      [{ PATH: bin, HOME: scratch, DGC_PYTHON: "/opt/py" }, "/opt/py"],
+      [{ PATH: "", HOME: scratch }, "python3"],
+    ]) {
+      const runtime = installedRuntime.defaultRuntime(env);
+      assert.deepEqual(runtime.slice(0, 2), [executable, "-c"]);
+      assert.match(runtime[2], /sys\.path = \[entry for entry in sys\.path if entry\]/);
+      assert.match(runtime[2], /runpy\.run_module\('dgc', run_name='__main__', alter_sys=True\)/);
+    }
     // The child gets the basic variables, the key it was given, and nothing else from the host.
     const host = { PATH: "/usr/bin", LANG: "C.UTF-8", FAKE_CLOUD_SECRET: "s3cret",
                    DGC_API_KEY: "host-key", PYTHONPATH: "/app/site-packages" };
