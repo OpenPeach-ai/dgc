@@ -748,7 +748,8 @@ test("every kind of task changes the pill as it starts and as it ends: monitors,
   ];
   for (const [kind, startTask, endTask] of kinds) {
     startTask();
-    assert.deepEqual([pill().hidden, pill().state, pill().label], [false, "running", "1 task"], `${kind} started`);
+    assert.deepEqual([pill().hidden, pill().state, pill().label],
+      kind.includes("preview") ? [false, "idle", "1 preview"] : [false, "running", "1 task"], `${kind} started`);
     endTask();
     assert.equal(pill().hidden, true, `${kind} ended`);
   }
@@ -762,25 +763,27 @@ test("every kind of task changes the pill as it starts and as it ends: monitors,
 
 test("the pill and the map count the same tasks, live while the map is open; so does the main agent's card", () => {
   const { $, doc, event, send, start, end, monitors, shells, pill, errors } = tasksView();
-  const pillTasks = () => Number(/(\d+) tasks?$/.exec(pill().label)?.[1] || 0);
+  const pillTasks = () => [...pill().label.matchAll(/(\d+) (?:tasks?|previews?)/g)].reduce((n, m) => n + Number(m[1]), 0);
   start(sid(1));
   $("agents-pill").click();
-  const agree = (n, why) => {
+  const agree = (n, why, previews = 0) => {
     assert.equal(pillTasks(), n, `the pill: ${why}`);
     assert.equal($("agent-map-task-list").querySelectorAll(".am-row").length, n, `the map: ${why}`);
     assert.equal($("agent-map-tasks").hidden, n === 0);
-    if (n) assert.equal($("agent-map-tasks-title").textContent, `${n} background task${n === 1 ? "" : "s"} · click a task for details`);
+    if (n) assert.equal($("agent-map-tasks-title").textContent,
+      [n - previews ? `${n - previews} background task${n - previews === 1 ? "" : "s"}` : "",
+        previews ? `${previews} live preview${previews === 1 ? "" : "s"}` : "", "click a task for details"].filter(Boolean).join(" · "));
   };
   agree(0, "nothing in the background");
   monitors(monitor("mon1"), monitor("mon2", "ended")); agree(1, "the running monitor, not the ended one");
   shells(shell("bg3"), shell("bg4", "exited")); agree(2, "and the running shell");
   event(troupe("running")); agree(3, "and the troupe");
-  event(preview("art1")); agree(4, "and the preview");
+  event(preview("art1")); agree(4, "and the preview", 1);
   doc.querySelector('#agent-map .am-row[data-am-key="root"]').click();
-  assert.match($("agent-card-body").textContent, /4 background tasks running/, "the main agent's card says the same number");
+  assert.match($("agent-card-body").textContent, /3 background tasks running · 1 live preview serving a page/, "the main agent's card distinguishes the preview");
   $("agent-card-back").click();
-  end(sid(1)); agree(4, "an agent ending changes no task");
-  assert.equal(pill().label, "4 tasks");
+  end(sid(1)); agree(4, "an agent ending changes no task", 1);
+  assert.equal(pill().label, "3 tasks · 1 preview");
   send({ type: "artifact_stop_state", id: "art1", state: "stopped" }); agree(3, "the preview stopped");
   event(troupe("done")); agree(2, "the troupe finished");
   shells(); agree(1, "the shell is gone");
@@ -813,7 +816,7 @@ test("a new chat, a cleared one and a chat switch take the old chat's running ta
     p.event(troupe("running"));
     p.event(preview("art1"));
     p.pipRun(1);
-    assert.equal(p.pill().label, "5 tasks");
+    assert.equal(p.pill().label, "4 tasks · 1 preview");
     reset(p);
     assert.equal(p.pill().hidden, true, "none of them is this chat's");
     assert.deepEqual(p.errors, []);
