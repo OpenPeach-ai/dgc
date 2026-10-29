@@ -746,6 +746,7 @@
     "note": "DGC's Microsoft app isn't publisher-verified yet, so Microsoft's sign-in page marks it unverified. A personal account can approve it there. In a company, people can't approve it themselves: an admin approves DGC once, for everyone."
    },
    "reviewed_reads": [
+    "mail_account",
     "search_mail",
     "list_mail_folders",
     "read_mail",
@@ -755,7 +756,7 @@
     "search_files",
     "read_file"
    ],
-   "reviewed_reads_note": "DGC's own server marks its tools read-only or not, but DGC passes on a tool's name, description and inputs only. These eight only read (a message, an event, a file's text, or a list of them), so a Pip runs them at once; other calls follow the plugin's permission setting, and unattended changes wait for an Allow.",
+   "reviewed_reads_note": "DGC's own server marks its tools read-only or not, but DGC passes on a tool's name, description and inputs only. These nine only read (account identity, a message, an event, a file's text, or a list of them), so a Pip runs them at once; other calls follow the plugin's permission setting, and unattended changes wait for an Allow.",
    "audited_on": "2026-10-29",
    "verification": "29 Oct 2026, against a stand-in Microsoft (tests/test_microsoft_plugins.py): DGC's own Graph server with every tool, paging, 429 with Retry-After, a 401 that refreshes once, one sign-in for the chosen apps in the browser (http://localhost on any port) and with a code, refresh at the account's own sign-in server, the admin-approval message and sign-out. 28 Oct 2026, against Microsoft: a personal account approved DGC's unverified app with a code at the consumers sign-in server, every permission was granted and Graph /me answered. Not tested: a refresh, a browser sign-in and one real call per app against Microsoft, and a work account (no tenant to try in)."
   },

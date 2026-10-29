@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import pip_app_access as apps, pip_app_read_adapters as extra_reads
+from . import pip_app_access as apps, pip_app_read_adapters as extra_reads, pip_microsoft_mail as microsoft_mail
 from .workspace_registry import RegistryError, WorkspaceRegistry, utc_now
 
 SCHEMA = """
@@ -55,7 +55,8 @@ NAMES = {"gmail": "Gmail", "googlecalendar": "Google Calendar", "googledrive": "
          "twitter": "X", "linkedin": "LinkedIn", "whatsapp": "WhatsApp", "telegram": "Telegram", "zoom": "Zoom"}
 # Which app each read in the closed read vocabulary belongs to.
 READ_TOOLKITS = {"GMAIL_FETCH_EMAILS": "gmail", "GOOGLECALENDAR_FIND_EVENT": "googlecalendar",
-                 **{tool: d["toolkit"] for tool, d in extra_reads.DESCRIPTORS.items()}}
+                 **{tool: d["toolkit"] for tool, d in extra_reads.DESCRIPTORS.items()},
+                 **{tool: "outlook" for tool in microsoft_mail.READS}}
 MAX_TEXT = 40000
 
 
@@ -237,10 +238,17 @@ def _owned(registry, link_id, actor):
 
 
 def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
-    """The user's Connect: use an account Composio already has, else start a sign-in."""
+    """The user's Connect: bind Outlook to Microsoft Mail, or use Composio for other apps."""
     row = _owned(registry, link_id, actor)
     if row["status"] not in ("requested", "authorizing", "failed"):
         raise RegistryError("invalid_state", "This card is already settled.")
+    if row["toolkit"] == "outlook":
+        try:
+            linked = microsoft_mail.connect(config)
+            return {"link": _set(registry, link_id, status="connected", error=None, **linked),
+                    "redirect_url": None, "connected": True}
+        except RegistryError as exc:
+            return {"link": _set(registry, link_id, status="failed", error=str(exc)[:500]), "redirect_url": None}
     found = composio_server(config)
     if found is None:
         return {"link": _set(registry, link_id, status="failed",
@@ -294,7 +302,7 @@ def decline(registry, link_id, actor) -> dict:
 
 
 def disconnect(registry, link_id, actor) -> dict:
-    """This Pip stops using the account. The account stays connected in Composio for anything else."""
+    """This Pip stops using the account. The underlying plugin remains connected for other uses."""
     _owned(registry, link_id, actor)
     return {"link": _set(registry, link_id, status="declined", account=None, label=None, error=None)}
 
@@ -304,6 +312,8 @@ def disconnect(registry, link_id, actor) -> dict:
 def read(config, app, tool, arguments, *, manager_factory=None, authorize=lambda: None) -> str:
     manager_factory = manager_factory or apps._manager
     """One read from the closed vocabulary on this Pip's own account for that app."""
+    if app.get("toolkit") == "outlook" and app.get("server") == microsoft_mail.SERVER:
+        return microsoft_mail.read(config, app, tool, arguments, authorize=authorize)
     if tool not in apps.READ_ACTIONS or READ_TOOLKITS.get(tool) != app["toolkit"]:
         tools = sorted(t for t, k in READ_TOOLKITS.items() if k == app["toolkit"])
         raise RegistryError("unsupported_app_action", f"{app['app']} reads available here: {', '.join(tools) or 'none yet'}.")
@@ -355,14 +365,14 @@ def schemas(apps_now) -> list[dict]:
     reads = ", ".join(sorted(f"{t} ({app_name(k)})" for t, k in READ_TOOLKITS.items()))
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
-            "Ask the user to connect one of their apps to you. Apps connect through the user's Composio, so any app "
-            "Composio supports works: Gmail, Google Calendar, Google Drive, Notion, Slack, Figma, GitHub, Linear and "
-            "many more. This shows a Connect card below your reply; the user signs in there (or just allows an account they "
+            "Ask the user to connect one of their apps to you. Outlook Mail uses the user's existing DGC Microsoft "
+            "plugin; other supported apps use Composio. This shows a Connect card below your reply; the user signs in "
+            "there (or just allows an account they "
             "already connected), and you are told when it is connected. Use it whenever the user asks whether you can "
             "use an app, or asks about Composio, and the app is not connected to you yet: call it rather than saying "
             "you have no tools. Never paste sign-in links or describe OAuth steps. " + connected_line),
             "parameters": {"type": "object", "properties": {
-                "app": {"type": "string", "description": "The app's Composio toolkit name: gmail, googlecalendar, googledrive, notion, slack, figma, github, linear, outlook, ..."},
+                "app": {"type": "string", "description": "The app name: outlook (DGC Microsoft Mail), gmail, googlecalendar, googledrive, notion, slack, figma, github, linear, ..."},
                 "why": {"type": "string", "description": "One short sentence the card shows: what you will do with it."}},
                 "required": ["app", "why"], "additionalProperties": False}}},
         {"type": "function", "function": {"name": "web_search", "description": (
@@ -482,6 +492,9 @@ class RunSocket:
                         return f"{link['app']} is already connected ({link['label']}). Read it with read_app."
                     if link["id"] not in self.asked:
                         self.asked.append(link["id"])
+                    if link["toolkit"] == "outlook":
+                        return ("A Connect Outlook card is below your reply. It uses the user's Microsoft Mail plugin "
+                                "from DGC Settings → Plugins; tell the user to choose Connect on the card.")
                     if composio_server(self.config) is None:
                         return (f"A Connect {link['app']} card is below your reply, but Composio is not set up in DGC yet. "
                                 "Tell the user in one sentence to add Composio in Settings → Plugins, then choose Connect on the card.")

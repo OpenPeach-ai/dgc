@@ -11,7 +11,7 @@ const items = (value: unknown, limit: number): Row[] | null => Array.isArray(val
   && value.length <= limit && value.every((item) => record(item)) ? value as Row[] : null;
 
 function metrics(block: Row): string | null {
-  const entries = items(block.items, 4);
+  const entries = items(block.items, 8);
   if (!entries) return null;
   const rows = entries.map((item) => {
     const label = word(item.label, 60), value = word(item.value, 40);

@@ -921,7 +921,7 @@ function appsMarkup(){
  if(appsSettingsPip!==S.selected){appsSettingsPip=S.selected;void loadAppLinks();}
  const connected=(S.appLinks||[]).filter(l=>l.status==='connected'),off=S.busy||!usable()||!!appLinkBusy;
  return `<section class="section" aria-label="Apps"><h2>Apps</h2>${connected.length
-  ?`<ul class="app-list">${connected.map(l=>`<li><span><strong>${esc(l.app)}</strong>${l.label?` <small>${esc(l.label)}</small>`:''}</span><button type="button" class="quiet" data-app-link-disconnect="${esc(l.id)}"${off?' disabled':''}>Disconnect</button></li>`).join('')}</ul><p class="muted">It reads these when you ask. Anything it would send or change waits for your Allow. Disconnect stops ${esc(S.pip?.name||'this Pip')} using this account. The account itself stays signed in (in Composio).</p>`
+  ?`<ul class="app-list">${connected.map(l=>`<li><span><strong>${esc(l.app)}</strong>${l.label?` <small>${esc(l.label)}</small>`:''}</span><button type="button" class="quiet" data-app-link-disconnect="${esc(l.id)}"${off?' disabled':''}>Disconnect</button></li>`).join('')}</ul><p class="muted">It reads these when you ask. Anything it would send or change waits for your Allow. Disconnect stops ${esc(S.pip?.name||'this Pip')} using this account. The account itself stays signed in under Settings → Plugins.</p>`
   :`<p class="muted">Nothing connected. Ask ${esc(S.pip?.name||'this Pip')} in its chat to connect an app, like Gmail or Google Calendar.</p>`}</section>`;
 }
 let appsSettingsPip='';

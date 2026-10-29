@@ -660,6 +660,9 @@ class GraphServer:
                    "body_type": {"type": "string", "enum": ["text", "html"],
                                  "description": "text (the default) or html."}}
         return [
+            ("mail_account", "Identify the signed-in Outlook account",
+             "Show the signed-in account's stable Microsoft id and email. DGC uses this to keep a Pip's mail access "
+             "bound to the account the user approved.", _schema({}), _READ, self.mail_account),
             ("search_mail", "Search Outlook mail",
              "Search or list messages in the user's Outlook mailbox. With query, searches like Outlook's search box "
              "(words, from:, to:, subject:, hasattachments:true) in every folder, or in folder. Without it, lists the "
@@ -698,6 +701,16 @@ class GraphServer:
              _schema({"id": {"type": "string", "description": "The message's id, from search_mail."},
                       "folder": folder}, ["id", "folder"]), _CHANGE, self.move_mail),
         ]
+
+    def mail_account(self, arguments: dict, cancelled):
+        item = self.graph.json("GET", "/me", what="Microsoft account", cancelled=cancelled,
+                               params={"$select": "id,mail,userPrincipalName,displayName"})
+        ident = item.get("id") if isinstance(item, dict) else None
+        if not isinstance(ident, str) or not 1 <= len(ident) <= 256:
+            raise GraphError("Microsoft did not identify the signed-in account. Reconnect it in Settings → Plugins.")
+        email = item.get("mail") or item.get("userPrincipalName")
+        return {"id": ident, "email": email[:320] if isinstance(email, str) else "",
+                "name": str(item.get("displayName") or "")[:160]}
 
     def _folder(self, value, cancelled) -> tuple[str, str]:
         """(Graph's name or id for a mail folder, how to say it) from a well-known name, a folder id or a name."""

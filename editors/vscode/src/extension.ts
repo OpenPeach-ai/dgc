@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { SessionTabs } from "./sessionTabs";
 import { ChatDGC } from "./chatdgc";
+import { WorkApps } from "./workApps";
 import { Artifacts } from "./artifacts";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
@@ -30,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
   const chatdgc = new ChatDGC(context);
   chatdgc.useArtifacts(artifacts);
   provider.useChatDGC(chatdgc);
+  const workApps = new WorkApps(context);
   // The chat a palette command acts on: the tab you last worked in. `chat` opens a new session's tab
   // when none is open, for commands that put something in a chat; `current` falls back to the side
   // bar for the ones that only change a setting.
@@ -88,9 +90,12 @@ export function activate(context: vscode.ExtensionContext): void | object {
     tabs,
     chatdgc.register(),
     chatdgc,
+    workApps.register(),
+    workApps,
     artifacts.register(),
     artifacts,
     vscode.commands.registerCommand("dgc.openArtifacts", () => chatdgc.openLibrary("artifacts")),
+    vscode.commands.registerCommand("dgc.openApps", () => workApps.open()),
     provider,
     vscode.commands.registerCommand("dgc.focus", () => provider.focus()),
     vscode.commands.registerCommand("dgc.openCommandMenu", () => chat().openCommandMenu()),

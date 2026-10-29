@@ -29,6 +29,18 @@ test('one bounded card renders metrics, progress, chart, table and draft-only ch
  assert.doesNotMatch(html,/<script|<iframe|onclick=/i);
 });
 
+test('a real ERP-style answer with six metrics and six steps renders as a card',()=>{
+ const html=markdown.render(fence({version:'1',title:'ERP status',subtitle:'Verified live',blocks:[
+  {type:'metrics',items:Array.from({length:6},(_,i)=>({label:`Metric ${i+1}`,value:String(i+1),detail:'Verified'}))},
+  {type:'steps',label:'Workstreams',items:Array.from({length:6},(_,i)=>({label:`Step ${i+1}`,state:i===4?'attention':'done',detail:'Checked'}))},
+  {type:'choices',label:'Next',items:[{label:'Review',description:'Prepare a follow-up',reply:'Review the blocker'}]}
+ ]}));
+ assert.match(html,/class="genui-card"/);
+ assert.equal((html.match(/class="genui-metric"/g)||[]).length,6);
+ assert.equal((html.match(/class="genui-step-dot"/g)||[]).length,6);
+ assert.doesNotMatch(html,/class="code"/);
+});
+
 test('model text is escaped and invalid or oversized payloads remain inert code',()=>{
  const html=markdown.render(fence({version:'1',title:'<img src=x onerror=alert(1)>',blocks:[
   {type:'choices',items:[{label:'" onmouseover="alert(1)',reply:'<script>alert(1)</script>'}]}

@@ -88,6 +88,17 @@ test('without Composio the card says how to add it, and Not now declines',async(
  assert.equal(x.d.querySelector(`[data-app-link="${LINK}"]`),null,'gone after Not now');
 });
 
+test('Outlook card uses the Microsoft plugin even when Composio is absent',async()=>{
+ const x=setup({links:[link({toolkit:'outlook',app:'Outlook',status:'failed',error:'Connect Microsoft Mail in Settings → Plugins first.'})],composio:false});
+ await openChat(x);
+ const card=x.d.querySelector(`[data-app-link="${LINK}"]`);
+ assert.match(card.textContent,/Couldn’t connect Outlook.*Connect Microsoft Mail in Settings/);
+ assert.doesNotMatch(card.textContent,/turn on Composio/);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Open Plugins','Try again','Not now']);
+ x.click(`[data-app-link-settings="${LINK}"]`);
+ assert.deepEqual(JSON.parse(JSON.stringify(x.sent.at(-1))),{type:'openSettings',section:'plugins'});
+});
+
 test('a card for another Pip, or a forged reply, is refused',async()=>{
  const x=setup({links:[link({pip_id:'pip_'+'h'.repeat(32)})]});await openChat(x);
  assert.equal(x.d.querySelector('[data-app-link]'),null);

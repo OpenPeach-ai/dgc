@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.34.1-genui.0",
+  "version": "0.34.2-apps.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -48,7 +48,9 @@
     "onWebviewPanel:dgc.chatEditor",
     "onWebviewPanel:dgc.chatdgcEditor",
     "onWebviewPanel:dgc.chatdgcWidget",
-    "onWebviewPanel:dgc.artifactPanel"
+    "onWebviewPanel:dgc.artifactPanel",
+    "onWebviewPanel:dgc.workApps",
+    "onCommand:dgc.openApps"
   ],
   "contributes": {
     "customEditors": [
@@ -285,6 +287,12 @@
         "title": "Artifacts",
         "category": "DGC",
         "icon": "$(library)"
+      },
+      {
+        "command": "dgc.openApps",
+        "title": "Apps",
+        "category": "DGC",
+        "icon": "$(layers)"
       },
       {
         "command": "dgc.goal",

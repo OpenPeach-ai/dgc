@@ -50,7 +50,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
     body = head(`Finish signing in to ${app}`, `Your browser opened ${esc(host || 'Composio')}. Come back here once it says you are connected.`)
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Open sign-in again</button>${no}</div>`;
-  } else if (!composio) {
+  } else if (!composio && link.toolkit !== 'outlook') {
     body = head(`Connect ${app}`, esc(link.reason))
       + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
@@ -61,7 +61,8 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Allowing…' : 'Allow'}</button>${no}</div>`;
   } else if (link.status === 'failed') {
     body = head(`Couldn’t connect ${app}`, esc(link.error || 'Try again.'))
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Plugins</button>`
+      + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
   } else {
     body = head(`Connect ${app}`, esc(link.reason))
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : `Connect ${app}`}</button>${no}</div>`;

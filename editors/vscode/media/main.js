@@ -1267,6 +1267,21 @@
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
+  // Apps live beside Work's saved Outputs; the project is easy to reopen after its chat is gone.
+  if ($("work-home") && $("sessions-status")) {
+    const appsButton = document.createElement("button");
+    appsButton.id = "work-apps";
+    appsButton.type = "button";
+    appsButton.className = "home-library";
+    appsButton.title = "Apps: reopen and check the projects you keep in DGC";
+    const mark = document.createElement("span");
+    mark.className = "codicon codicon-layers";
+    mark.setAttribute("aria-hidden", "true");
+    appsButton.appendChild(mark);
+    appsButton.appendChild(document.createTextNode("Apps"));
+    $("work-home").insertBefore(appsButton, $("sessions-status"));
+    appsButton.addEventListener("click", () => vscode.postMessage({ type: "openApps" }));
+  }
   // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.

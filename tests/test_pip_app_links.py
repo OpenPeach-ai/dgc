@@ -125,6 +125,22 @@ class AppLinkTests(unittest.TestCase):
                 self.assertIsNone(result["redirect_url"])
                 self.assertEqual(result["link"]["status"], "failed")
 
+    def test_outlook_uses_existing_microsoft_mail_without_composio(self):
+        self.cfg.data["mcp_servers"] = {}
+        card = self.ask("outlook", "To review Outlook mail.")
+        attached = {"server": "microsoft--mail", "connection_digest": "a" * 64,
+                    "account": "ca_ms_123", "label": "me@example.com"}
+        with patch.object(links.microsoft_mail, "connect", return_value=attached) as connect:
+            result = links.start(self.registry, self.cfg, card["id"], "editor-user")
+        connect.assert_called_once_with(self.cfg)
+        self.assertTrue(result["connected"])
+        self.assertIsNone(result["redirect_url"])
+        self.assertEqual(result["link"]["label"], "me@example.com")
+        app = links.connected(self.registry, self.pip["id"])[0]
+        with patch.object(links.microsoft_mail, "read", return_value='{"messages":[]}') as read:
+            self.assertEqual(links.read(self.cfg, app, "MICROSOFT_SEARCH_MAIL", {"limit": 1}), '{"messages":[]}')
+        self.assertEqual(read.call_args.args[:4], (self.cfg, app, "MICROSOFT_SEARCH_MAIL", {"limit": 1}))
+
     def test_not_now_and_disconnect(self):
         card = self.ask()
         self.assertEqual(links.decline(self.registry, card["id"], "editor-user")["link"]["status"], "declined")

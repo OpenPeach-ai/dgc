@@ -285,6 +285,8 @@ class Microsoft:
 
     def graph(self, handler, method, path, query, body, data):
         messages, events, files = self.messages, self.events, self.files
+        if path == "/me" and method == "GET":
+            return handler.reply({"id": "user-123", "mail": "me@example.com", "displayName": "Me"})
         if path == "/me/mailFolders" and method == "GET":
             return handler.reply({"value": [{"id": f, "displayName": f.title(), "totalItemCount": 1, "unreadItemCount": 0}
                                             for f in ("inbox", "archive", "deleteditems", "drafts", "sentitems")]
@@ -745,9 +747,13 @@ class ToolTests(Fixture):
         connection = self.mgr.servers[f"microsoft--{app}"].proc
         return {t["name"]: t for t, _app, _handler in connection.server.tools.values()}
 
+    def test_mail_account_identifies_the_signed_in_mailbox(self):
+        self.assertEqual(self.json_call(self.mgr, "mail", "mail_account"),
+                         {"id": "user-123", "email": "me@example.com", "name": "Me"})
+
     def test_each_app_has_its_tools_marked_for_what_they_do(self):
         expected = {
-            "mail": {"search_mail": "read", "list_mail_folders": "read", "read_mail": "read", "create_draft": "add",
+            "mail": {"mail_account": "read", "search_mail": "read", "list_mail_folders": "read", "read_mail": "read", "create_draft": "add",
                      "send_mail": "reach", "reply_or_forward": "reach", "move_mail": "change"},
             "calendar": {"list_calendars": "read", "list_events": "read", "read_event": "read",
                          "create_event": "reach", "update_event": "change", "delete_event": "change",
