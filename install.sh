@@ -412,6 +412,18 @@ else
 fi
 exec 9>&-
 
+# Keep a user-enabled Pips service on the same reviewed package as the newly active CLI.
+# A pinned older service otherwise accepts new jobs but executes them with old policy bytes.
+# The helper verifies the exact DGC-owned unit and leaves active/queued work alone.
+if [ -z "${DGC_SKIP_PIPS_SERVICE_UPDATE:-}" ]; then
+  if PIPS_NOTE=$(cd / && "$VDIR/.venv/bin/python" -I -c \
+      'from dgc.pip_keep_running import upgrade_after_install; print(upgrade_after_install())' 2>&1); then
+    [ -z "$PIPS_NOTE" ] || say "$PIPS_NOTE"
+  else
+    printf '  note: DGC installed, but its Pips service could not be refreshed. In Pips controls, turn Keep Pips running off and on after current work finishes.\n' >&2
+  fi
+fi
+
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *) printf '\033[1;33m  note:\033[0m add %s to your PATH:\n    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc && source ~/.bashrc\n' "$BIN" "$BIN" ;;

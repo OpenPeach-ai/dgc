@@ -6,6 +6,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Pips keep running across CLI updates.** An enabled, idle DGC-owned Linux or macOS runner is upgraded
+  with the CLI. If a runner still belongs to an older install, DGC stops new work with a clear
+  version message before a mismatched worker can fail the chat.
 - **Artifact versions and edits are safer to review.** Compare saved versions, export the version you chose,
   and keep a page's start file when restoring it. A document saved while DGC finishes an edit is preserved;
   DGC's proposed version remains available for review. Dashboard exports now include PDF.

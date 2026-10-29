@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from dgc import pip_runtime as runtime
+from dgc import __version__, pip_runtime as runtime
 from dgc.scheduler import named_process_lock
 from dgc.workspace_registry import RegistryError
 from module_clock import own_clock
@@ -23,7 +23,7 @@ class LocalStartupTests(unittest.TestCase):
         self.process = Mock()
         self.process.poll.return_value = None
         self.offline = {"online": False, "status": "offline", "paused": False}
-        self.online = {"online": True, "status": "running", "paused": False}
+        self.online = {"online": True, "status": "running", "paused": False, "version": __version__}
         for name, value in (("state_directory", self.directory),):
             p = patch.object(runtime, name, return_value=value); p.start(); self.addCleanup(p.stop)
 
@@ -47,6 +47,16 @@ class LocalStartupTests(unittest.TestCase):
              patch.object(runtime, "supervisor_is_live", return_value=True), \
              patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
             self.assertEqual(runtime.start_runtime(self.config), self.online)
+
+    def test_older_live_supervisor_refuses_new_runs_and_duplicate_start(self):
+        old = {**self.online, "version": None}
+        with patch.object(runtime, "_state", return_value=(old, "old")), \
+             patch.object(runtime, "supervisor_is_live", return_value=True), \
+             patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
+            for operation in (runtime.start_runtime, runtime.require_supervisor):
+                with self.subTest(operation=operation.__name__), self.assertRaises(RegistryError) as caught:
+                    operation(self.config)
+                self.assertEqual(caught.exception.code, "runner_version_mismatch")
 
     def test_start_uses_same_package_and_independent_process_without_cloud(self):
         with patch.object(runtime, "_state", side_effect=[(self.offline, "old"), (self.online, "new")]), \

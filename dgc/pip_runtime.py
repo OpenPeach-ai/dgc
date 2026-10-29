@@ -56,6 +56,12 @@ def supervisor_is_live(directory, status):
     return not acquired
 
 
+def _require_version(status):
+    from . import __version__
+    if status.get("version") != __version__:
+        raise RegistryError("runner_version_mismatch", "The Pips runner belongs to an older DGC install. Restart Keep Pips running from the Pips controls, then retry.")
+
+
 def require_supervisor(config):
     """Local enqueue guard: a heartbeat alone cannot prove the supervisor is alive."""
     if config.get("pips_enabled", False) is not True:
@@ -64,6 +70,7 @@ def require_supervisor(config):
     status, _ = _state(directory)
     if not supervisor_is_live(directory, status):
         raise RegistryError("runner_required", "Start the Pips runner before requesting work. Use Start runner in the editor or dgc pips serve in another terminal.")
+    _require_version(status)
     return status
 
 
@@ -109,6 +116,7 @@ def start_runtime(config, *, resume=False):
         if status["paused"]:
             raise RegistryError("runtime_paused", "Global stop is set. Review and explicitly resume the runner locally.")
         if supervisor_is_live(directory, status):
+            _require_version(status)
             return status
         env = dict(os.environ)
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])

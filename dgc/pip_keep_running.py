@@ -87,9 +87,11 @@ def _linger_mark(home):
 
 
 def _linux_on(home, options, runner_online):
-    pip_service.install(home, upgrade=True, **options)
+    changed = pip_service.install(home, upgrade=True, **options)["changed"]
     pip_service.enable(home, **options)
-    if not runner_online:
+    if changed and runner_online:
+        pip_service.restart(home, **options)
+    elif not runner_online:
         pip_service.start(home, **options)
     if not _linger_state():
         # Lets the user's services run while they are logged out (a server, or a remote editor).
@@ -100,6 +102,37 @@ def _linux_on(home, options, runner_online):
             mark.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             mark.write_text("DGC turned lingering on for Pips; turning Keep Pips running off turns it off.\n")
     return _linux_status(home, options)
+
+
+def upgrade_after_install():
+    """Refresh an enabled, idle DGC-owned runner after a CLI update.
+
+    The installer calls this after the new launcher is complete. Never create a service,
+    enable a disabled one, clear Stop, or interrupt an active or queued Pip run.
+    """
+    from .workspace_registry import WorkspaceRegistry, state_directory
+    if sys.platform == "darwin":
+        spec = _agent_spec(_home(None))
+        if not _agent_old(spec) or _agent_disabled(spec):
+            return ""
+        refresh = lambda: _mac_on(spec, runner_online=True)
+    elif sys.platform.startswith("linux") and not wsl.version() and _has_systemd():
+        home = _home(None)
+        current = pip_service.status(home)
+        if not current["installed"] or not current.get("outdated") or current.get("enabled_state") != "enabled":
+            return ""
+        def refresh():
+            updated = pip_service.install(home, upgrade=True)
+            if updated["changed"] and current.get("active_state") == "active":
+                pip_service.restart(home)
+    else:
+        return ""
+    with WorkspaceRegistry(state_directory()) as registry:
+        busy = registry.db.execute("SELECT 1 FROM pip_runs WHERE status IN ('queued','running','cancelling') LIMIT 1").fetchone()
+    if busy:
+        return "Pips runner update deferred until its current work is finished. Turn Keep Pips running off and on afterward."
+    refresh()
+    return "Updated the enabled Pips runner to this DGC install."
 
 
 def _linux_off(home, options):
@@ -139,19 +172,20 @@ def _agent_spec(home, *, agent_directory=None, python_executable=None, package_r
         "StandardErrorPath": "/dev/null",
     }
     content = plistlib.dumps(plist, sort_keys=True)
-    return {"label": label, "path": directory / (label + ".plist"), "directory": directory, "content": content}
+    return {"label": label, "path": directory / (label + ".plist"), "directory": directory,
+            "home": home, "content": content}
 
 
 def _domain():
     return f"gui/{os.getuid()}"
 
 
-def _agent_written(spec):
+def _agent_bytes(spec):
     path = spec["path"]
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
-        return False
+        return None
     except OSError as exc:
         raise RegistryError("unsafe_service_unit", "The Pips LaunchAgent could not be opened safely.") from exc
     with os.fdopen(fd, "rb") as stream:
@@ -159,7 +193,35 @@ def _agent_written(spec):
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
                 or info.st_mode & 0o022 or info.st_size > 16_384):
             raise RegistryError("unsafe_service_unit", "The Pips LaunchAgent must be an owned regular file without group writes.")
-        return stream.read(16_385) == spec["content"]
+        return stream.read(16_385)
+
+
+def _agent_written(spec):
+    return _agent_bytes(spec) == spec["content"]
+
+
+def _agent_old(spec):
+    """True only for the exact LaunchAgent DGC generated for this home from an older install."""
+    raw = _agent_bytes(spec)
+    if raw is None or raw == spec["content"]:
+        return False
+    try:
+        value = plistlib.loads(raw)
+        argv = value.get("ProgramArguments")
+        if (not isinstance(argv, list) or len(argv) != 9 or argv[1:5] != ["-I", "-B", "-c", pip_service._BOOTSTRAP]
+                or argv[6:] != ["pips", "serve", "--service"]):
+            return False
+        source = pip_service._path(argv[5], "DGC package root")
+        pip_service._safe_chain(source)
+        for entry in (source / "dgc" / "__init__.py", source / "dgc" / "cli.py"):
+            info = entry.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
+                return False
+        old = _agent_spec(spec["home"], agent_directory=spec["directory"],
+                          python_executable=argv[0], package_root=source)
+    except (ValueError, TypeError, OSError, RegistryError, plistlib.InvalidFileException):
+        return False
+    return old["content"] == raw
 
 
 def _agent_disabled(spec):
@@ -169,9 +231,10 @@ def _agent_disabled(spec):
 
 
 def _mac_status(spec):
-    on = _agent_written(spec) and not _agent_disabled(spec)
+    old = _agent_old(spec)
+    on = (_agent_written(spec) or old) and not _agent_disabled(spec)
     return {"platform": "darwin", "supported": True, "reason": "", "on": on, "starts_at_login": on,
-            "restarts_after_failure": on, "while_logged_out": False}
+            "restarts_after_failure": on, "while_logged_out": False, "outdated": old}
 
 
 def _mac_on(spec, runner_online):
@@ -179,7 +242,7 @@ def _mac_on(spec, runner_online):
     directory.mkdir(mode=0o755, parents=True, exist_ok=True)
     existed = spec["path"].exists()
     changed = not _agent_written(spec)
-    if existed and changed:
+    if existed and changed and not _agent_old(spec):
         raise RegistryError("service_conflict", "The Pips LaunchAgent differs from DGC's preview. Review it before replacing it.")
     if changed:
         staged = spec["path"].with_name("." + spec["path"].name + ".tmp")
@@ -203,7 +266,7 @@ def _mac_on(spec, runner_online):
 
 
 def _mac_off(spec):
-    if (spec["path"].exists() or spec["path"].is_symlink()) and not _agent_written(spec):
+    if (spec["path"].exists() or spec["path"].is_symlink()) and not (_agent_written(spec) or _agent_old(spec)):
         raise RegistryError("service_conflict", "The Pips LaunchAgent differs from DGC's preview. Review it before removing it.")
     target = f'{_domain()}/{spec["label"]}'
     _run(["/bin/launchctl", "disable", target], check=False)

@@ -2427,9 +2427,11 @@ async function createSimplePip(type,name,review=null){
   if(!record(pip)||typeof pip.id!=='string'||pip.workspace_id!==S.workspace.id)throw Error('The new Pip did not come back as expected. Refresh to see it.');
   // Its hello is a first turn DGC sends; the chat opens while it is being written.
   await ensureRunner();
-  try{await send('introduce_pip',{pip_id:pip.id});}catch{/* the chat still opens; say hi to start it */}
+  let introError='';
+  try{await send('introduce_pip',{pip_id:pip.id});}catch(error){introError=`${pip.name} was created, but its first message could not start: ${errorText(error)}`;}
   if(token!==scope())return;if(review)closeReview();S.busy=false;
   await refresh(true);if(token!==scope())return;await select(pip.id);
+  if(introError){S.error=introError;render();}
  }catch(error){if(token===scope()){if(review&&S.review===review){review.error=errorText(error);renderReview();}else setError(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }

@@ -208,7 +208,7 @@ def _ours(dgc_home, options):
     desktop = preview(dgc_home, **options)
     server = preview(dgc_home, server=True, **options)
     value = _read_unit(Path(desktop["unit_path"]))
-    return (server, desktop) if value == server["content"].encode() else (desktop, server)
+    return (server, desktop) if value == server["content"].encode() or (value is not None and _older_release(value, server)) else (desktop, server)
 
 
 def _read_unit(path):
@@ -241,6 +241,33 @@ def _older_ours(value, spec):
     return 0 < version < FORMAT and lines[1] == spec["content"].split("\n", 2)[1]
 
 
+def _older_release(value, spec):
+    """An exact DGC unit for this home whose pinned package came from another install.
+
+    Rebuild the old preview from its two paths and compare every byte. A matching header or
+    executable name alone never grants permission to replace somebody else's unit.
+    """
+    lines = value.decode("utf-8", errors="replace").splitlines()
+    if len(lines) < 2 or lines[0] != _HEADER + str(FORMAT) or lines[1] != spec["content"].splitlines()[1]:
+        return False
+    commands = [line[len("ExecStart="):] for line in lines if line.startswith("ExecStart=")]
+    if len(commands) != 1:
+        return False
+    try:
+        argv = [item.replace("%%", "%").replace("$$", "$") for item in shlex.split(commands[0])]
+        if (len(argv) not in (17, 18) or argv[:2] != ["/usr/bin/env", "-i"]
+                or argv[9:13] != ["-I", "-B", "-c", _BOOTSTRAP]
+                or argv[14:17] != ["pips", "serve", "--service"]
+                or (len(argv) == 18) != spec["server"]
+                or (len(argv) == 18 and argv[17] != "--server")):
+            return False
+        old = preview(spec["dgc_home"], unit_directory=Path(spec["unit_path"]).parent,
+                      python_executable=argv[8], package_root=argv[13], server=len(argv) == 18)
+    except (ValueError, OSError, RegistryError):
+        return False
+    return old["content"].encode() == value and old["sha256"] != spec["sha256"]
+
+
 def _check_file(spec, *, required=True, upgrade=False, other=None):
     path = Path(spec["unit_path"])
     if (path.parent / (path.name + ".d")).exists() or (path.parent / (path.name + ".d")).is_symlink():
@@ -255,6 +282,8 @@ def _check_file(spec, *, required=True, upgrade=False, other=None):
             return "other"                    # the other variant of this same unit (server or desktop)
         if upgrade and _older_ours(value, spec):
             return "older"
+        if upgrade and _older_release(value, spec):
+            return "older_release"
         _error("service_conflict", "The existing service unit differs from this preview. Review it explicitly; DGC will not overwrite or control it.")
     return True
 
@@ -345,7 +374,7 @@ def _lock(spec, *, create=False):
         os.close(fd)
 
 
-def _publish(spec):
+def _publish(spec, *, replace=False):
     """Publish complete bytes without replacing a file a non-cooperating writer added."""
     path = Path(spec["unit_path"])
     staged = None
@@ -355,8 +384,11 @@ def _publish(spec):
             stream.write(spec["content"].encode())
             stream.flush()
             os.fsync(stream.fileno())
-        os.link(staged, path, follow_symlinks=False)
-        staged.unlink()
+        if replace:
+            os.replace(staged, path)
+        else:
+            os.link(staged, path, follow_symlinks=False)
+            staged.unlink()
         staged = None
         fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -385,23 +417,22 @@ def install(dgc_home=None, *, upgrade=False, server=None, **options):
         spec, other = preview(dgc_home, server=server, **options), preview(dgc_home, server=not server, **options)
     with _lock(spec, create=True):
         present = _check_file(spec, required=False, upgrade=upgrade, other=other)
-        if present in ("older", "other"):
-            Path(spec["unit_path"]).unlink()
-            present = False
-        if not present:
-            _publish(spec)
+        replacement = present in ("older", "other", "older_release")
+        if not present or replacement:
+            _publish(spec, replace=replacement)
         try:
             _systemctl(["daemon-reload"])
         except RegistryError as exc:
             raise RegistryError(exc.code, "The scoped unit file is installed, but the user service manager reload failed. It was not started; inspect status and retry install.") from None
-        return _public(spec, installed=True, changed=not present, started=False)
+        return _public(spec, installed=True, changed=not present or replacement, started=False)
 
 
 def status(dgc_home=None, **options):
     spec, _ = _ours(dgc_home, options)
-    if not _check_file(spec, required=False, upgrade=True):
+    present = _check_file(spec, required=False, upgrade=True)
+    if not present:
         return _public(spec, installed=False, active_state="not_installed", enabled_state="disabled")
-    return _public(spec, installed=True, **_loaded(spec))
+    return _public(spec, installed=True, outdated=present in ("older", "older_release"), **_loaded(spec))
 
 
 def _control(operation, dgc_home, options):
@@ -423,6 +454,11 @@ def _control(operation, dgc_home, options):
 
 def start(dgc_home=None, **options):
     return _control("start", dgc_home, options)
+
+
+def restart(dgc_home=None, **options):
+    """Restart only an exact installed unit after its reviewed release path changed."""
+    return _control("restart", dgc_home, options)
 
 
 def stop(dgc_home=None, **options):

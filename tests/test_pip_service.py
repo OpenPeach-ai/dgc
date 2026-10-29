@@ -86,6 +86,64 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.file.stat().st_mtime_ns, before)
         self.assertFalse((self.home / ".dgc").exists())
 
+    def test_exact_previous_release_unit_can_be_upgraded_and_restarted(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('__version__ = "0.48.0"\n')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"])
+        self.file.chmod(0o600)
+        self.active = "active"
+        self.enabled = "enabled"
+        self.assertTrue(service.status(self.home, **self.options)["outdated"])
+        self.assertCode("service_conflict", service.install, self.home, **self.options)
+        self.assertTrue(service.install(self.home, upgrade=True, **self.options)["changed"])
+        self.assertEqual(self.file.read_text(), self.spec["content"])
+        self.assertFalse(service.status(self.home, **self.options)["outdated"])
+        service.restart(self.home, **self.options)
+        self.assertIn(["restart", self.spec["unit_name"]], self.calls)
+
+    def test_edited_previous_release_unit_is_never_upgraded(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"] + "# changed\n")
+        self.file.chmod(0o600)
+        self.assertCode("service_conflict", service.install, self.home, upgrade=True, **self.options)
+        self.assertIn("# changed", self.file.read_text())
+
+    def test_failed_replacement_keeps_previous_service_unit(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"])
+        self.file.chmod(0o600)
+        with patch.object(service.os, "replace", side_effect=OSError("disk unavailable")):
+            self.assertCode("service_write_failed", service.install, self.home, upgrade=True, **self.options)
+        self.assertEqual(self.file.read_text(), old["content"])
+
+    def test_previous_server_variant_stays_server_on_upgrade(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, server=True, **self.options)
+        expected = service.preview(self.home, server=True, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"])
+        self.file.chmod(0o600)
+        self.assertTrue(service.status(self.home, **self.options)["server"])
+        service.install(self.home, upgrade=True, **self.options)
+        self.assertEqual(self.file.read_text(), expected["content"])
+
     def test_publication_failure_leaves_no_partial_unit_or_temp_file(self):
         with patch.object(service.os, "fsync", side_effect=OSError("disk unavailable")):
             self.assertCode("service_write_failed", service.install, self.home, **self.options)

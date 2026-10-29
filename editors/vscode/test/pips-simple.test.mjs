@@ -65,6 +65,16 @@ test('Create Core makes Core with just its name, asks it to say hello, and opens
  assert.ok(x.requests('list_pip_messages').some(r=>r.request.pip_id===core.id));
 });
 
+test('a rejected first message leaves the new Pip open and names the runner problem',async()=>{
+ const x=setup();await x.drain();x.click('#create-core');
+ const core=pip('pip_'+'e'.repeat(32),'Core','core');x.addPip(core);
+ x.answer(x.requests('create_pip')[0],{pip:core});await flush();
+ x.answer(x.requests('introduce_pip')[0],'The Pips runner belongs to an older DGC install.',false);
+ await x.drain();
+ assert.ok(x.d.querySelector('.pip-topbar'));
+ assert.match(x.d.querySelector('.pip-conversation').textContent,/first message could not start.*older DGC install/s);
+});
+
 test('New Pip is a character and a name: no name, no Pip; then it is made and says hello',async()=>{
  const core=pip('pip_'+'c'.repeat(32),'Core','core');
  const x=setup({jobs:[core]});await x.drain();

@@ -258,6 +258,10 @@ On Linux it also keeps running while you are logged out, where the system allows
 starts it when you sign in (see **Windows** below). Turning it off
 stops the runner starting on its own; the runner running now keeps going until you stop
 it. It never turns Pips on and never clears an emergency stop.
+When you update the CLI on Linux or macOS, its installer updates an enabled DGC-owned runner to
+the new package if no Pip work is queued or running. Work in progress is left alone;
+turn Keep Pips running off and on after it finishes. DGC refuses new Pip work from a
+runner on an older package, so it cannot fail later with a policy handshake error.
 
 **DGC turns it on for you** the first time a Pip gets a schedule, a commit trigger or a
 routine, so the schedule doesn't depend on VS Code being open, and says so: "Your scheduled

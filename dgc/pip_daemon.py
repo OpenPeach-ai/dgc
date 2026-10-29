@@ -76,6 +76,7 @@ def runner_status(registry):
     elif online and paused:
         status = "stopping"
     result = {"runner_id": registry.runner_id, "status": status, "online": online,
+            "version": value.get("version") if isinstance(value.get("version"), str) else None,
             "paused": paused, "heartbeat_at": value.get("heartbeat_at"),
             "started_at": value.get("started_at"), "counts": _counts(registry)}
     error = value.get("error")
@@ -281,7 +282,8 @@ def serve(config, *, enable=False, stop_event=None, clock=utc_now, server=False)
             # Pips on Default follow the Pips default model saved in Settings while this runner runs.
             followed: dict = {}
             _follow_pips_default(runtime_config, followed)
-            record = {"schema_version": 1, "instance_id": identifier("supervisor"),
+            from . import __version__
+            record = {"schema_version": 1, "instance_id": identifier("supervisor"), "version": __version__,
                       "pid": os.getpid(), "started_at": clock(), "heartbeat_at": clock(), "status": "running",
                       **({"mode": pip_server.MODE} if server else {})}
             log = pip_server.EventLog(registry) if server else None

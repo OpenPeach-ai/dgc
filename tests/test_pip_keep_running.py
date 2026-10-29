@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dgc import pip_cli, pip_keep_running as keep, pip_service as service
 from dgc.workspace_registry import RegistryError
@@ -67,6 +67,38 @@ class LinuxSwitchTests(unittest.TestCase):
         self.assertEqual({k: value[k] for k in ("supported", "on", "starts_at_login", "restarts_after_failure", "while_logged_out")},
                          {"supported": True, "on": True, "starts_at_login": True, "restarts_after_failure": True, "while_logged_out": True})
         self.assertIn("also keeps running while you are logged out", pip_cli.keep_running_text(value))
+
+    def test_on_restarts_a_verified_older_live_runner(self):
+        old_source = self.home.parent / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.unit.parent.mkdir()
+        self.unit.write_text(old["content"])
+        self.unit.chmod(0o600)
+        self.active, self.enabled = "active", "enabled"
+        keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertEqual(self.unit.read_text(), self.spec["content"])
+        self.assertIn(["restart", self.spec["unit_name"]], self.calls)
+
+    def test_install_reconcile_skips_busy_work_then_restarts_idle_old_runner(self):
+        status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "active"}
+        registry = MagicMock()
+        context = MagicMock()
+        context.__enter__.return_value = registry
+        with patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
+             patch.object(keep, "_home", return_value=self.home), patch.object(service, "status", return_value=status), \
+             patch("dgc.workspace_registry.WorkspaceRegistry", return_value=context), \
+             patch.object(service, "install", return_value={"changed": True}) as install, \
+             patch.object(service, "restart") as restart:
+            registry.db.execute.return_value.fetchone.return_value = (1,)
+            self.assertIn("deferred", keep.upgrade_after_install())
+            install.assert_not_called()
+            registry.db.execute.return_value.fetchone.return_value = None
+            self.assertIn("Updated", keep.upgrade_after_install())
+            install.assert_called_once_with(self.home, upgrade=True)
+            restart.assert_called_once_with(self.home)
 
     def test_a_runner_already_running_is_not_started_twice(self):
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
@@ -186,6 +218,23 @@ class MacSwitchTests(unittest.TestCase):
         self.assertFalse([c for c in self.calls if c[0] in ("bootout", "bootstrap", "kickstart")], self.calls)
         keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
         self.assertIn("kickstart", [c[0] for c in self.calls], "a stopped runner is started again")
+
+    def test_exact_old_agent_is_refreshed_and_live_runner_reloaded(self):
+        source = self.home.parent / "old-release"
+        (source / "dgc").mkdir(parents=True)
+        (source / "dgc" / "__init__.py").write_text('')
+        (source / "dgc" / "cli.py").write_text('')
+        old = keep._agent_spec(self.home.resolve(), package_root=source, **self.options)
+        self.spec["path"].parent.mkdir()
+        self.spec["path"].write_bytes(old["content"])
+        self.spec["path"].chmod(0o644)
+        self.loaded = True
+        self.assertTrue(keep._mac_status(self.spec)["outdated"])
+        keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+        self.assertFalse(keep._mac_status(self.spec)["outdated"])
+        self.assertIn("bootout", [c[0] for c in self.calls])
+        self.assertIn("bootstrap", [c[0] for c in self.calls])
 
     def test_a_changed_agent_is_never_overwritten_or_removed(self):
         keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
