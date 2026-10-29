@@ -161,6 +161,20 @@ test("the Library's Artifacts tab: only when offered, newest first, by kind and 
   } finally { await s.page.close(); }
 });
 
+test("Work Library opens saved Outputs filtered to Work, while Chat can show all", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openLibrary(browser);
+  try {
+    await s.send({ type: "artifactsOffered", on: true });
+    await s.send({ type: "artifacts", items: ITEMS });
+    await s.send({ type: "view", view: "artifacts-work" });
+    assert.deepEqual(await s.page.locator(".lib-artifact .lib-name").allTextContents(), ["Home budget", "Tip calculator"]);
+    await s.send({ type: "view", view: "artifacts" });
+    assert.equal(await s.page.locator(".lib-artifact").count(), ITEMS.length);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("at 360px nothing runs off the edge: the Library's rows and the chat's Output menu", async (t) => {
   if (skipOrFail(t)) return;
   const lib = await openLibrary(browser, { width: 360 });
