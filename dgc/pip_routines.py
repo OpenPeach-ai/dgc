@@ -588,7 +588,11 @@ def check(registry, config, row, *, reader=None, now=None) -> str:
             try:
                 troupe_routines.start(registry.directory, config, row, f"schedule:{due}")
             except RegistryError as exc:
-                _record(registry, _row(registry, row["pip_id"], row["id"]), last_error=str(exc)[:500])
+                # A second troupe may claim the slot between busy() and start(). Keep this
+                # occurrence due so the next heartbeat retries it instead of skipping a week.
+                _record(registry, _row(registry, row["pip_id"], row["id"]),
+                        next_due_at=due, status="on", last_run_at=row["last_run_at"],
+                        last_error=str(exc)[:500])
                 return "error"
             return "started"
         try:

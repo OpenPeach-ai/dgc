@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import json
+import math
 
 _EDITOR_CONTEXT_LIMIT = 64_000
 
 
 def _editor_context_json(value) -> str:
     """Encode JSON without allowing source text to synthesize our framing delimiter."""
-    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return (json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
             .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
+
+
+def _safe_text(value: str, limit: int) -> str:
+    return value[:limit].encode("utf-8", "replace").decode("utf-8")
 
 
 def _format_editor_context(resources) -> str:
@@ -23,13 +28,15 @@ def _format_editor_context(resources) -> str:
         if depth > 4:
             return None
         if isinstance(value, str):
-            return value[:2_000]
+            return _safe_text(value, 2_000)
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         if isinstance(value, (int, float, bool)) or value is None:
             return value
         if isinstance(value, list):
             return [bounded(part, depth + 1) for part in value[:50]]
         if isinstance(value, dict):
-            return {str(k)[:80]: bounded(v, depth + 1) for k, v in list(value.items())[:50]}
+            return {_safe_text(str(k), 80): bounded(v, depth + 1) for k, v in list(value.items())[:50]}
         return None
     for item in resources[:64]:
         if not isinstance(item, dict):
@@ -42,7 +49,8 @@ def _format_editor_context(resources) -> str:
             if key == "diagnostics" and isinstance(value, list):
                 value = bounded(value)
             elif isinstance(value, str):
-                value = value[:64_000 if key == "text" and item.get("type") in ("mcp_context", "file_attachment") else 16_000]
+                value = _safe_text(value, 64_000 if key == "text" and item.get("type") in
+                                   ("mcp_context", "file_attachment") else 16_000)
             elif isinstance(value, (dict, list, int, float, bool)):
                 value = bounded(value)
             else:

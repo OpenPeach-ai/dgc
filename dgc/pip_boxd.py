@@ -22,10 +22,14 @@ CONTROL = SOCKETS + "/control"
 BROWSER_PORT, TERMINAL_PORT = 8899, 8898
 CHANNELS = {BROWSER_PORT: b"\x01", TERMINAL_PORT: b"\x02"}
 WAIT_SECONDS = 15                 # a client waits this long for the Mac to offer a connection
+MAX_IDLE = 64
+MAX_WATCHERS = 64
+MAX_CLIENTS = 64
 
-idle: "queue.Queue[socket.socket]" = queue.Queue()
+idle: "queue.Queue[socket.socket]" = queue.Queue(maxsize=MAX_IDLE)
 watchers: list = []
 lock = threading.Lock()
+clients = threading.BoundedSemaphore(MAX_CLIENTS)
 
 
 def pump(a, b) -> None:
@@ -62,7 +66,10 @@ def listen_unix(name: str) -> socket.socket:
 def accept_pool(server: socket.socket) -> None:
     while True:
         conn, _ = server.accept()
-        idle.put(conn)
+        try:
+            idle.put_nowait(conn)
+        except queue.Full:
+            conn.close()
 
 
 def take(channel: bytes, client: socket.socket) -> None:
@@ -89,13 +96,29 @@ def serve_port(port: int) -> None:
     server.listen(64)
     while True:
         client, _ = server.accept()
-        threading.Thread(target=take, args=(CHANNELS[port], client), daemon=True).start()
+        if not clients.acquire(blocking=False):
+            client.close()
+            continue
+        def run():
+            try:
+                take(CHANNELS[port], client)
+            finally:
+                client.close()
+                clients.release()
+        try:
+            threading.Thread(target=run, daemon=True).start()
+        except RuntimeError:
+            clients.release()
+            client.close()
 
 
 def accept_watchers(server: socket.socket) -> None:
     while True:
         conn, _ = server.accept()
+        conn.settimeout(0.5)
         with lock:
+            if len(watchers) >= MAX_WATCHERS:
+                watchers.pop(0).close()
             watchers.append(conn)
 
 
@@ -104,7 +127,14 @@ def read_control() -> None:
         os.mkfifo(CONTROL, 0o600)
     while True:
         with open(CONTROL, "rb") as stream:
-            for line in stream:
+            while line := stream.readline(256):
+                if len(line) == 256 and not line.endswith(b"\n"):
+                    # A Pip command can write this FIFO. Discard overlong lines without
+                    # accumulating them or treating a trailing fragment as a new event.
+                    while fragment := stream.readline(4096):
+                        if fragment.endswith(b"\n"):
+                            break
+                    continue
                 if line.strip() == b"browser":
                     with lock:
                         for conn in list(watchers):
@@ -112,6 +142,7 @@ def read_control() -> None:
                                 conn.sendall(b"browser\n")
                             except OSError:
                                 watchers.remove(conn)
+                                conn.close()
 
 
 def main() -> None:

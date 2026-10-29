@@ -242,6 +242,17 @@ test('Save to… writes the file where you choose, from the host',async()=>{
  assert.equal(tab.posted.at(-1).type,'pipComputerSaved');assert.equal(tab.posted.at(-1).ok,true);
 });
 
+test('Save to… refuses malformed or oversized webview bytes before opening the dialog',async()=>{
+ const h=host();h.editor.receive({type:'pipsOpenComputer',pip:PIP});const tab=h.panels[0];
+ for(const data of ['data:application/octet-stream;base64,AA!!',
+                    'data:application/octet-stream;base64,'+'A'.repeat(2_800_000)]){
+  tab.receive({type:'pipComputerSave',name:'bad.bin',data});
+  await new Promise(r=>setTimeout(r,1));
+  assert.equal(tab.posted.at(-1).ok,false);
+ }
+ assert.equal(h.saved.length,0);
+});
+
 function fakeViewer(){
  const made=[];
  class Viewer{constructor(target,channel,options){this.target=target;this.channel=channel;this.options=options;this.listeners={};made.push(this);

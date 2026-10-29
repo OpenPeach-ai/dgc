@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import atexit
 import itertools
+import math
 import os
 import re
 import selectors
@@ -894,7 +895,8 @@ class MonitorHub:
         persistent = args.get("persistent") is True
         raw_timeout = args.get("timeout_ms", DEFAULT_TIMEOUT_MS)
         timeout_ms = (DEFAULT_TIMEOUT_MS if isinstance(raw_timeout, bool)
-                      or not isinstance(raw_timeout, (int, float)) else int(raw_timeout))
+                      or not isinstance(raw_timeout, (int, float))
+                      or not math.isfinite(raw_timeout) else int(raw_timeout))
         timeout_ms = max(MIN_TIMEOUT_MS, min(MAX_TIMEOUT_MS, timeout_ms))
         self.reap()
         with self._lock:
@@ -1254,7 +1256,9 @@ class MonitorHub:
         with monitor.lock:
             out, err = monitor.ring_out.text(), monitor.ring_err.text()
             if monitor._err_partial:
-                err += monitor._err_partial.decode("utf-8", errors="replace")
+                from .redaction import redact_text, secret_values
+                err += redact_text(monitor._err_partial.decode("utf-8", errors="replace"),
+                                   secret_values(self.config))
             finished = monitor.ended_at or None
         text = out + (("[stderr]\n" + err) if err.strip() else "")
         entry = {"text": text, "proc": monitor.proc, "command": monitor.command_label,
@@ -1273,7 +1277,12 @@ class MonitorHub:
             return None
         with monitor.lock:
             out, err = monitor.ring_out.text(), monitor.ring_err.text()
-            partial = monitor._err_partial.decode("utf-8", errors="replace") if monitor._err_partial else ""
+            if monitor._err_partial:
+                from .redaction import redact_text, secret_values
+                partial = redact_text(monitor._err_partial.decode("utf-8", errors="replace"),
+                                      secret_values(self.config))
+            else:
+                partial = ""
             total = (monitor.ring_out.written_bytes + monitor.ring_err.written_bytes
                      + len(partial.encode("utf-8", "replace")))
             dropped = bool(monitor.ring_out.dropped or monitor.ring_err.dropped)

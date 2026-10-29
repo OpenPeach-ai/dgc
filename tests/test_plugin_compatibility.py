@@ -1,6 +1,7 @@
 """Curated availability is enforced before fetching, installing or connecting."""
 import json
 import re
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -17,16 +18,18 @@ class CuratedCompatibilityTests(unittest.TestCase):
 
     def test_blocked_packages_are_absent_from_recommendations_and_editor_catalog(self):
         blocked = {e['name'] for e in self.entries if e['install'] == 'block'}
-        self.assertTrue({'figma','canva','vercel','dropbox','google-workspace',
+        self.assertTrue({'figma','canva','vercel','dropbox',
                          'feature-dev','code-review','commit-commands','code-simplifier',
                          'pr-review-toolkit'} <= blocked)
         self.assertFalse(blocked & {r['name'] for r in plugins.search()})
         self.assertEqual(plugins.search('Figma'), [])
+        unlisted = {e['name'] for e in self.entries if e.get('unlisted')} - blocked   # not offered yet: Google's
         with patch.object(plugins, '_installed', return_value=[]), \
-             patch.object(plugins, '_source', side_effect=plugins.PluginError('not cached')):
+             patch.object(plugins, '_source', side_effect=plugins.PluginError('not cached')), \
+             patch.dict(os.environ, {plugins.UNLISTED_ENV: ''}):
             rows = plugins.catalog_for_editor()
         self.assertFalse(blocked & {r['name'] for r in rows})
-        self.assertEqual(len(rows), len(self.entries) - len(blocked))
+        self.assertEqual(len(rows), len(self.entries) - len(blocked) - len(unlisted))
 
     def test_blocked_names_and_pasted_links_refuse_before_any_fetch(self):
         with patch.object(plugins, '_source') as source, patch.object(plugins.sources, 'snapshot_github') as fetch:

@@ -282,7 +282,7 @@ test("replayed slots are fetched only for opened cards, two at a time, and fill 
   assert.equal(p.viewer().querySelector(".iv-message").textContent, "Too large to show in the panel. Open the file instead.");
   p.viewer().querySelector('[aria-label="Open file"]').click();
   assert.deepEqual(JSON.parse(JSON.stringify(p.posted.at(-1))), { type: "openImage", ref: ref(3) }, "a ref, never a path");
-  p.viewer().querySelector(".iv-close").click();
+  assert.equal(p.viewer(), null, "opening the file dismisses the preview");
 
   p.advance(30000);
   assert.equal(chips()[1].dataset.state, "failed", "a request that never answers times out");

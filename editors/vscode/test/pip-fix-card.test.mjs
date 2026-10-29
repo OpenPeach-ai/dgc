@@ -185,6 +185,19 @@ test("finished: what changed, whether tests ran in the fix copy, Review and Undo
   assert.deepEqual(s.errors, []);
 });
 
+test("Pip fix details display backend text without creating HTML", () => {
+  const s = panel();
+  s.event({ type: "pip_report", report: REPORT });
+  const payload = '<img src=x onerror="bad()">';
+  s.event({ type: "pip_fix", fix: fix({ state: "applied", files: [{ path: "app/gst.py", additions: 1, deletions: 0 }],
+    merged: [payload], message: payload, undo: { state: "done", restored: [], kept: [{ path: payload, why: payload }] } }) });
+  const notes = [...area(s).querySelectorAll(".pip-fix-note")];
+  assert.equal(notes.length, 3);
+  assert.ok(notes.every((note) => note.textContent.includes(payload)));
+  assert.equal(area(s).querySelector("img"), null);
+  assert.deepEqual(s.errors, []);
+});
+
 test("held back, not run, stopped and failed each say so, and what can be done next", () => {
   const s = panel();
   s.event({ type: "pip_report", report: REPORT });

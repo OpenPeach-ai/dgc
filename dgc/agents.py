@@ -22,6 +22,8 @@ Discovery (trusted project overrides user, which overrides built-ins):
   ~/.dgc/agents/<name>.md
   <project>/.dgc/agents/<name>.md
 
+Definitions must be regular UTF-8 files, at most 256 KiB. Unreadable or oversized files are skipped.
+
 Invoked via the `task` tool's optional `agent` argument, or listed with `/agents`.
 """
 from __future__ import annotations
@@ -30,6 +32,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .config import USER_AGENTS
+from .workspace import read_regular_bytes
+
+MAX_AGENT_FILE_BYTES = 256 * 1024
 
 _READS = "read_file, glob, grep, repo_map, code_intel, git_diff, web_fetch, web_search, skill, view_image"
 _HANDOFF = (
@@ -109,10 +114,16 @@ def parse_handoff_files(text: str) -> list[str]:
     return files[:16]
 
 
-def _parse_agent(path: Path) -> AgentDef | None:
+def _parse_agent(path: Path, *, project_root: Path | None = None) -> AgentDef | None:
     try:
-        text = path.read_text()
-    except OSError:
+        # Resolve the parent for account-home aliases, but leave the final
+        # component untouched so a symlinked definition is refused on open.
+        target = path.parent.resolve(strict=True) / path.name
+        if project_root is not None:
+            target.relative_to(project_root.resolve(strict=True))
+        captured = read_regular_bytes(target, maximum=MAX_AGENT_FILE_BYTES)
+        text = captured[0].decode("utf-8")
+    except (OSError, UnicodeError, RuntimeError, ValueError):
         return None
     fields = {"name": path.stem, "description": "", "model": "",
               "base_url": "", "api_mode": "", "api_key_env": "", "effort": "", "context_size": "",
@@ -161,7 +172,7 @@ def discover_agents(project_root, *, config=None) -> dict[str, AgentDef]:
     for base, is_project in bases:
         if base.is_dir():
             for f in sorted(base.glob("*.md")):
-                a = _parse_agent(f)
+                a = _parse_agent(f, project_root=Path(project_root) if is_project else None)
                 if not a:
                     continue
                 if is_project and restrict_routing:

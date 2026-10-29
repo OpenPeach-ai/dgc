@@ -22,7 +22,8 @@
       reset(now) { floor = []; heard = false; quietSince = 0; began = now; speech = 0.015; silence = 0.008; },
       /** Readings (RMS 0..1, ~50 ms each), oldest first, as they arrive at `now`: true when the turn is over. */
       push(levels, now) {
-        for (const raw of levels) {
+        if (!Array.isArray(levels)) return false;
+        for (const raw of levels.slice(-256)) {
           const v = Number(raw);
           if (!Number.isFinite(v)) continue;
           // The first 400 ms are the room: how loud it is when nobody speaks sets what counts as speech. (Capped, so

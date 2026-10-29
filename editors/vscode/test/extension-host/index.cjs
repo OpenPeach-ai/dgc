@@ -786,11 +786,20 @@ async function run() {
   await vscode.commands.executeCommand("workbench.action.closeAllEditors");
   await waitFor(() => chatTabs().length === 0, 15_000, "the session tabs close");
 
+  // 7. Artifacts: DGC: Artifacts opens the Library (on its Artifacts tab, when the CLI offers them) in an editor tab,
+  //    and an artifact's panel restored by VS Code (its serializer) comes back as a webview of its own.
+  await vscode.commands.executeCommand("dgc.openArtifacts");
+  const libraryTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+    .filter((tab) => tab.input instanceof vscode.TabInputWebview && /dgc\.chatdgcLibrary$/.test(tab.input.viewType));
+  await waitFor(() => libraryTabs().length === 1, 15_000, "DGC: Artifacts opens the Library");
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  await waitFor(() => libraryTabs().length === 0, 15_000, "the Library closes");
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, addFileFromImagePreview: true, sessionTabs: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
+    decisionLifecycle: true, backendExitLifecycle: true, monitorLifecycle: true, addFileFromImagePreview: true, sessionTabs: true, artifactsLibrary: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };

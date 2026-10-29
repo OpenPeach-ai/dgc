@@ -46,9 +46,12 @@ def private_dir(path: Path) -> Path:
     """Create ``path`` (and missing parents) and leave it owner-only (0700)."""
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or (_posix_owner_checks() and info.st_uid != os.geteuid()):
+        raise DGCConfigError(f"state directory {str(path)!r} must be a directory owned by this user, not a link")
     if os.name == "posix":
         try:
-            if stat.S_IMODE(path.stat().st_mode) != 0o700:
+            if stat.S_IMODE(info.st_mode) != 0o700:
                 path.chmod(0o700)
         except OSError:
             pass
@@ -66,6 +69,8 @@ def prepare_state_dir(state_dir: str | os.PathLike[str] | None) -> Path:
     if state_dir is None:
         return Path(tempfile.mkdtemp(prefix="dgc-sdk-")).resolve()
     path = Path(state_dir).expanduser()
+    if path.is_symlink():
+        raise DGCConfigError(f"state_dir {str(path)!r} must not be a symlink")
     existed = path.exists()
     if existed and not path.is_dir():
         raise DGCConfigError(f"state_dir {str(path)!r} exists and is not a directory")

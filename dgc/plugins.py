@@ -39,10 +39,20 @@ def load_catalog() -> dict:
     return data
 
 
+# A catalog entry with `unlisted` (why, for the maintainers) works but isn't offered: Google's, until Google approves
+# DGC's app and anyone may sign in. It installs by its exact name (`dgc plugin install google-workspace`), shows once
+# installed, and a maintainer's machine lists it with DGC_SHOW_UNLISTED_PLUGINS=1.
+UNLISTED_ENV = "DGC_SHOW_UNLISTED_PLUGINS"
+
+
+def _listed(entry: dict) -> bool:
+    return not entry.get("unlisted") or os.environ.get(UNLISTED_ENV) == "1"
+
+
 def search(query: str = "") -> list[dict]:
     needle = query.strip().lower()
     rows = [row for row in load_catalog()["plugins"]
-            if row.get("install") != "block" and row.get("license") != "Proprietary"]
+            if row.get("install") != "block" and row.get("license") != "Proprietary" and _listed(row)]
     if not needle:
         return rows
     return [row for row in rows if needle in " ".join([
@@ -88,8 +98,9 @@ def _license_ok(entry: dict, accept_license: str) -> None:
     if entry.get("install") == "block" or entry.get("license") == "Proprietary":
         raise PluginError(entry.get("block_reason") or "this plugin is not offered")
     if entry.get("install") == "accept" and accept_license != entry.get("license"):
+        import shlex                                     # a licence named in words is one argument, quoted
         raise PluginError(
-            f"accept the upstream terms with --accept-license {entry.get('license')}")
+            f"accept the upstream terms with --accept-license {shlex.quote(str(entry.get('license') or ''))}")
 
 
 def _state() -> dict:
@@ -278,9 +289,167 @@ def _plugin_name(root: Path, fallback: str) -> tuple[str, str]:
 
 
 
-def _install_tree(entry: dict, source: Path | None, *, accept_license: str, selected_servers=None) -> dict:
+# ---- mods a plugin carries (dgc/mods) -----------------------------------------------------------------------------
+# A plugin may hold mods: a dgc-mod.json at its root, or one in each mods/<name>/ folder. The install review lists each
+# with what it asks for, in the words /mods uses, and approving the install is the one Allow for exactly that. Each is
+# copied into ~/.dgc/mods/installed/<name>, marked with the plugin, and goes when the plugin does. An update whose mod
+# asks for more is shown as asking for more, and installing it allows that.
+MAX_PLUGIN_MODS = 8
+
+
+def _plugin_mods(source: Path | None) -> list:
+    """The mods in a package, each checked as `dgc mods validate` checks its manifest."""
+    from .mods.manifest import MANIFEST, ManifestError, load as load_mod
+    if source is None:
+        return []
+    folders = [source] if (source / MANIFEST).is_file() else []
+    inside = source / 'mods'
+    if inside.is_dir() and not inside.is_symlink():
+        folders += sorted(f for f in inside.iterdir() if f.is_dir() and not f.is_symlink() and (f / MANIFEST).is_file())
+    if len(folders) > MAX_PLUGIN_MODS:
+        raise PluginError(f'A plugin holds at most {MAX_PLUGIN_MODS} mods.')
+    found = []
+    for folder in folders:
+        where = folder.relative_to(source).as_posix() if folder != source else 'its root'
+        sources.contained(source, folder.relative_to(source).as_posix() if folder != source else '.')
+        try:
+            found.append(load_mod(folder))
+        except ManifestError as error:
+            raise PluginError(f"The mod in {where} can't be installed: {error}") from None
+    names = [m.name for m in found]
+    if len(names) != len(set(names)):
+        raise PluginError('Two of this plugin\'s mods have the same name.')
+    return found
+
+
+def _mod_clash(m, plugin: str) -> str:
+    """Why this plugin's mod can't be installed beside what is here, in plain words ('' when it can)."""
+    from .mods import catalog as mod_catalog
+    from .mods.manifest import ManifestError, load as load_mod
+    if any(b.name == m.name for b in mod_catalog.builtins()):
+        return f"Its mod {m.name} has the name of one of DGC's own mods, so DGC won't install it."
+    target = mod_catalog.installed_root() / m.name
+    if not target.is_dir():
+        return ''
+    try:
+        came = mod_catalog.origin(load_mod(target))
+    except ManifestError:
+        came = {}
+    if came.get('plugin') == plugin:
+        return ''
+    whose = f" with the plugin {came['title']}" if came else ''
+    return (f"A mod named {m.name} is already installed{whose}. Remove that one first (dgc mods remove {m.name}) "
+            f"to install this plugin's.")
+
+
+def _mods_review(mods: list, plugin: str) -> tuple[list[dict], list[str]]:
+    """What the install review shows of each mod: who it is, what it asks for, and whether that is new, the same as
+    the user allowed before, or more; and why any can't be installed."""
+    from .mods import consent as mod_consent
+    from .mods.manifest import describe
+    shown, clashes = [], []
+    for m in mods:
+        clash = _mod_clash(m, plugin)
+        if clash:
+            clashes.append(clash)
+        before = mod_consent.record(m.name)
+        state = 'new' if before is None else 'more' if mod_consent.missing(m) else 'same'
+        shown.append({'name': m.name, 'title': m.title, 'version': m.version, 'description': m.description,
+                      'asks': describe(m), 'grants': sorted(m.grants()), 'state': state})
+    return shown, clashes
+
+
+def _install_mods(package: Path, plugin: str, title: str, review: list[dict], before: list) -> tuple[list[str], callable]:
+    """Copy the package's mods in, marked as this plugin's, and allow exactly what the review showed. Returns their
+    names and an undo (the copies they replaced put back) for an install that fails later."""
+    from .mods import catalog as mod_catalog, consent as mod_consent
+    from .mods.manifest import load as load_mod
+    names, replaced, made = [], [], []
+    root = mod_catalog.installed_root()
+    mods = _plugin_mods(package)
+    prior_consent = {m.name: mod_consent.record(m.name) for m in mods}
+
+    def restore_consent():
+        with mod_consent.write_lock():
+            records = mod_consent._read()
+            for mod_name, previous in prior_consent.items():
+                if previous is None:
+                    records.pop(mod_name, None)
+                else:
+                    records[mod_name] = previous
+            mod_consent._write(records)
+
+    try:
+        for m in mods:
+            target = root / m.name
+            if target.exists():
+                aside = root / f'.previous-{m.name}'
+                if aside.exists():
+                    shutil.rmtree(aside)
+                target.rename(aside)
+                replaced.append((aside, target))
+            mod_catalog.install_folder(m.folder, plugin={'plugin': plugin, 'title': title})
+            made.append(target)
+            names.append(m.name)
+            shown = next((r for r in review if r['name'] == m.name), None)
+            if shown is not None and shown['state'] != 'same':
+                mod_consent.allow(load_mod(target))
+    except Exception:
+        for target in made:
+            shutil.rmtree(target, ignore_errors=True)
+        for aside, target in replaced:
+            aside.rename(target)
+        restore_consent()
+        raise
+
+    def undo():
+        for target in made:
+            shutil.rmtree(target, ignore_errors=True)
+        for aside, target in replaced:
+            if aside.exists():
+                aside.rename(target)
+        restore_consent()
+
+    def done():
+        for aside, _ in replaced:
+            shutil.rmtree(aside, ignore_errors=True)
+        # Remove dropped mods only after the plugin record is durable. A failed record write
+        # must leave the old plugin and its grants usable.
+        for gone in set(before or []) - set(names):
+            try:
+                _remove_plugin_mod(gone, plugin)
+            except OSError:
+                pass  # the record no longer claims it; cleanup can be retried
+    undo.done = done
+    return names, undo
+
+
+def _remove_plugin_mod(name: str, plugin: str) -> bool:
+    """Uninstall one mod if its installed copy is still this plugin's (one the user installed over it is theirs)."""
+    from .mods import catalog as mod_catalog, consent as mod_consent
+    from .mods.manifest import ManifestError, load as load_mod
+    if not isinstance(name, str) or not name or '/' in name or '\\' in name or name.startswith('.'):
+        return False
+    target = mod_catalog.installed_root() / name
+    try:
+        if mod_catalog.origin(load_mod(target)).get('plugin') != plugin:
+            return False
+    except ManifestError:
+        return False
+    if mod_catalog.remove(name):
+        mod_consent.forget(name)
+        return True
+    return False
+
+
+def _install_tree(entry: dict, source: Path | None, *, accept_license: str, selected_servers=None,
+                  sign_in_account: str = '') -> dict:
     _license_ok(entry, accept_license)
     name = entry['name']
+    accounts = [a['id'] for a in sign_in_accounts(app_sign_in(entry))]
+    if sign_in_account and sign_in_account not in accounts:
+        raise PluginError(f"{entry.get('display_name') or name} has no kind of account called {sign_in_account!r}"
+                          + (f". Choose from: {', '.join(accounts)}." if accounts else '.'))
     if not sources.NAME.fullmatch(name): raise PluginError('Invalid plugin name')
     with _registry_lock():
         preview = _preview(entry, source)
@@ -289,7 +458,18 @@ def _install_tree(entry: dict, source: Path | None, *, accept_license: str, sele
         selected = list(choices) if selected_servers is None else selected_servers
         if not isinstance(selected, list) or len(selected) > 32 or any(not isinstance(n,str) or n not in choices for n in selected):
             raise PluginError('Selected MCP servers do not belong to this plugin')
-        if not preview['skills'] and not selected: raise PluginError('Select at least one supported component')
+        if not preview['skills'] and not selected and not preview['mods']:
+            raise PluginError('Select at least one supported component')
+        if preview['mods']:
+            # Installing allows exactly what the review showed: a mod it didn't show, or one that asks for more now,
+            # is not covered by that Allow.
+            reviewed = entry.get('mods')
+            if not isinstance(reviewed, list):
+                raise PluginError('This plugin has mods. Review what they ask for before installing it.')
+            seen = {r.get('name'): set(r.get('grants') or []) for r in reviewed if isinstance(r, dict)}
+            if any(m['name'] not in seen or not set(m['grants']) <= seen[m['name']] for m in preview['mods']):
+                raise PluginError("This plugin's mods changed since you reviewed them. Review it again before "
+                                  "installing it.")
         old_rows = _installed()
         # The same flat namespace, from the other side: a package whose plugin.json names itself
         # after a connected app installs over that connector's ownership row, while the connector's
@@ -311,6 +491,7 @@ def _install_tree(entry: dict, source: Path | None, *, accept_license: str, sele
         moved, prior = [], []
         committed = False
         replaced = False
+        mods_undo = None
         try:
             if source is not None: sources.copy_tree(source, stage)
             # Resolve relative scripts against the final installed package, not its fetch cache.
@@ -341,8 +522,18 @@ def _install_tree(entry: dict, source: Path | None, *, accept_license: str, sele
                       'source_pin': entry.get('sha', ''), 'package_path': str(dest),
                       'warnings': preview['warnings'], 'setup_required': bool(entry.get('setup_required')),
                       'registered_specs': old.get('registered_specs', {})}
+            if accounts:
+                # The kind of account its one sign-in is for (Microsoft's): chosen now, else the one chosen before.
+                record['sign_in_account'] = sign_in_account or (old.get('sign_in_account') if old.get(
+                    'sign_in_account') in accounts else accounts[0])
+            record['mods'] = []
+            if preview['mods'] or old.get('mods'):
+                record['mods'], mods_undo = _install_mods(dest, name, entry.get('display_name') or name,
+                                                          preview['mods'], old.get('mods') or [])
             _save([r for r in old_rows if r['name'] != name] + [record])
             committed = True
+            if mods_undo is not None:
+                mods_undo.done()
             for folder in set(old.get('skills', [])) - set(skills):
                 try: _remove_owned_skill(folder, old_rows, name)
                 except OSError: pass  # catalog no longer claims the old file; cleanup may be retried
@@ -350,6 +541,8 @@ def _install_tree(entry: dict, source: Path | None, *, accept_license: str, sele
             return record
         except Exception:
             if not committed:
+                if mods_undo is not None:
+                    mods_undo()
                 for live in moved:
                     if live.exists(): shutil.rmtree(live)
                 for previous, live in prior: previous.rename(live)
@@ -366,13 +559,14 @@ def install_from_url(url: str, *, accept_license: str = '', selected_servers=Non
     return install(entry, accept_license=accept_license, selected_servers=selected_servers)
 
 
-def install(entry: dict, *, accept_license: str = '', selected_servers=None) -> dict:
+def install(entry: dict, *, accept_license: str = '', selected_servers=None, sign_in_account: str = '') -> dict:
     _license_ok(entry, accept_license)
     if entry.get('connector'): raise PluginError('Open Apps and complete this connector’s setup form.')
     source = None if entry.get('source_kind') == 'preset' else _source(entry, fetch=True)
     if entry.get('review_license'):
         entry = _review_external_license(entry, source)
-    return _install_tree(entry, source, accept_license=accept_license, selected_servers=selected_servers)
+    return _install_tree(entry, source, accept_license=accept_license, selected_servers=selected_servers,
+                         sign_in_account=str(sign_in_account or ''))
 
 
 def register_mcp(config, record: dict) -> dict:
@@ -525,6 +719,8 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
         unavailable = entry.get("install") == "block" or entry.get("license") == "Proprietary"
         if unavailable and not have:
             continue  # Withdrawn offers stay internal so stale reviews/links still fail closed.
+        if not have and not _listed(entry):
+            continue  # Not offered yet (`unlisted`); once installed by name, it shows like any other.
         try:
             source = _source(entry)
         except (PluginError, KeyError):
@@ -581,9 +777,22 @@ def catalog_for_editor(opening: str = "", connected: set | None = None,
             # comes from the environment DGC started with.
             "keys": _editor_keys(entry, have, config) if have else [],
             "apps": metadata.get("apps", []),
-            "mcps": [{"name":name, "url":spec.get("url", ""), "command":spec.get("command", ""), "transport":spec.get("transport", "stdio")} for name,spec in record_servers(have).items()] if have else metadata.get("mcps", []),
+            # A plugin that signs in with DGC's own app (Google's): each app's permissions in plain words, and the
+            # service's limits. Below the metadata spread: a package can't rewrite what its sign-in asks for.
+            **app_sign_in_display(entry),
+            # The kind of account its sign-in is for (Microsoft's personal or work account), as chosen at install.
+            **({"sign_in_account": have["sign_in_account"]} if have and have.get("sign_in_account") else {}),
+            "mcps": [{"name":name, "url":spec.get("url", ""), "command":_shown_command(spec), "transport":spec.get("transport", "stdio")} for name,spec in record_servers(have).items()] if have else metadata.get("mcps", []),
         })
     return items
+
+
+def _shown_command(spec: dict) -> str:
+    """How the plugin's page names a server's command: DGC's own Microsoft server in full (it runs from DGC's own
+    package), any other by its program alone (its arguments may hold a package path)."""
+    from .microsoft_graph import is_builtin_spec
+    command = str(spec.get("command") or "")
+    return " ".join([command, *spec.get("args", [])]) if is_builtin_spec(spec) else command
 
 
 def _editor_keys(entry: dict, record: dict, config=None) -> list[dict]:
@@ -806,6 +1015,207 @@ def sign_in_client(server: str, spec: dict, config=None, entry: dict | None = No
     owner = entry if entry and entry.get('name') else _key_entry(server)
     return {'client_id': client_id, 'grant': 'device', 'provider': str(found.get('provider') or '')[:40],
             **_chosen_sign_in(str(owner.get('name') or ''), found)}
+
+
+# A plugin that signs in with DGC's own registered app (the catalog's top-level `sign_in`, kind "browser": Google's).
+# The app's id is public and lives in the catalog; its secret is fetched from `client_secret_url` at sign-in and never
+# ships with DGC (mcp_remote). The scopes each app needs are the catalog's `sign_in.scopes`, by app.
+
+
+def app_sign_in(entry: dict) -> dict:
+    """The catalog's registered app for a plugin, checked: {} when it has none (or one DGC can't use). Google's has a
+    secret, which may come only from DGC's site over https, and one sign-in server; Microsoft's is a public client (no
+    secret) with a sign-in server for each kind of account (sign_in_accounts). Sign-in servers must be https (plain http
+    on this computer is for tests, as everywhere in mcp_remote)."""
+    from .mcp_remote import _allowed, _secret_source_allowed
+    found = entry.get('sign_in') if isinstance(entry, dict) else None
+    if not isinstance(found, dict) or found.get('kind') != 'browser':
+        return {}
+    client_id = found.get('client_id')
+    if not isinstance(client_id, str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,200}', client_id):
+        return {}
+    if found.get('public_client') is True:
+        return found if sign_in_accounts(found) and 'client_secret_url' not in found else {}
+    issuer, secret_url = found.get('issuer'), found.get('client_secret_url')
+    if not isinstance(issuer, str) or not _allowed(issuer) \
+            or not isinstance(secret_url, str) or not _secret_source_allowed(secret_url):
+        return {}
+    return found
+
+
+_ACCOUNT_ADDRESSES = ('authorization_endpoint', 'token_endpoint', 'device_authorization_endpoint')
+
+
+def sign_in_accounts(sign_in: dict) -> list[dict]:
+    """The kinds of account a public app signs in with (Microsoft's personal and work or school accounts), each with its
+    own sign-in server: {id, label, description, issuer, server_metadata, manage_url}. A kind whose addresses aren't all
+    on its issuer's host, over https, is left out."""
+    from .mcp_remote import _allowed
+    rows = []
+    for item in (sign_in.get('accounts') if isinstance(sign_in.get('accounts'), list) else [])[:4]:
+        if not isinstance(item, dict) or not _CHOICE_ID.fullmatch(str(item.get('id') or '')):
+            continue
+        issuer = item.get('issuer')
+        if not isinstance(issuer, str) or not _allowed(issuer):
+            continue
+        host = urlsplit(issuer).hostname
+        addresses = {key: item[key] for key in _ACCOUNT_ADDRESSES
+                     if isinstance(item.get(key), str) and _allowed(item[key]) and urlsplit(item[key]).hostname == host}
+        if 'authorization_endpoint' not in addresses or 'token_endpoint' not in addresses:
+            continue
+        manage = item.get('manage_url') if isinstance(item.get('manage_url'), str) \
+            and urlsplit(item['manage_url']).scheme == 'https' else ''
+        rows.append({'id': item['id'], 'label': str(item.get('label') or item['id'])[:60],
+                     'description': str(item.get('description') or '')[:240], 'issuer': issuer,
+                     'server_metadata': addresses, 'manage_url': manage[:200]})
+    return rows
+
+
+def sign_in_account(record: dict, sign_in: dict) -> dict:
+    """The kind of account an installed plugin signs in with: the one chosen when it was installed, else the first."""
+    accounts = sign_in_accounts(sign_in)
+    chosen = str((record or {}).get('sign_in_account') or '')
+    return next((a for a in accounts if a['id'] == chosen), accounts[0] if accounts else {})
+
+
+def _always_scopes(sign_in: dict) -> list[dict]:
+    """Permissions every sign-in of the app asks for, whichever apps are chosen (Microsoft: offline access, the
+    profile): {scope, label, description}."""
+    rows = []
+    for item in (sign_in.get('always') if isinstance(sign_in.get('always'), list) else [])[:8]:
+        scope = str(item.get('scope') or '') if isinstance(item, dict) else ''
+        if re.fullmatch(r'[a-z_]{1,40}|https://[A-Za-z0-9.:/_-]{1,120}', scope):
+            rows.append({'scope': scope, 'label': str(item.get('label') or '')[:80],
+                         'description': str(item.get('description') or '')[:240]})
+    return rows
+
+
+def _no_browser() -> bool:
+    """This computer can't show a sign-in page that comes back to it: a session over SSH with no display of its own, or
+    Linux with no desktop (WSL opens Windows' browser). A sign-in there uses a code, entered on any device."""
+    env = os.environ
+    shown = env.get('DISPLAY') or env.get('WAYLAND_DISPLAY')
+    if (env.get('SSH_CONNECTION') or env.get('SSH_CLIENT') or env.get('SSH_TTY')) and not shown:
+        return True
+    import sys
+    return sys.platform.startswith('linux') and not shown and not (env.get('WSL_DISTRO_NAME') or env.get('WSL_INTEROP'))
+
+
+# `dgc plugin sign-in NAME --code`: sign in with a code this time, even where a browser could open.
+SIGN_IN_WITH_CODE = False
+
+
+def app_sign_in_scopes(sign_in: dict) -> list[dict]:
+    """The permissions a registered app's sign-in asks for, by app: {app, scope, label, description}."""
+    rows = []
+    for item in (sign_in.get('scopes') if isinstance(sign_in.get('scopes'), list) else [])[:32]:
+        if not isinstance(item, dict):
+            continue
+        app, scope = str(item.get('app') or ''), str(item.get('scope') or '')
+        if not _CHOICE_ID.fullmatch(app) or not re.fullmatch(r'https://[A-Za-z0-9.:/_-]{1,120}', scope):
+            continue
+        rows.append({'app': app, 'scope': scope, 'label': str(item.get('label') or '')[:80],
+                     'description': str(item.get('description') or '')[:240]})
+    return rows
+
+
+def app_sign_in_display(entry: dict) -> dict:
+    """What a plugin's page and its install review show about its sign-in: each app's permissions in plain words and
+    the service's limits (Google's testing note). Never the client's details."""
+    found = app_sign_in(entry)
+    if not found:
+        return {}
+    testing = found.get('testing') if isinstance(found.get('testing'), dict) else {}
+    shown = {'sign_in_provider': str(found.get('provider') or '')[:40],
+             'sign_in_permissions': [{k: row[k] for k in ('app', 'label', 'description')}
+                                     for row in app_sign_in_scopes(found)],
+             'sign_in_note': str(testing.get('note') or found.get('note') or '')[:600]}
+    always = [{'label': row['label'], 'description': row['description']} for row in _always_scopes(found)
+              if row['label']]
+    if always:
+        shown['sign_in_always'] = always
+    accounts = sign_in_accounts(found)
+    if accounts:
+        # The kinds of account to choose from when installing (Microsoft's), never their sign-in addresses.
+        shown['sign_in_accounts'] = [{k: a[k] for k in ('id', 'label', 'description')} for a in accounts]
+    return shown
+
+
+def _app_of(entry: dict, url: str) -> str:
+    """The catalog app whose server is at URL (a Google app's preset), or ''."""
+    presets = entry.get('mcp_presets') if isinstance(entry.get('mcp_presets'), dict) else {}
+    return next((app for app, value in presets.items() if isinstance(value, dict) and value.get('url') == url), '')
+
+
+def _builtin_app(entry: dict, spec: dict) -> str:
+    """The catalog app whose server is DGC's own one, saved exactly as the catalog publishes it (Microsoft's
+    ``python3 -m dgc.microsoft_graph mail``), or ''."""
+    if not isinstance(spec, dict) or str(spec.get('transport') or 'stdio') != 'stdio':
+        return ''
+    presets = entry.get('mcp_presets') if isinstance(entry.get('mcp_presets'), dict) else {}
+    return next((app for app, value in presets.items() if isinstance(value, dict) and value.get('command')
+                 and value.get('command') == spec.get('command') and value.get('args') == spec.get('args')), '')
+
+
+def app_sign_in_launch(server: str, spec: dict) -> dict:
+    """A server of a plugin that signs in with DGC's own registered app (Google's, Microsoft's), launched with that
+    app: its public client id, where a secret is fetched at sign-in (Google's), the scopes of the apps installed (one
+    sign-in for all of them) and the one sign-in server it may use. Only a server the catalog publishes for the plugin
+    gets it (Google's at its address, Microsoft's DGC-owned command), so an edited server never gets DGC's app or the
+    plugin's sign-in. Anything else is returned unchanged."""
+    if not isinstance(spec, dict):
+        return spec
+    remote = spec.get('transport') == 'remote'
+    entry = _key_entry(server)
+    found = app_sign_in(entry)
+    app_of = (lambda s: _app_of(entry, str(s.get('url') or ''))) if remote else (lambda s: _builtin_app(entry, s))
+    if not found or not app_of(spec) or remote == (found.get('public_client') is True):
+        return spec
+    apps = {app_of(s) for s in record_servers(entry).values() if isinstance(s, dict)}
+    scopes = app_sign_in_scopes(found)
+    always = [row['scope'] for row in _always_scopes(found)]
+    scope = ' '.join(dict.fromkeys([*always, *(row['scope'] for row in scopes if row['app'] in apps)]))
+    testing = found.get('testing') if isinstance(found.get('testing'), dict) else {}
+    info = {'client_id': found['client_id'], 'provider': str(found.get('provider') or '')[:40], 'scope': scope,
+            'scope_fixed': True, 'sign_in_first': True,
+            'scope_labels': {row['scope']: row['label'] for row in scopes if row['app'] in apps and row['label']}}
+    if remote:
+        info.update({'client_secret_url': found['client_secret_url'], 'issuer': found['issuer'],
+                     'redirect_uris': ['http://127.0.0.1/oauth/callback']})
+    else:
+        # A public client (Microsoft's): its sign-in server is the chosen kind of account's, named in full (Graph has
+        # no metadata to discover); its redirect is the bare loopback it was registered with; refreshing names the
+        # scope again, as Microsoft's token address wants.
+        account = sign_in_account(entry, found)
+        info.update({'issuer': account['issuer'], 'server_metadata': account['server_metadata'],
+                     'account': account['id'], 'redirect_uris': ['http://localhost'], 'refresh_scope': True})
+        if account.get('manage_url'):
+            info['manage_url'] = account['manage_url']
+        approval = found.get('admin_approval')
+        if account['id'] != 'personal' and isinstance(approval, dict):
+            info['admin_approval'] = {k: approval[k] for k in ('message', 'url', 'errors') if k in approval}
+        if found.get('code_without_browser') is True and (SIGN_IN_WITH_CODE or _no_browser()):
+            info['grant'] = 'device'
+    if found.get('one_sign_in') is True and sources.NAME.fullmatch(str(entry.get('name') or '')):
+        info['shared_sign_in'] = entry['name']
+    if isinstance(found.get('authorization_params'), dict):
+        info['authorization_params'] = found['authorization_params']
+    if isinstance(testing.get('days'), int) and isinstance(testing.get('signed_out'), str):
+        info.update({'sign_in_lasts_days': testing['days'], 'signed_out_message': testing['signed_out'][:300]})
+    launch = dict(spec)
+    launch['args'] = [*spec.get('args', []), '--static-oauth-client-info', json.dumps(info, separators=(',', ':'))]
+    return launch
+
+
+def shared_sign_in_name(record: dict) -> str:
+    """The name the one sign-in of a plugin's servers is kept under (Google Workspace's), or ''."""
+    name = str(record.get('name') or '')
+    try:
+        current = next((e for e in sources.read_json(CATALOG_PATH)['plugins'] if e.get('name') == name), None)
+    except (OSError, sources.SourceError, KeyError, TypeError):
+        current = None
+    found = app_sign_in({**record, **(current or {})})
+    return name if found.get('one_sign_in') is True and sources.NAME.fullmatch(name) else ''
 
 
 def _signing_in(spec: dict, client: dict) -> dict:
@@ -1066,8 +1476,93 @@ def sign_in_again(config, manager, name: str, *, input_handler, cancel=None) -> 
             'failure': failure}
 
 
-_USAGE = ("dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME [--scopes A,B|none]|show NAME|"
+_USAGE = ("dgc plugin list|search [TEXT]|install NAME [--accept-license ID] [--apps A,B] [--account KIND] "
+          "[--allow-mods]|"
+          "sign-in NAME [--scopes A,B|none] [--account KIND] [--code]|show NAME|"
           "key NAME [--remove]|uninstall NAME|marketplace list|add SOURCE|remove NAME|refresh NAME|installed")
+
+
+def _cli_mods_review(entry: dict, argv: list[str]) -> dict:
+    """The terminal's install review of a plugin's mods: each one and what it asks for, then Install and allow?
+    Approving is the one Allow for exactly what was shown. Away from a terminal, --allow-mods says yes to it."""
+    import sys
+    if entry.get('connector') or entry.get('source_kind') == 'preset':
+        return entry                                    # no package of its own, so no mods (install says the rest)
+    mods, clashes = _mods_review(_plugin_mods(_source(entry, fetch=True)), entry['name'])
+    if clashes:
+        raise PluginError(' '.join(clashes))
+    if not mods:
+        return entry
+    print(f"{entry.get('display_name') or entry['name']} adds {len(mods)} mod{'s' if len(mods) != 1 else ''}:")
+    for m in mods:
+        note = {'more': ' (asks for more than you allowed before)', 'same': ' (allowed before)'}.get(m['state'], '')
+        print(f"  {m['title']} {m['version']}{note}")
+        for line in m['asks']:
+            print(f"    · {line}")
+    if '--allow-mods' not in argv:
+        if not sys.stdin.isatty():
+            raise PluginError('This plugin has mods. Run this in a terminal to see what they ask for, or add '
+                              '--allow-mods to allow what is shown above.')
+        if input('Install it and allow these mods? [y/N] ').strip().lower() not in ('y', 'yes'):
+            raise PluginError('Not installed.')
+    return {**entry, 'mods': mods}
+
+
+def _chosen_account(argv: list[str]) -> str:
+    """`--account work`: the kind of account a plugin with several signs in with (Microsoft: personal or work)."""
+    if "--account" not in argv:
+        return ""
+    at = argv.index("--account") + 1
+    if at >= len(argv) or not _CHOICE_ID.fullmatch(argv[at].strip().lower()):
+        raise PluginError("usage: --account KIND (personal or work)")
+    return argv[at].strip().lower()
+
+
+def set_sign_in_account(name: str, account: str) -> dict:
+    """Choose the kind of account an installed plugin signs in with (Microsoft's personal or work account). The next
+    connect signs in again for it: a sign-in made with the other kind is never used for this one."""
+    with _registry_lock():
+        rows = _installed()
+        record = next((r for r in rows if r.get('name') == name), None)
+        if record is None:
+            raise PluginError(f'{name} is not installed. Run: dgc plugin install {name}')
+        offered = [a['id'] for a in sign_in_accounts(app_sign_in(_key_entry_for(record)))]
+        if account not in offered:
+            raise PluginError(f"{record.get('display_name') or name} has no kind of account called {account!r}"
+                              + (f". Choose from: {', '.join(offered)}." if offered else '.'))
+        record = {**record, 'sign_in_account': account}
+        _save([record if r.get('name') == name else r for r in rows])
+    return record
+
+
+def _key_entry_for(record: dict) -> dict:
+    """An installed record with the curated catalog's current entry over it (as _key_entry gives for a server)."""
+    try:
+        current = next((e for e in sources.read_json(CATALOG_PATH)['plugins'] if e.get('name') == record.get('name')),
+                       None)
+    except (OSError, sources.SourceError, KeyError, TypeError):
+        current = None
+    return {**record, **(current or {})}
+
+
+def _chosen_apps(entry: dict, argv: list[str]):
+    """`--apps gmail,calendar`: the servers of a plugin that offers several apps (Google Workspace), or None for all."""
+    if "--apps" not in argv:
+        return None
+    at = argv.index("--apps") + 1
+    wanted = [a.strip().lower() for a in (argv[at] if at < len(argv) else "").split(",") if a.strip()]
+    servers = list(_read_server_specs(None, entry)) if entry.get('source_kind') == 'preset' else []
+    offered = [str(a.get('id')) for a in (entry.get('metadata') or {}).get('apps', []) if isinstance(a, dict)]
+    chosen = []
+    for app in wanted:
+        server = next((n for n in servers if n.endswith('--' + app)), None)
+        if server is None:
+            raise PluginError(f"{entry.get('display_name') or entry['name']} has no app called {app!r}. "
+                              f"Choose from: {', '.join(offered) or 'none'}.")
+        chosen.append(server)
+    if not chosen:
+        raise PluginError("usage: dgc plugin install NAME --apps A,B")
+    return list(dict.fromkeys(chosen))
 
 
 def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
@@ -1160,12 +1655,20 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
             accept = argv[argv.index("--accept-license") + 1]
         again = False
         if action == "install":
-            record = install(entry, accept_license=accept)
-            print(f"installed {record['name']}  skills={len(record['skills'])}")
+            record = install(_cli_mods_review(entry, argv), accept_license=accept,
+                             selected_servers=_chosen_apps(entry, argv), sign_in_account=_chosen_account(argv))
+            print(f"installed {record['name']}  skills={len(record['skills'])}"
+                  + (f"  mods={len(record['mods'])}" if record.get('mods') else ''))
         else:
             record = next((row for row in _installed() if row.get("name") == name), None)
             if record is None:
                 raise PluginError(f"{name} is not installed")
+            if "--account" in argv:
+                # Another kind of account (Microsoft: personal or work): the connect below signs in for it.
+                record = set_sign_in_account(name, _chosen_account(argv))
+            if "--code" in argv:
+                global SIGN_IN_WITH_CODE
+                SIGN_IN_WITH_CODE = True     # this sign-in shows a code to enter on any device, browser or not
             if "--scopes" in argv:
                 at = argv.index("--scopes") + 1
                 if at >= len(argv):
@@ -1179,7 +1682,8 @@ def handle(config, argv: list[str], *, ui=None, manager=None) -> int:
                          if again else ""))
             else:
                 again = _choice_changed(name)        # chosen on the page since the last sign-in
-        if record.get("sign_in_url") and manager is not None and ui is not None:
+        # A plugin with servers connects now: a hosted one, and DGC's own Microsoft server (it signs in here).
+        if (record.get("sign_in_url") or record_servers(record)) and manager is not None and ui is not None:
             if again:
                 sign_in_again(config, manager, name, input_handler=cli_mcp_input(ui))
             else:
@@ -1310,7 +1814,7 @@ def _relocate_spec(spec: dict, old: str, new: str) -> dict:
 
 
 # Catalog fields for DGC's maintainers only (what was checked, and when): never part of what the editor is sent.
-MAINTAINER_NOTES = frozenset({"verification", "audited_on"})
+MAINTAINER_NOTES = frozenset({"verification", "audited_on", "unlisted"})
 
 
 def _preview(entry: dict, source: Path | None) -> dict:
@@ -1326,14 +1830,17 @@ def _preview(entry: dict, source: Path | None) -> dict:
         skills = [{'name':_frontmatter_field(f,'name') or f.parent.name, 'description':_frontmatter_field(f,'description')} for f in files]
     else:
         skills = []
+    mods, clashes = _mods_review(_plugin_mods(source), entry['name']) if source else ([], [])
     specs = _read_server_specs(source, entry)
     if metadata.get('apps') and not specs:
         warnings.append('This package declares ChatGPT apps without a standalone MCP server. DGC cannot use those hosted connections.')
-    supported = bool(skills or specs or entry.get('connector'))
+    supported = bool(skills or specs or mods or entry.get('connector')) and not clashes
     public = {k: v for k, v in entry.items() if k not in MAINTAINER_NOTES}
+    reason = (' '.join(clashes) if clashes
+              else 'No supported skills, MCP servers or mods in this package. ' + ' '.join(warnings))
     return {**public, **{k:v for k,v in metadata.items() if v and k not in MAINTAINER_NOTES}, 'metadata':metadata,
-            'skills':skills, 'server_specs':specs, 'warnings':warnings, 'supported':supported,
-            'compatibility_reason': '' if supported else 'No supported skills or MCP servers in this package. ' + ' '.join(warnings)}
+            **app_sign_in_display(entry), 'skills':skills, 'server_specs':specs, 'warnings':warnings, 'supported':supported,
+            'mods': mods, 'compatibility_reason': '' if supported else reason}
 
 
 def entry_from_url(url: str) -> dict:
@@ -1397,6 +1904,9 @@ def uninstall(name: str, *, config, manager=None) -> dict:
             if server not in servers or servers[server] == spec:
                 servers.pop(server,None); removed.append(server)
             else: retained.append(server)
+        # Commit the registry before deleting anything. If this write fails, the
+        # installed package, skills, credentials, and live connections still exist.
+        _save([r for r in rows if r['name'] != name])
         for server in removed:
             if hasattr(config, 'drop_mcp_secrets'): config.drop_mcp_secrets(server)
         config.set('mcp_servers', servers)
@@ -1414,19 +1924,26 @@ def uninstall(name: str, *, config, manager=None) -> dict:
         if dest.is_dir(): shutil.rmtree(dest)
         logo = sources.contained(LOGO_ROOT, name + '.png')
         logo.unlink(missing_ok=True)
-        _save([r for r in rows if r['name'] != name])
+        removed_mods = [m for m in record.get('mods') or [] if _remove_plugin_mod(m, name)]
         state = _state()
         state['removed_defaults'] = sorted(set(state.get('removed_defaults', [])) | {name})
         sources.write_json(STATE_PATH,state)
     from . import plugin_keys, plugin_signin
     signed_out = [message for message in (plugin_signin.forget(server)['message'] for server in removed) if message]
+    shared = shared_sign_in_name(record)
+    if shared and removed:
+        # Its servers shared one sign-in (Google Workspace's): revoke it at the service and delete it here too.
+        message = plugin_signin.forget(shared)['message']
+        if message:
+            signed_out.append(message)
     # A key saved on its page goes with it (a server another plugin or the user still keeps keeps its key). Only the
     # vendor can revoke the key itself.
     keyed = (set(record_servers(record)) | set(owned) | set(removed)) - set(retained)
     if any([plugin_keys.remove(server) for server in sorted(keyed)]):
         signed_out.append('Its saved key was deleted from this computer; revoke the key itself in your account '
                           'at the service if you no longer use it.')
-    return {'name':name, 'retained_servers':retained, 'removed_servers':removed, 'signed_out':signed_out}
+    return {'name':name, 'retained_servers':retained, 'removed_servers':removed, 'signed_out':signed_out,
+            'removed_mods':removed_mods}
 
 
 # What a plugin may do without asking, ChatGPT's four levels (OpenAI, "Managing app permissions in ChatGPT"):

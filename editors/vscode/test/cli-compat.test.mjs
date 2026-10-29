@@ -28,13 +28,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "../../..");
 const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
 const MIN_CLI = String(manifest.dgcCliVersion || "");
+const SOURCE_CLI = /^__version__\s*=\s*["']([^"']+)["']/m.exec(readFileSync(join(repo, "dgc/__init__.py"), "utf8"))?.[1];
 
 function schemaAt(tag) {
   try {
     return JSON.parse(execFileSync("git", ["show", `${tag}:schemas/editor-protocol-v14.schema.json`],
-      { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));
+      { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }));
   } catch {
-    return null;                    // tag not present in this clone
+    // A combined CLI/editor candidate must be testable before its release tag exists.
+    // Only the exact CLI in this checkout may use its local schema; an arbitrary missing
+    // minimum must still fail, rather than silently skipping compatibility validation.
+    if (tag === `v${SOURCE_CLI}`) return JSON.parse(readFileSync(join(repo, "schemas/editor-protocol-v14.schema.json"), "utf8"));
+    return null;
   }
 }
 
@@ -96,7 +101,7 @@ test("a capability-gated sender still refuses to send when the CLI did not decla
 test("every field the extension always sends exists in the oldest CLI it supports", () => {
   assert.match(MIN_CLI, /^\d+\.\d+\.\d+$/, "package.json must pin a minimum CLI version");
   const oldSchema = schemaAt(`v${MIN_CLI}`);
-  if (!oldSchema) { console.log(`# no tag v${MIN_CLI} in this clone — skipping`); return; }
+  assert.ok(oldSchema, `no schema for the pinned CLI ${MIN_CLI}`);
 
   // Compare commands individually. A newly added event's `items` or a new command's
   // `request_id` must not make the same fields on every old command look incompatible.
@@ -141,9 +146,9 @@ test("every field the extension always sends exists in the oldest CLI it support
     + problems.join("\n  "));
 });
 
-test("the pinned minimum is a CLI that was actually released", () => {
+test("the pinned minimum is a released CLI or the exact CLI candidate being built", () => {
   const tags = execFileSync("git", ["tag", "--list", "v*"], { cwd: repo, encoding: "utf8" })
     .split("\n").map((t) => t.trim()).filter(Boolean);
-  assert.ok(tags.includes(`v${MIN_CLI}`) || tags.length === 0,
-    `dgcCliVersion is ${MIN_CLI}, which has no release tag`);
+  assert.ok(tags.includes(`v${MIN_CLI}`) || MIN_CLI === SOURCE_CLI,
+    `dgcCliVersion is ${MIN_CLI}, which is neither released nor this checkout's CLI`);
 });

@@ -195,7 +195,7 @@
       push(levels) {
         if (!Array.isArray(levels) || !LIVE.includes(state)) return;
         const now = performance.now();
-        for (const v of levels) {
+        for (const v of levels.slice(-256)) {
           const n = Number(v);
           if (!Number.isFinite(n)) continue;
           queue.push(Math.max(0, Math.min(1, n)));
@@ -204,6 +204,7 @@
           if (n >= QUIET_RMS) quietSince = 0;
           else if (!quietSince) quietSince = now;
         }
+        if (queue.length > 256) queue.splice(0, queue.length - 256);
       },
       get current() { return state; },
       /** For tests: the bars drawn so far (0..1, -1 for before it started). */

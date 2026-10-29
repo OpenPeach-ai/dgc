@@ -92,6 +92,7 @@ await build({
           applyNativeSettings() { globalThis.__DGC_PANEL_CALLS.push("applyNativeSettings"); }
           useSessionsHome() {}
           useChatDGC() {}
+          useArtifacts() {}
         };`,
         loader: "js",
       }));

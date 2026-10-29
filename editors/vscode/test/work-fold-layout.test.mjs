@@ -140,3 +140,68 @@ test("a background command's card folds with the work and opens under the row (d
     await page.close();
   }
 });
+
+// A turn split by a message sent mid-turn (reported 28 Oct: one "Worked for 3837s" row above the message, as if the
+// whole hour came before it): a row above the message, one under it, each opening its own part in place without
+// moving, and the message keeps the spacing it has with nothing folded.
+const SPLIT = `() => {
+  const block = document.querySelector("#log .msg.dgc");
+  const box = (n) => n.getBoundingClientRect();
+  const drawn = (n) => n.checkVisibility() && box(n).height > 0;
+  const rows = [...block.querySelectorAll(":scope > .work-toggle")];
+  const you = block.querySelector(":scope > .msg.user"), answer = block.querySelector(":scope > .answer");
+  const steps = [...block.querySelectorAll(":scope > .work-step")];
+  const before = steps.filter((n) => n.compareDocumentPosition(you) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const after = steps.filter((n) => !before.includes(n));
+  const shown = [...block.children].filter((n) => !n.matches(".role") && drawn(n));
+  const prev = shown[shown.indexOf(you) - 1], next = shown[shown.indexOf(you) + 1];
+  return {
+    rows: rows.map((n) => ({ text: n.textContent, top: Math.round(box(n).top), height: box(n).height,
+      chevron: getComputedStyle(n, "::after").content })),
+    order: rows.length === 2 && box(rows[0]).bottom <= box(you).top && box(you).bottom <= box(rows[1]).top
+      && box(rows[1]).bottom <= box(answer).top,
+    beforeDrawn: before.filter(drawn).length, afterDrawn: after.filter(drawn).length, before: before.length, after: after.length,
+    beforeBetween: before.every((n) => !drawn(n) || (box(n).top >= box(rows[0]).bottom - 0.5 && box(n).bottom <= box(you).top + 0.5)),
+    afterBetween: after.every((n) => !drawn(n) || (box(n).top >= box(rows[1]).bottom - 0.5 && box(n).bottom <= box(answer).top + 0.5)),
+    gapAbove: Math.round(box(you).top - box(prev).bottom), gapBelow: Math.round(box(next).top - box(you).bottom),
+    overflow: Math.max(document.getElementById("log").scrollWidth - document.getElementById("log").clientWidth, 0),
+  };
+}`;
+for (const [theme, width] of [["dark-modern", 460], ["light-modern", 900]]) {
+  test(`a turn split by a message sent mid-turn: a row above it and one under it, each opening its own part (${theme}, ${width}px)`, async (t) => {
+    if (skipOrFail(t)) return;
+    const { READY, splitTurn } = await import("./support/split-turn-scene.mjs");
+    const page = await openThinkingPage(browser, { theme, width, height: 1400,
+      events: [READY, { type: "history", complete: true, items: splitTurn() }], config: { model: "deepseek-v4.1-flash:cloud" } });
+    try {
+      const split = () => page.evaluate(`(${SPLIT})()`);
+      const folded = await split();
+      assert.deepEqual(folded.rows.map((r) => r.text), ["Worked for 18m 12s", "Worked for 45m 45s"]);
+      assert.ok(folded.order, "row, the message, row, the answer");
+      assert.ok(folded.rows.every((r) => r.height <= 24 && r.chevron === '"›"'), JSON.stringify(folded.rows));
+      assert.deepEqual([folded.beforeDrawn, folded.afterDrawn], [0, 0], "none of the work is drawn");
+      if (process.env.DGC_SHOT_DIR) await page.screenshot({ path: `${process.env.DGC_SHOT_DIR}/split-folded-${theme}.png` });
+
+      await page.locator("#log .work-toggle").nth(1).click();
+      const second = await split();
+      assert.deepEqual([second.beforeDrawn, second.afterDrawn], [0, second.after], "only what came after the message");
+      assert.ok(second.afterBetween, "under its row, above the answer");
+      assert.deepEqual(second.rows.map((r) => r.chevron), ['"›"', '"⌄"']);
+      assert.equal(second.rows[1].top, folded.rows[1].top, "the row did not move under the pointer");
+      if (process.env.DGC_SHOT_DIR) await page.screenshot({ path: `${process.env.DGC_SHOT_DIR}/split-second-open-${theme}.png` });
+
+      await page.locator("#log .work-toggle").nth(0).click();
+      const both = await split();
+      assert.deepEqual([both.beforeDrawn, both.afterDrawn], [both.before, both.after]);
+      assert.ok(both.beforeBetween, "what came first is under the top row, above the message");
+      assert.equal(both.rows[0].top, folded.rows[0].top);
+      // Folded or open, the message is spaced as it is with nothing folded.
+      assert.deepEqual([folded.gapAbove, folded.gapBelow], [both.gapAbove, both.gapBelow],
+        `folded ${folded.gapAbove}/${folded.gapBelow}, open ${both.gapAbove}/${both.gapBelow}`);
+      assert.equal(both.overflow, 0);
+      if (process.env.DGC_SHOT_DIR) await page.screenshot({ path: `${process.env.DGC_SHOT_DIR}/split-both-open-${theme}.png` });
+    } finally {
+      await page.close();
+    }
+  });
+}

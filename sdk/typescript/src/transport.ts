@@ -22,15 +22,15 @@ export type Frame = Record<string, unknown>;
 
 /** Protocol v14 event types (dgc/editor_protocol.py EVENT_FIELDS). Others are skipped. */
 export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
-  "agent_ended", "agent_message", "agent_report", "agent_runs", "agent_started", "agent_step", "agent_updated", "agents", "artifact_ready", "artifacts",
+  "agent_ended", "agent_message", "agent_report", "agent_runs", "agent_started", "agent_step", "agent_updated", "agents", "artifact_changed", "artifact_comparison", "artifact_detail", "artifact_exported", "artifact_items", "artifact_ready", "artifact_served", "artifacts",
   "ask_request", "ask_resolved", "background_output", "background_shells", "cache_clock", "cache_settings",
   "chat_change", "chat_changes", "chat_closed", "chat_opened",
-  "chatdgc_action", "chatdgc_activity", "chatdgc_canvas", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_followups", "chatdgc_held", "chatdgc_holder", "chatdgc_images", "chatdgc_library", "chatdgc_library_file", "chatdgc_made", "chatdgc_message",
-  "chatdgc_opened", "chatdgc_outline", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_widget", "chatdgc_widgets", "checkpoints", "command_rejected", "compacted", "config",
+  "chatdgc_action", "chatdgc_activity", "chatdgc_canvas", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_folder", "chatdgc_followups", "chatdgc_held", "chatdgc_holder", "chatdgc_images", "chatdgc_library", "chatdgc_library_file", "chatdgc_made", "chatdgc_message",
+  "chatdgc_opened", "chatdgc_outline", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_widget", "chatdgc_widgets", "chatdgc_work_brief", "checkpoints", "command_rejected", "compacted", "config",
   "context", "context_breakdown", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
   "history", "hook_activity", "hook_catalog", "image", "info", "live_sessions", "mcp_call_complete",
   "mcp_command_result", "mcp_context", "mcp_context_catalog", "mcp_input_request", "mcp_servers",
-  "mcp_tools", "memory", "memory_history", "memory_learned", "memory_state", "mode_changed", "model_changed", "model_retry", "model_wait_settings", "models", "models_at",
+  "mcp_tools", "memory", "memory_history", "memory_learned", "memory_state", "mod_offer", "mod_result", "mod_toast", "mod_ui", "mode_changed", "model_changed", "model_retry", "model_wait_settings", "models", "models_at", "mods",
   "monitor_ended", "monitor_event", "monitor_restart", "monitor_started", "monitors", "moved_to_background", "options_request",
   "task_interrupted",
   "options_resolved", "outline", "permission_decision", "permission_request", "permission_resolved",

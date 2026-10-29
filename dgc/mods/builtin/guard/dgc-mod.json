@@ -1,0 +1,12 @@
+{
+  "name": "guard",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "title": "Guard",
+  "description": "Holds a risky command (deleting, force-pushing, throwing away changes) and asks you first, saying what it would change.",
+  "capabilities": {
+    "events": ["tool.call"],
+    "reads": ["git"],
+    "draws": ["toast"]
+  }
+}

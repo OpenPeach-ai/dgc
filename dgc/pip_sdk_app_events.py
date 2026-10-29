@@ -291,7 +291,12 @@ def trigger(store, app, event, payload, idempotency_key, actor, config=None) -> 
         ensure_tables(db)
         kept = db.execute("SELECT answer FROM pip_app_events WHERE app=? AND idempotency_key=?", (name, key)).fetchone()
         if kept is not None:
-            answer = json.loads(kept[0])
+            try:
+                answer = json.loads(kept[0])
+            except ValueError as exc:
+                raise RegistryError("invalid_event_history", "The saved app event receipt is unreadable; no new event was queued.") from exc
+            if not isinstance(answer, dict) or not {"event_id", "app", "event", "idempotency_key", "received_at"} <= answer.keys():
+                raise RegistryError("invalid_event_history", "The saved app event receipt is unreadable; no new event was queued.")
         else:
             now = _instant(registry.clock())
             at = stamp(now)
@@ -363,6 +368,8 @@ def recent(store, app, limit, actor) -> dict:
         try:
             answer = json.loads(row["answer"])
         except ValueError:
+            answer = {}
+        if not isinstance(answer, dict):
             answer = {}
         waiting = db.execute("SELECT count(*) FROM pip_app_event_queue WHERE event_id=? AND status='waiting'",
                              (row["id"],)).fetchone()[0]

@@ -1,5 +1,29 @@
 # DGC SDK changelog
 
+## 0.8.0
+
+Pairs with CLI 0.50.0.
+
+- Artifact `compare` returns bounded changes between saved versions. `allow_source` / `allowSource` accepts an
+  expected version so a stale permission review cannot authorize a replaced dashboard source. Both additions
+  check the backend's advertised capabilities.
+- `session.artifacts` (Python, sync and async, and TypeScript): `list(type=, surface=)`, `get`, `content`, `update`
+  (a new version by "you", refused with reason `conflict` when the artifact moved on since `base_version`),
+  `restore`, `export` (returns the file's path) and `open` (serves it at an address of its own; returns the URL).
+  `run(…, output="slides")` and `stream(…, output=…)` on a session, and `send(…, output=…)` on a chat, ask the reply
+  to make that kind of artifact, as DGC's Output chip does: document, slides, spreadsheet, page or dashboard (a run's
+  `made_artifacts` and a chat reply's `artifacts` hold what it made; `output_note` says when it wasn't made).
+- Mods: `session(mods=[...])` runs the named mod folders in the session beside the user's allowed ones, and
+  `session.mods` lists them and runs their commands (needs `capabilities["mods"]`, CLI 0.50+). Authoring libraries:
+  `dgc_sdk.mods` (Python) and `@vibedgc/sdk/mods` (TypeScript).
+- Pips API 67: `get_pip_artifacts {pip_id}` reads where a Pip's reports are kept (`report_as`: chat, doc or sheet;
+  the document's and sheet's id, title and version) and the dashboards it refreshes; `set_pip_artifacts {pip_id,
+  report_as?, dashboards?}` changes them. Local only.
+- Editor protocol: the artifact commands and events (`artifact_items`, `artifact_changed`, `artifact_detail`,
+  `artifact_served`, `artifact_exported`) and the mod ones (`mods`, `mod_ui`, `mod_toast`, `mod_result`, and
+  `mod_offer`, the question about a mod DGC wrote, sent only to a client that asks for it with `watch_mod_offers`)
+  are in the vendored protocol and the TypeScript SDK's known events.
+
 ## 0.7.0 — 2026-10-26
 
 Pairs with CLI 0.48.0. `session.pips` (Python, sync and async) and `session.pips` (TypeScript)

@@ -21,11 +21,12 @@ RESET = ANSI_RESET
 
 def _vtrunc(s: str, width: int) -> str:
     """Truncate to at most `width` columns (… if cut) so a rendered line never wraps."""
+    from rich.cells import cell_len, chop_cells
     if width <= 0:
         return ""
-    if len(s) <= width:
+    if cell_len(s) <= width:
         return s
-    return s[: max(1, width - 1)] + "…"
+    return (chop_cells(s, width - 1)[0] if width > 1 else "") + "…"
 
 
 def _tty() -> bool:
@@ -90,7 +91,7 @@ def select(title: str, labels: list[str], hints: list[str] | None = None,
     scrollable = n > window
     block = 1 + window + (2 if scrollable else 0)  # constant #lines per render → stable redraw
     top = 0
-    width = max(8, cols - 1)  # keep every line strictly inside the terminal → it can never wrap
+    width = max(1, cols - 1)  # keep every line strictly inside the terminal → it can never wrap
                               # (a wrapped line eats 2 rows but the \x1b[<block>A redraw counts 1)
 
     def render(first: bool) -> None:
@@ -101,7 +102,8 @@ def select(title: str, labels: list[str], hints: list[str] | None = None,
             top = i - window + 1
         out = ["\r"] if first else [f"\r\x1b[{block}A"]  # col 0, then up to the title on redraw
         keyhint = "  (↑/↓ · enter · esc)"
-        if len(title) + len(keyhint) <= width:
+        from rich.cells import cell_len
+        if cell_len(title) + cell_len(keyhint) <= width:
             out.append(f"{BOLD}{title}{RESET}{DIM}{keyhint}{RESET}\x1b[K\r\n")
         else:
             out.append(f"{BOLD}{_vtrunc(title, width)}{RESET}\x1b[K\r\n")
@@ -114,7 +116,7 @@ def select(title: str, labels: list[str], hints: list[str] | None = None,
             label, h = labels[idx], hints[idx]
             avail = width - 2                 # room after the "❯ " / "  " marker+space
             hint_c = ""
-            if h and len(label) + 2 + len(h) <= avail:
+            if h and cell_len(label) + 2 + cell_len(h) <= avail:
                 hint_c = f"  {DIM}{h}{RESET}"
             else:
                 label = _vtrunc(label, avail)

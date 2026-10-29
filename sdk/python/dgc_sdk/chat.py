@@ -64,6 +64,10 @@ class ChatReply:
     finish: str = ""
     usage: Mapping[str, Any] = field(default_factory=dict)
     research: Mapping[str, Any] | None = None
+    # Artifacts the reply made or changed (CLI 0.50+): [{id, type, label, title, version, op}]; read one with
+    # session.artifacts. output_note says the Output asked for wasn't made.
+    artifacts: tuple[Mapping[str, Any], ...] = ()
+    output_note: str = ""
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -110,7 +114,8 @@ def _reply(chat_id: str, message: Mapping[str, Any]) -> ChatReply:
         files=tuple(dict(f) for f in message.get("files") or [] if isinstance(f, Mapping)),
         model=str(message.get("model") or ""), finish=str(message.get("finish") or ""),
         usage=dict(message.get("usage") or {}), research=dict(research) if isinstance(research, Mapping) else None,
-        raw=dict(message))
+        artifacts=tuple(dict(a) for a in message.get("artifacts") or [] if isinstance(a, Mapping)),
+        output_note=str(message.get("output_note") or ""), raw=dict(message))
 
 
 def _summary(row: Mapping[str, Any]) -> ChatSummary:
@@ -289,9 +294,12 @@ class Chat:
             chats._listeners[self.id] = listener
         limit = chats._reply_timeout if timeout is None else float(timeout)
         deadline = None if limit is None else time.monotonic() + limit
+        sent = False
+        completed = False
         try:
             try:
                 chats._raw.send({**command, "conversation_id": self.id, "request_id": rid})
+                sent = True
             except DGCClientError as exc:
                 raise DGCRuntimeError(str(exc)) from exc
             started = False
@@ -318,6 +326,7 @@ class Chat:
                     elif event.get("state") == "ended" and started:
                         if final is None:
                             raise DGCRuntimeError("ChatDGC ended the reply without one")
+                        completed = True
                         yield ChatEvent("reply", reply=final)
                         return
                 elif kind == "chatdgc_delta" and started:
@@ -338,6 +347,8 @@ class Chat:
                     if message.get("role") == "assistant" and started:
                         final = _reply(self.id, message)
         finally:
+            if sent and not completed:
+                self.cancel()
             with chats._lock:
                 if chats._listeners.get(self.id) is listener:
                     del chats._listeners[self.id]
@@ -358,7 +369,8 @@ class Chat:
         self.messages.append(message)
 
     def _send_command(self, text: str, model: str | None, thinking: str | None, search: str | None,
-                      files: Sequence[str | Path], study: bool | None = None) -> dict[str, Any]:
+                      files: Sequence[str | Path], study: bool | None = None,
+                      output: str | None = None) -> dict[str, Any]:
         if not isinstance(text, str) or not text.strip():
             raise DGCConfigError("text must be a non-empty message")
         if len(files) > MAX_FILES:
@@ -376,6 +388,12 @@ class Chat:
             if not isinstance(study, bool):
                 raise DGCConfigError("study must be True or False")
             command["study"] = study
+        if output is not None and output != "auto":
+            if output not in ("document", "slides", "spreadsheet", "page", "dashboard"):
+                raise DGCConfigError("output must be auto, document, slides, spreadsheet, page or dashboard")
+            if not isinstance(self._chats._session.capabilities.get("artifacts"), Mapping):
+                raise DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).")
+            command["output"] = output
         if files:
             attachments = []
             for item in files:
@@ -388,15 +406,16 @@ class Chat:
 
     def stream(self, text: str, *, model: str | None = None, thinking: str | None = None,
                search: str | None = None, files: Sequence[str | Path] = (), study: bool | None = None,
-               timeout: float | None = None) -> Iterator[ChatEvent]:
+               timeout: float | None = None, output: str | None = None) -> Iterator[ChatEvent]:
         """Send a message and yield the reply as it's written; the last event is ``"reply"``.
 
         ``search``: ``"auto"`` (the default: it searches when an answer depends on facts), ``"on"`` (search first)
         or ``"off"``. ``files``: up to ten local files the backend reads. ``study``: True turns Study mode on for the
         chat from this message (it teaches instead of answering), False turns it off; left out, the chat stays as it
         is. ``timeout``: seconds for the whole reply (default: the client's ``reply_timeout``, which is no limit unless it
-        was given one); past it the reply is stopped."""
-        return self._turn(self._send_command(text, model, thinking, search, files, study), timeout)
+        was given one); past it the reply is stopped. ``output`` (CLI 0.50+): what the reply should make, as DGC's
+        Output chip asks: document, slides, spreadsheet, page or dashboard; the reply's ``artifacts`` hold it."""
+        return self._turn(self._send_command(text, model, thinking, search, files, study, output), timeout)
 
     def send(self, text: str, **options: Any) -> ChatReply:
         """Send a message and wait for the whole reply. Options as :meth:`stream`."""
@@ -606,10 +625,14 @@ class AsyncChat:
         """Yield :class:`ChatEvent` as the reply is written; the last one is ``"reply"``."""
         loop = asyncio.get_running_loop()
         events: asyncio.Queue = asyncio.Queue()
+        abandoned = threading.Event()
+        completed = False
 
         def pump() -> None:
             try:
                 for event in self._sync.stream(text, **options):
+                    if abandoned.is_set():
+                        break
                     loop.call_soon_threadsafe(events.put_nowait, event)
             except BaseException as exc:              # noqa: BLE001 -- handed to the awaiting side
                 loop.call_soon_threadsafe(events.put_nowait, exc)
@@ -618,13 +641,19 @@ class AsyncChat:
 
         worker = threading.Thread(target=pump, name="dgc-sdk-chat-stream", daemon=True)
         worker.start()
-        while True:
-            item = await events.get()
-            if item is _DONE:
-                return
-            if isinstance(item, BaseException):
-                raise item
-            yield item
+        try:
+            while True:
+                item = await events.get()
+                if item is _DONE:
+                    completed = True
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            abandoned.set()
+            if not completed:
+                await asyncio.to_thread(self._sync.cancel)
 
     async def research(self, question: str, **options: Any) -> ChatReply:
         return await asyncio.to_thread(self._sync.research, question, **options)

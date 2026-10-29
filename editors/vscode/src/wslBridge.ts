@@ -51,6 +51,8 @@ const TO_BACKEND: Record<string, Fix> = {
   chatdgc_export: (c, to) => field(c, "path", to),
   chatdgc_canvas: (c, to) => { if (c.op === "export") { field(c, "path", to); } },
   chatdgc_library_file: (c, to) => field(c, "path", to),
+  // The folder a chat reads, as VS Code's picker chose it ("" takes it away, and stays "").
+  chatdgc_set_folder: (c, to) => field(c, "folder", to),
 };
 
 /** Events: fields that hold a path in the distro the extension opens, writes, shows or sends back. */
@@ -73,6 +75,14 @@ const TO_EDITOR: Record<string, Fix> = {
   chatdgc_canvas: (e, to) => { field(e.canvas, "path", to); each(e.canvas?.versions, (v) => field(v, "path", to)); },
   chatdgc_exported: (e, to) => field(e, "path", to),
   chatdgc_library_file: (e, to) => field(e, "path", to),
+  // The folder a chat reads (shown on its chip, where the picker starts), and the one Continue in Work opens Work in.
+  chatdgc_folder: (e, to) => field(e, "folder", to),
+  chatdgc_work_brief: (e, to) => field(e, "folder", to),
+  // An artifact's document opens over its working file, and an export is copied from where DGC made it.
+  artifact_changed: (e, to) => field(e.artifact, "file", to),
+  artifact_detail: (e, to) => field(e.artifact, "file", to),
+  artifact_items: (e, to) => each(e.items, (i) => field(i, "file", to)),
+  artifact_exported: (e, to) => field(e, "path", to),
   memory_state: (e, to) => each(e.projects, (p) => field(p, "folder", to)),
   troupe_started: (e, to) => field(e, "journal", to),
   troupe_progress: (e, to) => field(e, "journal", to),

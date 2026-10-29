@@ -120,6 +120,12 @@ STATIC_MEMBERS = {
     "extension/media/plugin-logos/asana.png": "media/plugin-logos/asana.png",
     "extension/media/plugin-logos/docusign.png": "media/plugin-logos/docusign.png",
     "extension/media/plugin-logos/zoom.png": "media/plugin-logos/zoom.png",
+    "extension/media/plugin-logos/docs.png": "media/plugin-logos/docs.png",
+    "extension/media/plugin-logos/slides.png": "media/plugin-logos/slides.png",
+    "extension/media/plugin-logos/microsoft.png": "media/plugin-logos/microsoft.png",
+    "extension/media/plugin-logos/work-iq.png": "media/plugin-logos/work-iq.png",
+    "extension/media/plugin-logos/outlook.png": "media/plugin-logos/outlook.png",
+    "extension/media/plugin-logos/onedrive.png": "media/plugin-logos/onedrive.png",
     "extension/media/seti.woff": "media/seti.woff",
     "extension/licenses/SETI-UI-MIT.txt": "licenses/SETI-UI-MIT.txt",
     "extension/licenses/CODICONS-CODE-MIT.txt": "licenses/CODICONS-CODE-MIT.txt",
@@ -140,10 +146,18 @@ STATIC_MEMBERS = {
     "extension/media/voicebar.css": "media/voicebar.css",
     "extension/media/voicemode.js": "media/voicemode.js",
     "extension/media/promptrail.js": "media/promptrail.js",
+    # The user's mods, drawn the same way in both chat pages and listed in Settings (window.DgcMods).
+    "extension/media/mods.js": "media/mods.js",
     "extension/media/chatdgc.css": "media/chatdgc.css",
     "extension/media/chart.js": "media/chart.js",
     "extension/media/library.js": "media/library.js",
     "extension/media/breakdown.js": "media/breakdown.js",
+    # Artifacts: the editor beside the chat (a document, slides, a sheet, a dashboard, a page) and a sheet's cell links.
+    "extension/media/artifact.js": "media/artifact.js",
+    "extension/media/artifact.css": "media/artifact.css",
+    "extension/media/artifactSheet.js": "media/artifactSheet.js",
+    "extension/media/artifactSlides.js": "media/artifactSlides.js",
+    "extension/media/sheetRefs.js": "media/sheetRefs.js",
     "extension/media/canvas.css": "media/canvas.css",
     "extension/media/dgc-tab-light.svg": "media/dgc-tab-light.svg",
     "extension/media/dgc-tab-dark.svg": "media/dgc-tab-dark.svg",
@@ -352,10 +366,11 @@ def _validate_package(package: dict, source_package: dict, version: str) -> None
         raise ValidationError("extension/package.json: unexpected VS Code engine range")
     if package.get("capabilities", {}).get("untrustedWorkspaces", {}).get("supported") is not False:
         raise ValidationError("extension/package.json: untrusted workspaces must remain disabled")
-    # The side bar, plus the three editor tabs VS Code restores after a reload (a session tab, a ChatDGC tab, a
-    # ChatDGC widget), each revived by its own registerWebviewPanelSerializer: nothing else wakes DGC.
+    # The side bar, plus the four editor tabs VS Code restores after a reload (a session tab, a ChatDGC tab, a
+    # ChatDGC widget, an artifact), each revived by its own registerWebviewPanelSerializer: nothing else wakes DGC.
     if package.get("activationEvents") != ["onView:dgc.chat", "onWebviewPanel:dgc.chatEditor",
-                                           "onWebviewPanel:dgc.chatdgcEditor", "onWebviewPanel:dgc.chatdgcWidget"]:
+                                           "onWebviewPanel:dgc.chatdgcEditor", "onWebviewPanel:dgc.chatdgcWidget",
+                                           "onWebviewPanel:dgc.artifactPanel"]:
         raise ValidationError("extension/package.json: unexpected activation surface")
 
 
@@ -543,11 +558,11 @@ def validate_artifact(
                     info.filename, DEFAULT_MEMBER_SIZE_LIMIT):
                 raise ValidationError(f"{path.name}: oversized member {info.filename}")
             total_size += info.file_size
+            if total_size > TOTAL_UNCOMPRESSED_LIMIT:
+                raise ValidationError(f"{path.name}: oversized uncompressed VSIX")
             raw = archive.read(info)
             members[info.filename] = raw
             _scan_credentials(info.filename, raw, environment_values)
-        if total_size > TOTAL_UNCOMPRESSED_LIMIT:
-            raise ValidationError(f"{path.name}: oversized uncompressed VSIX")
 
     for member, relative_source in STATIC_MEMBERS.items():
         source = extension_root / relative_source

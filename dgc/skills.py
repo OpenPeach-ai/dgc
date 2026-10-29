@@ -58,6 +58,8 @@ _BUILTIN_SKILL_PATTERNS = {
     "pr-feedback": re.compile(r"\b(?:address|resolve|implement) (?:the |this )?(?:(?:pr|review|pull request) )?(?:feedback|comments)\b|\bpr feedback\b", re.I),
     "skill-author": re.compile(r"\b(?:create|author|write|build|revise|update) (?:a |the |this |an? existing )?(?:dgc |portable )?skill\b|\bskill (?:authoring|package development)\b", re.I),
     "mcp-builder": re.compile(r"\b(?:build|implement|develop|extend) (?:an? |the |this )?mcp server\b|\bmcp server development\b", re.I),
+    "mod-author": re.compile(r"\b(?:write|make|build|create|author|change|update) (?:a |an |the |this |my )?(?:dgc )?mod "
+                             r"(?:that|which|to|for)\b|\bdgc[- ]mods?\b|\bdgc-mod\.json\b", re.I),
     "batch": re.compile(r"\b(?:batch|fan[- ]?out|repetitive change|many[- ]file change)\b", re.I),
     "code-review": re.compile(r"\b(?:code review|review (?:the )?(?:diff|changes|pr)|pull request review)\b", re.I),
     "ui-review": re.compile(

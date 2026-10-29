@@ -635,7 +635,9 @@ class TUI:
                 return [row for row in completion_rows("tui", self.config.project_root, skills=skills,
                                                        trigger="/", query=name)
                         if row["kind"] in ("command", "template") and row["value"].casefold() == name]
+            from .mods import terminal as mod_terminal
             return completion_rows("tui", self.config.project_root, skills=skills,
+                                   extra=mod_terminal.command_rows(getattr(self.agent, "mods", None)),
                                    trigger=token[0], query=token[1])
 
         def submit(row, typed):
@@ -1135,7 +1137,10 @@ class TUI:
             scroll = max(0, scroll)
         ov["scroll"] = scroll
         visible = rows[scroll:scroll + cap]
-        labw = min(max((_cell_len(r.get("label", "")) for r in rows), default=8), 34)
+        # The label column is 34 cells when a description sits beside it; a picker whose rows are all label (the
+        # /resume list: when, how long, name and first words) has the panel's whole width, so a name isn't cut short.
+        widest = 34 if any(r.get("desc") for r in rows) else max(8, inner - 2)
+        labw = min(max((_cell_len(r.get("label", "")) for r in rows), default=8), widest)
         # Hit-map recorded during render : screen-y → row index, and the
         # tab strip's x-ranges. Panel line 0 is the top border, so the k-th content line
         # sits at screen y = 1 + k. Every content line is kept to ONE screen row (truncated,
@@ -2039,6 +2044,9 @@ class TUI:
             return True
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         spec = resolve_command(name, "tui")
+        if spec is None and self._is_mod_command(name):
+            self._run_command(text)           # a mod's own command runs at once, with no model turn
+            return True
         if spec is None:
             return False                      # not a command: ordinary steering text
         if self._run_mid_turn_form(text):
@@ -2289,7 +2297,7 @@ class TUI:
         if " ".join(text.strip().lower().split()) in self._MID_TURN_FORMS:
             return True
         spec = resolve_command(name, "tui")
-        return bool(spec is not None and spec.available_while_running)
+        return bool(spec is not None and spec.available_while_running) or (spec is None and self._is_mod_command(name))
 
     def _dispatch_composer_text(self, text: str) -> str:
         """Route a completed composer value, with local mid-turn commands taking priority."""
@@ -2608,7 +2616,8 @@ class TUI:
         if kind == "think":
             return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""),
                     blk.get("head"), blk.get("source"), blk.get("provider"), blk.get("agent"),
-                    bool(blk.get("withheld")), bool(blk.get("truncated")), self._width < 60, theme_key)
+                    bool(blk.get("withheld")), bool(blk.get("truncated")), self._width < 60, theme_key,
+                    id(blk))  # the click handler closes over this exact block
         if kind == "narration":
             return ("narration", blk.get("text", ""), self._width, theme_key)
         if kind == "recall":
@@ -2632,7 +2641,8 @@ class TUI:
             return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
                     bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "",
                     blk.get("more", ""), getattr(self, "_width", 0), theme_key,
-                    len(blk.get("images") or ()), blk.get("images_omitted") or 0)   # images: rows
+                    len(blk.get("images") or ()), blk.get("images_omitted") or 0,
+                    id(blk))  # two identical steps must keep separate click handlers
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
             # width and height in the identity preserves the resize reflow exactly.
@@ -3014,6 +3024,8 @@ class TUI:
         running, error = bool(b.get("running")), bool(b.get("error"))
         name, summary, exp = b.get("name", ""), b.get("summary", ""), bool(b.get("exp"))
         verb = (self._TOOL_ING if running else self._TOOL_ED).get(name) or self._TOOL_VERB.get(name, name)
+        failed_step = self._TOOL_FAILED.get(name) if error and not running else None
+        verb = failed_step or verb
 
         row = [0]
         def rail():
@@ -3034,6 +3046,8 @@ class TUI:
         if summary:
             header.append((f"fg:{th.faint}", f" {summary.expandtabs(4)}"))
         outcome = self._tool_outcome(b)
+        if failed_step and outcome.startswith("failed"):     # the verb already says it
+            outcome = outcome[len("failed"):].lstrip(" \u00b7")
         if outcome:
             header.append((f"fg:{th.err if error else th.faint}", f"  \u00b7 {outcome}"))
         if running:                                     # a live marker on the header while it works
@@ -3330,6 +3344,189 @@ class TUI:
                 middle.append((style, tail, handler) if handler else (style, tail))
             return frags[:i] + middle + frags[i + 1:]
         return frags + [marker]
+
+    # ---- the user's mods (dgc/mods) -----------------------------------------------------------------------
+    def _start_mods(self) -> None:
+        from .mods import bridge as mod_bridge
+        try:
+            mod_bridge.start(self.agent, on_ui=self._mod_ui, surface="work")
+        except Exception:                                    # noqa: BLE001 -- a mod's trouble never stops DGC
+            pass
+        self._invalidate()
+
+    def _mod_ui(self, kind: str, payload: dict) -> None:
+        """A mod drew, said something, or one started or stopped (from a mod's thread); or DGC wrote a mod and asks
+        whether to turn it on (from the turn's own thread, which waits for the answer as it does for an approval)."""
+        if kind == "toast":
+            self._flash(f"{payload.get('mod', 'A mod')}: {payload.get('text', '')}", 4.0)
+            return
+        if kind == "offer":
+            self._mod_offer_card(payload)
+            return
+        self._pane_render_cache = None
+        self._invalidate()
+
+    def _mod_offer_card(self, offer: dict) -> None:
+        """"Turn on the mods DGC writes in this session?": the mod and everything it asks for, then Allow or Not now.
+        Allow runs its folder for this session, reloaded as it changes; Not now runs nothing and asks nothing more."""
+        from .mods.runtime import ModError
+        host = getattr(self.agent, "mods", None)
+        if host is None:
+            return
+        th = style_mod.theme()
+        safe = style_mod.terminal_safe_text
+        header = [Text.from_markup(f"[bold]{_esc(safe(offer.get('title', '')))}[/] "
+                                   f"[{th.faint}]{_esc(safe(offer.get('version', '')))} · "
+                                   f"{_esc(safe(offer.get('folder', '')))}[/]")]
+        header += [Text.from_markup(f"[{th.text}]· {_esc(safe(line))}[/]") for line in offer.get("asks") or []]
+        if offer.get("more"):
+            header.append(Text.from_markup(f"[{th.warn}]It asks for more than you allowed for the mods DGC wrote "
+                                           f"earlier.[/]"))
+        answer = self._ask({"kind": "mod-offer", "title": "Turn on the mods DGC writes in this session?",
+                            "header": header, "options": ["Allow", "Not now"],
+                            "footer": "For this session only · a mod can never approve anything for you · "
+                                      "Esc: Not now"})
+        try:
+            host.answer_offer(offer["id"], answer == 0)
+        except ModError as error:
+            self._flash(str(error))
+            return
+        self._flash(f"{offer.get('title') or 'The mod'} is on for this session" if answer == 0
+                    else "Not now: /mods lists what DGC writes, with an Allow")
+        self._invalidate()
+
+    def _is_mod_command(self, name: str) -> bool:
+        host = getattr(self.agent, "mods", None)
+        return bool(host is not None and name and any(c["name"] == name for c in host.commands()))
+
+    def _mod_band_lines(self) -> list:
+        from .mods import terminal as mod_terminal
+        if self._overlay is not None:
+            return []
+        return mod_terminal.band_lines(getattr(self.agent, "mods", None), max(10, self._width - 2))
+
+    def _mod_band_height(self) -> int:
+        try:
+            return min(8, len(self._mod_band_lines()))
+        except Exception:                                    # noqa: BLE001
+            return 0
+
+    def _mod_band(self):
+        from .mods import terminal as mod_terminal
+        lines = self._mod_band_lines()[:8]
+        return ANSI(self._rich(mod_terminal.as_rich(lines, style_mod.theme()), no_wrap=True, overflow="ellipsis"))
+
+    def _show_mod_result(self, title: str, shown, error: str, seconds: float) -> None:
+        """What a mod's command answered, in the transcript under its name (from the mod's thread)."""
+        from .mods import terminal as mod_terminal
+        from .mods import ui as mod_ui
+        th = style_mod.theme()
+        head = Text.from_markup(f"[{th.faint}]From {_esc(title or 'a mod')}[/]")
+        if error:
+            body = Text.from_markup(f"[{th.err}]{_esc(error)}[/]")
+        elif isinstance(shown, dict):
+            body = mod_terminal.as_rich(mod_ui.lines(shown, max(20, self._width - 6)), th)
+        else:
+            body = Text(str(shown or "(nothing)"))
+        self._append(self._rich(Text.assemble(head, "\n", body)))
+        self._invalidate()
+
+    def _open_mods(self, arg: str = "") -> None:
+        """/mods: every mod, running or not and why; Enter on one: Allow (its card), panel, off, on, reload."""
+        from .mods import bridge as mod_bridge
+        host = getattr(self.agent, "mods", None)
+        if host is None:
+            host = mod_bridge.start(self.agent, on_ui=self._mod_ui, surface="work")
+        words = arg.split()
+        if words and words[0] in ("on", "off", "reload", "pane", "allow") and len(words) <= 2:
+            self._mod_act(host, words[0], words[1] if len(words) > 1 else "")
+            return
+        th = style_mod.theme()
+        say = {"running": "on", "needs_allow": "needs your Allow", "off": "off", "stopped": "stopped",
+               "crashed": "stopped with an error", "starting": "starting"}
+        rows = []
+        for e in host.mods():
+            where = (" · DGC's own" if e["builtin"] else f" · from the plugin {e['plugin_title']}"
+                     if e.get("plugin_title") else " · written this session" if e.get("written") else "")
+            desc = say.get(e["state"], e["state"]) + where + (
+                f" · {e['error'][:80]}" if e["error"] else f" · {e['description'][:80]}" if e["description"] else "")
+            rows.append({"label": e["title"], "desc": desc, "value": e["name"], "entry": e})
+        header = None
+        if not host.on:
+            why = "safe mode" if os.environ.get("DGC_SAFE_MODE") else "the mods_enabled setting"
+            header = [Text.from_markup(f"[{th.warn}]Mods are off ({why}). Nothing below runs.[/]")]
+        self._open_overlay(rows, on_pick=lambda r: self._mod_menu(host, r["entry"]), title="Mods", header=header,
+                           footer="Enter: choose · Esc close", accent=True)
+
+    def _mod_menu(self, host, entry: dict) -> None:
+        name = entry["name"]
+        if entry["state"] == "needs_allow":
+            self._mod_allow_card(host, entry)
+            return
+        options = []
+        if entry["state"] == "running":
+            if "pane" in entry["draws"]:
+                options.append({"label": "Show its panel", "value": "pane"})
+            options += [{"label": "Reload", "value": "reload"}, {"label": "Turn off", "value": "off"}]
+        else:
+            options += [{"label": "Turn on", "value": "on"}, {"label": "What it can do", "value": "allow"}]
+        self._open_overlay(options, on_pick=lambda r: self._mod_act(host, r["value"], name), title=entry["title"],
+                           footer="Enter: do it · Esc back", accent=True, back=lambda: self._open_mods())
+
+    def _mod_allow_card(self, host, entry: dict) -> None:
+        """Allow, once: everything it asks for, in plain words, then Allow or Not now."""
+        from .mods import consent as mod_consent
+        th = style_mod.theme()
+        header = [Text.from_markup(f"[bold]{_esc(entry['title'])}[/] [{th.faint}]{_esc(entry.get('version', ''))}[/]")]
+        header += [Text.from_markup(f"[{th.text}]· {_esc(line)}[/]") for line in entry["asks"]]
+        if entry.get("written"):
+            header.append(Text.from_markup(f"[{th.faint}]DGC wrote it in this session; allowed, it runs for this "
+                                           f"session only.[/]"))
+        elif entry["state"] == "needs_allow" and mod_consent.record(entry["name"]) is not None:
+            header.append(Text.from_markup(f"[{th.warn}]This version asks for more than you allowed before.[/]"))
+        rows = [{"label": "Allow", "value": "yes"}, {"label": "Not now", "value": "no"}]
+        self._open_overlay(rows, on_pick=lambda r: self._mod_act(host, "allow-yes", entry["name"], review=entry.get("review", ""))
+                           if r["value"] == "yes" else self._close_overlay(),
+                           header=header, title="Allow this mod?", footer="It can never approve anything for you",
+                           accent=True)
+
+    def _mod_act(self, host, action: str, name: str, *, review: str | None = None) -> None:
+        from .mods import terminal as mod_terminal
+        from .mods.runtime import ModError
+        self._close_overlay()
+        entry = next((e for e in host.mods() if e["name"] == name), None)
+        if entry is None and action != "reload":
+            self._flash(f"there's no mod named {name or '…'} · /mods lists them")
+            return
+
+        def later(fn, done):
+            def go():
+                try:
+                    fn()
+                    self._flash(done)
+                except ModError as error:
+                    self._flash(str(error))
+                self._invalidate()
+            threading.Thread(target=go, daemon=True, name="dgc-mods-act").start()
+        if action == "allow":
+            self._mod_allow_card(host, entry)
+        elif action == "allow-yes":
+            later(lambda: host.allow(name, review=review or ""), f"{entry['title']} is on")
+        elif action == "off":
+            later(lambda: host.turn_off(name), f"{entry['title']} is off")
+        elif action == "on":
+            if entry["state"] == "needs_allow":
+                self._mod_allow_card(host, entry)
+            else:
+                later(lambda: host.turn_on(name), f"{entry['title']} is on")
+        elif action == "reload":
+            later(lambda: host.reload(name or None), "reloaded")
+        elif action == "pane":
+            if "pane" not in entry["draws"]:
+                self._flash(f"{entry['title']} has no panel")
+                return
+            self._mount_pane(mod_terminal.ModPane(host, name, entry["title"]),
+                             f"{entry['title']} · q returns to DGC")
 
     def _tip_visible(self) -> bool:
         """The welcome screen's one-line tip. It was defined and styled since the first release
@@ -3704,13 +3901,8 @@ class TUI:
         col = self._ctx_color(pct, th)
         barw = 34
         _full, _part, _empty = render_mod.frac_bar(pct, barw)
-        # rough split: the system prompt (messages[0]) vs the rest of the conversation
-        sys_tok = 0
-        try:
-            sys_tok = len(str(self.agent.messages[0].get("content", ""))) // 4 if self.agent.messages else 0
-        except Exception:
-            pass
-        msg_tok = max(0, used - sys_tok)
+        # Every part of the window, as the editor's breakdown shows it (dgc/context_breakdown.py): the agent counts
+        # each piece the way its client counts a request, scaled to the meter above, so the rows add up to it.
         header = [
             Text.from_markup(f"[bold]Context[/]  [{th.faint}]{_esc(self.config.model)}[/]"),
             Text(""),
@@ -3721,17 +3913,60 @@ class TUI:
         served = server_window_note(getattr(self.agent, "client", None))
         if served:                          # vLLM, SGLang, llama.cpp: the server sized it when it started
             header.append(Text.from_markup(f"[{th.faint}]{_esc(served[0].upper() + served[1:])}[/]"))
-        header += [
-            Text(""),
-            Text.from_markup(f"[{th.text}]{glyphs.DIAMOND}[/] [{th.muted}]System prompt[/]   [{th.faint}]{render_mod.fmt_tokens(sys_tok)}[/]"),
-            Text.from_markup(f"[{th.accent}]{glyphs.DIAMOND}[/] [{th.muted}]Conversation[/]    [{th.faint}]{render_mod.fmt_tokens(msg_tok)}[/]"),
-            Text.from_markup(f"[{th.border_strong}]{glyphs.DIAMOND_O}[/] [{th.muted}]Free[/]            [{th.faint}]{render_mod.fmt_tokens(max(0, size - used))}[/]"),
+        # The parts scroll under the meter: with every part and its biggest items they outgrow a short terminal.
+        lines = self._context_parts_lines(size, th) + [
             Text(""),
             Text.from_markup(f"[{th.faint}]Turns {sum(1 for m in self.agent.messages if m.get('role') == 'user')}"
                              f"  {glyphs.MIDDOT}  Tool calls {self._tool_count}[/]"),
         ]
-        self._open_overlay([], on_pick=lambda r: None, header=header,
-                           footer="Esc close", accent=True, info=True)
+        self._open_overlay([{"text": ln, "label": ln.plain} for ln in lines], on_pick=lambda r: None, header=header,
+                           reader=True, footer="↑↓ scroll · Esc close", accent=True)
+
+    def _context_parts_lines(self, size: int, th) -> list:
+        """The breakdown as rows: each part (messages, tool results, system prompt, tools, MCP tools, memory, skills,
+        plugins) with its tokens and share, its three biggest items under it, then the room kept for compaction, what's
+        free, and the MCP tools held back until a search finds them."""
+        from rich.text import Text
+        try:
+            threshold = float(self.config.get("compact_threshold", 0.85))
+        except (AttributeError, TypeError, ValueError):
+            threshold = 0.85
+        if not threshold or threshold <= 0 or threshold != threshold:
+            threshold = 0.85
+        try:
+            got = self.agent.context_breakdown(size, threshold)
+        except Exception:                                   # noqa: BLE001 -- the meter above still stands
+            return [Text.from_markup(f"[{th.faint}]The breakdown isn't available for this model.[/]")]
+        window = max(1, int(got.get("window") or size or 1))
+        colours = [th.accent, th.text, th.ok, th.warn, th.accent_bright, th.muted, th.border_strong, th.faint]
+        rows = []
+        # One label column for every row, so each number sits under the one above it.
+        width = max([len(str(c.get("label") or "")) for c in got.get("categories") or []] + [len("Kept for compaction"), 26])
+        for i, part in enumerate(got.get("categories") or []):
+            tokens = int(part.get("tokens") or 0)
+            share = tokens * 100 / window
+            label = str(part.get("label") or part.get("id") or "")
+            rows.append(Text.from_markup(
+                f"[{colours[i % len(colours)]}]{glyphs.DIAMOND}[/] [{th.muted}]{_esc(f'{label:<{width}}')}[/]  "
+                f"[{th.text}]{render_mod.fmt_tokens(tokens):>7}[/]  [{th.faint}]{share:4.1f}%[/]"))
+            for item in (part.get("items") or [])[:3]:
+                name = str(item.get("name") or "")
+                name = name if len(name) <= width - 2 else name[:width - 3] + "\u2026"
+                rows.append(Text.from_markup(
+                    f"    [{th.faint}]{_esc(f'{name:<{width - 2}}')}  "
+                    f"{render_mod.fmt_tokens(int(item.get('tokens') or 0)):>7}[/]"))
+        for name, key in (("Kept for compaction", "buffer"), ("Free", "free")):
+            tokens = int(got.get(key) or 0)
+            rows.append(Text.from_markup(
+                f"[{th.border_strong}]{glyphs.DIAMOND_O}[/] [{th.muted}]{name:<{width}}[/]  "
+                f"[{th.faint}]{render_mod.fmt_tokens(tokens):>7}  {tokens * 100 / window:4.1f}%[/]"))
+        held = sum(int(d.get("tokens") or 0) for d in got.get("deferred") or [])
+        if held:
+            rows.append(Text.from_markup(f"[{th.faint}]MCP tools found by a search when needed take no room yet: "
+                                         f"{render_mod.fmt_tokens(held)}[/]"))
+        if got.get("source") == "estimated":
+            rows.append(Text.from_markup(f"[{th.faint}]Estimated; the model's own count replaces it after a reply.[/]"))
+        return rows
 
     def _block_lines(self, blk) -> int:
         if isinstance(blk, dict) and blk.get("kind") == "recall":
@@ -3875,7 +4110,8 @@ class TUI:
         header = [Text.from_markup(f"[bold]Rewind to:[/] {_esc(prev)}"),
                   Text.from_markup(f"[{th.warn}]Reverts {nf} file(s) and truncates the conversation. "
                                    f"This cannot be undone.[/]")]
-        # Somebody's edits after DGC's: kept and DGC's taken out, or, where they overlap, the file left alone.
+        # Somebody's edits after DGC's: kept and DGC's taken out, or, where they overlap, the file left alone; and
+        # the files the person edited in another editor while a command ran, left alone (dgc/editor_traces.py).
         for line in rewind_words.question_lines(question):
             header.append(Text(line))
         # Nothing is restored unseen: the files it puts back because they changed while a command ran are named,
@@ -4774,6 +5010,10 @@ class TUI:
                 "view_image": "Viewed image",
                 "list_tasks": "Checked sub-agents", "wait_tasks": "Waited for a sub-agent",
                 "message_task": "Sent message to", "close_task": "Stopped", "continue_task": "Continued"}
+    # A failed helper step never reached its helper: "Delegated Analyze the data · failed" read as if a
+    # helper had run (the editor's words, media/main.js FAILED_AGENT_STEP).
+    _TOOL_FAILED = {"task": "Couldn't delegate", "message_task": "Couldn't message", "close_task": "Couldn't stop",
+                    "continue_task": "Couldn't continue"}
 
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
@@ -5050,6 +5290,20 @@ class TUI:
         self._append(self._rich(t))
         self._flash(f"artifact live → {art.url}")
 
+    def artifact_changed(self, view, op) -> None:
+        """An artifact the model made or changed: its line in the transcript, with how to open it."""
+        from rich.text import Text
+        th = style_mod.theme()
+        t = Text()
+        t.append("  ◆ ", style=f"bold {th.accent}")
+        t.append(f"{view['label']} {'made' if op == 'made' else 'changed'}", style=f"bold {th.text_strong}")
+        t.append(f"   {style_mod.terminal_safe_text(view['title'])}", style=th.muted)
+        t.append(f" · version {view['version']}", style=th.faint)
+        t.append("\n     ", style=th.faint)
+        t.append(f"/artifacts open {view['id']}", style=th.muted)
+        t.append(" to see it in your browser", style=th.faint)
+        self._append(self._rich(t))
+
     def _open_url(self, url: str) -> bool:
         import webbrowser
         try:
@@ -5067,11 +5321,21 @@ class TUI:
         title = f"Artifacts · {'shared on LAN' if lan else 'private (this machine)'} · plan preview: {'on' if plan_on else 'off'}"
         foot = ("Enter open · x remove · " + ("b → make private" if lan else "b → share on LAN")
                 + " · p plan-artifact · Esc close")
-        if arts:
-            rows = [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id} for a in arts]
-        else:
-            rows = [{"label": "(no previews yet)",
-                     "desc": "the agent serves one with the artifact tool", "value": ""}]
+        # Everything in the store (documents, decks, sheets, dashboards, pages) first, newest first; then any
+        # preview the server holds that isn't in the store (a plan page). A stored row's value is "store:<id>".
+        from . import artifact_service
+        try:
+            stored = artifact_service.listing()[:60]
+        except Exception:                            # noqa: BLE001 -- the store unreadable: previews still list
+            stored = []
+        listed = {item["id"] for item in stored}
+        rows = [{"label": item["title"], "desc": f"{item['label']} · v{item['version']} · from "
+                 f"{item.get('origin', {}).get('surface', '?')}", "value": "store:" + item["id"]} for item in stored]
+        rows += [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id}
+                 for a in arts if getattr(a, "store_id", "") not in listed]
+        if not rows:
+            rows = [{"label": "(nothing yet)",
+                     "desc": "ask for a document, slides, a sheet, a dashboard or a page", "value": ""}]
         # A plain-language reach explainer, ALWAYS shown, so LAN sharing isn't a mystery.
         from rich.text import Text
         th = style_mod.theme()
@@ -5092,8 +5356,22 @@ class TUI:
                            on_action=self._artifact_action, title=title, footer=foot,
                            header=header, accent=True)
 
+    def _open_stored_artifact(self, aid: str) -> None:
+        """An artifact from the store, served at an address of its own and opened in the browser."""
+        from . import artifact_service
+        try:
+            url = artifact_service.serve(aid)
+        except Exception as exc:                      # noqa: BLE001 -- said, never raised past the screen
+            self._flash(f"couldn't open {aid}: {exc}")
+            return
+        opened = self._open_url(url)
+        self._flash(f"opened {url}" if opened else f"open {url} in your browser")
+
     def _artifact_open(self, aid: str) -> None:
         from . import artifacts
+        if aid.startswith("store:"):
+            self._open_stored_artifact(aid[len("store:"):])
+            return
         art = artifacts.get(aid) if aid else None
         if not art:
             return
@@ -5115,6 +5393,9 @@ class TUI:
                         if on else "automatic plan previews off")
             self._open_artifacts()
             return
+        if row and str(row.get("value") or "").startswith("store:") and key in ("x", "space"):
+            self._confirm_trash_artifact(row["value"][len("store:"):], row.get("label", "this artifact"))
+            return
         if row and row.get("value") and key in ("x", "space"):
             self._confirm_remove_artifact(row["value"], row.get("label", "this artifact"))
 
@@ -5135,6 +5416,27 @@ class TUI:
                 {"label": f"{glyphs.CHECK}  Keep it", "value": "no"}]
         self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
                            on_pick=_do)
+
+    def _confirm_trash_artifact(self, aid: str, name: str) -> None:
+        """Ask before moving a stored artifact to DGC's trash (where it can be put back)."""
+        from rich.text import Text
+        from . import artifact_service
+        th = style_mod.theme()
+
+        def _do(r):
+            if r["value"] == "yes":
+                try:
+                    artifact_service.remove(aid)
+                    self._flash(f"moved {name[:40]} to DGC's trash")
+                except Exception as exc:              # noqa: BLE001
+                    self._flash(f"couldn't remove it: {exc}")
+            self._open_artifacts()
+        header = [Text.from_markup(f"[bold]Move this to DGC's trash?[/]  [{th.muted}]{_esc(name[:60])}[/]"),
+                  Text.from_markup(f"[{th.faint}]It leaves the list with every version; it can be put back from "
+                                   f"~/.dgc/artifacts/.trash.[/]")]
+        rows = [{"label": f"{glyphs.CROSS}  Move to trash", "value": "yes"},
+                {"label": f"{glyphs.CHECK}  Keep it", "value": "no"}]
+        self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True, on_pick=_do)
 
     def _confirm_lan_share(self) -> None:
         """Confirm before binding 0.0.0.0 — a no-auth network exposure — and show the shareable URL."""
@@ -5210,14 +5512,16 @@ class TUI:
         for the same moment, and Codex's place for it in a terminal: the steps stay on screen above the line,
         and the answer under it stands on its own. Any other end (stopped, failed, paused, an answer with no
         steps, steps with no answer) keeps the line under the turn: "· done · 3s"."""
+        from .subagents import format_elapsed
         th = style_mod.theme()
         count = self._tool_count
         tools = f" · {count} tool" + ("" if count == 1 else "s") if count else ""
+        took = format_elapsed(int(seconds) * 1000)       # 43s, 7m 42s, 1h 3m (the editor's words), never "3837s"
         at = self._answer_start() if verb == "done" and count else None
         if at is None:
-            self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {seconds:.0f}s{tools}[/]"))
+            self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {took}{tools}[/]"))
             return
-        self.blocks.insert(at, self._rich(f"[{th.faint}]{glyphs.MIDDOT} Worked for {int(seconds)}s{tools}[/]"))
+        self.blocks.insert(at, self._rich(f"[{th.faint}]{glyphs.MIDDOT} Worked for {took}{tools}[/]"))
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
@@ -5604,6 +5908,12 @@ class TUI:
             except Exception:
                 opened = False
             if not opened:
+                code = payload.get("_dgc_device_code")
+                if isinstance(code, str) and code:
+                    # A sign-in with a code (no browser on this computer, over SSH say) works from any device.
+                    self._append(self._rich(_esc(f"Open {url} on any device and enter the code {code}. "
+                                                 "DGC waits here.")))
+                    return {"action": "accept"}
                 self.error("could not open the MCP URL in a browser")
                 return {"action": "cancel"}
             return {"action": "accept"}
@@ -5764,8 +6074,12 @@ class TUI:
             filter=Condition(self._goal_panel_visible))
         tip = ConditionalContainer(Window(FormattedTextControl(self._tip), height=1),
                                    filter=Condition(self._tip_visible))
+        # The user's mods: each one's band and every one's status line, above the prompt (dgc/mods/terminal).
+        mod_band = ConditionalContainer(
+            Window(FormattedTextControl(self._mod_band), height=self._mod_band_height, dont_extend_height=True),
+            filter=Condition(lambda: self._mod_band_height() > 0))
         root = HSplit([header, transcript, pane_panel, overlay_panel, goal_panel, todo_panel,
-                       tip, status, composer_box, shortcut_bar])
+                       tip, mod_band, status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
@@ -6155,6 +6469,9 @@ class TUI:
             agent = Agent(session_config, self)
             agent._agent_defs_config = source_config
             agent.session_root = home
+            if kind == "managed" and workspace is not None:
+                # The user's untracked files its copy had no room for, named as a helper's are.
+                agent._left_out_note = workspace.left_out_note
             if session_path:
                 agent.load_session(session_path)
             else:
@@ -6213,6 +6530,9 @@ class TUI:
             if foreign:
                 place += f" · {_short_folder(home)}"
         note = (f" · prior workspace unavailable: {attach_error}" if attach_error else "") + note
+        left_out = _wt.left_out_summary(workspace, "agent") if kind == "managed" and workspace is not None else ""
+        if left_out:
+            note += f" ·{left_out}"
         hub = getattr(getattr(previous, "agent", None), "monitors", None)
         running = len(hub.running()) if hub is not None else 0
         warning = ""
@@ -6225,7 +6545,7 @@ class TUI:
                        f"{'' if running == 1 else 's'}: Ctrl+\\ back to it, then /monitors stop")
         flash = (f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
                  f" · {len(self._sessions)} agents{warning} · {place}{note}")
-        if warning or foreign:
+        if warning or foreign or left_out:
             self._flash(flash, secs=6.0)
         else:
             self._flash(flash)
@@ -6915,8 +7235,20 @@ class TUI:
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
             self._open_plan_view()
+        elif cmd == "make":
+            # The Output chip, typed: this one prompt's reply should make that kind of artifact.
+            kind, _, ask = rest.strip().partition(" ")
+            kinds = ("document", "slides", "spreadsheet", "page", "dashboard")
+            if kind not in kinds or not ask.strip():
+                self._flash(f"/make {'|'.join(kinds)} TEXT")
+            else:
+                self._submit(ask.strip(), output=kind)
         elif cmd in ("artifact", "artifacts"):
-            self._open_artifacts()
+            words = rest.split()
+            if len(words) == 2 and words[0] == "open":
+                self._open_stored_artifact(words[1])        # the transcript's "/artifacts open ID"
+            else:
+                self._open_artifacts()
         elif cmd == "copy":
             # DGC owns its buffer, so it can copy without selection or scroll position: the reply
             # goes to the system clipboard through the terminal (OSC 52), which works over SSH
@@ -7492,13 +7824,19 @@ class TUI:
         elif cmd in ("quit", "exit"):
             if self.app:
                 self.app.exit()
+        elif cmd == "mods":
+            self._open_mods(rest)
         else:
             from .commands import discover_commands, render_command
+            from .mods import terminal as mod_terminal
             custom = discover_commands(cfg.project_root)
             if cmd in custom:
                 rendered = render_command(custom[cmd], rest, cfg.project_root)
                 if rendered:
                     self._submit(rendered)
+            elif getattr(self.agent, "mods", None) is not None and mod_terminal.run_command(
+                    self.agent.mods, cmd, rest, self._show_mod_result):
+                self._flash(f"/{cmd} …")
             else:
                 self._append(self._rich(f"[{th.err}]unknown command:[/] /{_esc(cmd)}  [{th.faint}]— /help[/]"))
         self._invalidate()
@@ -8477,6 +8815,10 @@ class TUI:
             self._flash("cancelled"); return
         self.config.set("subagent_base_url" if subagent else "base_url", url)
         if not subagent:
+            # A custom host selected from the picker is a direct model route, just like
+            # /connect URL. Otherwise a previously selected subscription keeps handling turns.
+            self.config.set("subscription_engine", "")
+            self.config.set("api_mode", "auto")
             self.agent.refresh_client()
         self._flash(f"{'sub-agent host' if subagent else 'endpoint'} → {url}")
 
@@ -9262,7 +9604,7 @@ class TUI:
             self.error(f"{engine.short_label} exited with status {res['rc']}")
         return bool(res.get("ok"))
 
-    def _submit(self, text: str, *, echo: bool = True, expand_mentions: bool = True) -> None:
+    def _submit(self, text: str, *, echo: bool = True, expand_mentions: bool = True, output: str = "") -> None:
         from .workflows import display_prompt
         shown_text = display_prompt(text)
         sess = self._cur_session()                    # this turn belongs to THIS session
@@ -9308,15 +9650,22 @@ class TUI:
                     model_text = text
                 _se = str(self.config.get("subscription_engine", "")).strip().lower()
                 from .session_turn_events import foreground_turn
+                self.agent._turn_output, self.agent._turn_artifact_types = output, []
                 if _se:
                     with foreground_turn("vendor"):
                         succeeded = self._run_delegated_turn(_se, model_text)
                 else:
                     with foreground_turn("foreground_prompt"):
                         succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
+                if output and succeeded:
+                    from .artifact_tools import missing_note
+                    note = missing_note(output, getattr(self.agent, "_turn_artifact_types", []))
+                    if note:
+                        self.info(note)
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
+                self.agent._turn_output = ""            # /make was this prompt's only
                 take_deferred = getattr(self.agent, "take_deferred_steers", None)
                 deferred = take_deferred() if callable(take_deferred) else []
                 if deferred:
@@ -9848,11 +10197,15 @@ class TUI:
         self._start_peer_heartbeat()
         threading.Thread(target=self._load_pips_digest, name="dgc-pips-digest", daemon=True).start()
         self._start_pip_report_watch()
+        # The user's mods (dgc/mods), started beside the session so the first screen never waits for them.
+        threading.Thread(target=self._start_mods, name="dgc-mods", daemon=True).start()
         from . import termbg
         termbg.apply(self.config)          # dark canvas on a light terminal (idempotent; CLI may have done it)
         try:
             self.app.run()
         finally:
+            from .mods import bridge as mod_bridge
+            mod_bridge.stop(self.agent)
             if getattr(self, "_pip_report_stop", None) is not None:
                 self._pip_report_stop.set()
             self._stop_peer_heartbeat()

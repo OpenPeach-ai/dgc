@@ -180,7 +180,7 @@ const serializer: MarkdownSerializer = new MarkdownSerializer({
       row.forEach((cell, _p, c) => { cells.push(cellMarkdown(cell)); if (r === 0) aligns[c] = cell.attrs.align; });
       rows.push(cells);
     });
-    const width = Math.max(1, ...rows.map((r) => r.length));
+    const width = rows.reduce((largest, cells) => Math.max(largest, cells.length), 1);
     const line = (cells: string[]) => "| " + Array.from({ length: width }, (_, i) => cells[i] ?? "").join(" | ") + " |";
     const rule = "| " + Array.from({ length: width }, (_, i) => RULE[aligns[i] || ""] || "---").join(" | ") + " |";
     state.write([line(rows[0] || []), rule, ...rows.slice(1).map(line)].join("\n"));

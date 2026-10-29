@@ -76,6 +76,28 @@ class Vendor:
 
 
 class PluginSigninTests(unittest.TestCase):
+    def test_metadata_response_is_bounded_while_streaming(self):
+        class Response:
+            status_code = 200
+            closed = False
+            def iter_content(self, chunk_size):
+                yield b" " * plugin_signin.MAX_JSON_BYTES
+                yield b"x"
+            def close(self):
+                self.closed = True
+
+        class Session:
+            def __init__(self):
+                self.response = Response()
+            def get(self, url, **kwargs):
+                self.kwargs = kwargs
+                return self.response
+
+        session = Session()
+        self.assertIsNone(plugin_signin._get_json(session, "https://example.com/metadata"))
+        self.assertTrue(session.kwargs["stream"])
+        self.assertTrue(session.response.closed)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="dgc-plugin-signin-")
         self.home = Path(self.temp.name)
@@ -115,6 +137,24 @@ class PluginSigninTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.assertEqual(plugin_signin.forget(bad)["message"], "")
         self.assertTrue(folder.exists(), "a bad name never reaches a real sign-in")
+
+    def test_file_store_ignores_symlinks_and_does_not_reuse_a_predictable_temp_name(self):
+        import os
+        import threading
+        self.signed_in("asana", "https://mcp.example.com/mcp")
+        folder = self.home / ".dgc" / "plugin-auth" / "asana"
+        victim = self.home / "victim.txt"
+        victim.write_text("untouched")
+        old_temp = folder / f".credentials.{os.getpid()}.{threading.get_ident()}.tmp"
+        old_temp.symlink_to(victim)
+        plugin_credentials.save("asana", {"version": 1, "url": "https://new.example.com"})
+        self.assertEqual(victim.read_text(), "untouched")
+        (folder / "credentials.json").unlink()
+        (folder / "credentials.json").symlink_to(victim)
+        self.assertIsNone(plugin_credentials.load("asana"))
+
+    def test_malformed_saved_at_does_not_break_credential_selection(self):
+        self.assertEqual(plugin_credentials._newer({"saved_at": "broken"}, {"saved_at": 1}), {"saved_at": 1})
 
     def test_the_revocation_address_saved_at_sign_in_is_used_without_discovery(self):
         vendor = self.vendor()

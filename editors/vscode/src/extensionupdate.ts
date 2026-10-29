@@ -12,7 +12,7 @@ export type ExtensionRelease = { version: string; url: string; sha256?: string }
 
 export function newer(a: string, b: string): boolean {
   if (!VERSION.test(a) || !VERSION.test(b)) return false;
-  const left = a.split(".").map(Number), right = b.split(".").map(Number);
+  const left = a.split(".").map(BigInt), right = b.split(".").map(BigInt);
   for (let i = 0; i < 3; i++) {
     if (left[i] !== right[i]) return left[i] > right[i];
   }

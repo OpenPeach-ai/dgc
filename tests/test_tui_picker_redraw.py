@@ -192,25 +192,27 @@ class _Dgc:
         test.addCleanup(self.close)
 
     def pump(self, secs: float) -> None:
-        import select
+        import selectors
         end = time.monotonic() + secs
-        while True:
-            left = end - time.monotonic()
-            if left <= 0:
-                return
-            terms = {t.fd: t for t in [self, *self.others] if t.open}
-            if not terms:
-                return
-            for fd in select.select(list(terms), [], [], min(left, 0.05))[0]:
-                term = terms[fd]
-                try:
-                    chunk = os.read(fd, 65536)
-                except OSError:
-                    chunk = b""
-                if not chunk:
-                    term.open = False
-                    continue
-                term.screen.feed(chunk)
+        with selectors.DefaultSelector() as ready:
+            for term in [self, *self.others]:
+                if term.open:
+                    ready.register(term.fd, selectors.EVENT_READ, term)
+            while ready.get_map():
+                left = end - time.monotonic()
+                if left <= 0:
+                    return
+                for key, _ in ready.select(min(left, 0.05)):
+                    term = key.data
+                    try:
+                        chunk = os.read(key.fd, 65536)
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        term.open = False
+                        ready.unregister(key.fd)
+                        continue
+                    term.screen.feed(chunk)
 
     def wait_for(self, check, secs: float, what: str):
         end = time.monotonic() + secs
@@ -312,6 +314,25 @@ class PickerKeepsTheTranscriptDrawnTests(unittest.TestCase):
 
     def dgc(self, *args: str) -> _Dgc:
         return _Dgc(self, self.home, self.project, *args)
+
+    def test_terminal_reader_accepts_a_descriptor_above_selects_limit(self):
+        import fcntl
+        import resource
+        if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1101:
+            self.skipTest("this OS limits descriptors below the select boundary")
+        read, write = os.pipe()
+        try:
+            high = fcntl.fcntl(read, fcntl.F_DUPFD_CLOEXEC, 1100)
+        finally:
+            os.close(read)
+        self.addCleanup(os.close, high)
+        self.addCleanup(os.close, write)
+        term = object.__new__(_Dgc)
+        term.fd, term.open, term.others = high, True, []
+        term.screen = _Screen(COLS, ROWS)
+        os.write(write, b"HIGH-FD-MARKER")
+        term.pump(.1)
+        self.assertIn("HIGH-FD-MARKER", term.screen.text())
 
     def test_resume_picker_keeps_the_conversation_drawn_when_it_opens_and_closes(self):
         t = self.dgc("-c")

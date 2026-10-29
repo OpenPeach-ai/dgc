@@ -6700,6 +6700,79 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_folder"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "conversation_id",
+            "folder"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_work_brief"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            },
+            "brief": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "conversation_id",
+            "folder",
+            "brief"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_opened"
             },
             "seq": {
@@ -8177,6 +8250,471 @@
             "summary"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_items"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "items": {
+              "type": "array"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_changed"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "artifact": {
+              "type": "object"
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "made",
+                "changed",
+                "restored",
+                "removed",
+                "refreshed"
+              ]
+            },
+            "surface": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "artifact",
+            "op"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_detail"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "artifact": {
+              "type": "object"
+            },
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            },
+            "state": {
+              "type": "object"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "artifact"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_served"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "id",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_exported"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "id",
+            "format",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_comparison"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "comparison": {
+              "type": "object"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "comparison"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mods"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "mods": {
+              "type": "array"
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "mods",
+            "on"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_ui"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string"
+            },
+            "mod": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string",
+              "enum": [
+                "pane",
+                "band",
+                "status"
+              ]
+            },
+            "tree": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "name",
+            "mod",
+            "slot",
+            "tree",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_toast"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string"
+            },
+            "mod": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "tone": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "name",
+            "mod",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_result"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "mod": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "tree": {
+              "type": "object"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "name",
+            "mod"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_offer"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "mod": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            },
+            "asks": {
+              "type": "array"
+            },
+            "more": {
+              "type": "boolean"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "id",
+            "name",
+            "mod",
+            "version",
+            "folder",
+            "asks",
+            "more"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -8505,6 +9043,17 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "output": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "document",
+                "slides",
+                "spreadsheet",
+                "page",
+                "dashboard"
+              ]
             },
             "answers": {
               "anyOf": [
@@ -9099,6 +9648,9 @@
             },
             "selected_servers": {
               "type": "array"
+            },
+            "sign_in_account": {
+              "type": "string"
             }
           },
           "required": [
@@ -12541,6 +13093,17 @@
             "model": {
               "type": "string"
             },
+            "output": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "document",
+                "slides",
+                "spreadsheet",
+                "page",
+                "dashboard"
+              ]
+            },
             "voice": {
               "type": "boolean"
             },
@@ -13592,6 +14155,631 @@
             "type",
             "request_id",
             "conversation_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_folder"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_set_folder"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id",
+            "folder"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chatdgc_work_brief"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "conversation_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_list"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "artifact_type": {
+              "type": "string",
+              "enum": [
+                "page",
+                "doc",
+                "slides",
+                "sheet",
+                "dashboard"
+              ]
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "chat",
+                "work",
+                "pip",
+                "sdk",
+                "cli"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_get"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "content": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_update"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "content": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            },
+            "base_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "note": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "content",
+            "base_version"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_restore"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_compare"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "before": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "after": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "before"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_export"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_open"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "view",
+                "present"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_remove"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_refresh"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "artifact_allow_source"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "allowed": {
+              "type": "boolean"
+            },
+            "base_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "source",
+            "allowed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mods_list"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_set"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "on",
+                "off",
+                "reload"
+              ]
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            },
+            "review": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "op"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_command"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "args": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_action"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "watch_mod_offers"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mod_offer_answer"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "allow": {
+              "type": "boolean"
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "work",
+                "chat"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "id",
+            "allow"
           ],
           "additionalProperties": false
         }

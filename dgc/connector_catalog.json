@@ -45,8 +45,8 @@
   "docs": "https://docs.n8n.io/connect/connect-to-n8n-mcp-server",
   "terms": "https://n8n.io/legal/",
   "privacy": "https://n8n.io/legal/privacy",
-  "summary": "Use selected workflows on n8n Cloud or your own n8n instance.",
-  "setup": "In your n8n instance, enable Settings → Instance-level MCP, expose the workflows you want to use, and copy the server URL. Choose browser sign-in or a personal access token. With Remote SSH, local addresses refer to the machine running DGC.",
+  "summary": "Run and manage workflows on n8n Cloud or your own n8n instance.",
+  "setup": "In your n8n instance, enable Settings → Instance-level MCP, expose the workflows you want to run, and copy the server URL. A connected client can search previews of all workflows your n8n user may view, including ones you did not enable for MCP; newer n8n versions also expose workflow editing tools. Choose browser sign-in or a personal access token. With Remote SSH, local addresses refer to the machine running DGC.",
   "placeholder": "https://your-instance.app.n8n.cloud/mcp-server/http",
   "license": "n8n service terms",
   "cloud_execution": false

@@ -86,7 +86,10 @@ class ReadOnlyDatabaseTests(Project):
                          "postgresql://dgc_readonly:p%40ss@127.0.0.1:5433/erp?sslmode=disable")
         for bad, words in (("mysql://u:p@localhost/x", "Postgres"), ("postgresql://u:p@db.example.com/x", "this computer"),
                            ("postgresql://u:p@localhost:5432/", "database name"), ("postgresql://localhost/x", "user"),
-                           ("postgresql://u:p@localhost/x?host=10.0.0.1", "not as query options"), ("", "one")):
+                           ("postgresql://u:p@localhost/x?host=10.0.0.1", "not as query options"),
+                           ("postgresql://u:p@localhost/x?%68ostaddr=10.0.0.1", "not as query options"),
+                           ("postgresql://u:p@localhost/x?service=remote", "not as query options"),
+                           ("", "one")):
             with self.subTest(bad=bad), self.assertRaises(readonly_database.ReadOnlyDatabaseError) as raised:
                 readonly_database.parse(bad)
             self.assertIn(words, str(raised.exception))

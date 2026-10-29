@@ -118,6 +118,35 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(again.chat_id, chat.id)
             self.assertEqual(len(chat.messages), 4)
 
+    def test_closing_a_partial_stream_stops_its_backend_turn(self):
+        from unittest.mock import patch
+        with self._client() as dgc, dgc.chat() as chats:
+            chat = chats.new()
+            stream = chat.stream("Explain the checkout.", search="off")
+            self.assertNotEqual(next(stream).kind, "reply")
+            with patch.object(chat, "cancel", wraps=chat.cancel) as cancel:
+                stream.close()
+            cancel.assert_called_once_with()
+
+    def test_closing_a_partial_async_stream_stops_its_backend_turn(self):
+        import asyncio
+        from unittest.mock import patch
+        from dgc_sdk import AsyncDGC
+
+        async def run():
+            async with AsyncDGC(state_dir=self.state, model="sdk-model", base_url=self.base_url, api_key="sk-local") as dgc:
+                chats = await dgc.chat()
+                try:
+                    chat = await chats.new()
+                    stream = chat.stream("Explain the checkout.", search="off")
+                    self.assertNotEqual((await anext(stream)).kind, "reply")
+                    with patch.object(chat.sync, "cancel", wraps=chat.sync.cancel) as cancel:
+                        await stream.aclose()
+                    cancel.assert_called()
+                finally:
+                    await chats.close()
+        asyncio.run(run())
+
     def test_a_reply_has_no_limit_by_default_and_a_limit_is_still_taken(self):
         with self._client() as dgc, dgc.chat() as chats:
             self.assertIsNone(chats._reply_timeout)

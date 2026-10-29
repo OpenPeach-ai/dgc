@@ -26,6 +26,7 @@ after(cleanup);
 
 const manifest = JSON.parse(readFileSync(join(extensionRoot, "package.json"), "utf8"));
 const MIN_CLI = String(manifest.dgcCliVersion || "");
+const SOURCE_CLI = /^__version__\s*=\s*["']([^"']+)["']/m.exec(readFileSync(join(repoRoot, "dgc/__init__.py"), "utf8"))?.[1];
 
 /** Everything the panel sends during the handshake, for a CLI that declared `capabilities`. */
 function handshakeCommands(capabilities) {
@@ -91,8 +92,9 @@ test("live_steering's delivery field is withheld from a CLI that did not declare
 
 test("every command the panel sends to a capability-less CLI validates against that CLI's schema", async () => {
   assert.match(MIN_CLI, /^\d+\.\d+\.\d+$/, "package.json must pin a minimum CLI version");
-  const schema = schemaAtTag(`v${MIN_CLI}`);
-  if (!schema) { console.log(`# no tag v${MIN_CLI} in this clone — skipping`); return; }
+  const schema = schemaAtTag(`v${MIN_CLI}`) || (MIN_CLI === SOURCE_CLI
+    ? JSON.parse(readFileSync(join(repoRoot, "schemas/editor-protocol-v14.schema.json"), "utf8")) : undefined);
+  assert.ok(schema, `no schema for the pinned CLI ${MIN_CLI}`);
 
   // A CLI that declares nothing is the worst case the extension must survive: every capability
   // gate closed. Whatever it still sends has to be in the oldest supported CLI's vocabulary.

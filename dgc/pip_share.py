@@ -61,7 +61,13 @@ def dumps(document) -> str:
 
 def parse(text) -> dict:
     """A shared Pip file's text, checked for shape and size; never trusted as instructions."""
-    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_BYTES:
+    if not isinstance(text, str):
+        _fail(f"A shared Pip file is at most {MAX_BYTES // 1024} KiB.")
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeError:
+        _fail("The shared Pip file must be valid UTF-8 text.")
+    if size > MAX_BYTES:
         _fail(f"A shared Pip file is at most {MAX_BYTES // 1024} KiB.")
     try:
         document = json.loads(text)
@@ -77,7 +83,8 @@ def check(document) -> dict:
     pip = document["pip"]
     if set(pip) - _PIP_KEYS or not {"name", "goal", "pip_type", "scope", "schedule"} <= set(pip):
         _fail("The shared Pip file has missing or unknown fields.")
-    if pip["pip_type"] not in _TYPES or pip["scope"] not in ("project", "personal"):
+    if (not isinstance(pip["pip_type"], str) or pip["pip_type"] not in _TYPES
+            or pip["scope"] not in ("project", "personal")):
         _fail("The shared Pip file names a kind of Pip this DGC cannot create.")
     if pip["scope"] == "personal" and pip["pip_type"] == "pulse":
         _fail("A Pulse Pip belongs to a project.")
@@ -97,7 +104,9 @@ def setup_request(document, *, project_root, request_key) -> dict:
     elif pip["pip_type"] == "pulse" and "live_plan" in pip:
         work_kind = "live_data"
     elif pip["pip_type"] == "pulse":
-        network = (pip.get("verification_plan") or {}).get("action", {}).get("network")
+        plan = pip.get("verification_plan")
+        action = plan.get("action") if isinstance(plan, dict) else None
+        network = action.get("network") if isinstance(action, dict) else None
         work_kind = "app_smoke_test" if network == "loopback_http_v1" else "command_verification"
     elif pip["pip_type"] == "quill":
         work_kind = "documentation_draft"

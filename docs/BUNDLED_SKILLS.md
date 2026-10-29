@@ -11,6 +11,7 @@ insert `$name`. `/skills` opens management and `dgc skills show NAME` prints a p
 | `fix-ci` | Diagnose a failed CI job at its actual commit and verify a scoped fix. |
 | `pr-feedback` | Evaluate review comments against current code and address justified changes. |
 | `skill-author` | Create or revise a focused, portable skill with tested supporting resources. |
+| `mod-author` | Write a DGC mod: a status line, panel or command, or a guard that holds risky steps. |
 | `mcp-builder` | Develop an MCP server and test the capabilities it actually advertises. |
 | `batch` | Divide repetitive work into independent units, with delegation when available and authorized. |
 | `code-review` | Review actual changed code for concrete correctness defects. |

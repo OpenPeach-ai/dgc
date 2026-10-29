@@ -67,6 +67,14 @@ test("links do not fall back to the accent that failed", () => {
     "link text must use --link, not the accent it was moved off");
 });
 
+test("the open question Send button keeps white text readable", () => {
+  const fill = token("accent-fill");
+  const rule = /\.open-ask-send\s*\{([^}]*)\}/.exec(mainCss);
+  assert.ok(fill && rule);
+  assert.match(rule[1], /background:\s*var\(--accent-fill\)/);
+  assert.ok(contrastRatio(fill, "#FFFFFF") >= AA);
+});
+
 test("forced-colors hands links back to the system", () => {
   const forced = /@media \(forced-colors: active\) \{([\s\S]*?)\n  \}/.exec(mainCss);
   assert.ok(forced, "the forced-colors block should exist");

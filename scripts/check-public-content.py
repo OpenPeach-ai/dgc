@@ -91,6 +91,9 @@ def check(root: Path) -> list[str]:
     errors = []
     for name in filter(None, paths):
         path = root / name
+        if path.is_symlink():
+            errors.append(name + ': tracked symbolic link cannot enter the public product archive')
+            continue
         if not path.is_file():
             continue
         if _website_path(name):

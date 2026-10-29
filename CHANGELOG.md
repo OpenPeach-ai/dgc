@@ -4,6 +4,115 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## Unreleased
+
+- **Artifact versions and edits are safer to review.** Compare saved versions, export the version you chose,
+  and keep a page's start file when restoring it. A document saved while DGC finishes an edit is preserved;
+  DGC's proposed version remains available for review. Dashboard exports now include PDF.
+- **Mod updates and permissions are protected across windows.** Failed updates keep the installed copy;
+  concurrent consent changes preserve each other. A stale Allow cannot grant changed capabilities, and
+  session-only grants stay with the reviewed folder. Ending a session releases its mod processes and workers.
+- **Microsoft Outlook and OneDrive: your Outlook mail, Outlook calendar and OneDrive.** Microsoft has no server of its
+  own for personal accounts, so DGC brings one: it runs inside DGC and uses Microsoft's official API, with nothing to
+  download. Choose the apps and whether you use a personal account (Outlook.com, Hotmail, Live) or a work or school
+  one, then sign in with Microsoft once. DGC can search, read, draft, send, reply to, forward and move email; list,
+  create, change, answer and delete events; and search, read, download, upload and replace OneDrive files. Sending and
+  changing things wait for your approval, as DGC's other changes do, and a .env, a key or a credential file in your
+  project is never uploaded. Where there's no browser (over SSH, say), DGC
+  shows a code to enter on any device instead. DGC's Microsoft app isn't verified by Microsoft yet: a personal account
+  can still approve it, and in a company an admin approves it once; when that is what stops you, DGC says so and
+  gives you the link for your admin. In a terminal: `dgc plugin install microsoft --apps mail,calendar --account work`.
+- **Microsoft Work IQ, for work accounts with Microsoft 365 Copilot.** Microsoft's own server: ask about your work
+  email, meetings, documents and Teams chats. It needs a Copilot licence and your admin's one-time approval (the
+  plugin gives the link), uses Microsoft's own sign-in, and is in preview.
+- **Google Workspace is ready and waiting for Google.** Gmail, Calendar, Drive, Docs and Slides, through Google's own
+  MCP servers, with one Google sign-in for the apps you choose and nothing to set up at Google. It appears in
+  Settings → Plugins once Google approves DGC's app; until then only accounts DGC has added can sign in. The old
+  Google Workspace entry, which asked you to register your own Google project, is gone.
+- **Artifacts: documents, decks, spreadsheets, dashboards and pages DGC makes and keeps.** Ask for one in a chat, in
+  a coding session or from a Pip, and you get a real file-backed thing in one place on this computer
+  (`~/.dgc/artifacts`), whichever part of DGC made it. You and DGC both edit it, every change is a version marked
+  with who made it, and restoring an old one makes a new version. Exports: a document as Word, PDF or Markdown;
+  slides as PowerPoint, PDF or one HTML file; a spreadsheet as Excel or CSV; a dashboard or a page as HTML. The model
+  writes data and DGC lays it out, so a small local model makes the same clean deck a large one does. In a terminal:
+  `dgc artifacts` (list, `show`, `open`, `export`, `restore`, `rm` to DGC's trash), `/artifacts` in the full-screen
+  terminal, `dgc chat --make slides "…"`, and `/make TYPE TEXT` in a chat or a coding session.
+- **Dashboards over data you allow, refreshed with no model.** Number tiles, charts and tables over a CSV or Excel
+  file, a SQLite file, the project's read-only Postgres account, a chat's tables or a plugin's read-only tool. You
+  allow each source once for each dashboard; every query is one read-only SELECT, shown under its chart with when it
+  ran; Refresh runs on this computer and costs nothing; a dashboard never writes. A Pip can keep one current.
+- **Each page DGC serves has an address of its own.** Every preview used to share one browser origin, so a page could
+  read the preview list, another page and the stop button. Each artifact now has its own port on this computer,
+  remembered across restarts, and every publish of a page is a version.
+- **Pips keep their reports as a document or a spreadsheet.** A reviewing Pip can keep each review as the newest
+  version of its own document or sheet, beside the card in its chat, and any Pip can refresh the dashboards you give
+  it after every run. Pips control API 67: `get_pip_artifacts`, `set_pip_artifacts`.
+- **Mods: your own status lines, panels, commands and guards, in Python or TypeScript.** A mod hears the events it
+  asks for (a prompt, each step and its result, each turn's end), and can draw a status line, a band, a panel or a
+  toast, add slash commands that run at once with no model turn, and hold a risky step. You allow it once, after DGC
+  lists in plain words everything it can do; an update that asks for more asks again. A mod can never approve
+  anything for you, runs in a sandbox as its own process, reaches only the internet hosts it named, and in a Pip's
+  run can only stop a step. DGC ships three, off until you allow them: Context, Tally and Guard. `/mods` and
+  `dgc mods` (`allow`, `on`, `off`, `install`, `remove`, `validate`, `test`, `dev`); the built-in `mod-author` skill
+  writes one with you; `dgc --safe-mode` starts none.
+- **A plugin can bring mods.** A `dgc-mod.json` at its root, or one in each `mods/NAME/` folder. Before you install
+  it, DGC lists each mod and everything it can do in the same words `/mods` uses, and installing it is your Allow for
+  exactly that (`dgc plugin install` asks you in the terminal, or takes `--allow-mods`). Uninstalling the plugin
+  removes its mods; an update whose mod asks for more says so and asks again; a mod with the name of one you already
+  have is refused, saying which. `/mods` says which plugin each came from.
+- **"Turn on the mods DGC writes in this session?"** The first time in a session DGC writes a mod in your project, it
+  shows you the mod and what it can do, with Allow and Not now. Allow runs it for this session only, reloaded as DGC
+  changes it, and later mods it writes start without asking unless they ask for more. Not now runs nothing and asks
+  nothing more; `/mods` lists what DGC wrote, with an Allow. Never in a Pip's run, in safe mode, or with mods off.
+- **ChatDGC can read a folder you choose, and Continue in Work.** A chat with a folder reads it (never writes there),
+  and Continue in Work opens a coding session in that folder with a brief of the chat in its prompt box, for you to
+  send.
+- **The terminal's `/context` shows every part of the context window,** as the editor does: messages, tool results,
+  the system prompt, tools, MCP tools, memory, skills, plugins and free space.
+- **"No response from the model" waits for what is normal for that model.** A slow model (a large cloud model
+  through Ollama, say) can take a minute or more to start replying, and the notice said "No response" after
+  45 seconds on most turns while nothing was wrong. DGC now learns how long each model usually takes to
+  start, and once it has seen a model a few times it waits until a request is well past that before saying
+  so, adding "it usually starts within 1m 20s". It is never sooner than `model_stall_notice_s` and always
+  before the request is retried. Long waits read "2m 40s", not "160s".
+- **A delegation that never started says so.** When a helper couldn't be started (its copy of the project
+  could not be made, say), the step read "Delegated <task>" as if it had run, beside an agents count of 0.
+  It is a failed step now, in the terminal and the editor: "Couldn't delegate <task>", with the reason under it.
+- **Two new plugins: Runway and Higgsfield.** Each one makes videos and images with your own account, signing in
+  in the browser. Runway uses your Runway credits; Higgsfield needs a paid Higgsfield plan.
+- **`/resume` in the full-screen terminal shows a session's whole name.** The list cut every row at 34 characters, so a
+  session read "gst o…" with most of the panel empty. A list whose rows have no second column now uses the panel's
+  width; lists with a description beside each row keep their columns.
+- **Undo leaves alone a file you save in vim, Neovim, Emacs or nano while a command runs.** DGC already heard your
+  saves in VS Code. Other editors tell nobody, so a file you saved in one of them while one of DGC's commands ran was
+  taken for the command's change, and Undo could put back your own save. DGC now reads what those editors leave beside
+  your file: vim's and Neovim's swap file (nano's too, with locking on) and Emacs's lock, and on Linux the names a save
+  makes and removes while the command runs (vim's `:wq`, an Emacs save). A file one of them edited during the command
+  is yours: Undo leaves it, and its question says so, `README.md: edited in vim while a command ran; it is left as it
+  is`; a file DGC had written is merged with your edit, as with any later edit of yours. A file that is only open in
+  an editor is not enough, so a formatter's changes to it are still undone. A save that leaves nothing behind (nano
+  without locking, an editor that writes the file in place) is still told by time, and Undo's question still lets you
+  keep it. Undo also no longer removes, overwrites or brings back an editor's own swap or lock file.
+- **A helper starts in a project with lots of uncommitted files.** A helper works in a copy of your project that
+  holds at most 64 MB and 4,096 files of uncommitted state, and DGC copied all of yours into it or refused: a project
+  with 3 MB of changed code beside 64 MB of untracked screenshots and a downloaded template refused every helper,
+  with "dirty baseline exceeds 67108864 bytes", and the model did the work itself. Every change to a tracked file is
+  still copied. Untracked files are now copied while there is room, text and source files first, then images and
+  other binary files, each smallest first, and the rest are left out. The helper is told which files it doesn't
+  have, up to 20 by name and the rest counted by folder, and to say in its report if it needs one. They are your own
+  files, so bringing the helper's work in never writes over or deletes one of them: a change it made at one of
+  those paths is held back and named (and kept for `/tasks`), and the rest of its work lands as usual. A helper is
+  refused only when the changes to tracked files alone don't fit, and then in plain words: `This project has 70 MB
+  of uncommitted changes to tracked files, more than a helper's copy holds (64 MB). Commit some of it, or let the
+  model do this itself.`
+- **An agent you open with Ctrl+N starts in a big project too.** Its copy of the project follows the helper's rule
+  above: every change to a tracked file, then untracked files while there is room. The status line says how many of
+  your files were left out, and the agent is told which ones and to tell you if it needs one. It is refused only when
+  the changes to tracked files alone don't fit, in the same plain words.
+- **ChatDGC: a branch, or a chat you continue in a new chat, reads the same folder.** Branch and Continue in a new
+  chat left the folder behind, so the new chat's first question about your code found nothing to read. It goes with
+  them now, while it is still there.
+
 ## 0.48.4 — 2026-10-27
 
 - This is the first published build since 0.48.2. The 0.48.3 source tag was held by its release gate on GitHub's

@@ -83,8 +83,11 @@ def profile_folders() -> list[tuple[str, Path]]:
 def active_port(folder: Path) -> tuple[int, str] | None:
     """The port and browser path a running Chrome wrote, when it allows remote debugging; None otherwise."""
     try:
-        text = (folder / "DevToolsActivePort").read_text(encoding="utf-8", errors="replace")
+        with (folder / "DevToolsActivePort").open("r", encoding="utf-8", errors="replace") as source:
+            text = source.read(1025)
     except OSError:
+        return None
+    if len(text) > 1024:
         return None
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) < 2 or not lines[0].isdigit() or not lines[1].startswith("/devtools/browser/"):

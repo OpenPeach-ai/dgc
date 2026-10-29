@@ -22,7 +22,9 @@ from . import background_now, clock, command_watch, helper_checkout, helper_memo
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .chat_changes import ChatChanges
 from .config import Config
+from . import shown_files
 from .hooks import run_hooks
+from .mods import bridge as mod_bridge
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
                   normalize_usage, usage_reported)
 from .memory import load_instruction_file, load_memories, project_memory_path
@@ -165,6 +167,8 @@ _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: fin
                            "not depend on it, then end your result with the question and the option "
                            "you recommend.")
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "present_document", "propose_options", "update_goal",
+                                 # An artifact is DGC's own, never a project file: a plan's design doc or deck.
+                                 "make_artifact", "edit_artifact",
                                  # Ending work this agent itself started, `monitor_stop`'s exact
                                  # case: a background child spawned before the user switched to
                                  # plan mode keeps running, and stopping it must not require
@@ -262,6 +266,7 @@ _OPTIONAL_TOOL_INTENT = {
     "web_fetch": "web", "web_search": "web", "browser": "browser",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "present_document": "document", "task": "delegate", "monitor": "monitor",
+    "make_artifact": "artifact", "edit_artifact": "artifact",
     "view_image": "image",
 }
 
@@ -1061,7 +1066,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import (EXECUTORS, MAX_TODO_CHARS, MAX_TODOS, TODO_STATUSES, TOOL_SCHEMAS,
-                    SUPERVISION_TOOL_SCHEMAS, TROUPE_TOOL_SCHEMA,
+                    SUPERVISION_TOOL_SCHEMAS, TROUPE_TOOL_SCHEMA, ARTIFACT_TOOL_SCHEMAS,
                     bash_handle_tools, execute,
                     shutdown_browsers, shutdown_python_kernels, take_pending_images,
                     take_pending_files)
@@ -1571,6 +1576,10 @@ class AgentContext:
     on_background: object = None
     # Trusted owning-chat provenance, never supplied through a model tool argument.
     pip_proposal_origin: object = None
+    # Artifacts (dgc/artifact_tools): where one this context makes comes from ({"surface": "work", ...}, a callable
+    # so it reads the session as it is now), and who hears that one was made or changed (the screens).
+    artifact_origin: object = None
+    on_artifact: object = None
     # Controller-only, cloned for one configured foreground verifier; never a tool argument.
     configured_verifier_receipt: object = None
 
@@ -1944,6 +1953,9 @@ class _SubUI:
     def artifact_ready(self, art):
         return self._emit("artifact_ready", art)
 
+    def artifact_changed(self, view, op):
+        return self._emit("artifact_changed", view, op)
+
     def files_ready(self, call_id, items):
         return self._emit("files_ready", call_id, items)
 
@@ -2302,7 +2314,9 @@ class Agent(GoalLifecycle):
                                 on_todo=safe_todo_callback, cancelled=self.cancelled,
                                 on_tool_timing=self._record_tool_timing,
                                 notes=lambda: self.notes(),
-                                pip_proposal_origin=self._pip_proposal_origin)
+                                pip_proposal_origin=self._pip_proposal_origin,
+                                artifact_origin=self._artifact_origin,
+                                on_artifact=self._artifact_changed)
         # Only now is there a context to carry the model's image capability. Syncing it before
         # self.ctx existed silently did nothing, so every fresh backend told a vision model it
         # could not see its screenshots until the user happened to re-pick the model.
@@ -2328,6 +2342,7 @@ class Agent(GoalLifecycle):
         self._reasoning_seq = 0                  # thinking: reasoning block counter
         self._turn_reasoning_pending: list = []  # thinking: blocks not yet saved on a message
         self._approval_records: dict = {}       # explicit human decisions, persisted with results
+        self._shown_file_records: dict = {}     # path-only UI records, persisted with their tool result
         self._decision_records: dict = {}        # options: question outcomes by call id
         self._end_turn_after_batch = ""          # options: end the turn once this batch finishes
                                                  # ("dismissed" also skips the batch's later calls;
@@ -2371,6 +2386,7 @@ class Agent(GoalLifecycle):
         self.autonomous_gate = str(config.get("autonomous_gate", "") or "")
         self.autonomous_max_turns = int(config.get("autonomous_max_turns", 30) or 30)
         self._session_started = False       # SessionStart hook fires once per session
+        self.mods = None                    # this session's mods (dgc/mods), once a screen starts them
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
         self._steer_lock = threading.Lock()
@@ -2454,7 +2470,7 @@ class Agent(GoalLifecycle):
                            # each clamped by that request's read timeout.
                            first_token_timeout=self.config.get("model_first_token_timeout_s", "auto"),
                            idle_timeout=self.config.get("model_idle_timeout_s", 300),
-                           stall_notice=self.config.get("model_stall_notice_s", 45),
+                           stall_notice=self.config.get("model_stall_notice_s", 45), learn_pace=True,
                            stall_retries=self.config.get("model_stall_retries", 2),
                            load_timeout=self.config.get("model_load_timeout_s", "auto"))
         # Every client this agent builds reports each finished request to the local usage ledger,
@@ -3143,6 +3159,7 @@ class Agent(GoalLifecycle):
                 mcp_schemas = self.mcp.tool_schemas()
         schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
                    + ([TROUPE_TOOL_SCHEMA] if self._troupe_exposed() else [])
+                   + (ARTIFACT_TOOL_SCHEMAS if self._artifacts_exposed() else [])
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
         if not pips_tools_available(self.config):
@@ -3152,6 +3169,10 @@ class Agent(GoalLifecycle):
         else:
             hidden = _PIPS_TOOL_NAMES
         schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in hidden]
+        if getattr(self, "_turn_output", "") in ("document", "slides", "spreadsheet", "dashboard"):
+            # The older page tool cannot fulfil a typed Output choice. Leave it available for
+            # Auto/Page turns, but don't let its familiar name win over make_artifact here.
+            schemas = [tool for tool in schemas if tool.get("function", {}).get("name") != "artifact"]
         if self.depth > 0 or getattr(self, "_monitor_turn", False):
             schemas = [tool for tool in schemas if tool.get("function", {}).get("name") not in _PIPS_MUTATION_TOOL_NAMES]
         if not bool(getattr(self.client, "vision_supported", False)):
@@ -3212,6 +3233,7 @@ class Agent(GoalLifecycle):
                            if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
                                or name not in _OPTIONAL_TOOL_INTENT
                                or _OPTIONAL_TOOL_INTENT[name] in active
+                               or (name in ("make_artifact", "edit_artifact") and getattr(self, "_turn_output", ""))
                                or (name == "task" and self._task_exposed())
                                or (name in {"repo_map", "code_intel"}
                                    and "narrow_scope" not in active)
@@ -3520,6 +3542,26 @@ class Agent(GoalLifecycle):
         from .permissions import session_policy
         return session_policy() is None
 
+    def _artifact_origin(self) -> dict:
+        """Where an artifact this session makes comes from: Work, this project, this session."""
+        session = getattr(getattr(self, "session_file", None), "stem", "") or ""
+        return {"surface": "work", "project": str(self.config.project_root), **({"session": session} if session else {})}
+
+    def _artifact_changed(self, view: dict, op: str) -> None:
+        self.__dict__.setdefault("_turn_artifact_types", []).append(view.get("type", ""))
+        notify = getattr(self.ui, "artifact_changed", None)
+        if callable(notify):
+            notify(view, op)
+
+    def _artifacts_exposed(self) -> bool:
+        """Are make_artifact / edit_artifact offered (dgc/artifact_tools)? To the agent the user talks to, in every
+        mode (an artifact is DGC's own, never a project file), and never to a session a launching application's policy
+        governs, for SUPERVISION_TOOL_SCHEMAS' reason: its SDK could not name them."""
+        if self.depth != 0:
+            return False
+        from .permissions import session_policy
+        return session_policy() is None
+
     def _troupe_will_wake(self) -> bool:
         """A troupe this chat started is still running and its end will wake the chat: a turn waiting on it may stop
         with its checklist open. Held open instead, the model polled the troupe's journal and reported before the
@@ -3728,7 +3770,10 @@ class Agent(GoalLifecycle):
         except Exception:
             return ""
         needle = str(query or "").strip().lower()
-        connected = set(getattr(self.mcp, "servers", {}) or {})
+        # A launched server stays in the manager table when its process exits. The
+        # model must not mistake that stale entry for a usable plugin connection.
+        connected = {name for name, server in (getattr(self.mcp, "servers", {}) or {}).items()
+                     if getattr(server, "proc", None) is not None and server.proc.poll() is None}
         failures = dict(getattr(self.mcp, "failures", {}) or {})
         lines = []
         for row in rows:
@@ -4432,6 +4477,10 @@ class Agent(GoalLifecycle):
                 f"- Shared with the real project, NOT isolated: {', '.join(shared)}. What you write "
                 f"there changes the user's own copy immediately and no integration step can take it "
                 f"back, so treat those paths as read-only unless the task is about them.")
+        # The user's untracked files its copy had no room for (dgc/worktree.py left_out_note).
+        left_out = str(getattr(self, "_left_out_note", "") or "")
+        if left_out:
+            lines.append(left_out)
         # A Pip fix's kept copy: what is installed in it and which ignored files it was given.
         lines.extend(str(line) for line in (getattr(self, "_fix_notes", ()) or ()))
         # An isolated helper: where its copy is, and that the user's checkout is not its to change.
@@ -4902,6 +4951,12 @@ class Agent(GoalLifecycle):
                 # The one-time note for a clear made before this turn (or at a goal-cycle boundary). A
                 # clear that lands between tool batches reaches the model as a reminder instead.
                 sections.append(("cleared", "# Checklist cleared\n" + self.TODO_CLEARED_NOTE))
+        output = getattr(self, "_turn_output", "")
+        if output and not intents_only:
+            from .artifact_tools import output_line
+            line = output_line(output)
+            if line:
+                sections.append(("output:" + output, "# Output\n" + line))
         if not adaptive:
             if self._artifact_guidance_wanted() and not self._artifact_guidance_static():
                 sections.append(("artifact", "\n".join(self._artifact_guidance())))
@@ -5862,6 +5917,7 @@ class Agent(GoalLifecycle):
                 if self.depth == 0:             # Stop lifecycle hook (turn finished)
                     self._run_lifecycle_hooks(
                         "Stop", {"prompt": safe_user_text}, cancelled=self.cancelled)
+                    mod_bridge.turn_complete(self)
             if completed is False and not self._last_turn_error:
                 self._last_turn_error = (self._last_persist_error
                                          or "the turn stopped before it completed")
@@ -6158,6 +6214,7 @@ class Agent(GoalLifecycle):
                 if self.depth == 0:
                     self._run_lifecycle_hooks(
                         "Stop", {"prompt": safe_user_text}, cancelled=self.cancelled)
+                    mod_bridge.turn_complete(self)
             return_result["persisted"] = saved
             if not saved:
                 return_result["ok"] = False
@@ -6917,8 +6974,12 @@ class Agent(GoalLifecycle):
     @staticmethod
     def _model_wait_text(ev) -> tuple[str, str]:
         from .model_watch import endpoint_host, format_seconds
+        from .subagents import format_elapsed
+
+        def said(seconds: float) -> str:          # "45s", and past a minute "2m 40s", never "160s"
+            return format_seconds(seconds) if seconds < 60 else format_elapsed(seconds * 1000)
         where = f"{ev.model} at {endpoint_host(ev.endpoint)}"
-        after = format_seconds(ev.threshold_s)
+        after = said(ev.threshold_s)
         if ev.phase == "loading":
             return "Loading the model", where
         if getattr(ev, "server", "") == "working":
@@ -6927,11 +6988,14 @@ class Agent(GoalLifecycle):
             return "Waiting for the model", f"{where} · the server is working on it"
         if ev.phase == "streaming":
             return "The model stopped streaming", f"{where} · no tokens for {after}+"
+        # A model DGC has seen often enough says what its normal is (dgc/model_pace.py): a slow model past it.
+        usual = getattr(ev, "usual_s", 0.0) or 0.0
+        normal = f" · it usually starts within {said(usual)}" if usual else ""
         if ev.phase == "first_token":
             return ("No response from the model",
                     f"{where} · stream open, no tokens for {after}+"
-                    + (" · keep-alives only" if ev.noise_frames else ""))
-        return "No response from the model", f"{where} · no reply for {after}+"
+                    + (" · keep-alives only" if ev.noise_frames else "") + normal)
+        return "No response from the model", f"{where} · no reply for {after}+{normal}"
 
     def _on_model_wait(self, ev) -> None:
         """A request is silent, being retried, or streaming again. Runs on the watcher thread for
@@ -7528,6 +7592,9 @@ class Agent(GoalLifecycle):
                     self.monitors.requeue(notification)
                     self.monitors.policy.pause("a UserPromptSubmit hook blocked the wake-up")
                 return self._fail_turn(f"prompt blocked by a UserPromptSubmit hook: {hout}")
+            if not wake and self.mods is not None:
+                # The user's mods hear the prompt; one allowed to may rewrite it, said and kept (dgc/mods/bridge).
+                user_text = mod_bridge.prompt(self, user_text)
             if not wake and not self.checkpoints.open(
                     len(self.messages), _checkpoint_preview(user_text),
                     [m for m in self.messages if m.get("role") != "system"]):
@@ -7646,6 +7713,7 @@ class Agent(GoalLifecycle):
         todo_repair = 0             # bounded correction for a model printing tool args as prose
         options_repair = 0
         self._approval_records.clear()
+        self._shown_file_records.clear()
         self._task_batch_records = {}       # batch `task` calls: each helper's result, by call id
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
@@ -8521,12 +8589,14 @@ class Agent(GoalLifecycle):
             text_results: list[str] = []
             text_approvals: list[dict] = []
             text_decisions: list[dict] = []     # question outcomes recorded on the results message
+            text_files: list[dict] = []
             self._end_turn_after_batch = ""     # a dismissed question in THIS batch ends the turn
 
             def text_results_message() -> dict:
                 return {"role": "user",
                         "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>",
                         **({"_dgc_decision": list(text_decisions)} if text_decisions else {}),
+                        **({"_dgc_files": list(text_files)} if text_files else {}),
                         **({"_dgc_approvals": list(text_approvals)} if text_approvals else {})}
 
             def flush_text_results() -> None:
@@ -8534,6 +8604,7 @@ class Agent(GoalLifecycle):
                     self.messages.append(text_results_message())
                     text_results.clear()
                     text_decisions.clear()
+                    text_files.clear()
                     text_approvals.clear()
 
             def unfinished_text_batch(next_index: int) -> list:
@@ -8730,10 +8801,12 @@ class Agent(GoalLifecycle):
                 # A batch `task` call: each helper's own result, for the transcript to replay under
                 # its own card (Backend._history) and a reopened chat to restore (subagents.py).
                 helpers = (self.__dict__.get("_task_batch_records") or {}).pop(call.id, None)
+                files = self._shown_file_records.pop(call.id, None)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
                                           **({"_dgc_decision": decision} if decision else {}),
                                           **({"_dgc_task_batch": helpers} if helpers else {}),
+                                          **({"_dgc_files": [{"call_id": call.id, "items": files}]} if files else {}),
                                           **({"_dgc_approval": approval} if approval else {})})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
@@ -8741,6 +8814,8 @@ class Agent(GoalLifecycle):
                         text_approvals.append(approval)
                     if decision:
                         text_decisions.append({**decision, "call_id": None})
+                    if files:
+                        text_files.append({"call_id": None, "items": files})
                 if any(later not in parallel_tasks and later not in parallel_outputs
                        for later in range(call_index + 1, len(result.tool_calls))):
                     # A later call of this batch still has to run, and may run for minutes. Save the
@@ -9519,20 +9594,30 @@ class Agent(GoalLifecycle):
                 artifact_path = str(args.get("path", ""))
                 artifact_name = redact_text(
                     str(args.get("name", "") or Path(artifact_path).stem or "Artifact"), secrets)
-                art = artifacts.add(artifact_path, self.config.project_root,
-                                    artifact_name or "Artifact",
-                                    preferred_port=int(self.config.get("artifact_port", 45000)),
-                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"),
-                                    hostname=str(self.config.get("artifact_hostname", "") or ""))
+                art, unversioned = artifacts.publish(
+                    artifact_path, self.config.project_root, artifact_name or "Artifact",
+                    preferred_port=int(self.config.get("artifact_port", 45000)),
+                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"),
+                    hostname=str(self.config.get("artifact_hostname", "") or ""),
+                    session=getattr(getattr(self, "session_file", None), "stem", "") or "")
             except Exception as e:
                 return artifact_refused(f"error: could not start the artifact preview: {type(e).__name__}: {e}")
             notify = getattr(self.ui, "artifact_ready", None)
             if notify:
                 notify(art)                          # the TUI proposes opening it in the terminal
-            return (f"Artifact '{art.name}' is live at {art.url} — all artifacts share ONE local server "
-                    f"({artifacts.base_url()}) with a dropdown to switch between them. Tell the user they "
-                    f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
-                    f"another server yourself." + (f" {artifacts.SCOPED_NOTE}" if art.scoped else ""))
+            version = ""
+            if art.store_id and not unversioned:
+                try:
+                    from . import artifact_store
+                    version = f" (version {artifact_store.store().get(art.store_id).version}, kept in the Library)"
+                except Exception:
+                    version = ""
+            return (f"Artifact '{art.name}' is live at {art.url}{version}. Each artifact has its own address; the "
+                    f"page at {artifacts.base_url()} lists them all with a dropdown. Publishing the same page "
+                    f"again makes a new version of it. Tell the user they can open that URL in a browser; "
+                    f"'/artifact' lists and stops previews. Do NOT start another server yourself."
+                    + (f" {artifacts.SCOPED_NOTE}" if art.scoped else "")
+                    + (f" (This publish is {unversioned}.)" if unversioned else ""))
 
         if name in helper_checkout.FILE_TOOLS and isinstance(args, dict) and args.get("path"):
             # An isolated helper's copy is its only place to write. A write into the user's checkout
@@ -9574,6 +9659,19 @@ class Agent(GoalLifecycle):
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
         decision, reason = perms.decide(name, policy_args)
+        # The user's mods (dgc/mods): a mod may stop this step, or ask the user first where the rules would go
+        # ahead; it can never allow one. Its Ask isn't answered by the card's re-check below.
+        mod_asked = False
+        if self.mods is not None and decision != DENY:
+            said = mod_bridge.tool_call(self, name, display_args)
+            if said["decision"] == "deny":
+                why = f"{said['mod']}: {said['reason']}" if said["reason"] else said["mod"]
+                self.ui.tool_denied(name, display_args, redact_text(f"Stopped by {why}", secrets), call_id)
+                return (f"STOPPED by the user's {said['mod']} mod: {said['reason'] or 'no reason given'}. "
+                        "Do not retry this exact action.")
+            if said["decision"] == "ask" and decision == ALLOW:
+                decision, reason, mod_asked = ASK, f"{said['mod']} asks first: {said['reason']}", True
+                self.ui.info(redact_text(f"{said['mod']} asks you first: {said['reason']}", secrets))
         asked_user = decision == ASK            # a monitor's restart keeps the approval it was given
         if decision == DENY:
             self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
@@ -9591,6 +9689,8 @@ class Agent(GoalLifecycle):
         if decision == ASK:
             def recheck():
                 result, _ = current_permissions().decide(name, policy_args)
+                if mod_asked:                   # a rule that allows it doesn't answer the mod's Ask
+                    return "no" if result == DENY else None
                 return "once" if result == ALLOW else "no" if result == DENY else None
             # Opt in via a real method, not a permissive fixture's __getattr__ fallback.
             live_approve = getattr(type(self.ui), "approve_live", None)
@@ -9833,9 +9933,14 @@ class Agent(GoalLifecycle):
                     pass
             # What an isolated helper wrote outside its copy (a /tmp script) it may read back.
             helper_checkout.note_write(self, args["path"])
+            if self.mods is not None:
+                mod_bridge.wrote(self, str(args["path"]))   # a mod's folder DGC wrote: asked once a session
         _, post = self._run_lifecycle_hooks(
             "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
             cancelled=self.cancelled)
+        if self.mods is not None:
+            mod_bridge.fire(self, "tool.result", {"tool": name, "is_error": str(out).startswith(("error:", "ERROR")),
+                                                  "output": str(out)[:2000]})
         if post:
             out = redact_text(f"{out}\n[hook] {post}", secrets)
         reminder = self._notes_reminder(name, args)   # prior failures, before this call is recorded
@@ -9991,10 +10096,14 @@ class Agent(GoalLifecycle):
         A chip is a courtesy: a frontend that has no idea what a produced file is, and any failure
         inside one that does, must never cost the tool result that earned it.
         """
-        items = [entry for entry in (entries or ())
-                 if isinstance(entry, dict) and entry.get("rel")]
+        items = shown_files.items(entries)
         if not items:
             return
+        if call_id:
+            records = self.__dict__.setdefault("_shown_file_records", {})
+            if len(records) >= 64:
+                records.pop(next(iter(records)))
+            records[call_id] = items
         notify = getattr(self.ui, "files_ready", None)
         if not callable(notify):
             return
@@ -10540,7 +10649,7 @@ class Agent(GoalLifecycle):
                 prompt = helper_checkout.map_paths(prompt, user_checkouts, child_root)
             task_prompt = ((adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body and not continuing)
                            else prompt)
-            from .worktree import absent_ignored_dirs
+            from .worktree import absent_ignored_dirs, left_out_note
             try:
                 child_config = self.config.clone_for_root(child_root)
             except Exception as exc:
@@ -10596,6 +10705,9 @@ class Agent(GoalLifecycle):
                     sub._absent_dirs = absent_ignored_dirs(
                         self.config.project_root, child_root)
                     sub._shared_dirs = list(getattr(workspace, "linked", ()) or ())
+                    # The user's own uncommitted files its copy had no room for: named, so it does
+                    # not take one for missing and recreate it (dgc/worktree.py _populate).
+                    sub._left_out_note = left_out_note(workspace)
                     # The checkouts that are not its to change: the parent's, and every one above.
                     # Its prompt says so, and its file tools refuse a write into them.
                     sub._user_checkouts = user_checkouts
@@ -10929,7 +11041,11 @@ class Agent(GoalLifecycle):
             # that named only the conflict would read as "nothing happened" while files had in fact
             # changed, and one that named only what landed would hide work still waiting.
             landed = ", ".join(integration.paths[:20]) or "(none)"
-            held = ", ".join(integration.conflicts[:20]) or "(none)"
+            # Two reasons to hold a file back, said apart: the user changed the same lines, or it is
+            # one of the user's own files the helper's copy left out, which DGC never writes.
+            left_out = set(getattr(integration, "left_out", ()) or ())
+            collided = [path for path in integration.conflicts if path not in left_out]
+            kept_out = [path for path in integration.conflicts if path in left_out]
             more = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
             reconciled = ""
             if integration.merged:
@@ -10940,11 +11056,27 @@ class Agent(GoalLifecycle):
                 reconciled = (f" {names} changed in the working tree while the sub-agent ran"
                               f" — {cause} — so its edits were merged"
                               f" with those changes rather than written over them.")
+            if collided or not kept_out:
+                held = ", ".join(collided[:20]) or "(none)"
+                held_back = (f" Held back because you changed the same lines: {held}. That work is "
+                             f"preserved at {workspace.path} on branch {workspace.branch}; resolve "
+                             "it from /tasks.")
+            else:
+                held_back = ""
+            if kept_out:
+                names = ", ".join(kept_out[:20]) + (f" (+{len(kept_out) - 20} more)"
+                                                     if len(kept_out) > 20 else "")
+                one = len(kept_out) == 1
+                held_back += (
+                    f" Not written: {names}, {'one of the' if one else 'the'} user's own uncommitted "
+                    f"files that its copy did not have, so DGC left "
+                    f"{'it as it is' if one else 'them as they are'}. The helper's version is "
+                    f"preserved at {workspace.path} on branch {workspace.branch}. Say so in your "
+                    "answer.")
             return _TaskOutcome(
                 f"Sub-task '{description}' partly integrated. Applied {len(integration.paths)} "
-                f"path(s): {landed}{more}.{reconciled} Held back because you changed the same lines:"
-                f" {held}. That work is preserved at {workspace.path} on branch {workspace.branch};"
-                f" resolve it from /tasks.{outside}{warning}\nSummary:\n{result}",
+                f"path(s): {landed}{more}.{reconciled}{held_back}{outside}{warning}\n"
+                f"Summary:\n{result}",
                 True, tuple(integration.paths))
         if integration.status == "clean":
             if outside:
@@ -10971,7 +11103,7 @@ class Agent(GoalLifecycle):
         ends (_wait_for_detached_slot), where a single call over the cap runs in the foreground.
         ``spawned`` then receives ``(agent_id, queued)`` and the result is that child's one
         sentence -- the batch says once how the results come back."""
-        from .worktree import TaskWorkspace, repo_root
+        from .worktree import TaskWorkspace, left_out_summary, repo_root
 
         self._last_task_integrated = False
         description = self._safe_text(description)
@@ -11003,10 +11135,11 @@ class Agent(GoalLifecycle):
 
         if workspace is None and repo_root(self.config.project_root) is not None:
             return (f"Sub-task '{description}' was not started because its isolated Git worktree "
-                    f"could not be created: {isolation_error or 'unknown error'}. The parent checkout "
-                    "was left unchanged.")
+                    f"could not be created: {(isolation_error or 'unknown error').rstrip('.')}. The "
+                    "parent checkout was left unchanged.")
         if workspace is not None:
-            self.ui.info(self._safe_text(f"↳ isolated checkout: {workspace.project_root}"))
+            self.ui.info(self._safe_text(f"↳ isolated checkout: {workspace.project_root}"
+                                         f"{left_out_summary(workspace)}"))
             # A configured share that could not be made is the one thing here the user must see:
             # the task runs either way, but it runs without what they asked to share.
             for failure in getattr(workspace, "link_errors", ()) or ():
@@ -12234,7 +12367,7 @@ class Agent(GoalLifecycle):
         own description, permissions.py), PreToolUse hook, depth and budget. So the per-call
         approval check is not made again here; every other condition is (_parallel_task_refusal).
         """
-        from .worktree import TaskWorkspace
+        from .worktree import TaskWorkspace, left_out_summary
 
         # `background: true` means "do not wait for me", and this path waits for everything: a
         # background call inside a batch was silently run in the foreground, whatever the model asked
@@ -12314,8 +12447,8 @@ class Agent(GoalLifecycle):
                     if workspace is None:
                         outcomes[i] = _TaskOutcome(
                             f"Sub-task '{description}' was not started because its isolated Git worktree "
-                            f"could not be created: {error or 'unknown error'}. The parent checkout was "
-                            "left unchanged.")
+                            f"could not be created: {(error or 'unknown error').rstrip('.')}. The parent "
+                            "checkout was left unchanged.")
                     else:
                         prepared[i] = workspace
             finally:
@@ -12379,7 +12512,8 @@ class Agent(GoalLifecycle):
                         tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
                         self.ui.info(f"⟳ sub-task: {description}{tag}")
                         self.ui.info(self._safe_text(
-                            f"↳ isolated checkout: {workspace.project_root}"))
+                            f"↳ isolated checkout: {workspace.project_root}"
+                            f"{left_out_summary(workspace)}"))
                         if getattr(self, "subagents", None) is not None:
                             self.subagents.start(
                                 id=sub_uis[i].agent_id, parent_id=getattr(self, "_subagent_id", None),

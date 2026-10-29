@@ -125,6 +125,9 @@ for (const theme of ["dark-modern", "light-modern"]) {
       await s.card("plan-keep").locator(".feedback").fill("Cover the migration first");
       await s.card("plan-approve").locator(".feedback").fill("typed, then approved");
       for (const [id, d] of cards) await s.card(id).locator(`button[data-d="${d}"]`).click();
+      await s.page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+        type: "planAutoDecision", id: "req-plan-auto", approved: true, mode: "auto",
+      } })));
       await s.send({ type: "mcp_input_request", id: "req-sampling", server: "fixture", kind: "sampling_request", payload: { messages: [] } });
       await s.send({ type: "mcp_input_request", id: "req-url", server: "fixture", kind: "elicitation",
         payload: { mode: "url", message: "Sign in", url: "https://example.com/login", host: "example.com" } });

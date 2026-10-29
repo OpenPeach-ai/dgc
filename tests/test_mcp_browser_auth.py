@@ -45,6 +45,11 @@ class McpBrowserAuthTests(unittest.TestCase):
                     "_dgc_bridge_callback": "http://localhost:43123/oauth/callback"}
         self.assertNotIn("_dgc_bridge_callback", sanitize_input_request("elicitation/create", supplied))
 
+    def test_malformed_sign_in_url_is_a_bounded_input_error(self):
+        for url in ("https://[broken/", "https://auth.example.invalid:bad/sign-in"):
+            with self.subTest(url=url), self.assertRaises(MCPInputError):
+                sanitize_input_request("elicitation/create", {"mode": "url", "message": "Sign in", "url": url})
+
 
 class McpBrowserWaitTests(unittest.TestCase):
     def request_with_clock_jump(self, *, browser=True, method='initialize', cancelled=False):

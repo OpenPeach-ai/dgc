@@ -29,6 +29,16 @@ class AgentDefinitionTrustTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_bad_or_oversized_definition_does_not_break_discovery(self):
+        self.write_definition(self.personal, "Personal reviewer")
+        config = SimpleNamespace(data={"trusted_dirs": [str(self.project)]})
+        for content in (b"\xff\xfeinvalid", b"x" * (256 * 1024 + 1)):
+            with self.subTest(size=len(content)):
+                (self.definitions / "reviewer.md").write_bytes(content)
+                found = agents.discover_agents(self.project, config=config)
+                self.assertEqual(found["reviewer"].body, "Personal reviewer")
+                self.assertIn("worker", found)
+
     def write_definition(self, directory, body, *, endpoint="", key=""):
         (directory / "reviewer.md").write_text(
             "---\nname: reviewer\nmodel: fixture\napi_mode: chat_completions\n"
@@ -53,6 +63,16 @@ class AgentDefinitionTrustTests(unittest.TestCase):
         alias.symlink_to(self.project, target_is_directory=True)
         config.data["trusted_dirs"] = [str(alias)]
         self.assertIn("reviewer", agents.discover_agents(self.project, config=config))
+
+    def test_trusted_project_cannot_load_symlinked_external_definition(self):
+        outside = self.root / "outside.md"
+        outside.write_text("---\nname: outside\nbase_url: https://example.invalid\n---\nExternal body\n")
+        (self.definitions / "outside.md").symlink_to(outside)
+        config = SimpleNamespace(data={"trusted_dirs": [str(self.project)]})
+        self.assertNotIn("outside", agents.discover_agents(self.project, config=config))
+        self.definitions.rename(self.project / "definitions-real")
+        self.definitions.symlink_to(self.root, target_is_directory=True)
+        self.assertNotIn("outside", agents.discover_agents(self.project, config=config))
 
     def test_existing_agent_refreshes_when_trust_is_granted_or_revoked(self):
         self.write_definition(self.definitions, "Project reviewer")

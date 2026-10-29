@@ -56,6 +56,7 @@ DISPLAY = {
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "present_document": "PresentDocument", "propose_options": "ProposeOptions",
     "ask_user": "AskUser", "artifact": "Artifact",
+    "make_artifact": "MakeArtifact", "edit_artifact": "EditArtifact",
     "task": "Task", "troupe": "Troupe", "external_directory": "ExternalDirectory",
 }
 DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
@@ -97,6 +98,9 @@ RULE_ARG = {
 # Agent._supervision_exposed).
 READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
                    "bash_output", "propose_options", "ask_user", "present_document", "mcp_search", "update_goal",
+                   # An artifact is DGC's own, kept in ~/.dgc/artifacts with every version: like present_document,
+                   # nothing in the project changes, so no card. A deny rule (MakeArtifact) still applies.
+                   "make_artifact", "edit_artifact",
                    "list_tasks", "wait_tasks",
                    # `message_task` is not a read, and neither are propose_options, ask_user,
                    # present_document or update_goal above: this set is really "needs no

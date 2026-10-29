@@ -22,6 +22,17 @@ REMOTE = {"transport": "remote", "command": "npx", "args": ["-y", "mcp-remote", 
 
 
 class BackgroundStartupTests(unittest.TestCase):
+    def test_startup_cap_applies_before_hosted_servers_are_split_out(self):
+        calls = []
+        entries = {f"remote_{i}": dict(REMOTE) for i in range(40)}
+        entries.update({f"local_{i}": {"command": sys.executable, "args": ["-c", "pass"]} for i in range(40)})
+        manager = MCPManager(Path(tempfile.mkdtemp()))
+        with patch.object(MCPServer, "start", lambda server, timeout=10.0, cancel=None: calls.append(server.name) or False):
+            manager.connect_all(entries, startup=True)
+            self.assertTrue(manager.wait_background(5))
+        self.assertEqual(len(calls), 64)
+        self.assertNotIn("local_24", calls)
+
     def test_hosted_servers_do_not_hold_a_new_chat(self):
         release = threading.Event()
         started = []

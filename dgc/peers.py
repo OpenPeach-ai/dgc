@@ -20,6 +20,7 @@ is ``unknown`` and the caller says so, rather than claiming a peer is live or go
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import subprocess
@@ -32,6 +33,8 @@ from pathlib import Path
 STALE_AFTER_S = 15 * 60.0
 MAX_PEERS = 64                       # a listing bound, not a limit on how many may run
 MAX_NOTE_SESSIONS = 32               # one process's chats, listed in its note
+MAX_NOTE_BYTES = 1024 * 1024          # bounded even for a full multi-chat note
+MAX_RELEASE_BYTES = 8192              # one bounded takeover request or answer
 # The note is a slow courtesy, but a takeover ask is someone waiting at a keyboard, so one thread
 # serves both: it ticks fast and only re-announces every ANNOUNCE_EVERY ticks. Both frontends read
 # these from here -- two copies of a number that must agree is how most of this file's bugs began.
@@ -132,6 +135,13 @@ def _alive(pid: int) -> bool:
         return False
 
 
+def _heartbeat(value) -> float | None:
+    if type(value) not in (int, float):
+        return None
+    stamp = float(value)
+    return stamp if math.isfinite(stamp) else None
+
+
 def liveness(record: dict, *, now: float | None = None) -> str:
     """``live``, ``gone`` or ``unknown`` for one peer note.
 
@@ -141,11 +151,14 @@ def liveness(record: dict, *, now: float | None = None) -> str:
     if not isinstance(record, dict):
         return "gone"
     pid = record.get("pid")
-    if not isinstance(pid, int) or pid <= 0:
+    if type(pid) is not int or pid <= 0:
         return "gone"
     seen = record.get("heartbeat")
     moment = time.time() if now is None else now
-    if isinstance(seen, (int, float)) and moment - float(seen) > STALE_AFTER_S:
+    stamp = _heartbeat(seen)
+    if seen is not None and stamp is None:
+        return "gone"
+    if stamp is not None and moment - stamp > STALE_AFTER_S:
         return "gone"
     if not _alive(pid) or _is_zombie(pid):
         return "gone"
@@ -229,14 +242,17 @@ def announce(*, kind: str, session: str = "", cwd: str = "", project_root: str =
                 for item in sessions[:MAX_NOTE_SESSIONS] if isinstance(item, dict)]
         path = directory / f"{pid}.json"
         tmp = _staging(directory, f"{pid}.json")
-        tmp.write_text(json.dumps(record, ensure_ascii=True), encoding="utf-8")
+        encoded = json.dumps(record, ensure_ascii=True, allow_nan=False).encode("utf-8")
+        if len(encoded) > MAX_NOTE_BYTES:
+            return None
+        tmp.write_bytes(encoded)
         try:
             tmp.chmod(0o600)
         except OSError:
             pass
         os.replace(tmp, path)
         return path
-    except OSError:
+    except (OSError, ValueError, TypeError):
         return None                  # a peer note is a courtesy; never fail a turn over one
 
 
@@ -288,8 +304,13 @@ def others(*, project_root: str = "", git_common_dir: str = "", here: bool = Tru
         return []
     for entry in entries[:MAX_PEERS * 4]:
         try:
-            record = json.loads(entry.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            from .workspace import read_regular_bytes
+            # The account home itself may be a symlink; pin its resolved peer
+            # directory while still refusing a symlinked note entry.
+            raw, _version = read_regular_bytes(entry.parent.resolve(strict=True) / entry.name,
+                                               maximum=MAX_NOTE_BYTES)
+            record = json.loads(raw)
+        except (OSError, ValueError, UnicodeError, RuntimeError):
             continue
         if not isinstance(record, dict) or record.get("pid") == mine:
             continue
@@ -304,7 +325,7 @@ def others(*, project_root: str = "", git_common_dir: str = "", here: bool = Tru
             continue
         record["liveness"] = verdict
         found.append(record)
-    found.sort(key=lambda r: float(r.get("heartbeat") or 0), reverse=True)
+    found.sort(key=lambda r: _heartbeat(r.get("heartbeat")) or 0, reverse=True)
     return found[:MAX_PEERS]
 
 
@@ -480,6 +501,14 @@ def _release_path(pid: int, suffix: str) -> Path:
     return takeover_dir() / f"{int(pid)}.{suffix}.json"
 
 
+def _release_json(pid: int, suffix: str):
+    from .workspace import read_regular_bytes
+    path = _release_path(pid, suffix)
+    raw, _version = read_regular_bytes(path.parent.resolve(strict=True) / path.name,
+                                       maximum=MAX_RELEASE_BYTES)
+    return json.loads(raw)
+
+
 def request_release(record: dict, session: str, *, open_here: bool = False, by: str = "") -> bool:
     """Ask the peer in ``record`` to give this session up. True when the ask was left.
 
@@ -517,9 +546,8 @@ def pending_release(session: str, *, now: float | None = None) -> dict | None:
     would mean standing down for a window that is no longer waiting.
     """
     try:
-        raw = _release_path(os.getpid(), "ask").read_text(encoding="utf-8")
-        ask = json.loads(raw)
-    except (OSError, ValueError):
+        ask = _release_json(os.getpid(), "ask")
+    except (OSError, ValueError, RuntimeError):
         return None
     if not isinstance(ask, dict) or ask.get("holder") != os.getpid():
         return None
@@ -527,7 +555,8 @@ def pending_release(session: str, *, now: float | None = None) -> dict | None:
         return None
     moment = time.time() if now is None else now
     at = ask.get("at")
-    if not isinstance(at, (int, float)) or moment - float(at) > RELEASE_REQUEST_FRESH_S:
+    stamp = _heartbeat(at)
+    if stamp is None or not 0 <= moment - stamp <= RELEASE_REQUEST_FRESH_S:
         _forget_release(os.getpid(), "ask")
         return None
     return ask
@@ -556,8 +585,8 @@ def answer_release(*, granted: bool, reason: str = "") -> None:
 def release_answer(pid: int) -> dict | None:
     """For an asker: the holder's reply, or None while it has not answered."""
     try:
-        answer = json.loads(_release_path(pid, "ans").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        answer = _release_json(pid, "ans")
+    except (OSError, ValueError, RuntimeError):
         return None
     return answer if isinstance(answer, dict) and answer.get("holder") == pid else None
 

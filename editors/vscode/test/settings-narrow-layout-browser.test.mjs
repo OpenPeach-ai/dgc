@@ -80,10 +80,9 @@ async function open(width, section, opts = {}) {
   await p.route("https://settings.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
   await p.goto("https://settings.test/view");
   await p.waitForSelector("#ultra_mode");
-  // A tab narrower than 620px has the page picker in place of the side list.
+  // The same navigation stays reachable as an icon rail in narrow tabs.
   if (section !== "general") {
-    if (await p.isVisible(`[data-nav=${section}]`)) await p.click(`[data-nav=${section}]`);
-    else await p.selectOption("#page-picker", section);
+    await p.click(`[data-nav=${section}]`);
   }
   return { p, close: () => context.close() };
 }
@@ -119,7 +118,7 @@ test("General at 270px: DGC Ultra's words keep a readable column, its switch bes
   if (skipOrFail(t)) return;
   const { p, close } = await open(270, "general");
   try {
-    // A narrow tab now has a page picker instead of the side list, so the words have room beside the switch;
+    // Even with the icon rail, the words need room beside or above the switch;
     // what must never come back is the crushed column (readable: 150px or more, three lines at most).
     const hint = '.field:has(#ultra_mode) .hint';
     readable(await run(p, hint), 3);
@@ -193,7 +192,7 @@ test("MCP servers at 270px: a server's words stay beside its mark, and its switc
     await p.waitForSelector('[data-mcp-toggle="local-files"]');
     const row = 'article.row:has([data-mcp-toggle="local-files"])';
     assert.ok((await placement(p, `${row} .mark`, `${row} .copy`)).beside, "the words beside the server's mark");
-    // With the page picker in place of the side list there may be room for the switch and gear beside the words;
+    // There may be room for the switch and gear beside the words;
     // either way the words keep a readable column.
     const controls = await placement(p, `${row} .copy`, `${row} .actions`);
     const words = await run(p, `${row} .copy strong`);
@@ -233,5 +232,47 @@ test("at 900px nothing moved: each control sits beside its words, the figures sh
     await p.waitForSelector('[data-mcp-toggle="local-files"]');
     const row = 'article.row:has([data-mcp-toggle="local-files"])';
     assert.ok((await placement(p, `${row} .copy`, `${row} .actions`)).beside, "a server's switch and gear beside its words");
+  } finally { await close(); }
+});
+
+
+test("narrow Settings keeps labeled, scrollable icon navigation and restores the wide layout", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, close } = await open(360, "general");
+  try {
+    const nav = p.locator(".sidebar");
+    const entries = await p.locator("[data-nav]").evaluateAll(els => els.map(el => ({
+      id: el.dataset.nav, label: el.getAttribute("aria-label"), title: el.title,
+    })));
+    for (const width of [270, 360, 520, 620]) {
+      await p.setViewportSize({ width, height: 300 });
+      assert.equal(await nav.isVisible(), true);
+      assert.equal(Math.round((await nav.boundingBox()).width), 52);
+      assert.equal(await p.locator(".nav-text").first().isVisible(), false);
+      assert.equal(await p.locator("#collapse-nav").isVisible(), false);
+      for (const { id, label, title } of entries) {
+        assert.ok(label, `${id} has an accessible label`);
+        assert.equal(title, label, `${id} has a hover label`);
+        const button = p.locator(`[data-nav="${id}"]`);
+        await button.focus();
+        await p.keyboard.press("Enter");
+        assert.equal(await button.getAttribute("aria-current"), "page");
+        const bounds = await button.boundingBox();
+        assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 301, `${id} scrolls into view`);
+        const icon = await button.locator("svg").boundingBox();
+        assert.ok(icon.x >= bounds.x && icon.x + icon.width <= bounds.x + bounds.width, `${id} icon fits its button`);
+      }
+    }
+    await p.setViewportSize({ width: 900, height: 900 });
+    assert.equal(Math.round((await nav.boundingBox()).width), 172);
+    assert.equal(await p.locator(".nav-text").first().isVisible(), true);
+    await p.click("#collapse-nav");
+    assert.equal(Math.round((await nav.boundingBox()).width), 52);
+    assert.equal(await p.locator("#collapse-nav").getAttribute("title"), "Expand navigation");
+    await p.setViewportSize({ width: 360, height: 900 });
+    await p.setViewportSize({ width: 900, height: 900 });
+    assert.equal(Math.round((await nav.boundingBox()).width), 52, "manual collapse survives resizing");
+    await p.click("#collapse-nav");
+    assert.equal(await p.locator(".nav-text").first().isVisible(), true);
   } finally { await close(); }
 });

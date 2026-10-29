@@ -72,30 +72,45 @@ export function notSetUp(said: string): boolean {
 export type Runner = (args: string[], options?: { input?: string; timeoutMs?: number }) =>
   Promise<{ code: number | null; out: string; err: string; missing?: boolean }>;
 
+const MAX_WSL_OUTPUT = 8 * 1024 * 1024;
+
 /** wsl.exe with ARGS, its output read either way. `missing` when there is no wsl.exe at all. */
-export function runWsl(env: NodeJS.ProcessEnv = process.env): Runner {
+export function runWsl(env: NodeJS.ProcessEnv = process.env, spawnProcess: typeof spawn = spawn): Runner {
   return (args, options = {}) => new Promise((resolve) => {
     let child;
     try {
       const merged: NodeJS.ProcessEnv = { ...env, WSL_UTF8: "1" };
       merged.WSLENV = wslenv(env.WSLENV, merged);     // the installer's own variables, as `dgc serve` gets them
-      child = spawn(wslExe(env), args, { env: merged, windowsHide: true });
+      child = spawnProcess(wslExe(env), args, { env: merged, windowsHide: true });
     } catch {
       resolve({ code: null, out: "", err: "", missing: true });
       return;
     }
     const out: Buffer[] = [];
     const err: Buffer[] = [];
+    let outputBytes = 0;
+    let overflow = false;
+    const collect = (target: Buffer[], chunk: Buffer) => {
+      if (overflow) return;
+      outputBytes += chunk.length;
+      if (outputBytes > MAX_WSL_OUTPUT) {
+        overflow = true;
+        try { child.kill(); } catch { /* already exited */ }
+        return;
+      }
+      target.push(chunk);
+    };
     const timer = setTimeout(() => { try { child.kill(); } catch { /* gone */ } }, options.timeoutMs ?? 60_000);
-    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
+    child.stdout.on("data", (chunk: Buffer) => collect(out, chunk));
+    child.stderr.on("data", (chunk: Buffer) => collect(err, chunk));
     child.on("error", (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
       resolve({ code: null, out: "", err: String(error.message), missing: error.code === "ENOENT" });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, out: wslText(Buffer.concat(out)), err: wslText(Buffer.concat(err)) });
+      resolve({ code: overflow ? null : code, out: wslText(Buffer.concat(out)),
+        err: overflow ? "WSL output exceeded 8 MiB." : wslText(Buffer.concat(err)) });
     });
     if (options.input !== undefined) { child.stdin.end(options.input); } else { child.stdin.end(); }
   });

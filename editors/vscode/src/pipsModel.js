@@ -237,7 +237,12 @@ export function requestBroker(send, namespace=globalThis.crypto.randomUUID()) {
     // `wait`: how long this one may take (a /learn draft is a model's answer, so minutes, not 60 s).
     request(request, wait=60000) {
       if (pending.size >= 48) return Promise.reject(new Error('DGC is busy. Reconnect and try again.'));
-      return new Promise((resolve,reject) => { const id = 'view-' + namespace + '-' + (++sequence); pending.set(id,{resolve,reject,at:Date.now(),wait}); send({type:'pipsRequest',id,request}); });
+      return new Promise((resolve,reject) => {
+        const id = 'view-' + namespace + '-' + (++sequence);
+        pending.set(id,{resolve,reject,at:Date.now(),wait});
+        try { send({type:'pipsRequest',id,request}); }
+        catch (error) { pending.delete(id); reject(error); }
+      });
     },
     receive(message) { const item=pending.get(message.id); if (!item) return; pending.delete(message.id); message.ok === true ? item.resolve(message.result) : item.reject(new Error(errorText(message.error))); },
     reset() { for(const item of pending.values()) item.reject(new Error('The connection to DGC changed. Refresh and try again.')); pending.clear(); },

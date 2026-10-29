@@ -697,7 +697,7 @@ def subagent_window_arg(text: str) -> int | None:
     scale = 1024 if raw.endswith("k") else 1
     try:
         size = int(float(raw[:-1] if scale > 1 else raw) * scale)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
     return size if size == 0 or 2_048 <= size <= 16_777_216 else None
 
@@ -1086,6 +1086,8 @@ class Config:
             name: current_mcp_identity[name] for name in retained_mcp_env
         }
         perms = raw.pop("permissions", {})
+        if not isinstance(perms, dict):
+            perms = {}
         # Remember which keys the user actually wrote, so a stored value that happens to equal a
         # default is never mistaken for "unset".
         self._explicit_keys = set(raw)
@@ -1200,7 +1202,8 @@ class Config:
                 if key in _PROVIDER_SECRET_KEYS:
                     self._provider_secret_identity[key] = _provider_secret_identity(self.data, key)
         for action in ("allow", "ask", "deny"):
-            self.permissions[action] = list(perms.get(action, []))
+            rules = perms.get(action, [])
+            self.permissions[action] = [rule for rule in rules if isinstance(rule, str)] if isinstance(rules, list) else []
         from . import plugin_credentials
         plugin_credentials.configure(self.data.get("plugin_credentials_store"))
         # A launching process's policy that reviews permissions itself (project_allow=False, set by
@@ -1416,7 +1419,9 @@ class Config:
                 for key in SECRET_KEYS:
                     payload.pop(key, None)
                 base = on_disk.get("permissions")
-                merged = {a: list((base or {}).get(a, [])) for a in ("allow", "ask", "deny")}
+                base = base if isinstance(base, dict) else {}
+                merged = {a: [rule for rule in base.get(a, []) if isinstance(rule, str)]
+                          if isinstance(base.get(a), list) else [] for a in ("allow", "ask", "deny")}
                 for action in merged:
                     for rule in perms.get("removed", {}).get(action, []):
                         while rule in merged[action]:

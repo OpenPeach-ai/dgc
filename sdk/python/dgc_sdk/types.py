@@ -188,6 +188,35 @@ class Artifact:
 
 
 @dataclass(frozen=True)
+class ArtifactVersion:
+    """One version of an artifact: who made it ("you", "DGC" or a Pip's name), when, and what changed."""
+    n: int
+    author: str
+    at: str
+    summary: str = ""
+    size: int = 0
+
+
+@dataclass(frozen=True)
+class ArtifactInfo:
+    """An artifact DGC keeps (CLI 0.50+): a doc, slides, sheet, dashboard or page, with every version.
+
+    ``origin`` says where it was made ({"surface": "chat"|"work"|"pip"|…}); ``exports`` are the formats
+    :meth:`Session.artifacts.export` takes; ``file`` is the file a document is edited in."""
+    id: str
+    type: str
+    title: str
+    version: int
+    label: str = ""
+    created: str = ""
+    updated: str = ""
+    origin: Mapping[str, Any] = field(default_factory=dict)
+    exports: tuple[str, ...] = ()
+    file: str = ""
+    versions: tuple[ArtifactVersion, ...] = ()
+
+
+@dataclass(frozen=True)
 class TaskItem:
     id: str
     content: str
@@ -336,6 +365,8 @@ class RunResult:
     changes: list[FileChange] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
     documents: list[Artifact] = field(default_factory=list)
+    # Artifacts the run made or changed (CLI 0.50+), as they were when it ended.
+    made_artifacts: list[ArtifactInfo] = field(default_factory=list)
     tasks: list[TaskItem] = field(default_factory=list)
     agents: list[AgentInfo] = field(default_factory=list)
     verification: VerificationResult | None = None

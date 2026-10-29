@@ -794,6 +794,11 @@ class StoreTests(unittest.TestCase):
         self.assertEqual((got, reason), (data, ""))
         self.assertEqual(Path(path).parent, directory.resolve())
 
+        Path(path).write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+        self.assertEqual(image_views.resolve(self.session, record)[1], "changed")
+        image_views.store(self.session, data, name="again.png", source="view_image")
+        self.assertEqual(image_views.resolve(self.session, record)[:2], (data, ""))
+
         Path(path).write_bytes(png(9, 9))
         self.assertEqual(image_views.resolve(self.session, record)[1], "changed")
         Path(path).unlink()

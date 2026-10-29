@@ -133,6 +133,13 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(pip_logins.page_check("http://login.northwind-bank.example/signin")[2], "insecure")
         self.assertTrue(pip_logins.page_check("http://127.0.0.1:8080/signin")[0], "plain http on this computer only")
 
+    def test_malformed_login_addresses_fail_closed(self):
+        for address in ("https://[bad", "https://example.com:99999/signin", "https://example.com:abc/signin"):
+            with self.subTest(address=address):
+                with self.assertRaises(pip_logins.LoginError):
+                    pip_logins.normalize_address(address)
+                self.assertEqual(pip_logins.page_check(address)[0], False)
+
     def test_what_the_user_types_is_checked_without_ever_repeating_it(self):
         for kw, words in (({"password": ""}, "Type the password"), ({"address": "not a site"}, "address"),
                           ({"totp": "otpauth://hotp/x?secret=" + SECRET}, "counter-based"), ({"pips": []}, "which Pips"),
@@ -194,6 +201,7 @@ class GateTests(unittest.TestCase):
                                                       False, ("arjun", PASSWORD), time.monotonic() + 10)
         form = "user=arjun&password=" + urllib.parse.quote_plus(PASSWORD)
         self.paused(browser, "elsewhere", "https://login.other.example/signin", form)
+        self.paused(browser, "insecure-target", "http://login.northwind-bank.example/signin", form)
         self.paused(browser, "no-value", "https://login.northwind-bank.example/signin", "user=someone&password=x")
         self.paused(browser, "card", "https://login.northwind-bank.example/pay", form + "&cc=4242424242424242")
         self.assertEqual(fired, [], "another site, a body without the typed value, a card: all held")
@@ -203,7 +211,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(browser.login_sent, ["POST login.northwind-bank.example/signin"])
         browser.acted_at = time.monotonic()
         self.paused(browser, "again", "https://login.northwind-bank.example/signin", form)
-        self.assertEqual([h.request_id for h in held], ["elsewhere", "no-value", "card", "again"])
+        self.assertEqual([h.request_id for h in held], ["elsewhere", "insecure-target", "no-value", "card", "again"])
         self.assertIn("password", [f[0] for f in held[0].fields])
         self.assertEqual(dict(held[0].fields)["password"], "•••", "a held sign-in never shows the password")
         # JSON sign-ins (fetch) count too; an expired pass does not.

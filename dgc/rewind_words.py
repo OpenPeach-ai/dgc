@@ -26,10 +26,18 @@ def held_line(path) -> str:
     return f"{path}: your edits overlap DGC's; it is left as it is"
 
 
+def elsewhere_line(path, editor) -> str:
+    """A file the person edited in another editor while a command ran (dgc/editor_traces.py): it is theirs,
+    and Undo leaves it."""
+    return f"{path}: edited in {editor or 'another editor'} while a command ran; it is left as it is"
+
+
 def question_lines(question: dict, shown: int = 8) -> list[str]:
     """The per-file lines of Undo's question (CheckpointManager.undo_question), merged ones first."""
     lines = [merged_line(path) for path in question.get("merged") or ()]
     lines += [held_line(row["path"]) for row in question.get("held") or () if row.get("reason") == "overlap"]
+    lines += [elsewhere_line(row["path"], row.get("editor")) for row in question.get("elsewhere") or ()
+              if isinstance(row, dict) and row.get("path")]
     if len(lines) > shown:
         lines = lines[:shown] + [f"…and {len(lines) - shown} more"]
     return lines
@@ -71,8 +79,8 @@ def anyway_question(paths) -> str:
 def also_puts_back(paths, shown: int = 5) -> str:
     """Undo's question, about the files it puts back because they changed while one of the turns' commands
     ran: "Also puts back 2 files changed while a command ran: rates.py, README.md." Nothing is restored
-    unseen. A save no editor reported is taken by time for the command's (KEEP_EDITED lets the person
-    keep one)."""
+    unseen. A save no editor reported and no editor's traces show is taken by time for the command's
+    (KEEP_EDITED lets the person keep one)."""
     paths = [str(path) for path in paths]
     if not paths:
         return ""

@@ -8,8 +8,9 @@
  * never 0. `token_estimate` is DGC's estimate of the conversation's context size, not billed
  * tokens.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { appendPrivate, privateDir } from "./state.ts";
 import type { Pricing } from "./types.ts";
 
@@ -18,6 +19,7 @@ export const USAGE_TOTAL_KEYS = [
 ] as const;
 export type UsageKey = typeof USAGE_TOTAL_KEYS[number];
 export type UsageTotals = Record<UsageKey, number>;
+const MAX_USAGE_LINE_CHARS = 1024 * 1024;
 
 export function emptyTotals(): UsageTotals {
   return { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0, requests: 0 };
@@ -117,49 +119,94 @@ export class UsageLog {
 
   query(options: { department?: string; since?: number; until?: number } = {}): UsageReport {
     const rows: Array<Record<string, unknown>> = [];
-    if (existsSync(this.path)) {
-      for (const line of readFileSync(this.path, "utf8").split("\n")) {
-        if (!line.trim()) continue;
-        let row: unknown;
-        try { row = JSON.parse(line); } catch { continue; }
-        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-        const record = row as Record<string, unknown>;
-        if (options.department && String(record.department || "") !== options.department) continue;
-        const ts = Number(record.ts || 0);
-        if (options.since !== undefined && ts < options.since) continue;
-        if (options.until !== undefined && ts > options.until) continue;
-        rows.push(record);
-      }
-    }
-    const known = rows.filter(rowKnown);
-    const costs = known.map((row) => row.cost_usd).filter((value): value is number => typeof value === "number");
+    let runs = 0;
+    let unknownUsageRuns = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cachedInputTokens = 0;
+    let totalCost = 0;
+    let hasCost = false;
     const buckets = new Map<string, UsageReport["byDepartment"][number]>();
-    for (const row of rows) {
-      const key = String(row.department || "");
+    const accept = (line: string) => {
+      if (!line.trim()) return;
+      let row: unknown;
+      try { row = JSON.parse(line); } catch { return; }
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
+      const record = row as Record<string, unknown>;
+      if (options.department && String(record.department || "") !== options.department) return;
+      const rawTs = record.ts || 0;
+      if (!["number", "string", "boolean"].includes(typeof rawTs)) return;
+      const ts = Number(rawTs);
+      if (!Number.isFinite(ts)) return;
+      if (options.since !== undefined && ts < options.since) return;
+      if (options.until !== undefined && ts > options.until) return;
+      runs += 1;
+      rows.push(record);
+      if (rows.length > 500) rows.shift();
+      const key = String(record.department || "");
       let slot = buckets.get(key);
       if (!slot) {
         slot = { department: key, runs: 0, unknownUsageRuns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
         buckets.set(key, slot);
       }
       slot.runs += 1;
-      if (!rowKnown(row)) {
+      if (!rowKnown(record)) {
+        unknownUsageRuns += 1;
         slot.unknownUsageRuns += 1;
-        continue;
+        return;
       }
-      slot.inputTokens += count(row.input_tokens) || 0;
-      slot.outputTokens += count(row.output_tokens) || 0;
-      if (typeof row.cost_usd === "number") slot.costUsd += row.cost_usd;
+      const inp = count(record.input_tokens) || 0;
+      const out = count(record.output_tokens) || 0;
+      inputTokens += inp;
+      outputTokens += out;
+      cachedInputTokens += count(record.cached_input_tokens) || 0;
+      slot.inputTokens += inp;
+      slot.outputTokens += out;
+      if (typeof record.cost_usd === "number" && Number.isFinite(record.cost_usd)) {
+        totalCost += record.cost_usd;
+        slot.costUsd += record.cost_usd;
+        hasCost = true;
+      }
+    };
+    if (existsSync(this.path)) {
+      const fd = openSync(this.path, "r");
+      const decoder = new StringDecoder("utf8");
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      let pending = "";
+      let discarding = false;
+      const feed = (text: string) => {
+        pending += text;
+        let end: number;
+        while ((end = pending.indexOf("\n")) >= 0) {
+          if (!discarding && end <= MAX_USAGE_LINE_CHARS) accept(pending.slice(0, end));
+          pending = pending.slice(end + 1);
+          discarding = false;
+        }
+        if (pending.length > MAX_USAGE_LINE_CHARS) {
+          pending = "";
+          discarding = true;
+        }
+      };
+      try {
+        let size: number;
+        while ((size = readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+          feed(decoder.write(chunk.subarray(0, size)));
+        }
+        feed(decoder.end());
+        if (!discarding && pending.length <= MAX_USAGE_LINE_CHARS) accept(pending);
+      } finally {
+        closeSync(fd);
+      }
     }
-    const sum = (key: string) => known.reduce((total, row) => total + (count(row[key]) || 0), 0);
     return {
-      runs: rows.length,
-      unknownUsageRuns: rows.length - known.length,
-      inputTokens: sum("input_tokens"),
-      outputTokens: sum("output_tokens"),
-      cachedInputTokens: sum("cached_input_tokens"),
-      costUsd: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e8) / 1e8 : null,
+      runs,
+      unknownUsageRuns,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+      costUsd: hasCost ? Math.round(totalCost * 1e8) / 1e8 : null,
       byDepartment: [...buckets.values()],
-      rows: rows.slice(-500),
+      rows,
     };
   }
 }

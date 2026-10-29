@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tarfile
 import tempfile
 import threading
@@ -84,7 +85,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual({m["role"] for m in catalog.MODELS}, set(catalog.ROLES), "something for each role")
 
     def test_pocket_tts_says_it_is_for_non_commercial_use(self):
-        self.assertEqual(catalog.model("pocket-tts")["licence"], "Non-commercial use only")
+        self.assertEqual(catalog.model("pocket-tts")["licence"],
+                         "CC BY 4.0 in archive; upstream README says non-commercial")
 
 
 class SpeakableTests(unittest.TestCase):
@@ -108,6 +110,17 @@ class SpeakableTests(unittest.TestCase):
 
 
 class ManagerTests(Fixture):
+    def test_worker_reply_timeout_stops_a_silent_worker(self):
+        worker = self.root / "silent.py"
+        worker.write_text("import sys, time\nsys.stdin.readline()\ntime.sleep(5)\n", encoding="utf-8")
+        manager = VoiceManager(self.root, python=sys.executable)
+        with patch("dgc.voice.manager.WORKER", worker):
+            start = time.monotonic()
+            with self.assertRaisesRegex(VoiceError, "took too long"):
+                manager._ask({"id": "v1"}, timeout=0.2)
+        self.assertLess(time.monotonic() - start, 2)
+        self.assertIsNone(manager._worker)
+
     def test_install_makes_the_engine_once_checks_the_download_and_chooses_the_first_of_its_role(self):
         found = self.offer("moonshine-base-en")
         seen = []

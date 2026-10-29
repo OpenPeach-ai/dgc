@@ -32,6 +32,8 @@ class Emitter:
 
     def emit(self, type: str, **fields) -> None:
         with self._lock:
+            if "seq" in fields:
+                raise ValueError("protocol envelope fields are reserved")
             # Allocate the sequence under the same lock as the write. Multiple worker/provider
             # threads can emit concurrently; allocating before the lock allowed seq=1 to reach the
             # wire before seq=0 even though each individual write was atomic.

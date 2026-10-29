@@ -132,10 +132,15 @@ def normalize_address(raw) -> tuple[str, str]:
     text = str(raw or "").strip()
     if not text or len(text) > 2048 or any(ord(ch) < 33 or ch == "\\" for ch in text):
         raise LoginError("Type the site's address, such as example.com.")
-    parts = urlsplit(text if re.match(r"^[a-z][a-z0-9+.-]*://", text, re.I) else "https://" + text)
-    if parts.scheme not in ("https", "http") or not parts.hostname or parts.username or parts.password:
+    try:
+        parts = urlsplit(text if re.match(r"^[a-z][a-z0-9+.-]*://", text, re.I) else "https://" + text)
+        host = parts.hostname
+        _ = parts.port  # Validate numeric port and range before saving the page.
+    except ValueError:
+        raise LoginError("Type the site's address, such as example.com.") from None
+    if parts.scheme not in ("https", "http") or not host or parts.username or parts.password:
         raise LoginError("Type the site's address, such as example.com.")
-    host = _plain_host(parts.hostname)
+    host = _plain_host(host)
     if "." not in host and not loopback(host):
         raise LoginError("Type the site's whole address, such as example.com.")
     page = ""
@@ -147,8 +152,12 @@ def normalize_address(raw) -> tuple[str, str]:
 def page_check(url: str) -> tuple[bool, str, str]:
     """Whether a saved login may ever be typed into this page: (ok, host, why not). https, or plain http on this
     computer only (a password sent over plain http to another computer can be read on the way)."""
-    parts = urlsplit(str(url or ""))
-    host = _plain_host(parts.hostname)
+    try:
+        parts = urlsplit(str(url or ""))
+        host = _plain_host(parts.hostname)
+        _ = parts.port
+    except ValueError:
+        return False, "", "address"
     if parts.scheme not in ("https", "http") or not host:
         return False, host, "address"
     if parts.scheme == "http" and not loopback(host):

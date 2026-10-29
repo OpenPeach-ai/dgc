@@ -544,7 +544,7 @@ def _events_kimi(obj: dict) -> list[dict]:
                 try:
                     parsed = json.loads(raw_args)
                     args = parsed if isinstance(parsed, dict) else {"args": raw_args}
-                except (json.JSONDecodeError, ValueError):
+                except (ValueError, RecursionError):
                     args = {"args": raw_args}
             else:
                 args = raw_args if isinstance(raw_args, dict) else {}
@@ -634,7 +634,7 @@ def parse_stream_events(stream: str, line: str) -> list[dict]:
         return []
     try:
         obj = json.loads(line)
-    except (json.JSONDecodeError, ValueError):
+    except (ValueError, RecursionError):
         return []
     if not isinstance(obj, dict):
         return []
@@ -961,7 +961,7 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
             if not events:
                 try:
                     is_json = isinstance(json.loads(line), (dict, list))
-                except (json.JSONDecodeError, ValueError):
+                except (ValueError, RecursionError):
                     is_json = False
                 if not is_json:
                     _diagnostic(line)

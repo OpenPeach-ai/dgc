@@ -181,5 +181,67 @@ class ProtocolShape(unittest.TestCase):
                           "a panel must learn file-chip support from the actual ready handshake")
 
 
+class ShownFileHistory(unittest.TestCase):
+    def test_real_tool_loop_saves_shown_files_for_reopening(self):
+        import copy
+        import json
+        from unittest.mock import patch
+        from dgc.agent import Agent
+        from dgc.headless import Backend
+        from dgc.llm import ChatResult, ToolCall
+        from test_options_agent import fixture_config, StubUI
+        from dgc import sessions
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "result.png").write_bytes(b"example")
+            agent = Agent(fixture_config(root), StubUI(None))
+            self.addCleanup(agent.mcp.stop_all)
+            agent.session_file = sessions.new_path(root)
+            requests = []
+            def chat(messages, **kwargs):
+                requests.append(copy.deepcopy(messages))
+                if len(requests) == 1:
+                    return ChatResult(content="", tool_calls=[ToolCall("show1", "show_file", {
+                        "path": "result.png", "caption": "The result"})])
+                return ChatResult(content="The result is shown.")
+            with patch.object(agent.client, "chat", side_effect=chat):
+                self.assertTrue(agent.run_turn("Show result.png"))
+            saved = json.loads(Path(agent.session_file).read_text())
+            messages = saved["messages"]
+            shown = [m for m in messages if m.get("_dgc_files")]
+            self.assertEqual(len(shown), 1)
+            backend = object.__new__(Backend)
+            backend.agent = SimpleNamespace(messages=messages)
+            replayed = [e for e in backend._history() if e.get("type") == "files_ready"]
+            self.assertEqual(replayed[0]["items"][0]["rel"], "result.png")
+
+    def test_malformed_saved_paths_are_not_replayed(self):
+        from dgc.shown_files import events
+        self.assertEqual(events({"_dgc_files": [{"items": [None, {"rel": "../private.png"},
+            {"rel": "/etc/private.png"}, {"rel": "C:\\private.png"}, {"rel": "x\x00.png"}]}]}), [])
+
+    def test_reopening_replays_shown_images_and_captions_in_their_turn(self):
+        import json
+        from dgc.headless import Backend
+        item = {"name": "result.png", "rel": "out/result.png", "bytes": 123, "caption": "The finished view"}
+        for native in (True, False):
+            backend = object.__new__(Backend)
+            result = {"role": "tool", "tool_call_id": "show1", "content": "Showing result.png"} if native else {
+                "role": "user", "content": '<tool_results>\n<result tool="show_file">Showing result.png</result>\n</tool_results>'}
+            result["_dgc_files"] = [{"call_id": "show1" if native else None, "items": [item]}]
+            backend.agent = SimpleNamespace(messages=[
+                {"role": "user", "content": "Show the result"},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "show1", "type": "function", "function": {
+                    "name": "show_file", "arguments": json.dumps({"path": "out/result.png"})}}]} if native else {
+                    "role": "assistant", "content": '<tool name="show_file">out/result.png</tool>'}, result,
+                {"role": "assistant", "content": "Here it is."}])
+            events = backend._history()
+            shown = [e for e in events if e.get("type") == "files_ready"]
+            self.assertEqual(len(shown), 1, "the shown file must survive closing and reopening the chat")
+            self.assertEqual(shown[0]["items"], [item])
+            self.assertEqual(shown[0]["caption"], item["caption"])
+            self.assertLess(events.index(shown[0]), next(i for i, e in enumerate(events) if e.get("type") == "turn_end"))
+
+
 if __name__ == "__main__":
     unittest.main()

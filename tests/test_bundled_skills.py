@@ -30,6 +30,8 @@ class BundledSkillsTests(unittest.TestCase):
             "pr-feedback": ("Address review comments on this pull request", "Review the diff for correctness"),
             "skill-author": ("Create a portable skill for API migrations", "Implement an API endpoint"),
             "mcp-builder": ("Build an MCP server for project documentation", "Connect this MCP server"),
+            "mod-author": ("Write a mod that shows my token use in the status line",
+                           "Fix the mod operator in the totals calculation"),
         }
         for name, (positive, negative) in cases.items():
             with self.subTest(skill=name):

@@ -57,7 +57,7 @@ test("Work: a reopened chat says when each prompt was sent and each reply writte
   const written = v.doc.querySelector(".answer > .response-actions > time.msg-time:first-child");
   assert.ok(written, "first in the reply's row");
   assert.equal(written.dateTime, new Date(WRITTEN * 1000).toISOString());
-  assert.equal(v.doc.querySelector(".msg.dgc .thinking.done").textContent, "Worked for 95s");
+  assert.equal(v.doc.querySelector(".msg.dgc .thinking.done").textContent, "Worked for 1m 35s");
   assert.deepEqual(v.errors, []);
 });
 

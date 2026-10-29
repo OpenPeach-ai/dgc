@@ -680,7 +680,13 @@ class _ACPUi:
         if is_diff:
             path = self._tool_paths.get(call_id or "", "")
             try:
-                new_text = Path(path).read_text(errors="replace") if path else ""
+                # The ACP diff shape accepts at most one million characters. Reading the
+                # complete file first lets a large (or growing) file exhaust this process.
+                if path:
+                    with Path(path).open("r", errors="replace") as source:
+                        new_text = source.read(1_000_001)
+                else:
+                    new_text = ""
             except OSError:
                 new_text = ""
             if path and len(new_text) <= 1_000_000:

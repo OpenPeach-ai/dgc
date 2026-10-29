@@ -261,6 +261,16 @@ class LentChromeTests(Borrow):
         for odd in ("https://evil.example\\@shop.example/", "https://me@shop.example/orders"):
             self.assertTrue(session.use({"op": "open", "url": odd}).startswith("error"), odd)
 
+    def test_fetch_gate_keeps_subframes_resources_and_background_posts_on_card_sites(self):
+        tab = pip_borrow.BorrowedTab({SHOP})
+        fired = []
+        tab._fire = lambda method, params, session: fired.append((method, params, session))
+        for index, (kind, method) in enumerate((("Document", "GET"), ("Image", "GET"), ("XHR", "POST"))):
+            tab._gate({"requestId": str(index), "resourceType": kind,
+                       "request": {"method": method, "url": ELSEWHERE + "/collect"}}, "child")
+        self.assertEqual([method for method, _, _ in fired], ["Fetch.failRequest"] * 3)
+        self.assertEqual([kind for kind, _ in tab.refused], ["site", "resource", "elsewhere"])
+
     def test_what_it_would_send_goes_only_as_its_level_allows_and_a_payment_never(self):
         sent = lambda fake: [u for m, u, _ in fake.sent_requests if m == "POST"]
         fake, session, _, _ = self.lent(level=pip_levels.ASK)
@@ -487,7 +497,7 @@ class RunTests(Borrow):
         home = Path(os.environ["HOME"])
         # Where Chrome keeps its profile on this platform (browser_user.profile_folders), so the run finds it.
         folder = (home / "Library" / "Application Support" / "Google" / "Chrome" if sys.platform == "darwin"
-                  else home / ".config" / "google-chrome")
+                  else Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "google-chrome")
         fake = FakeChrome(shop_pages(), folder=folder)
         self.addCleanup(fake.close)
         pip_chat.send(self.store, self.pip["id"], "Find my mug order on shop.example", "mugs-1", "editor-user", self.cfg)

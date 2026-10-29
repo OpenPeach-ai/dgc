@@ -112,10 +112,30 @@ class RedirectTests(unittest.TestCase):
             headers = {"Location": "http://plain.example.com/"}
             def close(self):
                 pass
-        with patch("dgc.tools._validate_public_url", side_effect=lambda url: url), \
+        with patch("dgc.tools._public_destination", side_effect=lambda url: (url, "8.8.8.8")), \
                 patch("requests.Session.get", return_value=Response()):
             with self.assertRaisesRegex(ValueError, "away from https"):
                 web._fetch_page("https://status.example.com/")
+
+    def test_fetch_connects_to_checked_address_with_original_host(self):
+        class Response:
+            is_redirect, is_permanent_redirect = False, False
+            headers = {"Content-Type": "text/plain"}
+            encoding = "utf-8"
+            def raise_for_status(self):
+                pass
+            def iter_content(self, chunk_size):
+                yield b"ok"
+            def close(self):
+                pass
+        with patch("dgc.tools._public_destination", return_value=("https://status.example.com/today", "8.8.8.8")), \
+                patch("requests.Session.get", return_value=Response()) as get:
+            final, text = web._fetch_page("https://status.example.com/today")
+        self.assertEqual(final, "https://status.example.com/today")
+        self.assertEqual(text, "ok")
+        self.assertEqual(get.call_args.args[0], "https://8.8.8.8/today")
+        self.assertEqual(get.call_args.kwargs["headers"]["Host"], "status.example.com")
+        self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
 
 class PersonalJobTests(unittest.TestCase):

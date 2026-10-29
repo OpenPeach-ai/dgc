@@ -299,6 +299,8 @@ class _WebSocket:
                 raise BrowserError("devtools frame exceeded the size ceiling")
             data = self._exact(length) if length else b""
             if opcode == 0x9:                                    # ping -> pong, same payload
+                if len(data) > 125:
+                    raise BrowserError("devtools sent an oversized ping")
                 mask = os.urandom(4)
                 pong = bytearray(b"\x8a")
                 pong.append(0x80 | len(data))
@@ -314,8 +316,11 @@ class _WebSocket:
                 buffer += data
                 if final:
                     try:
-                        return json.loads(bytes(buffer).decode("utf-8", "replace"))
-                    except ValueError as error:
+                        message = json.loads(bytes(buffer).decode("utf-8", "replace"))
+                        if not isinstance(message, dict):
+                            raise BrowserError("devtools sent a non-object message")
+                        return message
+                    except (ValueError, RecursionError) as error:
                         raise BrowserError(f"devtools sent unreadable JSON: {error}") from error
                 continue
             raise BrowserError(f"devtools sent an unexpected frame opcode {opcode}")

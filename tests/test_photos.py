@@ -129,6 +129,14 @@ class ForModelTests(unittest.TestCase):
             out = photos.for_model(uri(jpeg(4032, 3024)))
         self.assertEqual(parse_dimensions(base64.b64decode(out.split(",", 1)[1])), (2500, 1875))
 
+    def test_an_oversized_converter_output_is_skipped_before_reading(self):
+        def oversized(source, target, kind, side, quality):
+            with Path(target).open("wb") as out:
+                out.truncate(photos.MAX_TOOL_OUTPUT_BYTES + 1)
+        with self.tools(oversized, Fake()):
+            out = photos.for_model(uri(jpeg(4032, 3024)))
+        self.assertEqual(parse_dimensions(base64.b64decode(out.split(",", 1)[1])), (2500, 1875))
+
     def test_each_of_a_prompts_images_in_order(self):
         big, fake = uri(jpeg(4032, 3024)), Fake()
         with self.tools(fake):

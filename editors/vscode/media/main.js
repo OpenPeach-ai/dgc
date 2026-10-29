@@ -1326,7 +1326,9 @@
   function rememberTab(session) {
     if (chatPlace !== "tab") return;
     const key = document.documentElement.dataset.tabKey || "";
-    try { vscode.setState({ ...vscode.getState(), chatTab: { key, session: String(session || "") } }); } catch {}
+    // A tab Continue in Work opened in another folder: that folder too, so a reload brings it back there.
+    const cwd = document.documentElement.dataset.tabCwd || "";
+    try { vscode.setState({ ...vscode.getState(), chatTab: { key, session: String(session || ""), ...(cwd ? { cwd } : {}) } }); } catch {}
   }
   document.addEventListener("visibilitychange",()=>pipsApp?.setVisible?.(pipsOpen && pipsViewVisible && !document.hidden));
   // The inline ceilings: what fits in the 4 MiB protocol frame once base64 has inflated it.
@@ -1466,12 +1468,58 @@
   // The extension host owns the auto-mode confirmation. Update only when the backend
   // echoes mode_changed/state so cancelling the modal cannot leave a false "auto" badge.
   function setMode(m) { vscode.postMessage({ type: "setMode", mode: m }); hideModeMenu(); }
+  let autoModeDialog = null;
+  function closeAutoModePrompt(answer) {
+    const current = autoModeDialog;
+    if (!current) return;
+    autoModeDialog = null;
+    current.dialog.remove();
+    if (current.focus?.isConnected) current.focus.focus();
+    if (typeof answer === "boolean") vscode.postMessage({ type: "autoModeAnswer", requestId: current.id, accepted: answer });
+  }
+  function showAutoModePrompt(message) {
+    closeAutoModePrompt(false);
+    if (typeof message.requestId !== "string" || !/^[a-f0-9]{32}$/.test(message.requestId)) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "auto-mode-dialog";
+    dialog.setAttribute("aria-labelledby", "auto-mode-title");
+    dialog.setAttribute("aria-describedby", "auto-mode-intro");
+    dialog.innerHTML = `<div class="auto-mode-body">
+      <div class="auto-mode-heading"><span class="auto-mode-warning codicon codicon-warning" aria-hidden="true"></span>
+      <div><h2 id="auto-mode-title">Turn on Auto mode?</h2><p class="auto-mode-scope">For this Work session</p></div></div>
+      <p id="auto-mode-intro">DGC can take actions without asking each time. Only enable Auto for work and content you trust.</p>
+      <div class="auto-mode-permissions">
+        <div class="auto-mode-permission"><span class="codicon codicon-folder" aria-hidden="true"></span><div><strong>Files and folders</strong><p>Read, create, edit, or delete files, including outside your project, wherever your account has access.</p></div></div>
+        <div class="auto-mode-permission"><span class="codicon codicon-terminal" aria-hidden="true"></span><div><strong>Terminal commands</strong><p>Run commands, install software, and change settings with your account’s permissions.</p></div></div>
+        <div class="auto-mode-permission"><span class="codicon codicon-globe" aria-hidden="true"></span><div><strong>Internet and connected apps</strong><p>Send data and use tools from enabled plugins, including tools that change things in your accounts.</p></div></div>
+      </div>
+      <p class="auto-mode-risk"><strong>Mistakes or malicious instructions can cause data loss or expose private information.</strong> You can switch back to Default at any time.</p>
+      <p class="auto-mode-limits">Your deny and ask rules still apply. Auto does not grant new account permissions or remove sandbox restrictions.</p>
+      <p class="auto-mode-trust" hidden>This workspace is not trusted. Continuing also trusts this workspace.</p>
+      </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel" autofocus>Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
+    if (message.needsTrust === true) {
+      dialog.querySelector(".auto-mode-trust").hidden = false;
+      dialog.querySelector(".auto-mode-confirm span:last-child").textContent = "Trust and enable Auto";
+    }
+    autoModeDialog = { dialog, id: message.requestId, focus: document.activeElement };
+    dialog.querySelector(".auto-mode-cancel").onclick = () => closeAutoModePrompt(false);
+    dialog.querySelector(".auto-mode-confirm").onclick = () => closeAutoModePrompt(true);
+    dialog.addEventListener("cancel", (e) => { e.preventDefault(); closeAutoModePrompt(false); });
+    dialog.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); closeAutoModePrompt(false); }
+    });
+    document.body.appendChild(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else { closeAutoModePrompt(false); return; }
+    dialog.querySelector(".auto-mode-cancel").focus();
+  }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
   function hideModeMenu() { $("modemenu").hidden = true; $("btn-mode").setAttribute("aria-expanded", "false"); }
   function toggleModeMenu() {
     const mm = $("modemenu");
     if (!mm.hidden) { hideModeMenu(); return; }
-    hideModelMenu(); hideContextMenu(); hideAgentsMenu();
+    hideModelMenu(); hideContextMenu(); hideAgentsMenu(); hideOutputMenu();
     mm.innerHTML =
       `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
       MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
@@ -1479,6 +1527,54 @@
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
     mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
     (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
+  }
+
+  // The Output chip (ready.capabilities.artifacts): what the next message should make. Auto lets the model choose and
+  // is never sent; a choice goes with the next message only, then the chip is Auto again, as Deep research is.
+  const OUTPUT_CHOICES = [
+    ["auto", "Auto", "The model picks what to make, if anything", "sparkle"],
+    ["document", "Document", "A document to keep editing", "file-text"],
+    ["slides", "Slides", "A deck to present", "preview"],
+    ["spreadsheet", "Spreadsheet", "A sheet, formulas and all", "table"],
+    ["page", "Page", "One self-contained web page", "browser"],
+    ["dashboard", "Dashboard", "Charts over data you allow", "dashboard"],
+  ];
+  let outputOffered = null;            // the capability, or null: no chip
+  let outputPick = "auto";
+  function offeredOutputs() {
+    const listed = Array.isArray(outputOffered?.outputs) ? outputOffered.outputs : [];
+    return OUTPUT_CHOICES.filter(([value]) => value === "auto" || !listed.length || listed.includes(value));
+  }
+  function artifactsOffered(capability) {
+    outputOffered = capability && typeof capability === "object" && Number(capability.version) >= 1 ? capability : null;
+    $("output-picker").hidden = !outputOffered;
+    if (!outputOffered) { hideOutputMenu(); setOutput("auto"); }
+  }
+  function setOutput(value) {
+    const choice = OUTPUT_CHOICES.find(([v]) => v === value) || OUTPUT_CHOICES[0];
+    outputPick = choice[0];
+    const on = outputPick !== "auto";
+    const button = $("btn-output");
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-pressed", String(on));
+    $("output-icon").className = `codicon codicon-${on ? choice[3] : "output"}`;
+    // "Output: Slides"; a narrow panel shows the kind's icon and keeps the choice in the accessible label.
+    const prefix = el("span", "output-prefix", "Output: "), name = el("span", "output-name", choice[1]);
+    $("output-label").replaceChildren(...(on ? [prefix, name] : [el("span", "output-name", "Output")]));
+    button.setAttribute("aria-label", `Output: ${choice[1]}. ${on ? `This message makes ${choice[1].toLowerCase() === "slides" ? "slides" : `a ${choice[1].toLowerCase()}`}` : "The model picks"}`);
+    button.title = on ? `Output: ${choice[1]} for the next message (then Auto again)` : "Output: what the next message should make. Auto lets the model pick";
+  }
+  function hideOutputMenu() { $("outputmenu").hidden = true; $("btn-output").setAttribute("aria-expanded", "false"); }
+  function toggleOutputMenu() {
+    const menu = $("outputmenu");
+    if (!menu.hidden) { hideOutputMenu(); return; }
+    hideModeMenu(); hideModelMenu(); hideContextMenu(); hideAgentsMenu();
+    menu.innerHTML = `<div role="group" aria-label="Output"><div class="mhead" role="presentation"><span>Make, with the next message</span></div>`
+      + offeredOutputs().map(([value, label, desc, glyph]) => `<button type="button" role="menuitemradio" aria-checked="${value === outputPick}" class="mrow${value === outputPick ? " sel" : ""}" data-output="${value}"><span class="mi codicon codicon-${glyph}" aria-hidden="true"></span><span>${label}</span><span class="md">${desc}</span></button>`).join("")
+      + `</div>`;
+    menu.querySelectorAll("[data-output]").forEach((row) => { row.onclick = () => { setOutput(row.dataset.output); hideOutputMenu(); $("btn-output").focus(); }; });
+    menu.hidden = false; $("btn-output").setAttribute("aria-expanded", "true");
+    (menu.querySelector(".sel") || menu.querySelector("button"))?.focus();
   }
 
   // in-composer model menu (rendered from the `models` message the extension posts)
@@ -1850,6 +1946,7 @@
     if (next !== null) { e.preventDefault(); items[next].focus(); }
   }
   $("modemenu").addEventListener("keydown", (e) => menuKeys($("modemenu"), hideModeMenu, $("btn-mode"), e));
+  $("outputmenu").addEventListener("keydown", (e) => menuKeys($("outputmenu"), hideOutputMenu, $("btn-output"), e));
   $("modelmenu").addEventListener("keydown", (e) => menuKeys($("modelmenu"), hideModelMenu, $("btn-model"), e));
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
@@ -1870,6 +1967,10 @@
   const ICON_PATHS = {
     "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     "app-window": '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>',
+    "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+    "presentation": '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
+    "sheet": '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="3" x2="21" y1="15" y2="15"/><line x1="9" x2="9" y1="9" y2="21"/><line x1="15" x2="15" y1="9" y2="21"/>',
     "blocks": '<path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/><rect x="14" y="2" width="8" height="8" rx="1"/>',
     "book-open": '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
     "bookmark": '<path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/>',
@@ -1941,6 +2042,7 @@
     present_plan: "clipboard-list", present_document: "file-text", propose_options: "circle-help",
     task: "bot", todo: "list-todo", skill: "sparkle", add_skill: "sparkle", notes: "notebook-pen",
     monitor: "activity", monitor_stop: "activity", artifact: "app-window", update_goal: "target",
+    make_artifact: "app-window", edit_artifact: "app-window",
     // Supervising sub-agents. Steering one wears a fixed mark, never the agent's own face: the
     // row is about the parent talking to it.
     list_tasks: "bot", wait_tasks: "bot", message_task: "message-square", close_task: "circle-slash", continue_task: "bot",
@@ -2012,6 +2114,13 @@
   // CLI, a task that was refused or never started, an agent the backend stopped listing) reads
   // "Delegated Write the parser", which is also what a reload of it draws.
   const NAMES_ITS_AGENT = new Set(["message_task", "close_task", "task", "continue_task"]);
+  // A failed step of these never reached its helper: a delegation refused before the helper started (its
+  // copy of the project couldn't be made, say) read "Delegated Analyze the data · 1 issue", and the agents
+  // chip beside it said 0, which looked like the chip was wrong. It says so in its own words instead.
+  const FAILED_AGENT_STEP = { task: "Couldn't delegate", message_task: "Couldn't message",
+    close_task: "Couldn't stop", continue_task: "Couldn't continue" };
+  const failedAgentStep = (card) => card?.dataset.status === "failed"
+    && FAILED_AGENT_STEP[canonicalTool(card.dataset.toolName)] || "";
   const LONE_PRESENT = { message_task: "messaging a sub-agent", close_task: "stopping a sub-agent",
     task: "delegating to a sub-agent", continue_task: "continuing a sub-agent" };
   function pluginLogoHtml(name) {
@@ -2040,6 +2149,19 @@
     { name: "init", description: "inspect the project and prepare DGC.md", action: "workflow:init", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
+
+  // /mods, and each running mod's own commands "from <title>": a name DGC's own commands or the project's prompt
+  // templates already have stays theirs, as the terminal has it.
+  function modSlashItems() {
+    if (!modsUi?.offered) return [];
+    const taken = new Set([...agentMapCommands(builtinCommands).map((c) => c?.name), ...customCommands]);
+    const own = taken.has("mods") ? [] : [{ label: "/mods", detail: "your mods: allow one, show its panel, turn one off or reload it", action: "mods", kind: "command" }];
+    return own.concat(modsUi.commands().filter((c) => !taken.has(c.name)).map((c) => ({
+      label: "/" + c.name, detail: `${c.description || "a command"} · from ${c.title}`, modCommand: c.name, kind: "mod" })));
+  }
+  function modCommandName(name) {
+    return !!modsUi?.offered && !agentMapCommands(builtinCommands).some((c) => c?.name === name) && !customCommands.includes(name);
+  }
 
   // `/agents` is the agent map, opened in the panel (the CLI's own /agents opened the sub-agent
   // settings, which the map links to). `/tasks` keeps its meaning: retained worktrees.
@@ -3014,6 +3136,42 @@
     },
     announce: speak,
   });
+  // The user's mods (media/mods.js, the same in ChatDGC): each band and one status line above the prompt box, a mod's
+  // panel in a drawer beside the chat, its notices as the transcript's own quiet lines, its commands in the slash
+  // menu (run at once, never a prompt and never steering mid-turn), and the question about the mods DGC writes.
+  // Nothing at all without ready.capabilities.mods.
+  const modsUi = window.DgcMods?.create({
+    surface: "work",
+    post: (msg) => vscode.postMessage(msg),
+    strip: $("mod-strip"),
+    notice: (title, text, tone) => modNotice(title, text, tone),
+    transcript: (node) => { const stay = following; appendConversationContent(node); breakText(); if (stay) scroll(); },
+    announce: speak,
+  });
+  // A mod's notice, under its title, in the transcript's machine voice (the .sys line). The same words again (a dev
+  // mod reloaded on every save) count up on the last line instead of adding one.
+  function modNotice(title, text, tone) {
+    const words = `${title}: ${text}`;
+    const last = turn ? turn.act?.previousElementSibling : log.lastElementChild;
+    if (last?.classList.contains("mod-notice") && last.dataset.words === words) {
+      const times = Number(last.dataset.times || 1) + 1;
+      last.dataset.times = String(times);
+      last.querySelector(".mod-notice-times").textContent = ` ×${times}`;
+      return;
+    }
+    const line = document.createElement("div");
+    line.className = "sys sys-marked mod-notice" + (tone === "bad" ? " err" : "");
+    line.dataset.words = words;
+    line.setAttribute("role", tone === "bad" ? "alert" : "status");
+    const mark = document.createElement("span");
+    mark.className = "codicon codicon-extensions"; mark.setAttribute("aria-hidden", "true");
+    const said = document.createElement("span"); said.textContent = words;
+    const times = document.createElement("span"); times.className = "mod-notice-times";
+    line.append(mark, said, times);
+    const stay = following;
+    appendConversationContent(line);
+    if (stay) scroll();
+  }
   // The rows change when the transcript does: a turn's box added or taken away, a page of history landing.
   let railFrame = 0;
   const railSoon = () => { if (promptRail && !railFrame) railFrame = requestAnimationFrame(() => { railFrame = 0; railWatch(); promptRail.refresh(); }); };
@@ -3328,12 +3486,56 @@
     const size = Number(item.bytes) || 0;
     if (size) chip.appendChild(el("span", "chip-size", esc(humanSize(size))));
     const caption = String(item.caption || "");
+    if (caption) chip.appendChild(el("span", "chip-caption", esc(caption)));
     const label = caption ? `${name} — ${caption}` : name;
     chip.title = `${rel}${caption ? ` — ${caption}` : ""}`;
     chip.setAttribute("aria-label", `Open ${label}`);
     // The extension host re-validates the path; the webview never opens anything itself.
     chip.onclick = () => vscode.postMessage({ type: "openFile", path: rel });
     return chip;
+  }
+  // An image the model shows you on purpose (show_file) is shown, not named: a picture tile with its caption under
+  // it, which opens the image viewer (reported 28 Oct: a shown screenshot was only a file name, like any other file).
+  // The picture comes from the extension host by path; the host checks the path as Open does and reads only PNG,
+  // JPEG, GIF and WebP up to 8 MB. Anything it won't read stays the plain chip, so nothing is ever lost.
+  const PRODUCED_IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+  const fileThumbs = new Map();
+  let fileThumbSeq = 0;
+  function finishFileThumb(requestId, src = "") {
+    const pending = fileThumbs.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    fileThumbs.delete(requestId);
+    pending.done(src);
+  }
+  function clearFileThumbs() {
+    for (const id of fileThumbs.keys()) finishFileThumb(id);
+  }
+  function producedImage(item, row) {
+    const rel = String(item.rel || "");
+    const name = String(item.name || rel.split("/").pop() || "image");
+    const caption = String(item.caption || "");
+    const figure = el("figure", "made-image");
+    const wait = el("span", "image-tile skeleton");
+    wait.appendChild(el("span", "sr-only", `Loading ${esc(name)}`));
+    figure.appendChild(wait);
+    figure.appendChild(el("figcaption", "made-image-caption", esc(caption || name)));
+    const requestId = `thumb-${++fileThumbSeq}`;
+    const record = { name, src: "", bytes: Number(item.bytes) || 0, state: "pending", path: rel, owner: row };
+    row._images = [...(row._images || []), record];
+    const done = (src) => {
+      if (!src || !figure.isConnected) { if (figure.isConnected) figure.replaceWith(producedFileChip(item)); return; }
+      record.src = src; record.state = "ready";
+      const chip = imageChip(record, row._images.indexOf(record), row._images.length);
+      chip.setAttribute("aria-label", `Open ${caption ? `${name}: ${caption}` : name}`);
+      wait.replaceWith(chip);
+      if (imageViewer) refreshViewerSequence();
+    };
+    // A missing host response must not retain an old transcript or leave a permanent spinner.
+    while (fileThumbs.size >= 64) finishFileThumb(fileThumbs.keys().next().value);
+    fileThumbs.set(requestId, { done, timer: setTimeout(() => finishFileThumb(requestId), 15_000) });
+    vscode.postMessage({ type: "fileThumb", requestId, path: rel });
+    return figure;
   }
   function humanSize(bytes) {
     const units = ["B", "KB", "MB", "GB"];
@@ -3555,7 +3757,9 @@
       if(receipt && kinds.includes(receipt.pip_type) && typeof receipt.name==='string'){
         const face=el('span','pip-run-avatar');face.setAttribute('aria-hidden','true');
         if(window.PipConcepts?.plush)face.innerHTML=window.PipConcepts.plush.markup({index:kinds.indexOf(receipt.pip_type),name:receipt.name},'success',`approval-${id.replace(/[^a-z0-9]/gi,'')}`,{paused:true});
-        note.append(face,el('span','pip-approval-name',receipt.name),el('span','pip-approval-status','Created'));
+        const pipName = el('span', 'pip-approval-name');
+        pipName.textContent = receipt.name;
+        note.append(face, pipName, el('span','pip-approval-status','Created'));
       }else note.append(el('span','','Pip created'));
       appendTarget.appendChild(note);head=note;
     } else if (kind === "resume" || kind === "continue") {
@@ -3626,7 +3830,11 @@
     }
   }
   // When a prompt was sent (media/msgtime.js), under its bubble; the whole date is the tooltip.
+  // When each message was sent, kept whether or not a time is drawn: a split turn's rows are timed from it
+  // (workRows). Off the DOM, so a live and a replayed transcript stay the same markup.
+  const sentAt = new WeakMap();
   function stampPrompt(node, at) {
+    if (node && Number.isFinite(at) && at > 0) sentAt.set(node, at);
     const time = node && window.DgcTime?.node(at);
     if (!time) return;
     const old = node.querySelector(":scope > .msg-time");
@@ -3877,7 +4085,8 @@
     const phase = Math.floor((now - (turn.phaseT0 || turn.t0)) / 1000);
     // Two clocks only once they differ: how long this step has taken, then the whole turn. It is
     // the TUI's shape, and it is what makes a long gate visible instead of a growing total.
-    const clock = activity && phase !== total ? `${phase}s · ${total}s` : `${total}s`;
+    const clock = activity && phase !== total ? `${elapsedWords(phase * 1000)} · ${elapsedWords(total * 1000)}`
+      : elapsedWords(total * 1000);
     const eta = turn.eta ? ` · ${turn.eta}` : "";
     meta.textContent = `(${clock}${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
   }
@@ -3934,12 +4143,19 @@
   const workFoldSeen = new WeakSet();
   function paintWorkFold(block, keep = false) {
     const shown = [];
+    const split = block.querySelectorAll(":scope > .work-toggle").length > 1;
+    let row = null;
     for (const node of block.children) {
       if (node.matches(".role")) continue;
+      if (node.matches(".work-toggle")) row = node;
       const step = keep && workFoldSeen.has(node) ? node.classList.contains("work-step") : isWorkStep(node);
       workFoldSeen.add(node);
       node.classList.toggle("work-step", step);
-      if (!step) shown.push(node);
+      // A step is shown while the row above it is open: a turn split by a message you sent mid-turn has
+      // a row for each part, and each opens on its own (one row opens the whole turn, so it needs no mark).
+      const open = step && row?.getAttribute("aria-expanded") === "true";
+      node.classList.toggle("wf-open", open && split);
+      if (!step || open) shown.push(node);
     }
     shown.forEach((node, i) => {
       node.classList.toggle("wf-before-prompt", Boolean(shown[i + 1]?.matches(".msg.user")));
@@ -3947,15 +4163,50 @@
       node.classList.toggle("wf-last", i === shown.length - 1);
     });
   }
-  function foldTurnWork(block, act) {
+  // A message you sent mid-turn splits the work where it came: what led up to it folds into the row at
+  // the top of the turn, what came after into a row of its own under the message, each saying how long
+  // its part took. One row for the whole turn put an hour of work above a message sent 18 minutes in
+  // (reported 28 Oct: "Worked for 3837s", then the message, then the answer), as if all of it came first.
+  // `span` is when the turn started and ended; without it, or without a message's send time, a split
+  // turn's rows say "Worked" and no number rather than a made-up one. A part with no steps has no row.
+  function workRows(block, act, span) {
+    const parts = [[]], sent = [];
+    for (const node of block.children) {
+      if (node.matches(".role") || node === act) continue;
+      if (node.matches(".msg.user")) { parts.push([]); sent.push(node); continue; }
+      parts.at(-1).push(node);
+    }
+    const busy = parts.map((part) => part.some(isWorkStep));
+    const count = busy.filter(Boolean).length;
+    if (!count) return [];
+    const starts = [span?.start, ...sent.map((node) => sentAt.get(node) ?? NaN)];
+    const timed = count > 1 && Number.isFinite(span?.end) && starts.every(Number.isFinite);
+    const rows = [];
+    parts.forEach((_, i) => {
+      if (!busy[i]) return;
+      const row = rows.length ? el("div", "thinking done") : act;
+      if (i > 0) sent[i - 1].after(row);
+      else { const role = block.querySelector(":scope > .role"); if (role) role.after(row); else block.prepend(row); }
+      if (count > 1) {
+        // Clamped to the turn: a send time a clock apart from the turn's own never makes a part negative.
+        const from = Math.min(Math.max(starts[i], span?.start ?? 0), span?.end ?? 0);
+        const to = Math.max(from, Math.min(starts[i + 1] ?? span?.end, span?.end ?? 0));
+        row.textContent = timed ? `Worked for ${elapsedWords(to - from)}` : "Worked";
+      }
+      rows.push(row);
+    });
+    return rows;
+  }
+  function foldTurnWork(block, act, span = null) {
     // Nothing to fold (the answer was all the turn did): the row stays a plain line.
-    if ([...block.children].some(isWorkStep)) {
-      act.classList.add("work-toggle");
-      act.setAttribute("role", "button");
-      act.setAttribute("aria-expanded", "false");
-      act.tabIndex = 0;
-      const role = block.querySelector(":scope > .role");
-      if (role) role.after(act); else block.prepend(act);
+    const rows = workRows(block, act, span);
+    if (rows.length) {
+      for (const row of rows) {
+        row.classList.add("work-toggle");
+        row.setAttribute("role", "button");
+        row.setAttribute("aria-expanded", "false");
+        row.tabIndex = 0;
+      }
       block.classList.add("has-work-fold", "work-folded");
       paintWorkFold(block);
     }
@@ -3963,32 +4214,35 @@
     // A turn opened to read folds again once the next one has answered, and one whose sub-agent has
     // since finished takes its line in.
     const others = [...log.querySelectorAll(".msg.dgc.has-work-fold")].filter((other) => other !== block
-      && (!other.classList.contains("work-folded") || other.querySelector(":scope > .agent-line:not(.work-step)")));
+      && (other.querySelector(':scope > .work-toggle[aria-expanded="true"]')
+        || other.querySelector(":scope > .agent-line:not(.work-step)")));
     if (others.length) holdReadingPlace(() => { for (const other of others) setWorkOpen(other, false); });
   }
-  function setWorkOpen(block, open) {
-    if (!open) paintWorkFold(block);
-    block.classList.toggle("work-folded", !open);
-    block.querySelector(":scope > .work-toggle")?.setAttribute("aria-expanded", String(open));
+  // `row`: one part of a split turn; without it, every row of the turn.
+  function setWorkOpen(block, open, row = null) {
+    const rows = [...block.querySelectorAll(":scope > .work-toggle")];
+    for (const each of row ? [row] : rows) each.setAttribute("aria-expanded", String(open));
+    paintWorkFold(block, open);   // folding decides each step again; opening shows them as they were decided
+    block.classList.toggle("work-folded", rows.some((each) => each.getAttribute("aria-expanded") !== "true"));
     repinBlockOf(block);        // off screen it is skipped at its old height: measure it again
   }
-  function toggleWorkFold(block) {
-    const open = block.classList.contains("work-folded");
-    setWorkOpen(block, open);
+  function toggleWorkFold(row) {
+    const open = row.getAttribute("aria-expanded") !== "true";
+    setWorkOpen(row.parentElement, open, row);
     // Opened, the work is being read: a turn running below must not scroll() the reader away from it.
     if (open && !atBottom()) following = false;
     renderToLatest();
   }
   log.addEventListener("click", (event) => {
     const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
-    if (row) toggleWorkFold(row.parentElement);
+    if (row) toggleWorkFold(row);
   });
   log.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const row = event.target.closest?.(".msg.dgc.has-work-fold > .work-toggle");
     if (!row) return;
     event.preventDefault();
-    toggleWorkFold(row.parentElement);
+    toggleWorkFold(row);
   });
   function endTurn(reason = "completed", finalId) {
     if (!turn) return;
@@ -3996,7 +4250,8 @@
     finishReasoning();
     settleRetryLines(turn, reason);
     if (!replaying) undockAskCard("turn_end");
-    turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
+    // A question about a mod DGC wrote is not the turn's: DGC keeps it open after the turn, until it is answered.
+    turn.block.querySelectorAll(".card:not(.resolved):not(.mod-offer)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
       if (outlivesTheTurn(card) || reason === "moved") return;   // moved: it is still running, elsewhere
       setToolStatus(card, "stopped");
@@ -4067,8 +4322,9 @@
     // happened and stop there rather than printing a made-up number.
     const took = turn.t0 != null ? Date.now() - turn.t0
       : reason === "completed" && turn.promptAt > 0 && turn.replyAt >= turn.promptAt ? turn.replyAt - turn.promptAt : null;
-    turn.act.textContent = took == null || reason === "moved" ? outcome : `${outcome} for ${Math.floor(took / 1000)}s`;
-    if (answer && reason === "completed") foldTurnWork(turn.block, turn.act);
+    turn.act.textContent = took == null || reason === "moved" ? outcome : `${outcome} for ${elapsedWords(took)}`;
+    const start = turn.t0 != null ? turn.t0 : took != null ? turn.promptAt : null;
+    if (answer && reason === "completed") foldTurnWork(turn.block, turn.act, took == null ? null : { start, end: start + took });
     const finished = turn.block;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
@@ -4674,6 +4930,118 @@
     syncComposerRail();
   }
 
+  // ---- artifacts (dgc/artifact_service): a card for each one a Work turn made or changed. Open shows it in its panel
+  // (a document in the editor over its file); Export makes a copy in one of its own formats. Every card of the same
+  // artifact shows it as it is now: a later change names the same id (artifact_changed, or artifactNews from another
+  // chat, a Pip or the editor).
+  const ARTIFACT_MARK = { doc: "file-text", slides: "presentation", sheet: "sheet", dashboard: "layout-dashboard", page: "app-window" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+  const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
+                            xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
+  const ARTIFACT_OP = { made: "made", changed: "changed", restored: "restored", refreshed: "refreshed", removed: "removed" };
+  const artifactOk = (a) => !!a && typeof a === "object" && /^ar_[a-f0-9]{16}$/.test(String(a.id || "")) && !!ARTIFACT_KIND[a.type];
+  function artifactFormats(a) {
+    const own = Array.isArray(a.exports) ? a.exports.filter((f) => typeof f === "string" && /^[a-z0-9]{1,8}$/.test(f)) : [];
+    return own.length ? own : (Array.isArray(outputOffered?.exports?.[a.type]) ? outputOffered.exports[a.type] : []);
+  }
+  let artifactMenuOpen = null;
+  function closeArtifactMenu(focus) {
+    if (!artifactMenuOpen) return;
+    const { menu, button } = artifactMenuOpen;
+    menu.hidden = true; button.setAttribute("aria-expanded", "false"); artifactMenuOpen = null;
+    if (focus) button.focus();
+  }
+  document.addEventListener("click", (e) => {
+    if (artifactMenuOpen && !artifactMenuOpen.menu.contains(e.target) && !artifactMenuOpen.button.contains(e.target)) closeArtifactMenu(false);
+  });
+  function paintArtifactCard(card, a, op) {
+    if (op) card.dataset.op = ARTIFACT_OP[op] || "changed";
+    const removed = card.dataset.op === "removed";
+    card.dataset.version = String(a.version || 1);
+    card.classList.toggle("stopped", removed);
+    card.setAttribute("aria-label", `${ARTIFACT_KIND[a.type]}: ${a.title || ARTIFACT_KIND[a.type]}`);
+    const kind = ARTIFACT_KIND[a.type];
+    const status = removed ? "removed: it's in DGC's trash" : `version ${Number(a.version) || 1}${card.dataset.op ? ` · ${card.dataset.op}` : ""}`;
+    card.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">${icon(ARTIFACT_MARK[a.type])}</span><span class="anm"></span></div>`
+      + `<div class="ameta"></div>`;
+    card.querySelector(".anm").textContent = a.title || kind;
+    card.querySelector(".ameta").textContent = `${kind} · ${status}`;
+    const row = el("div", "abtns");
+    const open = el("button", "abtn primary", "Open"); open.type = "button";
+    open.disabled = removed;
+    open.title = a.type === "doc" ? "Open it in the editor, over its own file" : "Open it in a panel of its own";
+    open.onclick = () => vscode.postMessage({ type: "artifactOpen", id: a.id, artifactType: a.type, title: a.title || "" });
+    row.appendChild(open);
+    const formats = artifactFormats(a);
+    if (formats.length) {
+      const wrap = el("div", "amenu-wrap");
+      const button = el("button", "abtn amenu-button"); button.type = "button";
+      button.innerHTML = `<span>Export</span>${icon("chevron-down", "xs")}`;
+      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+      button.disabled = removed;
+      const menu = el("div", "amenu"); menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Export as"); menu.hidden = true;
+      for (const format of formats) {
+        const item = el("button", "amenu-item"); item.type = "button"; item.setAttribute("role", "menuitem");
+        item.textContent = ARTIFACT_FORMAT[format] || format.toUpperCase();
+        item.dataset.format = format;
+        item.onclick = () => {
+          closeArtifactMenu(true);
+          vscode.postMessage({ type: "artifactExport", id: a.id, format, artifactType: a.type, title: a.title || "", exports: formats });
+        };
+        menu.appendChild(item);
+      }
+      menu.addEventListener("keydown", (e) => {
+        const items = [...menu.querySelectorAll("button")];
+        const at = items.indexOf(document.activeElement);
+        if (e.key === "Escape") { e.preventDefault(); closeArtifactMenu(true); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+        else if (e.key === "Tab") closeArtifactMenu(false);
+      });
+      button.onclick = (e) => {
+        e.stopPropagation();
+        if (artifactMenuOpen?.menu === menu) { closeArtifactMenu(true); return; }
+        closeArtifactMenu(false);
+        menu.hidden = false; button.setAttribute("aria-expanded", "true");
+        artifactMenuOpen = { menu, button };
+        menu.querySelector("button")?.focus();
+      };
+      wrap.appendChild(button); wrap.appendChild(menu);
+      row.appendChild(wrap);
+    }
+    card.appendChild(row);
+  }
+  // What make_artifact and edit_artifact tell the model (dgc/artifact_tools._summary): `Made Slides “Q3 plan”
+  // (ar_…, version 3). …`, read back into the card's artifact.
+  function artifactFromResult(text) {
+    const m = /^(Made|Changed|Restored) (Document|Slides|Spreadsheet|Dashboard|Page) \u201c([\s\S]{0,240}?)\u201d \((ar_[0-9a-f]{16}), version (\d{1,6})\)/.exec(text);
+    if (!m) return null;
+    const type = Object.keys(ARTIFACT_KIND).find((t) => ARTIFACT_KIND[t] === m[2]);
+    return type ? { id: m[4], type, title: m[3], version: Number(m[5]), op: m[1].toLowerCase() } : null;
+  }
+  function artifactCardFrom(a, op) {
+    if (!artifactOk(a)) return;
+    ensureTurn();
+    let card = [...turn.block.querySelectorAll(".artifact-card")].find((c) => c.dataset.artifactRef === a.id);
+    if (!card) {
+      card = el("div", "artifact artifact-card");
+      card.dataset.artifactRef = a.id;
+      card.setAttribute("role", "group");
+      appendTurnContent(card); breakText();
+    }
+    paintArtifactCard(card, a, op);
+    artifactNews(a, op);
+  }
+  /** The same artifact on every card that shows it: its title and version now, or that it was removed. */
+  function artifactNews(a, op) {
+    if (!artifactOk(a)) return;
+    for (const card of document.querySelectorAll(".artifact-card")) {
+      if (card.dataset.artifactRef !== a.id) continue;
+      if (op === "removed") paintArtifactCard(card, a, "removed");
+      else if (card.dataset.op !== "removed" || op === "restored" || op === "made") paintArtifactCard(card, a, ARTIFACT_OP[op] ? op : card.dataset.op === "removed" ? "changed" : null);
+    }
+  }
+
   function ensureTurn() {
     if (turn) return;
     startTurn();
@@ -4764,7 +5132,8 @@
     const loneName = loneOther && canonicalTool(loneOther.dataset.toolName);
     const agent = loneOther && NAMES_ITS_AGENT.has(loneName)
       ? String(loneOther.querySelector(".arg")?.textContent || "").trim() : "";
-    const named = agent ? `${TOOL_COPY[loneName][past ? 1 : 0].toLowerCase()} ${agent}` : "";
+    const verb = past && failedAgentStep(loneOther) || TOOL_COPY[loneName]?.[past ? 1 : 0] || "";
+    const named = agent ? `${verb.toLowerCase()} ${agent}` : "";
     const lone = !past ? loneOther : null;
     const loneCopy = lone && (named || LONE_PRESENT[loneName] || TOOL_COPY[loneName]?.[0].toLowerCase());
     const otherPresent = loneCopy ? loneCopy
@@ -4832,7 +5201,9 @@
     const viewing = cards.some((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "viewed");
     const images = viewing ? 0 : cards.reduce((n, card) => n + (card._images?.length || 0), 0);
     if (!running.length && images) sentence += ` · ${images} ${images === 1 ? "image" : "images"}`;
-    if (!running.length && failures.length) {
+    // A sentence that already says the one step failed ("Couldn't delegate …") needs no "· 1 issue".
+    const saidFailed = cards.length === 1 && failedAgentStep(cards[0]);
+    if (!running.length && failures.length && !saidFailed) {
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
     summary.textContent = sentence;
@@ -5072,7 +5443,7 @@
     if (verb) {
       verb.textContent = value === "running" ? copy.present
         : value === "completed" ? copy.past
-          : value === "failed" ? `${copy.past} · failed`
+          : value === "failed" ? failedAgentStep(card) || `${copy.past} · failed`
             : value === "blocked" ? `${copy.past} · blocked, repeated call`
               : value === "denied" ? `${copy.present} · denied`
               : value === "stopped" ? `${copy.past} · stopped`
@@ -6175,19 +6546,27 @@
     const panel = $("goal-detail");
     if (panel.hidden) return;
     panel.replaceChildren();
-    panel.appendChild(el("p", "goal-detail-objective", goalState.text || ""));
+    const objective = el("p", "goal-detail-objective");
+    objective.textContent = goalState.text || "";
+    panel.appendChild(objective);
     const status = String(goalState.status || "");
     const reason = String(goalState.reason || "").trim();
     const evidence = Array.isArray(goalState.evidence)
       ? goalState.evidence.map((item) => String(item || "").trim()).filter(Boolean) : [];
     if (reason) {
       const label = status === "blocked" ? "Blocked" : status === "paused" ? "Paused" : "Note";
-      panel.appendChild(el("p", "goal-detail-why", `${label}: ${reason}`));
+      const why = el("p", "goal-detail-why");
+      why.textContent = `${label}: ${reason}`;
+      panel.appendChild(why);
     }
     if (evidence.length) {
       panel.appendChild(el("p", "goal-detail-label", evidence.length === 1 ? "Evidence" : "Evidence"));
       const list = el("ul", "goal-detail-evidence");
-      for (const item of evidence) list.appendChild(el("li", "", item));
+      for (const item of evidence) {
+        const row = el("li");
+        row.textContent = item;
+        list.appendChild(row);
+      }
       panel.appendChild(list);
     }
     if (!reason && !evidence.length) {
@@ -6948,9 +7327,12 @@
       $("changes-review").hidden = true;
     }
     const stick = atBottom();
+    // A mod's frames, and the answers to what the mods asked (media/mods.js): never a chat event of their own.
+    if (ev.type !== "ready" && modsUi?.event(ev)) return;
     switch (ev.type) {
       case "ready": {
         requestEpoch += 1;             // a backend (re)started: its request ids start again
+        modsUi?.ready(ev.capabilities);
         backendLive = true; backendDown = false; armTodoClearTimer();
         if (Array.isArray(ev.commands) && ev.commands.length
             && ev.commands.every((c) => c && typeof c === "object")) {
@@ -6988,6 +7370,7 @@
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        artifactsOffered(ev.capabilities?.artifacts);
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
           && Number(ev.capabilities?.pips_api_version) >= 41;
         clearPipPicker();
@@ -7277,6 +7660,11 @@
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
           recordEdit(turn._paths?.[ev.call_id || ev.name], 0, 0, false);
         }
+        // A reloaded chat has no artifact_changed to replay: its card comes back from what the tool told the model.
+        if (replaying && !ev.is_error && (ev.name === "make_artifact" || ev.name === "edit_artifact")) {
+          const told = artifactFromResult(String(ev.output || ""));
+          if (told) artifactCardFrom(told, told.op);
+        }
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         // A step whose result the reload snapshot already showed is not finished a second time
@@ -7388,7 +7776,8 @@
         const c = requestCard(decisionCard(`<div class="q">${icon("clipboard-list")} Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
-          if (!resolveCard(c, planDecision(b.dataset.d, feedback))) return;
+          const choice = b.dataset.d;
+          if (!resolveCard(c, choice === "auto" ? "Auto requested · awaiting confirmation" : planDecision(choice, feedback))) return;
           vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback });
         });
         break;
@@ -7616,7 +8005,7 @@
         row.setAttribute("aria-label", "Files produced");
         for (const item of items.slice(0, 8)) {
           const li = el("li");
-          li.appendChild(producedFileChip(item));
+          li.appendChild(PRODUCED_IMAGE.test(String(item.rel)) ? producedImage(item, row) : producedFileChip(item));
           row.appendChild(li);
         }
         appendTurnContent(row); breakText();
@@ -7661,6 +8050,10 @@
           .forEach((run) => { if (run && typeof run === "object") troupeEvent(run, run.state === "running"); });
         break;
       }
+      case "artifact_changed":
+        // An artifact this Work turn made or changed: its card, which opens it or exports it.
+        if (ev.surface === "work") artifactCardFrom(ev.artifact, ev.op);
+        break;
       case "artifact_ready": {
         amPreviewReady(ev);
         ensureTurn();
@@ -7689,7 +8082,8 @@
         const list = c.querySelector(".artifact-list");
         items.forEach((a) => {
           const row = el("div", "abtns artifact-list-row"); row.dataset.artifactId = String(a.id || "");
-          const open = el("button", "abtn primary", `${a.name} · open`); open.type = "button";
+          const open = el("button", "abtn primary"); open.type = "button";
+          open.textContent = `${String(a.name || "Artifact")} · open`;
           open.onclick = () => vscode.postMessage({ type: "openExternal", url: a.url });
           const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
           stop.onclick = () => requestArtifactStop(a.id, row, stop);
@@ -8063,6 +8457,11 @@
     if (/^\/agents\s*$/i.test(composerText().trim()) && !attachments.length) {
       clearComposer(); persistDraft(); openAgentMap({ command: true }); return;
     }
+    // /mods, or a running mod's own "/name args": at once, never a prompt, and never folded into a running turn as
+    // steering (the terminal sent one there once). DGC's own commands and the project's templates keep their names.
+    if (!attachments.length && modsUi?.intercept(composerText().trim(), (name) => !modCommandName(name))) {
+      clearComposer(); persistDraft(); return;
+    }
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
@@ -8160,7 +8559,9 @@
       delivery,
       ...(references.length ? {pip_references: references.map(a => ({pip_id:a.pipReference.pip_id,expected_version:a.pipReference.job_version,expected_lifecycle_revision:a.pipReference.lifecycle_revision}))} : {}),
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
+      ...(outputOffered && outputPick !== "auto" ? { output: outputPick } : {}),
       context: resources.length ? resources : undefined });
+    if (outputPick !== "auto") setOutput("auto");
     // One step with the text, so undo right after sending brings back the whole prompt -- the
     // pills and the chips with the words.
     recordComposerEdit(() => { clearComposer(); attachments.length = 0; });
@@ -8274,7 +8675,7 @@
     // alphabets. `label` keeps its sigil -- the matcher and the inserter both read it -- so this
     // is a rendering change only.
     const rowIcon = (it) => (it.skill ? "codicon-package"
-      : it.template ? "codicon-symbol-snippet" : "codicon-terminal");
+      : it.template ? "codicon-symbol-snippet" : it.modCommand || it.action === "mods" ? "codicon-extensions" : "codicon-terminal");
     pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
@@ -8359,6 +8760,13 @@
       renderAtts();
       insertComposerPill(popStart, popEnd, "file", it.label);
     } else if (popMode === "/") {
+      if (it.modCommand || it.action === "mods") {
+        // A mod's command runs at once with no model turn, mid-turn too; the rest of the draft stays as it was.
+        replacePopToken(); hidePop();
+        if (it.action === "mods") modsUi?.openList(input); else modsUi?.run(it.modCommand, "");
+        if (it.action !== "mods") input.focus();
+        return;
+      }
       if (it.action === "agentMap") {
         // The map is the panel's own: the token goes, the rest of the draft stays.
         replacePopToken(); hidePop();
@@ -8598,7 +9006,8 @@
         action: c.action, acceptsArgs: c.accepts_args === true,
         kind: "command",
         aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
-        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "Apply this prompt template to your request", template: c, kind: "prompt" })), skillItems);
+        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "Apply this prompt template to your request", template: c, kind: "prompt" })),
+                modSlashItems(), skillItems);
       const matches = all.filter((c) => c.label.slice(1).toLowerCase().includes(query)
         || (c.detail || "").toLowerCase().includes(query)
         || (c.aliases || []).some((alias) => alias.toLowerCase().includes(query)));
@@ -8860,6 +9269,7 @@
     if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); $("btn-ctx").focus(); }
   });
   $("btn-mode").onclick = (e) => { e.stopPropagation(); toggleModeMenu(); };
+  $("btn-output").onclick = (e) => { e.stopPropagation(); toggleOutputMenu(); };
   // "+" is a menu, not a keystroke. It used to insert a literal "@", which meant the one control
   // most likely to be clicked first did the least discoverable thing in the panel. The shape is
   // Codex's -- a leading Add section -- but every item is a capability DGC already has, including
@@ -9158,6 +9568,7 @@
   };
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
+    if (!$("outputmenu").hidden && !$("btn-output").contains(e.target) && !$("outputmenu").contains(e.target)) hideOutputMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
     if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
     hideAgentsMenu(e);
@@ -9208,7 +9619,7 @@
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
-                              "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
+                              "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "options_resolved",
                               "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_files", "turn_end"]);
   function prepareCompleteHistory(items) {
     // The host may have forwarded the end of A and start of queued B while this webview was
@@ -9744,7 +10155,7 @@
     const from = Number(fix.started_at || fix.created_at || 0) * 1000;
     if (!from) return "";
     const to = pipFixActive(fix) ? Date.now() : Number(fix.ended_at || 0) * 1000;
-    return to > from ? agentElapsed(to - from) : "";
+    return to > from ? elapsedWords(to - from) : "";
   }
   function syncPipFixTick() {
     const live = [...pipFixes.values()].some(pipFixActive);
@@ -9865,16 +10276,22 @@
       body.push(p);
     }
     if (Array.isArray(fix.merged) && fix.merged.length && fix.state !== "undone") {
-      body.push(el("p", "pip-fix-note", `Merged with your changes: ${fix.merged.slice(0, 3).join(", ")}`));
+      const note = el("p", "pip-fix-note");
+      note.textContent = `Merged with your changes: ${fix.merged.slice(0, 3).join(", ")}`;
+      body.push(note);
     }
     const tests = pipFixActive(fix) || fix.state === "undone" ? null : pipFixTests(fix);
     if (tests) { const p = el("p", `pip-fix-tests tone-${tests.tone}`); p.textContent = tests.text; body.push(p); }
-    if (fix.message && !pipFixActive(fix)) body.push(el("p", "pip-fix-note", String(fix.message).slice(0, 400)));
+    if (fix.message && !pipFixActive(fix)) {
+      const note = el("p", "pip-fix-note"); note.textContent = String(fix.message).slice(0, 400); body.push(note);
+    }
     if (fix.undo && (fix.undo.state === "done" || fix.undo.state === "partial")) {
       const restored = Array.isArray(fix.undo.restored) ? fix.undo.restored.length : 0;
       const kept = Array.isArray(fix.undo.kept) ? fix.undo.kept : [];
-      body.push(el("p", "pip-fix-note", `Put back ${pipFixPlural(restored, "file")}.`
-        + (kept.length ? ` Kept ${kept.map((k) => `${k.path} (${k.why})`).slice(0, 3).join(", ")}.` : "")));
+      const note = el("p", "pip-fix-note");
+      note.textContent = `Put back ${pipFixPlural(restored, "file")}.`
+        + (kept.length ? ` Kept ${kept.map((k) => `${k.path} (${k.why})`).slice(0, 3).join(", ")}.` : "");
+      body.push(note);
     }
     if (fix.summary && !pipFixActive(fix) && fix.state !== "undone") {      // undone, "Put back 2 files." says it all
       const p = el("p", "pip-fix-summary"); p.textContent = String(fix.summary).slice(0, 400); p.title = p.textContent; body.push(p);
@@ -10253,11 +10670,31 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
+    if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
+    if (msg?.type === "autoModeDismiss") {
+      if (msg.requestId === autoModeDialog?.id) closeAutoModePrompt();
+      return;
+    }
+    if (msg?.type === "planAutoDecision") {
+      const card = [...document.querySelectorAll('.card[data-request-id]')]
+        .find((node) => node.dataset.requestId === String(msg.id || "") && node._requestEpoch === requestEpoch);
+      const decision = card?.querySelector(':scope > .decision');
+      if (decision?.textContent === "Auto requested · awaiting confirmation") {
+        decision.textContent = msg.approved === true
+          ? `Approved · ${msg.mode === "default" ? "default" : "auto"} mode`
+          : "Kept planning · Auto was not confirmed";
+      }
+      return;
+    }
     if (["mic", "micLevels", "speak", "speakAudio", "voiceReady"].includes(msg.type)) {
       // This page's own box, or the Pips box beside it (in the side bar's Pips view). (voiceReady answers voice mode,
       // which only the Pips box has here.)
       if (msg.from === "chat") { if (msg.type.startsWith("speak")) reader?.receive(msg); else if (msg.type !== "voiceReady") onMic(msg); }
       else if (msg.from === "pips") for (const listener of pipsListeners) listener(msg);
+      return;
+    }
+    if (msg.type === "fileThumb") {
+      finishFileThumb(String(msg.requestId || ""), typeof msg.src === "string" && msg.src.startsWith("data:image/") ? msg.src : "");
       return;
     }
     if (msg.type === "pipsOpen") { showPips(); return; }
@@ -10279,6 +10716,7 @@
       return;
     }
     if (msg.type === "sessions_show") { showSessions(); return; }
+    if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     if (msg.type === "pipsPluginLogos") { for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
@@ -10379,6 +10817,7 @@
     else if (msg.type === "turn_active") noteLiveTurn(msg);
     else if (msg.type === "cleared") {
       pipReferencesSupported=false;hidePop();
+      clearFileThumbs();
       // DGC: Restart Backend. The backend holding the queued messages is going away and the new one
       // replays the chat: they are given back as not sent, as Stop gives them back.
       discardTurn(); log.innerHTML = ""; setSending(false);
@@ -11279,7 +11718,7 @@
     const working = AGENT_ACTIVE.has(record.state);
     const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
     // Where the agent worked, which the chat's "↳ isolated checkout" notice used to say.
-    meta.textContent = `${working ? "Working" : "Worked"} for ${agentElapsed(ms)}${record.isolated ? " · isolated checkout" : ""}`;
+    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${record.isolated ? " · isolated checkout" : ""}`;
   }
   // The spawn's own result says whether the agent's changes reached your checkout; its line only says
   // it finished. The page says what was integrated, above the agent's report -- and says it plainly
@@ -11414,7 +11853,7 @@
     "section.ask button", "section.ask input", "section.ask textarea",                              // a question in the box
     ".recovery-card .act.primary", ".task-interrupted button", ".ts-undo", ".learn-actions button",  // Continue, run again, Undo, Save
     ".steer-now", ".steer-all", ".pip-report-fix", ".pip-report-fix-slim", "#tasks-clear",
-    "#btn-add", "#btn-cmd", "#btn-mode", "#btn-model", "#btn-goal", "#btn-mic", "#ctx-compact", "#ctx-size",
+    "#btn-add", "#btn-cmd", "#btn-mode", "#btn-output", "#btn-model", "#btn-goal", "#btn-mic", "#ctx-compact", "#ctx-size",
     "#ctx-size-custom", "#queue-send", "#send",
   ].join(", ");
   let workHeldWatch = null;
@@ -11549,7 +11988,8 @@
 
   function agentNow() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
   function agentPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
-  function agentElapsed(ms) {
+  // How long, in the words every clock in the chat uses: 48s, 1m 12s, 2h 3m (format_elapsed in dgc/subagents.py).
+  function elapsedWords(ms) {
     const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
@@ -11889,7 +12329,7 @@
     return `${(value / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`;
   }
   // Under a second is not worth saying, and nor is a count of none.
-  function amDuration(ms) { return Number(ms) >= 1000 ? agentElapsed(ms) : ""; }
+  function amDuration(ms) { return Number(ms) >= 1000 ? elapsedWords(ms) : ""; }
   function amAgentMs(record) {
     if (record.state === "running" || record.state === "waiting") return agentLiveMs(record);
     return AGENT_ACTIVE.has(record.state) || record.duration_ms == null ? 0 : Number(record.duration_ms);
@@ -12094,7 +12534,7 @@
   }
   function amPreviewTask(preview) {
     const key = `preview:${preview.id}`, running = preview.state !== "stopped";
-    const up = Number.isFinite(preview.readyWall) ? agentElapsed(Date.now() - preview.readyWall) : String(preview.uptime || "");
+    const up = Number.isFinite(preview.readyWall) ? elapsedWords(Date.now() - preview.readyWall) : String(preview.uptime || "");
     return { key, kind: "preview", id: preview.id, running, name: String(preview.name || preview.id), word: running ? "Running" : "Stopped",
       label: "preview", ms: 0, stoppable: running, preview, meta: ["preview", up ? `up ${up}` : ""].filter(Boolean) };
   }
@@ -13100,7 +13540,7 @@
       const item = task.item;
       return [["Command", String(item.command || "")], ["Events", String(Math.max(0, Number(item.events) || 0))],
         ...(Number(item.pending_events) > 0 ? [["Waiting for DGC", eventCount(item.pending_events)]] : []),
-        ["Ends", item.persistent ? "When it is stopped" : `After ${agentElapsed(Number(item.timeout_ms) || 0)}`], ["Id", task.id]]
+        ["Ends", item.persistent ? "When it is stopped" : `After ${elapsedWords(Number(item.timeout_ms) || 0)}`], ["Id", task.id]]
         .filter(([, value]) => value);
     }
     if (task.kind === "shell") {
@@ -13913,6 +14353,7 @@
     pumpImages();
   }
   function imagesOnSessionReset(kind) {
+    clearFileThumbs();
     imageGeneration++;
     for (const entry of imageInFlight.values()) clearTimeout(entry.timer);
     imageInFlight.clear(); imageQueue.length = 0; imageRefs.clear(); imageCache.clear(); imageCacheChars = 0;
@@ -13942,6 +14383,10 @@
 
   // ---- the viewer ----
   function imageSequenceFor(record) {
+    if (record.owner?.classList.contains("made-files")) {
+      const turn = record.owner.closest(".turn");
+      if (turn) return [...turn.querySelectorAll(".made-files")].flatMap(row => (row._images || []).filter(image => image.state === "ready"));
+    }
     const group = record.owner?.closest(".tool-group");
     if (!group) return record.owner?._images?.length ? [...record.owner._images] : [record];
     return [...group.querySelectorAll(".tool")].flatMap((card) => card._images || []);
@@ -13954,7 +14399,7 @@
     const viewer = el("div");
     viewer.id = "image-viewer";
     viewer.setAttribute("role", "dialog"); viewer.setAttribute("aria-modal", "true"); viewer.setAttribute("aria-labelledby", "iv-title");
-    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}<span class="iv-zoomer"><button type="button" class="iv-btn iv-out" aria-label="Zoom out" title="Zoom out (-)"><span class="codicon codicon-zoom-out" aria-hidden="true"></span></button><output class="iv-level" aria-live="off">100%</output><button type="button" class="iv-btn iv-in" aria-label="Zoom in" title="Zoom in (+)"><span class="codicon codicon-zoom-in" aria-hidden="true"></span></button></span>${viewerButton("screen-full", "Fit to panel", "Fit to panel (Z)", "iv-zoom")}${viewerButton("desktop-download", "Save image", "Save image", "iv-save")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
+    viewer.innerHTML = `<div class="iv-bar"><div class="iv-heading"><h2 id="iv-title"></h2><span id="iv-meta"></span></div><div class="iv-controls"><span class="iv-pos"></span>${viewerButton("chevron-left", "Previous image", "Previous image (←)", "iv-prev")}${viewerButton("chevron-right", "Next image", "Next image (→)", "iv-next")}<span class="iv-zoomer"><button type="button" class="iv-btn iv-out" aria-label="Zoom out" title="Zoom out (-)"><span class="codicon codicon-zoom-out" aria-hidden="true"></span></button><output class="iv-level" aria-live="off">100%</output><button type="button" class="iv-btn iv-in" aria-label="Zoom in" title="Zoom in (+)"><span class="codicon codicon-zoom-in" aria-hidden="true"></span></button></span>${viewerButton("screen-full", "Actual size", "Actual size (Z)", "iv-zoom")}${viewerButton("desktop-download", "Save image", "Save image", "iv-save")}${viewerButton("go-to-file", "Open file", "Open file", "iv-open")}${viewerButton("debug-stop", "Stop generation", "Stop generation", "iv-stop")}${viewerButton("close", "Close image preview", "Close (Esc)", "iv-close")}</div></div><div class="iv-notice" hidden><span class="iv-notice-text"></span><button type="button" class="act iv-show">Show</button></div><div class="iv-stage"></div>`;
     const inert = [...document.body.children]
       .filter((node) => node !== viewer && node.id !== "announcer" && !node.classList.contains("tip"))
       .map((node) => ({ node, attr: node.hasAttribute("inert"), prop: node.inert }));
@@ -13983,6 +14428,8 @@
     q(".iv-open").onclick = () => {
       const current = imageViewer?.records[imageViewer.index];
       if (current?.ref) vscode.postMessage({ type: "openImage", ref: current.ref });
+      else if (current?.path) vscode.postMessage({ type: "openFile", path: current.path });
+      if (current?.ref || current?.path) closeImageViewer(true);
     };
     q(".iv-show").onclick = () => showWaitingRequest();
     viewer.addEventListener("click", (event) => {
@@ -13995,6 +14442,10 @@
       imageViewer.observer.observe(log, { childList: true, subtree: true });
     }
     renderViewerImage(false);
+    if (typeof ResizeObserver === "function") {
+      imageViewer.resizeObserver = new ResizeObserver(() => applyViewerZoom());
+      imageViewer.resizeObserver.observe(q(".iv-stage"));
+    }
     q(".iv-close").focus();
     hoverTip.hide();             // focus placed for the reader: no "Close (Esc)" label over the dialog
   }
@@ -14047,6 +14498,9 @@
     if (next === imageViewer.index) return;
     imageViewer.index = next;
     imageViewer.scale = 1;          // a new picture starts at its own size, not the last one's
+    imageViewer.zoomExplicit = false;
+    imageViewer.actual = false;
+    imageViewer.el.classList.remove("actual");
     applyViewerZoom();
     renderViewerImage(true);
   }
@@ -14055,7 +14509,7 @@
   // purpose: a slider in a preview is fiddly, and these are the sizes anyone actually wants.
   const ZOOM_STEPS = [0.25, 0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.5, 2, 3, 4];
   function viewerZoomIndex() {
-    const wanted = imageViewer?.scale ?? 1;
+    const wanted = viewerRenderedScale();
     let best = 0;
     ZOOM_STEPS.forEach((step, i) => {
       if (Math.abs(step - wanted) < Math.abs(ZOOM_STEPS[best] - wanted)) best = i;
@@ -14067,30 +14521,46 @@
     const el2 = imageViewer.el;
     const scale = imageViewer.scale ?? 1;
     // Any explicit zoom means the reader chose a size, so the fit/actual toggle steps aside.
-    el2.classList.toggle("scaled", scale !== 1);
+    el2.classList.toggle("scaled", imageViewer.zoomExplicit === true);
     el2.style.setProperty("--iv-scale", String(scale));
     const level = el2.querySelector(".iv-level");
-    if (level) level.value = `${Math.round(scale * 100)}%`;
+    if (level) level.value = `${Math.round(viewerRenderedScale() * 100)}%`;
     const out = el2.querySelector(".iv-out"), inn = el2.querySelector(".iv-in");
     if (out) out.disabled = scale <= ZOOM_STEPS[0];
     if (inn) inn.disabled = scale >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  }
+  function viewerRenderedScale() {
+    if (!imageViewer) return 1;
+    if (imageViewer.zoomExplicit) return imageViewer.scale ?? 1;
+    if (imageViewer.actual) return 1;
+    const img = imageViewer.el.querySelector(".iv-stage img");
+    return img?.naturalWidth && img.getBoundingClientRect().width
+      ? img.getBoundingClientRect().width / img.naturalWidth : 1;
   }
   function stepViewerZoom(direction) {
     if (!imageViewer) return;
     const next = Math.max(0, Math.min(ZOOM_STEPS.length - 1, viewerZoomIndex() + direction));
     imageViewer.scale = ZOOM_STEPS[next];
-    if (imageViewer.actual) toggleViewerZoom();   // an explicit size replaces "actual size"
+    imageViewer.zoomExplicit = true;
+    imageViewer.actual = false;
+    imageViewer.el.classList.remove("actual");
+    const fit = imageViewer.el.querySelector(".iv-zoom");
+    fit.setAttribute("aria-label", "Actual size");
+    fit.setAttribute("aria-pressed", "false");
     applyViewerZoom();
   }
   function toggleViewerZoom() {
     if (!imageViewer) return;
     imageViewer.actual = !imageViewer.actual;
+    imageViewer.zoomExplicit = false;
+    imageViewer.scale = 1;
     imageViewer.el.classList.toggle("actual", imageViewer.actual);
     const zoom = imageViewer.el.querySelector(".iv-zoom");
     zoom.setAttribute("aria-pressed", String(imageViewer.actual));
     zoom.setAttribute("aria-label", imageViewer.actual ? "Fit to panel" : "Actual size");
     zoom.title = imageViewer.actual ? "Fit to panel (Z)" : "Actual size (Z)";
     zoom.querySelector(".codicon").className = `codicon codicon-${imageViewer.actual ? "screen-normal" : "screen-full"}`;
+    applyViewerZoom();
   }
   function refreshViewerSequence() {
     if (!imageViewer) return;
@@ -14118,7 +14588,7 @@
     const label = IMAGE_SOURCES[record.source] || "Image";
     q("#iv-title").textContent = record.name || label;
     q("#iv-meta").textContent = [imageDims(record), imageSize(record.bytes), record.host || label].filter(Boolean).join(" · ");
-    q(".iv-open").hidden = !record.ref;
+    q(".iv-open").hidden = !record.ref && !record.path;
     q(".iv-open").title = `Open ${record.name} in the editor`;
     const stage = q(".iv-stage");
     stage.textContent = "";
@@ -14126,6 +14596,11 @@
       const img = el("img");
       img.alt = `${record.name}, ${label}`;
       img.src = record.src;
+      img.addEventListener("load", () => {
+        if (!imageViewer || imageViewer.records[imageViewer.index] !== record) return;
+        imageViewer.el.style.setProperty("--iv-natural-w", `${img.naturalWidth}px`);
+        applyViewerZoom();
+      });
       img.addEventListener("click", (event) => { event.stopPropagation(); toggleViewerZoom(); });
       stage.appendChild(img);
     } else {
@@ -14138,9 +14613,10 @@
   }
   function closeImageViewer(restoreFocus) {
     if (!imageViewer) return;
-    const { el: viewer, inert, records, index, opener, observer } = imageViewer;
+    const { el: viewer, inert, records, index, opener, observer, resizeObserver } = imageViewer;
     imageViewer = null;
     observer?.disconnect();
+    resizeObserver?.disconnect();
     viewer.remove();
     for (const saved of inert) {
       if (!saved.attr) saved.node.removeAttribute("inert");

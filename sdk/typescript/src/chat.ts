@@ -44,6 +44,10 @@ export type ChatReply = {
   finish: string;
   usage: Record<string, unknown>;
   research: Record<string, unknown> | null;
+  /** Artifacts the reply made or changed (CLI 0.50+): {id, type, label, title, version, op}; read one with session.artifacts. */
+  artifacts: Array<Record<string, unknown>>;
+  /** Set when the Output asked for wasn't made. */
+  outputNote: string;
   raw: Record<string, unknown>;
 };
 
@@ -84,6 +88,8 @@ export type ChatSendOptions = {
   study?: boolean;
   /** For the whole reply (default: the client's `replyTimeoutMs`); past it the reply is stopped. `null`: none. */
   timeoutMs?: number | null;
+  /** CLI 0.50+: what the reply should make, as DGC's Output chip asks; the reply's `artifacts` hold it. */
+  output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard";
 };
 
 export type ChatAnswerOptions = {
@@ -133,7 +139,9 @@ function toReply(chatId: string, message: Record<string, unknown>): ChatReply {
     chatId, messageId: text(message.id), text: text(message.text), sources,
     searches: (Array.isArray(message.searches) ? message.searches : []).map(text),
     files: (Array.isArray(message.files) ? message.files : []).map((f) => ({ ...record(f) })),
-    model: text(message.model), finish: text(message.finish), usage: { ...record(message.usage) }, research, raw: { ...message },
+    model: text(message.model), finish: text(message.finish), usage: { ...record(message.usage) }, research,
+    artifacts: (Array.isArray(message.artifacts) ? message.artifacts : []).map((a) => ({ ...record(a) })),
+    outputNote: text(message.output_note), raw: { ...message },
   };
 }
 
@@ -307,9 +315,12 @@ export class Chat {
     const id = requestId();
     const limit = timeoutMs === undefined ? chats.replyTimeoutMs : timeoutMs;
     const deadline = limit === null ? Infinity : Date.now() + limit;
+    let started = false;
+    let sent = false;
+    let completed = false;
     try {
       chats.send({ ...command, conversation_id: this.id, request_id: id });
-      let started = false;
+      sent = true;
       let final: ChatReply | null = null;
       for (;;) {
         const left = deadline - Date.now();
@@ -329,6 +340,7 @@ export class Chat {
           if (event.state === "started") started = true;
           else if (event.state === "ended" && started) {
             if (!final) throw new DGCRuntimeError("ChatDGC ended the reply without one");
+            completed = true;
             yield { kind: "reply", text: "", data: {}, reply: final };
             return;
           }
@@ -348,6 +360,7 @@ export class Chat {
         }
       }
     } finally {
+      if (sent && !completed) this.cancel();
       if (chats.listeners.get(this.id) === inbox) chats.listeners.delete(this.id);
     }
   }
@@ -383,6 +396,15 @@ export class Chat {
     if (options.study !== undefined) {
       if (typeof options.study !== "boolean") throw new DGCConfigError("study must be true or false");
       command.study = options.study;
+    }
+    if (options.output !== undefined && options.output !== "auto") {
+      if (!["document", "slides", "spreadsheet", "page", "dashboard"].includes(options.output)) {
+        throw new DGCConfigError("output must be auto, document, slides, spreadsheet, page or dashboard");
+      }
+      if (!record(this.chats.capabilities().artifacts).version) {
+        throw new DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).");
+      }
+      command.output = options.output;
     }
     if (files.length) {
       command.attachments = files.map((item) => {

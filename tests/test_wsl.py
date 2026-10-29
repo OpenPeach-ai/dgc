@@ -463,11 +463,16 @@ class SignedInChromeTests(unittest.TestCase):
             return free.server_address[1]
 
     def test_windows_browsers_come_first_then_linux_ones(self):
-        rows = browser_user.profile_folders()
-        self.assertEqual(rows[0], ("Google Chrome", self.chrome))
-        names = [name for name, folder in rows if wsl.on_windows_drive(folder)]
-        self.assertEqual(names, ["Google Chrome", "Google Chrome Beta", "Microsoft Edge", "Brave", "Chromium"])
-        self.assertTrue(any(".config/google-chrome" in folder.as_posix() for _, folder in rows), "WSLg's Chrome after")
+        for configured in ("", str(self.fake.root / "linux-config")):
+            with self.subTest(xdg=configured), patch.dict(os.environ, {"XDG_CONFIG_HOME": configured}):
+                rows = browser_user.profile_folders()
+                self.assertEqual(rows[0], ("Google Chrome", self.chrome))
+                windows = [(name, folder) for name, folder in rows if wsl.on_windows_drive(folder)]
+                self.assertEqual([name for name, _ in windows],
+                                 ["Google Chrome", "Google Chrome Beta", "Microsoft Edge", "Brave", "Chromium"])
+                config = Path(configured) if configured else Path.home() / ".config"
+                self.assertEqual(rows[len(windows)], ("Google Chrome", config / "google-chrome"),
+                                 "WSLg's Chrome follows the Windows browsers and honors XDG_CONFIG_HOME")
 
     def test_without_interop_every_windows_account_is_looked_at(self):
         (self.fake.drive / "Users" / "Public").mkdir()

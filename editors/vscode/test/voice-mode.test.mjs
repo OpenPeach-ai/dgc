@@ -47,3 +47,11 @@ test("someone who starts talking at once is still heard, and their turn still en
   const ended = run(turnDetector(), [...hold(0.1, 2000), ...hold(0.002, 2000)]);
   assert.ok(ended !== null && ended <= 2000 + 1400, `ended at ${ended} ms`);
 });
+
+test("malformed or oversized microphone batches cannot break turn detection", () => {
+  const detector = turnDetector();
+  detector.reset(0);
+  assert.equal(detector.push({ 0: 0.1, length: 1 }, 100), false);
+  assert.equal(detector.push(Array(100000).fill(0.1), 200), false);
+  assert.equal(detector.heard, true);
+});

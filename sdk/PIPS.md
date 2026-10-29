@@ -11,7 +11,7 @@ app declares its Pips in code and keeps them as declared on each deploy ([Pips i
 from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`), and from API 66
 `list_pip_models` says each model's context window and the Pips default model.
 
-It pairs with DGC CLI 0.48.0, which advertises **Pips API 66** over editor protocol
+It pairs with DGC CLI 0.50.0, which advertises **Pips API 67** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 

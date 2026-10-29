@@ -46,6 +46,19 @@ test("unusable callback mappings fail before opening a broken authorization flow
   }
 });
 
+test("an app registered with a bare loopback address is called back at its port alone", async () => {
+  // Microsoft's http://localhost: the redirect has no path, and the editor forwards that port as it is.
+  const bare = "http://localhost:43123";
+  const url = "https://login.example.invalid/authorize?state=synthetic&redirect_uri=" + encodeURIComponent(bare);
+  assert.equal(await openMcpBrowser({ callbackUrl: bare, url }, () => true), true);
+  assert.deepEqual(calls, [["forward", bare + "/"], ["open", url]], "the port forwarded; the sign-in link unchanged");
+  calls.length = 0;
+  const other = "http://localhost:43123/elsewhere";
+  await assert.rejects(openMcpBrowser({ callbackUrl: other, url: "https://login.example.invalid/?redirect_uri="
+    + encodeURIComponent(other) }, () => true), /callback does not match/);
+  assert.deepEqual(calls, []);
+});
+
 test("generic URL requests cannot implicitly forward ports and cancellation suppresses late browser launch", async () => {
   await openMcpBrowser({ url: request.url }, () => true);
   assert.deepEqual(calls, [["open", request.url]]);

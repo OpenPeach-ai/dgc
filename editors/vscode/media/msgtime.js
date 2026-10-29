@@ -8,7 +8,7 @@
 
   const DAY = 86_400_000;
   const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const valid = (at) => typeof at === "number" && Number.isFinite(at) && at > 0;
+  const valid = (at) => typeof at === "number" && Number.isFinite(at) && at > 0 && at <= 8.64e15;
 
   function label(at, now = Date.now()) {
     if (!valid(at)) return "";

@@ -11,7 +11,7 @@
  */
 import {
   chmodSync, closeSync, existsSync, fchmodSync, fstatSync, fsyncSync, mkdirSync, mkdtempSync,
-  openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeSync,
+  openSync, readFileSync, realpathSync, renameSync, statSync, lstatSync, unlinkSync, writeSync,
   constants as fsConstants,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
@@ -43,9 +43,13 @@ function privateGroup(gid: number): boolean {
 /** Create `path` (and missing parents) and leave it owner-only (0700). */
 export function privateDir(path: string): string {
   mkdirSync(path, { recursive: true, mode: 0o700 });
+  const info = lstatSync(path);
+  if (!info.isDirectory() || (posixOwnerChecks() && info.uid !== process.geteuid!())) {
+    throw new DGCConfigError(`state directory ${JSON.stringify(path)} must be owned by this user and not a link`);
+  }
   if (process.platform !== "win32") {
     try {
-      if ((statSync(path).mode & 0o777) !== 0o700) chmodSync(path, 0o700);
+      if ((info.mode & 0o777) !== 0o700) chmodSync(path, 0o700);
     } catch { /* best effort */ }
   }
   return path;
@@ -67,6 +71,8 @@ export function prepareStateDir(stateDir?: string): string {
     throw new DGCConfigError("stateDir must be a non-empty path");
   }
   let path = resolve(stateDir.startsWith("~/") ? join(userInfo().homedir, stateDir.slice(2)) : stateDir);
+  try { if (lstatSync(path).isSymbolicLink()) throw new DGCConfigError(`stateDir ${JSON.stringify(path)} must not be a symlink`); }
+  catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
   const existed = existsSync(path);
   if (existed && !statSync(path).isDirectory()) {
     throw new DGCConfigError(`stateDir ${JSON.stringify(path)} exists and is not a directory`);
@@ -205,8 +211,10 @@ export function configDrift(stateDir: string, expected: Record<string, unknown>)
 
 /** Append `line` to an owner-only (0600) file, tightening an existing file's mode. */
 export function appendPrivate(path: string, line: string): void {
-  const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT, 0o600);
+  const fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT
+    | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0), 0o600);
   try {
+    if (!fstatSync(fd).isFile()) throw new DGCConfigError("audit or usage log must be a regular file");
     if (process.platform !== "win32") {
       try {
         if (fstatSync(fd).mode & 0o077) fchmodSync(fd, 0o600);

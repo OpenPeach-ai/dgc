@@ -6,8 +6,8 @@ answers its permission and question requests, and gets a structured result back.
 
 | Package | Version | Pairs with | Protocol | Runtime |
 | --- | --- | --- | --- | --- |
-| `dgc-sdk` (Python, PyPI) | **0.7.0** | CLI **0.48.0** | editor protocol v14 | Python 3.10+ |
-| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.7.0** | CLI **0.48.0** | editor protocol v14 | Node 22+ |
+| `dgc-sdk` (Python, PyPI) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Python 3.10+ |
+| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Node 22+ |
 
 Proven on Linux. macOS and WSL are unproven, and native Windows is experimental (custom tools need
 Unix sockets). The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
@@ -122,14 +122,14 @@ iterator. TypeScript uses camelCase (`chatId`, `messageId`,
 ### Published packages
 
 ```bash
-python3 -m pip install dgc-sdk==0.7.0
+python3 -m pip install dgc-sdk==0.8.0
 ```
 
 That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named `dgc` is an
 unrelated library.
 
 The SDK does not contain the agent. It drives `dgc serve` from a DGC CLI install, so you also need
-the CLI (0.48.0 or newer, protocol v14):
+the CLI (0.50.0 or newer, protocol v14):
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -387,7 +387,55 @@ Agent state:
 - `add_mcp_server(name, command, args=None)` → `list[McpServerInfo]` — a stdio MCP server;
   `list_mcp_servers()` → `list[McpServerInfo]`.
 - `list_monitors()` → `list[Monitor]`; `stop_monitor(monitor_id="all")` → `list[Monitor]`.
-- `list_artifacts()` → `list[Artifact]`; `list_agents()` → `list[AgentInfo]`.
+- `list_artifacts()` → `list[Artifact]` (the page previews this session serves); `list_agents()` → `list[AgentInfo]`.
+
+Artifacts (CLI 0.50+, `capabilities["artifacts"]`; without it `session.artifacts` raises `DGCUnsupportedError`):
+everything DGC made that the user keeps, in every part of DGC, each with every version. `session.artifacts` is an
+`Artifacts`; each call is one request:
+
+- `list(*, type=None, surface=None)` → `list[ArtifactInfo]`, newest first. `type`: `doc`, `slides`, `sheet`,
+  `dashboard` or `page`; `surface`: where it was made, `chat`, `work`, `pip`, `sdk` or `cli`.
+- `get(artifact_id)` → `ArtifactInfo` with every version; `content(artifact_id, version=None)` → a document's text, or a
+  deck's, sheet's or dashboard's data.
+- `update(artifact_id, content, *, base_version, note=None)` → `ArtifactInfo`: a new version by "you".
+  `DGCCommandRejectedError` with reason `conflict` if it moved on since `base_version`.
+- `restore(artifact_id, version)` → `ArtifactInfo`: that version again, as a new one.
+- `compare(artifact_id, before, after=None)` → a read-only comparison of saved versions (the current version
+  when `after` is omitted). Documents return a text diff; slides, sheets, pages and dashboards return labelled
+  changes. `truncated` says when the bounded result omits or shortens content. Requires the CLI's
+  `artifacts.compare` capability; otherwise raises `DGCUnsupportedError`.
+- `export(artifact_id, format, *, version=None)` → the file's path (`exports` on the artifact lists its formats:
+  Word, PDF, Markdown, PowerPoint, Excel, CSV, HTML, zip).
+- `open(artifact_id)` → a URL on this computer, the artifact at an address of its own.
+- `remove(artifact_id)`: into DGC's trash, where it can be put back.
+- `refresh(artifact_id)` → a dashboard's numbers now (its read-only queries, no model);
+  `allow_source(artifact_id, source, allowed=True, *, base_version=None)` → `ArtifactInfo`: only an allowed
+  source runs. Pass the version whose source settings you showed the user; a stale version is refused with
+  reason `conflict`. Version-checked consent requires `artifacts.source_consent_version`; an older CLI raises
+  `DGCUnsupportedError` rather than silently dropping that check.
+
+`ArtifactInfo`: `id`, `type`, `title`, `version`, `label`, `created`, `updated`, `origin`, `exports`, `file` (the file a
+document is edited in), `versions` (`ArtifactVersion`: `n`, `author`, `at`, `summary`, `size`). `run()` and `stream()`
+take `output` (`"document"`, `"slides"`, `"spreadsheet"`, `"page"` or `"dashboard"`, as DGC's Output chip): the
+result's `made_artifacts` holds what the run made. `AsyncSession.artifacts` is `AsyncArtifacts`, the same calls
+awaited. TypeScript: `session.artifacts.list({ type })`, `.update(id, content, { baseVersion })`,
+`.compare(id, before, after?)`, `.allowSource(id, source, allowed, baseVersion?)`, and `output` in run options.
+
+Mods (CLI 0.50+, `capabilities["mods"]`; without it `session.mods` raises `DGCUnsupportedError`): small programs that
+add panels, status lines, commands and guards to DGC, each in its own sandbox, each able only to watch a step, ask the
+user first or stop it, never to approve one. `session(mods=[folder, ...])` runs the folders named (each holds a
+`dgc-mod.json`) in that session only; named in your code, they need no other Allow. A folder without a manifest raises
+`DGCConfigError` before anything starts. The session's `mods` is a `Mods`:
+
+- `list()` → every mod the session knows: `name`, `title`, `state` (`running`, `stopped`, `crashed`, `off`,
+  `needs_allow`), `error`, `asks` (what it can do, in plain words), `commands`.
+- `run(name, args="")` → `{mod, text?, tree?, error?}`: one of a mod's own commands, at once, with no model turn.
+
+Writing one: `dgc_sdk.mods` is the library a Python mod imports (inside a running mod it is `dgc_mod`, the same code):
+`Mod()` with `@mod.on(event)`, `@mod.command(name)`, `@mod.render(slot)`, `ask()`, `deny()`, `rewrite()` and the
+elements (`Box`, `Row`, `Column`, `Text`, `Markdown`, `Button`, `Input`, `Select`, `Bar`, `Table`, `Sparkline`).
+TypeScript: `import { Mod, ask, Text } from "@vibedgc/sdk/mods"`. `dgc mods validate`, `dgc mods test` and
+`dgc mods dev` check, exercise and live-reload one.
 - `clear_todos()` → `list[TaskItem]`.
 - `get_config()` → `dict`; `get_plan()` → `dict`; `get_usage(range="today")` → `dict` — the
   runtime's own token ledger.
@@ -535,6 +583,7 @@ value raises `DGCUnsupportedError`). Tool calls are never retried.
 | `tools` | `list[ToolRecord]` — `ToolRecord`: `name`, `call_id`, `summary`, `output`, `is_error`, `is_diff`, `diff`, `args`. |
 | `changes` | `list[FileChange]` — `FileChange`: `path`, `kind` (`added`, `modified`, `deleted`), `before`, `after`, `root`, `diff` (a `git apply`-able patch for that file). |
 | `artifacts`, `documents` | `list[Artifact]` — `Artifact`: `id`, `name`, `url`, `rel`. |
+| `made_artifacts` | `list[ArtifactInfo]` — the artifacts the run made or changed (CLI 0.50+), as they were when it ended. |
 | `tasks` | `list[TaskItem]` — `TaskItem`: `id`, `content`, `status`, `revision`. |
 | `agents` | `list[AgentInfo]` — `AgentInfo`: `id`, `state`, `description`, `parent_id`, `model`. |
 | `verification` | `VerificationResult` (`ok`, `command`, `output`, `exit_code`) for the configured `verify_command` only, else `None`. |
@@ -563,7 +612,7 @@ A run that fails does not raise: its `RunResult` has `status="failed"` and the r
 
 ### Constants
 
-`__version__` (`"0.7.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.48.0"`).
+`__version__` (`"0.8.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.50.0"`).
 
 ## Events
 
@@ -709,15 +758,15 @@ CycloneDX SBOM and `SHA256SUMS` to the GitHub release, each with a GitHub artifa
 
 ```bash
 # The PyPI file matches the GitHub release, and the workflow built it from the tag:
-python3 -m pip download --no-deps dgc-sdk==0.7.0 -d dl
-curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.7.0/SHA256SUMS
+python3 -m pip download --no-deps dgc-sdk==0.8.0 -d dl
+curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.8.0/SHA256SUMS
 (cd dl && sha256sum -c ../SHA256SUMS --ignore-missing)
-gh attestation verify dl/dgc_sdk-0.7.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
+gh attestation verify dl/dgc_sdk-0.8.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
   --signer-workflow OpenPeach-ai/dgc/.github/workflows/publish-dgc-sdk.yml
 ```
 
 PyPI shows the same provenance on the file's page, and
-`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.7.0-py3-none-any.whl`
+`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.8.0-py3-none-any.whl`
 checks it from the command line.
 
 The source tree also carries a checkout manifest: `sdk/sbom/SHA256SUMS` lists every SDK source

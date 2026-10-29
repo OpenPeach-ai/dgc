@@ -377,7 +377,7 @@ def bounded_spooled_images(value):
     """API 52: 1 to 64 {name, media_type}, each a file the editor put in the backend's spool."""
     if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
             or any(not isinstance(i, dict) or set(i) != {"name", "media_type"} or not _spool_name(i["name"])
-                   or i["media_type"] not in _SPOOL_IMAGE_TYPES for i in value)
+                   or not isinstance(i["media_type"], str) or i["media_type"] not in _SPOOL_IMAGE_TYPES for i in value)
             or len({i["name"] for i in value}) != len(value)):
         _drop_spooled(value if isinstance(value, list) else None, "name")      # refused: none of them stay
         raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} photos, "
@@ -389,7 +389,8 @@ def validate_images(value):
     """The images a message carries, as metadata: digest, type and size."""
     if (not isinstance(value, list) or not 1 <= len(value) <= MAX_CHAT_IMAGES
             or any(not isinstance(i, dict) or set(i) != {"sha256", "mime", "bytes"} or not isinstance(i["sha256"], str)
-                   or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or i["mime"] not in _IMAGE_EXT
+                   or not re.fullmatch(r"[0-9a-f]{64}", i["sha256"]) or not isinstance(i["mime"], str)
+                   or i["mime"] not in _IMAGE_EXT
                    or type(i["bytes"]) is not int or not 1 <= i["bytes"] <= MAX_CHAT_IMAGE_BYTES for i in value)
             or sum(i["bytes"] for i in value) > MAX_CHAT_IMAGES_BYTES):
         raise RegistryError("invalid_images", f"Send up to {MAX_CHAT_IMAGES} photos, "
@@ -784,7 +785,7 @@ def failure_text(row) -> str:
     """Why a chat turn failed, in the user's words, for the line under their message (at most 300)."""
     try:
         error = json.loads(row[0]) if row and row[0] else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return ""
     if not isinstance(error, dict) or not isinstance(error.get("message"), str):
         return ""
@@ -898,7 +899,10 @@ def _last_report(store, pip_id):
         CASE WHEN typeof(requested_by)='text' AND length(CAST(requested_by AS BLOB))<=512 THEN requested_by END requested_by,
         CASE WHEN typeof(idempotency_key)='text' AND length(CAST(idempotency_key AS BLOB))<=512 THEN idempotency_key END idempotency_key
         FROM pip_runs WHERE id=?""", (row["id"],)).fetchone()
-    result, manifest = json.loads(raw["result"]), json.loads(raw["manifest"])
+    try:
+        result, manifest = json.loads(raw["result"]), json.loads(raw["manifest"])
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RegistryError("invalid_history", "The previous source result is malformed.") from exc
     from .pip_commit_paths import validate_parent as validate_path_parent
     validate_path_parent(store.registry, {'id':row['id'],'pip_id':pip_id,'workspace_id':row['workspace_id'],
         **{key:raw[key] for key in ('binding_id','requested_by','idempotency_key')}}, manifest)
@@ -1089,7 +1093,7 @@ def reply_plugins(db, run_id):
     row = db.execute("SELECT json_extract(result,'$.plugins') FROM pip_runs WHERE id=?", (run_id,)).fetchone()
     try:
         return used_plugins(json.loads(row[0])) or [] if row and row[0] else []
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return []
 
 
@@ -1237,6 +1241,9 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``)."""
     try:
+        # Validate the request identity before copying attachments into the kept store.
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
+            raise RegistryError("invalid_request", "Conversation retry keys use 1–128 letters, digits, underscores or hyphens.")
         if not _intro and isinstance(key, str) and key.startswith(DGC_KEYS):
             raise RegistryError("invalid_request", "That message key is reserved for messages DGC writes.")
         if not _intro:
@@ -1412,7 +1419,7 @@ def reply_stats(store, pip_id, run_ids) -> dict:
     for row in rows:
         try:
             usage = (json.loads(row["result"]) or {}).get("usage") if row["result"] else None
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):
             usage = None
         usage = usage if isinstance(usage, dict) else {}
         start, end = _instant(row["started_at"]), _instant(row["finished_at"])

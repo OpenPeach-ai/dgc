@@ -18,6 +18,18 @@ from .config import USER_HOME
 
 VERSION_URL = "https://vibedgc.com/version.json"
 UPDATE_CACHE = USER_HOME / "update-check.json"
+MAX_UPDATE_CACHE_BYTES = 8192
+
+
+def _cached_record() -> dict:
+    with UPDATE_CACHE.open("rb") as stream:
+        raw = stream.read(MAX_UPDATE_CACHE_BYTES + 1)
+    if len(raw) > MAX_UPDATE_CACHE_BYTES:
+        raise ValueError("update cache is too large")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("update cache is malformed")
+    return value
 
 
 def _ver_tuple(s: str) -> tuple:
@@ -27,7 +39,7 @@ def _ver_tuple(s: str) -> tuple:
 def cached_update() -> str | None:
     """Latest version from the local cache if it's newer than us — non-blocking, never raises."""
     try:
-        latest = str(json.loads(UPDATE_CACHE.read_text()).get("latest", ""))
+        latest = str(_cached_record().get("latest", ""))[:64]
         if latest and _ver_tuple(latest) > _ver_tuple(__version__):
             return latest
     except Exception:
@@ -45,7 +57,7 @@ def refresh_update_async() -> None:
     writes on the *next* launch, so there's nothing to wait for now.
     """
     try:  # daily gate in the parent — usually we don't spawn anything at all
-        if time.time() - float(json.loads(UPDATE_CACHE.read_text()).get("checked", 0)) < 86400:
+        if time.time() - float(_cached_record().get("checked", 0)) < 86400:
             return
     except Exception:
         pass
@@ -55,9 +67,13 @@ def refresh_update_async() -> None:
         # a real User-Agent is required — Cloudflare 403s the default 'Python-urllib' UA,
         # which silently broke the update nudge (the fetch failed, the cache went stale).
         f"  req=urllib.request.Request({VERSION_URL!r},headers={{'User-Agent':'dgc-update-check'}})\n"
-        f"  d=json.loads(urllib.request.urlopen(req,timeout=4).read().decode())\n"
+        "  with urllib.request.urlopen(req,timeout=4) as response:\n"
+        f"    raw=response.read({MAX_UPDATE_CACHE_BYTES + 1})\n"
+        f"  if len(raw)>{MAX_UPDATE_CACHE_BYTES}: raise ValueError('update response too large')\n"
+        "  d=json.loads(raw)\n"
+        "  if not isinstance(d,dict): raise ValueError('invalid update response')\n"
         f"  open({str(UPDATE_CACHE)!r},'w').write("
-        "json.dumps({'latest':str(d.get('version','')),'checked':time.time()}))\n"
+        "json.dumps({'latest':str(d.get('version',''))[:64],'checked':time.time()}))\n"
         "except Exception: pass\n"
     )
     try:

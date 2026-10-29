@@ -63,10 +63,9 @@ async function open(width, section, theme = "dark") {
   await p.route("https://settings.test/**", (r) => r.fulfill({ body: pageFor(theme), contentType: "text/html" }));
   await p.goto("https://settings.test/view");
   await p.waitForSelector("#ultra_mode");
-  // A tab narrower than 620px has the page picker in place of the side list.
+  // Navigation stays reachable as an icon rail in narrow tabs.
   if (section !== "general") {
-    if (await p.isVisible(`[data-nav=${section}]`)) await p.click(`[data-nav=${section}]`);
-    else await p.selectOption("#page-picker", section);
+    await p.click(`[data-nav=${section}]`);
   }
   await p.waitForSelector(".save-bar");
   return { p, close: () => context.close() };

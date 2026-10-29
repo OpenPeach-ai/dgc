@@ -17,6 +17,14 @@ def write(directory, name, *, messages, title="", updated=1.0):
 
 
 class SessionIndexTests(unittest.TestCase):
+    def test_oversize_session_stays_listed_without_being_read(self):
+        path = self.dir / "large.json"
+        with path.open("wb") as stream:
+            stream.truncate(session_index.MAX_INDEX_FILE_BYTES + 1)
+        [row] = session_index.page(self.dir)
+        self.assertEqual(row[0], path)
+        self.assertIn("Large session", row[2])
+
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
 

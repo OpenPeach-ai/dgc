@@ -97,8 +97,12 @@ def public_mcp_spec(raw) -> dict:
             raw_args[index + 1], re.IGNORECASE)
         if match:
             legacy_auth_env = match.group(1)
+    # Older and runtime-only specs may still contain argv credentials. The
+    # public projection is display data: drop the whole argv if any item is
+    # unsafe so a flag and its value can never be separated and exposed.
+    display_args = raw_args[:128] if persisted_mcp_args_safe(raw_args) else []
     args, skip = [], False
-    for arg in raw_args[:128]:
+    for arg in display_args:
         text = str(arg)[:8192]
         if skip:
             skip = False
@@ -133,7 +137,9 @@ def public_mcp_spec(raw) -> dict:
         auth_env = ""
     public = {
         "transport": transport if transport in ("stdio", "remote") else "stdio",
-        "command": str(spec.get("command") or "")[:4096], "args": args,
+        "command": (str(spec.get("command") or "")[:4096]
+                    if persisted_mcp_args_safe([str(spec.get("command") or "")]) else "<hidden>"),
+        "args": args,
         "env_names": list(dict.fromkeys(env_names)), "url": url[:4096],
         "log_level": str(spec.get("log_level") or "warning")[:16],
     }

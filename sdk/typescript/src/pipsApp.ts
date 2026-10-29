@@ -204,7 +204,12 @@ export type AppToolHandlerOptions = {
 /** What the handler reads of a web `Headers`. Declared here so the package needs neither the DOM lib nor Node's types. */
 export interface HeaderReader { get(name: string): string | null }
 /** What `fetch()` reads of a web `Request`: a real one from Node 18+, Bun, Deno or a worker fits. */
-export interface WebRequestLike { readonly method: string; readonly headers: HeaderReader; arrayBuffer(): Promise<ArrayBuffer> }
+export interface WebRequestLike {
+  readonly method: string;
+  readonly headers: HeaderReader;
+  readonly body?: { getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<unknown> } } | null;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
 /** A web `Response` where your project has one (the DOM lib, or Node's types); otherwise its shape. */
 export type WebResponse = typeof globalThis extends { Response: { prototype: infer R } } ? R
   : { readonly status: number; readonly headers: HeaderReader; text(): Promise<string> };
@@ -268,6 +273,9 @@ export class AppToolHandler {
     this.maxSkew = options?.maxSkewSeconds ?? 300;
     this.maxBody = options?.maxBody ?? MAX_BODY;
     this.maxNonces = options?.maxNonces ?? 50_000;
+    for (const [name, value] of [["maxSkewSeconds", this.maxSkew], ["maxBody", this.maxBody], ["maxNonces", this.maxNonces]] as const) {
+      if (!Number.isSafeInteger(value) || value < 1) throw new DGCConfigError(`${name} must be a positive whole number`);
+    }
     this.clock = options?.clock ?? (() => Date.now() / 1000);
     this.onError = options?.onError ?? ((error, ctx) => console.error(`Pip tool ${ctx.tool} failed:`, error));
     for (const key of ["onApprovalRequested", "onApprovalResolved"] as const) {
@@ -390,7 +398,24 @@ export class AppToolHandler {
       const out = refuse(405, "method", "DGC calls with POST.");
       return new WebResponseClass(out.body, { status: out.status, headers: out.headers });
     }
-    const body = new Uint8Array(await request.arrayBuffer());
+    let body: Uint8Array;
+    if (request.body) {
+      const reader = request.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value?.byteLength ?? 0;
+        if (size > this.maxBody) {
+          await reader.cancel().catch(() => {});
+          const out = refuse(413, "too_large", "The call is too large.");
+          return new WebResponseClass(out.body, { status: out.status, headers: out.headers });
+        }
+        if (part.value) chunks.push(part.value);
+      }
+      body = Buffer.concat(chunks, size);
+    } else body = new Uint8Array(await request.arrayBuffer());
     const out = await this.handle({ headers: request.headers, body });
     return new WebResponseClass(out.status === 204 ? null : out.body, { status: out.status, headers: out.headers });
   }

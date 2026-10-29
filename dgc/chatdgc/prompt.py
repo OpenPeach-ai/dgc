@@ -81,6 +81,14 @@ CANVAS = (
     "exact edits. Short answers, short code and drafts they'll send as they are stay in your reply.\n")
 
 
+# Artifacts (dgc/artifact_tools): a deck, a spreadsheet, a dashboard or a page the user keeps, with every version.
+ARTIFACTS = (
+    "- For a deck to present, a spreadsheet to keep working on, a dashboard over their data, or a page to keep, make "
+    "an artifact with make_artifact (slides, sheet, dashboard or page); it opens beside the chat with every version "
+    "kept, and edit_artifact changes it (with only its id, it shows you the user's own changes first). A document to "
+    "work on together is a canvas. make_file is for a file to download as it is (a Word file, a PDF, a CSV).\n")
+
+
 # Voice mode: the message was spoken and the reply will be read aloud, so it should sound like speech, as ChatGPT's
 # voice answers do -- a few sentences, nothing to look at -- unless the user asks for the detail.
 VOICE = (
@@ -167,7 +175,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         # Main DGC's rule (dgc/presentation.py), as the maintainers decided for ChatDGC too.
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
-        + (ASK + CANVAS + WIDGETS if ask and not voice else "")
+        + (ASK + CANVAS + WIDGETS + ARTIFACTS if ask and not voice else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

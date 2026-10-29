@@ -35,14 +35,24 @@ def _json(value) -> dict:
 
 def _what(kind, payload) -> tuple[str, str]:
     """A card's words: (title, detail), plain text."""
+    if not isinstance(payload, dict):
+        payload = {}
     if kind == "email":
         m = payload.get("message") or {}
+        if not isinstance(m, dict):
+            m = {}
         return f"Send this email to {m.get('recipient_email', 'someone')}?", m.get("subject", "")
     if kind == "event":
         e = payload.get("event") or {}
+        if not isinstance(e, dict):
+            e = {}
         return f"Add “{e.get('summary', 'an event')}” to your calendar?", _when(e)
     a = payload.get("action") or payload
+    if not isinstance(a, dict):
+        a = {}
     call = a.get("call") or {}
+    if not isinstance(call, dict):
+        call = {}
     from . import pip_sdk_apps
     if pip_sdk_apps.is_app(a.get("server")):
         # Your own app (Pips API 61): "Run create_dispatch in Shop app?"
@@ -141,6 +151,8 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
             for row in rows("SELECT id,body,created_at,expires_at FROM pip_setup_proposals WHERE workspace_id=? AND status='pending' "
                             "AND expires_at>? ORDER BY created_at DESC", workspace_id, now):
                 request = _json(row["body"]).get("request") or {}
+                if not isinstance(request, dict):
+                    request = {}
                 target = request.get("pip_id") if request.get("pip_id") in pips else None
                 add("setup", row["id"], target, row["created_at"], row["expires_at"],
                     f"Change {pips[target]['name']}?" if target else f"Create the Pip “{request.get('name', 'New Pip')}”?",

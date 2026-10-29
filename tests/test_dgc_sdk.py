@@ -31,6 +31,7 @@ from dgc_sdk import (  # noqa: E402
     RetryPolicy, RuntimePolicy, define_tool, redact_text,
 )
 from dgc_sdk.schema import extract_json, validate  # noqa: E402
+from dgc_sdk._state import prepare_state_dir, write_session_config  # noqa: E402
 
 
 def _process_alive(pid: int) -> bool:
@@ -1334,6 +1335,18 @@ class SessionFixTests(unittest.TestCase):
 
     # private state ------------------------------------------------------------------------------
 
+    def test_state_directory_links_cannot_redirect_the_isolated_config(self):
+        outside = self.work / "outside-home"
+        outside.mkdir()
+        (self.state / "home").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(DGCConfigError):
+            write_session_config(self.state, {"model": "sdk-model"})
+        self.assertFalse((outside / ".dgc").exists())
+        alias = self.work / "state-alias"
+        alias.symlink_to(self.state, target_is_directory=True)
+        with self.assertRaises(DGCConfigError):
+            prepare_state_dir(alias)
+
     def test_planted_config_in_state_dir_is_ignored(self):
         marker = self.work / "planted-gate-ran"
         verifier = self.work / "planted-verifier-ran"
@@ -1462,6 +1475,17 @@ class SessionFixTests(unittest.TestCase):
         self.assertIn("not found", result.error)
 
     # changes ------------------------------------------------------------------------------------
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "FIFO descriptor accounting uses /proc")
+    def test_workspace_snapshot_closes_nonregular_file_descriptors(self):
+        from dgc_sdk.session import _read_regular
+        with tempfile.TemporaryDirectory(prefix="dgc-sdk-fifo-") as folder:
+            path = Path(folder) / "not-a-file"
+            os.mkfifo(path)
+            before = len(os.listdir("/proc/self/fd"))
+            for _ in range(32):
+                self.assertIsNone(_read_regular(str(path)))
+            self.assertEqual(len(os.listdir("/proc/self/fd")), before)
 
     def test_changes_cover_dot_dirs_home_locks_and_lockfiles(self):
         from dgc_sdk.session import _diff_workspace, _snapshot_workspace

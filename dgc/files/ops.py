@@ -251,23 +251,6 @@ class FileOps:
     def copy(self, sources: list[Path], dest_dir: Path, *, overwrite: bool = False) -> OpResult:
         done: list[tuple[Path, tuple]] = []
         restores: list[tuple[Path, tuple]] = []
-        for src in sources:
-            _measure(src)
-            dest = dest_dir / src.name
-            if dest == src or (src.is_dir() and not src.is_symlink() and dest.is_relative_to(src)):
-                raise OpError(f"cannot copy {src.name} into itself")
-            if dest.exists() or dest.is_symlink():
-                if overwrite:
-                    restores.append((dest, self._snapshot(dest)))
-                    _remove(dest)
-                else:
-                    dest = _unique(dest)
-            try:
-                _copy(src, dest)
-            except OSError as exc:
-                raise OpError(f"copy failed at {src.name}: {exc.strerror or exc}") from None
-            done.append((dest, _fingerprint(dest)))
-
         def undo():
             kept = 0
             for path, mark in done:
@@ -278,30 +261,39 @@ class FileOps:
             for path, snap in restores:
                 self._restore(path, snap)
             return f"removed {len(done) - kept} copied item(s)" + (f" · kept {kept} edited" if kept else "")
+        # Refuse an oversized later source before copying any earlier selection.
+        for src in sources:
+            _measure(src)
+            dest = dest_dir / src.name
+            if dest == src or (src.is_dir() and not src.is_symlink() and dest.is_relative_to(src)):
+                raise OpError(f"cannot copy {src.name} into itself")
+        for src in sources:
+            dest = dest_dir / src.name
+            owned = False
+            try:
+                if dest.exists() or dest.is_symlink():
+                    if overwrite:
+                        restores.append((dest, self._snapshot(dest)))
+                        _remove(dest)
+                    else:
+                        dest = _unique(dest)
+                owned = True
+                _copy(src, dest)
+            except (OSError, OpError) as exc:
+                completed = len(done)
+                if owned and (dest.exists() or dest.is_symlink()):
+                    done.append((dest, _fingerprint(dest)))
+                if done or restores:
+                    self._push(f"partial copy {len(done)}", undo)
+                raise OpError(f"copy stopped at {src.name} after {completed} complete; "
+                              f"press u to undo; current item may be partial: {getattr(exc, 'strerror', None) or exc}") from None
+            done.append((dest, _fingerprint(dest)))
         self._push(f"copy {len(done)}", undo)
         return OpResult(f"copied {len(done)} item(s)", [p for p, _ in done])
 
     def move(self, sources: list[Path], dest_dir: Path, *, overwrite: bool = False) -> OpResult:
         moved: list[tuple[Path, Path]] = []
         restores: list[tuple[Path, tuple]] = []
-        for src in sources:
-            dest = dest_dir / src.name
-            if dest == src:
-                continue
-            if src.is_dir() and not src.is_symlink() and dest.is_relative_to(src):
-                raise OpError(f"cannot move {src.name} into itself")
-            if dest.exists() or dest.is_symlink():
-                if overwrite:
-                    restores.append((dest, self._snapshot(dest)))
-                    _remove(dest)
-                else:
-                    dest = _unique(dest)
-            try:
-                shutil.move(str(src), str(dest))
-            except OSError as exc:
-                raise OpError(f"move failed at {src.name}: {exc.strerror or exc}") from None
-            moved.append((src, dest))
-
         def undo():
             back = 0
             for src, dest in reversed(moved):
@@ -311,6 +303,31 @@ class FileOps:
             for path, snap in restores:
                 self._restore(path, snap)
             return f"moved {back} item(s) back"
+        for src in sources:
+            dest = dest_dir / src.name
+            if src.is_dir() and not src.is_symlink() and dest.is_relative_to(src) and dest != src:
+                raise OpError(f"cannot move {src.name} into itself")
+        for src in sources:
+            dest = dest_dir / src.name
+            if dest == src:
+                continue
+            try:
+                if dest.exists() or dest.is_symlink():
+                    if overwrite:
+                        restores.append((dest, self._snapshot(dest)))
+                        _remove(dest)
+                    else:
+                        dest = _unique(dest)
+                shutil.move(str(src), str(dest))
+            except (OSError, OpError) as exc:
+                completed = len(moved)
+                if (dest.exists() or dest.is_symlink()) and not (src.exists() or src.is_symlink()):
+                    moved.append((src, dest))
+                if moved or restores:
+                    self._push(f"partial move {len(moved)}", undo)
+                raise OpError(f"move stopped at {src.name} after {completed} complete; "
+                              f"press u to undo; current item may be partial: {getattr(exc, 'strerror', None) or exc}") from None
+            moved.append((src, dest))
         self._push(f"move {len(moved)}", undo)
         return OpResult(f"moved {len(moved)} item(s)", [d for _, d in moved])
 
@@ -318,13 +335,6 @@ class FileOps:
     def send_to_trash(self, paths: list[Path]) -> OpResult:
         moved: list[tuple[Path, Path]] = []
         route = "dgc"
-        for path in paths:
-            try:
-                dest, route = self.trash.send(path)
-            except OSError as exc:
-                raise OpError(f"cannot trash {path.name}: {exc.strerror or exc}") from None
-            moved.append((path, dest))
-
         def undo():
             back = 0
             for src, dest in reversed(moved):
@@ -339,22 +349,21 @@ class FileOps:
                     except OSError:
                         pass
             return f"restored {back} item(s) from the trash"
+        for path in paths:
+            try:
+                dest, route = self.trash.send(path)
+            except OSError as exc:
+                if moved:
+                    self._push(f"partial trash {len(moved)}", undo)
+                raise OpError(f"trash stopped at {path.name} after {len(moved)} item(s); "
+                              f"press u to restore them: {exc.strerror or exc}") from None
+            moved.append((path, dest))
         self._push(f"trash {len(moved)}", undo)
         where = "OS trash" if route == "os" else "DGC trash"
         return OpResult(f"moved {len(moved)} item(s) to the {where} · u undoes", [])
 
     def delete(self, paths: list[Path]) -> OpResult:
         snapshots: list[tuple[Path, tuple | None]] = []
-        for path in paths:
-            snap = self._snapshot(path) if (path.is_symlink() or path.is_file()) else None
-            _measure(path)
-            try:
-                _remove(path)
-            except OSError as exc:
-                raise OpError(f"cannot delete {path.name}: {exc.strerror or exc}") from None
-            snapshots.append((path, snap))
-        restorable = sum(1 for _, snap in snapshots if snap is not None)
-
         def undo():
             back = 0
             for path, snap in snapshots:
@@ -362,6 +371,20 @@ class FileOps:
                     back += 1
             lost = len(snapshots) - back
             return f"restored {back} file(s)" + (f" · {lost} could not be restored" if lost else "")
+        # Size refusals should happen before any part of a selection is deleted.
+        for path in paths:
+            _measure(path)
+        for path in paths:
+            snap = self._snapshot(path) if (path.is_symlink() or path.is_file()) else None
+            try:
+                _remove(path)
+            except OSError as exc:
+                if snapshots:
+                    self._push(f"partial delete {len(snapshots)}", undo)
+                raise OpError(f"delete stopped at {path.name} after {len(snapshots)} item(s); "
+                              f"press u to restore what can be restored: {exc.strerror or exc}") from None
+            snapshots.append((path, snap))
+        restorable = sum(1 for _, snap in snapshots if snap is not None)
         self._push(f"delete {len(paths)}", undo)
         note = "" if restorable == len(paths) else " · folders are not restorable"
         return OpResult(f"deleted {len(paths)} item(s) permanently{note}", [])

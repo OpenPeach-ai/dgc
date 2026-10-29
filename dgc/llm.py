@@ -20,6 +20,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
+from . import model_pace
 from . import reasoning as _reasoning
 from .image_views import parse_dimensions as _image_dimensions   # one header parser, shared
 from .model_watch import (CHECK_EVERY_S, LOCAL_SOCKET_CEILING_S, RECHECK_S, RequestWatch, StallInfo,
@@ -1704,7 +1705,7 @@ class LLMClient:
                  provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
                  provider_state: str = "stateless", prompt_cache: bool = True,
                  prompt_cache_key: str = "", context_size: int = 0, prompt_cache_ttl: str = "5m",
-                 first_token_timeout="auto", idle_timeout=300, stall_notice=45,
+                 first_token_timeout="auto", idle_timeout=300, stall_notice=45, learn_pace=False,
                  stall_retries=2, load_timeout="auto", local_waits: bool = True):
         self.base_url = base_url.rstrip("/")
         try:
@@ -1741,6 +1742,8 @@ class LLMClient:
             first_token_timeout, self.base_url, self.family, model=self.model)
         self.idle_timeout = bounded_seconds(idle_timeout, 300.0)
         self.stall_notice = bounded_seconds(stall_notice, 45.0)
+        # DGC's own clients learn each model's pace (dgc/model_pace.py); a bare client keeps the plain notice.
+        self.learn_pace = bool(learn_pace)
         self.stall_retries = bounded_retries(stall_retries, 2)
         self.load_timeout = resolve_load_timeout(load_timeout, self.base_url, self.family,
                                                  model=self.model)
@@ -1986,7 +1989,7 @@ class LLMClient:
         answered = False
         try:
             response = requests.get(f"{self.base_url}/models", headers=self._headers(),
-                                    stream=True, timeout=(2, 2))
+                                    stream=True, timeout=(2, 2), allow_redirects=False)
             entry = None
             if response.status_code == 200:
                 value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
@@ -2003,7 +2006,7 @@ class LLMClient:
                 meta = (entry or {}).get("meta")
                 trained = _bounded_model_tokens(meta.get("n_ctx_train")) if isinstance(meta, dict) else 0
                 response = requests.get(f"{self._ollama_root}/props", headers=self._headers(),
-                                        stream=True, timeout=(2, 2))
+                                        stream=True, timeout=(2, 2), allow_redirects=False)
                 if response.status_code == 200:
                     value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
                                                    "llama.cpp server properties", deadline=deadline)
@@ -2083,12 +2086,14 @@ class LLMClient:
             if self.api_mode == "ollama":
                 response = requests.post(
                     f"{self._ollama_root}/api/show", headers=self._headers(),
-                    json={"model": self.model, "verbose": False}, stream=True, timeout=(2, 2))
+                    json={"model": self.model, "verbose": False}, stream=True, timeout=(2, 2),
+                    allow_redirects=False)
                 label = "Ollama model metadata"
             else:
                 response = requests.get(
                     f"{self.base_url}/models/{quote(self.model, safe='')}",
-                    headers=self._anthropic_headers(), stream=True, timeout=(2, 2))
+                    headers=self._anthropic_headers(), stream=True, timeout=(2, 2),
+                    allow_redirects=False)
                 label = "Anthropic model metadata"
             if response.status_code != 200:
                 _close_response(response)
@@ -2332,23 +2337,28 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
-    def list_models(self, *, redirects: bool = True) -> list[str]:
+    def list_models(self, *, redirects: bool = False) -> list[str]:
         """The model ids this host lists. ``redirects=False`` asks only the host as given: a redirect is refused
         (ModelListRedirect) rather than followed, so a key sent with the request can't go on to another host --
         requests drops Authorization on a cross-host redirect, but not Anthropic's x-api-key."""
         def get(url, headers, **kwargs):
             r = requests.get(url, headers=headers, allow_redirects=redirects, **kwargs)
-            if not redirects and r.is_redirect:
+            if not redirects and 300 <= r.status_code < 400:
                 status = r.status_code
                 _close_response(r)
                 raise ModelListRedirect(f"HTTP {status}: the host answered with a redirect")
             return r
 
         if self.api_mode == "ollama":
-            r = get(f"{self._ollama_root}/api/tags", self._headers(), timeout=10)
+            r = get(f"{self._ollama_root}/api/tags", self._headers(), stream=True, timeout=(2, 2))
             if r.status_code == 200:
+                value = _bounded_json_response(r, _MAX_MODEL_METADATA_BYTES, "Ollama model catalog",
+                                               deadline=time.monotonic() + _MODEL_METADATA_TOTAL_S)
+                if not isinstance(value, dict) or not isinstance(value.get("models"), list):
+                    raise LLMError("Ollama model catalog returned an invalid shape")
                 return sorted(str(m.get("model") or m.get("name") or "?")
-                              for m in r.json().get("models", []))
+                              for m in value["models"] if isinstance(m, dict))
+            _close_response(r)
             if self.requested_api_mode != "auto" or r.status_code not in (404, 405, 501):
                 r.raise_for_status()
             self._mark_rejected("native_chat")
@@ -2376,9 +2386,15 @@ class LLMClient:
             _close_response(r)
             self._mark_rejected("anthropic_messages")
             self.api_mode = "chat_completions"
-        r = get(f"{self.base_url}/models", self._headers(), timeout=10)
-        r.raise_for_status()
-        return sorted(m.get("id", "?") for m in r.json().get("data", []))
+        r = get(f"{self.base_url}/models", self._headers(), stream=True, timeout=(2, 2))
+        if r.status_code != 200:
+            _close_response(r)
+            r.raise_for_status()
+        value = _bounded_json_response(r, _MAX_MODEL_METADATA_BYTES, "model catalog",
+                                       deadline=time.monotonic() + _MODEL_METADATA_TOTAL_S)
+        if not isinstance(value, dict) or not isinstance(value.get("data"), list):
+            raise LLMError("model catalog returned an invalid shape")
+        return sorted(m.get("id", "?") for m in value["data"] if isinstance(m, dict))
 
     def chat(
         self,
@@ -2568,7 +2584,8 @@ class LLMClient:
 
         def probe():
             try:
-                response = requests.get(url, headers=headers, stream=True, timeout=(1, 1))
+                response = requests.get(url, headers=headers, stream=True, timeout=(1, 1),
+                                        allow_redirects=False)
             except requests.RequestException:
                 return None
             try:
@@ -2591,9 +2608,13 @@ class LLMClient:
         if check is None and self._local_work():
             load = resolve_load_timeout(getattr(self, "_load_setting", "auto"), self.base_url,
                                         getattr(self, "family", ""), model=self.model, checked=False)
+        notice = float(getattr(self, "stall_notice", 0.0) or 0.0)
+        learn = bool(getattr(self, "learn_pace", False))
+        first_notice, usual = (model_pace.notice_after(notice, self.model, safe_endpoint(endpoint), first)
+                               if learn else (notice, 0.0))
         watch = RequestWatch(
             cancel, first_token_s=first, idle_s=idle,
-            notice_s=float(getattr(self, "stall_notice", 0.0) or 0.0),
+            notice_s=notice, first_notice_s=first_notice, usual_s=usual, pace=learn,
             load_probe=None if check is not None else self._ollama_load_probe(),
             load_timeout_s=load,
             load_poll_s=self._load_probe_interval_s,
@@ -3492,7 +3513,8 @@ class LLMClient:
                 with watch.registered():
                     response = requests.post(
                         f"{self.base_url}/messages", headers=self._anthropic_headers(),
-                        json=payload, stream=True, timeout=self._post_timeout(watch))
+                        json=payload, stream=True, timeout=self._post_timeout(watch),
+                        allow_redirects=False)
             except requests.ConnectionError as exc:
                 watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
@@ -4097,7 +4119,8 @@ class LLMClient:
             try:
                 with watch.registered():
                     r = requests.post(self._ollama_url, headers=self._headers(), json=payload,
-                                      stream=True, timeout=self._post_timeout(watch))
+                                      stream=True, timeout=self._post_timeout(watch),
+                                      allow_redirects=False)
             except requests.ConnectionError as exc:
                 watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
@@ -4353,7 +4376,8 @@ class LLMClient:
             try:
                 with watch.registered():
                     r = requests.post(self._url, headers=self._headers(), json=payload,
-                                      stream=True, timeout=self._post_timeout(watch))
+                                      stream=True, timeout=self._post_timeout(watch),
+                                      allow_redirects=False)
             except requests.ConnectionError as e:
                 watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():
@@ -4697,7 +4721,7 @@ class LLMClient:
         try:
             response = requests.post(
                 f"{self.base_url}/responses/compact", headers=self._headers(), json=payload,
-                stream=True, timeout=(min(15, remaining), remaining))
+                stream=True, timeout=(min(15, remaining), remaining), allow_redirects=False)
             if cancel is not None:
                 def _watch(resp=response, ev=stop_watch, cx=cancel) -> None:
                     while not ev.wait(0.15):
@@ -4871,7 +4895,7 @@ class LLMClient:
                 with watch.registered():
                     response = requests.post(f"{self.base_url}/responses", headers=self._headers(),
                                              json=payload, stream=True,
-                                             timeout=self._post_timeout(watch))
+                                             timeout=self._post_timeout(watch), allow_redirects=False)
             except requests.ConnectionError as e:
                 watch.stop()        # this attempt is over; a backoff must not raise notices
                 if cancel is not None and cancel.is_set():

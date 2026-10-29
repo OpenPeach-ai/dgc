@@ -109,6 +109,22 @@ class ABackgroundChildsStepOutlivesTheTurnTests(unittest.TestCase):
         ui._settle_running_tools()                 # what the turn worker's finally does
         ui._turn.clear()
 
+    def test_a_refused_delegation_says_it_couldnt_delegate(self):
+        """Reported 28 Oct: a delegation refused before its helper started read "Delegated … · failed", as if a
+        helper had run; the editor says the same now (media/main.js FAILED_AGENT_STEP)."""
+        ui = self.tui()
+        ui._turn.set()
+        ui._turn_t0 = time.monotonic()
+        ui.tool_call("task", {"description": "Analyze delivery patterns", "prompt": "look"}, "call-1")
+        ui.tool_result("task", "Sub-task 'Analyze delivery patterns' was not started because its isolated Git worktree could not be created: too many uncommitted files. The parent checkout was left unchanged.", "call-1")
+        block = self.plain(ui._tool_frags(ui.blocks[-1]))
+        self.assertIn("Couldn't delegate Analyze delivery patterns", block)
+        self.assertNotIn("Delegated", block)
+        self.assertNotIn("failed", block.splitlines()[0], "the verb already says it")
+        ui.tool_call("task", {"description": "Count the lines", "prompt": "count"}, "call-2")
+        ui.tool_result("task", "Sub-task 'Count the lines' completed with no file changes.", "call-2")
+        self.assertIn("Delegated Count the lines", self.plain(ui._tool_frags(ui.blocks[-1])))
+
     def test_the_step_keeps_its_command_progress_and_result(self):
         from dgc.agent import _SubUI
         ui = self.tui()

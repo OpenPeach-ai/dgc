@@ -141,6 +141,11 @@ class RequestedFeatures(unittest.TestCase):
         self.assertEqual(classify_result('Failure probe', result.output)[0], 'failed')
         self.assertTrue(tool_output_is_error(result.output.removeprefix('error: ')))
         self.assertFalse(tool_output_is_error("Sub-task 'ok' completed in the shared checkout. Summary:\nfine"))
+        # A delegation refused before its helper started is a failed step, not a delegation (reported 28 Oct:
+        # three of them read "Delegated …" while the agents count said 0).
+        self.assertTrue(tool_output_is_error(
+            "Sub-task 'Analyze delivery patterns' was not started because its isolated Git worktree could not be "
+            "created: too many uncommitted files. The parent checkout was left unchanged."))
 
     def test_a_pipeline_ending_in_head_is_not_a_failure(self):
         from dgc.ui import tool_output_is_error

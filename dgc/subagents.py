@@ -815,7 +815,7 @@ def _task_calls(messages):
             if isinstance(raw, str):
                 try:
                     args = json.loads(raw)
-                except ValueError:
+                except (ValueError, RecursionError):
                     args = {}
             args = args if isinstance(args, dict) else {}
             items = task_batch_items(args)

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 import { SessionTabs } from "./sessionTabs";
 import { ChatDGC } from "./chatdgc";
+import { Artifacts } from "./artifacts";
 import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
@@ -14,11 +15,20 @@ export function activate(context: vscode.ExtensionContext): void | object {
     return;
   }
   const provider = new DgcViewProvider(context);
+  // Artifacts: everything DGC makes that you keep, opened from any chat's cards and the Library, answered by the side
+  // bar's dgc serve (as ChatDGC is) whichever chat made them.
+  const artifacts = new Artifacts(context);
+  provider.useArtifacts(artifacts, true);
   // #3: the side bar is the Sessions home, and each session opens in an editor tab of its own.
-  const tabs = new SessionTabs(context, provider, (init) => new DgcViewProvider(context, init));
+  const tabs = new SessionTabs(context, provider, (init) => {
+    const tab = new DgcViewProvider(context, init);
+    tab.useArtifacts(artifacts, false);
+    return tab;
+  });
   provider.useSessionsHome(tabs);
   // ChatDGC: chats of their own, in editor tabs, on the side bar's dgc serve; the home lists them.
   const chatdgc = new ChatDGC(context);
+  chatdgc.useArtifacts(artifacts);
   provider.useChatDGC(chatdgc);
   // The chat a palette command acts on: the tab you last worked in. `chat` opens a new session's tab
   // when none is open, for commands that put something in a chat; `current` falls back to the side
@@ -78,6 +88,9 @@ export function activate(context: vscode.ExtensionContext): void | object {
     tabs,
     chatdgc.register(),
     chatdgc,
+    artifacts.register(),
+    artifacts,
+    vscode.commands.registerCommand("dgc.openArtifacts", () => chatdgc.openLibrary("artifacts")),
     provider,
     vscode.commands.registerCommand("dgc.focus", () => provider.focus()),
     vscode.commands.registerCommand("dgc.openCommandMenu", () => chat().openCommandMenu()),

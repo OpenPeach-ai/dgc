@@ -374,7 +374,10 @@ def make_plan(client, question: str, context: str, cancel=None, *, tools: bool =
 # -- reading
 
 def _host(url: str) -> str:
-    return (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    try:
+        return (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    except ValueError:
+        return ""
 
 
 def _within(url: str, sites: list[str]) -> bool:
@@ -384,7 +387,10 @@ def _within(url: str, sites: list[str]) -> bool:
 
 def _key(url: str) -> str:
     """One page, however it's linked: no fragment, no trailing slash, any scheme."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
     return f"{_host(url)}{parts.path.rstrip('/')}{'?' + parts.query if parts.query else ''}"
 
 
@@ -632,7 +638,7 @@ class Research:
                     if rank >= len(found) or not isinstance(found[rank], dict):
                         continue
                     url = str(found[rank].get("url") or "")
-                    if not url.startswith(("http://", "https://")) or not _within(url, sites) or _key(url) in seen:
+                    if not url.startswith(("http://", "https://")) or not _host(url) or not _within(url, sites) or _key(url) in seen:
                         continue
                     seen.add(_key(url))
                     fresh.append({"url": url, "title": " ".join(str(found[rank].get("title") or "").split())[:200],

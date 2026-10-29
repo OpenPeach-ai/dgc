@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 
 MAX_SIDE = 8192
+MAX_PIXELS = 16 * 1024 * 1024
+MAX_DESKTOP_NAME = 4096
 READ_SECONDS = 10.0
 
 # X key symbols for the names a model uses ("ctrl+s", "alt+tab", "Enter").
@@ -146,8 +148,11 @@ class Screen:
         head = self._exact(24)
         self.width, self.height = struct.unpack(">HH", head[:4])
         name_length = struct.unpack(">I", head[20:24])[0]
-        self.name = self._exact(min(name_length, 4096)).decode("utf-8", "replace")
-        if not (0 < self.width <= MAX_SIDE and 0 < self.height <= MAX_SIDE):
+        if name_length > MAX_DESKTOP_NAME:
+            raise RFBError("the computer's screen name is too large")
+        self.name = self._exact(name_length).decode("utf-8", "replace")
+        if (not (0 < self.width <= MAX_SIDE and 0 < self.height <= MAX_SIDE)
+                or self.width * self.height > MAX_PIXELS):
             raise RFBError("the computer's screen has an impossible size")
         # 32 bits a pixel, little-endian, so each pixel arrives as blue, green, red, unused.
         self.sock.sendall(struct.pack(">B3xBBBBHHHBBB3x", 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))

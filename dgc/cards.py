@@ -9,6 +9,7 @@ account number, or a long number that fails the check is not one. The editors ch
 from __future__ import annotations
 
 import re
+import unicodedata
 
 _RUN = re.compile(r"\d+(?:[ -]\d+)*")
 
@@ -47,7 +48,7 @@ def card_number(text) -> str | None:
             for end in range(start, len(groups)):
                 if end > start:
                     used.add(seps[end - 1])
-                digits += groups[end]
+                digits += "".join(str(unicodedata.decimal(ch)) for ch in groups[end])
                 if len(digits) > 19 or len(used) > 1:
                     break
                 if 13 <= len(digits) and _network(digits) and _luhn(digits):

@@ -3,9 +3,11 @@ and cell-exact frames. Everything runs on temporary trees; no model, Git transpo
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from dgc.files import FilesPane, FilesPaneError
 from dgc.files.model import human_size, natural_key, scan, sort_entries
@@ -109,6 +111,68 @@ class FileOpsTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_copy_refuses_an_oversized_later_source_before_copying_earlier_files(self):
+        first = self.root / "work" / "note.txt"
+        second = self.root / "work" / "large.txt"
+        second.write_text("large")
+        destination = self.root / "destination"
+        destination.mkdir()
+        def measure(path):
+            if path == second:
+                raise OpError("too large")
+            return (1, 5)
+        with patch("dgc.files.ops._measure", side_effect=measure), self.assertRaisesRegex(OpError, "too large"):
+            self.ops.copy([first, second], destination)
+        self.assertEqual(list(destination.iterdir()), [])
+
+    def test_partial_copy_failure_records_an_undo(self):
+        first = self.root / "work" / "note.txt"
+        second = self.root / "work" / "second.txt"
+        second.write_text("second")
+        destination = self.root / "destination"
+        destination.mkdir()
+        def copy(src, dest):
+            if src == second:
+                raise OSError("disk full")
+            dest.write_bytes(src.read_bytes())
+        with patch("dgc.files.ops._copy", side_effect=copy), self.assertRaisesRegex(OpError, "after 1 complete"):
+            self.ops.copy([first, second], destination)
+        self.assertTrue((destination / first.name).exists())
+        self.ops.undo()
+        self.assertEqual(list(destination.iterdir()), [])
+
+    def test_partial_move_failure_records_an_undo(self):
+        first = self.root / "work" / "note.txt"
+        second = self.root / "work" / "second.txt"
+        second.write_text("second")
+        destination = self.root / "destination"
+        destination.mkdir()
+        original_move = shutil.move
+        def move(src, dest):
+            if src == str(second):
+                raise OSError("disk full")
+            return original_move(src, dest)
+        with patch("dgc.files.ops.shutil.move", side_effect=move), self.assertRaisesRegex(OpError, "after 1 complete"):
+            self.ops.move([first, second], destination)
+        self.assertTrue((destination / first.name).exists())
+        self.ops.undo()
+        self.assertTrue(first.exists())
+
+    def test_partial_delete_failure_restores_completed_file(self):
+        first = self.root / "work" / "note.txt"
+        second = self.root / "work" / "second.txt"
+        second.write_text("second")
+        original_remove = __import__("dgc.files.ops", fromlist=["_remove"])._remove
+        def remove(path):
+            if path == second:
+                raise OSError("read-only")
+            return original_remove(path)
+        with patch("dgc.files.ops._remove", side_effect=remove), self.assertRaisesRegex(OpError, "after 1 item"):
+            self.ops.delete([first, second])
+        self.assertFalse(first.exists())
+        self.ops.undo()
+        self.assertEqual(first.read_text(), "hello")
 
     def test_create_rename_and_undo(self):
         result = self.ops.create(self.root / "work", "new.txt")
@@ -291,6 +355,16 @@ class FilesPaneTests(unittest.TestCase):
         self.assertFalse((self.root / "src" / "util.py.bak").exists())
         drive(pane, "u")
         self.assertTrue((self.root / "src" / "util.py.bak").exists())
+
+    def test_rename_rejects_path_in_prompt_without_crashing_pane(self):
+        pane = self.pane()
+        pane._focus_name("README.md")
+        drive(pane, "r")
+        pane.prompt["value"] = "other/name.md"
+        drive(pane, "enter")
+        self.assertEqual(pane.mode, "normal")
+        self.assertIn("cannot contain '/'", pane.status)
+        self.assertTrue((self.root / "README.md").exists())
 
     def test_default_mode_confirms_destructive_and_plan_mode_is_read_only(self):
         pane = self.pane(mode="default")

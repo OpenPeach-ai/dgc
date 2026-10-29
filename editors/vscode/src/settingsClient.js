@@ -14,14 +14,29 @@ import gmailLogo from '../media/plugin-logos/gmail.png';
 import calendarLogo from '../media/plugin-logos/calendar.png';
 import contactsLogo from '../media/plugin-logos/contacts.png';
 import driveLogo from '../media/plugin-logos/drive.png';
+import docsLogo from '../media/plugin-logos/docs.png';
+import slidesLogo from '../media/plugin-logos/slides.png';
+import microsoftLogo from '../media/plugin-logos/microsoft.png';
+import outlookLogo from '../media/plugin-logos/outlook.png';
+import onedriveLogo from '../media/plugin-logos/onedrive.png';
 import dgcLogo from '../media/dgc-mark.svg';
 const connectorLogos = {zapier:zapierLogo, make:makeLogo, n8n:n8nLogo, arcade:arcadeLogo, asana:asanaLogo, docusign:docusignLogo, zoom:zoomLogo};
-const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo};
+const serviceLogos = {gmail:gmailLogo, calendar:calendarLogo, contacts:contactsLogo, drive:driveLogo, docs:docsLogo, slides:slidesLogo};
+// Plugins whose apps you choose and sign in to once with DGC's own app for the service: each app's mark (Outlook's
+// for Microsoft's mail and calendar, which share it) and the service's.
+const signInProviders = {
+    'google-workspace': {name:'Google', mark:googleLogo, apps:serviceLogos, terms:'Google’s terms'},
+    microsoft: {name:'Microsoft', mark:microsoftLogo, apps:{mail:outlookLogo, calendar:outlookLogo, onedrive:onedriveLogo}, terms:'Microsoft’s terms'},
+};
+// What a plugin's sign-in lets DGC do in one app (Google's, Microsoft's), in the catalog's plain words: "Read your email · …".
+const appPermissions = (row, app) => (row.sign_in_permissions || []).filter(p => p.app === app?.id);
 import { contextSizeHint, contextSizeMore, contextSizeShown, renderFields } from './settingsFields.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 import { createModelBoxes, modelBoxMarkup } from './settingsModelBox.js';
+// The user's mods, listed as the chats' /mods lists them (window.DgcMods.listView: every word goes in as text).
+import '../media/mods.js';
 const vscode = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -37,6 +52,8 @@ let sequence = 0;
 let directory = false, marketFilter = 'all', marketplaces = [], pluginNotice = '', modal = null, modalKind = '', reviewName = '', preview = null, dialogReturn = null, createdPath = '';
 let operationPending = false;
 let connectingPlugin = null;
+// Settings -> Plugins -> Mods: the active chat's mods (its backend's `mods`), asked for when the page first shows.
+const modsPage = { asked: false, list: null, on: true, unsupported: false, busy: new Set(), note: '' };
 const errors = new Map(), pending = new Map(), skillPending = new Map();
 // A plugin's key field (GitHub's token, Brevo's key): what is typed so far, survives the page redrawing under it;
 // a Save or Remove waiting on DGC; and what DGC said back. Keyed plugin|server|variable. The key itself goes to DGC
@@ -208,10 +225,11 @@ function render() {
         if (candidate && !candidate.disabled) candidate.focus({preventScroll: true});
     });
     usage?.dispose();
+    pipUsage?.dispose();
     usage = null;
+    pipUsage = null;
     document.querySelectorAll('[data-nav]').forEach(b => { b.classList.toggle('active', b.dataset.nav === section); b.setAttribute('aria-current', b.dataset.nav === section ? 'page' : 'false'); });
     const main = $('page');
-    if ($('page-picker')) $('page-picker').value = section;
     if (section === 'plugins') {
         renderPlugins(main);
         return;
@@ -301,16 +319,17 @@ function render() {
             } };
     }
 }
-function appLogo(row, app) { return row.name === 'google-workspace' && serviceLogos[app.id] ? logo({name:app.id, display_name:app.name, logo:serviceLogos[app.id]}) : logo(row); }
+function appLogo(row, app) { const mark = signInProviders[row.name]?.apps[app?.id]; return mark ? logo({name:app.id, display_name:app.name, logo:mark}) : logo(row); }
 // One-colour marks drawn for one background vanish on the other theme (Superpowers' black mark on dark,
 // Composio's white one on light), so each sits on the plate its maker draws it on.
 const logoPlates = {composio: 'dark', arcade: 'light', superpowers: 'light'};
-function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, logo:connectorLogos[row.name]}; if (row.name === 'composio') row = {...row, logo:composioLogo}; if (row.name === 'google-workspace') row = {...row, logo:googleLogo}; const plate = logoPlates[row.name]; return row.logo ? `<img class="logo${plate ? ' plate-' + plate : ''}" width="${big ? 72 : 40}" height="${big ? 72 : 40}" alt="${esc(row.display_name || row.name)}" src="${esc(row.logo)}">` : `<span class="mark" aria-hidden="true">${icon('plugins')}</span>`; }
+function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, logo:connectorLogos[row.name]}; if (row.name === 'composio') row = {...row, logo:composioLogo}; if (signInProviders[row.name] && !row.logo) row = {...row, logo:signInProviders[row.name].mark}; const plate = logoPlates[row.name]; return row.logo ? `<img class="logo${plate ? ' plate-' + plate : ''}" width="${big ? 72 : 40}" height="${big ? 72 : 40}" alt="${esc(row.display_name || row.name)}" src="${esc(row.logo)}">` : `<span class="mark" aria-hidden="true">${icon('plugins')}</span>`; }
 function banner(row) { if (!signin || row && signin.server !== row.name && !(row.server_names || []).includes(signin.server))
     return ''; const code = /^[A-Za-z0-9-]{4,24}$/.test(signin.code || '') ? signin.code : '';
     // A device sign-in (GitHub's): the code to enter on the page that opened, to copy again if it was lost.
     return `<div class="banner" role="status"><p>${code ? `Enter the code <code class="signin-code">${esc(code)}</code> on the page that opened to finish connecting ${esc(signin.title)}` : `Finish connecting ${esc(signin.title)} in your browser`}</p><div class="actions">${code ? `<button class="secondary" data-copy-code="${esc(code)}">Copy code</button>` : ''}<button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div></div>`; }
-function issue(row) { const message = errors.get(row.name) || row.connection_error; return message ? `<div class="banner error" role="alert"><p>${esc(message)}</p></div>` : ''; }
+function cancelledSignIn(message) { return /^Sign-in cancelled\./.test(String(message || '')); }
+function issue(row) { const message = errors.get(row.name) || row.connection_error; return message ? `<div class="banner${cancelledSignIn(message) ? '' : ' error'}" role="${cancelledSignIn(message) ? 'status' : 'alert'}"><p>${esc(message)}</p></div>` : ''; }
 function pluginControl(row) {
     if (!offered(row)) return '<span class="status">Unavailable</span>';
     if (pending.has(row.name) || row.opening)
@@ -333,9 +352,10 @@ function manualServers() {
     return servers.filter(s => !owned.has(s.name));
 }
 function chips(active) {
-    const count = id => id === 'plugins' ? items.filter(r => r.installed && offered(r)).length : null;
-    // Plugins and Apps. MCP servers has a page of its own in the side list: one door to it, not two.
-    return `<div class="chips" role="group" aria-label="Plugin contents">${[['plugins', 'Plugins'], ['apps', 'Apps']].map(([id, label]) => `<button data-lane="${id}" class="${active === id ? 'on' : ''}" aria-pressed="${active === id}">${label}${count(id) === null ? '' : ` <span class="status">${count(id)}</span>`}</button>`).join('')}</div>`;
+    const count = id => id === 'plugins' ? items.filter(r => r.installed && offered(r)).length
+        : id === 'mods' && Array.isArray(modsPage.list) ? modsPage.list.length : null;
+    // Plugins, Apps and Mods. MCP servers has a page of its own in the side list: one door to it, not two.
+    return `<div class="chips" role="group" aria-label="Plugin contents">${[['plugins', 'Plugins'], ['apps', 'Apps'], ['mods', 'Mods']].map(([id, label]) => `<button data-lane="${id}" class="${active === id ? 'on' : ''}" aria-pressed="${active === id}">${label}${count(id) === null ? '' : ` <span class="status">${count(id)}</span>`}</button>`).join('')}</div>`;
 }
 function bindChips(main) {
     main.querySelectorAll('[data-lane]').forEach(button => button.onclick = () => {
@@ -585,6 +605,7 @@ function renderPlugins(main) {
     if (detail && mcpEditing) { renderMcpForm(main, mcpEditing); return; }
     if (detail) { renderDetail(main); return; }
     if (directory) { renderDirectory(main); return; }
+    if (lane === 'mods') { renderMods(main); return; }
     const shown = items.filter(r => r.installed && offered(r) && `${r.display_name} ${r.summary}`.toLowerCase().includes(query.toLowerCase()));
     main.innerHTML = banner() + `<div class="page-heading"><div><h2>Plugins</h2><p class="sub">Skills and tools DGC can use.</p></div><div class="actions"><button class="secondary" id="browse-directory">Browse directory</button>${addMenu()}</div></div>` + notice() + chips(lane) + `<div class="list-toolbar"><input class="search" id="plugin-search" type="search" placeholder="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" aria-label="Search ${lane === 'apps' ? 'apps' : 'installed plugins'}" value="${esc(query)}"></div><div id="plugin-list"></div>`;
     const rows = lane === 'apps' ? shown.flatMap(r => (r.apps || []).map(app => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${appLogo(r, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="summary">${esc(r.display_name)} · ${r.mcps?.length ? 'Uses MCP' : 'Requires a ChatGPT app connection'}</span></span></button><span class="status">${r.connected ? 'Connected' : r.install === 'block' ? 'Unavailable in DGC' : r.setup_required ? 'Setup required' : r.mcps?.length ? 'Not connected' : 'Unavailable in DGC'}</span></article>`)).join('') : shown.map(r => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${logo(r)}<span class="copy"><strong>${esc(r.display_name)}</strong><span class="summary">${esc(r.summary)}</span></span></button>${pluginControl(r)}</article>`).join('');
@@ -601,6 +622,21 @@ function renderPlugins(main) {
         if (retired.length) main.insertAdjacentHTML('beforeend', `<details class="retired-plugins"><summary>Unavailable installed plugins · ${retired.length}</summary><p class="note">These older installations are no longer offered. You can review or uninstall them here.</p>${retired.map(r => `<article class="row"><button class="row-open" data-open="${esc(r.name)}">${logo(r)}<span class="copy"><strong>${esc(r.display_name)}</strong><span class="summary">${esc(r.block_reason || 'This integration is unavailable.')}</span></span></button><button class="secondary" data-uninstall="${esc(r.name)}">Uninstall</button></article>`).join('')}</details>`);
     }
     bindPlugins(main); bindChips(main); bindAddMenu(main);
+}
+// Mods: the same list, the same words for what each can do, and the same Allow, On, Off and Reload as /mods in a chat.
+function renderMods(main) {
+    if (!modsPage.asked) { modsPage.asked = true; send({ type: 'modsList' }); }
+    main.innerHTML = banner() + `<div class="page-heading"><div><h2>Plugins</h2><p class="sub">Skills and tools DGC can use.</p></div><div class="actions"><button class="secondary" id="browse-directory">Browse directory</button>${addMenu()}</div></div>` + notice() + chips(lane)
+        + `<section class="mods-page" aria-labelledby="mods-heading"><h3 id="mods-heading">Mods</h3><p class="note">Small programs that add your own panels, status lines, commands and guards to DGC. Each one runs in a sandbox, does only what you allowed it, and can never approve anything for you. A plugin can bring mods too: installing it is your Allow for what they ask.</p>${modsPage.note ? `<p class="notice" role="status">${esc(modsPage.note)}</p>` : ''}<div id="mods-list"></div></section>`;
+    const host = $('mods-list');
+    if (modsPage.unsupported) host.append(Object.assign(document.createElement('p'), { className: 'note', textContent: 'This DGC has no mods yet. Update it (DGC: Update CLI) to use them.' }));
+    else if (!modsPage.list) host.append(Object.assign(document.createElement('p'), { className: 'note', textContent: 'Reading your mods…' }));
+    else host.append(window.DgcMods.listView(modsPage.list, modsPage.on, { busy: modsPage.busy, act: (name, op, button, review) => {
+        modsPage.busy.add(name); modsPage.note = ''; send({ type: 'modSet', name, op, ...(op === 'allow' && review ? { review } : {}) }); render();
+    } }));
+    host.append(window.DgcMods.aboutLines());
+    $('browse-directory').onclick = () => { directory = true; query = ''; render(); };
+    bindChips(main); bindAddMenu(main);
 }
 function notice() { return pluginNotice ? `<p class="notice" role="status">${esc(pluginNotice)}${createdPath ? ' <button class="link" id="edit-created">Edit skill</button>' : ''}</p>` : ''; }
 function addMenu() { return `<div class="add-wrap"><button id="add-menu" class="secondary" aria-haspopup="menu" aria-expanded="false">Add <span aria-hidden="true">⌄</span></button><div id="add-options" class="add-menu" role="menu" hidden><button role="menuitem" data-add="create">Create plugin</button><button role="menuitem" data-add="marketplace">Add a marketplace</button><button role="menuitem" data-add="mcp">Add MCP server</button><button role="menuitem" data-add="link">Install from link</button></div></div>`; }
@@ -667,7 +703,7 @@ function browserPlugin(row) {
 }
 function connectionArt(row) {
     const name = row.display_name || row.name;
-    const src = connectorLogos[row.name] || (row.name === 'composio' ? composioLogo : row.name === 'google-workspace' ? googleLogo : row.logo || items.find(r => r.name === row.name)?.logo || (row.name === 'figma' ? figmaLogo : ''));
+    const src = connectorLogos[row.name] || (row.name === 'composio' ? composioLogo : signInProviders[row.name]?.mark || row.logo || items.find(r => r.name === row.name)?.logo || (row.name === 'figma' ? figmaLogo : ''));
     return `<div class="connection-art" aria-label="DGC and ${esc(name)}"><span class="connection-tile"><img src="${esc(dgcLogo)}" width="56" height="56" alt="DGC"></span><span class="connection-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="connection-tile">${src ? `<img${logoPlates[row.name] ? ` class="plate-${logoPlates[row.name]}"` : ''} src="${esc(src)}" width="56" height="56" alt="${esc(name)}">` : `<span class="status">Plugin</span>`}</span></div>`;
 }
 function connectionRequirement(row) {
@@ -688,7 +724,7 @@ function showConnection(row, state = 'confirm') {
     connectingPlugin = row.name;
     const title = row.display_name || row.name;
     const error = errors.get(row.name) || row.connection_error;
-    const body = state === 'error' ? `<div class="banner error" role="alert"><p>${esc(error || 'The connection did not finish.')}</p></div>`
+    const body = state === 'error' ? `<div class="banner${cancelledSignIn(error) ? '' : ' error'}" role="${cancelledSignIn(error) ? 'status' : 'alert'}"><p>${esc(error || 'The connection did not finish.')}</p></div>`
         : state === 'connected' ? `<p class="connection-intro" role="status">Connected. ${esc(title)} tools are ready for DGC.</p>`
         : state === 'browser' ? `<p class="connection-intro" role="status">Finish connecting ${esc(title)} in your browser.</p>`
         : state === 'pending' ? '<p class="connection-intro" role="status">Requesting a connection. Your browser opens only if the service provides a sign-in link.</p>'
@@ -716,19 +752,48 @@ function updateConnection(state) {
     const row = items.find(r => r.name === connectingPlugin);
     if (row) showConnection(row, state);
 }
+// A plugin's mods in its install review: each one and what it asks for, in the words /mods uses (written as text,
+// never markup). Installing is the one Allow for exactly that; an update whose mod asks for more says so.
+function reviewMods(item) {
+    const host = $('review-mods');
+    if (!host) return;
+    for (const m of item.mods || []) {
+        const box = document.createElement('div'); box.className = 'review-mod';
+        const head = document.createElement('p'); const name = document.createElement('strong');
+        name.textContent = String(m.title || m.name || ''); head.append(name, document.createTextNode(` ${String(m.version || '')}`));
+        const said = document.createElement('p'); said.className = m.state === 'more' ? 'note review-mod-more' : 'note';
+        said.textContent = m.state === 'same' ? 'Allowed before, and it asks for nothing more.'
+            : m.state === 'more' ? 'This version asks for more than you allowed before. Installing it allows all of this:'
+            : 'Installing it allows exactly this:';
+        const list = document.createElement('ul'); list.className = 'review-mod-asks';
+        for (const line of m.asks || []) { const li = document.createElement('li'); li.textContent = String(line); list.append(li); }
+        box.append(head, said, list);
+        host.append(box);
+    }
+}
 function renderReview(item) {
     preview = item;
     const servers = Object.entries(item.server_specs || {});
     const apps = item.apps || item.metadata?.apps || [];
     const serverLabel = name => apps.find(a => name.endsWith('--' + a.id))?.name || name;
-    dialog('review', item.display_name || item.name, `<p>${esc(item.long_summary || item.summary || '')}</p>${compatibilityDetails(item)}<p class="note">Source: ${esc(item.upstream || item.marketplace || 'Local package')}${item.sha ? '<br>Revision: '+esc(item.sha.slice(0,12)) : ''}</p>${item.setup_required?`<div class="banner"><p>${esc(item.setup_instructions)}</p></div><p>${link(item.setup_url,'Google setup instructions')}</p>`:''}${item.skills?.length ? '<details class="review-section"><summary>Skills · '+item.skills.length+'</summary>'+item.skills.map(x=>`<div class="review-skill"><strong>${esc(x.name)}</strong><span>${esc(x.description)}</span></div>`).join('')+'</details>' : ''}${servers.length ? '<h3>MCP servers</h3>' + servers.map(([name,spec])=>`<label class="review-choice"><input type="checkbox" data-server="${esc(name)}" checked><span><strong>${esc(serverLabel(name))}</strong><span>${esc(spec.url || spec.command + ' ' + (spec.args || []).join(' '))}</span>${spec.env_names?.length ? '<span>Requires: '+esc(spec.env_names.join(', '))+'</span>' : ''}</span></label>`).join('') : ''}${(item.warnings || []).map(w=>`<p class="note">${esc(w)}</p>`).join('')}${!item.supported ? `<p class="error-message" role="alert">${esc(item.compatibility_reason)}</p>` : ''}<p class="note">License: ${item.license_url ? link(item.license_url, item.license || 'Publisher license') : esc(item.license || 'Not provided')}. ${item.install==='accept'?'Publisher terms are confirmed before installation.':''}${item.privacy_url ? ' '+link(item.privacy_url, 'Privacy policy') : ''}</p>`, `<button class="save" id="confirm-plugin"${item.supported?'':' disabled'}>${item.setup_required?'Install selected connections':'Install'}</button>`);
-    if (item.name === 'google-workspace') {
+    dialog('review', item.display_name || item.name, `<p>${esc(item.long_summary || item.summary || '')}</p>${compatibilityDetails(item)}<p class="note">Source: ${esc(item.upstream || item.marketplace || 'Local package')}${item.sha ? '<br>Revision: '+esc(item.sha.slice(0,12)) : ''}</p>${item.setup_required?`<div class="banner"><p>${esc(item.setup_instructions)}</p></div><p>${link(item.setup_url,'Google setup instructions')}</p>`:''}${item.skills?.length ? '<details class="review-section"><summary>Skills · '+item.skills.length+'</summary>'+item.skills.map(x=>`<div class="review-skill"><strong>${esc(x.name)}</strong><span>${esc(x.description)}</span></div>`).join('')+'</details>' : ''}${item.mods?.length ? '<h3>Mods</h3><div id="review-mods" class="review-mods"></div>' : ''}${servers.length ? '<h3>MCP servers</h3>' + servers.map(([name,spec])=>`<label class="review-choice"><input type="checkbox" data-server="${esc(name)}" checked><span><strong>${esc(serverLabel(name))}</strong><span>${esc(spec.url || spec.command + ' ' + (spec.args || []).join(' '))}</span>${spec.env_names?.length ? '<span>Requires: '+esc(spec.env_names.join(', '))+'</span>' : ''}</span></label>`).join('') : ''}${(item.warnings || []).map(w=>`<p class="note">${esc(w)}</p>`).join('')}${!item.supported ? `<p class="error-message" role="alert">${esc(item.compatibility_reason)}</p>` : ''}<p class="note">License: ${item.license_url ? link(item.license_url, item.license || 'Publisher license') : esc(item.license || 'Not provided')}. ${item.install==='accept'?'Publisher terms are confirmed before installation.':''}${item.privacy_url ? ' '+link(item.privacy_url, 'Privacy policy') : ''}</p>`, `<button class="save" id="confirm-plugin"${item.supported?'':' disabled'}>${item.setup_required?'Install selected connections':(item.mods || []).some(m => m.state !== 'same')?'Install and allow its mods':'Install'}</button>`);
+    reviewMods(item);
+    const provider = signInProviders[item.name];
+    if (provider) {
         const choices = servers.map(([name]) => {
             const app = apps.find(a => name.endsWith('--' + a.id));
-            const src = serviceLogos[app?.id];
-            return `<label class="google-choice"><span class="service-tile">${src ? `<img src="${esc(src)}" width="28" height="28" alt="">` : ''}</span><span>${esc(app?.name || name)}</span><input type="checkbox" role="switch" aria-label="${esc(app?.name || name)}" data-server="${esc(name)}" checked></label>`;
+            const src = provider.apps[app?.id];
+            const may = appPermissions(item, app).map(p => p.label);
+            return `<label class="google-choice"><span class="service-tile">${src ? `<img src="${esc(src)}" width="28" height="28" alt="">` : ''}</span><span class="google-app"><span>${esc(app?.name || name)}</span>${may.length ? `<span class="google-scopes">${esc(may.join(' · '))}</span>` : ''}</span><input type="checkbox" role="switch" aria-label="${esc(app?.name || name)}" data-server="${esc(name)}" checked></label>`;
         }).join('');
-        dialog('review', 'Choose Google services for DGC', `<div class="connection-art" aria-label="DGC and Google"><span class="connection-tile"><img src="${esc(dgcLogo)}" width="56" height="56" alt="DGC"></span><span class="connection-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="connection-tile"><img src="${esc(googleLogo)}" width="44" height="44" alt="Google"></span></div><h2 id="google-title">Choose Google services for DGC</h2><p class="google-intro">Select the connections you want to set up.</p><div class="google-choices">${choices}</div><div class="google-setup"><strong>Setup required</strong><p>DGC’s Google sign-in is not configured yet. Installing saves your selections. It does not grant account access.</p><details><summary>What is needed to connect?</summary><p>${esc(item.setup_instructions)}</p><p>${link(item.setup_url,'Google setup instructions')}</p><p>License: ${esc(item.license)}. Publisher terms are confirmed before installation.</p></details></div>`, '<button class="save" id="confirm-plugin">Install selected connections</button>');
+        // The kind of account to sign in with, where the service has a sign-in server for each (Microsoft's personal
+        // and work or school accounts): chosen here, before the sign-in opens.
+        const accounts = (item.sign_in_accounts || []).map((a, i) => `<label class="account-choice"><input type="radio" name="sign-in-account" value="${esc(a.id)}"${(item.sign_in_account ? item.sign_in_account === a.id : i === 0) ? ' checked' : ''}><span class="google-app"><span>${esc(a.label)}</span>${a.description ? `<span class="google-scopes">${esc(a.description)}</span>` : ''}</span></label>`).join('');
+        // Each permission in full, one click away; the service's limits said up front (an app it hasn't verified).
+        const always = (item.sign_in_always || []).length ? `<p><strong>Every app</strong></p><ul class="google-permissions">${item.sign_in_always.map(p => `<li>${esc(p.label)}: ${esc(p.description)}</li>`).join('')}</ul>` : '';
+        const details = apps.filter(app => appPermissions(item, app).length).map(app => `<div data-permission-app="${esc(app.id)}"><p><strong>${esc(app.name)}</strong></p><ul class="google-permissions">${appPermissions(item, app).map(p => `<li>${esc(p.label)}: ${esc(p.description)}</li>`).join('')}</ul></div>`).join('') + always;
+        const title = `Choose ${provider.name} apps for DGC`;
+        dialog('review', title, `<div class="connection-art" aria-label="DGC and ${esc(provider.name)}"><span class="connection-tile"><img src="${esc(dgcLogo)}" width="56" height="56" alt="DGC"></span><span class="connection-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="connection-tile"><img src="${esc(provider.mark)}" width="44" height="44" alt="${esc(provider.name)}"></span></div><h2 id="google-title">${esc(title)}</h2><p class="google-intro">Choose the apps DGC may use. You sign in with ${esc(provider.name)} once, for all of them.</p><div class="google-choices">${choices}</div>${accounts ? `<fieldset class="google-choices account-choices"><legend>Your ${esc(provider.name)} account</legend>${accounts}</fieldset>` : ''}<div class="google-setup">${item.sign_in_note ? `<strong>Who can sign in</strong><p>${esc(item.sign_in_note)}</p>` : ''}<details><summary>What each permission lets DGC do</summary>${details}<p>Your sign-in is kept in your system keychain. ${link(item.terms_url || item.license_url, provider.terms)}${item.privacy_url ? ' · ' + link(item.privacy_url, 'Privacy') : ''}</p></details></div>`, '<button class="save" id="confirm-plugin">Install and sign in</button>');
         modal.classList.add('google-dialog', 'connection-dialog');
         modal.setAttribute('aria-labelledby','google-title');
     } else if (browserPlugin(item)) {
@@ -737,14 +802,19 @@ function renderReview(item) {
     preview = item;
     $('confirm-plugin').onclick = () => {
         const selectedServers = [...modal.querySelectorAll('[data-server]:checked')].map(x=>x.dataset.server);
-        if (!item.skills?.length && !selectedServers.length) return;
+        if (!item.skills?.length && !selectedServers.length && !item.mods?.length) return;
         pending.set(item.name,true); detail=item.name;
+        const signInAccount = modal.querySelector('[name=sign-in-account]:checked')?.value;
         // The host stores the reviewed source under the requested identity. URL installs keep that identity until resolved.
-        send({type:'installPlugin', name:reviewName.startsWith('https://')?reviewName:item.name, selectedServers});
+        send({type:'installPlugin', name:reviewName.startsWith('https://')?reviewName:item.name, selectedServers, ...(signInAccount ? {signInAccount} : {})});
         closeDialog(); render();
         if (browserPlugin(item)) showConnection(item, 'pending');
     };
-    modal.querySelectorAll('[data-server]').forEach(c=>c.onchange=()=>{ $('confirm-plugin').disabled = !item.supported || (!item.skills?.length && !modal.querySelector('[data-server]:checked')); });
+    modal.querySelectorAll('[data-server]').forEach(c=>c.onchange=()=>{
+        const selected = [...modal.querySelectorAll('[data-server]:checked')].map(n => n.dataset.server);
+        $('confirm-plugin').disabled = !item.supported || (!item.skills?.length && !item.mods?.length && !selected.length);
+        modal.querySelectorAll('[data-permission-app]').forEach(n => { n.hidden = !selected.some(name => name.endsWith('--' + n.dataset.permissionApp)); });
+    });
 }
 function openForm(kind) {
     if (kind === 'marketplace') {
@@ -865,13 +935,23 @@ function cloudNotice(row) {
     // request to somebody else's machine" cannot be one clause inside a Requirements paragraph.
     // It is a banner, and it is driven by a catalog flag rather than by whoever wrote the prose.
     if (!row.cloud_execution) { return ''; }
+    if (row.name === 'microsoft') return '<div class="banner"><p><strong>Runs on this computer and connects to Microsoft Graph.</strong> The apps you enable send requests and data to Microsoft. DGC keeps your sign-in in your system keychain, including when your model runs locally.</p></div>';
+    if (row.name === 'work-iq') return '<div class="banner"><p><strong>Microsoft’s Work IQ program runs on this computer.</strong> It connects to Microsoft 365 using its own sign-in. Queries and relevant data are processed by Microsoft, including when your model runs locally.</p></div>';
+    if (row.name === 'google-workspace') return '<div class="banner"><p><strong>Runs on this computer and connects to Google APIs.</strong> The apps you enable send requests and data to Google. DGC keeps your sign-in in your system keychain, including when your model runs locally.</p></div>';
     return `<div class="banner"><p><strong>Runs in ${esc(row.display_name || row.name)}'s cloud.</strong> `
         + `Your requests and their data are sent to this service and processed there, including when `
         + `the model you are using runs on this computer. It holds the app credentials you authorize.</p></div>`;
 }
+function textWithLinks(value) {
+    return String(value || '').split(/(https?:\/\/[^\s<>]+)/g).map(part => {
+        if (!/^https?:\/\//.test(part)) return esc(part);
+        const url = part.replace(/[.,;!)]+$/, '');
+        return link(url) + esc(part.slice(url.length));
+    }).join('');
+}
 function compatibilityDetails(row) {
     return cloudNotice(row)
-        + (row.requirements ? `<p class="note"><strong>Requirements.</strong> ${esc(row.requirements)}</p>` : '')
+        + (row.requirements ? `<p class="note"><strong>Requirements.</strong> ${textWithLinks(row.requirements)}</p>` : '')
         + (row.compatibility_url ? `<p>${link(row.compatibility_url, 'Connection requirements')}</p>` : '')
         + (row.name === 'figma' ? '<button class="secondary" data-desktop-setup>Set up Figma desktop</button>' : '');
 }
@@ -993,9 +1073,9 @@ function renderDetail(main) {
     const keyReady = keys.every(k => k.saved || k.from_environment);
     main.innerHTML = `<div class="crumbs"><button id="back">Plugins</button><span aria-hidden="true">›</span><span>${esc(row.display_name)}</span></div>` + banner(row) + (keys.length ? '' : issue(row)) + `<div class="hero">${logo(row, true)}<div class="copy"><h2>${esc(row.display_name)}</h2><p class="sub">${esc(row.summary)}</p></div><div class="actions">${pluginControl(row)}${row.installed && offered(row) && mcps.length && !row.setup_required && !row.connected && !pending.has(row.name) && !row.opening && keyReady ? `<button class="install" data-connect="${esc(row.name)}">Connect</button>` : ''}${row.installed ? `<button class="secondary" data-uninstall="${esc(row.name)}">Uninstall</button>` : ''}</div></div>${row.connected ? '<p class="status connected">Connected</p>' : ''}${row.install === 'block' ? `<p class="note">${esc(row.block_reason)}</p>` : ''}`
         + compatibilityDetails(row) + (row.setup_required && !row.connected ? `<div class="banner"><p>${esc(row.setup_instructions || 'Complete Google Cloud and OAuth setup before connecting.')}</p></div><p>${link(row.setup_url,'Setup instructions')}</p>` : '') + ((row.default_prompt || []).length ? `<div class="examples">${row.default_prompt.slice(0, 3).map(p => `<div class="example">${esc(p)}</div>`).join('')}</div>` : '') + `<p class="long-description">${esc(row.long_summary || row.summary)}</p>`
-        + '<h3>Apps' + (apps.length ? ' · ' + apps.length : '') + '</h3>' + (apps.length ? apps.map(app => `<div class="row">${appLogo(row, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="description">${mcps.length ? 'DGC connects to this service through the plugin’s MCP server.' : 'This package expects a ChatGPT app connection. It is unavailable in DGC without a standalone MCP server.'}</span></span></div>`).join('') : '<p class="note">No apps declared in this package.</p>')
+        + '<h3>Apps' + (apps.length ? ' · ' + apps.length : '') + '</h3>' + (apps.length ? apps.map(app => `<div class="row">${appLogo(row, app)}<span class="copy"><strong>${esc(typeof app === 'string' ? app : app.name)}</strong><span class="description">${appPermissions(row, app).length ? 'DGC may: ' + esc(appPermissions(row, app).map(p => p.label.charAt(0).toLowerCase() + p.label.slice(1)).join('; ')) + '.' : mcps.length ? 'DGC connects to this service through the plugin’s MCP server.' : 'This package expects a ChatGPT app connection. It is unavailable in DGC without a standalone MCP server.'}</span></span></div>`).join('') : '<p class="note">No apps declared in this package.</p>')
         + `<h3>Skills${skills.length ? ' · ' + skills.length : ''}</h3>` + (skills.length ? skills.map(s => `<div class="row"><span class="copy"><strong>${esc(s.name)}</strong><span class="description skill-description" title="${esc(s.description)}">${esc(s.description || 'No description provided.')}</span></span>${row.installed && offered(row) ? switchHTML(s.enabled !== false, `Enable ${s.name}`, `data-skill="${esc(s.name)}"`, skillPending.has(s.name)) : ''}</div>`).join('') : '<p class="note">No instruction skills in this package.</p>')
-        + `<h3>Information</h3><dl class="meta">${[['Developer', esc(row.developer || 'Not provided')], ['Category', esc(row.category || 'Not provided')], ['License', row.license_url && (!row.declared_license || row.declared_license === row.license) ? link(row.license_url, row.license || 'License') : esc(row.declared_license || row.license || 'Not provided')], ['Version', esc(row.version || 'Not provided')], ['Terms', link(row.terms_url, 'Publisher terms')], ['Privacy', link(row.privacy_url, 'Privacy policy')], ['Website', link(row.website_url)], ['MCP URL', mcps.length ? mcps.map(m => m.url ? link(m.url) : esc(m.command || m.transport)).join('<br>') : 'None declared'], ['Source', link(row.source_url || row.upstream)]].filter(([, v]) => v !== 'Not provided').map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+        + `<h3>Information</h3><dl class="meta">${[['Developer', esc(row.developer || 'Not provided')], ['Category', esc(row.category || 'Not provided')], ['Signs in with', esc((row.sign_in_accounts || []).find(a => a.id === row.sign_in_account)?.label || 'Not provided')], ['License', row.license_url && (!row.declared_license || row.declared_license === row.license) ? link(row.license_url, row.license || 'License') : esc(row.declared_license || row.license || 'Not provided')], ['Version', esc(row.version || 'Not provided')], ['Terms', link(row.terms_url, 'Publisher terms')], ['Privacy', link(row.privacy_url, 'Privacy policy')], ['Website', link(row.website_url)], ['Server connection', mcps.length ? mcps.map(m => m.url ? 'URL: ' + link(m.url) : 'Command: ' + esc([m.command || m.transport, ...(Array.isArray(m.args) ? m.args : [])].join(' '))).join('<br>') : 'None declared'], ['Source', link(row.source_url || row.upstream)]].filter(([, v]) => v !== 'Not provided').map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
     if (row.installed && offered(row) && connections.length) {
         main.querySelector('.meta').previousElementSibling.insertAdjacentHTML('beforebegin', '<section class="plugin-connections"><h3>Connection</h3>' + serverRows(connections) + '</section>');
     }
@@ -1089,13 +1169,11 @@ function renderMcpForm(main, s) {
         danger(mcpConfirm);
     }
 }
-document.querySelector('nav').innerHTML = sections.map(([id, label]) => (id === 'usage' ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
+document.querySelector('nav').innerHTML = sections.map(([id, label]) => (id === 'usage' ? '<div class="nav-divider"></div>' : '') + `<button data-nav="${id}" title="${label}" aria-label="${label}">${icon(id)}<span class="nav-text">${label}</span></button>`).join('');
 document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { navTo(b.dataset.nav); if (b.dataset.nav === 'mcp')
     send({ type: 'listMcp' }); });
-$('main').insertAdjacentHTML('afterbegin', `<div class="page-picker"><label for="page-picker">Settings</label><select id="page-picker">${sections.map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div>`);
-$('page-picker').onchange = () => { const next = $('page-picker').value; navTo(next); if (next === 'mcp') send({ type: 'listMcp' }); };
 $('collapse-nav').innerHTML = icon('panel');
-$('collapse-nav').onclick = () => { const collapsed = document.querySelector('.shell').classList.toggle('collapsed'); $('collapse-nav').setAttribute('aria-expanded', String(!collapsed)); $('collapse-nav').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); };
+$('collapse-nav').onclick = () => { const collapsed = document.querySelector('.shell').classList.toggle('collapsed'); $('collapse-nav').setAttribute('aria-expanded', String(!collapsed)); $('collapse-nav').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); $('collapse-nav').title = collapsed ? 'Expand navigation' : 'Collapse navigation'; };
 window.addEventListener('message', event => {
     const msg = event.data || {};
     if (msg.type === 'show') {
@@ -1120,6 +1198,17 @@ window.addEventListener('message', event => {
         if (items.some(r => r.name === connectingPlugin && r.connected)) updateConnection('connected');
         if (['plugins', 'mcp'].includes(section) && !mcpEditing)
             render();
+    }
+    else if (msg.type === 'mods') {
+        // This chat's mods, as they change, or the answer to the page's own request.
+        modsPage.unsupported = msg.unsupported === true;
+        if (!modsPage.unsupported) { modsPage.list = Array.isArray(msg.mods) ? msg.mods : []; modsPage.on = msg.on !== false; }
+        modsPage.busy.clear();
+        if (section === 'plugins' && lane === 'mods' && !detail && !directory) render();
+    }
+    else if (msg.type === 'modsError') {
+        modsPage.busy.clear(); modsPage.note = String(msg.message || '');
+        if (section === 'plugins' && lane === 'mods') render();
     }
     else if (msg.type === 'pluginPreview') {
         if (modalKind === 'review' && reviewName === msg.requested) renderReview(msg.item);

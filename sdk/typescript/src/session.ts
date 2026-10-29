@@ -17,7 +17,7 @@ import { resolvePermission, type Policy } from "./policy.ts";
 import { Pips } from "./pips.ts";
 import type { StateLock } from "./state.ts";
 import type {
-  AbortSignalLike, AgentInfo, Artifact, Denial, Checkpoint, ContextBreakdown, ContextPart, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
+  AbortSignalLike, AgentInfo, Artifact, ArtifactInfo, Denial, Checkpoint, ContextBreakdown, ContextPart, McpInputResponse, PermissionAction, PermissionRequest, Pricing,
   QuestionRequest, RunEvent, RunOptions, RunResult, RunStatus, SandboxStatus, SessionInfo,
   SessionOptions, TaskItem, ToolRecord, VerificationResult,
 } from "./types.ts";
@@ -105,6 +105,134 @@ function checkTimeout(timeoutMs: unknown, name = "timeoutMs"): void {
 }
 
 /** Pump-side state of one run. Outcome events for its prompt ids land here, whoever reads them. */
+export const ARTIFACT_OUTPUTS: readonly string[] = ["auto", "document", "slides", "spreadsheet", "page", "dashboard"];
+
+export function artifactInfo(row: unknown): ArtifactInfo {
+  const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+  const versions = (Array.isArray(r.versions) ? r.versions : []).filter((v) => v && typeof v === "object").map((v) => {
+    const x = v as Record<string, unknown>;
+    return { n: Number(x.n || 0), author: String(x.author || ""), at: String(x.at || ""),
+             summary: String(x.summary || ""), size: Number(x.size || 0) };
+  });
+  return { id: String(r.id || ""), type: String(r.type || ""), title: String(r.title || ""),
+           version: Number(r.version || 0), label: String(r.label || ""), created: String(r.created || ""),
+           updated: String(r.updated || ""), origin: (r.origin && typeof r.origin === "object" ? r.origin : {}) as Record<string, unknown>,
+           exports: (Array.isArray(r.exports) ? r.exports : []).map(String),
+           ...(r.file ? { file: String(r.file) } : {}), versions };
+}
+
+type ArtifactRequest = (command: Frame, answer: string) => Promise<Record<string, unknown>>;
+
+/** `session.artifacts`: the store every part of DGC shares. Each call is one request to the CLI. */
+/** `session.mods`: the mods this session runs (CLI 0.50+): the user's allowed ones and those named with
+ *  `session({ mods: [...] })`. */
+export class Mods {
+  private readonly ask: ArtifactRequest;
+
+  constructor(ask: ArtifactRequest) {
+    this.ask = ask;
+  }
+
+  /** Every mod this session knows: {name, title, state, error, asks, commands, ...}. */
+  async list(): Promise<Array<Record<string, unknown>>> {
+    const event = await this.ask({ type: "mods_list", request_id: newId("mods") }, "mods");
+    return Array.isArray(event.mods) ? (event.mods as Array<Record<string, unknown>>) : [];
+  }
+
+  /** A mod's own command, at once, with no model turn: {mod, text?, tree?, error?}. */
+  async run(name: string, args = ""): Promise<Record<string, unknown>> {
+    const event = await this.ask({ type: "mod_command", request_id: newId("mods"), name, args }, "mod_result");
+    return Object.fromEntries(Object.entries(event).filter(([k]) => ["mod", "text", "tree", "error"].includes(k)));
+  }
+}
+
+export class Artifacts {
+  private readonly ask: ArtifactRequest;
+  private readonly capabilities: Record<string, unknown>;
+
+  constructor(ask: ArtifactRequest, capabilities: Record<string, unknown> = {}) {
+    this.ask = ask;
+    this.capabilities = capabilities;
+  }
+
+  private send(command: Frame, answer: string): Promise<Record<string, unknown>> {
+    return this.ask({ ...command, request_id: newId("art") }, answer);
+  }
+
+  /** Newest first; `type` is doc|slides|sheet|dashboard|page, `surface` chat|work|pip|sdk|cli. */
+  async list(options: { type?: string; surface?: string } = {}): Promise<ArtifactInfo[]> {
+    const command: Frame = { type: "artifact_list" };
+    if (options.type) command.artifact_type = options.type;
+    if (options.surface) command.surface = options.surface;
+    const event = await this.send(command, "artifact_items");
+    return (Array.isArray(event.items) ? event.items : []).map(artifactInfo);
+  }
+
+  async get(id: string): Promise<ArtifactInfo> {
+    return artifactInfo((await this.send({ type: "artifact_get", id }, "artifact_detail")).artifact);
+  }
+
+  /** Bounded changes between saved versions. Requires the CLI's artifacts.compare capability. */
+  async compare(id: string, before: number, after?: number): Promise<Record<string, unknown>> {
+    if (!this.capabilities.compare) throw new DGCUnsupportedError("This DGC CLI can't compare artifact versions; update it (dgc update).");
+    const command: Frame = { type: "artifact_compare", id, before };
+    if (after !== undefined) command.after = after;
+    return (await this.send(command, "artifact_comparison")).comparison as Record<string, unknown>;
+  }
+
+  /** What a version says: a document's text, or a deck's, sheet's or dashboard's data. */
+  async content(id: string, version?: number): Promise<unknown> {
+    const command: Frame = { type: "artifact_get", id, content: true };
+    if (version !== undefined) command.version = version;
+    return (await this.send(command, "artifact_detail")).content;
+  }
+
+  /** A new version by "you"; rejected (reason "conflict") if it moved on since `baseVersion`. */
+  async update(id: string, content: unknown, options: { baseVersion: number; note?: string }): Promise<ArtifactInfo> {
+    const command: Frame = { type: "artifact_update", id, content: content as Frame[string], base_version: options.baseVersion };
+    if (options.note) command.note = options.note;
+    return artifactInfo((await this.send(command, "artifact_changed")).artifact);
+  }
+
+  async restore(id: string, version: number): Promise<ArtifactInfo> {
+    return artifactInfo((await this.send({ type: "artifact_restore", id, version }, "artifact_changed")).artifact);
+  }
+
+  /** Write it as a file; returns its path. */
+  async export(id: string, format: string, version?: number): Promise<string> {
+    const command: Frame = { type: "artifact_export", id, format };
+    if (version !== undefined) command.version = version;
+    return String((await this.send(command, "artifact_exported")).path || "");
+  }
+
+  /** Serve it at an address of its own on this computer; returns the URL. */
+  async open(id: string): Promise<string> {
+    return String((await this.send({ type: "artifact_open", id }, "artifact_served")).url || "");
+  }
+
+  /** Into DGC's trash, where it can be put back. */
+  async remove(id: string): Promise<void> {
+    await this.send({ type: "artifact_remove", id }, "artifact_changed");
+  }
+
+  /** Run a dashboard's queries now (no model); returns what each widget shows. */
+  async refresh(id: string): Promise<Record<string, unknown>> {
+    const detail = await this.send({ type: "artifact_refresh", id }, "artifact_detail");
+    const state = (detail.state && typeof detail.state === "object" ? detail.state : {}) as Record<string, unknown>;
+    return (state.results && typeof state.results === "object" ? state.results : {}) as Record<string, unknown>;
+  }
+
+  async allowSource(id: string, source: string, allowed = true, baseVersion?: number): Promise<ArtifactInfo> {
+    const command: Frame = { type: "artifact_allow_source", id, source, allowed };
+    if (baseVersion !== undefined) {
+      if (!this.capabilities.source_consent_version) throw new DGCUnsupportedError("This DGC CLI can't check source consent versions; update it (dgc update).");
+      if (!Number.isSafeInteger(baseVersion) || baseVersion < 1) throw new RangeError("baseVersion is a positive version number");
+      command.base_version = baseVersion;
+    }
+    return artifactInfo((await this.send(command, "artifact_changed")).artifact);
+  }
+}
+
 export class Run {
   readonly result: RunResult;
   readonly requestId: string;
@@ -130,6 +258,7 @@ export class Run {
   handle: RunHandle | null = null;
   pumpStarted = false;
   holdsFollowups = false;   // this run changes DGC's config for its own turns
+  output = "";              // the Output chip's choice for this run's prompt (CLI 0.50+)
   held = false;             // a follow-up the SDK sends once the run in front of it is over
   /** The workspace when this run's last turn ended: its "after", and a follow-up's "before". */
   after: Snapshot | null = null;
@@ -416,6 +545,13 @@ export class Session {
     if (this.closed) throw new DGCRuntimeError("this session is closed");
     if (typeof prompt !== "string" || !prompt.trim()) throw new DGCConfigError("prompt must be a non-empty string");
     if (runOptions.outputSchema) assertSupported(runOptions.outputSchema);
+    const output = runOptions.output;
+    if (output !== undefined && !ARTIFACT_OUTPUTS.includes(output)) {
+      throw new DGCConfigError(`output must be one of ${ARTIFACT_OUTPUTS.join(", ")}`);
+    }
+    if (output && output !== "auto" && !(this.capabilities.artifacts && typeof this.capabilities.artifacts === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).");
+    }
     checkTimeout(runOptions.timeoutMs);
     const maxTurns = runOptions.maxTurns;
     if (maxTurns !== undefined) {
@@ -435,6 +571,7 @@ export class Session {
     const prior = this.queued.length ? this.queued[this.queued.length - 1] : (current && !current.done ? current : null);
     const run = new Run(this.newResult("running"), newId("req"));
     run.holdsFollowups = maxTurns !== undefined || Boolean(runOptions.outputSchema);
+    run.output = output && output !== "auto" ? output : "";
     if (prior) this.queued.push(run);
     else this.active = run;
     this.owners.set(run.requestId, run);
@@ -565,6 +702,23 @@ export class Session {
   async listSessions(): Promise<SessionInfo[]> {
     const event = await this.request({ type: "list_sessions", request_id: newId("sessions") }, "sessions");
     return rowsToSessions(event.items);
+  }
+
+  /** Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each with
+   *  every version. Needs `capabilities.artifacts`. */
+  /** The mods this session runs (CLI 0.50+). Needs `capabilities.mods`. */
+  get mods(): Mods {
+    if (!(this.capabilities.mods && typeof this.capabilities.mods === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI has no mods; update it (dgc update).");
+    }
+    return new Mods((command, answer) => this.request(command, answer));
+  }
+
+  get artifacts(): Artifacts {
+    if (!(this.capabilities.artifacts && typeof this.capabilities.artifacts === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI has no artifacts; update it (dgc update).");
+    }
+    return new Artifacts((command, answer) => this.request(command, answer), mapping(this.capabilities.artifacts));
   }
 
   /** What fills this session's context window, part by part, as DGC's meter shows it: messages, tool results, the
@@ -1011,6 +1165,7 @@ export class Session {
     const payload: Frame = { type: "prompt", text, request_id: requestId };
     if (skills?.length) payload.skills = [...skills];
     if (workflow) payload.workflow = workflow;
+    if (run.output) payload.output = run.output;
     run.ids.add(requestId);
     run.expect.add(requestId);
     this.owners.set(requestId, run);
@@ -1504,11 +1659,13 @@ class Accumulator {
   verifyOrder = 0;
   verifyModelOrder = -1;
   verifyCliOrder = -1;
+  made = new Map<string, ArtifactInfo>();
 
   constructor(result: RunResult) {
     this.result = result;
     for (const item of result.artifacts) this.artifacts.set(item.id, item);
     for (const item of result.documents) this.documents.set(item.id, item);
+    for (const item of result.madeArtifacts || []) this.made.set(item.id, item);
     this.tasks = [...(result.tasks || [])];
     for (const item of result.agents || []) this.agents.set(item.id, item);
   }
@@ -1570,6 +1727,10 @@ class Accumulator {
       };
       this.artifacts.set(art.id, art);
       if (art.url.startsWith("http://127.0.0.1") || art.url.startsWith("http://localhost")) this.documents.set(art.id, art);
+    } else if (kind === "artifact_changed" && event.artifact && typeof event.artifact === "object") {
+      const info = artifactInfo(event.artifact);
+      if (event.op === "removed") this.made.delete(info.id);
+      else this.made.set(info.id, info);
     } else if (kind === "todos") {
       this.tasks = session.projectTasks(event.todos);
     } else if (kind === "agent_started" || kind === "agent_ended") {
@@ -1671,6 +1832,7 @@ class Accumulator {
     result.denials = [...this.denials];
     result.artifacts = [...this.artifacts.values()];
     result.documents = [...this.documents.values()];
+    result.madeArtifacts = [...this.made.values()];
     result.tasks = this.tasks;
     result.agents = [...this.agents.values()];
     let status = this.status;

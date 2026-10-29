@@ -14,13 +14,23 @@ GIT_CACHE_S = 2.0
 
 def read_head(path: Path, limit: int = PREVIEW_BYTES) -> tuple[bytes, int]:
     """Read the first ``limit`` bytes of a regular file without following a symlink."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    if not isinstance(limit, int) or not 0 <= limit <= PREVIEW_BYTES:
+        raise ValueError("preview limit is outside the supported range")
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError("not a regular file")
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+             | getattr(os, "O_BINARY", 0))
     fd = os.open(path, flags)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise OSError("not a regular file")
-        return os.read(fd, limit), int(info.st_size)
+        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino):
+            raise OSError("file changed while opening preview")
+        data = os.read(fd, limit)
+        after = os.lstat(path)
+        if not stat.S_ISREG(after.st_mode) or (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino):
+            raise OSError("file changed while reading preview")
+        return data, int(info.st_size)
     finally:
         os.close(fd)
 

@@ -166,6 +166,9 @@ class AppToolHandlerTests(unittest.TestCase):
             AppToolHandler(SECRET, tools={"find_unpaid_orders": broken})
         with self.assertRaises(DGCConfigError):
             AppToolHandler("", tools={UNPAID: broken})
+        for option in ("max_skew_seconds", "max_body", "max_nonces"):
+            with self.subTest(option=option), self.assertRaises(DGCConfigError):
+                AppToolHandler(SECRET, tools={UNPAID: broken}, **{option: 0})
 
     def test_nonces_are_bounded(self):
         handler = AppToolHandler(SECRET, tools={UNPAID: lambda a, c: 1}, max_nonces=3)

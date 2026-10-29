@@ -17,18 +17,22 @@ function mathInline(state: any, silent: boolean): boolean {
   let open: string, close: string, from: number, end: number, display = false;
   if (src.startsWith("\\(", start)) {
     open = "\\("; close = "\\)"; from = start + 2;
-    end = src.indexOf(close, from);
+    const found = src.slice(from, Math.min(max, from + MAX_MATH + close.length)).indexOf(close);
+    end = found < 0 ? -1 : from + found;
   } else if (src.startsWith("$$", start) || src.startsWith("\\[", start)) {
     open = src[start] === "$" ? "$$" : "\\["; close = open === "$$" ? "$$" : "\\]"; from = start + 2; display = true;
-    end = src.indexOf(close, from);
+    const found = src.slice(from, Math.min(max, from + MAX_MATH + close.length)).indexOf(close);
+    end = found < 0 ? -1 : from + found;
   } else if (src[start] === "$") {
     open = close = "$"; from = start + 1;
     if (from >= max || /\s/.test(src[from])) return false;
-    end = from;
+    const nearby = src.slice(from, Math.min(max, from + MAX_MATH + 1));
+    let offset = 0;
     for (;;) {
-      end = src.indexOf("$", end);
-      if (end < 0 || end >= max) return false;
-      if (src[end - 1] === "\\" || /\s/.test(src[end - 1]) || /\d/.test(src[end + 1] || "")) { end += 1; continue; }
+      offset = nearby.indexOf("$", offset);
+      if (offset < 0) return false;
+      end = from + offset;
+      if (src[end - 1] === "\\" || /\s/.test(src[end - 1]) || /\d/.test(src[end + 1] || "")) { offset += 1; continue; }
       break;
     }
   } else return false;
@@ -52,13 +56,17 @@ function mathBlock(state: any, startLine: number, endLine: number, silent: boole
   const close = open === "$$" ? "$$" : "\\]";
   const lines: string[] = [];
   let line = startLine, rest = first.slice(open.length), found = false;
+  let remaining = MAX_MATH + close.length;
   for (;;) {
-    const at = rest.indexOf(close);
+    const at = rest.slice(0, remaining).indexOf(close);
     if (at >= 0) {
       if (rest.slice(at + close.length).trim()) return false;      // words after it: maths inside a paragraph
       lines.push(rest.slice(0, at)); found = true; break;
     }
+    if (rest.length >= remaining) return false;
     lines.push(rest);
+    remaining -= rest.length + 1;
+    if (remaining <= 0) return false;
     line += 1;
     if (line >= endLine || (state.sCount[line] < state.blkIndent && state.bMarks[line] + state.tShift[line] < state.eMarks[line])) break;
     rest = lineText(line);

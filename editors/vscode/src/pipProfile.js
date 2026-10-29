@@ -141,7 +141,7 @@ export function computersMarkup(value, { esc, busy = false, error = '', formatDa
   if (error && !value) return `<p class="error" role="alert">${esc(error)}</p>`;
   if (!value) return '<p class="muted" role="status">Loading…</p>';
   const s = value.setup;
-  const state = s.state === 'running' ? `Updating… ${esc(s.step || '')}${s.total ? ` (${s.done}/${s.total})` : ''}`
+  const state = s.state === 'running' ? `Updating… ${esc(s.step || '')}${s.total ? ` (${esc(s.done)}/${esc(s.total)})` : ''}`
     : s.state === 'failed' ? `Update failed: ${esc(s.error)}` : s.state === 'unsupported' ? esc(s.error || 'Pip computers don’t run here.')
     : s.state === 'none' ? 'Not set up yet. It sets itself up the first time a Pip opens its computer.'
     : `Up to date${s.chrome ? ` · Chrome ${esc(s.chrome)}` : ''}${s.checked_at ? ` · checked ${esc(formatDate(s.checked_at))}` : ''}`;

@@ -118,6 +118,20 @@ class JournalTests(unittest.TestCase):
         self.memory.undo(row["id"])
         self.assertEqual(sorted(f["text"] for f in self.memory.facts()), ["Is vegetarian", "Lives in Pune", "Works at Fungi"])
 
+    def test_undo_refuses_to_overwrite_a_newer_memory_edit(self):
+        added = self.memory.add("Lives in Pune")
+        add_row = self.memory.history()[0]["id"]
+        self.memory.edit(added["id"], "Lives in Mumbai")
+        first_edit = self.memory.history()[0]["id"]
+        self.memory.edit(added["id"], "Lives in Delhi")
+        self.assertFalse({r["id"]: r for r in self.memory.history()}[first_edit]["undoable"])
+        self.assertFalse({r["id"]: r for r in self.memory.history()}[add_row]["undoable"])
+        with self.assertRaisesRegex(NotRemembered, "newer change"):
+            self.memory.undo(first_edit)
+        with self.assertRaisesRegex(NotRemembered, "newer change"):
+            self.memory.undo(add_row)
+        self.assertEqual(self.memory.facts()[0]["text"], "Lives in Delhi")
+
     def test_the_journal_is_bounded(self):
         for i in range(shared_memory.MAX_JOURNAL + shared_memory.JOURNAL_SLACK + 5):
             fact = self.memory.add(f"Fact number {i} about them")
@@ -141,6 +155,11 @@ class JournalTests(unittest.TestCase):
 
 
 class ReviewRuleTests(unittest.TestCase):
+    def test_quoted_line_does_not_hide_the_users_own_following_words(self):
+        said = memory_review.own_words("> A quoted message from someone else\nI prefer metric units.")
+        self.assertNotIn("quoted message", said)
+        self.assertIn("I prefer metric units.", said)
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="dgc-learns-")
         self.addCleanup(temp.cleanup)
@@ -386,6 +405,26 @@ class LearnTests(unittest.TestCase):
         self.assertEqual(Path(saved["path"]), self.root / "proj" / ".dgc" / "skills" / "run-tests" / "SKILL.md")
         from dgc.skills import discover_skills
         self.assertIn("run-tests", discover_skills(self.root / "proj"), "read as a project skill")
+
+    def test_unlearn_refuses_linked_or_oversized_skill_file(self):
+        folder = self.root / "home" / ".dgc" / "skills"
+        markdown = skill_learn.compose("safe-skill", "Learn a safe task.", "# Safe\n\nDo it.")
+        with patch("dgc.config.USER_SKILLS", folder):
+            saved = skill_learn.save(markdown, scope="user", project_root=self.root, memory=self.memory)
+            path = Path(saved["path"])
+            outside = self.root / "outside.txt"
+            outside.write_text("keep me", encoding="utf-8")
+            path.unlink()
+            path.symlink_to(outside)
+            with self.assertRaises(skill_learn.SkillError):
+                skill_learn.unlearn(saved)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "keep me")
+            path.unlink()
+            from dgc.skills import MAX_SKILL_FILE_BYTES
+            with path.open("wb") as target:
+                target.truncate(MAX_SKILL_FILE_BYTES + 1)
+            with self.assertRaises(skill_learn.SkillError):
+                skill_learn.unlearn(saved)
 
     def test_a_skill_with_no_description_or_no_name_is_refused(self):
         with self.assertRaisesRegex(skill_learn.SkillError, "description"):

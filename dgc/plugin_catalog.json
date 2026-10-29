@@ -492,61 +492,39 @@
   },
   {
    "name": "google-workspace",
+   "unlisted": "Until Google approves DGC's app, only the accounts DGC has added can sign in, so it isn't listed: install it by name.",
    "display_name": "Google Workspace",
-   "summary": "Choose Gmail, Calendar, Contacts and Drive. Requires Google Cloud setup and Workspace MCP preview access.",
+   "summary": "Gmail, Google Calendar, Drive, Docs and Slides through Google's own MCP servers. Choose the apps, then sign in once with your Google account. While Google reviews DGC's app, only accounts DGC has added can sign in.",
    "source_kind": "preset",
    "license": "Google API terms",
-   "install": "block",
+   "install": "allow",
    "license_url": "https://developers.google.com/terms",
-   "terms_url": "https://developers.google.com/terms",
-   "auth": "setup",
-   "setup_required": true,
-   "setup_url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
-   "setup_instructions": "Google requires Workspace MCP preview access, a Cloud project with the selected APIs enabled, and your own OAuth client. DGC does not have a registered Google OAuth client. Installation saves only the selected server definitions; it does not sign you in or start these servers. Complete Google’s setup, then configure credentials in MCP servers. Google account access is not supplied by Codex or inherited from ChatGPT.",
+   "terms_url": "https://policies.google.com/terms",
+   "privacy_url": "https://policies.google.com/privacy",
+   "auth": "browser",
+   "developer": "Google",
+   "category": "Productivity",
+   "requirements": "A Google account DGC has added as a tester: while Google reviews DGC's app, only those accounts can sign in, and Google signs them out every 7 days. A Google Workspace admin can block apps Google hasn't verified.",
+   "cloud_execution": true,
+   "compatibility_url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
    "metadata": {
     "display_name": "Google Workspace",
     "developer": "Google",
     "category": "Productivity",
-    "long_summary": "Connect selected Google Workspace services through Google’s published MCP endpoints. Setup is required before DGC can access account data.",
+    "long_summary": "Google runs these MCP servers itself (a Developer Preview). DGC signs in once, with DGC's own Google app, for the apps you choose, and keeps the sign-in in your system keychain. Each app asks Google only for the permissions listed under it.",
     "apps": [
-     {
-      "id": "gmail",
-      "name": "Gmail"
-     },
-     {
-      "id": "calendar",
-      "name": "Google Calendar"
-     },
-     {
-      "id": "contacts",
-      "name": "Google Contacts"
-     },
-     {
-      "id": "drive",
-      "name": "Google Drive"
-     }
+      {"id": "gmail", "name": "Gmail"},
+      {"id": "calendar", "name": "Google Calendar"},
+      {"id": "drive", "name": "Google Drive"},
+      {"id": "docs", "name": "Google Docs"},
+      {"id": "slides", "name": "Google Slides"}
     ],
     "mcps": [
-     {
-      "name": "gmail",
-      "url": "https://gmailmcp.googleapis.com/mcp/v1",
-      "transport": "remote"
-     },
-     {
-      "name": "calendar",
-      "url": "https://calendarmcp.googleapis.com/mcp/v1",
-      "transport": "remote"
-     },
-     {
-      "name": "contacts",
-      "url": "https://people.googleapis.com/mcp/v1",
-      "transport": "remote"
-     },
-     {
-      "name": "drive",
-      "url": "https://drivemcp.googleapis.com/mcp/v1",
-      "transport": "remote"
-     }
+      {"name": "gmail", "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "remote"},
+      {"name": "calendar", "url": "https://calendarmcp.googleapis.com/mcp/v1", "transport": "remote"},
+      {"name": "drive", "url": "https://drivemcp.googleapis.com/mcp/v1", "transport": "remote"},
+      {"name": "docs", "url": "https://docsmcp.googleapis.com/mcp/v1", "transport": "remote"},
+      {"name": "slides", "url": "https://slidesmcp.googleapis.com/mcp/v1", "transport": "remote"}
     ]
    },
    "mcp_presets": {
@@ -556,17 +534,275 @@
     "calendar": {
      "url": "https://calendarmcp.googleapis.com/mcp/v1"
     },
-    "contacts": {
-     "url": "https://people.googleapis.com/mcp/v1"
-    },
     "drive": {
      "url": "https://drivemcp.googleapis.com/mcp/v1"
+    },
+    "docs": {
+     "url": "https://docsmcp.googleapis.com/mcp/v1"
+    },
+    "slides": {
+     "url": "https://slidesmcp.googleapis.com/mcp/v1"
     }
    },
-   "audited_on": "2026-09-23",
-   "block_reason": "Requires Google Workspace MCP preview access and a registered OAuth client. DGC has neither configured; these presets do not provide a working sign-in.",
-   "compatibility_url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
-   "verification": "Unavailable in DGC"
+   "sign_in": {
+    "kind": "browser",
+    "provider": "Google",
+    "client_id": "228249948914-neiececpci3rls19uhja1cd6nulva3ht.apps.googleusercontent.com",
+    "client_secret_url": "https://vibedgc.com/oauth/google-client.json",
+    "issuer": "https://accounts.google.com",
+    "one_sign_in": true,
+    "authorization_params": {
+     "access_type": "offline",
+     "prompt": "consent"
+    },
+    "testing": {
+     "days": 7,
+     "note": "While Google reviews DGC's app, only accounts DGC has added can sign in, and Google signs you out every 7 days: sign in again then.",
+     "signed_out": "Google signs you out every 7 days while DGC's Google app is in testing: sign in again."
+    },
+    "scopes": [
+      {"app": "gmail", "scope": "https://www.googleapis.com/auth/gmail.readonly", "label": "Read your email", "description": "Read your messages, threads, labels and Gmail settings."},
+      {"app": "gmail", "scope": "https://www.googleapis.com/auth/gmail.compose", "label": "Write drafts and send email", "description": "Create and change drafts, and send email as you. Google's Gmail tools make drafts; none of them sends."},
+      {"app": "calendar", "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "label": "See your calendars", "description": "See the list of calendars you have and follow."},
+      {"app": "calendar", "scope": "https://www.googleapis.com/auth/calendar.events.freebusy", "label": "See when you're free", "description": "See the free and busy times on your calendars."},
+      {"app": "calendar", "scope": "https://www.googleapis.com/auth/calendar.events.readonly", "label": "Read your events", "description": "See the events on all your calendars. This sign-in can't create, change or answer events."},
+      {"app": "drive", "scope": "https://www.googleapis.com/auth/drive.readonly", "label": "Read all your Drive files", "description": "See and download every file in your Google Drive."},
+      {"app": "drive", "scope": "https://www.googleapis.com/auth/drive.file", "label": "Create files, and change the ones DGC made", "description": "Create files in your Drive, and change or delete only the files DGC created or you opened with it."},
+      {"app": "docs", "scope": "https://www.googleapis.com/auth/drive.readonly", "label": "Read all your Drive files", "description": "See and download every file in your Google Drive."},
+      {"app": "docs", "scope": "https://www.googleapis.com/auth/drive.file", "label": "Create files, and change the ones DGC made", "description": "Create files in your Drive, and change or delete only the files DGC created or you opened with it."},
+      {"app": "docs", "scope": "https://www.googleapis.com/auth/documents.readonly", "label": "Read your documents", "description": "See all your Google Docs documents."},
+      {"app": "docs", "scope": "https://www.googleapis.com/auth/documents", "label": "Edit your documents", "description": "See, change, create and delete all your Google Docs documents."},
+      {"app": "slides", "scope": "https://www.googleapis.com/auth/drive.readonly", "label": "Read all your Drive files", "description": "See and download every file in your Google Drive."},
+      {"app": "slides", "scope": "https://www.googleapis.com/auth/drive.file", "label": "Create files, and change the ones DGC made", "description": "Create files in your Drive, and change or delete only the files DGC created or you opened with it."},
+      {"app": "slides", "scope": "https://www.googleapis.com/auth/presentations.readonly", "label": "Read your presentations", "description": "See all your Google Slides presentations."},
+      {"app": "slides", "scope": "https://www.googleapis.com/auth/presentations", "label": "Edit your presentations", "description": "See, change, create and delete all your Google Slides presentations."}
+    ]
+   },
+   "audited_on": "2026-10-28",
+   "verification": "28 Oct 2026, against Google: all five servers answer initialize and tools/list without a token (Gmail 23 tools, Calendar 9, Drive 8, Docs 2, Slides 4) and answer a tool call with 401 naming accounts.google.com; Google's sign-in page accepts DGC's app and its 127.0.0.1 redirect. Against a stand-in Google: one sign-in for the chosen apps, the secret fetched at sign-in only, refresh, the 7-day sign-out message and sign-out. Not tested: a real Google sign-in and a real tool call (they need a test account)."
+  },
+  {
+   "name": "microsoft",
+   "display_name": "Microsoft Outlook and OneDrive",
+   "summary": "Outlook mail, your Outlook calendar and OneDrive, through DGC's own Microsoft server. Choose the apps and your kind of account, then sign in with Microsoft once. Personal sign-in was verified; work or school sign-in may need an admin's approval.",
+   "source_kind": "preset",
+   "license": "Microsoft APIs terms",
+   "license_url": "https://learn.microsoft.com/legal/microsoft-apis/terms-of-use",
+   "terms_url": "https://www.microsoft.com/servicesagreement",
+   "privacy_url": "https://privacy.microsoft.com/privacystatement",
+   "install": "allow",
+   "auth": "browser",
+   "developer": "DGC",
+   "category": "Productivity",
+   "requirements": "A Microsoft account: a personal one (Outlook.com, Hotmail, Live) or a work or school account. DGC's Microsoft app isn't publisher-verified yet, so Microsoft's sign-in page marks it unverified. A personal account can still approve it there. In a company, people can't approve it themselves: an admin approves DGC once, for everyone, and DGC gives you the link to send them.",
+   "cloud_execution": true,
+   "compatibility_url": "https://learn.microsoft.com/graph/overview",
+   "metadata": {
+    "display_name": "Microsoft Outlook and OneDrive",
+    "developer": "DGC",
+    "category": "Productivity",
+    "long_summary": "Microsoft has no MCP server a personal account can use, so DGC has its own: it runs inside DGC and calls Microsoft Graph, Microsoft's official API, for the apps you choose. You sign in once with DGC's Microsoft app, and DGC keeps the sign-in in your system keychain. Each app asks Microsoft only for the permissions listed under it. DGC's mode and plugin permission setting determine when it asks before a tool call.",
+    "apps": [
+     {
+      "id": "mail",
+      "name": "Outlook Mail"
+     },
+     {
+      "id": "calendar",
+      "name": "Outlook Calendar"
+     },
+     {
+      "id": "onedrive",
+      "name": "OneDrive"
+     }
+    ],
+    "mcps": [
+     {
+      "name": "mail",
+      "command": "python3 -m dgc.microsoft_graph mail",
+      "transport": "stdio"
+     },
+     {
+      "name": "calendar",
+      "command": "python3 -m dgc.microsoft_graph calendar",
+      "transport": "stdio"
+     },
+     {
+      "name": "onedrive",
+      "command": "python3 -m dgc.microsoft_graph onedrive",
+      "transport": "stdio"
+     }
+    ]
+   },
+   "mcp_presets": {
+    "mail": {
+     "command": "python3",
+     "args": [
+      "-m",
+      "dgc.microsoft_graph",
+      "mail"
+     ]
+    },
+    "calendar": {
+     "command": "python3",
+     "args": [
+      "-m",
+      "dgc.microsoft_graph",
+      "calendar"
+     ]
+    },
+    "onedrive": {
+     "command": "python3",
+     "args": [
+      "-m",
+      "dgc.microsoft_graph",
+      "onedrive"
+     ]
+    }
+   },
+   "sign_in": {
+    "kind": "browser",
+    "provider": "Microsoft",
+    "client_id": "7b46091e-b62d-434a-8e59-943a01c66c89",
+    "public_client": true,
+    "one_sign_in": true,
+    "code_without_browser": true,
+    "authorization_params": {
+     "prompt": "select_account"
+    },
+    "accounts": [
+     {
+      "id": "personal",
+      "label": "Personal account",
+      "description": "Outlook.com, Hotmail or Live, or a Microsoft account you made with another email address.",
+      "issuer": "https://login.microsoftonline.com/consumers/v2.0",
+      "authorization_endpoint": "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
+      "token_endpoint": "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+      "device_authorization_endpoint": "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
+      "manage_url": "https://account.live.com/consent/Manage"
+     },
+     {
+      "id": "work",
+      "label": "Work or school account",
+      "description": "A Microsoft 365 account your organization gave you. An admin there approves DGC once.",
+      "issuer": "https://login.microsoftonline.com/organizations/v2.0",
+      "authorization_endpoint": "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+      "token_endpoint": "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+      "device_authorization_endpoint": "https://login.microsoftonline.com/organizations/oauth2/v2.0/devicecode",
+      "manage_url": "https://myapps.microsoft.com"
+     }
+    ],
+    "always": [
+     {
+      "scope": "offline_access",
+      "label": "Stay signed in",
+      "description": "Keep DGC signed in, so you don't sign in again every hour."
+     },
+     {
+      "scope": "https://graph.microsoft.com/User.Read",
+      "label": "See your name and email address",
+      "description": "Read your profile, so DGC knows which account it is signed in to."
+     }
+    ],
+    "scopes": [
+     {
+      "app": "mail",
+      "scope": "https://graph.microsoft.com/Mail.ReadWrite",
+      "label": "Read and organize your email",
+      "description": "Read, search and draft messages in your Outlook mailbox, and move or delete them."
+     },
+     {
+      "app": "mail",
+      "scope": "https://graph.microsoft.com/Mail.Send",
+      "label": "Send email as you",
+      "description": "Send email from your account: new messages, replies and forwards."
+     },
+     {
+      "app": "calendar",
+      "scope": "https://graph.microsoft.com/Calendars.ReadWrite",
+      "label": "Read and change your calendar",
+      "description": "See your events, and create, change, answer and delete them."
+     },
+     {
+      "app": "onedrive",
+      "scope": "https://graph.microsoft.com/Files.ReadWrite",
+      "label": "Read and change your OneDrive files",
+      "description": "See and download all your OneDrive files, upload new ones and replace ones you name."
+     }
+    ],
+    "admin_approval": {
+     "message": "Your organization needs an admin to approve DGC for Microsoft 365 first.",
+     "url": "https://login.microsoftonline.com/organizations/adminconsent?client_id=7b46091e-b62d-434a-8e59-943a01c66c89",
+     "errors": [
+      "AADSTS65001",
+      "AADSTS90094",
+      "AADSTS90095",
+      "AADSTS900941",
+      "AADSTS900981",
+      "admin_consent_required",
+      "consent_required"
+     ]
+    },
+    "note": "DGC's Microsoft app isn't publisher-verified yet, so Microsoft's sign-in page marks it unverified. A personal account can approve it there. In a company, people can't approve it themselves: an admin approves DGC once, for everyone."
+   },
+   "reviewed_reads": [
+    "search_mail",
+    "list_mail_folders",
+    "read_mail",
+    "list_calendars",
+    "list_events",
+    "read_event",
+    "search_files",
+    "read_file"
+   ],
+   "reviewed_reads_note": "DGC's own server marks its tools read-only or not, but DGC passes on a tool's name, description and inputs only. These eight only read (a message, an event, a file's text, or a list of them), so a Pip runs them at once; other calls follow the plugin's permission setting, and unattended changes wait for an Allow.",
+   "audited_on": "2026-10-29",
+   "verification": "29 Oct 2026, against a stand-in Microsoft (tests/test_microsoft_plugins.py): DGC's own Graph server with every tool, paging, 429 with Retry-After, a 401 that refreshes once, one sign-in for the chosen apps in the browser (http://localhost on any port) and with a code, refresh at the account's own sign-in server, the admin-approval message and sign-out. 28 Oct 2026, against Microsoft: a personal account approved DGC's unverified app with a code at the consumers sign-in server, every permission was granted and Graph /me answered. Not tested: a refresh, a browser sign-in and one real call per app against Microsoft, and a work account (no tenant to try in)."
+  },
+  {
+   "name": "work-iq",
+   "display_name": "Microsoft Work IQ",
+   "summary": "Microsoft's own Work IQ: ask about your work email, meetings, files and Teams chats in Microsoft 365. For work accounts with a Microsoft 365 Copilot licence; an admin approves it once for the company. In preview.",
+   "source_kind": "preset",
+   "upstream": "https://github.com/microsoft/work-iq",
+   "license": "Microsoft Work IQ CLI terms",
+   "license_url": "https://www.npmjs.com/package/@microsoft/workiq/v/1.0.1",
+   "license_note": "The npm package @microsoft/workiq runs Microsoft's own Work IQ program under Microsoft's pre-release licence terms (in the package's EULA folder; npm lists 'SEE EULA'). The MIT licence of github.com/microsoft/work-iq covers that repository's plugins and documents, not the program.",
+   "install": "accept",
+   "auth": "none",
+   "developer": "Microsoft",
+   "category": "Productivity",
+   "requirements": "A work or school Microsoft 365 account with a Microsoft 365 Copilot licence, and Node.js (DGC runs Microsoft's package with npx). An admin approves Work IQ once for your organization, with https://login.microsoftonline.com/organizations/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87 (Microsoft's admin guide has the details). Work IQ signs you in itself, with Microsoft's own app, the first time it is used. It is in public preview.",
+   "cloud_execution": true,
+   "compatibility_url": "https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md",
+   "terms_url": "https://www.npmjs.com/package/@microsoft/workiq/v/1.0.1",
+   "privacy_url": "https://privacy.microsoft.com/privacystatement",
+   "metadata": {
+    "display_name": "Microsoft Work IQ",
+    "developer": "Microsoft",
+    "category": "Productivity",
+    "long_summary": "Work IQ is Microsoft's own MCP server for Microsoft 365 Copilot. DGC runs Microsoft's package (@microsoft/workiq 1.0.1) on this computer; it signs in with Microsoft's own app, not DGC's, and answers from your organization's Microsoft 365: email, meetings, documents, Teams and people. It needs a Microsoft 365 Copilot licence, and your admin's one-time approval.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "work-iq",
+      "command": "npx",
+      "transport": "stdio"
+     }
+    ]
+   },
+   "mcp_presets": {
+    "work-iq": {
+     "command": "npx",
+     "args": [
+      "-y",
+      "@microsoft/workiq@1.0.1",
+      "mcp"
+     ]
+    }
+   },
+   "audited_on": "2026-10-29",
+   "verification": "29 Oct 2026: @microsoft/workiq 1.0.1 is on npm (published 24 Sep 2026, the latest; its tarball's sha1 matches npm's). It ships Microsoft's signed Work IQ program for Windows, macOS and Linux (x64 and arm64) under Microsoft's pre-release licence terms, not MIT. Microsoft's admin guide gives the consent link for its app ba081686-5d24-4bc6-a0d6-d034ecffed87. Not run here: it needs a work account with a Copilot licence in a tenant whose admin approved it. Microsoft's own Work IQ plugin now points at a hosted server (workiq.svc.cloud.microsoft/mcp); this entry runs the local package."
   },
   {
    "name": "zapier",
@@ -966,6 +1202,86 @@
    },
    "terms_url": "https://www.mural.co/terms/terms-of-service",
    "privacy_url": "https://www.mural.co/terms/privacy-statement"
+  },
+  {
+   "name": "runway",
+   "display_name": "Runway",
+   "summary": "Make videos and images with Runway's models. Browser sign-in.",
+   "developer": "Runway",
+   "category": "Creativity",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-28",
+   "compatibility_url": "https://mcp.runwayml.com/",
+   "requirements": "A Runway account. Each video or image uses your Runway credits.",
+   "verification": "Runway's sign-in server lets any app register, with PKCE. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://mcp.runwayml.com/",
+   "license": "Runway service terms",
+   "license_url": "https://runway.com/terms-of-use",
+   "mcp_presets": {
+    "runway": {
+     "url": "https://mcp.runwayml.com/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Runway",
+    "developer": "Runway",
+    "category": "Creativity",
+    "long_summary": "Make videos and images with Runway's models. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "runway",
+      "url": "https://mcp.runwayml.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://runway.com/terms-of-use",
+   "privacy_url": "https://runway.com/privacy-policy"
+  },
+  {
+   "name": "higgsfield",
+   "display_name": "Higgsfield",
+   "summary": "Make videos and images with 30+ models on Higgsfield. Browser sign-in.",
+   "developer": "Higgsfield",
+   "category": "Creativity",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-10-28",
+   "compatibility_url": "https://higgsfield.ai/mcp",
+   "requirements": "A paid Higgsfield plan. Each video or image uses your Higgsfield credits.",
+   "verification": "Higgsfield's sign-in server accepts DGC's published app details, with PKCE. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://higgsfield.ai/mcp",
+   "license": "Higgsfield service terms",
+   "license_url": "https://higgsfield.ai/terms-of-use-agreement",
+   "mcp_presets": {
+    "higgsfield": {
+     "url": "https://mcp.higgsfield.ai/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Higgsfield",
+    "developer": "Higgsfield",
+    "category": "Creativity",
+    "long_summary": "Make videos and images with 30+ models on Higgsfield. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "higgsfield",
+      "url": "https://mcp.higgsfield.ai/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://higgsfield.ai/terms-of-use-agreement",
+   "privacy_url": "https://higgsfield.ai/privacy-policy"
   },
   {
    "name": "intercom",

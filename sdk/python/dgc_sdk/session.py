@@ -28,7 +28,7 @@ from .errors import (
 )
 from .schema import assert_supported, extract_json, validate as validate_schema
 from .types import (
-    AgentInfo, Artifact, Checkpoint, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,
+    AgentInfo, Artifact, ArtifactInfo, ArtifactVersion, Checkpoint, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,
     McpInputResponse,
     McpServerInfo, Monitor, OnMcpInput, OnPermission, OnPlan, OnQuestion, PermissionAction,
     PermissionRequest, PermissionRule, PlanRequest, Question, QuestionAnswer, QuestionOption,
@@ -138,10 +138,10 @@ def _read_regular(path: str) -> bytes | None:
     except OSError:
         return None
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):   # a FIFO/device/socket is not a regular file
-            return None
         with os.fdopen(fd, "rb") as handle:
+            st = os.fstat(handle.fileno())
+            if not stat.S_ISREG(st.st_mode):   # a FIFO/device/socket is not a regular file
+                return None
             return handle.read(_TEXT_LIMIT + 1)[:_TEXT_LIMIT + 1]
     except OSError:
         return None
@@ -329,6 +329,128 @@ def _exit_code(output: str) -> int | None:
 
 def _same_command(left: str, right: str) -> bool:
     return " ".join(str(left or "").split()) == " ".join(str(right or "").split())
+
+
+OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
+
+
+def _artifact_info(row: Mapping[str, Any]) -> ArtifactInfo:
+    versions = tuple(ArtifactVersion(n=int(v.get("n") or 0), author=str(v.get("author") or ""),
+                                     at=str(v.get("at") or ""), summary=str(v.get("summary") or ""),
+                                     size=int(v.get("size") or 0))
+                     for v in row.get("versions") or [] if isinstance(v, Mapping))
+    return ArtifactInfo(id=str(row.get("id") or ""), type=str(row.get("type") or ""),
+                        title=str(row.get("title") or ""), version=int(row.get("version") or 0),
+                        label=str(row.get("label") or ""), created=str(row.get("created") or ""),
+                        updated=str(row.get("updated") or ""), origin=dict(row.get("origin") or {}),
+                        exports=tuple(str(f) for f in row.get("exports") or []), file=str(row.get("file") or ""),
+                        versions=versions)
+
+
+class Mods:
+    """``session.mods``: the mods this session runs (CLI 0.50+): the user's allowed ones and those named with
+    ``session(mods=[...])``. Each call is one request to the CLI."""
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def list(self) -> list[dict[str, Any]]:
+        """Every mod this session knows: {name, title, state, error, asks, commands, ...}."""
+        return list(self._session._request({"type": "mods_list", "request_id": _new_id("mods")}, "mods")["mods"])
+
+    def run(self, name: str, args: str = "") -> dict[str, Any]:
+        """A mod's own command, at once, with no model turn: {mod, text?, tree?, error?}."""
+        got = self._session._request({"type": "mod_command", "request_id": _new_id("mods"), "name": name,
+                                      "args": args}, "mod_result")
+        return {k: got[k] for k in ("mod", "text", "tree", "error") if k in got}
+
+
+class Artifacts:
+    """``session.artifacts``: the store every part of DGC shares. Each call is one request to the CLI."""
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def _ask(self, command: dict[str, Any], answer: str) -> dict[str, Any]:
+        return self._session._request({**command, "request_id": _new_id("art")}, answer)
+
+    def list(self, *, type: str | None = None, surface: str | None = None) -> list[ArtifactInfo]:
+        """Newest first; ``type`` is doc|slides|sheet|dashboard|page, ``surface`` chat|work|pip|sdk|cli."""
+        command: dict[str, Any] = {"type": "artifact_list"}
+        if type:
+            command["artifact_type"] = type
+        if surface:
+            command["surface"] = surface
+        return [_artifact_info(row) for row in self._ask(command, "artifact_items").get("items") or []
+                if isinstance(row, Mapping)]
+
+    def get(self, artifact_id: str) -> ArtifactInfo:
+        """One artifact with every version."""
+        return _artifact_info(self._ask({"type": "artifact_get", "id": artifact_id}, "artifact_detail")["artifact"])
+
+    def content(self, artifact_id: str, version: int | None = None) -> Any:
+        """What a version says: a document's text, or a deck's, sheet's or dashboard's data (a page has files)."""
+        command: dict[str, Any] = {"type": "artifact_get", "id": artifact_id, "content": True}
+        if version is not None:
+            command["version"] = int(version)
+        return self._ask(command, "artifact_detail").get("content")
+
+    def update(self, artifact_id: str, content: Any, *, base_version: int, note: str | None = None) -> ArtifactInfo:
+        """A new version by "you". Raises :class:`DGCCommandRejectedError` (reason "conflict") if the artifact moved on
+        since ``base_version``: read it again, then change it."""
+        command: dict[str, Any] = {"type": "artifact_update", "id": artifact_id, "content": content,
+                                   "base_version": int(base_version)}
+        if note:
+            command["note"] = note
+        return _artifact_info(self._ask(command, "artifact_changed")["artifact"])
+
+    def restore(self, artifact_id: str, version: int) -> ArtifactInfo:
+        """Version ``version`` again, as a new version (the ones between stay)."""
+        return _artifact_info(self._ask({"type": "artifact_restore", "id": artifact_id, "version": int(version)},
+                                        "artifact_changed")["artifact"])
+
+    def export(self, artifact_id: str, format: str, *, version: int | None = None) -> str:
+        """Write it as a file (Word, PDF, Markdown, PowerPoint, Excel, CSV, HTML or a zip); returns the file's path."""
+        command: dict[str, Any] = {"type": "artifact_export", "id": artifact_id, "format": format}
+        if version is not None:
+            command["version"] = int(version)
+        return str(self._ask(command, "artifact_exported")["path"])
+
+    def compare(self, artifact_id: str, before: int, after: int | None = None) -> dict[str, Any]:
+        """Bounded changes between saved versions. Requires artifacts.compare in the CLI capability."""
+        offered = self._session.capabilities.get("artifacts") or {}
+        if not isinstance(offered, Mapping) or not offered.get("compare"):
+            raise DGCUnsupportedError("This DGC CLI can't compare artifact versions; update it (dgc update).")
+        command: dict[str, Any] = {"type": "artifact_compare", "id": artifact_id, "before": int(before)}
+        if after is not None:
+            command["after"] = int(after)
+        return dict(self._ask(command, "artifact_comparison")["comparison"])
+
+    def open(self, artifact_id: str) -> str:
+        """Serve it at an address of its own on this computer; returns the URL."""
+        return str(self._ask({"type": "artifact_open", "id": artifact_id}, "artifact_served")["url"])
+
+    def remove(self, artifact_id: str) -> None:
+        """Out of the list, into DGC's trash (where it can be put back)."""
+        self._ask({"type": "artifact_remove", "id": artifact_id}, "artifact_changed")
+
+    def refresh(self, artifact_id: str) -> dict[str, Any]:
+        """Run a dashboard's queries now (on this computer, no model); returns what each widget shows."""
+        detail = self._ask({"type": "artifact_refresh", "id": artifact_id}, "artifact_detail")
+        return dict((detail.get("state") or {}).get("results") or {})
+
+    def allow_source(self, artifact_id: str, source: str, allowed: bool = True, *,
+                     base_version: int | None = None) -> ArtifactInfo:
+        """Allow a dashboard source. Pass the version shown to the user to reject a stale decision."""
+        command = {"type": "artifact_allow_source", "id": artifact_id, "source": source, "allowed": bool(allowed)}
+        if base_version is not None:
+            offered = self._session.capabilities.get("artifacts") or {}
+            if not isinstance(offered, Mapping) or not offered.get("source_consent_version"):
+                raise DGCUnsupportedError("This DGC CLI can't check source consent versions; update it (dgc update).")
+            if isinstance(base_version, bool) or not isinstance(base_version, int) or base_version < 1:
+                raise ValueError("base_version is a positive version number")
+            command["base_version"] = base_version
+        return _artifact_info(self._ask(command, "artifact_changed")["artifact"])
 
 
 class _Run:
@@ -642,10 +764,11 @@ class Session:
         skills: Sequence[str] | None = None,
         workflow: str | None = None,
         repair_attempts: int = 1,
+        output: str | None = None,
     ) -> RunResult:
         handle = self.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
-            skills=skills, workflow=workflow, repair_attempts=repair_attempts,
+            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output,
         )
         return handle.result(timeout=None)
 
@@ -659,8 +782,12 @@ class Session:
         skills: Sequence[str] | None = None,
         workflow: str | None = None,
         repair_attempts: int = 1,
+        output: str | None = None,
     ) -> RunHandle:
         """Send ``prompt`` and return a handle over its events.
+
+        ``output`` (CLI 0.50+) asks the reply to make that kind of artifact, as DGC's Output chip does: document,
+        slides, spreadsheet, page or dashboard; the run's ``made_artifacts`` holds what it made.
 
         ``timeout`` is seconds for each turn of the run; the default, None, is no limit (a big local
         model can take tens of minutes before its first word, and DGC itself never gives up on a
@@ -673,6 +800,10 @@ class Session:
             raise DGCConfigError("prompt must be a non-empty string")
         if output_schema is not None:
             assert_supported(output_schema)
+        if output is not None and output not in OUTPUTS:
+            raise DGCConfigError(f"output must be one of {', '.join(OUTPUTS)}")
+        if output not in (None, "auto") and not isinstance(self.capabilities.get("artifacts"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).")
         _check_timeout(timeout)
         if max_turns is not None:
             if isinstance(max_turns, bool) or not isinstance(max_turns, int) or max_turns < 0:
@@ -694,6 +825,7 @@ class Session:
             run = _Run(RunResult(session_id=self.session_id, run_id=_new_id("run"),
                                  status="running"), _new_id("req"))
             run.holds_followups = max_turns is not None or output_schema is not None
+            run.output = output if output not in (None, "auto") else ""
             self._run = run
             self._owners[run.request_id] = run
         handle = RunHandle(self, run)
@@ -853,6 +985,21 @@ class Session:
                                          message_count=int(row.get("count") or 0),
                                          when=str(row.get("when") or "")))
         return items
+
+    @property
+    def mods(self) -> "Mods":
+        """The mods this session runs (CLI 0.50+). Needs ``capabilities["mods"]``."""
+        if not isinstance(self.capabilities.get("mods"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI has no mods; update it (dgc update).")
+        return Mods(self)
+
+    @property
+    def artifacts(self) -> "Artifacts":
+        """Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each
+        with every version. Needs ``capabilities["artifacts"]``."""
+        if not isinstance(self.capabilities.get("artifacts"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI has no artifacts; update it (dgc update).")
+        return Artifacts(self)
 
     def context_breakdown(self) -> ContextBreakdown:
         """What fills this session's context window, part by part, as DGC's meter shows it: messages, tool results, the
@@ -1463,6 +1610,8 @@ class Session:
             payload["skills"] = list(skills)
         if workflow:
             payload["workflow"] = workflow
+        if getattr(run, "output", ""):
+            payload["output"] = run.output
         with self._lock:
             run.ids.add(request_id)
             run.expect.add(request_id)
@@ -2013,6 +2162,7 @@ class _Accumulator:
         self.answer_ids: list[str] = []
         self.artifacts: dict[str, Artifact] = {item.id: item for item in result.artifacts}
         self.documents: dict[str, Artifact] = {item.id: item for item in result.documents}
+        self.made: dict[str, ArtifactInfo] = {item.id: item for item in result.made_artifacts}
         self.tasks: list[TaskItem] = list(result.tasks)
         self.agents: dict[str, AgentInfo] = {item.id: item for item in result.agents}
         self.usage: dict[str, Any] = {}
@@ -2113,6 +2263,12 @@ class _Accumulator:
             self.artifacts[art.id] = art
             if art.url.startswith("http://127.0.0.1") or art.url.startswith("http://localhost"):
                 self.documents[art.id] = art
+        elif kind == "artifact_changed" and isinstance(event.get("artifact"), Mapping):
+            if event.get("op") == "removed":
+                self.made.pop(str(event["artifact"].get("id") or ""), None)
+            else:
+                info = _artifact_info(event["artifact"])
+                self.made[info.id] = info
         elif kind == "todos":
             self.tasks = session._project_tasks(event.get("todos") or [])
         elif kind in ("agent_started", "agent_ended"):
@@ -2217,6 +2373,7 @@ class _Accumulator:
         result.denials = list(self.denials)
         result.artifacts = list(self.artifacts.values())
         result.documents = list(self.documents.values())
+        result.made_artifacts = list(self.made.values())
         result.tasks = self.tasks
         result.agents = list(self.agents.values())
         status, reason, error = self.status, self.reason, self.error

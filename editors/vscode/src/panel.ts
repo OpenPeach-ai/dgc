@@ -9,7 +9,8 @@ import * as path from "path";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 import { AttachMode, AttachedChatState, ChildExitInfo, DgcBackend, DgcEvent, MOVED_CAUSE, STOP_CAUSE } from "./backend";
 import { ChatBackend, OpenedChat } from "./chatChannel";
-import { CHATDGC_WINDOWS, isChatdgcEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
+import { CHATDGC_WINDOWS, isChatdgcEvent, isChatdgcModsEvent, type ChatDGC, type ChatDGCHost } from "./chatdgc";
+import { artifactsOffer, outputChoice, type Artifacts } from "./artifacts";
 import { keepRunningAfterClose } from "./closingTab";
 import { editorName, holderFacts, holderLine, type HolderFacts, type HolderLine } from "./holderWords";
 import { Dictation, MIC_MESSAGES, ReadAloud, SPEAK_MESSAGES, VoiceClient, type DictationOwner } from "./voice";
@@ -20,7 +21,7 @@ import {
   autoUpdateEnabled, INSTALL_COMMAND, installTerminalOptions, isUserChosenCommand, updateCliWithProgress, runCliUpdate,
 } from "./cliupdate";
 import { checkForExtensionUpdates } from "./extensionupdate";
-import { workspaceFile } from "./navigation";
+import { workspaceFile, workspaceImage } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 import { PipsEditor } from "./pipsView";
 import { PLUGIN_ID, pluginLogoData, pluginLogoSource, type PluginLogoItem } from "./pluginLogos";
@@ -105,6 +106,8 @@ const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel"
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
 const HOME_BACKEND_KEY = "dgc.homeBackend.v1";
+/** The folders Continue in Work opened Work sessions in (this workspace's): a reloaded tab comes back in one unasked. */
+const WORK_FOLDERS_KEY = "dgc.workFolders.v1";
 /** Voice was offered once (the editor's first run with a CLI that has it): never again, whatever was answered. */
 const VOICE_OFFERED_KEY = "dgc.voiceOffered.v1";
 /** What voice costs to turn on, as `dgc setup` says it: Moonshine (111 MB) and Kitten (68 MB), with the engine. */
@@ -459,8 +462,9 @@ const PER_CHAT_FIELDS = [
 export interface ChatPlaces {
   /** The tab the user last worked in, while it is open: palette commands and the status bar follow it. */
   current(): DgcViewProvider | undefined;
-  /** A saved session (its id) in a tab of its own, or the tab it is already in; "" opens a new one. */
-  open(session: string, title?: string): DgcViewProvider;
+  /** A saved session (its id) in a tab of its own, or the tab it is already in; "" opens a new one. `cwd`: a new
+   *  session in that folder rather than the window's (Continue in Work). */
+  open(session: string, title?: string, options?: { cwd?: string }): DgcViewProvider;
   /** The sessions open in tabs. */
   openSessions(): Set<string>;
   /** A tab's session changed, or a tab opened or closed. */
@@ -481,6 +485,9 @@ export interface ChatTabInit {
   /** VS Code brought the tab back after a reload: its session may still be running in the backend the
    *  reload left behind, which may need a moment to fall quiet before it can be reattached to. */
   restored?: boolean;
+  /** The folder its chat works in, when it is not the window's (Continue in Work from a ChatDGC chat's folder). Kept
+   *  in the tab's state, so a reload brings it back in that folder and never in the window's. */
+  cwd?: string;
 }
 
 interface ChatSlot {
@@ -593,6 +600,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private cliAutoUpdateAttempted = false;
   private updateChannel?: vscode.OutputChannel;
   private featureRequest = 0;
+  private modeApprovalEpoch = 0;
+  private autoModePrompt?: { id: string; settle(accepted: boolean): void };
   private correlatedStateRequests = false;
   private routeState: {
     subagentBaseUrl: string; fallbackBaseUrl: string;
@@ -772,6 +781,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private home = false;
   /** ChatDGC (chatdgc.ts): only the side bar's provider has it. */
   private chatdgc?: ChatDGC;
+  /** Artifacts (artifacts.ts): every provider shows their cards; the side bar's process answers for them. */
+  private artifacts?: Artifacts;
+  private artifactsHome = false;
   /** Dictation and reading aloud for every message box in the window: the side bar's, made when a box first asks. */
   private dictation?: Dictation;
   private readAloud?: ReadAloud;
@@ -806,6 +818,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.sessionRestoreSuppressed = true;
       this.tabTitled = !!tab.session;              // opened from the list: it already has its title
       this.attachMode = tab.restored ? "restore" : "auto";
+      // Continue in Work: the tab's chat works in that folder (its own project, config and sessions), as a chat
+      // opened in another folder does; named by the folder, not by the brief it starts from.
+      if (tab.cwd && tab.cwd !== this.cwd()) {
+        const slot: ChatSlot = { id: `chat-${++this.slotSeq}`, label: "", busy: false, needsYou: false, unread: 0, cwd: tab.cwd };
+        this.slots.push(slot);
+        this.activeSlotId = slot.id;
+        this.tabTitled = true;
+      }
       this.backendLog = tab.host.backendLog;
       this.sb = tab.host.sb;
       tab.host.tabProviders.add(this);
@@ -852,7 +872,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   reportSave(document: any): void {
     const uri = document?.uri;
     if (!uri || uri.scheme !== "file" || !uri.fsPath) return;
-    if (typeof vscode.workspace.getWorkspaceFolder === "function" && !vscode.workspace.getWorkspaceFolder(uri)) return;
+    // A file in the window's folders; or a document's working file in DGC's own folder (an artifact's or a canvas's),
+    // whose save is the user's own version (dgc/artifact_commands.py user_saved).
+    const ownDoc = !!this.artifacts?.docAt(uri.fsPath) || !!this.chatdgc?.canvasOf(uri.fsPath);
+    if (!ownDoc && typeof vscode.workspace.getWorkspaceFolder === "function" && !vscode.workspace.getWorkspaceFolder(uri)) return;
     const at = Date.now() / 1000;
     const told = new Set<any>();
     for (const owner of [this, ...this.tabProviders]) {
@@ -865,6 +888,29 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** ChatDGC rides on this provider's dgc serve: the side bar's, whose handshake gave it the user's
    *  model settings and keys. It hears every chatdgc_* event (routeEvent) and sends through here. */
+  /** Artifacts: this chat's cards open and export them, and hear when one changes. `home`: the side bar's provider,
+   *  whose process answers every artifact_* command (as it answers ChatDGC's). */
+  useArtifacts(hub: Artifacts, home: boolean): void {
+    this.artifacts = hub;
+    if (home) {
+      this.artifactsHome = true;
+      hub.attach({ send: (cmd) => this.artifactsSend(cmd), offers: () => artifactsOffer(this.lastReadyEvent?.capabilities) });
+    }
+    const listening = hub.listen((message) => {
+      // A card in this chat's transcript shows the artifact's title and version as they are now.
+      if (message.type === "artifactChanged" && this.webviewReady) this.post({ type: "artifactNews", artifact: message.artifact, op: message.op });
+    });
+    this.context.subscriptions.push(listening);
+  }
+
+  private artifactsSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli" {
+    let be: ChatBackend;
+    try { be = this.ensureBackend(); } catch { return "starting"; }
+    if (!this.sessionReady || !this.lastReadyEvent || !be.ready) { return "starting"; }
+    if (!artifactsOffer(this.lastReadyEvent.capabilities)) { return "old_cli"; }
+    return be.send(cmd as any) ? "sent" : "starting";
+  }
+
   useChatDGC(chat: ChatDGC): void {
     this.chatdgc = chat;
     const host: ChatDGCHost = {
@@ -883,13 +929,58 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const offered = (this.lastReadyEvent?.capabilities as any)?.chatdgc;
         return offered && typeof offered === "object" ? offered : {};
       },
+      chatdgcMods: () => (this.lastReadyEvent?.capabilities as any)?.chatdgc ? this.modsOffer() : undefined,
+      chatdgcModsSend: (message, answer) => this.modsCommand(message, "chat", answer),
       dictation: () => this.dictationService(),
       readAloud: () => this.readAloudService(),
       pluginLogo: (plugin) => this.replyPluginLogo(plugin),
       chatdgcKeepsRunning: () => !!this.processOf(this.backend)?.detach,
       chatdgcOpenHere: () => this.chatdgcOpenHere(),
+      openWork: (folder, brief) => this.continueInWork(folder, brief),
     };
     chat.attach(host);
+  }
+
+  /** Continue in Work (a ChatDGC chat's folder): a new Work session in that folder, in a tab of its own, with the brief
+   *  in its prompt box, unsent; the person reads it, changes it, and sends it. A folder outside the window's is asked
+   *  about first, as any chat in another folder is (it starts MCP servers and runs hooks there). */
+  async continueInWork(folder: string, brief: string): Promise<boolean> {
+    const places = this.tab?.places ?? this.places;
+    if (!places || !folder || !brief.trim()) { return false; }
+    if (!(await this.mayOpenChatIn(folder))) { return false; }
+    this.rememberWorkFolder(folder);
+    const tab = places.open("", path.basename(folder.replace(/[\\/]+$/, "")) || folder, { cwd: folder });
+    tab.composeBrief(brief);
+    return true;
+  }
+
+  /** Text placed in this chat's prompt box, unsent: Continue in Work's brief. */
+  composeBrief(text: string): void {
+    this.inVisiblePanel(() => this.post({ type: "composer_text", text }));
+  }
+
+  /** The folders Continue in Work opened Work in, in this workspace (at most 32, newest first): a tab VS Code brings
+   *  back after a reload reopens in one of these without asking again. */
+  private workFolders(): string[] {
+    try {
+      const kept = this.context.workspaceState.get<string[]>(WORK_FOLDERS_KEY);
+      return Array.isArray(kept) ? kept.filter((f) => typeof f === "string" && f.length > 0 && f.length <= 4096) : [];
+    } catch { return []; }
+  }
+
+  private rememberWorkFolder(folder: string): void {
+    const kept = [folder, ...this.workFolders().filter((f) => f !== folder)].slice(0, 32);
+    try {
+      void Promise.resolve(this.context.workspaceState.update(WORK_FOLDERS_KEY, kept)).catch(() => { /* a reload asks again */ });
+    } catch { /* the same */ }
+  }
+
+  /** A tab VS Code brings back after a reload, in the folder it worked in: one Continue in Work opened (or one in the
+   *  window's folders) comes back as it was; any other is asked about, as it would be when opened. */
+  async mayRestoreChatIn(folder: string): Promise<boolean> {
+    if (!folder || !fs.existsSync(folder)) { return false; }
+    if (this.workFolders().includes(folder)) { return true; }
+    return this.mayOpenChatIn(folder);
   }
 
   /** The editor's first run with voice: offered once, a moment after DGC is up, unless a model is already there. */
@@ -1180,6 +1271,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** Make `id` the chat the panel describes and repaint the transcript from its backend. */
   private switchToSlot(id: string): void {
     if (!id || id === this.activeSlotId) { return; }
+    this.cancelAutoModePrompt();
     const incoming = this.slotById(id);
     if (!incoming || !incoming.saved) { return; }
     this.parkActiveSlot();
@@ -1525,6 +1617,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private routeEvent(slot: ChatSlot, ev: DgcEvent): void {
     // ChatDGC's, never a session's: no transcript, chip or card of this chat is about a ChatDGC chat.
     if (isChatdgcEvent(ev as any)) { this.chatdgc?.onEvent(ev); return; }
+    // ChatDGC's own mods (surface "chat"), and the answers to what its pages asked of them (their request ids).
+    if (isChatdgcModsEvent(ev as any)) { this.chatdgc?.onModsEvent(ev); return; }
+    // An artifact's (artifacts.ts): its replies, and what changed. A Work turn's change goes on to its chat as well,
+    // which draws the card. (artifact_ready and artifacts are the older previews' own, and stay the chat's.)
+    const artifactEvent = /^artifact_(items|changed|detail|served|exported)$/.test(String(ev.type)) || ev.type === "command_rejected";
+    if (artifactEvent && this.artifacts?.onEvent(ev)) return;
+    if (ev.type === "artifact_changed" && (ev as any).surface !== "work") return;
     // A dictation's answer, whichever chat's process carried it: no session's.
     if (String(ev.type).startsWith("voice_") && this.dictation?.client.onEvent(ev)) return;
     if (slot.id === this.activeSlotId) { this.onEvent(ev); return; }
@@ -1745,6 +1844,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.nativeSettingsReady = false;
     be.completeHandshake();
     this.chatdgc?.backendReady(reattached);
+    if (this.artifactsHome) this.artifacts?.backendReady();
     if (this.chatdgc) {
       const offered = !!(this.lastReadyEvent?.capabilities as any)?.chatdgc;
       if (this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) !== offered) void this.context.globalState.update(CHATDGC_SEEN_KEY, offered);
@@ -3181,6 +3281,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const how = exitHow(code, signal);
       if (slot.id === this.activeSlotId) { this.mcpUrls.clear(); }
       if (!host) { this.chatdgc?.backendLost(); }   // a ChatDGC reply on this process stopped with it
+      if (!host && this.artifactsHome) { this.artifacts?.backendLost(); }
       if (facts.cause) { return; }             // our own teardown: already logged and handled
       // With no word from the backend, the exit status is the cause: "killed by SIGKILL", or
       // "exited with code 1". (`exited with ${how}` read "exited with killed by SIGKILL".)
@@ -3591,6 +3692,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   restart(reason = "command DGC: Restart Backend"): void {
+    this.cancelAutoModePrompt();
     this._installPrompted = false;      // a fresh start earns a fresh prompt if the CLI is still missing
     this._updatePrompted = false;
     this.pendingCommandRestart = false;
@@ -4187,6 +4289,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.settingsEditor?.webview.postMessage({ type: "marketplaces", items: ev.items });
       return;
     }
+    // Settings -> Plugins -> Mods: this chat's mods as they change (the chat's own page draws them too).
+    if (ev.type === "mods" && (ev as any).surface !== "chat") {
+      this.settingsEditor?.webview.postMessage({ type: "mods", mods: (ev as any).mods, on: (ev as any).on !== false });
+    }
+    if (ev.type === "command_rejected" && String((ev as any).request_id || "").startsWith("settings-mods-")) {
+      this.settingsEditor?.webview.postMessage({ type: "modsError", message: String((ev as any).message || "That didn't reach your mods.") });
+      return;
+    }
     // A plugin key saved or removed from its page: answered to that page alone, never with the key.
     const keyRequest = ["plugin_operation", "command_rejected"].includes(ev.type)
       ? this.settingsKeyRequests.get(String((ev as any).request_id || "")) : undefined;
@@ -4238,7 +4348,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.settingsEditor?.webview.postMessage({ type: "signin", clear: true });
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: String(ev.message || "Plugin install failed.") });
       }
-      void vscode.window.showErrorMessage(String(ev.message || "Plugin install failed."));
+      const message = String(ev.message || "Plugin install failed.");
+      if (ev.reason === "cancelled" || /^Sign-in cancelled\./.test(message)) void vscode.window.showInformationMessage(message);
+      else void vscode.window.showErrorMessage(message);
     }
     if (ev.type === "plugin_catalog" && Array.isArray((ev as any).items)) {
       this.settingsCatalog = (ev as any).items;
@@ -4499,6 +4611,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private post(msg: any): void {
+    if (["backend_exit", "cleared", "chat_switched"].includes(msg?.type)) this.cancelAutoModePrompt();
     if (["backend_exit", "cleared"].includes(msg?.type)) {
       this.settleGoalEdit("The backend stopped before confirming the goal edit. Check the saved goal before trying again.");
     }
@@ -4601,6 +4714,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private readonly adoptedViews = new WeakSet<vscode.WebviewView>();
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.cancelAutoModePrompt();
     const previous = this.view;
     if (previous && previous !== view) {
       // retainContextWhenHidden keeps the abandoned twin alive, so it must say where the
@@ -4639,7 +4753,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // view has never stopped the backend. Say which of the two it is, once. The backend gives
         // that claim a bounded extra wait before it hands the session to a window that is asking,
         // and nothing more -- a host cannot prove its window is still there.
-        if (this.view === view) { this.webviewReady = false; }
+        if (this.view === view) { this.cancelAutoModePrompt(); this.webviewReady = false; }
         for (const be of this.liveBackends()) { be.editorState("host", "closed"); }
       });
       view.webview.onDidReceiveMessage((msg) => {
@@ -4764,6 +4878,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private promptPipRequests = new Map<string, {backend: ChatBackend; session: string; generation: number}>();
   private async onMessage(msg: any): Promise<void> {
+    if (msg?.type === "autoModeAnswer") {
+      if (this.autoModePrompt && msg.requestId === this.autoModePrompt.id) {
+        this.autoModePrompt.settle(msg.accepted === true && !this.sessionElsewhere);
+      }
+      return;
+    }
     if (this.sessionElsewhere && WORK_READ_ONLY_REFUSES.has(String(msg?.type || ""))) {
       // Read-only while the session is open in another window: the page offers none of these then, and nothing here
       // changes a session another window holds. The page is shown read-only again, in case it lost track.
@@ -4825,11 +4945,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsRequest":
       case "pipsOpenComputer":
       case "pipsOpenPhoto":
+      case "pipsOpenArtifact":
       case "pipsPluginLogos":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
       case "webviewReady": {
+        this.cancelAutoModePrompt();
         this.webviewReady = true;
         // The home's chats, asked for now its page can hear the answer (one that came before was dropped).
         if (this.home) this.chatdgc?.homeRefresh();
@@ -4974,6 +5096,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    ...(this.lastReadyEvent?.capabilities?.live_steering
                                      ? { delivery: msg.delivery === "queue" ? "queue" : "steer" } : {}),
                                    ...(workflow ? { workflow: workflow as "plan" | "review" | "init" } : {}),
+                                   // The Output chip: only a choice other than Auto, and only to a CLI that offers
+                                   // artifacts (an older one refuses the whole prompt over a field it doesn't know).
+                                   ...(outputChoice(msg.output, artifactsOffer(this.lastReadyEvent?.capabilities))
+                                     ? { output: outputChoice(msg.output, artifactsOffer(this.lastReadyEvent?.capabilities)) as any } : {}),
                                    // A reply to open questions says which ones it answers. Without
                                    // the tag this is an ordinary message, and the backend treats it
                                    // as one -- a follow-up typed while a question is open must
@@ -5009,20 +5135,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "plan_response":
+        const planSession = this.currentSessionId;
+        const planGeneration = this.sessionHandshakeGeneration;
         if (msg.decision === "auto") {
-          const confirm = await vscode.window.showWarningMessage(
-            "Full-auto will execute every plan write and shell command without another prompt.",
-            { modal: true }, "Enable full-auto");
-          if (confirm !== "Enable full-auto") {
+          // Approving a plan in Auto changes the permission mode too. Use the same warning
+          // as the mode picker for a trusted workspace; an untrusted workspace cannot enter
+          // Auto from a plan, so keep its distinct fallback explanation.
+          const confirmed = this.state.workspaceTrusted ? await this.confirmAutoMode(false)
+            : await vscode.window.showWarningMessage(
+              "This workspace is not trusted. The approved plan will run in Default mode, asking before changes.",
+              { modal: true }, "Approve in Default") === "Approve in Default";
+          if (!confirmed) {
+            if (this.backend !== be || this.currentSessionId !== planSession
+                || this.sessionHandshakeGeneration !== planGeneration || this.sessionElsewhere) break;
             be.send({ type: "plan_response", id: msg.id, decision: "reject",
                       feedback: msg.feedback || "Full-auto was not confirmed; offer a safer execution mode." });
             this.openDecisions.delete(String(msg.id ?? ""));
             this.postChatSlots();
+            this.post({ type: "planAutoDecision", id: msg.id, approved: false });
             break;
           }
         }
-        be.send({ type: "plan_response", id: msg.id, decision: msg.decision,
+        if (this.backend !== be || this.currentSessionId !== planSession
+            || this.sessionHandshakeGeneration !== planGeneration || this.sessionElsewhere) break;
+        be.send({ type: "plan_response", id: msg.id,
+                  decision: msg.decision === "auto" && !this.state.workspaceTrusted ? "default" : msg.decision,
                   feedback: msg.feedback });
+        if (msg.decision === "auto") this.post({ type: "planAutoDecision", id: msg.id,
+          approved: true, mode: this.state.workspaceTrusted ? "auto" : "default" });
         // `plan_response` is a COMMAND, and the CLI emits no matching event — so nothing else ever
         // clears this id. Left in, an accepted plan kept the chat flagged "waiting for you" for
         // the whole rest of a turn that was, in fact, working.
@@ -5183,6 +5323,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "openFile":
         await this.openFile(msg.path, msg.line);
         break;
+      case "fileThumb": {
+        // The picture for a shown image's tile. Checked as Open checks it; "" tells the page to keep the plain chip.
+        const requestId = String(msg.requestId || "");
+        if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) { break; }
+        const src = typeof msg.path === "string" ? await workspaceImage(editorPath(msg.path), this.workspaceRoots()) : "";
+        this.post({ type: "fileThumb", requestId, src });
+        break;
+      }
       case "openTroupeJournal":
         await this.openTroupeJournal(String(msg.runId || ""));
         break;
@@ -5207,6 +5355,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "openExternal":
         if (msg.url) { void this.openSafeExternal(String(msg.url)); }
+        break;
+      case "artifactOpen":
+        // A card's Open: the artifact's panel (a document in the editor over its file).
+        if (typeof msg.id === "string") {
+          this.artifacts?.open(msg.id, { type: typeof msg.artifactType === "string" ? msg.artifactType : undefined,
+                                         title: typeof msg.title === "string" ? msg.title.slice(0, 200) : undefined });
+        }
+        break;
+      case "artifactExport":
+        if (typeof msg.id === "string" && typeof msg.format === "string" && typeof msg.artifactType === "string") {
+          void this.artifacts?.exportArtifact({ id: msg.id, title: String(msg.title || "artifact").slice(0, 200), type: msg.artifactType,
+            exports: Array.isArray(msg.exports) ? msg.exports.filter((f: unknown) => typeof f === "string") : [] }, msg.format);
+        }
         break;
       case "getSkill":
         be.send({ type: "get_skill", request_id: this.nextRequestId("skill"), name: String(msg.name || "") });
@@ -5381,7 +5542,63 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "slashText":
         void this.slashText(String(msg.text || ""));
         break;
+      case "mods":
+        this.modsCommand(msg, "work");
+        break;
     }
+  }
+
+  /** What the user's mods are offered here: ready.capabilities.mods ({version, offers}), or undefined. */
+  private modsOffer(): { version: number; offers?: number; consent_reviews?: number } | undefined {
+    const offered = (this.lastReadyEvent?.capabilities as any)?.mods;
+    return offered && typeof offered === "object" && Number(offered.version) >= 1 ? offered : undefined;
+  }
+
+  /** A page's request of its mods (media/mods.js: list, watch, set, command, action, offer), as a backend command.
+   *  Work's go to this chat's backend; ChatDGC's (surface "chat") to the process's own, with surface "chat". Each
+   *  request id is the page's own, so the answer finds the card that asked; one that couldn't be sent is answered here,
+   *  as the backend would refuse it. */
+  modsCommand(msg: any, surface: "work" | "chat", answer?: (ev: any) => void): boolean {
+    const offered = this.modsOffer();
+    const prefix = surface === "chat" ? "chatdgc-mods-" : "wmods-";
+    const request = typeof msg?.request_id === "string" && msg.request_id.startsWith(prefix)
+      && /^[A-Za-z0-9_.:-]{1,80}$/.test(msg.request_id) ? msg.request_id : "";
+    const name = typeof msg?.name === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(msg.name) ? msg.name : "";
+    let cmd: any;
+    switch (msg?.op) {
+      case "list": cmd = { type: "mods_list", request_id: request || `${prefix}${Date.now()}` }; break;
+      case "watch": if (Number(offered?.offers) >= 1) cmd = { type: "watch_mod_offers" }; break;
+      case "set":
+        if (name && request && ["allow", "on", "off", "reload"].includes(msg.action)) cmd = { type: "mod_set", request_id: request, name, op: msg.action,
+          ...(msg.action === "allow" && Number(offered?.consent_reviews) >= 1 ? { review: /^[a-f0-9]{64}$/.test(msg.review || "") ? msg.review : "" } : {}) };
+        break;
+      case "command":
+        if (request && /^[a-z][a-z0-9-]{0,31}$/.test(String(msg.name || ""))) {
+          cmd = { type: "mod_command", request_id: request, name: msg.name,
+                  ...(typeof msg.args === "string" && msg.args ? { args: msg.args.slice(0, 2000) } : {}) };
+        }
+        break;
+      case "action":
+        if (name && typeof msg.id === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(msg.id)) {
+          cmd = { type: "mod_action", name, id: msg.id, ...(typeof msg.value === "string" ? { value: msg.value.slice(0, 400) } : {}) };
+        }
+        break;
+      case "offer":
+        if (request && Number(offered?.offers) >= 1 && typeof msg.id === "string" && /^mo_[0-9a-f]{16}$/.test(msg.id)) {
+          cmd = { type: "mod_offer_answer", request_id: request, id: msg.id, allow: msg.allow === true };
+        }
+        break;
+    }
+    if (!cmd || !offered) return false;
+    if (surface === "chat") cmd.surface = "chat";
+    let sent = false;
+    try { const be = this.ensureBackend(); sent = be.ready && be.send(cmd); } catch { sent = false; }
+    if (!sent && cmd.request_id && cmd.type !== "mods_list") {
+      const refused = { type: "command_rejected", command: cmd.type, request_id: cmd.request_id, reason: "unavailable",
+                        message: "DGC isn't connected right now, so this didn't reach your mods. Try again in a moment." };
+      if (answer) answer(refused); else this.post({ type: "event", event: refused });
+    }
+    return sent;
   }
 
   private async sendFiles(): Promise<void> {
@@ -7053,6 +7270,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.attach(message => this.post(message));
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
+      // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
+      this.pipsEditor.useArtifacts(() => this.artifacts);
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -7409,9 +7628,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         accept = row.license;
       }
+      // DGC's own Microsoft server runs from DGC itself (python3 -m dgc.microsoft_graph): nothing to download or
+      // review, so only another package's commands ask first.
+      const ownServer = (spec: any) => spec?.command === "python3" && Array.isArray(spec.args)
+        && spec.args[0] === "-m" && spec.args[1] === "dgc.microsoft_graph";
       const commands = Object.entries(reviewed?.server_specs || {})
         .filter(([key]) => !Array.isArray(msg.selectedServers) || msg.selectedServers.includes(key))
-        .map(([, spec]) => spec) as any[];
+        .map(([, spec]) => spec)
+        .filter(spec => !ownServer(spec)) as any[];
       if (commands.some(spec => spec.transport === "stdio")) {
         const answer = await vscode.window.showWarningMessage(
           `Install ${row.display_name || name} and run its MCP commands?`,
@@ -7423,7 +7647,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       const requestId = this.nextRequestId("settings-plugin");
       this.settingsInstalls.set(requestId, String(row.name || name));
-      if (!this.sendPluginCommand({ type: "install_plugin", request_id: requestId, name, accept_license: accept, ...(Array.isArray(msg.selectedServers) ? { selected_servers: msg.selectedServers } : {}) })) {
+      // The kind of account its sign-in is for (Microsoft's personal or work account), offered only by a CLI whose
+      // catalog lists the kinds, so only such a CLI is ever sent it.
+      const account = typeof msg.signInAccount === "string" && /^[a-z][a-z0-9_]{0,31}$/.test(msg.signInAccount)
+        && Array.isArray(reviewed?.sign_in_accounts) ? { sign_in_account: msg.signInAccount } : {};
+      if (!this.sendPluginCommand({ type: "install_plugin", request_id: requestId, name, accept_license: accept, ...(Array.isArray(msg.selectedServers) ? { selected_servers: msg.selectedServers } : {}), ...account })) {
         this.settingsInstalls.delete(requestId);
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name, error: "DGC could not start installation. Try again." });
       }
@@ -7544,6 +7772,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // toggle. Ask for it here instead, from the surface that owns the switch: commands share one
       // ordered pipe, so this is dispatched after the toggle has been applied.
       this.sendPluginCommand({ type: "list_plugins", request_id: this.nextRequestId("plugins") });
+    } else if (msg?.type === "modsList" || msg?.type === "modSet") {
+      // Settings -> Plugins -> Mods: the same mods as this chat's /mods, and the same Allow, On, Off and Reload.
+      if (!this.modsOffer()) {
+        this.settingsEditor?.webview.postMessage({ type: "mods", unsupported: true });
+        return;
+      }
+      const name = String(msg.name || "");
+      if (msg.type === "modsList") be.send({ type: "mods_list", request_id: this.nextRequestId("settings-mods") });
+      else if (/^[a-z][a-z0-9-]{0,39}$/.test(name) && ["allow", "on", "off", "reload"].includes(msg.op)) {
+        be.send({ type: "mod_set", request_id: this.nextRequestId("settings-mods"), name, op: msg.op,
+          ...(msg.op === "allow" && Number(this.modsOffer()?.consent_reviews) >= 1 ? { review: /^[a-f0-9]{64}$/.test(msg.review || "") ? msg.review : "" } : {}) });
+      }
     } else if (msg?.type === "listMcp") {
       be.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
     } else if (msg?.type === "mcpToggle" || msg?.type === "mcpReconnect") {
@@ -8039,18 +8279,56 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.requestMode(pick.id);
   }
 
+  private cancelAutoModePrompt(): void {
+    this.autoModePrompt?.settle(false);
+  }
+
+  /** A fresh host-issued request, tied to this session and renderer. A stale card cannot elevate another chat. */
+  private async confirmAutoMode(needsTrust: boolean): Promise<boolean> {
+    if (!this.view || !this.webviewReady || this.view.visible === false) {
+      const action = needsTrust ? "Trust and enable" : "Enable auto";
+      const result = await vscode.window.showWarningMessage("Turn on Auto mode?", {
+        modal: true,
+        detail: "DGC can read, create, edit, or delete files, including outside your project; run commands, install software, "
+          + "and change settings with your account’s permissions; and send data or use enabled plugins. "
+          + "Mistakes or malicious instructions can cause data loss or expose private information. "
+          + "Your deny and ask rules and sandbox restrictions still apply. Switch back to Default at any time."
+          + (needsTrust ? " This also trusts the current workspace." : ""),
+      }, action);
+      return result === action;
+    }
+    const backend = this.backend, session = this.currentSessionId, slot = this.activeSlotId;
+    const generation = this.sessionHandshakeGeneration, view = this.view;
+    return new Promise<boolean>((resolve) => {
+      const id = randomBytes(16).toString("hex");
+      const timer = setTimeout(() => settle(false), 5 * 60_000);
+      const settle = (accepted: boolean) => {
+        if (this.autoModePrompt?.id !== id) return;
+        this.autoModePrompt = undefined;
+        clearTimeout(timer);
+        void view.webview.postMessage({ type: "autoModeDismiss", requestId: id });
+        resolve(accepted && this.backend === backend && this.currentSessionId === session
+          && this.activeSlotId === slot && this.sessionHandshakeGeneration === generation && this.view === view);
+      };
+      this.autoModePrompt = { id, settle };
+      Promise.resolve(view.webview.postMessage({ type: "autoModePrompt", requestId: id, needsTrust }))
+        .then((delivered) => { if (!delivered) settle(false); }, () => settle(false));
+    });
+  }
+
   private async approveModeChange(mode: string): Promise<ApprovedModeChange | undefined> {
     if (!MODES.some((m) => m.id === mode)) { return undefined; }
+    this.cancelAutoModePrompt();
+    const epoch = ++this.modeApprovalEpoch;
+    const backend = this.backend, session = this.currentSessionId, generation = this.sessionHandshakeGeneration;
     const mutationMode = mode === "acceptEdits" || mode === "auto";
     const needsTrust = mutationMode && !this.state.workspaceTrusted;
     const needsAutoWarning = mode === "auto" && this.state.mode !== "auto";
-    if (needsTrust || needsAutoWarning) {
-      const message = needsTrust
-        ? (mode === "auto"
-          ? "This workspace is not trusted. Full-auto will run every file write and shell command without prompts. Trust it and continue?"
-          : "This workspace is not trusted. acceptEdits will apply file changes without prompting. Trust it and continue?")
-        : "Full-auto approves every file write and shell command with no prompts. Continue?";
-      const action = needsTrust ? "Trust and enable" : "Enable auto";
+    if (needsAutoWarning || (mode === "auto" && needsTrust)) {
+      if (!await this.confirmAutoMode(needsTrust)) { this.postState(); return undefined; }
+    } else if (needsTrust) {
+      const message = "This workspace is not trusted. acceptEdits will apply file changes without prompting. Trust it and continue?";
+      const action = "Trust and enable";
       const ok = await vscode.window.showWarningMessage(
         message, { modal: true }, action);
       if (ok !== action) {
@@ -8058,6 +8336,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         return undefined;
       }
     }
+    if (epoch !== this.modeApprovalEpoch || backend !== this.backend || session !== this.currentSessionId
+        || generation !== this.sessionHandshakeGeneration || this.sessionElsewhere) return undefined;
     return { mode, acknowledgeWorkspaceTrust: needsTrust };
   }
 
@@ -8251,6 +8531,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  running is then asked about once (keep it running in the background, or stop it), unless the
    *  answer was remembered; anything else in the tab stops, as closing a tab always did. */
   dispose(closedByUser = false): void {
+    this.cancelAutoModePrompt();
     if (this.liveSessionsTimer) { clearTimeout(this.liveSessionsTimer); this.liveSessionsTimer = undefined; }
     if (this.holderTimer) { clearTimeout(this.holderTimer); this.holderTimer = undefined; }
     if (this.pipsAttentionTimer) { clearInterval(this.pipsAttentionTimer); this.pipsAttentionTimer = undefined; }
@@ -8339,6 +8620,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const msgTimeJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "msgtime.js"));
     // The prompt rail beside the transcript, the same as ChatDGC's.
     const promptRailJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "promptrail.js"));
+    // The user's mods, drawn the same way here and in ChatDGC (window.DgcMods).
+    const modsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mods.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
     // the same allowance Codex ships. It is NOT what keeps model output from phoning home: the
     // markdown renderer never emits an <img> for model content -- it turns every image into a
@@ -8351,7 +8634,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // (its key and saved session go in the webview's state, which is what restores it after a reload).
     const place = this.tab ? "tab" : this.home ? "home" : "chat";
     const chatdgcSeen = place === "home" && this.context.globalState.get<boolean>(CHATDGC_SEEN_KEY) === true ? ` data-chatdgc-seen="1"` : "";
-    const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"` : "";
+    // A tab Continue in Work opened in another folder keeps that folder in its state too, so a reload brings it back there.
+    const tabCwd = this.tab?.cwd && this.slots.some((slot) => slot.cwd === this.tab?.cwd)
+      ? ` data-tab-cwd="${this.tab.cwd.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}"` : "";
+    const tabAttrs = this.tab ? ` data-tab-key="${this.tab.key}" data-tab-session="${this.currentSessionSaved ? this.currentSessionId : this.tab.session}"${tabCwd}` : "";
     return `<!doctype html><html lang="en" data-draft-scope="${draftScope}" data-pips-document-id="${this.pipsDocumentId}" data-chat-place="${place}"${tabAttrs}${chatdgcSeen}><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -8464,6 +8750,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <div id="elsewhere-bar" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="elsewhere-text" class="elsewhere-text"></span><button type="button" id="elsewhere-open" class="act primary" title="Carry on with this session in this window; the other window shows it read-only">Open here</button></div>
+  <!-- The user's mods (media/mods.js): each band, then one status line. Above the rail, which sits on the box. -->
+  <div id="mod-strip" class="mod-strip" hidden></div>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
       <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>
@@ -8564,6 +8852,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
         <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
+      <div class="picker output-picker" id="output-picker" hidden>
+        <button type="button" id="btn-output" class="fbtn output-control" title="Output: what the next message should make. Auto lets the model pick" aria-label="Output: Auto. The model picks" aria-haspopup="menu" aria-expanded="false" aria-pressed="false"><span id="output-icon" class="codicon codicon-output" aria-hidden="true"></span><span id="output-label" class="output-label">Output</span></button>
+        <div id="outputmenu" class="cmenu output-menu" role="menu" aria-label="Output" hidden></div>
+      </div>
       <button type="button" id="btn-goal" class="fbtn goal-control" data-state="none" hidden><span class="codicon codicon-target" aria-hidden="true"></span> <span id="goal-control-label">Goal</span></button>
       </div>
       <div class="cf-right">
@@ -8590,6 +8882,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
+<script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;

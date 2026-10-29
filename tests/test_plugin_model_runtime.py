@@ -151,6 +151,19 @@ class PluginModelRuntimeTests(TestCase):
         finally:
             agent.mcp.stop_all()
 
+    def test_exited_server_is_not_reported_connected_to_model(self):
+        agent = self.agent()
+        try:
+            self.assertIn('MCP connected', agent._installed_plugin_note('fixture'))
+            server = agent.mcp.servers['fixture']
+            server.proc.kill()
+            server.proc.wait(timeout=5)
+            note = agent._installed_plugin_note('fixture')
+            self.assertIn('MCP configured but not connected in this session', note)
+            self.assertNotIn('MCP connected', note)
+        finally:
+            agent.mcp.stop_all()
+
     def test_uninstalled_tools_are_removed_and_denied_tools_do_not_execute(self):
         agent=self.agent()
         from dgc.permissions import rule_for

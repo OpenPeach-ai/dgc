@@ -538,17 +538,28 @@ class CleanupTests(unittest.TestCase):
         self.addCleanup(env.stop)
 
     def test_copies_unused_for_14_days_are_removed_and_doctor_says_their_size(self):
-        old, new = pip_fix.root() / "old-aaaaaaaaaaaa", pip_fix.root() / "new-bbbbbbbbbbbb"
-        for folder, age_days in ((old, 15), (new, 3)):
-            (folder / "copy").mkdir(parents=True)
-            (folder / "copy" / "big.bin").write_bytes(b"x" * 4096)
-            (folder / "project.json").write_text(json.dumps({"project_root": str(self.base / folder.name),
-                                                             "last_used": time.time() - age_days * 86400}))
+        from dgc.worktree import KeptTaskWorkspace
+        source = self.base / "project"
+        source.mkdir()
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        (source / "README.md").write_text("project\n")
+        subprocess.run(["git", "add", "README.md"], cwd=source, check=True)
+        subprocess.run(["git", "-c", "user.name=DGC", "-c", "user.email=dgc@example.test", "commit", "-qm", "base"], cwd=source, check=True)
+        old = pip_fix.root() / pip_fix.project_key(source)
+        copy, error = KeptTaskWorkspace.sync(source, old / "copy")
+        self.assertIsNone(error)
+        self.assertIsNotNone(copy)
+        (old / "copy" / "big.bin").write_bytes(b"x" * 4096)
+        (old / "project.json").write_text(json.dumps({"project_root": str(source), "last_used": time.time() - 15 * 86400}))
+        unknown = pip_fix.root() / "old-aaaaaaaaaaaa"
+        (unknown / "copy").mkdir(parents=True)
+        (unknown / "copy" / "user.txt").write_text("keep me")
+        (unknown / "project.json").write_text(json.dumps({"project_root": str(source), "last_used": time.time() - 15 * 86400}))
         rows = {Path(row["project"]).name: row["bytes"] for row in pip_fix.doctor_rows()}
-        self.assertGreaterEqual(rows["old-aaaaaaaaaaaa"], 4096)
-        self.assertEqual(pip_fix.sweep(), ["old-aaaaaaaaaaaa"])
+        self.assertGreaterEqual(rows[source.name], 4096)
+        self.assertEqual(pip_fix.sweep(), [old.name])
         self.assertFalse(old.exists())
-        self.assertTrue(new.exists())
+        self.assertEqual((unknown / "copy" / "user.txt").read_text(), "keep me")
 
 
 if __name__ == "__main__":

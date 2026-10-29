@@ -756,6 +756,23 @@ body.vscode-light, body.vscode-high-contrast-light {
 .chip.made-file .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.made-file .chip-size { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
 .chip.made-file[data-file-kind]::before { vertical-align: -1px; margin-right: 0; }
+/* What the model said the file is, on the chip itself: before, it was only in the hover label. */
+.chip.made-file .chip-caption { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1000 auto; }
+/* With a caption the name keeps its whole width (up to 60%): flex shrinks by weight, so even a caption that gives way
+   first took a fraction of a pixel from the name, and that is enough for an ellipsis on it. */
+.chip.made-file:has(> .chip-caption) .chip-label { flex-shrink: 0; max-width: 60%; }
+.made-files > li { min-width: 0; max-width: 100%; }
+.chip.made-file .chip-caption { border-left: 1px solid var(--border); padding-left: 6px; }
+/* A shown image: the picture with its caption under it. One alone may use the card's width, as a
+   viewed one does; several sit in a row of tiles. */
+.made-files > li:only-child:has(> .made-image) { flex: 1 1 100%; min-width: 0; }
+.made-image { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; width: min-content; max-width: 100%; }
+.made-files > li:only-child .made-image { width: 100%; max-width: 420px; }
+.made-files > li:only-child .made-image :is(.image-chip, .image-tile) { width: 100%; }
+.made-files > li:only-child .made-image .image-tile { height: auto; min-height: 96px; max-height: 320px; }
+.made-files > li:only-child .made-image .image-tile img { height: auto; max-height: 320px; }
+.made-image-caption { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.35 var(--sans); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* The row under a finished answer: copy, rate, branch, run again, edit and resend. Quiet until
    hovered, because it sits under every response and must never compete with the answer. */
@@ -886,13 +903,14 @@ body.vscode-light, body.vscode-high-contrast-light {
 /* A finished turn's work folds into its "Worked for 43s" row (main.js foldTurnWork). The row is a
    disclosure like a tool group's line: the same chevron, in muted ink that brightens on hover, and
    the steps it holds are drawn again in place, under it, once it is open. */
-.msg.dgc.work-folded > .work-step { display: none; }
+.msg.dgc.work-folded > .work-step:not(.wf-open) { display: none; }
 .thinking.done.work-toggle { align-self: flex-start; color: var(--muted); cursor: pointer; border-radius: var(--r-sm); }
 .thinking.work-toggle::after { content: "›"; color: var(--faint); }
-.msg.dgc:not(.work-folded) > .thinking.work-toggle::after { content: "⌄"; }
+.thinking.work-toggle[aria-expanded="true"]::after { content: "⌄"; }
 /* Open, it heads the work under it: a little room, as a tool group's line has. A prompt sent mid-turn
-   right under it keeps the prompt's own spacing (`.msg.dgc > :not(.role):has(+ .msg.user)`). */
-.msg.dgc:not(.work-folded) > .thinking.work-toggle:not(:has(+ .msg.user)) { margin-bottom: var(--sp-1); }
+   right under it keeps the prompt's own spacing (`.msg.dgc > :not(.role):has(+ .msg.user)`). A turn split
+   by a message sent mid-turn has a row for each part, each open or folded on its own. */
+.thinking.work-toggle[aria-expanded="true"]:not(:has(+ .msg.user)) { margin-bottom: var(--sp-1); }
 .thinking.done.work-toggle:hover { color: var(--text); }
 .thinking.work-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 /* What stays is spaced by what is drawn beside it, never by a hidden step (main.js paintWorkFold):
@@ -1364,14 +1382,12 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
   .goal-control #goal-control-label { display: none; }
 }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
-/* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,
-   which model will do it on the right, and Send pinned to the model group so it travels with it.
-   The row wraps rather than overflowing -- a long local model name used to push Send outside the
-   box entirely (measured: 474px of content in a 426px row). */
-#cfooter { flex-wrap: wrap; row-gap: var(--sp-1); }
+/* Keep permission, agent map, model and Send on one row. The model picker gives up its name first;
+   progressive compact forms below keep the other controls reachable in a narrow editor tab. */
+#cfooter { flex-wrap: nowrap; }
 .cf-left, .cf-right { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
-.cf-left { flex: 0 1 auto; }
-.cf-right { flex: 1 1 250px; justify-content: flex-end; }
+.cf-left { flex: 0 0 auto; }
+.cf-right { flex: 1 1 auto; justify-content: flex-end; }
 .cf-left > *, .cf-right > * { flex: 0 0 auto; }
 .cf-right > .picker { flex: 0 1 auto; min-width: 0; }
 /* Send and Stop are never allowed to shrink or leave: the model name truncates instead. */
@@ -1558,20 +1574,37 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 
 /* Combined model + reasoning selector. The continuous rail reads as one power scale while every
    stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
-@media (max-width: 420px) {
-  #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
-  .model-control { width: var(--control); max-width: var(--control) !important; padding: 0; }
-  .model-control .model-copy, .model-control .model-chevron { display: none; }
-  .model-control .model-icon { display: inline-block; }
+@media (max-width: 640px) {
+  #btn-ctx span:not(.codicon) { display: none; }
+  #btn-output .output-label, #btn-output .output-prefix { display: none; }
+  .model-control #modelname, .model-control #effortname { display: none; }
+  .model-control .model-copy::before { content: "Model"; color: var(--text); }
   .agents-text, .agents-need { display: none; }
   .agents-pill .agents-short { display: inline; }
   #workspace-changes .workspace-changes-label { display: none; }
   #workspace-changes .codicon { display: inline-block; }
 }
+@media (max-width: 560px) {
+  /* Commands stay in Add; preserve the cache clock and all live choices on the same row. */
+  #btn-cmd { display: none; }
+  #cfooter, .cf-left, .cf-right { gap: 2px; }
+  #cfooter .fbtn { min-width: 28px; padding-right: 3px; padding-left: 3px; }
+}
+
+@media (max-width: 420px) {
+  #btn-mode #modelabel { display: none; }
+  .model-control { width: var(--control); max-width: var(--control) !important; padding: 0; }
+  .model-control .model-copy, .model-control .model-chevron { display: none; }
+  .model-control .model-icon { display: inline-block; }
+}
 
 @media (max-width: 360px) {
   footer { padding-right: var(--sp-2); padding-left: var(--sp-2); }
-  #cfooter { gap: 0; padding-right: var(--sp-1); padding-left: var(--sp-1); }
+  #cfooter { gap: 2px; padding-right: var(--sp-1); padding-left: var(--sp-1); }
+}
+@media (max-width: 320px) {
+  .context-picker { display: none; }
+  #cfooter .fbtn { min-width: 26px; }
 }
 
 /* settings and feature-management overlays */
@@ -1747,6 +1780,27 @@ pre.code .copy.done, .md-table-wrap .copy.done, blockquote > .copy.done { opacit
 :is(.artifact, .card) .abtn.primary:hover { background: var(--accent-hover); }
 :is(.artifact, .card) .abtn:disabled { cursor: default; background: var(--surface2); border-color: var(--border); color: var(--faint); opacity: 1; }
 .artifact-list-row.stopping { opacity: .72; }
+/* An artifact a Work turn made or changed (artifact_changed): its title, what it is and its version, Open and Export. */
+.artifact-card .ahead .anm { font: var(--w-semi) var(--t-sm)/1.3 var(--sans); overflow-wrap: anywhere; }
+.artifact-card .ameta { margin: var(--sp-1) 0 var(--sp-3) calc(var(--icon) + var(--sp-2)); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.artifact-card .abtns { flex-wrap: wrap; }
+.artifact-card .amenu-wrap { position: relative; display: inline-flex; }
+.artifact-card .amenu-button { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.artifact-card .amenu { position: absolute; top: calc(100% + var(--sp-1)); left: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
+body.vscode-light .artifact-card .amenu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.artifact-card .amenu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); white-space: nowrap; }
+.artifact-card .amenu-item:hover, .artifact-card .amenu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
+/* The Output chip: quiet at Auto, and lifted like a pressed tool while it holds a choice for the next message. */
+.fbtn.output-control { color: var(--muted); max-width: min(190px, 100%); min-width: 0; }
+.fbtn.output-control .output-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* It may give way, cut short, rather than push the composer's row past its edge. */
+.cf-left > .output-picker { flex: 0 1 auto; min-width: 0; display: inline-flex; }
+.fbtn.output-control:hover { color: var(--text); }
+.fbtn.output-control.on { background: color-mix(in srgb, var(--accent-fill) 18%, transparent); color: var(--accent-text); }
+body.vscode-light .fbtn.output-control.on, body.vscode-high-contrast-light .fbtn.output-control.on { color: var(--link); }
+.cmenu.output-menu .mrow .md { font-family: var(--sans); }
 
 /* Windows High Contrast / VS Code forced-colors mode. System colors preserve the user's chosen
    palette; shape, text, and border changes keep status from depending on hue alone. */
@@ -2126,7 +2180,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 .agents-pill { color: var(--muted); gap: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .agents-pill:hover { color: var(--text); }
 .agents-label { white-space: nowrap; }
-/* The narrow footer's form (the 420px query above): the total running, "3" for "1 agent · 2 tasks". */
+/* The narrow footer's form (the 640px query above): the total running, "3" for "1 agent · 2 tasks". */
 .agents-short { display: none; }
 .agents-dot { box-sizing: border-box; width: 7px; height: 7px; border-radius: var(--r-full); flex: none;
   background: var(--agent-run); }
@@ -2389,6 +2443,9 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
   overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface2); color: var(--muted); }
 .image-tile .ic { flex: none; }
 .image-chip:hover .image-tile { border-color: var(--border-strong); }
+/* One track the tile's own size: without it the picture's 100% height resolved against an auto row, so a tall
+   screenshot took its natural height and the tile showed only its middle -- the slice this rule exists to stop. */
+.image-tile { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
 .image-tile img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
 /* One image has the row to itself, so it may use the card's width rather than sit in a square. */
 .tool-images:has(> li:only-child) .image-chip,
@@ -2442,7 +2499,7 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
 #image-viewer .iv-notice[hidden] { display: none; }
 #image-viewer .iv-stage { flex: 1 1 auto; min-height: 0; display: flex; overflow: auto; overscroll-behavior: contain; }
 /* A checkerboard under the image, so transparency reads as transparency on any theme. */
-#image-viewer .iv-stage img { display: block; margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in;
+#image-viewer .iv-stage img { display: block; flex: none; margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in;
   background-color: var(--surface2);
   background-image: linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%),
     linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%);
@@ -2601,7 +2658,7 @@ body.ask-docked #tasks-panel { display: none; }
 .open-ask-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .open-ask-send, .open-ask-skip, .open-ask-collapse { padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm);
   font: var(--w-reg) var(--t-xs)/1.6 var(--sans); cursor: pointer; }
-.open-ask-send { border: 0; background: var(--accent); color: var(--on-accent, #fff); }
+.open-ask-send { border: 0; background: var(--accent-fill); color: var(--on-accent, #fff); }
 .open-ask-skip { border: 1px solid var(--border-strong); background: transparent; color: var(--muted); }
 .open-ask-skip:hover { color: var(--text); }
 .open-ask-settled { display: block; padding: var(--sp-2) var(--sp-3); color: var(--muted);
@@ -3115,3 +3172,200 @@ body.hide-reasoning .thought-note, body.hide-reasoning .thought-static { display
 .learn-card .learn-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .learn-card .learn-error { margin: 0; color: var(--vscode-errorForeground, #f14c4c); }
 .learn-card .link { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; }
+
+/* ---- The user's mods (media/mods.js), in the Work chat and ChatDGC alike -----------------------------------------
+   A mod's tree is drawn with the panel's own tokens, and each of its six tones is one of them: muted and strong are
+   the text ramp, accent is the link tone (it clears 4.5:1 in both themes), ok is a green for words, warn the amber
+   for words (--need-text), bad the error tone (--err-text). Fills (a Bar's parts, a dot) take the same hues at full
+   strength. High contrast themes keep the editor's own foreground for every word. */
+:root {
+  --mod-ok: #5BCB8B; --mod-ok-fill: var(--good);
+  --mod-drawer-w: 380px;
+}
+body.vscode-light, body.vscode-high-contrast-light { --mod-ok: #1D7A44; }   /* 5.4:1 on white, 4.6:1 on the input grey */
+.mod-strip { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0 var(--sp-3) 0; }
+#mod-strip { margin: 0 var(--sp-3) 2px; }
+.mod-strip[hidden] { display: none; }
+.mod-bands { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mod-band { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; padding: 3px var(--sp-2);
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
+  font: var(--w-reg) var(--t-xs)/1.5 var(--sans); color: var(--text); }
+.mod-band-toggle { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 40%; min-height: 20px;
+  padding: 0 var(--sp-1) 0 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1.5 var(--sans); cursor: pointer; }
+.mod-band-toggle:hover { color: var(--text); }
+.mod-band-toggle:focus-visible, .mod-status-item:focus-visible, .mod-drawer-icon:focus-visible, .mod-button:focus-visible,
+.mod-input:focus-visible, .mod-select:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
+.mod-band-toggle > .codicon { flex: none; font-size: 12px; }
+.mod-band-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-band-body { flex: 1 1 auto; min-width: 0; max-height: calc(3 * 1.5em + 2px); overflow: auto; overflow-wrap: anywhere; }
+.mod-band-body[data-folded="true"] { max-height: 1.5em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+/* Every mod's status on one line, like the terminal's: an item cut with an ellipsis when it is long, never a second line. */
+.mod-status { display: flex; align-items: center; gap: 0; min-width: 0; height: 22px; overflow: hidden; white-space: nowrap;
+  padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/22px var(--sans); color: var(--text); }
+/* Each item shares the line evenly and takes no more than its words need: a short one shows whole, the long ones
+   are cut, and none is squeezed down to its title alone. */
+.mod-status-item { display: inline-flex; flex: 1 1 0; align-items: baseline; gap: 5px; min-width: 0; max-width: max-content;
+  height: 22px; padding: 0 var(--sp-1); border: 0; border-radius: var(--r-sm); background: transparent; color: inherit;
+  font: inherit; line-height: 22px; white-space: nowrap; text-align: left; overflow: hidden; }
+.mod-status-item + .mod-status-item::before { content: "·"; flex: none; margin-right: 3px; color: var(--faint); }
+button.mod-status-item { cursor: pointer; }
+button.mod-status-item:hover { background: var(--surface2); }
+.mod-status-title { flex: none; color: var(--muted); }
+.mod-status-body { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-status-body :is(.mod-box, .mod-row, .mod-col) { display: inline; }
+.mod-status-body :is(.mod-row, .mod-col, .mod-box) > * + * { margin-left: 4px; }
+.mod-status-body .mod-bar-wrap { display: inline-block; width: 48px; vertical-align: middle; }
+.mod-status-body .mod-bar { height: 6px; }
+.mod-status-body .mod-spark { width: 44px; height: 12px; vertical-align: middle; }
+.mod-status-body :is(.mod-button, .mod-input, .mod-select) { display: none; }
+/* The tree's elements */
+.mod-box { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; padding: var(--sp-2);
+  border: 1px solid var(--border); border-radius: var(--r-md); }
+.mod-box-title { color: var(--text-strong); font-weight: var(--w-semi); }
+.mod-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.mod-col { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.mod-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mod-status-body .mod-text { white-space: nowrap; }
+[data-tone="muted"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap) { color: var(--muted); }
+[data-tone="strong"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap) { color: var(--text-strong); font-weight: var(--w-semi); }
+[data-tone="accent"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap) { color: var(--link); }
+[data-tone="ok"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap, .mod-state) { color: var(--mod-ok); }
+[data-tone="warn"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap, .mod-state, .mod-offer-more) { color: var(--need-text); }
+[data-tone="bad"]:is(.mod-text, .mod-box, .mod-row, .mod-col, .mod-md, .mod-table-wrap, .mod-spark-wrap, .mod-state, .mod-item-error, .mod-result-error) { color: var(--err-text); }
+[data-tone="muted"]:is(.mod-state, .mod-result-none, .mod-offer-note) { color: var(--muted); }
+.mod-md { font-size: var(--t-sm); line-height: 1.5; }
+.mod-md > :first-child { margin-top: 0; } .mod-md > :last-child { margin-bottom: 0; }
+.mod-button { min-height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface2); color: var(--text); font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; }
+.mod-button:hover:not(:disabled) { border-color: var(--accent); }
+.mod-button[data-tone="accent"] { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+.mod-button[data-tone="bad"] { color: var(--err-text); }
+.mod-button:disabled { opacity: .6; cursor: default; }
+.mod-input, .mod-select { min-height: 24px; max-width: 100%; padding: 0 var(--sp-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); background: var(--vscode-input-background, var(--surface2)); color: var(--vscode-input-foreground, var(--text));
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.mod-input { flex: 1 1 140px; min-width: 0; }
+.mod-bar-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mod-bar { display: flex; width: 100%; height: 8px; overflow: hidden; border-radius: var(--r-full); background: var(--surface2);
+  box-shadow: inset 0 0 0 1px var(--border); }
+.mod-bar-part { height: 100%; min-width: 0; background: var(--accent); }
+.mod-bar-part[data-tone="muted"], .mod-bar-dot[data-tone="muted"] { background: var(--faint); }
+.mod-bar-part[data-tone="strong"], .mod-bar-dot[data-tone="strong"] { background: var(--text-strong); }
+.mod-bar-part[data-tone="ok"], .mod-bar-dot[data-tone="ok"] { background: var(--mod-ok-fill); }
+.mod-bar-part[data-tone="warn"], .mod-bar-dot[data-tone="warn"] { background: var(--need); }
+.mod-bar-part[data-tone="bad"], .mod-bar-dot[data-tone="bad"] { background: var(--err); }
+.mod-bar-legend { display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); color: var(--muted); font-size: var(--t-xs); }
+.mod-bar-key { display: inline-flex; align-items: center; gap: 5px; }
+.mod-bar-dot { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); }
+.mod-table-wrap { max-width: 100%; overflow-x: auto; }
+.mod-table { border-collapse: collapse; font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.mod-table th { padding: 2px var(--sp-3) 2px 0; color: var(--text-strong); font-weight: var(--w-semi); text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mod-table td { padding: 2px var(--sp-3) 2px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; vertical-align: top; }
+.mod-table td.mod-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mod-spark-wrap { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--link); min-width: 0; }
+.mod-spark-label { color: var(--muted); }
+.mod-spark { width: 96px; height: 20px; overflow: visible; }
+.mod-spark polyline { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+/* A mod's panel, or /mods: a drawer beside the chat. Wide, the page makes room for it; narrow, it covers the page. */
+.mod-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 40; display: flex; flex-direction: column;
+  width: var(--mod-drawer-w); max-width: 100%; border-left: 1px solid var(--border); background: var(--bg); color: var(--text);
+  box-shadow: -8px 0 24px -12px var(--vscode-widget-shadow, rgba(0,0,0,.4)); }
+.mod-drawer[hidden] { display: none; }
+@media (min-width: 760px) {
+  body.mods-drawer-open { padding-right: var(--mod-drawer-w); }
+  body.mods-drawer-open .mod-drawer { box-shadow: none; }
+}
+@media (max-width: 759px) { .mod-drawer { width: 100%; border-left: 0; } }
+.mod-drawer-head { flex: none; display: flex; align-items: center; gap: var(--sp-1); min-height: 42px; padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); }
+.mod-drawer-title { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.4 var(--sans); }
+.mod-drawer-icon { flex: none; display: inline-grid; place-items: center; width: var(--control); height: var(--control); padding: 0;
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); cursor: pointer; }
+.mod-drawer-icon:hover { color: var(--text); background: var(--surface2); }
+.mod-drawer-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-3) var(--sp-4);
+  font: var(--w-reg) var(--t-sm)/1.5 var(--sans); overflow-wrap: anywhere; outline: none; }
+.mod-drawer-body > .mod-col, .mod-drawer-body > .mod-box { gap: var(--sp-2); }
+.mod-empty, .mod-off { margin: var(--sp-2) 0; color: var(--muted); }
+.mod-off { padding: var(--sp-2); border: 1px solid var(--need); border-radius: var(--r-md); color: var(--need-text); }
+/* /mods and Settings -> Plugins -> Mods */
+.mod-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mod-item { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border);
+  border-radius: var(--r-lg); background: var(--surface); min-width: 0; }
+.mod-item-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px var(--sp-2); min-width: 0; }
+.mod-item-title { color: var(--text-strong); font-weight: var(--w-semi); overflow-wrap: anywhere; }
+.mod-item-version { color: var(--faint); font-size: var(--t-xs); }
+.mod-state { margin-left: auto; font: var(--w-med) var(--t-xs)/1.4 var(--sans); color: var(--muted); }
+.mod-item-where, .mod-item-desc, .mod-item-error, .mod-asks-head { margin: 0; font-size: var(--t-xs); }
+.mod-item-where { color: var(--muted); }
+.mod-asks { margin: 0; padding-left: var(--sp-4); font-size: var(--t-xs); color: var(--text); }
+.mod-asks li + li { margin-top: 2px; }
+.mod-asks-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-xs); }
+.mod-asks-more > summary:hover { color: var(--text); }
+.mod-asks-more[open] > summary { margin-bottom: var(--sp-1); }
+.mod-item-actions { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); margin-top: var(--sp-1); }
+.mod-item-actions button.act { min-height: 24px; font-size: var(--t-xs); }
+.mod-about { margin-top: var(--sp-3); color: var(--muted); font-size: var(--t-xs); }
+.mod-about p { margin: 0 0 var(--sp-1); }
+.mod-about code { font: var(--w-reg) var(--t-xs)/1.4 var(--mono); color: var(--text); }
+/* What a mod's command answered, under its name: never a model's reply. */
+.mod-result { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.mod-result-head { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; color: var(--muted); font-size: var(--t-xs); }
+.mod-result-head > .codicon { font-size: 13px; }
+.mod-result-from { color: var(--text); font-weight: var(--w-med); }
+.mod-result-command { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.mod-result-body { min-width: 0; overflow-wrap: anywhere; }
+.mod-result-text { white-space: pre-wrap; }
+.mod-result-wait { color: var(--muted); }
+.mod-result-error { margin: 0; }
+/* "Turn on the mods DGC writes in this session?": the approval card's look (.card .q .btns) */
+.card.mod-offer { margin: var(--sp-2) 0; font-size: var(--t-sm); }
+.mod-offer-who, .mod-offer-more, .mod-offer-note { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.mod-offer-folder { color: var(--muted); font-family: var(--mono); font-size: var(--t-xs); }
+.card.mod-offer .mod-asks { margin-bottom: var(--sp-2); }
+.mod-notice .mod-notice-times { color: var(--faint); }
+/* ChatDGC's slash menu (Work has its own, #pop) */
+.mod-slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 20; max-height: 240px; overflow: auto;
+  padding: var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface);
+  box-shadow: 0 10px 30px -10px var(--vscode-widget-shadow, rgba(0,0,0,.5)); }
+.mod-slash[hidden] { display: none; }
+.mod-slash-row { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md); cursor: pointer; font: var(--w-reg) var(--t-sm)/1.4 var(--sans); }
+.mod-slash-row[aria-selected="true"] { background: var(--sel); color: var(--text-strong); }
+.mod-slash-name { flex: none; font-family: var(--mono); color: var(--text); }
+.mod-slash-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--t-xs); }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) :is(.mod-band, .mod-item, .mod-result, .mod-drawer, .mod-slash, .mod-box) {
+  border-color: var(--vscode-contrastBorder, var(--border-strong)); }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outline: 1px solid var(--vscode-contrastBorder, transparent); }
+@media (prefers-reduced-motion: reduce) { .mod-drawer { transition: none; } }
+/* Host-confirmed Auto consent. Native dialog keeps the rest of the webview inert and traps focus. */
+.auto-mode-dialog {
+  box-sizing: border-box; width: min(590px, calc(100vw - 28px)); max-height: calc(100vh - 28px);
+  padding: 0; border: 1px solid var(--vscode-widget-border, #48414a); border-radius: 18px;
+  background: var(--vscode-editorWidget-background, #202127); color: var(--vscode-foreground, #eeeff2);
+  font: 13px/1.6 var(--vscode-font-family, system-ui); box-shadow: 0 24px 90px #0007;
+}
+.auto-mode-dialog::backdrop { background: #08090bb8; backdrop-filter: blur(3px); }
+.auto-mode-body { padding: 28px 30px 20px; }
+.auto-mode-heading { display: flex; align-items: center; gap: 13px; }
+.auto-mode-heading h2 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 650; }
+.auto-mode-heading .auto-mode-warning { display: grid; place-items: center; flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px; font-size: 21px; color: var(--vscode-errorForeground, #ffacbc); background: color-mix(in srgb, var(--vscode-errorForeground, #ffacbc) 12%, transparent); }
+.auto-mode-scope { margin: 4px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground, #a2a6b2); }
+#auto-mode-intro { margin: 22px 0 18px; color: var(--vscode-descriptionForeground, #babdc7); }
+.auto-mode-permissions { border: 1px solid var(--vscode-widget-border, #34363d); border-radius: 12px; padding: 0 16px; background: var(--vscode-editor-background, #17181b); }
+.auto-mode-permission { display: flex; gap: 13px; padding: 15px 0; }
+.auto-mode-permission + .auto-mode-permission { border-top: 1px solid var(--vscode-widget-border, #34363d); }
+.auto-mode-permission > .codicon { font-size: 19px; margin-top: 2px; color: var(--vscode-textLink-foreground, #bdcaff); }
+.auto-mode-permission strong { font-size: 13px; font-weight: 600; }
+.auto-mode-permission p { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--vscode-descriptionForeground, #a2a6b2); }
+.auto-mode-risk { margin: 18px 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground, #a2a6b2); }
+.auto-mode-risk strong { color: var(--vscode-errorForeground, #ffacbc); font-weight: 500; }
+.auto-mode-limits { margin: 0; font-size: 11px; color: var(--vscode-descriptionForeground, #a2a6b2); }
+.auto-mode-trust { margin: 12px 0 0; font-size: 12px; color: var(--vscode-editorWarning-foreground, #efc780); }
+.auto-mode-buttons { display: flex; gap: 10px; justify-content: flex-end; padding: 0 30px 27px; flex-wrap: wrap; }
+.auto-mode-buttons button { padding: 9px 15px; border: 1px solid var(--vscode-button-border, #484b55); border-radius: 8px; font: inherit; cursor: pointer; background: var(--vscode-button-secondaryBackground, #26272c); color: var(--vscode-button-secondaryForeground, #eeeff2); }
+.auto-mode-buttons .auto-mode-confirm { background: var(--vscode-inputValidation-errorBackground, #f3a6b7); color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground, #33131c)); border-color: var(--vscode-inputValidation-errorBorder, #f3a6b7); font-weight: 600; }
+.auto-mode-confirm .codicon { vertical-align: -2px; margin-right: 7px; }
+.auto-mode-buttons button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #bdcaff); outline-offset: 3px; }
+@media (max-width: 480px) { .auto-mode-body { padding: 20px; } .auto-mode-buttons { padding: 0 20px 22px; } .auto-mode-heading h2 { font-size: 20px; } }

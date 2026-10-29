@@ -130,6 +130,14 @@ class TroupeRoutineTests(unittest.TestCase):
         self.assertEqual((dest / "a.py").read_text(encoding="utf-8"), "A = 1\n")
         self.assertFalse((dest / ".git").exists())
 
+    def test_snapshot_archive_limit_is_checked_before_extracting(self):
+        dest = self.base / "oversize-snap"
+        dest.mkdir()
+        with patch.object(troupe_routines, "MAX_SNAPSHOT_ARCHIVE", 1):
+            with self.assertRaisesRegex(RegistryError, "too large"):
+                troupe_routines.snapshot(str(self.root), self.first, dest)
+        self.assertEqual(list(dest.iterdir()), [])
+
     # ---------------------------------------------------------------- the routine
 
     def test_a_troupe_routine_is_on_at_once_and_says_what_it_runs(self):
@@ -173,6 +181,18 @@ class TroupeRoutineTests(unittest.TestCase):
         self.assertGreater(after["next_due_at"], pip_routines.stamp(self.registry.clock()))
         self.assertEqual(self.turns_in_chat(), [], "no Pip run: the job reports when it ends")
 
+    def test_a_raced_busy_troupe_keeps_the_due_occurrence(self):
+        routine = self.add()
+        self.at(7 * 24 * 60)
+        def raced(*_args, **_kwargs):
+            raise RegistryError("troupe_busy", "Another troupe started.")
+        with patch.object(troupe_routines, "busy", return_value=False), patch.object(troupe_routines, "start", raced):
+            self.assertEqual(pip_routines.tick(self.registry, self.cfg), {routine["id"]: "error"})
+        due = pip_routines.listing(self.store, self.pip["id"])["routines"][0]
+        self.assertEqual(due["status"], "on")
+        self.assertEqual(due["next_due_at"], routine["next_due_at"])
+        self.assertIsNone(due["last_run_at"])
+
     def turns_in_chat(self):
         return [m for m in pip_chat.list_messages(self.store, self.pip["id"], limit=50)["messages"] if m.get("intro")]
 
@@ -201,6 +221,16 @@ class TroupeRoutineTests(unittest.TestCase):
         self.job(routine, lambda *a: self.fail("nothing changed: no troupe"))
         [post] = self.posted
         self.assertIn("no file changed since it last ran", post["text"])
+
+    def test_a_background_job_exception_is_reported_without_advancing_its_cursor(self):
+        routine = self.add()
+        def broken(*_args):
+            raise OSError("private disk detail")
+        self.job(routine, broken)
+        [post] = self.posted
+        self.assertIn("could not finish (OSError)", post["text"])
+        self.assertNotIn("private disk detail", post["text"])
+        self.assertIsNone(json.loads(self.row(routine["id"])["troupe"])["last_commit"])
 
     def test_a_routine_moved_to_another_project_keeps_its_own_cursor(self):
         routine = self.add()

@@ -30,6 +30,7 @@ SERVER_NAME = "app"
 _HELLO_KEY = "dgc_sdk_bridge"
 _HELLO_TIMEOUT_S = 10.0
 _HELLO_MAX = 4096
+_FRAME_MAX = 16 * 1024 * 1024
 # sun_path holds 104 bytes on macOS and 108 on Linux, terminator included.
 _SOCKET_PATH_MAX = 100
 
@@ -268,6 +269,8 @@ class ToolHub:
             while True:
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
+                    if len(line) > _FRAME_MAX:
+                        return
                     line = line.strip()
                     if not line:
                         continue
@@ -275,9 +278,13 @@ class ToolHub:
                         message = json.loads(line.decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError):
                         continue
+                    if not isinstance(message, dict):
+                        continue
                     reply = self._handle(message)
                     if reply is not None:
                         conn.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode())
+                if len(buf) > _FRAME_MAX:
+                    return
                 chunk = conn.recv(65536)
                 if not chunk:
                     return

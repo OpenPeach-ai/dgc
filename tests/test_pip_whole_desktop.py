@@ -31,9 +31,10 @@ except ImportError:                      # pragma: no cover - the base commit
 class FakeVNC:
     """A VNC server on a Unix socket: RFB 3.8, no security, one Raw frame, and a record of the client's input."""
 
-    def __init__(self, folder: Path, width=64, height=40):
+    def __init__(self, folder: Path, width=64, height=40, name=b"fake"):
         self.path = Path(folder) / "vnc.sock"
         self.width, self.height = width, height
+        self.name = name
         self.events: list[tuple] = []
         self.server = socket.socket(socket.AF_UNIX)
         self.server.bind(str(self.path))
@@ -67,7 +68,7 @@ class FakeVNC:
             assert exact(1) == b"\x01"
             client.sendall(struct.pack(">I", 0))
             exact(1)
-            name = b"fake"
+            name = self.name
             client.sendall(struct.pack(">HH", self.width, self.height) + bytes(16) + struct.pack(">I", len(name)) + name)
             while True:
                 kind = exact(1)[0]
@@ -230,6 +231,16 @@ class Temp(unittest.TestCase):
 # --------------------------------------------------------------------------- the hands (VNC)
 
 class HandsTests(Temp):
+    def test_oversized_vnc_name_and_frame_are_refused_before_allocation(self):
+        for width, height, name in ((64, 40, b"x" * 4097), (8192, 8192, b"fake")):
+            with self.subTest(width=width, name_bytes=len(name)):
+                folder = self.dir / f"vnc-{width}-{len(name)}"
+                folder.mkdir()
+                vnc = FakeVNC(folder, width=width, height=height, name=name)
+                self.addCleanup(vnc.close)
+                with self.assertRaises(pip_rfb.RFBError):
+                    pip_rfb.Screen(vnc.path)
+
     def test_the_pip_grabs_the_screen_and_its_clicks_drags_and_keys_reach_it(self):
         vnc = FakeVNC(self.dir)
         self.addCleanup(vnc.close)

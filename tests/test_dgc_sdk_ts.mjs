@@ -2,12 +2,26 @@
 /** TypeScript SDK conformance. Run: node --experimental-strip-types --test tests/test_dgc_sdk_ts.mjs */
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DGC, defineTool, extractJson, validate, assertSupported } from "../sdk/typescript/src/index.ts";
 import { engineDenyRules, looksLikeWrite, policyDecision } from "../sdk/typescript/src/policy.ts";
+import { prepareStateDir, writeSessionConfig } from "../sdk/typescript/src/state.ts";
+import { AuditLog } from "../sdk/typescript/src/audit.ts";
+import { ToolHub } from "../sdk/typescript/src/tools.ts";
+import { unifiedHunks } from "../sdk/typescript/src/changes.ts";
+
+test("changes: a long low-edit diff does not exceed the argument limit", () => {
+  const before = Array.from({ length: 200_000 }, (_, i) => `${i.toString(36).padStart(4, "0")}\n`);
+  const after = [...before.slice(1), before[0]];
+  const hunks = unifiedHunks(before, after);
+  assert.equal(hunks.length > 0, true);
+  assert.equal(hunks.join("").includes("-0000\n"), true);
+  assert.equal(hunks.join("").includes("+0000\n"), true);
+});
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -855,6 +869,32 @@ print(json.dumps({"env": plan.env.get("DGC_SESSION_POLICY"), "strict": plan.stri
 
 // ---- private state; nothing a previous session left is merged or run ---------------------------
 
+test("state: directory links cannot redirect an isolated config", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "dgc-sdk-state-link-"));
+  try {
+    const stateDir = join(tmp, "state"), outside = join(tmp, "outside");
+    mkdirSync(stateDir); mkdirSync(outside);
+    symlinkSync(outside, join(stateDir, "home"), "dir");
+    assert.throws(() => writeSessionConfig(stateDir, { model: "sdk-model" }), named("DGCConfigError"));
+    assert.equal(existsSync(join(outside, ".dgc")), false);
+    const alias = join(tmp, "alias"); symlinkSync(stateDir, alias, "dir");
+    assert.throws(() => prepareStateDir(alias), named("DGCConfigError"));
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("audit: a planted log link is not read or appended", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "dgc-sdk-audit-link-"));
+  try {
+    const outside = join(tmp, "outside.jsonl");
+    writeFileSync(outside, '{"secret":"outside"}\n');
+    const log = new AuditLog(join(tmp, "audit"));
+    symlinkSync(outside, log.pathFor("one"));
+    assert.deepEqual(log.export("one"), []);
+    assert.throws(() => log.append("one", "run", "test", { value: "x" }));
+    assert.equal(readFileSync(outside, "utf8"), '{"secret":"outside"}\n');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
 test("state: a planted config.json in stateDir is ignored and the state is private", async () => {
   await withEnv("text", async (env) => {
     const marker = join(env.work, "planted-gate-ran");
@@ -1441,6 +1481,28 @@ test("decisions: unhandled 'callback' requires the callback and stops the run wh
 
 // ---- custom-tool socket: private, random, authenticated -------------------------------------------
 
+test("tools: oversized hello and frames are refused, and malformed messages do not stop the bridge", async () => {
+  const hub = new ToolHub([defineTool("echo", "Echo", { type: "object" }, (args) => args)]);
+  await hub.start();
+  const hello = JSON.stringify({ dgc_sdk_bridge: 1, token: hub.token }) + "\n";
+  const exchange = (payload) => new Promise((resolve, reject) => {
+    const sock = net.createConnection(hub.socketPath);
+    let data = "";
+    const timer = setTimeout(() => { sock.destroy(); reject(new Error("tool socket did not close")); }, 5000);
+    sock.on("data", (chunk) => { data += chunk; if (data.includes("\n")) sock.destroy(); });
+    sock.on("close", () => { clearTimeout(timer); resolve(data); });
+    sock.on("error", () => { clearTimeout(timer); resolve(data); });
+    sock.on("connect", () => sock.write(payload));
+  });
+  try {
+    assert.equal(await exchange(JSON.stringify({ token: hub.token, padding: "x".repeat(4100) }) + "\n"), "");
+    assert.equal(await exchange(hello + "x".repeat(16 * 1024 * 1024 + 1)), "");
+    assert.match(await exchange(hello + "[]\n" + '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'), /echo/);
+  } finally {
+    hub.close();
+  }
+});
+
 test("tools: the socket is private, random, authenticated and removed", async () => {
   await withEnv("text", async (env) => {
     const tool = defineTool("sku_lookup", "Look up", { type: "object" }, () => "ok");
@@ -1494,11 +1556,6 @@ test("tools: a tool server that never authenticates fails the session and reaps 
 // ---- runtime --------------------------------------------------------------------------------------
 
 test("runtime: a dgc package in the workspace does not replace the runtime", async (t) => {
-  const { supportsSafePath } = await import(join(SRC, "runtime.ts")).catch(() => ({}));
-  if (supportsSafePath && !supportsSafePath(PY)) {
-    t.skip("the runtime's Python has no -P (older than 3.11)");
-    return;
-  }
   await withEnv("text", async (env) => {
     mkdirSync(join(env.work, "dgc"));
     writeFileSync(join(env.work, "dgc", "__init__.py"), "raise SystemExit('workspace dgc was imported')\n");

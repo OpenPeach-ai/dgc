@@ -324,7 +324,7 @@ def process_env(config=None, *, agent: bool = True) -> dict[str, str]:
     for name in configured if isinstance(configured, (list, tuple)) else []:
         key = str(name)
         if (key in os.environ and key and "\x00" not in key and "=" not in key
-                and key.upper() not in ENV_HIJACK_BLOCKLIST):
+                and key.upper() not in ENV_HIJACK_BLOCKLIST and not _is_provider_key_env(key)):
             env[key] = os.environ[key]
     env.update({"HOME": "/tmp/dgc-home", "TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"})
     if agent or os.environ.get(AGENT_SHELL) == "1":

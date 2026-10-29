@@ -36,10 +36,20 @@ def _get_json(session, url: str):
     if not _allowed(url):
         return None
     try:
-        response = session.get(url, timeout=TIMEOUT, allow_redirects=False, headers={"Accept": "application/json"})
-        if response.status_code != 200 or len(response.content) > MAX_JSON_BYTES:
-            return None
-        value = response.json()
+        response = session.get(url, timeout=TIMEOUT, allow_redirects=False, stream=True,
+                               headers={"Accept": "application/json"})
+        try:
+            if response.status_code != 200:
+                return None
+            chunks, size = [], 0
+            for chunk in response.iter_content(chunk_size=8192):
+                size += len(chunk)
+                if size > MAX_JSON_BYTES:
+                    return None
+                chunks.append(chunk)
+            value = json.loads(b"".join(chunks))
+        finally:
+            response.close()
     except Exception:                                     # noqa: BLE001 -- discovery is best effort
         return None
     return value if isinstance(value, dict) else None
@@ -99,8 +109,12 @@ def revoke(session, server_url: str, tokens: dict, client: dict, *, endpoint: st
         data, auth = authenticated(client, methods or [], {"token": token, "token_type_hint": hint}) \
             if client.get("client_id") else ({"token": token, "token_type_hint": hint}, None)
         try:
-            response = session.post(endpoint, data=data, auth=auth, timeout=TIMEOUT, allow_redirects=False)
-            confirmed = confirmed and response.status_code == 200
+            response = session.post(endpoint, data=data, auth=auth, timeout=TIMEOUT,
+                                    allow_redirects=False, stream=True)
+            try:
+                confirmed = confirmed and response.status_code == 200
+            finally:
+                response.close()
         except Exception:                                 # noqa: BLE001 -- said in the result, never raised
             confirmed = False
     return confirmed if asked else None
@@ -137,7 +151,8 @@ def forget(name: str, *, session=None) -> dict:
         client.update({k: v for k, v in static.items() if k in ("client_id", "client_secret") and isinstance(v, str)})
     server = saved.get("server") if isinstance(saved.get("server"), dict) else {}
     revoked = None
-    if tokens and url:
+    # A sign-in server DGC's app names in full and that offers no revocation (Microsoft's) is not searched for one.
+    if tokens and url and server.get("no_revocation") is not True:
         if session is None:
             import requests
             session = requests.Session()
@@ -156,7 +171,9 @@ def forget(name: str, *, session=None) -> dict:
     deleted = not left and not target.exists()
     if not tokens and not removed:
         return {**nothing, "deleted": deleted}
-    host = urlsplit(url).hostname or "the service"
+    # The service by name where the sign-in kept one (Google, for the one sign-in of its apps), else by address.
+    provider = saved.get("provider") if isinstance(saved.get("provider"), str) else ""
+    host = provider[:40] or urlsplit(url).hostname or "the service"
     if not tokens:
         message = ""
     elif revoked is True:
@@ -165,8 +182,11 @@ def forget(name: str, *, session=None) -> dict:
         message = (f"Its sign-in was deleted from this computer, but {host} didn't confirm the sign-out. "
                    "You can remove DGC's access in your account there.")
     else:
+        manage = saved.get("manage_url") if isinstance(saved.get("manage_url"), str) \
+            and saved["manage_url"].startswith("https://") else ""
+        where = f"at {manage[:200]}" if manage else "in your account there"
         message = (f"Its sign-in was deleted from this computer. {host} offers no way for an app to sign itself "
-                   "out, so remove DGC's access in your account there if you want it gone there too.")
+                   f"out, so remove DGC's access {where} if you want it gone there too.")
     if not deleted:
         message = (f"DGC couldn't delete its sign-in ({credentials.where()}, {target}). "
                    "Delete it to finish signing out.")

@@ -1,6 +1,6 @@
-export const VERSION = "0.7.0";
+export const VERSION = "0.8.0";
 export const PROTOCOL = 14;
-export const REQUIRES_CLI = "0.48.0";
+export const REQUIRES_CLI = "0.50.0";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto";
 export type PermissionAction = "once" | "always" | "deny";
@@ -219,6 +219,8 @@ export type RunResult = {
   denials?: Denial[];
   artifacts: Artifact[];
   documents: Artifact[];
+  /** Artifacts the run made or changed (CLI 0.50+), as they were when it ended. */
+  madeArtifacts?: ArtifactInfo[];
   /** Files the run added, modified or deleted under the session cwd. */
   changes?: FileChange[];
   tasks?: TaskItem[];
@@ -262,6 +264,11 @@ export type SessionOptions = {
   verifyCommand?: string;
   /** Overrides the client's `sandbox` for this session. */
   sandbox?: SandboxSetting;
+  /**
+   * Mods this session runs: folders holding dgc-mod.json. Named in code, they're the developer's own Allow, for
+   * this session only; each runs in its sandbox and can never approve anything.
+   */
+  mods?: string[];
   tools?: Array<{
     name: string;
     description: string;
@@ -375,6 +382,31 @@ export type RunOptions = {
   repairAttempts?: number;
   skills?: string[];
   workflow?: string;
+  /** CLI 0.50+: what the reply should make, as DGC's Output chip asks; the result's `madeArtifacts` holds it. */
+  output?: ArtifactOutput;
+};
+
+/** The Output chip's choices (CLI 0.50+). */
+export type ArtifactOutput = "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard";
+
+/** One version of an artifact: who made it ("you", "DGC" or a Pip's name), when, and what changed. */
+export type ArtifactVersion = { n: number; author: string; at: string; summary: string; size: number };
+
+/** An artifact DGC keeps (CLI 0.50+): a doc, slides, sheet, dashboard or page, with every version. */
+export type ArtifactInfo = {
+  id: string;
+  type: "doc" | "slides" | "sheet" | "dashboard" | "page" | string;
+  title: string;
+  version: number;
+  label: string;
+  created: string;
+  updated: string;
+  origin: Record<string, unknown>;
+  /** The formats `session.artifacts.export` takes. */
+  exports: string[];
+  /** The file a document is edited in. */
+  file?: string;
+  versions: ArtifactVersion[];
 };
 
 export type ResumeOptions = SessionOptions & {

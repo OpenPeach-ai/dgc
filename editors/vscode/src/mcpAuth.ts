@@ -16,7 +16,9 @@ export async function openMcpBrowser(request: McpBrowserRequest, current: () => 
     const redirects = target.searchParams.getAll("redirect_uri");
     if (callback.protocol !== "http:" || !loopback(callback.hostname) || Number(callback.port) < 1
         || callback.username || callback.password || callback.search || callback.hash
-        || callback.pathname !== "/oauth/callback" || redirects.length !== 1
+        // DGC's callback path, or none: an app registered with a bare loopback address (Microsoft's
+        // http://localhost) is called back at the port alone.
+        || !["/oauth/callback", "/"].includes(callback.pathname) || redirects.length !== 1
         || redirects[0] !== request.callbackUrl) {
       throw new Error("The MCP callback does not match this sign-in request.");
     }

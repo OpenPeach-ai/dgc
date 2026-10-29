@@ -701,7 +701,7 @@ class ChatChanges:
                             raise ValueError("invalid chat review snapshot")
             result.files = copy.deepcopy(value["files"])
             result.incomplete = value.get("incomplete") is True
-        except (ValueError, TypeError, UnicodeError):
+        except (ValueError, TypeError, UnicodeError, RecursionError):
             result.incomplete = True
         return result
 

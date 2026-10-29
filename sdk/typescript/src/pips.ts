@@ -19,6 +19,7 @@ export type PipSeverity = "low" | "medium" | "high" | "critical";
 export type PipLevel = "ask" | "approve" | "full";
 export type PipReadParams = {
   list_pip_run_fixes: { pip_id: string };
+  get_pip_artifacts: { pip_id: string };
   list_pip_templates: { pip_id?: string };
   list_app_events: { app: string; limit?: number };
   list_app_approvals: { app?: string };
@@ -153,6 +154,7 @@ export type PipMutationParams = {
   set_pip_careful: { pip_id: string; on: boolean };
   set_pip_chat_options: { pip_id: string; chat_options: PipChatOptions };
   set_pip_eyes: { pip_id: string; choice: "ask" | "relay" | "off" };
+  set_pip_artifacts: { pip_id: string; report_as?: "chat" | "doc" | "sheet"; dashboards?: string[] };
   set_plugin_permission: { plugin: string; level: "always_ask" | "any_changes" | "important" | "never_ask" };
   forget_pip_site: { pip_id: string; site: string };
   set_pips_limit: { max_pips: number };
@@ -227,6 +229,8 @@ export type PipReadCommand = keyof PipReadParams;
 export type PipMutationCommand = keyof PipMutationParams;
 export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   list_pip_run_fixes: ["pip_id"],
+  get_pip_artifacts: ["pip_id"],
+  set_pip_artifacts: ["dashboards", "pip_id", "report_as"],
   ensure_pip_template: ["template", "accept_widening", "overwrite_user_changes"],
   prune_pip_templates: ["keep"],
   list_pip_templates: ["pip_id"],
@@ -785,6 +789,15 @@ for (const command of API64_MUTATIONS) MUTATIONS.add(command);
 // can say fixing, Fixed, failed or undone. A Personal Pip has none. Local only.
 const API65_READS = new Set(["list_pip_run_fixes"]);
 for (const command of API65_READS) READS.add(command);
+// API 67: where a Pip's reports are kept and the dashboards it refreshes. get_pip_artifacts {pip_id} reads {report_as:
+// chat|doc|sheet, dashboards: [ids], report_doc, report_doc_title, report_doc_version, report_sheet,
+// report_sheet_title, report_sheet_version}; set_pip_artifacts {pip_id, report_as?, dashboards?}
+// changes them: with doc or sheet each finished review is also the newest version of the Pip's own document or sheet,
+// and after every run it finishes it refreshes those dashboards. Local only.
+const API67_READS = new Set(["get_pip_artifacts"]);
+const API67_MUTATIONS = new Set(["set_pip_artifacts"]);
+for (const command of API67_READS) READS.add(command);
+for (const command of API67_MUTATIONS) MUTATIONS.add(command);
 const MAX_EVENT_PAYLOAD = 32768;
 /** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
  *  it again). */
@@ -933,7 +946,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1118,6 +1131,7 @@ export class Pips {
     if (command === "set_pip_computer_apps" && !APPS_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be download or not_now");
     if (command === "save_pip_login") checkLoginSave(values);
     if (command === "set_pip_level" && !PIP_LEVELS.has(values.level as string)) throw new DGCConfigError("level must be ask, approve or full");
+    if (command === "set_pip_artifacts" && values.report_as !== undefined && !["chat", "doc", "sheet"].includes(values.report_as as string)) throw new DGCConfigError("report_as must be chat, doc or sheet");
     if (API59_MUTATIONS.has(command) && !(typeof values.borrow_id === "string" && /^pipborrow_[a-f0-9]{32}$/.test(values.borrow_id))) {
       throw new DGCConfigError("borrow_id is the card's id, pipborrow_ and 32 hex digits");
     }
@@ -1337,7 +1351,9 @@ export class Pips {
     if (!Number.isSafeInteger(this.caps.pips_api_version) || (this.caps.pips_api_version as number) < 52) {
       throw new DGCUnsupportedError("Photos and files through the spool require a runtime advertising Pips API 52 or newer");
     }
-    if (!(data instanceof Uint8Array) || data.byteLength === 0) throw new DGCConfigError("spool takes the file's bytes");
+    if (!(data instanceof Uint8Array) || data.byteLength === 0 || data.byteLength > 2 * 1024 * 1024) {
+      throw new DGCConfigError("spool takes 1 byte to 2 MiB of file data");
+    }
     const suffix = options.suffix ?? "";
     if (!/^(\.[A-Za-z0-9]{1,10})?$/.test(suffix)) throw new DGCConfigError("suffix is empty or one extension, such as .jpg");
     const { mkdir, writeFile } = await import("node:fs/promises");

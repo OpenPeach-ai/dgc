@@ -187,13 +187,26 @@ class MacSwitchTests(unittest.TestCase):
         keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
         self.assertIn("kickstart", [c[0] for c in self.calls], "a stopped runner is started again")
 
-    def test_a_changed_agent_is_reloaded(self):
+    def test_a_changed_agent_is_never_overwritten_or_removed(self):
         keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
-        self.spec["path"].write_bytes(self.spec["content"].replace(b"ThrottleInterval", b"ThrottleIntervaX"))
+        changed = self.spec["content"].replace(b"ThrottleInterval", b"ThrottleIntervaX")
+        self.spec["path"].write_bytes(changed)
         self.calls.clear()
-        keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
-        self.assertEqual([c[0] for c in self.calls if c[0] in ("bootout", "bootstrap")], ["bootout", "bootstrap"])
-        self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+        with self.assertRaisesRegex(RegistryError, "differs"):
+            keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        with self.assertRaisesRegex(RegistryError, "differs"):
+            keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertEqual(self.spec["path"].read_bytes(), changed)
+        self.assertEqual([c[0] for c in self.calls if c[0] in ("bootout", "bootstrap")], [])
+
+    def test_a_link_at_the_agent_path_is_never_followed(self):
+        self.spec["path"].parent.mkdir(parents=True)
+        target = self.spec["path"].parent / "unrelated.plist"
+        target.write_bytes(b"keep me")
+        self.spec["path"].symlink_to(target)
+        with self.assertRaisesRegex(RegistryError, "safely"):
+            keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
+        self.assertEqual(target.read_bytes(), b"keep me")
 
     def test_on_again_after_off_never_unloads_the_running_runner(self):
         keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)

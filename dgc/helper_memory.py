@@ -123,8 +123,12 @@ def _read(path: Path, limit: int = MAX_RECORD_BYTES + 1024 * 1024):
     if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with path.open("rb") as handle:
+            data = handle.read(limit + 1)
+        if len(data) > limit:
+            return None
+        return json.loads(data)
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -351,6 +355,10 @@ def sanitize(messages, secrets=()) -> list:
         if not isinstance(message, dict) or message.get("role") not in ("system", "user", "assistant", "tool"):
             continue
         item = {key: (_content(value) if key == "content" else value) for key, value in message.items()}
+        if len(json.dumps(item, ensure_ascii=False, default=str).encode("utf-8")) > MAX_MESSAGE_CHARS * 4:
+            # Tool arguments and other non-content fields can be much larger than the clipped text.
+            # Keep a valid transcript entry without letting one such field make the saved memory unreadable.
+            item = {"role": message["role"], "content": "[Oversized earlier message was not kept.]"}
         out.append(item)
     out = json.loads(json.dumps(out, ensure_ascii=False, default=str))
     return redact_value(out, tuple(secrets)) if secrets else out
@@ -359,9 +367,14 @@ def sanitize(messages, secrets=()) -> list:
 def _fit(record: dict) -> dict:
     """Bound one record: the oldest messages after its brief go first (a later repair closes any pair cut)."""
     messages = record["messages"]
-    while len(messages) > 4 and len(json.dumps(record, ensure_ascii=False, default=str)) > MAX_RECORD_BYTES:
-        head = 2 if messages and messages[0].get("role") == "system" else 1
+    while len(messages) > 2 and len(json.dumps(record, ensure_ascii=False, default=str).encode("utf-8")) > MAX_RECORD_BYTES:
+        head = 1 if messages and messages[0].get("role") == "system" else 0
         del messages[head:head + max(1, (len(messages) - head) // 8)]
+    if len(json.dumps(record, ensure_ascii=False, default=str).encode("utf-8")) > MAX_RECORD_BYTES:
+        # A project can have thousands of long uncommitted paths. Losing their comparison only
+        # makes the next helper conservatively re-read files; it must not lose its conversation.
+        record["project"] = {"too_many": True}
+        record["landed"] = {}
     return record
 
 
@@ -441,6 +454,8 @@ def own_dirty(workspace, record: dict) -> frozenset:
     landed = record.get("landed") if isinstance(record.get("landed"), dict) else {}
     if workspace is None or not landed:
         return frozenset()
+    # Only a file the new copy holds: one it left out (dgc/worktree.py _populate) stays the user's, even if it landed
+    # there from an earlier run, because this run cannot see it. Being in `baseline` already says that.
     baseline = getattr(workspace, "baseline", None) or {}
     return frozenset(path for path in getattr(workspace, "initial_dirty", ()) or ()
                      if path in landed and path in baseline and _digest(baseline[path]) == landed[path])
@@ -449,7 +464,8 @@ def own_dirty(workspace, record: dict) -> frozenset:
 def view_state(workspace, outcome) -> dict | None:
     """What a helper last saw of the project, for "changed since": its copy's start (the commit and the uncommitted
     files it was given) and the files of its own that landed, as they are now. A change the person made while it
-    worked, which it never saw, then counts as changed; so does a file whose work of its was held back."""
+    worked, which it never saw, then counts as changed; so does a file whose work of its was held back. The person's
+    files its copy left out are listed apart: it never saw them, so nothing it knows about them can be stale."""
     base = str(getattr(workspace, "base_commit", "") or "")
     if workspace is None or not base:
         return None
@@ -458,7 +474,11 @@ def view_state(workspace, outcome) -> dict | None:
     for repo_path, state in list((getattr(workspace, "baseline", None) or {}).items())[:MAX_STATE_FILES]:
         dirty[str(repo_path)] = _digest(state)
     dirty.update(landed_states(workspace, outcome))
-    return {"head": base, "project_rel": str(rel), "dirty": dirty, "at": time.time()}
+    view = {"head": base, "project_rel": str(rel), "dirty": dirty, "at": time.time()}
+    left_out = sorted(str(path) for path in (getattr(workspace, "left_out", None) or {}))
+    if left_out:
+        view["left_out"] = left_out[:MAX_STATE_FILES]
+    return view
 
 
 def changed_since(project_root, then) -> list[str] | None:
@@ -475,14 +495,16 @@ def changed_since(project_root, then) -> list[str] | None:
         return None
     rel = Path(now.get("project_rel") or ".")
     before, after = dict(then.get("dirty") or {}), dict(now.get("dirty") or {})
-    candidates = set(before) | set(after)
+    # Files its copy did not have: "changed since you last worked on it" would be false about every one of them.
+    unseen = {str(path) for path in (then.get("left_out") or ()) if isinstance(path, str)}
+    candidates = (set(before) | set(after)) - unseen
     if then["head"] != now["head"]:
         spec = str(rel) if rel != Path(".") else "."
         listed = _git_bytes(["diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", then["head"], now["head"],
                              "--", spec], repo)
         if listed.returncode != 0:
             return None
-        candidates |= {os.fsdecode(name) for name in (listed.stdout or b"").split(b"\0") if name}
+        candidates |= {os.fsdecode(name) for name in (listed.stdout or b"").split(b"\0") if name} - unseen
     changed = []
     for repo_path in sorted(candidates):
         try:
@@ -875,7 +897,7 @@ def _start(parent, agent_id, record, text, *, by, background, call_id, descripti
         lease.release()
     if workspace is None and repo_root(root) is not None:
         raise Refused("unavailable", "DGC couldn't make the helper a fresh copy of the project: "
-                                     f"{isolation_error or 'unknown error'}. Nothing was changed.")
+                                     f"{(isolation_error or 'unknown error').rstrip('.')}. Nothing was changed.")
     if workspace is not None:
         # Uncommitted files that hold exactly what it landed last are its own work: its next change to them lands
         # like any file's. A file the user changed since is theirs, and keeps the standing rule.

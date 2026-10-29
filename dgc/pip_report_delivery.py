@@ -163,6 +163,8 @@ def _pip(db, pip_id: str) -> dict | None:
         definition = json.loads(row[1])
     except (ValueError, RecursionError):
         return None
+    if not isinstance(definition, dict):
+        return None
     kind = definition.get("pip_type", "rook")
     name = definition.get("name")
     if kind not in _TYPES or not isinstance(name, str) or not name.strip():
@@ -242,7 +244,7 @@ def _candidate(registry, row, pip) -> dict | None:
             error = None
         reason, detail = _reason(error)
         report.update(outcome="failed", reason=reason, detail=detail)
-        signature = "failed:" + str((error or {}).get("code") or "")[:64]
+        signature = "failed:" + str((error if isinstance(error, dict) else {}).get("code") or "")[:64]
         return {"report": report, "outcome": "failed", "signature": signature}
     if kind == "test":
         try:

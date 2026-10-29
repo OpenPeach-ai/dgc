@@ -522,6 +522,10 @@ class PluginActionTests(PluginWorld, unittest.TestCase):
             self.assertNotIn(gone, text)
         self.assertEqual(text.count("[REDACTED]"), 5, text)
 
+    def test_plugin_text_cannot_spoof_a_public_address_placeholder(self):
+        fake = "\x00DGC-ADDRESS-0\x00"
+        self.assertEqual(pip_plugins.cleaned(fake, self.cfg), fake)
+
     def test_always_allow_on_a_payment_plugin_is_refused_before_anything_runs(self):
         self.cfg.data["pips_enabled"] = True
         _, money = self.offer("aave", "create_record", {"amount": "1"})

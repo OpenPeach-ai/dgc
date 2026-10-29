@@ -62,6 +62,7 @@ test("manifest URLs cannot redirect the installer to a different origin", () => 
 });
 test("versions compare numerically and never downgrade", () => {
   assert.ok(newer("0.25.1", "0.25.0")); assert.ok(newer("0.100.0", "0.99.0"));
+  assert.ok(newer("0.9007199254740993.0", "0.9007199254740992.0"));
   assert.equal(newer("0.24.0", "0.25.0"), false); assert.equal(newer("bad", "0.25.0"), false);
 });
 test("checksum failures reject before any installation", () => {

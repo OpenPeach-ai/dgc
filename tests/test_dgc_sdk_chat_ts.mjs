@@ -102,6 +102,19 @@ test("a stream writes the reply in pieces, then ends with it; a second message k
   });
 });
 
+test("closing a partial stream cancels its backend turn", { timeout: 180_000 }, async () => {
+  await withChats(async (chats) => {
+    const chat = await chats.new();
+    let cancelled = 0;
+    const cancel = chat.cancel.bind(chat);
+    chat.cancel = () => { cancelled++; cancel(); };
+    const stream = chat.stream("Explain the checkout.", { search: "off" });
+    assert.notEqual((await stream.next()).value.kind, "reply");
+    await stream.return();
+    assert.equal(cancelled, 1);
+  });
+});
+
 test("two chats answer at once, and each gets only its own reply", { timeout: 180_000 }, async () => {
   await withChats(async (chats) => {
     const [a, b] = await Promise.all([chats.new(), chats.new()]);

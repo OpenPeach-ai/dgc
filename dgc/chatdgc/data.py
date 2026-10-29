@@ -24,6 +24,7 @@ MAX_COLUMNS = 200
 MAX_RESULT_ROWS = 200       # a query's result, as the model reads it
 SHOWN_ROWS = 60             # of those, in the table it reads (the rest counted)
 QUERY_SECONDS = 5.0
+MAX_XLSX_XML_BYTES = 80_000_000  # total expanded XML across a workbook
 TABULAR = (".csv", ".tsv", ".xlsx")
 _NUMBER = re.compile(r"^[-+]?(?:[$₹€£¥]\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$|^[-+]?\.\d+%?$")
 
@@ -87,10 +88,16 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
     try:
         z = zipfile.ZipFile(io.BytesIO(raw))
         names = set(z.namelist())
+        xml_bytes = 0
 
         def xml(part):
-            if part not in names or z.getinfo(part).file_size > 80_000_000:
+            nonlocal xml_bytes
+            if part not in names:
                 return None
+            size = z.getinfo(part).file_size
+            if size > MAX_XLSX_XML_BYTES - xml_bytes:
+                raise DataError("That workbook expands past the supported size; use a smaller .xlsx or CSV file.")
+            xml_bytes += size
             return ElementTree.fromstring(z.read(part))
         shared = []
         strings = xml("xl/sharedStrings.xml")
@@ -109,6 +116,7 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
         rels = xml("xl/_rels/workbook.xml.rels")
         targets = {r.get("Id"): r.get("Target") for r in (rels if rels is not None else [])}
         out = []
+        total_rows = 0
         for sheet in book.findall("m:sheets/m:sheet", ns) if book is not None else []:
             target = targets.get(sheet.get(rel), "")
             part = target.lstrip("/") if target.startswith("/") else "xl/" + target
@@ -126,7 +134,8 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
                     col = col - 1 if ref else len(cells)
                     kind, v = c.get("t"), c.find("m:v", ns)
                     if kind == "s" and v is not None:
-                        value = shared[int(v.text)] if v.text and int(v.text) < len(shared) else ""
+                        index = int(v.text) if v.text else -1
+                        value = shared[index] if 0 <= index < len(shared) else ""
                     elif kind == "inlineStr":
                         value = "".join(t.text or "" for t in c.iter(f"{{{ns['m']}}}t"))
                     elif kind == "b" and v is not None:
@@ -143,6 +152,9 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
                     if 0 <= col < MAX_COLUMNS:
                         cells[col] = value
                 if cells:
+                    total_rows += 1
+                    if total_rows > MAX_ROWS:
+                        raise DataError(f"That workbook has more than {MAX_ROWS:,} rows; use a smaller workbook.")
                     rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
             out.append((sheet.get("name") or "Sheet", rows))
         return out

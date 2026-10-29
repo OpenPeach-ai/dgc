@@ -34,6 +34,7 @@ export function installedLauncher(env: Env = process.env): string | undefined {
 }
 
 const SAFE_PATH_CACHE = new Map<string, boolean>();
+const SAFE_MODULE_BOOTSTRAP = "import runpy, sys\nsys.path = [entry for entry in sys.path if entry]\nsys.argv = ['dgc', 'serve']\nrunpy.run_module('dgc', run_name='__main__', alter_sys=True)\n";
 
 /** True when `python` has `-P` (3.11+): it keeps the working directory off sys.path. */
 export function supportsSafePath(python: string, env: Env = process.env): boolean {
@@ -57,17 +58,15 @@ export function supportsSafePath(python: string, env: Env = process.env): boolea
 }
 
 /**
- * `python -m dgc serve`, with `-P` where the interpreter has it: `-m` puts the working directory
- * (the session cwd) first on sys.path, so a workspace with its own `dgc/` package would replace
- * the runtime.
+ * Start `dgc serve` without putting the session cwd before the installed runtime.
  */
 export function pythonRuntime(python: string, env: Env = process.env): string[] {
-  return supportsSafePath(python, env) ? [python, "-P", "-m", "dgc", "serve"] : [python, "-m", "dgc", "serve"];
+  return supportsSafePath(python, env) ? [python, "-P", "-m", "dgc", "serve"] : [python, "-c", SAFE_MODULE_BOOTSTRAP];
 }
 
 /**
  * How to start `dgc serve`: DGC_PYTHON, then this checkout's .venv (source checkouts only),
- * then the installed `dgc` launcher, then `python3 -m dgc`. The ready handshake checks the
+ * then the installed `dgc` launcher, then Python's DGC module. The ready handshake checks the
  * protocol either way.
  */
 export function defaultRuntime(env: Env = process.env): string[] {

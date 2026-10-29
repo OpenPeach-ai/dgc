@@ -18,6 +18,7 @@ import hashlib
 import os
 import plistlib
 import shlex
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -147,12 +148,18 @@ def _domain():
 
 def _agent_written(spec):
     path = spec["path"]
-    if path.is_symlink():
-        raise RegistryError("unsafe_service_unit", "The Pips LaunchAgent must be a regular file.")
     try:
-        return path.read_bytes() == spec["content"]
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return False
+    except OSError as exc:
+        raise RegistryError("unsafe_service_unit", "The Pips LaunchAgent could not be opened safely.") from exc
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1
+                or info.st_mode & 0o022 or info.st_size > 16_384):
+            raise RegistryError("unsafe_service_unit", "The Pips LaunchAgent must be an owned regular file without group writes.")
+        return stream.read(16_385) == spec["content"]
 
 
 def _agent_disabled(spec):
@@ -172,6 +179,8 @@ def _mac_on(spec, runner_online):
     directory.mkdir(mode=0o755, parents=True, exist_ok=True)
     existed = spec["path"].exists()
     changed = not _agent_written(spec)
+    if existed and changed:
+        raise RegistryError("service_conflict", "The Pips LaunchAgent differs from DGC's preview. Review it before replacing it.")
     if changed:
         staged = spec["path"].with_name("." + spec["path"].name + ".tmp")
         staged.write_bytes(spec["content"])
@@ -194,6 +203,8 @@ def _mac_on(spec, runner_online):
 
 
 def _mac_off(spec):
+    if (spec["path"].exists() or spec["path"].is_symlink()) and not _agent_written(spec):
+        raise RegistryError("service_conflict", "The Pips LaunchAgent differs from DGC's preview. Review it before removing it.")
     target = f'{_domain()}/{spec["label"]}'
     _run(["/bin/launchctl", "disable", target], check=False)
     try:

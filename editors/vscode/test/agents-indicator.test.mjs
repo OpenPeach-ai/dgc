@@ -476,7 +476,7 @@ test("the palette clears 3:1 and forced colours keep each state distinct", () =>
   for (const state of ["running", "waiting", "idle"]) assert.match(forced, new RegExp(`\\.agents-pill\\[data-state="${state}"\\] \\.agents-dot`));
   assert.match(forced, /\.agents-need \{[^}]*text-decoration: underline/);
   assert.match(section, /\.cf-right > \.picker\.agents-picker \{ flex: 0 0 auto; min-width: auto; \}/);
-  assert.match(mainCss, /@media \(max-width: 420px\) \{[\s\S]*?\.agents-text, \.agents-need \{ display: none; \}\s*\.agents-pill \.agents-short \{ display: inline; \}/);
+  assert.match(mainCss, /@media \(max-width: 640px\) \{[\s\S]*?\.agents-text, \.agents-need \{ display: none; \}\s*\.agents-pill \.agents-short \{ display: inline; \}/);
   assert.match(section, /\.agents-short \{ display: none; \}/, "the total is the narrow footer's alone");
   assert.match(section, /prefers-reduced-motion: reduce\) \{ \.tool\.flash \{ animation: none; \} \}/);
 });

@@ -152,16 +152,77 @@ test('Add menu creates packages, adds marketplaces, and opens the real MCP form'
 test('Apps distinguish missing hosted connections from live MCP connections',()=>{const x=setup();x.message({type:'plugins',items:[{...plugin,mcps:[],connected:false}]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.match(x.d.body.textContent,/Unavailable in DGC/);assert.doesNotMatch(x.d.body.textContent,/Declared app/);});
 
 
-test('Google branded picker has four real service images and keyboard switches with honest setup status',()=>{
- const x=setup(); const apps=['gmail','calendar','contacts','drive'].map(id=>({id,name:id==='gmail'?'Gmail':'Google '+id}));
- const google={name:'google-workspace',display_name:'Google Workspace',supported:true,setup_required:true,setup_instructions:'Workspace preview access and an OAuth client are required.',apps,server_specs:Object.fromEntries(apps.map(a=>['google-workspace--'+a.id,{url:'https://example.com/'+a.id}]))};
+test('Google picker shows five real service images, each app\'s permissions and the testing limits, and signs in after install',()=>{
+ const x=setup(); const apps=['gmail','calendar','drive','docs','slides'].map(id=>({id,name:id==='gmail'?'Gmail':'Google '+id}));
+ const sign_in_permissions=[{app:'gmail',label:'Read your email',description:'Read your messages.'},{app:'gmail',label:'Write drafts and send email',description:'Create drafts.'},{app:'docs',label:'Edit your documents',description:'Change your documents.'}];
+ const google={name:'google-workspace',display_name:'Google Workspace',auth:'browser',supported:true,apps,sign_in_permissions,sign_in_note:'While Google reviews DGC\'s app, only accounts DGC has added can sign in, and Google signs you out every 7 days: sign in again then.',server_specs:Object.fromEntries(apps.map(a=>['google-workspace--'+a.id,{url:'https://'+a.id+'mcp.googleapis.com/mcp/v1'}]))};
  x.message({type:'plugins',items:[google]});x.click('[data-nav=plugins]');x.click('#browse-directory');x.click('[data-install=google-workspace]');x.message({type:'pluginPreview',requested:'google-workspace',item:google});
- const modal=x.d.querySelector('.google-dialog');assert.ok(modal);assert.equal(modal.querySelectorAll('.service-tile img').length,4);
- assert.equal(modal.querySelectorAll('[role=switch]').length,4);assert.match(modal.textContent,/does not grant account access/);
+ const modal=x.d.querySelector('.google-dialog');assert.ok(modal);assert.equal(modal.querySelectorAll('.service-tile img').length,5);
+ assert.equal(modal.querySelectorAll('[role=switch]').length,5);
+ assert.doesNotMatch(modal.textContent,/does not grant account access|Setup required|not configured/);
+ assert.match(modal.textContent,/only accounts DGC has added can sign in/);assert.match(modal.textContent,/every 7 days/);
+ assert.match(modal.querySelector('label.google-choice').textContent,/Read your email · Write drafts and send email/);
+ assert.match(modal.querySelector('details').textContent,/Edit your documents: Change your documents\./);
  assert.equal(modal.querySelector('.connection-art img[alt=DGC]').src.startsWith('data:image/svg+xml'),true);
  assert.equal(modal.querySelector('.connection-art img[alt=Google]').src.startsWith('data:image/png'),true);
  for(const c of modal.querySelectorAll('[data-server]'))c.click();assert.equal(x.d.querySelector('#confirm-plugin').disabled,true);
- x.click('[data-server=google-workspace--gmail]');x.click('#confirm-plugin');assert.deepEqual(Array.from(x.sent.at(-1).selectedServers),['google-workspace--gmail']);
+ x.click('[data-server=google-workspace--gmail]');x.click('[data-server=google-workspace--docs]');assert.match(x.d.querySelector('#confirm-plugin').textContent,/Install and sign in/);x.click('#confirm-plugin');
+ assert.deepEqual(Array.from(x.sent.at(-1).selectedServers),['google-workspace--gmail','google-workspace--docs']);
+ assert.match(x.d.querySelector('dialog').textContent,/Requesting a connection/,'installing goes straight on to Google\'s sign-in');
+});
+
+test('Google Workspace page says what DGC may do in each app and the testing limits',()=>{
+ const x=setup();const apps=[{id:'gmail',name:'Gmail'},{id:'calendar',name:'Google Calendar'}];
+ const row={name:'google-workspace',display_name:'Google Workspace',auth:'browser',installed:true,apps,mcps:[{name:'google-workspace--gmail',url:'https://gmailmcp.googleapis.com/mcp/v1'}],requirements:'A Google account DGC has added as a tester: while Google reviews DGC\'s app, only those accounts can sign in.',sign_in_permissions:[{app:'gmail',label:'Read your email',description:'x.'},{app:'calendar',label:'See when you\'re free',description:'y.'}]};
+ x.message({type:'plugins',items:[row]});x.click('[data-nav=plugins]');x.click('[data-open=google-workspace]');
+ assert.match(x.d.body.textContent,/DGC may: read your email\./);assert.match(x.d.body.textContent,/DGC may: see when you're free\./);
+ assert.match(x.d.body.textContent,/only those accounts can sign in/);
+});
+
+test('Microsoft picker shows Outlook and OneDrive, each app\'s permissions, the kind of account and the unverified app, and signs in after install',()=>{
+ const x=setup();const apps=[{id:'mail',name:'Outlook Mail'},{id:'calendar',name:'Outlook Calendar'},{id:'onedrive',name:'OneDrive'}];
+ const own=app=>({transport:'stdio',command:'python3',args:['-m','dgc.microsoft_graph',app]});
+ const microsoft={name:'microsoft',display_name:'Microsoft Outlook and OneDrive',auth:'browser',supported:true,apps,
+  sign_in_permissions:[{app:'mail',label:'Read and organize your email',description:'Read, search and draft messages.'},{app:'mail',label:'Send email as you',description:'Send email.'},{app:'onedrive',label:'Read and change your OneDrive files',description:'See and upload files.'},{app:'calendar',label:'Read and change your calendar',description:'Manage events.'}],
+  sign_in_always:[{label:'Stay signed in',description:'Keep DGC signed in.'}],
+  sign_in_accounts:[{id:'personal',label:'Personal account',description:'Outlook.com, Hotmail or Live.'},{id:'work',label:'Work or school account',description:'An admin there approves DGC once.'}],
+  sign_in_note:'DGC\'s Microsoft app isn\'t publisher-verified yet, so Microsoft\'s sign-in page marks it unverified. A personal account can approve it there. In a company, people can\'t approve it themselves: an admin approves DGC once, for everyone.',
+  server_specs:Object.fromEntries(apps.map(a=>['microsoft--'+a.id,own(a.id)]))};
+ x.message({type:'plugins',items:[microsoft]});x.click('[data-nav=plugins]');x.click('#browse-directory');x.click('[data-install=microsoft]');x.message({type:'pluginPreview',requested:'microsoft',item:microsoft});
+ const modal=x.d.querySelector('.google-dialog');assert.ok(modal);
+ assert.match(modal.querySelector('h2').textContent,/Choose Microsoft apps for DGC/);
+ assert.equal(modal.querySelectorAll('.service-tile img').length,3);assert.equal(modal.querySelectorAll('[role=switch]').length,3);
+ assert.equal(modal.querySelector('.connection-art img[alt=Microsoft]').src.startsWith('data:image/png'),true);
+ assert.match(modal.querySelector('label.google-choice').textContent,/Read and organize your email · Send email as you/);
+ assert.match(modal.textContent,/isn't publisher-verified yet/);assert.match(modal.textContent,/an admin approves DGC once/);
+ assert.match(modal.querySelector('details').textContent,/Every app.*Stay signed in: Keep DGC signed in\./s);
+ const kinds=[...modal.querySelectorAll('[name=sign-in-account]')];assert.deepEqual(kinds.map(k=>k.value),['personal','work']);
+ assert.equal(kinds[0].checked,true,'a personal account unless you choose');
+ x.click('[data-server=microsoft--calendar]');
+ assert.equal(modal.querySelector('[data-permission-app="calendar"]').hidden,true,'deselected apps do not claim requested permissions');
+ assert.equal(modal.querySelector('[data-permission-app="mail"]').hidden,false);
+ kinds[1].click();x.click('#confirm-plugin');
+ assert.deepEqual(Array.from(x.sent.at(-1).selectedServers),['microsoft--mail','microsoft--onedrive']);
+ assert.equal(x.sent.at(-1).signInAccount,'work');
+ assert.match(x.d.querySelector('dialog').textContent,/Requesting a connection/,'installing goes straight on to Microsoft\'s sign-in');
+});
+
+test('Microsoft page says what DGC may do in each app and which kind of account it signs in with',()=>{
+ const x=setup();const apps=[{id:'mail',name:'Outlook Mail'},{id:'onedrive',name:'OneDrive'}];
+ const row={name:'microsoft',display_name:'Microsoft Outlook and OneDrive',auth:'browser',installed:true,apps,sign_in_account:'work',cloud_execution:true,
+  requirements:'Admin: https://login.microsoftonline.com/organizations/adminconsent?client_id=example',
+  sign_in_accounts:[{id:'personal',label:'Personal account'},{id:'work',label:'Work or school account'}],
+  mcps:[{name:'microsoft--mail',url:'',command:'python3 -m dgc.microsoft_graph mail',transport:'stdio'}],
+  sign_in_permissions:[{app:'mail',label:'Send email as you',description:'x.'},{app:'onedrive',label:'Read and change your OneDrive files',description:'y.'}]};
+ x.message({type:'plugins',items:[row]});x.click('[data-nav=plugins]');x.click('[data-open=microsoft]');
+ assert.match(x.d.body.textContent,/DGC may: send email as you\./);assert.match(x.d.body.textContent,/DGC may: read and change your OneDrive files\./);
+ assert.match(x.d.body.textContent,/Signs in withWork or school account/);
+ assert.match(x.d.body.textContent,/python3 -m dgc\.microsoft_graph mail/);
+ assert.match(x.d.body.textContent,/Runs on this computer and connects to Microsoft Graph/);
+ assert.match(x.d.body.textContent,/Server connectionCommand:/);
+ assert.doesNotMatch(x.d.body.textContent,/It holds the app credentials you authorize/);
+ assert.ok(x.d.querySelector('a[href="https://login.microsoftonline.com/organizations/adminconsent?client_id=example"]'));
+ assert.equal(x.d.querySelectorAll('.row img[alt="Outlook Mail"], .row img[alt=OneDrive]').length,2,'each app shows its own mark');
 });
 
 test('Figma review shows DGC and the vendor mark plus the approval prerequisite before install',()=>{
@@ -668,10 +729,10 @@ test('Settings -> Voice lists each model with its size and licence; Install show
   assert.match(x.d.querySelector('main').textContent,/Reading your voice models/);
   const model=(id,role,name,size,licence,extra={})=>({id,role,name,summary:name+' summary',languages:'English',licence,size,installed:false,in_use:false,installing:null,...extra});
   const models=[model('moonshine-base-en','dictation','Moonshine',111266225,'MIT'),model('nemotron-3.5-asr','dictation','Nemotron 3.5',475271763,'NVIDIA Open Model (OpenMDW-1.1)'),
-                model('kitten-mini-en','read_aloud','Kitten',67547594,'Apache-2.0'),model('pocket-tts','read_aloud','Pocket TTS',98336520,'Non-commercial use only')];
+                model('kitten-mini-en','read_aloud','Kitten',67547594,'Apache-2.0'),model('pocket-tts','read_aloud','Pocket TTS',98336520,'CC BY 4.0 in archive; upstream README says non-commercial')];
   x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models,dictation:'',read_aloud:''}});
   const text=x.d.querySelector('main').textContent;
-  for(const want of ['Dictation','Read aloud','Moonshine','Nemotron 3.5','475 MB','Licence: Non-commercial use only','voice engine (about 50 MB)']) assert.match(text,new RegExp(want.replace(/[()]/g,'\\$&')),want);
+  for(const want of ['Dictation','Read aloud','Moonshine','Nemotron 3.5','475 MB','CC BY 4.0 in archive; upstream README says non-commercial','voice engine (about 50 MB)']) assert.match(text,new RegExp(want.replace(/[()]/g,'\\$&')),want);
   x.click('[data-voice-install="nemotron-3.5-asr"]');
   assert.deepEqual(last(),{type:'voiceInstall',id:'nemotron-3.5-asr'});
   x.message({type:'event',event:{type:'voice_state',runtime:{installed:false,size_mb:50},models:models.map(m=>m.id==='nemotron-3.5-asr'?{...m,installing:{stage:'starting',done:0,total:m.size}}:m),dictation:'',read_aloud:''}});
@@ -1370,15 +1431,17 @@ test('one Save for every page: it says so, and names the pages with unsaved chan
   assert.equal(x.d.querySelector('#save-status').textContent,'Saved');
 });
 
-test('a narrow tab picks pages by name: the page picker lists every page and follows navigation',()=>{
+test('icon navigation names every page and requests MCP state when opened',()=>{
   const x=setup();
-  const picker=x.d.querySelector('#page-picker');
-  assert.ok(picker,'the picker is there (CSS shows it in place of the side list below 620px)');
-  assert.deepEqual([...picker.options].map(o=>o.textContent),[...x.d.querySelectorAll('[data-nav]')].map(b=>b.textContent));
-  picker.value='voice';picker.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  for (const b of x.d.querySelectorAll('[data-nav]')) {
+    assert.equal(b.getAttribute('aria-label'), b.textContent);
+    assert.equal(b.title, b.textContent);
+  }
+  x.click('[data-nav=voice]');
   assert.equal(x.d.querySelector('#page>h2').textContent,'Voice');
+  assert.equal(x.d.querySelector('[data-nav=voice]').getAttribute('aria-current'),'page');
   x.click('[data-nav=mcp]');
-  assert.equal(picker.value,'mcp');
+  assert.equal(x.d.querySelector('[data-nav=voice]').getAttribute('aria-current'),'false');
   assert.equal(x.sent.at(-1).type,'listMcp');
 });
 

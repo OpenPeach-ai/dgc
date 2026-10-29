@@ -160,6 +160,15 @@ class HubBase(unittest.TestCase):
 
 
 class HubTests(HubBase):
+    def test_nonfinite_timeout_and_unterminated_stderr_are_safe(self):
+        secret = "sk-monitor-secret-0123456789abcdef"
+        self.config.data["api_key"] = secret
+        mid = self.start("printf '%s' '" + secret + "' >&2; sleep 2", timeout_ms=float("nan"))
+        self.assertTrue(wait_for(lambda: bool(self.hub.get(mid)._err_partial), 3))
+        self.assertEqual(self.hub.get(mid).timeout_ms, monitors_mod.DEFAULT_TIMEOUT_MS)
+        self.assertNotIn(secret, self.hub.output(mid)["text"])
+        self.assertNotIn(secret, self.hub.render_output(mid, {}))
+
     def test_lines_batch_within_the_window_and_the_end_is_an_event(self):
         mid = self.start("printf 'a\\nb\\n'; sleep 0.6; echo c")
         self.assertTrue(self.ended(mid))
@@ -1342,6 +1351,17 @@ class BackendYieldTests(unittest.TestCase):
         self.assertEqual((state, count), ("queued", 1))
         self.assertEqual(backend._queue[0][0], "what happened?")
         self.assertTrue(backend.agent.cancelled.is_set(), "a message is never steered into a wake turn")
+
+    def test_wake_turn_does_not_bypass_followup_byte_limit(self):
+        from dgc import headless
+        backend = self.backend()
+        self.running_wake_turn(backend)
+        with mock.patch.object(headless, "_MAX_QUEUED_TURN_BYTES", 50):
+            state, count = backend._start_turn("x" * 100, request_id="too-large")
+        self.assertEqual((state, count), ("full", 0))
+        self.assertEqual(backend._queue, [])
+        self.assertFalse(backend.agent.cancelled.is_set())
+        backend.agent.cancelled.set()
 
     def queued_wake_not_yet_running(self, backend):
         """The state a wake timer leaves for an instant: a wake item queued, its worker not yet on it.

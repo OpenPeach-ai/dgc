@@ -45,6 +45,10 @@ class FindTests(unittest.TestCase):
                 self.assertIsNone(browser_user.active_port(self.folder(text)))
         self.assertEqual(browser_user.active_port(self.folder("9222\n/devtools/browser/abc-1\n")), (9222, "/devtools/browser/abc-1"))
 
+    def test_oversized_port_file_is_ignored(self):
+        self.assertIsNone(browser_user.active_port(
+            self.folder("9222\n/devtools/browser/abc\n" + "x" * 1025)))
+
     def test_each_platform_looks_in_its_own_folders(self):
         for platform, expected in (("darwin", "Library/Application Support/Google/Chrome"), ("linux", ".config/google-chrome"),
                                    ("win32", "Google/Chrome/User Data")):

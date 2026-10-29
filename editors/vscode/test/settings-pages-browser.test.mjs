@@ -113,8 +113,7 @@ async function open(width, theme) {
   return { p, close: () => context.close() };
 }
 async function go(p, page, then) {
-  if (await p.isVisible(`[data-nav=${page}]`)) await p.click(`[data-nav=${page}]`);
-  else await p.selectOption("#page-picker", page);
+  await p.click(`[data-nav=${page}]`);
   await p.waitForTimeout(80);
   if (then) await then(p);
   await p.waitForTimeout(80);

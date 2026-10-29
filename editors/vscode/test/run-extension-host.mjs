@@ -495,6 +495,7 @@ try {
       || evidence.monitorLifecycle !== true
       || evidence.addFileFromImagePreview !== true
       || evidence.sessionTabs !== true
+      || evidence.artifactsLibrary !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1
       || typeof evidence.vscodeVersion !== "string"
       || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
@@ -505,7 +506,7 @@ try {
   if (expectedVersion && evidence.vscodeVersion !== expectedVersion) {
     throw new Error(`expected VS Code ${expectedVersion}, host reported ${evidence.vscodeVersion}`);
   }
-  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + monitor turns + backend exit paths)\n`);
+  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles + monitor turns + backend exit paths + the Artifacts Library)\n`);
 } finally {
   rmSync(imageHome, { recursive: true, force: true });               // 0.40 images
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {

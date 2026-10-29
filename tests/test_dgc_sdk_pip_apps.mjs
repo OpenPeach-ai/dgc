@@ -122,6 +122,9 @@ test('the signature is DGC\'s, and a signed call runs while anything else is ref
   assert.equal(failed.length, 1, 'its details stay in the app');
   assert.throws(() => new AppToolHandler(SECRET, { find_unpaid_orders: () => 1 }, { definitions: [] }), DGCConfigError);
   assert.throws(() => new AppToolHandler('', { find_unpaid_orders: () => 1 }, { definitions: [unpaid] }), DGCConfigError);
+  for (const option of ['maxSkewSeconds', 'maxBody', 'maxNonces']) {
+    assert.throws(() => new AppToolHandler(SECRET, { find_unpaid_orders: () => 1 }, { definitions: [unpaid], [option]: 0 }), DGCConfigError);
+  }
   const bounded = new AppToolHandler(SECRET, { find_unpaid_orders: () => 1 }, { definitions: [unpaid], maxNonces: 3 });
   for (let i = 0; i < 10; i++) assert.equal((await bounded.handle(signed(call()))).status, 200);
 });
@@ -148,4 +151,22 @@ test('express and fetch serve it, and a body parsed before the handler is refuse
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, result: [{ id: 'ord_17', days: 7 }] });
   assert.equal((await handler.fetch(new Request('http://127.0.0.1/dgc/pips'))).status, 405);
+});
+
+test('fetch rejects an oversized streaming body before materializing the full request', async () => {
+  const { handler } = shop();
+  let reads = 0;
+  let cancelled = false;
+  const request = {
+    method: 'POST', headers: new Headers(),
+    body: { getReader: () => ({
+      read: async () => { reads++; return { done: false, value: new Uint8Array(1_000_001) }; },
+      cancel: async () => { cancelled = true; },
+    }) },
+    arrayBuffer: async () => { throw new Error('full body read'); },
+  };
+  const response = await handler.fetch(request);
+  assert.equal(response.status, 413);
+  assert.equal(reads, 1);
+  assert.equal(cancelled, true);
 });

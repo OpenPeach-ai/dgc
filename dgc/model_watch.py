@@ -93,6 +93,7 @@ class WaitEvent:
     since: float = 0.0          # time.monotonic() when the silence began
     silent_s: float = 0.0
     threshold_s: float = 0.0    # the notice threshold, so wording can say "45s+"
+    usual_s: float = 0.0        # how long this model usually takes to start (dgc/model_pace.py); 0 unknown
     noise_frames: int = 0
     model: str = ""
     endpoint: str = ""
@@ -431,11 +432,17 @@ class RequestWatch:
                  headers_deadline: bool = True, model: str = "", endpoint: str = "",
                  poll_s: float = 0.15, clock=time.monotonic, server_check=None,
                  check_every_s: float = CHECK_EVERY_S, recheck_s: float = RECHECK_S,
-                 check_at_start: bool = False):
+                 check_at_start: bool = False, first_notice_s: float | None = None, usual_s: float = 0.0,
+                 pace: bool = False):
         self.cancel = cancel
         self.first_token_s = _number(first_token_s, 0.0)
         self.idle_s = _number(idle_s, 0.0)
         self.notice_s = _number(notice_s, 0.0)
+        # The notice before the first token: this model's own pace when DGC knows it (dgc/model_pace.py), and
+        # `pace` records this request's wait for the next one. Silence mid-stream keeps notice_s.
+        self.first_notice_s = self.notice_s if first_notice_s is None else _number(first_notice_s, 0.0)
+        self.usual_s = _number(usual_s, 0.0)
+        self.pace = bool(pace)
         self.load_timeout_s = _number(load_timeout_s, 0.0)
         self.load_poll_s = max(0.01, _number(load_poll_s, 5.0))
         self.headers_deadline = bool(headers_deadline)
@@ -542,7 +549,12 @@ class RequestWatch:
     # ---- consumer signals ---------------------------------------------------------------------
     def progress(self) -> None:
         """Real work arrived: text, reasoning, a tool-call delta, or a finish."""
-        self.last_progress = self._clock()
+        now = self._clock()
+        if not self.progressed and self.pace:
+            loading = now - self._load_t0 if self._load_t0 is not None else 0.0
+            from . import model_pace
+            model_pace.record(self.model, self.endpoint, now - self.t_start - self._paused_s - loading)
+        self.last_progress = now
         self.progressed = True
         self._noticed = None
         self._gone_runs = self._idle_runs = 0   # it is working: earlier doubts are answered
@@ -594,7 +606,7 @@ class RequestWatch:
     def _event(self, kind: str, *, phase: str = "", since: float = 0.0, silent: float = 0.0,
                threshold: float = 0.0) -> WaitEvent:
         return WaitEvent(kind=kind, phase=phase or self.phase, since=since, silent_s=silent,
-                         threshold_s=threshold, noise_frames=self.noise_frames,
+                         threshold_s=threshold, usual_s=self.usual_s, noise_frames=self.noise_frames,
                          model=self.model, endpoint=self.endpoint, server=self.verdict)
 
     def _cancel_set(self) -> bool:
@@ -668,7 +680,7 @@ class RequestWatch:
             self._noticed = None
             self._maybe_notice(phase, self.t_start, silent, min(self.notice_s, silent))
             return
-        self._maybe_notice(phase, self.t_start, silent, self.notice_s)
+        self._maybe_notice(phase, self.t_start, silent, self.first_notice_s)
 
     # ---- the server check (local requests) ------------------------------------------------------
     def _schedule_check(self, now: float) -> None:

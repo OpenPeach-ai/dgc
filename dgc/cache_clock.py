@@ -25,6 +25,7 @@ it into the ``cache_clock`` event's fields. Nothing here raises.
 from __future__ import annotations
 
 import re
+import json
 import time
 from datetime import datetime, timezone
 
@@ -155,10 +156,21 @@ def ollama_listed(endpoint: str, model: str, *, timeout: float = 2.0):
     """Ask Ollama's /api/ps whether ``model`` is loaded and until when: (loaded, expires_ms), or None."""
     try:
         import requests
-        response = requests.get(f"{str(endpoint).rstrip('/')}/api/ps", timeout=(timeout, timeout))
-        if response.status_code != 200:
-            return None
-        payload = response.json()
+        response = requests.get(f"{str(endpoint).rstrip('/')}/api/ps", timeout=(timeout, timeout), stream=True)
+        try:
+            if response.status_code != 200:
+                return None
+            deadline = time.monotonic() + max(2.0, timeout * 2)
+            body = bytearray()
+            for chunk in response.iter_content(chunk_size=65_536):
+                if time.monotonic() >= deadline:
+                    return None
+                body.extend(chunk)
+                if len(body) > 1_048_576:
+                    return None
+            payload = json.loads(bytes(body).decode("utf-8"))
+        finally:
+            response.close()
     except Exception:                        # noqa: BLE001 -- Ollama not reachable: not known
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):

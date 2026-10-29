@@ -121,7 +121,7 @@ for (const width of [300, 360, 460]) {
       assert.ok(!intersects(g.model, g.queue) && !intersects(g.model, g.stop),
         `the model picker gives way rather than run under Queue or Stop (${JSON.stringify([g.model, g.queue, g.stop])})`);
       assert.match(g.aria, /^2 agents · Agents are working · Click to open the agent map$/);
-      if (width <= 360) {
+      if (width <= 640) {
         assert.equal(g.word, "none");
         assert.equal(g.need, "none");
         assert.equal(g.pillText, "2", "the digit stays");
@@ -172,7 +172,7 @@ for (const width of [300, 360, 460]) {
       assert.deepEqual([g.hidden, g.state], [false, "running"]);
       assert.equal(g.aria, "1 agent · 2 tasks · 1 agent working and 2 background tasks running · Click to open the agent map");
       fits(g);
-      if (width <= 360) {
+      if (width <= 640) {
         assert.deepEqual([g.word, g.short, g.need], ["none", "inline", "none"], "the words give way to the total");
         assert.equal(g.pillText, "3", "everything running, never the agents' number alone");
       } else {
@@ -193,7 +193,7 @@ test("a chat that never had an agent shows the pill while its tasks run: \"2 tas
       assert.deepEqual([g.hidden, g.state], [false, "running"], `${width}px: shown, green`);
       assert.equal(g.aria, "2 tasks · 2 background tasks running · Click to open the agent map");
       fits(g);
-      assert.equal(g.pillText, width <= 360 ? "2" : "2 tasks");
+      assert.equal(g.pillText, width <= 640 ? "2" : "2 tasks");
       await shot(page, `pill-tasks-${width}`);
     } finally { await page.close(); }
   }
@@ -208,7 +208,7 @@ test("an agent waiting while a task runs: the blue dot and \"· needs you\" win,
       wait: getComputedStyle(document.body).getPropertyValue("--agent-wait").trim() }));
     assert.equal(g.state, "waiting");
     assert.equal(hex(dot.bg), dot.wait.toUpperCase());
-    assert.equal(g.pillText, "2 agents · 1 task · needs you");
+    assert.equal(g.pillText, "3");
     assert.equal(g.aria, "2 agents · 1 task · An agent is waiting for your permission · 1 background task running · Click to open the agent map");
     fits(g);
   } finally { await page.close(); }
@@ -365,7 +365,7 @@ test("the pill's hover label follows its state: agents ending under the pointer 
       && !document.getElementById("hover-tip").hidden, null, { timeout: 10000 });
     const after = await page.evaluate(() => ({ hidden: document.getElementById("agents-picker").hidden,
       tip: document.getElementById("hover-tip").textContent, text: document.getElementById("agents-pill").innerText.trim() }));
-    assert.deepEqual(after, { hidden: false, tip: "No agents working · Click to open the agent map", text: "0 agents" },
+    assert.deepEqual(after, { hidden: false, tip: "No agents working · Click to open the agent map", text: "0" },
       "the pill stays for the whole chat, counting none working");
   } finally { await page.close(); }
 });

@@ -162,6 +162,7 @@ class AppLinkTests(unittest.TestCase):
         pin = server.pin()
         self.assertEqual(pin["apps"], [])
         self.assertIn("error: refused", links.worker_call({**pin, "token": "x"}, "connect_app", {"app": "gmail", "why": "w"}))
+        self.assertIn("invalid app arguments", links.worker_call(pin, "connect_app", []))
         self.assertIn("unknown app operation", links.worker_call(pin, "start", {}))
         said = links.worker_call(pin, "connect_app", {"app": "gmail", "why": "To read your mail."})
         self.assertIn("A Connect Gmail card is now below your reply", said)

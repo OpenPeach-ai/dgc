@@ -111,6 +111,8 @@ test('continuity inspector escapes summary text, shows fallback, and stays scope
  const c={version:1,checkpoint_id:7,digest:'a'.repeat(64),pip_id:'a',workspace_id:'ws',run_id:'saved',summary:'Keep <script>private</script> project constraints.',summarized_messages:12,through_seq:12,strategy:'mechanical',notice:'Lossy reference, not permission.',provenance:{model:'local-default',job_version:1}};
  const x=setup({api:26,continuity:c});await x.select('a');x.click('#chat-context-toggle');
  const inspector=x.d.querySelector('.chat-continuity');assert.ok(inspector);assert.equal(inspector.open,false);assert.match(inspector.textContent,/12 messages summarized/);assert.match(inspector.textContent,/A short summary/);assert.equal(inspector.querySelector('pre').textContent,c.summary);assert.equal(inspector.querySelector('script'),null);
+ const named=setup({api:26,jobs:[job('a',{name:'<img src=x onerror=alert(1)>'})],continuity:{...c,strategy:'model'}});await named.select('a');named.click('#chat-context-toggle');
+ const namedInspector=named.d.querySelector('.chat-continuity');assert.match(namedInspector.textContent,/A summary <img src=x onerror=alert\(1\)> keeps up to date/);assert.equal(namedInspector.querySelector('img'),null,'the Pip name is text in its memory summary');
  for(const changed of [{pip_id:'b'},{workspace_id:'other'},{summary:'x'.repeat(8193)},{digest:'bad'},{summarized_messages:3}]){
   const bad=setup({api:26,continuity:{...c,...changed}});await bad.select('a');assert.match(bad.d.body.textContent,/continuity is invalid or belongs to another Pip/);bad.click('#chat-context-toggle');assert.equal(bad.d.querySelector('.chat-continuity'),null);
  }

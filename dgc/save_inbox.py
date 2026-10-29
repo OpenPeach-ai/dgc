@@ -25,6 +25,7 @@ from __future__ import annotations
 import atexit
 import hmac
 import json
+import math
 import os
 import secrets
 import shutil
@@ -204,6 +205,8 @@ def _believed(raw: bytes | None, token: str) -> tuple[list[str], float] | None:
         return None
     if not isinstance(at, (int, float)) or isinstance(at, bool):
         return None
+    if not math.isfinite(at):
+        return None
     return list(paths), float(at)
 
 
@@ -263,6 +266,8 @@ def _forward(paths, at) -> int:
 
 
 def _leave(pid: int, paths: list[str], at: float) -> bool:
+    if not math.isfinite(at) or not paths:
+        return False
     directory = inbox_dir(pid)
     try:
         info = os.lstat(directory)
@@ -278,23 +283,39 @@ def _leave(pid: int, paths: list[str], at: float) -> bool:
         waiting = sum(1 for name in os.listdir(directory) if name.endswith(".json"))
     except (OSError, UnicodeDecodeError):
         return False
-    if waiting >= MAX_WAITING:
+    bodies = []
+    chunk = []
+    for path in paths:
+        trial = chunk + [path]
+        body = json.dumps({"token": token, "paths": trial, "at": at, "from": os.getpid()},
+                          ensure_ascii=True, allow_nan=False).encode("ascii")
+        if len(body) > MAX_MESSAGE_BYTES:
+            if not chunk:
+                return False
+            bodies.append(json.dumps({"token": token, "paths": chunk, "at": at, "from": os.getpid()},
+                                     ensure_ascii=True, allow_nan=False).encode("ascii"))
+            chunk = [path]
+        else:
+            chunk = trial
+    if chunk:
+        bodies.append(json.dumps({"token": token, "paths": chunk, "at": at, "from": os.getpid()},
+                                 ensure_ascii=True, allow_nan=False).encode("ascii"))
+    if waiting + len(bodies) > MAX_WAITING or any(len(body) > MAX_MESSAGE_BYTES for body in bodies):
         return False
-    body = json.dumps({"token": token, "paths": paths, "at": at, "from": os.getpid()},
-                      ensure_ascii=True).encode("ascii")
-    name = f"{time.time_ns():020d}-{os.getpid()}-{secrets.token_hex(4)}"
-    staging = directory / f".{name}.tmp"
-    try:
-        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    for body in bodies:
+        name = f"{time.time_ns():020d}-{os.getpid()}-{secrets.token_hex(4)}"
+        staging = directory / f".{name}.tmp"
         try:
-            os.write(fd, body)
-        finally:
-            os.close(fd)
-        os.replace(staging, directory / f"{name}.json")
-        return True
-    except OSError:
-        try:
-            os.unlink(staging)
+            fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                os.write(fd, body)
+            finally:
+                os.close(fd)
+            os.replace(staging, directory / f"{name}.json")
         except OSError:
-            pass
-        return False
+            try:
+                os.unlink(staging)
+            except OSError:
+                pass
+            return False
+    return True

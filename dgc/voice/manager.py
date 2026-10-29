@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -128,6 +129,7 @@ class VoiceManager:
         self._lock = threading.Lock()            # choices and installs
         self._installs: dict[str, dict] = {}     # id -> {stage, done, total, cancel}
         self._worker: subprocess.Popen | None = None
+        self._worker_lines: queue.Queue[str | None] | None = None
         self._worker_lock = threading.Lock()     # one request at a time
         self._seq = 0
 
@@ -314,6 +316,19 @@ class VoiceManager:
         self._worker = subprocess.Popen([python, "-I", str(WORKER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=log, text=True, bufsize=1, cwd=str(self.root))
         log.close()
+        worker = self._worker
+        lines: queue.Queue[str | None] = queue.Queue(maxsize=32)
+        self._worker_lines = lines
+        def read_lines() -> None:
+            try:
+                while True:
+                    line = worker.stdout.readline()
+                    lines.put(line or None)
+                    if not line:
+                        return
+            except (OSError, ValueError):
+                lines.put(None)
+        threading.Thread(target=read_lines, daemon=True).start()
         return self._worker
 
     def _ask(self, request: dict, on_chunk: Callable[[dict], None] | None = None, timeout: float = 300.0) -> dict:
@@ -322,22 +337,33 @@ class VoiceManager:
             worker.stdin.write(json.dumps(request) + "\n")
             worker.stdin.flush()
             deadline = time.monotonic() + timeout
+            lines = self._worker_lines
             while True:
-                line = worker.stdout.readline()
+                try:
+                    line = lines.get(timeout=max(0, deadline - time.monotonic()))
+                except queue.Empty as exc:
+                    self._worker = None
+                    self._worker_lines = None
+                    worker.kill()
+                    worker.wait(timeout=5)
+                    worker.stdin.close()
+                    worker.stdout.close()
+                    raise VoiceError("The voice engine took too long; try again.") from exc
                 if not line:
                     self._worker = None
+                    self._worker_lines = None
+                    worker.stdin.close()
+                    worker.stdout.close()
                     raise VoiceError("The voice engine stopped; see " + str(self.root / "worker.log") + ".")
                 try:
                     answer = json.loads(line)
                 except ValueError:
                     continue
-                if answer.get("id") != request["id"]:
+                if not isinstance(answer, dict) or answer.get("id") != request["id"]:
                     continue
                 if "chunk" in answer:
                     if on_chunk is not None:
                         on_chunk(answer)
-                    if time.monotonic() > deadline:
-                        raise VoiceError("Reading aloud took too long.")
                     continue
                 if not answer.get("ok"):
                     raise VoiceError("The voice engine couldn't do that: " + str(answer.get("error") or "unknown"))
@@ -389,9 +415,15 @@ class VoiceManager:
     def stop_worker(self) -> None:
         with self._worker_lock:
             worker, self._worker = self._worker, None
+            self._worker_lines = None
         if worker is not None and worker.poll() is None:
             try:
                 worker.stdin.close()
                 worker.wait(timeout=5)
             except Exception:                         # noqa: BLE001 -- it goes either way
                 worker.kill()
+                worker.wait(timeout=5)
+        if worker is not None:
+            if not worker.stdin.closed:
+                worker.stdin.close()
+            worker.stdout.close()

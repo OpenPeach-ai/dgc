@@ -74,6 +74,30 @@ def _package(raw: bytes) -> dict[str, bytes]:
 
 
 class Documents(unittest.TestCase):
+    def test_malformed_slide_rows_and_bullets_are_user_errors(self):
+        for slide in ({"title": "x", "table": [[]]}, {"title": "x", "bullets": 7},
+                      {"title": "x", "table": "wrong"}):
+            with self.subTest(slide=slide), self.assertRaises(made.MadeError):
+                made.make({"name": "deck", "format": "pptx", "slides": [slide]}, CONFIG)
+
+    def test_task_lists_export_checked_state_instead_of_literal_markdown(self):
+        text = "# Checklist\n\n- [x] **Done**\n- [ ] Still to do\n- Ordinary item\n"
+        blocks = made.parse(text)
+        items = [b for b in blocks if b.kind == "item"]
+        self.assertEqual([b.task for b in items], [True, False, None])
+        body = _package(made.docx("Checklist", blocks))["word/document.xml"].decode()
+        self.assertIn("☑", body)
+        self.assertIn("☐", body)
+        self.assertNotIn("[x]", body)
+        self.assertNotIn("[ ]", body)
+        self.assertIn("<w:b/>", body, "formatting in the checked item survives")
+        html = made.page_html("Checklist", blocks)
+        self.assertIn('aria-label="Completed"', html)
+        self.assertIn('aria-label="Not completed"', html)
+        raw, lost, _ = made.plain_pdf("Checklist", blocks)
+        self.assertEqual(lost, 0, "fallback prints the state as readable words")
+        self.assertIn(b"Done:", raw)
+
     def test_a_word_document_is_a_real_one_and_reads_back(self):
         m = made.make({"name": "London FEMA brief", "format": "docx", "content": BRIEF}, CONFIG)
         self.assertEqual((m.name, m.mime), ("London FEMA brief.docx", made.FORMATS["docx"][1]))

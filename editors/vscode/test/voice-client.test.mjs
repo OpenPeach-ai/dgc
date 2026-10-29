@@ -268,6 +268,19 @@ test("cancel, a page that went away, and a DGC Voice too old to say how loud it 
   dictation.dispose(); d2.dispose();
 });
 
+test("a closed dictation page gets no late transcription", async () => {
+  const w = world({ recorder: (command) => command === "dgcVoice.start" ? { ok: true } : { ok: true, pcm: speech(1).toString("base64") } });
+  const dictation = new Dictation(w.client), page = box("closed");
+  await dictation.handle(page, { type: "micStart" });
+  const stopping = dictation.handle(page, { type: "micStop" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(w.sent.some((cmd) => cmd.type === "voice_transcribe"));
+  dictation.release(page);
+  await stopping;
+  assert.deepEqual(page.said.filter((message) => message.type === "mic").map((message) => message.state), ["recording", "writing"]);
+  dictation.dispose();
+});
+
 // ---- ReadAloud: one reply at a time, its audio to the box that asked --------------------------------------------
 
 test("read aloud: the audio goes to the box that asked, piece by piece; another reply stops the first; no voice opens Settings", async () => {

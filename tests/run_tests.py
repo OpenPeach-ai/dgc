@@ -8116,6 +8116,7 @@ os._exit(0 if lock.acquire(timeout=1) else 2)
     harness.checkpoints = SimpleNamespace(record_file=capture_checkpoint, last_record_error="")
     harness._edit_checkpoints_required = True
     harness.mcp = SimpleNamespace(call=lambda *_args: "unexpected MCP call")
+    harness.mods = None
     ordered_outcome = []
     held = lock.acquire(timeout=1)
     worker = threading.Thread(target=lambda: ordered_outcome.append(
@@ -9333,7 +9334,7 @@ os._exit(0 if lease.acquire(blocking=False) else 2)
         fleet_tui._switch_to = lambda index: setattr(fleet_tui, "_active_idx", index)
         fleet_tui._invalidate = lambda: None
         fleet_flashes = []
-        fleet_tui._flash = fleet_flashes.append
+        fleet_tui._flash = lambda message, **_how: fleet_flashes.append(message)
 
         managed_session = fleet_tui._new_session()
         managed_sidecar = sessions.load_workspace(managed_session.agent.session_file, repo)
@@ -9351,6 +9352,24 @@ os._exit(0 if lease.acquire(blocking=False) else 2)
               and any("retained" in message for message in fleet_flashes))
         check("TUI retained checkout remains explicitly recoverable",
               managed_session.workspace.cleanup() is None)
+
+        # A copy with no room for an untracked file: the agent is named it, as a helper is, and so is the user.
+        import dgc.worktree as _worktree_mod
+        old_max_bytes = _worktree_mod._MAX_TASK_BYTES
+        _worktree_mod._MAX_TASK_BYTES = 20          # room for tracked.txt's change, not for untracked.txt
+        try:
+            roomy_session = fleet_tui._new_session()
+        finally:
+            _worktree_mod._MAX_TASK_BYTES = old_max_bytes
+        roomy_note = str(getattr(getattr(roomy_session, "agent", None), "_left_out_note", ""))
+        check("TUI new agent whose copy leaves a file out is told which, and the user sees it",
+              roomy_session is not None and "untracked.txt" in roomy_note and "tell the user" in roomy_note
+              and not (roomy_session.workspace.project_root / "untracked.txt").exists()
+              and any("1 untracked file left out" in message for message in fleet_flashes),
+              detail=f"{roomy_note[:200]!r} {fleet_flashes[-1:]!r}")
+        if roomy_session is not None:
+            roomy_session.workspace.cleanup()
+            fleet_tui._sessions.remove(roomy_session)
 
         stale_session = fleet_tui._new_session()
         stale_session.agent._session_revision = 0
@@ -11022,6 +11041,17 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/asana.png",
         "extension/media/plugin-logos/docusign.png",
         "extension/media/plugin-logos/zoom.png",
+        "extension/media/plugin-logos/docs.png",
+        "extension/media/plugin-logos/slides.png",
+        "extension/media/plugin-logos/microsoft.png",
+        "extension/media/plugin-logos/work-iq.png",
+        "extension/media/plugin-logos/outlook.png",
+        "extension/media/plugin-logos/onedrive.png",
+        "extension/media/artifact.js",
+        "extension/media/artifact.css",
+        "extension/media/artifactSheet.js",
+        "extension/media/artifactSlides.js",
+        "extension/media/sheetRefs.js",
         "extension/media/plugin-logos/plain.png",
         "extension/media/plugin-logos/read-ai.png",
         "extension/media/plugin-logos/refero.png",
@@ -11055,6 +11085,7 @@ def test_extension_vsix_guard():
         "extension/media/voicebar.css",
         "extension/media/voicemode.js",
         "extension/media/promptrail.js",
+        "extension/media/mods.js",
         "extension/media/chatdgc.js",
         "extension/media/chatdgc.css",
         "extension/media/chart.js",
@@ -11102,7 +11133,7 @@ def test_extension_vsix_guard():
         "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 169)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 181)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real
@@ -14547,7 +14578,7 @@ def test_slash_palette():
             return [x.text for x in _classic.get_completions(
                 Document(value, len(value)), None)]
         check("classic slash completion uses the canonical built-in registry",
-              classic_comps("/mo") == ["/model", "/models", "/mode"])
+              classic_comps("/mo") == ["/model", "/models", "/mode", "$mod-author"])   # built-in skills follow
         check("classic slash completion includes safe custom commands only",
               classic_comps("/rev") == ["/review", "/review-api"]
               and classic_comps("/model q") == [])

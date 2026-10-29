@@ -385,6 +385,10 @@ def tool_output_is_error(out: str) -> bool:
         outcome = classify_result("", text)
         if outcome and outcome[0] in ("failed", "stopped"):
             return True
+        # No helper started (classify_result's None): the step failed, it did not delegate. Read as a success,
+        # a refused delegation showed "Delegated <task>" beside an agents count of 0 (reported 28 Oct).
+        if outcome is None and "' was not started" in text:
+            return True
     if low.startswith("exit code:"):
         first = low.splitlines()[0].partition(":")[2].strip()
         try:

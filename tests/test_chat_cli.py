@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import contextlib
 import json
 import os
 import shutil
@@ -16,6 +17,17 @@ import test_dgc_sdk as harness                               # noqa: E402  (its 
 
 ROOT = Path(__file__).resolve().parent.parent
 ANSWER = "The checkout flow creates an empty cart and then redirects."
+
+
+class PipedInputBudgetTests(unittest.TestCase):
+    def test_oversized_piped_question_is_rejected_before_service_start(self):
+        from dgc.chat_cli import main
+        from dgc.chatdgc.store import MAX_TEXT
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            status = main(None, [], stdin=io.StringIO("x" * (MAX_TEXT + 2)), out=io.StringIO())
+        self.assertEqual(status, 2)
+        self.assertIn("at most", error.getvalue())
 
 
 class ChatCliTests(unittest.TestCase):
@@ -72,6 +84,15 @@ class ChatCliTests(unittest.TestCase):
         secret = self.dgc("Just between us.", "--temporary", "--search", "off")
         self.assertIn(ANSWER, secret.stdout)
         self.assertEqual(len(json.loads(self.dgc("--list", "--json").stdout)), 1, "a temporary chat is never listed")
+
+    def test_make_asks_for_slides_and_a_reply_that_didnt_make_them_says_so(self):
+        run = self.dgc("Our Q3 in a few slides", "--make", "slides", "--search", "off", "--json")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        reply = json.loads(run.stdout)
+        self.assertEqual(reply["artifacts"], [])
+        self.assertIn("didn't make slides", reply["output_note"])
+        bad = self.dgc("x", "--make", "poster")
+        self.assertNotEqual(bad.returncode, 0)
 
     def test_refusals_say_what_is_wrong(self):
         missing = self.dgc("hi", "--file", str(self.home / "missing.txt"))

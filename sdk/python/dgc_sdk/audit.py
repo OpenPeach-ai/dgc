@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import threading
 import time
 from pathlib import Path
@@ -169,8 +170,11 @@ def redact(value: Any) -> Any:
 
 def _open_private_append(path: Path):
     """Open ``path`` for appending as an owner-only (0600) file."""
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), 0o600)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("audit log must be a regular file")
         if os.name == "posix":
             info = os.fstat(fd)
             if info.st_mode & 0o077:
@@ -211,9 +215,20 @@ class AuditLog:
         paths = [self.path_for(session_id)] if session_id else sorted(self.directory.glob("*.jsonl"))
         rows: list[dict[str, Any]] = []
         for path in paths:
-            if not path.is_file():
+            try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    continue
+            except OSError:
                 continue
-            with path.open(encoding="utf-8") as handle:
+            try:
+                fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                             | getattr(os, "O_NONBLOCK", 0))
+            except OSError:
+                continue
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                os.close(fd)
+                continue
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
                 for line in handle:
                     line = line.strip()
                     if not line:

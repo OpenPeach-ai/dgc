@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import { dgcHome } from "./wslSetup";
 import * as path from "path";
+import { readBoundedFileSync } from "./boundedFile";
 
 /** What the plugin catalog knows of a plugin, for its logo. */
 export interface PluginLogoItem { name?: string; icon?: string; logo_file?: string; developer?: string }
@@ -18,9 +19,9 @@ export function pluginLogoSource(extensionUri: vscode.Uri, item: PluginLogoItem)
     try {
       const root = fs.realpathSync(path.join(dgcHome(), "plugins", "logos"));
       const file = fs.realpathSync(item.logo_file);
-      if (file.startsWith(root + path.sep) && file.endsWith(".png") && fs.statSync(file).size <= MAX_BYTES) {
-        const data = fs.readFileSync(file);
-        if (data.subarray(0, 8).equals(PNG)) return { data: `data:image/png;base64,${data.toString("base64")}` };
+      if (file.startsWith(root + path.sep) && file.endsWith(".png")) {
+        const data = readBoundedFileSync(file, MAX_BYTES);
+        if (data?.subarray(0, 8).equals(PNG)) return { data: `data:image/png;base64,${data.toString("base64")}` };
       }
     } catch { /* use the shipped logo when a package asset is unavailable */ }
   }
@@ -51,8 +52,9 @@ export function pluginLogoData(extensionUri: vscode.Uri, item: PluginLogoItem): 
   if (!found.file) return "";
   try {
     const type = TYPES[path.extname(found.file.fsPath).toLowerCase()];
-    if (!type || fs.statSync(found.file.fsPath).size > MAX_BYTES) return "";
-    return `data:${type};base64,${fs.readFileSync(found.file.fsPath).toString("base64")}`;
+    if (!type) return "";
+    const data = readBoundedFileSync(fs.realpathSync(found.file.fsPath), MAX_BYTES);
+    return data ? `data:${type};base64,${data.toString("base64")}` : "";
   } catch {
     return "";
   }

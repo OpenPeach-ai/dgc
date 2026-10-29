@@ -111,7 +111,8 @@ class PeerRegistryTest(unittest.TestCase):
         self.assertEqual(peers.liveness(self.note(proc_start="")), "unknown")
 
     def test_rubbish_is_gone_rather_than_an_exception(self):
-        for bad in (None, [], {}, {"pid": "x"}, {"pid": -1}):
+        for bad in (None, [], {}, {"pid": "x"}, {"pid": -1}, {"pid": True},
+                    self.note(heartbeat="broken"), self.note(heartbeat=float("nan"))):
             self.assertEqual(peers.liveness(bad), "gone")
 
     # ---- the registry ---------------------------------------------------------------------
@@ -183,6 +184,33 @@ class PeerRegistryTest(unittest.TestCase):
         (peers.peers_dir()).mkdir(parents=True, exist_ok=True)
         (peers.peers_dir() / "junk.json").write_text("{not json")
         self.assertEqual(peers.others(project_root="/w", git_common_dir="/w/.git"), [])
+
+    def test_malformed_or_oversized_peer_note_does_not_break_listing(self):
+        bad = self.write(self.note(pid=os.getppid(), proc_start=peers._proc_start(os.getppid()),
+                                   heartbeat="not-a-time"))
+        self.assertEqual(peers.others(project_root="/w", git_common_dir="/w/.git"), [])
+        self.assertFalse(bad.exists())
+        huge = self.write(self.note(pid=os.getppid(), proc_start=peers._proc_start(os.getppid()),
+                                    padding="x" * peers.MAX_NOTE_BYTES))
+        self.assertGreater(huge.stat().st_size, peers.MAX_NOTE_BYTES)
+        self.assertEqual(peers.others(project_root="/w", git_common_dir="/w/.git"), [])
+
+    def test_peer_note_under_symlinked_home_still_reads(self):
+        alias = self.home / "alias"
+        alias.symlink_to(self.home, target_is_directory=True)
+        with patch.dict(os.environ, {"DGC_HOME": str(alias)}):
+            self.write(self.note(pid=os.getppid(), proc_start=peers._proc_start(os.getppid())))
+            self.assertEqual(len(peers.others(project_root="/w", git_common_dir="/w/.git")), 1)
+
+    def test_malformed_takeover_timestamp_and_oversized_answer_are_ignored(self):
+        directory = peers.takeover_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        ask = peers._release_path(os.getpid(), "ask")
+        ask.write_text(json.dumps({"holder": os.getpid(), "session": "/s/one.json", "at": float("nan")}))
+        self.assertIsNone(peers.pending_release("/s/one.json"))
+        answer = peers._release_path(os.getpid(), "ans")
+        answer.write_bytes(b"x" * (peers.MAX_RELEASE_BYTES + 1))
+        self.assertIsNone(peers.release_answer(os.getpid()))
 
     # ---- what gets said -------------------------------------------------------------------
 

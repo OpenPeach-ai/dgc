@@ -324,6 +324,31 @@ class NewDirTest(unittest.TestCase):
                     self.assertIn("Your answer is remembered", rendered)
                 ui._close_overlay()
 
+    def test_a_picker_without_descriptions_shows_long_labels_whole(self):
+        # /resume puts the when, the message count, the name and the first words all in the label: cut at 34 cells, a
+        # session read "Oct 27 10:02  (12 msgs)  gst …" with the panel's other 60 columns empty.
+        label = "Oct 27 10:02  (12 msgs)  gst on quotes · Add a GST line to the quote PDF"
+        ui = self.tui(120, 30)
+        ui._show_picker("Resume a session", [label, "Oct 26 18:40  (3 msgs)  fix the parser"], lambda i: None)
+        rendered = self.plain_text(ui._render_overlay())
+        self.assertIn("gst on quotes · Add a GST line to the quote PDF", rendered)
+        ui._close_overlay()
+        narrow = self.tui(60, 24)                                   # still one row each on a narrow terminal
+        narrow._show_picker("Resume a session", [label], lambda i: None)
+        rendered = self.plain_text(narrow._render_overlay())
+        self.assertIn("Oct 27 10:02  (12 msgs)  gst on quotes", rendered)
+        self.assertEqual(sorted(narrow._overlay["_rowmap"].values()), [0], "one screen row, the hit-map exact")
+
+    def test_a_picker_with_descriptions_keeps_its_label_column(self):
+        ui = self.tui(120, 30)
+        ui._open_overlay([{"label": "a-very-long-option-name-that-runs-past-the-column", "desc": "what it does",
+                           "value": 0}, {"label": "short", "desc": "the other one", "value": 1}],
+                         on_pick=lambda r: None, title="Pick")
+        rendered = self.plain_text(ui._render_overlay())
+        self.assertIn("…", rendered, "the label column is still 34 cells")
+        self.assertIn("what it does", rendered)
+        self.assertIn("the other one", rendered)
+
     # ---- an agent in another folder --------------------------------------------------------------
     def test_a_folder_agent_brings_its_own_project_and_keeps_the_runs_key(self):
         self.config.set_runtime_secret("api_key", "sk-launch-runtime")

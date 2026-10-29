@@ -306,7 +306,9 @@ export function runCliUpdate(
     };
 
     const timer = setTimeout(() => stop("the update took longer than 10 minutes"), UPDATE_TIMEOUT_MS);
-    const subscription = token?.onCancellationRequested(() => stop("cancelled"));
+    let subscription: vscode.Disposable | undefined;
+    subscription = token?.onCancellationRequested(() => stop("cancelled"));
+    if (settled) { subscription?.dispose(); }
 
     const attempt = () => {
       if (settled) { return; }

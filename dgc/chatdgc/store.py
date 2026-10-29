@@ -378,10 +378,23 @@ class ChatStore:
             chat = {**chat, "updated_at": now(), "pinned": current.get("pinned", False),
                     "archived": current.get("archived", False),
                     "title": chat["title"] if current.get("title") == "New chat" else current["title"]}
-            # Which project it's in is the list's to change, as its name is (a move mid-reply stays moved).
-            chat.pop("project", None)
-            if current.get("project"):
-                chat["project"] = current["project"]
+            # Which project it's in is the list's to change, as its name is (a move mid-reply stays moved); so is the
+            # folder it reads (set_folder), so one chosen mid-reply stays chosen.
+            for key in ("project", "folder"):
+                chat.pop(key, None)
+                if current.get(key):
+                    chat[key] = current[key]
+            self._write(chat)
+        return chat
+
+    def set_folder(self, chat_id: str, folder: str) -> dict:
+        """The folder a chat reads (folder.py), or ("") none."""
+        with self._locked():
+            chat = self.get(chat_id)
+            if folder:
+                chat["folder"] = str(folder)
+            else:
+                chat.pop("folder", None)
             self._write(chat)
         return chat
 
@@ -510,6 +523,9 @@ class ChatStore:
     def remove_file(self, chat_id: str, attachment_id: str) -> dict:
         """Delete a file you attached, from the Library: its bytes go; the chat keeps its name, marked removed,
         and says it's no longer there."""
+        from .attachments import ATTACHMENT_ID
+        if not isinstance(attachment_id, str) or not ATTACHMENT_ID.fullmatch(attachment_id):
+            raise ChatStoreError("That file isn't in this chat.")
         with self._locked():
             chat = self.get(chat_id)
             tails = [t for fork in (chat.get("forks") or {}).values() for t in fork.get("tails") or [] if t]
@@ -747,6 +763,9 @@ class ChatStore:
         return raw, text
 
     def remove_project_file(self, project_id: str, file_id: str) -> dict:
+        from .attachments import ATTACHMENT_ID
+        if not isinstance(file_id, str) or not ATTACHMENT_ID.fullmatch(file_id):
+            raise ChatStoreError("That file isn't in this project.")
         with self._locked():
             projects = self._read_projects()
             project = self._project(projects, project_id)

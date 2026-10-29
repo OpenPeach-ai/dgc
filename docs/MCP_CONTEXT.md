@@ -96,6 +96,36 @@ callback port, `--header`, `--static-oauth-client-info`, `--static-oauth-client-
   the same way as one that answers `401`. Tokens refresh before they expire and after a `401`. A `403 insufficient_scope` signs in
   again for the larger scope while you are connecting; in the middle of a conversation the call says
   so, and the next Connect asks for it.
+- **DGC's own registered app (Google Workspace):** Google's sign-in server has no registration and no client
+  metadata documents, and its token address wants the app's secret. The catalog names DGC's desktop app (its
+  public client id), the one sign-in server it signs in with (`https://accounts.google.com`: a server whose
+  metadata names another is refused before anything is fetched), and where its secret is fetched,
+  `https://vibedgc.com/oauth/google-client.json` (https on vibedgc.com only, no redirects, at most 16 KiB). The
+  secret is fetched once the user has agreed to sign in, used only if its `client_id` is the catalog's, sent only
+  to that server's token address, and kept with the sign-in in the keychain for refreshing; it is never written
+  to `config.json`, a diagnostic, an event or the model's context. Google's servers answer `initialize` and
+  `tools/list` without a token, so DGC signs in when the plugin is connected rather than at the first tool call.
+  The apps of the plugin share one sign-in (kept under `google-workspace`), with no resource indicator, since
+  one token serves several servers; it asks for exactly the chosen apps' scopes, with `access_type=offline` and
+  `prompt=consent`, on `http://127.0.0.1:<port>/oauth/callback`. A tool that needs a scope outside them is
+  refused with the permission's name, never a wider sign-in. When a refresh is refused with `invalid_grant`
+  around 7 days after the sign-in (Google's limit for an app in testing), the plugin says so in plain words.
+- **DGC's own Microsoft app and server (Microsoft Outlook and OneDrive):** Microsoft has no MCP server a
+  personal account can use, so the plugin's servers are DGC's own, saved as `python3 -m dgc.microsoft_graph
+  <app>` and run inside DGC's process when the plugin owns them (`microsoft_graph.GraphConnection`, driven like
+  the remote client over JSON-RPC lines). The same module is a stdio server for any MCP client, using the
+  plugin's kept sign-in. The app is a public client: its id is in the catalog and nothing secret exists. Graph
+  publishes no sign-in metadata, so the catalog names each kind of account's sign-in server in full (personal:
+  `https://login.microsoftonline.com/consumers`; work or school: `.../organizations`; nothing is discovered, and
+  only addresses on that host are used). The sign-in asks for the chosen apps' Graph permissions plus
+  `offline_access` and `User.Read`, with `prompt=select_account`, on `http://localhost:<port>` (no path, as the app
+  is registered), or with a code (RFC 8628) where this computer has no browser. Refreshing goes to the same
+  server and names the scope again; a sign-in made for the other kind of account is made again. Errors Microsoft
+  gives when an organization doesn't let users approve the app (`AADSTS90094`, `AADSTS90095`, `AADSTS65001`,
+  `AADSTS900941`...) become "Your organization needs an admin to approve DGC for Microsoft 365 first" with the
+  admin-consent link. Microsoft offers no revocation, so signing out deletes the sign-in and says where to remove
+  DGC's access. Graph calls carry the token and nothing else does: pre-authorised download and upload addresses
+  never get it, and none of them is shown.
 - **Where sign-ins live:** the system keychain (macOS Keychain through the Security framework; the
   Linux desktop keyring through `secret-tool`, with the secret on its standard input), one entry per
   server and DGC home. Without a usable keychain, an owner-only file under

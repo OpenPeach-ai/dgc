@@ -605,6 +605,27 @@ test("an unclaimed spawn names its delegation", () => {
   assert.deepEqual(p.errors, []);
 });
 
+// Reported 28 Oct: three delegations refused before their helpers started (the project's uncommitted files
+// were over the helper copy's limit) read "Delegated Analyze … · 1 issue", while the agents chip said 0.
+test("a refused delegation says it couldn't delegate, in the group's sentence and on its card", () => {
+  const p = panel({ capabilities: {} });
+  p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+  spawn(p.event, 0, "Analyze delivery patterns");
+  p.event({ type: "tool_result", call_id: "call_0", name: "task", is_error: true,
+    output: "Sub-task 'Analyze delivery patterns' was not started because its isolated Git worktree could not be created: too many uncommitted files. The parent checkout was left unchanged." });
+  assert.equal(p.doc.querySelector(".tool-group-label").textContent, "Couldn't delegate Analyze delivery patterns",
+    "the sentence says it failed, so no \"· 1 issue\" after it");
+  assert.equal(p.doc.querySelector(".tool .verb").textContent, "Couldn't delegate");
+  assert.equal(p.doc.querySelector(".tool .arg").textContent, "Analyze delivery patterns");
+  // A failed command keeps the old shape.
+  p.event({ type: "text_delta", text: "Then: " });
+  p.event({ type: "tool_call", call_id: "c9", name: "bash", args: { command: "false" }, summary: "false" });
+  p.event({ type: "tool_result", call_id: "c9", name: "bash", output: "exit 1", is_error: true });
+  const labels = [...p.doc.querySelectorAll(".tool-group-label")].map((n) => n.textContent);
+  assert.equal(labels.at(-1), "Ran 1 command · 1 issue");
+  assert.deepEqual(p.errors, []);
+});
+
 test("an agent page rebuilt from its step log never touches the live turn", async () => {
   const p = panel({ clock: false });
   p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });

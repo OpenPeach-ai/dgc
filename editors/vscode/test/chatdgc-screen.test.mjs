@@ -923,7 +923,8 @@ test("a reply that searches: what it looks for while it looks, its words with no
     // Web search is always there, and the box has no switch for it (reported 2026-10-18: "it anyway uses web, so
     // let's not confuse users"): the model looks things up when an answer depends on it. Settings turns it off.
     assert.equal(await s.page.locator("#cd-search, #cd-websearch, .cd-tools .codicon-globe").count(), 0, "no web switch in the box");
-    assert.deepEqual(await s.page.locator(".cd-tools .cd-tool").evaluateAll((tools) => tools.map((b) => b.getAttribute("aria-label"))),
+    // (The Output chip is a tool too, shown only to a backend that offers artifacts: test/artifact-chat.test.mjs.)
+    assert.deepEqual(await s.page.locator(".cd-tools .cd-tool").evaluateAll((tools) => tools.filter((b) => b.checkVisibility()).map((b) => b.getAttribute("aria-label"))),
                      ["Deep research", "Study"], "Deep research and Study stay");
     await s.page.locator("#cd-input").fill("Weather in Paris?");
     await s.page.keyboard.press("Enter");
@@ -1974,6 +1975,57 @@ test("what fills the window, in the meter's details: a bar a colour a part, each
   } finally { await s.page.close(); }
 });
 
+// Reported 28 Oct: opening the context window blanked the chat beside it. It sat in the footer's flow, so the footer grew
+// and its band covered the chat; it floats over the chat now, above the box, as main DGC's does.
+test("the context window floats over the chat: the chat keeps its height and shows beside the card", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ width: 900, height: 700 });
+  try {
+    const talk = [1, 2, 3, 4, 5, 6].map((n) => ({ id: M(n), role: n % 2 ? "user" : "assistant", finish: n % 2 ? undefined : "stop",
+      text: n % 2 ? `Question ${n}?` : "A long answer that runs across the whole column, line after line, ".repeat(6) }));
+    await s.send({ type: "opened", conversation: conversation(), messages: talk, earlier: 0, busy: false });
+    await s.send({ type: "context", window: 32768, limit: 262144, used: 9200, preset: "32k", source: "reported", parts: { conversation: 9200 }, compactable: true });
+    const chatHeight = () => s.page.evaluate(() => document.querySelector("main").getBoundingClientRect().height);
+    const before = await chatHeight();
+    await s.page.locator("#cd-context").click();
+    await s.frame();
+    assert.equal(await chatHeight(), before, "the chat doesn't shrink while the card is open");
+    const place = await s.page.evaluate(() => {
+      const card = document.querySelector("#cd-context-pop").getBoundingClientRect(), box = document.querySelector("#cd-box").getBoundingClientRect();
+      const beside = document.elementFromPoint(card.left - 160, card.top + card.height / 2);
+      return { chat: !!beside?.closest("#cd-log"), above: card.bottom <= box.top, right: Math.round(box.right - card.right) };
+    });
+    assert.equal(place.chat, true, "beside the card, the chat is still there");
+    assert.equal(place.above, true, "the card sits above the box");
+    assert.equal(place.right, 0, "its right edge lines up with the box's");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+// GitHub's CI runner failed "the tools too" above every time: a part opened a moment before the meter redraws (it redraws
+// as a reply streams in) was drawn folded again, since the toggle event that remembered it comes after the click.
+// Here both happen in one step, so it fails the same way on any machine without the fix (media/breakdown.js sync).
+test("a part opened the moment before the meter redraws stays open", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "hi" }, { id: M(2), role: "assistant", text: "Hello.", finish: "stop" }], earlier: 0, busy: false });
+    const context = (used) => ({ type: "context", window: 32768, limit: 262144, used, preset: "32k", source: "reported", parts: { conversation: used }, compactable: true });
+    await s.send(context(9200));
+    await s.page.locator("#cd-context").click();
+    await s.send({ type: "breakdown", conversation: ID, breakdown: { window: 32768, used: 9200, source: "reported", compact_at: 24576,
+      buffer: 8192, free: 15376, categories: [{ id: "tools", label: "Tools", tokens: 3100, items: [{ name: "make_file", tokens: 900 }] }] } });
+    await s.page.locator("#cd-context-pop .bd-toggle").click();
+    await s.page.evaluate((ev) => {
+      document.querySelector("#cd-context-pop details.bd-more").open = true;       // its toggle event comes later
+      window.dispatchEvent(new MessageEvent("message", { data: ev }));             // the meter redraws first
+    }, context(9300));
+    await s.frame();
+    assert.equal(await s.page.locator("#cd-context-pop .bd-item-name").first().isVisible(), true);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("the context window: a meter that warns early, Compact now, the summary in place, and a chat carried over", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -2225,6 +2277,33 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     assert.equal((await sends()).length, 2);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+test("a queued message with pasted attachments is returned for review after a reload", async (t) => {
+  if (skipOrFail(t)) return;
+  const first = await openScreen();
+  let saved;
+  try {
+    await first.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: true });
+    await first.send({ type: "attached", items: [{ kind: "image", name: "paste.png", data: "data:image/png;base64,aA==" },
+                                                   { kind: "text", name: "Pasted text", text: "long paste" }] });
+    await first.page.locator("#cd-input").fill("Use both attachments");
+    await first.page.locator("#cd-input").press("Enter");
+    saved = await first.page.evaluate(() => window.__state);
+    const entry = saved[`queue:${ID}`][0];
+    assert.deepEqual(entry.pending, [], "large paste data is kept out of webview state");
+    assert.equal(entry.lostAttachments, 2);
+  } finally { await first.page.close(); }
+  const second = await openScreen({ state: saved });
+  try {
+    await second.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: true });
+    assert.equal(await second.page.locator("#cd-queue").isHidden(), true);
+    assert.equal(await second.page.locator("#cd-input").inputValue(), "Use both attachments");
+    assert.match(await second.page.locator("#cd-notice").textContent(), /attach them again/);
+    await second.send({ type: "turn", state: "ended", replyId: M(2) });
+    assert.deepEqual(await second.posted("send"), [], "a changed message must not send itself after reload");
+    assert.deepEqual(second.errors, []);
+  } finally { await second.page.close(); }
 });
 
 test("a reply that read a plugin says so under it (Used Aave), as ChatGPT names the apps it used", async (t) => {

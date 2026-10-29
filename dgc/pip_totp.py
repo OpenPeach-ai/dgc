@@ -80,8 +80,10 @@ def parse_key(raw) -> dict:
 def valid_key(value) -> bool:
     """A stored key's shape (the sealed file is checked on every read)."""
     return (isinstance(value, dict) and set(value) == {"secret", "algorithm", "digits", "period"}
-            and isinstance(value["secret"], str) and re.fullmatch(r"[A-Z2-7]{16,}", value["secret"]) is not None
-            and value["algorithm"] in ALGORITHMS and type(value["digits"]) is int and 6 <= value["digits"] <= 8
+            and isinstance(value["secret"], str) and len(value["secret"]) <= MAX_KEY_TEXT
+            and re.fullmatch(r"[A-Z2-7]{16,}", value["secret"]) is not None
+            and isinstance(value["algorithm"], str) and value["algorithm"] in ALGORITHMS
+            and type(value["digits"]) is int and 6 <= value["digits"] <= 8
             and type(value["period"]) is int and 10 <= value["period"] <= 300)
 
 

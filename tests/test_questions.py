@@ -15,6 +15,17 @@ from dgc.llm import ToolCall
 from dgc.questions import format_result, normalize_questions, validate_response
 
 
+class QuestionInputBudgetTests(unittest.TestCase):
+    def test_oversized_model_options_stop_before_normalization(self):
+        from dgc import questions
+        with self.assertRaisesRegex(ValueError, "at most 6 options"):
+            normalize_questions({"question": "Pick", "options": ["Other"] * (questions.MAX_RAW_OPTIONS + 1)})
+
+    def test_oversized_selection_is_invalid(self):
+        questions = normalize_questions({"question": "Pick", "options": ["A", "B"]})
+        self.assertIsNone(validate_response(questions, {"answers": {"q1": {"selected": [0] * 1000}}}))
+
+
 def opt(label, description="", recommended=False):
     return {"label": label, "description": description, "recommended": recommended}
 

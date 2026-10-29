@@ -1,32 +1,99 @@
 /** Harness-side JSON Schema subset used for outputSchema. Unsupported keywords are rejected. */
+import { isDeepStrictEqual } from "node:util";
 
 const ALLOWED = new Set([
   "type", "properties", "required", "items", "enum", "additionalProperties",
   "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
   "description", "title", "default",
 ]);
+const TYPES = new Set(["object", "array", "string", "integer", "number", "boolean", "null"]);
+const COUNTS = ["minLength", "maxLength", "minItems", "maxItems"];
+const LIMITS = ["minimum", "maximum"];
 const JSON_FENCE = /```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```/;
 
 export function assertSupported(schema: unknown): void {
   if (!schema || typeof schema !== "object" || Array.isArray(schema) || !Object.keys(schema).length) {
     throw new Error("outputSchema must be a non-empty object");
   }
-  walk(schema);
+  walk(schema, new Set<object>(), 0);
 }
 
-function walk(node: unknown): void {
-  if (!node || typeof node !== "object" || Array.isArray(node)) return;
-  const record = node as Record<string, unknown>;
+function walk(node: unknown, ancestors: Set<object>, depth: number): void {
+  if (!node || typeof node !== "object" || Array.isArray(node) || depth > 64 || ancestors.has(node)) {
+    throw new Error("outputSchema must contain finite, acyclic schema objects");
+  }
+  ancestors.add(node);
+  try {
+    checkNode(node as Record<string, unknown>, ancestors, depth);
+  } finally {
+    ancestors.delete(node);
+  }
+}
+
+function checkNode(record: Record<string, unknown>, ancestors: Set<object>, depth: number): void {
   if ("$ref" in record || "$id" in record || "$schema" in record) {
     throw new Error("outputSchema must not use $ref, $id, or $schema");
   }
   for (const key of Object.keys(record)) {
     if (!ALLOWED.has(key)) throw new Error(`outputSchema has unsupported keyword: ${key}`);
   }
-  if (record.properties && typeof record.properties === "object") {
-    for (const child of Object.values(record.properties as Record<string, unknown>)) walk(child);
+  if ("type" in record) {
+    const types = Array.isArray(record.type) ? record.type : [record.type];
+    if (!types.length || types.some((kind) => typeof kind !== "string" || !TYPES.has(kind))) {
+      throw new Error("outputSchema type must name supported JSON types");
+    }
   }
-  if (record.items && typeof record.items === "object") walk(record.items);
+  if ("required" in record && (!Array.isArray(record.required) ||
+    record.required.some((key) => typeof key !== "string"))) {
+    throw new Error("outputSchema required must be an array of strings");
+  }
+  if ("enum" in record && (!Array.isArray(record.enum) || !record.enum.length)) {
+    throw new Error("outputSchema enum must be a non-empty array");
+  }
+  for (const key of ["enum", "default"]) {
+    if (key in record && !isJsonValue(record[key], new Set<object>(), 0)) {
+      throw new Error(`outputSchema ${key} must contain JSON values`);
+    }
+  }
+  for (const key of COUNTS) {
+    if (key in record && (!Number.isSafeInteger(record[key]) || (record[key] as number) < 0)) {
+      throw new Error(`outputSchema ${key} must be a non-negative integer`);
+    }
+  }
+  for (const key of LIMITS) {
+    if (key in record && (typeof record[key] !== "number" || !Number.isFinite(record[key]))) {
+      throw new Error(`outputSchema ${key} must be a finite number`);
+    }
+  }
+  for (const key of ["title", "description"]) {
+    if (key in record && typeof record[key] !== "string") {
+      throw new Error(`outputSchema ${key} must be a string`);
+    }
+  }
+  if ("properties" in record) {
+    if (!record.properties || typeof record.properties !== "object" || Array.isArray(record.properties)) {
+      throw new Error("outputSchema properties must be an object");
+    }
+    for (const child of Object.values(record.properties)) walk(child, ancestors, depth + 1);
+  }
+  if ("items" in record) walk(record.items, ancestors, depth + 1);
+  if ("additionalProperties" in record && typeof record.additionalProperties !== "boolean") {
+    walk(record.additionalProperties, ancestors, depth + 1);
+  }
+}
+
+function isJsonValue(value: unknown, ancestors: Set<object>, depth: number): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || depth > 64 || ancestors.has(value)) return false;
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return value.every((entry) => isJsonValue(entry, ancestors, depth + 1));
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+    return Object.values(value).every((entry) => isJsonValue(entry, ancestors, depth + 1));
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 export function extractJson(text: string): unknown {
@@ -53,7 +120,7 @@ export function validate(value: unknown, schema: Record<string, unknown>, path =
       return errors;
     }
   }
-  if ("enum" in schema && !((schema.enum as unknown[]) || []).includes(value)) {
+  if ("enum" in schema && !(schema.enum as unknown[]).some((entry) => isDeepStrictEqual(entry, value))) {
     errors.push(`${path} is not one of the allowed values`);
   }
   if (typeof value === "string") {
@@ -83,11 +150,11 @@ export function validate(value: unknown, schema: Record<string, unknown>, path =
       ? schema.properties as Record<string, Record<string, unknown>> : {};
     const required = Array.isArray(schema.required) ? schema.required as string[] : [];
     for (const key of required) {
-      if (!(key in record)) errors.push(`${path}.${key} is required`);
+      if (!Object.hasOwn(record, key)) errors.push(`${path}.${key} is required`);
     }
     const additional = schema.additionalProperties === undefined ? true : schema.additionalProperties;
     for (const [key, item] of Object.entries(record)) {
-      if (key in props) errors.push(...validate(item, props[key], `${path}.${key}`));
+      if (Object.hasOwn(props, key)) errors.push(...validate(item, props[key], `${path}.${key}`));
       else if (additional === false) errors.push(`${path}.${key} is not allowed`);
       else if (additional && typeof additional === "object") {
         errors.push(...validate(item, additional as Record<string, unknown>, `${path}.${key}`));

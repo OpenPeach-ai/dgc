@@ -9,6 +9,16 @@
   let listOpen = false;
   const partsOpen = new Set();
   const remember = (details, onToggle) => details.addEventListener("toggle", () => onToggle(details.open));
+  // What is open on screen now, read before drawing again. The toggle event comes a moment after the click that
+  // opened a part, and a redraw in that moment (the meter redraws as a reply streams in) drew it folded again: on
+  // a slow machine, every time.
+  function sync() {
+    for (const d of document.querySelectorAll("details.bd-more[data-part]")) {
+      if (d.open) partsOpen.add(d.dataset.part); else partsOpen.delete(d.dataset.part);
+    }
+    const shown = document.querySelector("details.bd-details");
+    if (shown) listOpen = shown.open;
+  }
   const fmt = (n) => {
     const v = Math.max(0, Number(n) || 0);
     if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
@@ -29,6 +39,7 @@
 
   /** The breakdown as an element. `b`: {window, used, categories, buffer, free, deferred?}. */
   function render(b) {
+    sync();
     const box = el("div", "bd");
     const size = Math.max(0, Number(b?.window) || 0);
     const parts = Array.isArray(b?.categories) ? b.categories : [];
@@ -55,6 +66,7 @@
       if (Array.isArray(c.items) && c.items.length) {
         // A part with things in it (tools, files): opened, each with its own tokens.
         const more = el("details", "bd-more");
+        more.dataset.part = String(c.id || "");
         more.open = partsOpen.has(c.id);
         remember(more, (open) => { if (open) partsOpen.add(c.id); else partsOpen.delete(c.id); });
         const summary = el("summary", "");

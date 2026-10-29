@@ -1,0 +1,12 @@
+{
+  "name": "tally",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "title": "Tally",
+  "description": "Counts the steps DGC takes this session: in the status bar, and by tool in a panel.",
+  "capabilities": {
+    "events": ["tool.call", "tool.result", "turn.complete"],
+    "draws": ["status", "pane"],
+    "commands": [{"name": "tally", "description": "Steps this session, by tool"}]
+  }
+}

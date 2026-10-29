@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
-import { mkdirSync } from "fs";
+import { mkdtempSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { CANVAS_DOC_VIEW, CanvasDocEditor } from "./canvasDoc";
@@ -8,6 +8,7 @@ import { tabIcon } from "./tabIcon";
 import { keepRunningAfterClose } from "./closingTab";
 import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
+import { ARTIFACT_ID, outputChoice, type Artifacts } from "./artifacts";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -40,7 +41,11 @@ const MAX_INLINE_CHARS = 3_000_000;
 /** What a tab may not do while another window's DGC writes to its chat: anything that changes the chat. */
 const READ_ONLY_REFUSES = new Set(["send", "continue", "edit", "regenerate", "version", "answer", "compact", "summary", "carry",
                                    "branch", "research", "researchStart", "steer", "stop", "draftEdit", "actionRun",
-                                   "actionHand", "actionDismiss", "widgetRemove"]);
+                                   "actionHand", "actionDismiss", "widgetRemove", "folderPick", "folderSet", "workBrief"]);
+/** A folder as the backend names one (chatdgc_folder): a full path, or "" for none. */
+const MAX_FOLDER_CHARS = 4096;
+/** Continue in Work's brief: the chat summarized (a model's words), for a Work prompt box. */
+const MAX_BRIEF_CHARS = 200_000;
 
 /** What ChatDGC needs of the side bar: its process, and its home's webview. */
 export interface ChatDGCHost {
@@ -68,6 +73,13 @@ export interface ChatDGCHost {
   /** Its process holds the chats this window shows, one window writing to a chat at a time, and moves one with
    *  Open here (ready.capabilities.detach.chatdgc_open_here, on a backend that opted in with set_detach_chatdgc). */
   chatdgcOpenHere?(): boolean;
+  /** Continue in Work: a Work session in `folder`, in a tab of its own, with `brief` in its prompt box, unsent. False
+   *  when it didn't open (the person said no to a folder outside the window's). */
+  openWork?(folder: string, brief: string): Promise<boolean>;
+  /** ChatDGC's own mods (surface "chat"): what its backend offers (ready.capabilities.mods), and a page's request of
+   *  them (media/mods.js), answered through `answer` when it couldn't be sent. */
+  chatdgcMods?(): { version: number; offers?: number } | undefined;
+  chatdgcModsSend?(message: Record<string, unknown>, answer: (ev: any) => void): boolean;
 }
 
 
@@ -97,6 +109,8 @@ interface Tab {
   elsewhere?: { state: "elsewhere" | "moved"; pid?: number; note?: HolderLine };
   /** Opened to be taken here at once (Settings › Running sessions › Open): its first ask is chatdgc_open_here. */
   take?: boolean;
+  /** The folder its chat reads, as the process last said (chatdgc_folder): where the picker starts next time. */
+  folder?: string;
 }
 
 type Asker = { tab?: Tab; home?: boolean; kind: string; project?: string; libraryPanel?: vscode.WebviewPanel; path?: string;
@@ -144,6 +158,13 @@ export const CHATDGC_WIDGET = "dgc.chatdgcWidget";
 export function isChatdgcEvent(ev: { type?: unknown; conversation_id?: unknown } | null | undefined): boolean {
   const type = typeof ev?.type === "string" ? ev.type : "";
   return type.startsWith("chatdgc_") || (type === "context_breakdown" && typeof ev?.conversation_id === "string" && !!ev.conversation_id);
+}
+
+/** ChatDGC's own mods' frames (surface "chat"), and the answers to its pages' requests of them (their request ids). */
+export function isChatdgcModsEvent(ev: { type?: unknown; surface?: unknown; request_id?: unknown } | null | undefined): boolean {
+  const type = typeof ev?.type === "string" ? ev.type : "";
+  if (["mods", "mod_ui", "mod_toast", "mod_offer"].includes(type)) return ev?.surface === "chat";
+  return (type === "mod_result" || type === "command_rejected") && String(ev?.request_id || "").startsWith("chatdgc-mods-");
 }
 
 /** ChatDGC's context window presets, as main DGC's sizes run (a backend offers the ones it takes). */
@@ -231,6 +252,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <title>ChatDGC</title></head><body class="cd-blank" data-katex="${attr(asset("dist/katex/katex.js"))}" data-katex-css="${attr(asset("dist/katex/katex.css"))}">
 <header class="cd-head"><span class="pm"><svg class="mk mk-chat" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-bubble" d="M5.5 2.5 H18.5 A4 4 0 0 1 22.5 6.5 V13.5 A4 4 0 0 1 18.5 17.5 H11 L6 21.5 V17.5 H5.5 A4 4 0 0 1 1.5 13.5 V6.5 A4 4 0 0 1 5.5 2.5 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><g class="mk-slashes" transform="translate(6.53 4.53) scale(0.4560)" fill="currentColor"><path d="M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z"/><path d="M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z"/><path d="M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"/></g></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
 <button type="button" id="cd-widgets" class="cd-head-btn" title="This chat's widgets" aria-label="Widgets in this chat" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-play-circle" aria-hidden="true"></span><span class="cd-head-btn-label">Widgets</span><span id="cd-widgets-count" class="cd-head-btn-count"></span></button>
+<button type="button" id="cd-work" class="cd-head-btn cd-work" data-changes="1" hidden><span id="cd-work-icon" class="codicon codicon-arrow-right" aria-hidden="true"></span><span id="cd-work-label" class="cd-head-btn-label">Continue in Work</span></button>
 <button type="button" id="cd-keys-open" class="cd-icon" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts"><span class="codicon codicon-keyboard" aria-hidden="true"></span></button>
 <button type="button" id="cd-menu" class="cd-icon" title="Rename, pin, archive, export or delete" aria-label="Chat options" hidden><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>
 <button type="button" id="cd-new" class="cd-icon" title="New chat" aria-label="New chat"><span class="codicon codicon-edit" aria-hidden="true"></span></button></header>
@@ -243,6 +265,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-elsewhere" class="elsewhere-bar" role="status" hidden><span class="codicon codicon-multiple-windows" aria-hidden="true"></span><span id="cd-elsewhere-text" class="elsewhere-text"></span><button type="button" id="cd-elsewhere-open" class="act primary" title="Carry on with this chat in this window; the other window shows it read-only">Open here</button></div>
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
 <div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
+<div id="cd-mod-strip" class="mod-strip" hidden></div>
 <form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
 <textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
 <div class="cd-tools">
@@ -251,6 +274,8 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <option value="off">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select></span>
 <button type="button" id="cd-research" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Deep research" title="Deep research: a plan to check, then many sources read, then a report with checked citations"><span class="codicon codicon-telescope" aria-hidden="true"></span><span class="cd-tool-label">Deep research</span></button>
 <button type="button" id="cd-study" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Study" title="Study: it teaches you step by step, asks you questions and quizzes you, instead of handing over answers. It stays on in this chat until you turn it off"><span class="codicon codicon-mortar-board" aria-hidden="true"></span><span class="cd-tool-label">Study</span></button>
+<span class="cd-output" id="cd-output-wrap" hidden><button type="button" id="cd-output" class="cd-tool" data-changes="1" aria-haspopup="menu" aria-expanded="false" aria-pressed="false" aria-label="Output: Auto. The model picks" title="Output: what the next reply should make. Auto lets the model pick"><span id="cd-output-icon" class="codicon codicon-output" aria-hidden="true"></span><span id="cd-output-label" class="cd-tool-label">Output</span></button><span id="cd-output-menu" class="cd-output-menu" role="menu" aria-label="Output" hidden></span></span>
+<span class="cd-output cd-folder" id="cd-folder-wrap" hidden><button type="button" id="cd-folder" class="cd-tool" data-changes="1" aria-pressed="false" aria-label="Folder: give this chat a folder to read" title="Folder: give this chat a folder to read. It reads the files there and never changes them"><span id="cd-folder-icon" class="codicon codicon-folder" aria-hidden="true"></span><span id="cd-folder-label" class="cd-tool-label">Folder</span></button><span id="cd-folder-menu" class="cd-output-menu cd-folder-menu" role="menu" aria-label="Folder" hidden></span></span>
 <label id="cd-temp-toggle" class="cd-toggle" title="Temporary: this chat isn't saved or listed"><input type="checkbox" id="cd-temporary" aria-label="Temporary chat" data-changes="1"><span class="codicon codicon-comment-draft cd-toggle-icon" aria-hidden="true"></span><span class="cd-tool-label">Temporary</span></label>
 <span class="cd-spacer"></span>
 <div class="cd-tools-end"><button type="button" id="cd-context" class="cd-meter" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-pie-chart" aria-hidden="true"></span><span id="cd-context-pct">0%</span></button>
@@ -266,7 +291,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -280,6 +305,7 @@ export function libraryDocument(asset: (name: string) => string, cspSource: stri
 <div id="lib-views" class="lib-views" role="tablist" aria-label="Show" hidden></div>
 <p id="lib-about" class="lib-about">Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.</p>
 <div id="lib-origins" class="lib-kinds" role="toolbar" aria-label="Show files" hidden></div>
+<div id="lib-made" class="lib-kinds" role="toolbar" aria-label="Where it was made" hidden></div>
 <div id="lib-kinds" class="lib-kinds" role="toolbar" aria-label="Show"></div>
 <p id="lib-status" class="lib-status" role="status"></p>
 <ul id="lib-list" class="lib-list" aria-label="Your files" role="tabpanel"></ul>
@@ -306,9 +332,82 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   /** The chats this window's tabs show, as last said to its process (chatdgc_shown); "" after a new process. */
   private shownSaid = "";
 
+  private artifacts?: Artifacts;
+
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   attach(host: ChatDGCHost): void { this.host = host; }
+
+  /** Artifacts (artifacts.ts): a reply's cards open and export them, the Library lists them, and every one of them
+   *  hears when one changes (a model's edit, the user's in its panel, a Pip's). */
+  useArtifacts(hub: Artifacts): void {
+    this.artifacts = hub;
+    hub.listen((message) => {
+      if (message.type === "artifactsOffered") {
+        for (const tab of this.tabs) this.post(tab, { type: "artifacts", offered: message.offered ?? null });
+        if (this.library) void this.library.webview.postMessage({ type: "artifactsOffered", on: !!message.offered });
+        return;
+      }
+      if (message.type === "artifactChanged") {
+        for (const tab of this.tabs) this.post(tab, { type: "artifactChanged", artifact: message.artifact, op: message.op });
+        if (this.library) void this.library.webview.postMessage({ type: "artifactChanged", artifact: message.artifact, op: message.op });
+      }
+    });
+  }
+
+  /** The artifacts the process offers (ready.capabilities.artifacts), or undefined. */
+  private artifactsOffer() { return this.artifacts?.offers(); }
+
+  /** A folder the chat reads, and Continue in Work (ready.capabilities.chatdgc.folder): nothing of it is asked of a
+   *  process that doesn't offer it. */
+  private folderOffered(): boolean {
+    try { return Number(this.host?.chatdgcOffers?.()?.folder) >= 1; } catch { return false; }
+  }
+
+  /** Which folder a tab's chat reads: asked as it opens, since a chat's summary doesn't carry it. */
+  private askFolder(tab: Tab): void {
+    if (!this.folderOffered() || !CONVERSATION_ID.test(tab.conversation)) return;
+    this.ask({ tab, kind: "folderGet" }, { type: "chatdgc_folder", conversation_id: tab.conversation });
+  }
+
+  /** The Folder chip: VS Code's own folder picker (at the chat's folder, else the window's first), then the chat reads
+   *  what was chosen. The page never names a path itself, so it can never point the chat anywhere the person didn't. */
+  private async pickFolder(tab: Tab): Promise<void> {
+    const conversation = tab.conversation;
+    if (!this.folderOffered() || !CONVERSATION_ID.test(conversation)) {
+      this.post(tab, { type: "folderError", message: this.folderOffered() ? "Wait for the chat to open, then choose its folder."
+                                                                           : "This DGC can't give a chat a folder. Run “DGC: Update CLI”, then try again." });
+      return;
+    }
+    const start = tab.folder || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    let picked: readonly vscode.Uri[] | undefined;
+    try {
+      picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+                                                    ...(start ? { defaultUri: vscode.Uri.file(start) } : {}),
+                                                    openLabel: "Use this folder", title: "A folder this chat reads (it never changes it)" });
+    } catch { picked = undefined; }
+    if (!this.tabs.has(tab)) return;
+    const path = picked?.[0]?.fsPath || "";
+    if (!path || path.length > MAX_FOLDER_CHARS || tab.conversation !== conversation) { this.post(tab, { type: "folderPicked", cancelled: true }); return; }
+    this.ask({ tab, kind: "folderSet" }, { type: "chatdgc_set_folder", conversation_id: conversation, folder: path });
+  }
+
+  /** Continue in Work, its brief written: the Work session opens in the folder with the brief in its box, unsent, and
+   *  the chat it came from says where it went. */
+  private async continueInWork(tab: Tab | undefined, folder: string, brief: string): Promise<void> {
+    let opened = false, failed = "";
+    try {
+      if (!this.host?.openWork) failed = "This window can't open a Work session.";
+      else opened = await this.host.openWork(folder, brief);
+    } catch (err: any) { failed = String(err?.message || err || "it didn't open"); }
+    if (tab && this.tabs.has(tab)) this.post(tab, { type: "workOpened", folder, opened, ...(failed ? { message: failed } : {}) });
+  }
+
+  /** What every artifact in this list is now (for a reply's cards after a reload): removed ones aren't listed. */
+  private async artifactViews(post: (message: Record<string, unknown>) => void): Promise<void> {
+    if (!this.artifacts || !this.artifactsOffer()) return;
+    try { post({ type: "artifactViews", items: await this.artifacts.list() }); } catch { /* the cards stay as the reply left them */ }
+  }
 
   register(): vscode.Disposable {
     const chats = vscode.window.registerWebviewPanelSerializer(CHATDGC_EDITOR, this);
@@ -318,6 +417,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     // A document canvas opens formatted (Canvas option B), over the same file the Markdown editor opens.
     this.canvasDocs = new CanvasDocEditor(this.context.extensionUri, {
       canvasOf: (path) => this.canvasOf(path),
+      artifactOf: (path) => this.artifacts?.docAt(path),
+      artifactVersions: (id) => this.artifacts?.docVersions(id),
+      artifactExport: (id) => this.artifacts?.docExport(id),
+      artifactBrowser: (id) => this.artifacts?.openInBrowser({ id, title: this.artifacts?.title(id) ?? "this document" }),
       canvasAskAbout: (conversation, canvas, text, start, end) => this.canvasAskAbout(conversation, canvas, text, start, end),
       canvasShortcut: () => this.canvasShortcut(),
     });
@@ -372,7 +475,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   private library?: vscode.WebviewPanel;
   private libraryView = "";
 
-  /** The Library, in a tab of its own (one at a time); `view` "widgets" opens it on its Widgets tab. */
+  /** The Library, in a tab of its own (one at a time); `view` "widgets" or "artifacts" opens it on that tab. */
   openLibrary(view = ""): void {
     // Shown again, it asks again: a file attached or made since is there (it keeps its filters).
     if (this.library) {
@@ -629,7 +732,32 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     const ref = this.libraryRef(message?.file);
     const widget = message?.widget && WIDGET_ID.test(String(message.widget.id || "")) && CONVERSATION_ID.test(String(message.widget.chat_id || ""))
       ? { id: String(message.widget.id), chat: String(message.widget.chat_id), title: widgetName(message.widget.title) } : undefined;
+    const artifact = message?.artifact && ARTIFACT_ID.test(String(message.artifact.id || "")) ? message.artifact : undefined;
     switch (message?.type) {
+      case "artifactList": {
+        if (!this.artifacts || !this.artifactsOffer()) { void panel.webview.postMessage({ type: "artifactsOffered", on: false }); return; }
+        try { void panel.webview.postMessage({ type: "artifacts", items: await this.artifacts.list() }); }
+        catch (err: any) { void panel.webview.postMessage({ type: "error", message: `Your artifacts couldn't be listed: ${String(err?.message || err)}` }); }
+        return;
+      }
+      case "artifactOpen":
+        if (artifact) this.artifacts?.open(String(artifact.id), { type: String(artifact.type || ""), title: String(artifact.title || ""),
+                                                                   ...(typeof artifact.file === "string" ? { file: artifact.file } : {}) });
+        return;
+      case "artifactExport":
+        if (artifact && typeof message.format === "string") {
+          void this.artifacts?.exportArtifact({ id: String(artifact.id), title: String(artifact.title || "artifact").slice(0, 200), type: String(artifact.type || ""),
+                                                exports: Array.isArray(artifact.exports) ? artifact.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format);
+        }
+        return;
+      case "artifactRemove":
+        if (artifact && this.artifacts) {
+          // Asked first, in VS Code's own words: it goes to DGC's trash, so it can be recovered.
+          if (await this.artifacts.remove({ id: String(artifact.id), title: String(artifact.title || "this artifact").slice(0, 120) })) {
+            void panel.webview.postMessage({ type: "artifactRemoved", id: String(artifact.id) });
+          }
+        }
+        return;
       case "widgets": {
         void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
         if (!this.widgetLibrary()) return;
@@ -658,6 +786,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "ready":
         void panel.webview.postMessage({ type: "widgetsOffered", on: this.widgetLibrary() });
+        void panel.webview.postMessage({ type: "artifactsOffered", on: !!this.artifactsOffer() });
         if (this.libraryView) { void panel.webview.postMessage({ type: "view", view: this.libraryView }); this.libraryView = ""; }
         // falls through: the files are asked for as a list is
       case "list": {
@@ -941,6 +1070,14 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     if (this.host) this.homeRefresh();
     // A tab that loaded before the backend was up was told of no window sizes: now it knows them.
     for (const tab of this.tabs) this.post(tab, { type: "windows", presets: this.windowPresets() });
+    for (const tab of this.tabs) this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
+    // A new process's mods: each tab asks for them again.
+    for (const tab of this.tabs) this.modsReady(tab);
+    // And whether a chat can have a folder: a tab already open asks its chat's folder of this process.
+    for (const tab of this.tabs) {
+      this.post(tab, { type: "folderOffered", on: this.folderOffered() });
+      if (tab.opened && !tab.held.some((cmd) => cmd.type === "chatdgc_open")) this.askFolder(tab);
+    }
     this.restoreWidgets();
   }
 
@@ -968,6 +1105,18 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     }).then((keep) => {
       if (!keep && this.answering.has(conversation)) this.host?.chatdgcSend({ type: "chatdgc_cancel", conversation_id: conversation });
     }, () => { /* no answer: it goes on, as a dismissed question leaves it */ });
+  }
+
+  /** ChatDGC's own mods are the process's, one set for every chat: each tab draws them (media/mods.js) and keeps
+   *  only the answers to its own requests. */
+  onModsEvent(ev: any): void {
+    for (const tab of this.tabs) this.post(tab, { type: "modsEvent", event: ev });
+  }
+
+  /** What each tab is told of its mods: whether there are any here, and whether DGC asks about the ones it writes. */
+  private modsReady(tab: Tab): void {
+    const offered = this.host?.chatdgcMods?.();
+    this.post(tab, { type: "modsReady", capabilities: offered ? { mods: offered } : {} });
   }
 
   /** Every chatdgc_* event the side bar's process sends. */
@@ -1053,6 +1202,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           tab.summary = ev.conversation;
           this.post(tab, { type: "opened", conversation: ev.conversation, messages: ev.messages, earlier: ev.earlier,
                            busy: ev.busy === true, replyId: typeof ev.reply_id === "string" ? ev.reply_id : "", keep: true });
+          this.askFolder(tab);                 // changed in the window that had it, perhaps
           return;
         }
         if (asker?.kind === "fork" || asker?.kind === "version") {
@@ -1069,6 +1219,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (!asker?.tab) return;
         this.requests.delete(requestId);
         const tab = asker.tab;
+        if (tab.conversation !== String(ev.conversation?.id || "")) tab.folder = undefined;
         tab.conversation = String(ev.conversation?.id || "");
         tab.temporary = ev.conversation?.temporary === true;
         tab.summary = ev.conversation;
@@ -1081,8 +1232,35 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                          ...(ev.project && typeof ev.project === "object" ? { project: ev.project } : {}) });
         if (waitingAttach.length) this.attachLibrary(tab, waitingAttach);
         for (const waiting of tab.waitingSend?.splice(0) || []) this.post(tab, waiting);
+        this.askFolder(tab);
         this.sayShown();
         this.homeChanged();
+        return;
+      }
+      case "chatdgc_folder": {
+        // Asked, or changed (here or in another tab on the chat): every tab on it shows the folder it reads now.
+        if (asker) this.requests.delete(requestId);
+        if (!CONVERSATION_ID.test(conversation) || typeof ev.folder !== "string" || ev.folder.length > MAX_FOLDER_CHARS) return;
+        const set = asker?.kind === "folderSet" ? asker.tab : undefined;
+        for (const tab of allShowing(conversation)) {
+          tab.folder = ev.folder;
+          this.post(tab, { type: "folder", conversation, folder: ev.folder, ...(tab === set ? { mine: true } : {}) });
+        }
+        return;
+      }
+      case "chatdgc_work_brief": {
+        // Continue in Work: the brief is written. Every tab on the chat stops showing it being written; the Work
+        // session opens in the folder with the brief in its box, and nothing runs until the person sends it.
+        if (asker) this.requests.delete(requestId);
+        for (const tab of allShowing(conversation)) this.post(tab, { type: "briefing", on: false });
+        if (asker?.kind !== "workBrief") return;
+        const folder = typeof ev.folder === "string" ? ev.folder : "";
+        const brief = typeof ev.brief === "string" ? ev.brief.slice(0, MAX_BRIEF_CHARS) : "";
+        if (!folder || folder.length > MAX_FOLDER_CHARS || !brief.trim()) {
+          if (asker.tab) this.post(asker.tab, { type: "workOpened", folder, opened: false, message: "DGC wrote no brief. Try Continue in Work again." });
+          return;
+        }
+        void this.continueInWork(asker.tab, folder, brief);
         return;
       }
       case "chatdgc_library": {
@@ -1287,11 +1465,16 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           });
         }
         return;
-      case "chatdgc_activity":
+      case "chatdgc_activity": {
+        // Continue in Work's brief is written in the chat's turn slot, which says "compacting" as Compact now does:
+        // its own request's activity is the brief being written, not earlier messages being summarized.
+        const briefing = typeof ev.message_id === "string" && this.requests.get(ev.message_id)?.kind === "workBrief";
         for (const tab of showing(conversation)) {
-          this.post(tab, { type: "activity", messageId: ev.message_id, kind: ev.kind, text: String(ev.text || "") });
+          this.post(tab, briefing ? { type: "briefing", on: true }
+                                  : { type: "activity", messageId: ev.message_id, kind: ev.kind, text: String(ev.text || "") });
         }
         return;
+      }
       case "chatdgc_changed":
         for (const tab of allShowing(conversation)) {
           if (ev.summary) { tab.summary = { ...tab.summary, ...ev.summary }; tab.panel.title = chatTitle(ev.summary.title); }
@@ -1307,6 +1490,15 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         if (waiting) { this.createWaiting.delete(requestId); waiting(""); }
         if (asker?.kind === "widgetRestore") { asker.widgetPanel?.dispose(); return; }       // deleted since: no tab
         if (asker?.kind === "breakdown") return;          // the details show the meter's own lines instead
+        if (asker?.kind === "folderGet") return;          // its chip shows no folder
+        if (asker?.kind === "folderSet") { if (asker.tab) this.post(asker.tab, { type: "folderError", message }); return; }
+        if (asker?.kind === "workBrief") {
+          // No brief (no folder any more, nothing sent yet, the model failed, or Stop): every tab stops showing it
+          // being written, and the tab that asked says why.
+          for (const tab of allShowing(conversation)) this.post(tab, { type: "briefing", on: false, ...(tab === asker.tab ? { error: message } : {}) });
+          if (asker.tab && !allShowing(conversation).includes(asker.tab)) this.post(asker.tab, { type: "briefing", on: false, error: message });
+          return;
+        }
         if (asker?.libraryPanel) { void asker.libraryPanel.webview.postMessage({ type: "error", message }); return; }
         if (asker?.kind === "libraryRecent") { this.recentWaiting.shift()?.([]); return; }
         if (asker && !asker.tab && asker.kind !== "list") { void vscode.window.showErrorMessage(message); return; }
@@ -1360,8 +1552,46 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         try { favicons = vscode.workspace.getConfiguration("dgc").get<boolean>("linkFavicons", true) !== false; } catch { /* default */ }
         this.post(tab, { type: "favicons", on: favicons });
         this.post(tab, { type: "windows", presets: this.windowPresets() });
+        this.post(tab, { type: "artifacts", offered: this.artifactsOffer() ?? null });
+        this.post(tab, { type: "folderOffered", on: this.folderOffered() });
+        this.modsReady(tab);
         return;
       }
+      case "mods":
+        // A request of ChatDGC's mods from this page: the extension host checks it and sends it with surface "chat".
+        this.host?.chatdgcModsSend?.(message, (ev) => this.post(tab, { type: "modsEvent", event: ev }));
+        return;
+      case "folderPick":
+        void this.pickFolder(tab);
+        return;
+      case "folderSet":
+        // Only taking the folder away comes from the page: a folder itself comes from VS Code's picker (folderPick).
+        if (message.folder !== "" || !this.folderOffered() || !CONVERSATION_ID.test(conversation)) return;
+        this.ask({ tab, kind: "folderSet" }, { type: "chatdgc_set_folder", conversation_id: conversation, folder: "" });
+        return;
+      case "workBrief":
+        // Continue in Work: a brief of this chat for a Work session in its folder (a model call; it can take a while).
+        if (!this.folderOffered() || !CONVERSATION_ID.test(conversation)) {
+          this.post(tab, { type: "briefing", on: false, error: "This DGC can't continue a chat in Work. Run “DGC: Update CLI”, then try again." });
+          return;
+        }
+        this.ask({ tab, kind: "workBrief" }, { type: "chatdgc_work_brief", conversation_id: conversation });
+        return;
+      case "artifactViews":
+        void this.artifactViews((m) => this.post(tab, m));
+        return;
+      case "artifactOpen":
+        if (typeof message.id === "string" && ARTIFACT_ID.test(message.id)) {
+          this.artifacts?.open(message.id, { type: typeof message.artifactType === "string" ? message.artifactType : undefined,
+                                             title: typeof message.title === "string" ? message.title.slice(0, 200) : undefined });
+        }
+        return;
+      case "artifactExport":
+        if (typeof message.id === "string" && ARTIFACT_ID.test(message.id) && typeof message.format === "string" && typeof message.artifactType === "string") {
+          void this.artifacts?.exportArtifact({ id: message.id, title: String(message.title || "artifact").slice(0, 200), type: message.artifactType,
+                                                exports: Array.isArray(message.exports) ? message.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format);
+        }
+        return;
       case "pluginLogos": {
         // The logos of the plugins replies used ("Used [logo] Aave"), by id; "" for one with none (it shows a plug).
         const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
@@ -1388,6 +1618,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       case "reopenNew":                      // the chat it held is gone (a temporary one after a restart)
       case "newChat":
         tab.conversation = "";
+        tab.folder = undefined;
         tab.summary = undefined;
         tab.temporary = message.temporary === true;
         tab.project = undefined;
@@ -1438,10 +1669,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         }
         return;
       case "dropped": {
-        // Dropped from VS Code's Explorer or the system's file manager: as good as picked, with one guard a picker
-        // doesn't need. A drop names its files in the page, so a page could name any file; nothing inside a
-        // hidden folder (~/.ssh, ~/.dgc, a project's .git) goes by drop. The picker can still choose one.
-        const items = [];
+        // A webview can name arbitrary file URIs in a forged drop message. Confirm the exact paths in VS Code
+        // before they become picked attachments; hidden folders are still reserved for the file picker.
+        const items: { kind: string; path: string; name: string; size: number }[] = [];
         for (const raw of (Array.isArray(message.uris) ? message.uris : []).slice(0, MAX_ATTACHMENTS)) {
           let uri: vscode.Uri;
           try { uri = vscode.Uri.parse(String(raw), true); } catch { continue; }
@@ -1449,11 +1679,17 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           let stat: vscode.FileStat;
           try { stat = await vscode.workspace.fs.stat(uri); } catch { continue; }
           if (stat.type !== vscode.FileType.File) continue;
-          tab.picked.add(uri.fsPath);
           items.push({ kind: "file", path: uri.fsPath, name: uri.path.split("/").pop() || "file", size: stat.size });
         }
-        if (items.length) this.post(tab, { type: "attached", items });
-        else this.post(tab, { type: "error", message: "Those can't be attached here. Use the paperclip to choose a file." });
+        if (!items.length) {
+          this.post(tab, { type: "error", message: "Those can't be attached here. Use the paperclip to choose a file." });
+          return;
+        }
+        const choice = await vscode.window.showWarningMessage("Attach these dropped files to ChatDGC?",
+          { modal: true, detail: items.map((item) => item.path).join("\n") }, "Attach");
+        if (choice !== "Attach" || !this.tabs.has(tab)) return;
+        for (const item of items) tab.picked.add(item.path);
+        this.post(tab, { type: "attached", items });
         return;
       }
       case "send": {
@@ -1474,6 +1710,8 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
                                           ...(search ? { search } : {}),
+                                          // The Output chip: a choice other than Auto, to a process that offers artifacts.
+                                          ...(outputChoice(message.output, this.artifactsOffer()) ? { output: outputChoice(message.output, this.artifactsOffer()) } : {}),
                                           ...(typeof message.study === "boolean" ? { study: message.study } : {}),
                                           // Spoken in voice mode, on a backend that knows it: the reply is to sound like speech.
                                           ...(message.voice === true && this.host?.chatdgcOffers?.()?.voice_replies === 1 ? { voice: true } : {}),
@@ -1632,8 +1870,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           this.ask({ tab, kind: "fileSave" }, { ...ref, path: target.fsPath });
           return;
         }
-        const dir = join(tmpdir(), "dgc-chatdgc-files", fileId);
-        try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { return; }
+        // A fresh private directory cannot be replaced by a pre-planted /tmp symlink before the backend writes.
+        let dir: string;
+        try { dir = mkdtempSync(join(tmpdir(), "dgc-chatdgc-file-")); } catch { return; }
         const path = join(dir, name);
         this.ask({ tab, kind: "fileOpen", path }, { ...ref, path });
         return;

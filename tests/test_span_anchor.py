@@ -1,21 +1,21 @@
 """An edit that swaps a whole region must not do it from a stale read.
 
-`edit_file` matches in seven tiers. Six of them patch what is actually in the file, and they were
+`edit_file` matches in seven tiers. Five of them patch what is actually in the file, and they were
 measured against a colleague's concurrent change:
 
     exact / normalized quotes / normalized line endings -> splice a located string; nothing to lose
     corroborated line drift  -> the colleague's line SURVIVED (the tier re-checks it)
-    block anchor             -> refused outright
+    block anchor             -> can overwrite two or more drifted interior lines
     elision                  -> the colleague's inserted line was GONE, reported as a clean success
 
-The elision tier anchors on a head and a tail and replaces everything between them with `new`. When
+The elision and block-anchor tiers replace bounded regions with `new`. When
 `new` was composed from a read taken before someone else wrote the file, whatever arrived in between
 is deleted, the tool reports "1 replacement(s)", and nothing tells anyone.
 
-So the guard is deliberately narrow: only the tier that replaces a region, and only when the file
+So the guard is deliberately narrow: only tiers that replace a region, and only when the file
 moved since the model read it. Widening it to the tiers proven safe above would buy nothing and
 refuse legitimate edits. `write_file` already refuses wholesale on the same signal
-(`tests/test_write_staleness.py`); this is the same rule for the one edit path that behaves like a
+(`tests/test_write_staleness.py`); this is the same rule for edit paths that behave like a
 wholesale write.
 """
 from __future__ import annotations
@@ -58,6 +58,19 @@ ELIDED_NEW = ("def setup(trace=False):\n    connect()\n    warm_cache()\n"
 
 
 class AnElidedEditIsRefusedAfterAForeignWriteTest(unittest.TestCase):
+    def test_block_anchor_preserves_two_concurrent_interior_changes(self) -> None:
+        original = ("def setup():\n    connect()\n    warm_cache()\n"
+                    "    prime_index()\n    audit()\n    finalize()\n    return True\n")
+        path, ctx = project(original)
+        run("read_file", {"path": "h.py"}, ctx)
+        changed = original.replace("warm_cache()", "warm_cache_new()")
+        changed = changed.replace("prime_index()", "prime_index_new()")
+        path.write_text(changed, encoding="utf-8")
+        result = run("edit_file", {"path": "h.py", "old_string": original,
+                                   "new_string": original.replace("def setup():", "def setup(trace=False):")}, ctx)
+        self.assertIn("changed after you read it", result)
+        self.assertEqual(path.read_text(encoding="utf-8"), changed)
+
     def test_the_measured_loss_case_now_refuses(self) -> None:
         path, ctx = project()
         run("read_file", {"path": "h.py"}, ctx)
@@ -151,7 +164,7 @@ class EverythingElseStillAppliesTest(unittest.TestCase):
 
 class TheGuardIsNarrowOnPurposeTest(unittest.TestCase):
     def test_only_the_region_replacing_tier_is_guarded(self) -> None:
-        self.assertEqual(set(tools._SPAN_REPLACING_TIERS), {"elision"},
+        self.assertEqual(set(tools._SPAN_REPLACING_TIERS), {"elision", "block anchor"},
                          "the other tiers were measured preserving a concurrent change; guarding "
                          "them would refuse legitimate edits and buy nothing")
 

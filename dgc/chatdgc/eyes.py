@@ -31,6 +31,13 @@ class Eyes:
     def __init__(self, engine):
         self.engine = engine
         self._cache: dict[str, tuple[float, dict | None]] = {}
+        self._settings_signature = None
+
+    def _signature(self):
+        config = self.engine.config
+        return (config.base_url, config.api_key, config.model, config.get("api_mode", "auto"),
+                config.get("subagent_model", ""), config.get("subagent_base_url", ""),
+                config.get("subagent_api_key", ""), config.get("subagent_api_mode", ""))
 
     def _candidates(self, chat_model: str):
         config = self.engine.config
@@ -58,6 +65,10 @@ class Eyes:
     def route(self, chat_model: str, cancel=None) -> dict | None:
         """The first model that can see, for a chat whose own model can't (None: none can)."""
         from ..vision import has_vision
+        signature = self._signature()
+        if signature != self._settings_signature:
+            self._cache.clear()
+            self._settings_signature = signature
         now = time.monotonic()
         cached = self._cache.get(chat_model)
         if cached is not None and now - cached[0] < ROUTE_TTL_S:

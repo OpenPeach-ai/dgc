@@ -10,6 +10,14 @@ from tests import test_pip_app_actions as fixtures
 
 
 class AttentionTests(unittest.TestCase):
+    def test_malformed_saved_card_payload_does_not_break_attention(self):
+        for kind, value in (("email", {"message": []}), ("event", {"event": []}),
+                            ("action", {"action": [], "call": []})):
+            with self.subTest(kind=kind):
+                title, detail = pip_attention._what(kind, value)
+                self.assertIsInstance(title, str)
+                self.assertIsInstance(detail, str)
+
     setUp = fixtures.AppActionTests.setUp
     prepare_source = fixtures.AppActionTests.prepare_source
 

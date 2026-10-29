@@ -1,11 +1,14 @@
 """Canvas (ChatGPT's), as a real file beside the chat: the model makes and changes it with exact edits, the user edits
 the file in their editor, and the model reads it fresh every turn. Every change is a version, the user's too."""
 import io
+import json
+import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from dgc.chatdgc import canvas as chat_canvas
 from dgc.chatdgc.engine import LOOK_UP, ChatEngine
@@ -48,6 +51,28 @@ class Store(unittest.TestCase):
         self.assertEqual(everywhere["text"].count("### Day"), 2)
         with self.assertRaisesRegex(chat_canvas.CanvasError, "change nothing"):
             self.canvases.edit(CHAT, view["id"], content=everywhere["text"])
+
+    def test_canvas_edits_and_saved_paths_stay_within_the_canvas(self):
+        view = self.canvases.create(CHAT, title="Plan", kind="document", language="", content="x")
+        with mock.patch.object(chat_canvas, "MAX_CHARS", 1000), self.assertRaisesRegex(
+                chat_canvas.CanvasError, "at most 1,000 characters"):
+            chat_canvas.apply_edits("x" * 1000, [{"find": "x", "replace": "xx", "all": True}])
+        meta_path = Path(view["path"]).parent / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta_path.write_text(json.dumps({**meta, "file": "../outside.txt"}))
+        with self.assertRaises(chat_canvas.CanvasError):
+            self.canvases.get(CHAT, view["id"], text=True)
+        meta_path.write_text(json.dumps(meta))
+        outside = meta_path.parent.parent / "outside.txt"
+        outside.write_text("private")
+        old_temp = meta_path.parent / f".{Path(view['path']).name}.{os.getpid()}.tmp"
+        old_temp.symlink_to(outside)
+        self.canvases.edit(CHAT, view["id"], content="safe")
+        self.assertEqual(outside.read_text(), "private")
+        Path(view["path"]).unlink()
+        Path(view["path"]).symlink_to(outside)
+        with self.assertRaises(chat_canvas.CanvasError):
+            self.canvases.get(CHAT, view["id"], text=True)
 
     def test_the_users_own_edits_are_a_version_before_the_models_and_any_version_comes_back(self):
         view = self.canvases.create(CHAT, title="Plan", kind="document", language="", content=PLAN)

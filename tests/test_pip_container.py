@@ -143,6 +143,14 @@ class ToolTests(unittest.TestCase):
 
 
 class SetupTests(FakeContainerTests):
+    def test_malformed_progress_counts_do_not_break_status(self):
+        path = self.base / "dgc-desktop" / "status.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"tag": pip_container.tag(), "state": "failed",
+                                    "done": "many", "total": -3, "error": "retry"}))
+        current = pip_container.status()
+        self.assertEqual((current["state"], current["done"], current["total"]), ("failed", 0, 0))
+
     def test_setting_up_starts_the_service_builds_the_image_and_says_chrome(self):
         self.assertEqual(pip_container.status()["state"], "none")
         self.assertTrue(pip_container.due())

@@ -256,11 +256,12 @@ class Notifier:
         row = registry.db.execute("SELECT value FROM metadata WHERE key=?", (SEEN_KEY,)).fetchone()
         try:
             value = json.loads(row[0]) if row else {}
-        except ValueError:
+        except (TypeError, ValueError):
             value = {}
-        return {"alerts": [i for i in value.get("alerts", []) if isinstance(i, str)],
-                "reviews": [i for i in value.get("reviews", []) if isinstance(i, str)],
-                "ran": [i for i in value.get("ran", []) if isinstance(i, str)],
-                "finished": [i for i in value.get("finished", []) if isinstance(i, str)],
-                "asking": [i for i in value.get("asking", []) if isinstance(i, str)],
-                "blocked": [i for i in value.get("blocked", []) if isinstance(i, str)]}
+        if not isinstance(value, dict):
+            value = {}
+        seen = {}
+        for key in ("alerts", "reviews", "ran", "finished", "asking", "blocked"):
+            entries = value.get(key, [])
+            seen[key] = [item for item in entries[-MAX_SEEN:] if isinstance(item, str)] if isinstance(entries, list) else []
+        return seen

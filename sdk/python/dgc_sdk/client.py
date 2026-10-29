@@ -254,8 +254,9 @@ class DGC:
         decision_timeout: float | None = 30.0,
         turn_budget_s: int | None = None,
         max_tokens: int | None = None,
+        mods: Sequence[str | Path] = (),
     ) -> Session:
-        return self._session(cwd=cwd, permissions=permissions, on_permission=on_permission, on_plan=on_plan, on_question=on_question, on_mcp_input=on_mcp_input, model=model, base_url=base_url, api_key=api_key, mode=mode, thinking=thinking, tools=tools, instructions=instructions, max_turns=max_turns, sandbox=sandbox, verify_command=verify_command, decision_timeout=decision_timeout, turn_budget_s=turn_budget_s, max_tokens=max_tokens)
+        return self._session(cwd=cwd, permissions=permissions, on_permission=on_permission, on_plan=on_plan, on_question=on_question, on_mcp_input=on_mcp_input, model=model, base_url=base_url, api_key=api_key, mode=mode, thinking=thinking, tools=tools, instructions=instructions, max_turns=max_turns, sandbox=sandbox, verify_command=verify_command, decision_timeout=decision_timeout, turn_budget_s=turn_budget_s, max_tokens=max_tokens, mods=mods)
 
     def _session(
         self,
@@ -280,6 +281,7 @@ class DGC:
         turn_budget_s: int | None = None,
         max_tokens: int | None = None,
         chat_backend: bool = False,
+        mods: Sequence[str | Path] = (),
     ) -> Session:
         if self._closed:
             raise DGCRuntimeError("this DGC client is closed")
@@ -297,6 +299,14 @@ class DGC:
                               turn_budget_s=turn_budget_s, max_tokens=max_tokens)
         requirement = sandbox_requirement(sandbox) if sandbox is not None else self._sandbox
         sandbox_precheck(requirement)
+        # Mods this session runs (folders holding dgc-mod.json): named in code, they're the developer's own Allow,
+        # for this session only, each in its sandbox and never able to approve anything (DGC's dgc/mods).
+        mod_folders = []
+        for folder in mods or ():
+            path = Path(folder).expanduser().resolve()
+            if not (path / "dgc-mod.json").is_file():
+                raise DGCConfigError(f"mods: {folder} has no dgc-mod.json")
+            mod_folders.append(str(path))
         # The RuntimePolicy and sandbox reach this session's runtime only through its
         # environment (DGC_SESSION_POLICY); nothing is written to any config.json.
         plan = compile_session(
@@ -320,6 +330,8 @@ class DGC:
                 key_file = self._state_dir / f".apikey-{_new_id('key')}"
                 extra["DGC_API_KEY_FILE"] = str(key_file)
         extra.update(plan.env)
+        if mod_folders:
+            extra["DGC_MODS_EXTRA"] = os.pathsep.join(mod_folders)
         isolated_values: dict[str, object] | None = None
         if not self._inherit:
             isolated_values = {
@@ -717,6 +729,46 @@ class AsyncRunHandle:
                 raise
 
 
+class AsyncArtifacts:
+    """``AsyncSession.artifacts``: Session.artifacts, awaited."""
+
+    def __init__(self, sync):
+        self._sync = sync
+
+    async def list(self, *, type: str | None = None, surface: str | None = None):
+        return await asyncio.to_thread(self._sync.list, type=type, surface=surface)
+
+    async def get(self, artifact_id: str):
+        return await asyncio.to_thread(self._sync.get, artifact_id)
+
+    async def content(self, artifact_id: str, version: int | None = None):
+        return await asyncio.to_thread(self._sync.content, artifact_id, version)
+
+    async def update(self, artifact_id: str, content, *, base_version: int, note: str | None = None):
+        return await asyncio.to_thread(self._sync.update, artifact_id, content, base_version=base_version, note=note)
+
+    async def restore(self, artifact_id: str, version: int):
+        return await asyncio.to_thread(self._sync.restore, artifact_id, version)
+
+    async def compare(self, artifact_id: str, before: int, after: int | None = None):
+        return await asyncio.to_thread(self._sync.compare, artifact_id, before, after)
+
+    async def export(self, artifact_id: str, format: str, *, version: int | None = None) -> str:
+        return await asyncio.to_thread(self._sync.export, artifact_id, format, version=version)
+
+    async def open(self, artifact_id: str) -> str:
+        return await asyncio.to_thread(self._sync.open, artifact_id)
+
+    async def remove(self, artifact_id: str) -> None:
+        return await asyncio.to_thread(self._sync.remove, artifact_id)
+
+    async def refresh(self, artifact_id: str):
+        return await asyncio.to_thread(self._sync.refresh, artifact_id)
+
+    async def allow_source(self, artifact_id: str, source: str, allowed: bool = True, *, base_version: int | None = None):
+        return await asyncio.to_thread(self._sync.allow_source, artifact_id, source, allowed, base_version=base_version)
+
+
 class AsyncSession:
     """Async wrapper with the same methods as :class:`Session`. Pipe waits stay on a worker
     thread; async decision callbacks run on the event loop that created the session."""
@@ -765,10 +817,11 @@ class AsyncSession:
         skills: Sequence[str] | None = None,
         workflow: str | None = None,
         repair_attempts: int = 1,
+        output: str | None = None,
     ) -> RunResult:
         handle = await self.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
-            skills=skills, workflow=workflow, repair_attempts=repair_attempts)
+            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output)
         return await handle.result()
 
     async def stream(
@@ -781,10 +834,11 @@ class AsyncSession:
         skills: Sequence[str] | None = None,
         workflow: str | None = None,
         repair_attempts: int = 1,
+        output: str | None = None,
     ) -> AsyncRunHandle:
         return await self._start(lambda: self._sync.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
-            skills=skills, workflow=workflow, repair_attempts=repair_attempts))
+            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output))
 
     async def followup(
         self,
@@ -829,6 +883,11 @@ class AsyncSession:
     async def context_breakdown(self) -> ContextBreakdown:
         """What fills the session's context window, part by part (see Session.context_breakdown)."""
         return await asyncio.to_thread(self._sync.context_breakdown)
+
+    @property
+    def artifacts(self) -> "AsyncArtifacts":
+        """Everything DGC made that the user keeps (see Session.artifacts)."""
+        return AsyncArtifacts(self._sync.artifacts)
 
     async def list_checkpoints(self) -> list[Checkpoint]:
         return await asyncio.to_thread(self._sync.list_checkpoints)
@@ -1006,13 +1065,14 @@ class AsyncDGC:
         decision_timeout: float | None = 30.0,
         turn_budget_s: int | None = None,
         max_tokens: int | None = None,
+        mods: Sequence[str | Path] = (),
     ) -> AsyncSession:
         return await self._open(lambda: self._sync.session(
             cwd=cwd, permissions=permissions, on_permission=on_permission, on_plan=on_plan,
             on_question=on_question, on_mcp_input=on_mcp_input, model=model, base_url=base_url,
             api_key=api_key, mode=mode, thinking=thinking, tools=tools, instructions=instructions,
             max_turns=max_turns, sandbox=sandbox, verify_command=verify_command,
-            decision_timeout=decision_timeout, turn_budget_s=turn_budget_s, max_tokens=max_tokens,
+            decision_timeout=decision_timeout, turn_budget_s=turn_budget_s, max_tokens=max_tokens, mods=mods,
         ))
 
     async def resume(
@@ -1066,7 +1126,16 @@ class AsyncDGC:
     async def chat(self, *, model: str | None = None, thinking: str | None = None,
                    reply_timeout: float | None = None) -> AsyncChats:
         """ChatDGC, as :meth:`DGC.chat`, awaitable."""
-        chats = await asyncio.to_thread(self._sync.chat, model=model, thinking=thinking, reply_timeout=reply_timeout)
+        future = asyncio.ensure_future(asyncio.to_thread(
+            self._sync.chat, model=model, thinking=thinking, reply_timeout=reply_timeout))
+        try:
+            chats = await asyncio.shield(future)
+        except asyncio.CancelledError:
+            def close(done: "asyncio.Future[Any]") -> None:
+                if not done.cancelled() and done.exception() is None:
+                    done.result().close()
+            future.add_done_callback(close)
+            raise
         return AsyncChats(chats)
 
     def usage_report(self, *, department: str | None = None) -> dict[str, Any]:

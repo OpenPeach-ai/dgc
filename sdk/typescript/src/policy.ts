@@ -32,6 +32,7 @@ export const DISPLAY: Readonly<Record<string, string>> = {
   pause_pip: "PipsPause", resume_pip: "PipsResume", attach_pip_to_session: "PipsAttach",
   mcp_call: "MCPCall", present_plan: "PresentPlan", present_document: "PresentDocument",
   propose_options: "ProposeOptions", ask_user: "AskUser", artifact: "Artifact", task: "Task",
+  make_artifact: "MakeArtifact", edit_artifact: "EditArtifact",
 };
 // Tools a rule cannot name (goal bookkeeping), and tools an allowlist keeps unless it is denied
 // by name: the option picker is how the agent asks the application a question.

@@ -3,8 +3,14 @@
 A canvas is a file VS Code opens in an editor beside the chat, named for its title, under
 ``<chat root>/canvas/<chat>/<id>/``; the user edits it there like any file. The model changes it with exact
 find-and-replace edits (as ChatGPT's canvas does) or a rewrite, and reads it fresh from disk every turn, so what the
-user typed is what it works from. Every change is a version (``.versions/v<n>.<ext>``, with who made it), to compare
-and restore; an edit of the user's that the model hasn't seen yet becomes a version of theirs first.
+user typed is what it works from. Every change is a version, with who made it, to compare and restore; an edit of the
+user's that the model hasn't seen yet becomes a version of theirs first.
+
+Each canvas is a Doc in DGC's one artifact store (``dgc.artifact_store``): the store holds its versions, so the
+canvas is in the Library beside everything else DGC made, with every version. The file the user edits stays where
+the editor opens it, and ``meta.json`` beside it names its artifact. ``.versions/v<n>.<ext>`` are copies of the
+store's versions made for the editor's compare view, rebuilt from the store when missing. A canvas from before the
+store (its versions in ``meta.json`` and ``.versions``) moves its history into the store the first time it is read.
 """
 from __future__ import annotations
 
@@ -16,6 +22,9 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .. import artifact_store
+from ..artifact_store import ArtifactError, Store
 
 CANVAS_ID = re.compile(r"cv_[a-f0-9]{16}\Z")
 CHAT_ID = re.compile(r"chat_[a-f0-9]{32}\Z")
@@ -61,37 +70,100 @@ def apply_edits(text: str, edits) -> str:
             raise CanvasError(f"Edit {i}: “{find[:80]}” is in the canvas {count} times. Include more of the "
                               "text around it, so it's found once (or set all to change every one).")
         text = text.replace(find, replace) if edit.get("all") else text.replace(find, replace, 1)
+        if len(text) > MAX_CHARS:
+            raise CanvasError(f"A canvas holds at most {MAX_CHARS:,} characters.")
     return text
 
 
 class Canvases:
-    """One chat store's canvases: ``root`` is ``<chat root>/canvas``."""
+    """One chat store's canvases: ``root`` is ``<chat root>/canvas``; their versions are in ``store``."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, store: Store | None = None):
         self.root = Path(root)
+        self._store = store
+
+    @property
+    def store(self) -> Store:
+        return self._store or artifact_store.store()
 
     @staticmethod
     def temporary() -> "Canvases":
-        """A temporary chat's: the system's temp folder, gone with it."""
+        """A temporary chat's: the system's temp folder, gone with it, versions and all."""
         uid = getattr(os, "getuid", lambda: 0)()
-        return Canvases(Path(tempfile.gettempdir()) / f"dgc-chat-canvas-{uid}")
+        root = Path(tempfile.gettempdir()) / f"dgc-chat-canvas-{uid}"
+        return Canvases(root, Store(root / ".artifacts"))
 
     def _dir(self, chat_id: str, canvas_id: str) -> Path:
         if not CHAT_ID.fullmatch(str(chat_id)) or not CANVAS_ID.fullmatch(str(canvas_id)):
             raise CanvasError("That canvas doesn't exist.")
-        return self.root / chat_id / canvas_id
+        chat_dir = self.root / chat_id
+        canvas_dir = chat_dir / canvas_id
+        if chat_dir.is_symlink() or canvas_dir.is_symlink():
+            raise CanvasError("That canvas doesn't exist.")
+        return canvas_dir
 
     def _meta(self, chat_id: str, canvas_id: str) -> dict:
         try:
-            return json.loads((self._dir(chat_id, canvas_id) / "meta.json").read_text(encoding="utf-8"))
+            meta_path = self._dir(chat_id, canvas_id) / "meta.json"
+            if meta_path.is_symlink():
+                raise CanvasError("That canvas doesn't exist.")
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise CanvasError("That canvas doesn't exist.") from None
+        if (not isinstance(meta, dict) or meta.get("id") != canvas_id
+                or not isinstance(meta.get("file"), str) or not meta["file"]
+                or "/" in meta["file"] or "\\" in meta["file"]
+                or meta["file"] in (".", "..")
+                or not isinstance(meta.get("ext"), str) or not re.fullmatch(r"[a-z0-9]{1,8}", meta["ext"])):
+            raise CanvasError("That canvas doesn't exist.")
+        if not meta.get("artifact") or not self.store.exists(meta["artifact"]):
+            meta = self._into_store(chat_id, meta)
+        elif "file" not in self.store.get(meta["artifact"]).legacy:
+            self.store.set_meta(meta["artifact"], legacy=self._legacy(chat_id, meta))   # put in before files were named
+        return meta
+
+    def _into_store(self, chat_id: str, meta: dict) -> dict:
+        """A canvas from before the store, or one whose artifact is gone: its history (or its text now) goes in."""
+        history = []
+        for v in meta.get("versions") or []:
+            try:
+                text = (self._dir(chat_id, meta["id"]) / ".versions" / f"v{v['n']}.{meta['ext']}").read_text(
+                    encoding="utf-8")
+            except (OSError, KeyError):
+                continue
+            history.append(({artifact_store.SOURCE_FILE["doc"]: text.encode("utf-8")},
+                             _author(v.get("by")), v.get("at"), v.get("note") or ""))
+        if not history:
+            try:
+                text = (self._dir(chat_id, meta["id"]) / meta["file"]).read_text(encoding="utf-8", errors="replace")
+            except (OSError, KeyError):
+                text = ""
+            history.append(({artifact_store.SOURCE_FILE["doc"]: text.encode("utf-8")}, "DGC", meta.get("created_at"),
+                            "Created"))
+        art = self.store.import_history("doc", meta.get("title") or "Canvas", history,
+                                        origin={"surface": "chat", "chat": chat_id}, legacy=self._legacy(chat_id, meta))
+        meta = {k: v for k, v in meta.items() if k != "versions"}
+        meta["artifact"] = art.id
+        self._put_meta(chat_id, meta)
+        return meta
+
+    def _legacy(self, chat_id: str, meta: dict) -> dict:
+        """What the canvas's artifact records: which canvas, and the file the user edits (so a change made through
+        the artifact, edit_artifact or a restore from the Library, lands in that file too)."""
+        return {"canvas": meta["id"], "chat": chat_id, "kind": meta.get("kind", "document"),
+                "language": meta.get("language", "markdown"), "ext": meta.get("ext", "md"),
+                "file": str(self._dir(chat_id, meta["id"]) / meta["file"])}
 
     def _write(self, path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp.write_text(text, encoding="utf-8")
-        os.replace(temp, path)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        temp = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                output.write(text)
+            os.replace(temp, path)
+        finally:
+            temp.unlink(missing_ok=True)
 
     def _put_meta(self, chat_id: str, meta: dict) -> None:
         self._write(self._dir(chat_id, meta["id"]) / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
@@ -99,10 +171,22 @@ class Canvases:
     def path(self, chat_id: str, canvas_id: str, meta: dict | None = None) -> Path:
         """The file the user edits."""
         meta = meta or self._meta(chat_id, canvas_id)
-        return self._dir(chat_id, canvas_id) / meta["file"]
+        path = self._dir(chat_id, canvas_id) / meta["file"]
+        if path.is_symlink():
+            raise CanvasError("That canvas file can't be a link.")
+        return path
 
     def _version_path(self, chat_id: str, meta: dict, n: int) -> Path:
-        return self._dir(chat_id, meta["id"]) / ".versions" / f"v{n}.{meta['ext']}"
+        """Version n as a file for the editor's compare view: a copy of the store's, made when missing."""
+        path = self._dir(chat_id, meta["id"]) / ".versions" / f"v{n}.{meta['ext']}"
+        if path.parent.is_symlink() or path.is_symlink():
+            raise CanvasError("That canvas version can't be a link.")
+        if not path.exists():
+            try:
+                self._write(path, self.store.source(meta["artifact"], n))
+            except (ArtifactError, OSError):
+                pass
+        return path
 
     def read(self, chat_id: str, canvas_id: str) -> tuple[dict, str]:
         meta = self._meta(chat_id, canvas_id)
@@ -114,20 +198,15 @@ class Canvases:
 
     def _last(self, chat_id: str, meta: dict) -> str:
         try:
-            return self._version_path(chat_id, meta, meta["versions"][-1]["n"]).read_text(encoding="utf-8")
-        except (OSError, IndexError, KeyError):
+            return self.store.source(meta["artifact"])
+        except (ArtifactError, OSError, KeyError):
             return ""
 
     def _add_version(self, chat_id: str, meta: dict, text: str, by: str, note: str) -> None:
-        n = (meta["versions"][-1]["n"] if meta["versions"] else 0) + 1
-        self._write(self._version_path(chat_id, meta, n), text)
-        meta["versions"].append({"n": n, "at": _now(), "by": by, "note": str(note or "")[:200], "chars": len(text)})
-        for old in meta["versions"][:-MAX_VERSIONS]:
-            try:
-                self._version_path(chat_id, meta, old["n"]).unlink()
-            except OSError:
-                pass
-        meta["versions"] = meta["versions"][-MAX_VERSIONS:]
+        try:
+            self.store.update(meta["artifact"], text, author=_author(by), summary=str(note or "")[:200])
+        except ArtifactError as exc:
+            raise CanvasError(str(exc)) from None
 
     def _theirs_first(self, chat_id: str, meta: dict) -> str:
         """The canvas as it is now; if the user changed it since the last version, that's a version of theirs."""
@@ -151,9 +230,11 @@ class Canvases:
             name = name[: -len(ext) - 1] or "Canvas"
         meta = {"id": "cv_" + secrets.token_hex(8), "title": name, "kind": kind,
                 "language": "markdown" if kind == "document" else (lang or "text"), "ext": ext, "file": f"{name}.{ext}",
-                "created_at": _now(), "versions": []}
+                "created_at": _now()}
+        art = self.store.create("doc", name, content, origin={"surface": "chat", "chat": chat_id}, author="DGC",
+                                summary="Created", legacy=self._legacy(chat_id, meta))
+        meta["artifact"] = art.id
         self._write(self.path(chat_id, meta["id"], meta), content)
-        self._add_version(chat_id, meta, content, "model", "Created")
         self._put_meta(chat_id, meta)
         return self.view(chat_id, meta, content)
 
@@ -177,12 +258,13 @@ class Canvases:
 
     def restore(self, chat_id: str, canvas_id: str, n: int) -> dict:
         meta = self._meta(chat_id, canvas_id)
-        if not any(v["n"] == n for v in meta["versions"]):
-            raise CanvasError("That version isn't kept any more.")
+        try:
+            text = self.store.source(meta["artifact"], int(n))
+        except (ArtifactError, ValueError, TypeError):
+            raise CanvasError("That version isn't kept any more.") from None
         self._theirs_first(chat_id, meta)
-        text = self._version_path(chat_id, meta, n).read_text(encoding="utf-8")
         self._write(self.path(chat_id, canvas_id, meta), text)
-        self._add_version(chat_id, meta, text, "user", f"Restored version {n}")
+        self.store.restore(meta["artifact"], int(n), author="you")
         self._put_meta(chat_id, meta)
         return self.view(chat_id, meta, text)
 
@@ -190,8 +272,15 @@ class Canvases:
         """A canvas as the screen and the editor need it: where it is, its versions' files, and (when given) its text."""
         out = {key: meta[key] for key in ("id", "title", "kind", "language", "created_at")}
         out["path"] = str(self.path(chat_id, meta["id"], meta))
-        out["version"] = meta["versions"][-1]["n"] if meta["versions"] else 0
-        out["versions"] = [{**v, "path": str(self._version_path(chat_id, meta, v["n"]))} for v in meta["versions"]]
+        out["artifact"] = meta["artifact"]
+        try:
+            versions = self.store.versions(meta["artifact"])
+        except ArtifactError:
+            versions = []
+        out["version"] = versions[-1].n if versions else 0
+        out["versions"] = [{"n": v.n, "at": v.at, "by": _by(v.author), "note": v.summary,
+                            "chars": v.size, "path": str(self._version_path(chat_id, meta, v.n))}
+                           for v in versions[-MAX_VERSIONS:]]
         if text is not None:
             out["text"] = text
         return out
@@ -221,13 +310,49 @@ class Canvases:
         return [{**self.view(chat_id, meta), "text": text} for _, meta, text in out]
 
     def copy_chat(self, source: str, target: str, into: "Canvases | None" = None) -> None:
-        """A branch's canvases: its own copies, from here on."""
+        """A branch's canvases: its own copies, from here on, each its own artifact with the history so far."""
         into = into or self
+        if not CHAT_ID.fullmatch(str(source)) or not CHAT_ID.fullmatch(str(target)):
+            return
         try:
-            shutil.copytree(self.root / source, into.root / target, dirs_exist_ok=True)
+            entries = [e for e in (self.root / source).iterdir() if CANVAS_ID.fullmatch(e.name)]
         except OSError:
-            pass
+            return
+        for entry in entries:
+            try:
+                meta = self._meta(source, entry.name)
+                theirs = self._theirs_first(source, meta)
+                clone = self.store.clone(meta["artifact"], origin={"surface": "chat", "chat": target},
+                                         legacy=into._legacy(target, meta), into=into.store)
+                copied = {**meta, "artifact": clone.id}
+                into._write(into.path(target, meta["id"], copied), theirs)
+                into._put_meta(target, copied)
+            except (CanvasError, ArtifactError, OSError):
+                continue
 
     def remove_chat(self, chat_id: str) -> None:
-        if CHAT_ID.fullmatch(str(chat_id)):
-            shutil.rmtree(self.root / chat_id, ignore_errors=True)
+        """The chat's canvases leave the Library with it (their artifacts go to the store's trash, not deleted)."""
+        if not CHAT_ID.fullmatch(str(chat_id)):
+            return
+        try:
+            entries = [e for e in (self.root / chat_id).iterdir() if CANVAS_ID.fullmatch(e.name)]
+        except OSError:
+            entries = []
+        for entry in entries:
+            try:
+                meta = json.loads((entry / "meta.json").read_text(encoding="utf-8"))
+                if meta.get("artifact") and self.store.exists(meta["artifact"]):
+                    self.store.remove(meta["artifact"])
+            except (OSError, ValueError, ArtifactError):
+                continue
+        shutil.rmtree(self.root / chat_id, ignore_errors=True)
+
+
+def _author(by) -> str:
+    """The store's names for who made a version: the model is "DGC" and the user "you"."""
+    return {"model": "DGC", "user": "you"}.get(str(by or ""), str(by or "") or "DGC")
+
+
+def _by(author: str) -> str:
+    """And back, for the screens that say "You" or "ChatDGC"."""
+    return {"DGC": "model", "you": "user"}.get(author, author)

@@ -280,6 +280,12 @@ class ProcessLifetimeTests(_Base):
 
 
 class ProtocolTests(_Base):
+    def test_deep_event_is_a_protocol_error(self):
+        client = self._wire("normal")
+        payload = (b'[' * 1500) + b'0' + (b']' * 1500)
+        with self.assertRaises(wire.DGCProtocolError):
+            client._decode_event(payload)
+
     def test_unknown_event_types_are_skipped_not_fatal(self):
         client = self._wire("unknown")
         try:
@@ -672,8 +678,6 @@ class EnvironmentTests(_Base):
         self.assertNotIn("not-a-real-secret", outputs)
 
     def test_a_dgc_package_in_the_workspace_does_not_replace_the_runtime(self):
-        if "-P" not in sdk_runtime.discover_runtime().argv:
-            self.skipTest("the runtime's Python has no -P (it is older than 3.11)")
         shadow = self.work / "dgc"
         shadow.mkdir()
         (shadow / "__init__.py").write_text("raise SystemExit('workspace dgc was imported')\n")
@@ -685,6 +689,10 @@ class EnvironmentTests(_Base):
 
 
 class RetryPolicyTests(unittest.TestCase):
+    def test_nonfinite_http_status_is_a_config_error(self):
+        with self.assertRaises(DGCConfigError):
+            RetryPolicy(retry_on=(float("inf"),))
+
     def test_retry_policy_sets_only_what_the_runtime_honours(self):
         self.assertEqual(RetryPolicy().isolated_values(), {"model_stall_retries": 3})
         self.assertEqual(RetryPolicy(max_attempts=1).isolated_values(), {"model_stall_retries": 0})

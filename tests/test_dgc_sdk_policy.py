@@ -931,6 +931,13 @@ class ToolSocketTests(unittest.TestCase):
         other = self._hub()
         self.assertNotEqual(os.path.dirname(hub.socket_path), os.path.dirname(other.socket_path))
 
+    def test_socket_bounds_frames_and_ignores_non_object_messages(self):
+        hub = self._hub()
+        good = json.dumps({"dgc_sdk_bridge": 1, "token": hub.token}).encode() + b"\n"
+        with mock.patch.object(bridge, "_FRAME_MAX", 64):
+            self.assertEqual(self._talk(hub, good + b"x" * 65), b"")
+            self.assertIn(b'"echo"', self._talk(hub, good + b"[]\n"))
+
     def test_relay_script_runs_isolated(self):
         hub = self._hub()
         runtime, persisted = hub.server_spec(sys.executable)

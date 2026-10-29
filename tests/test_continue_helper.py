@@ -46,6 +46,26 @@ FIXED = BILLING.replace("result += round(quantity * unit_price)", "result += qua
 FINDING = "FINDING-1: total() rounds each line instead of rounding the sum once."
 
 
+class HelperRecordReadTests(unittest.TestCase):
+    def test_deep_saved_record_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "record.json"
+            path.write_text("[" * 10000 + "0" + "]" * 10000)
+            self.assertIsNone(helper_memory._read(path))
+
+    def test_oversized_tool_arguments_do_not_make_memory_unreadable(self):
+        messages = helper_memory.sanitize([
+            {"role": "system", "content": "brief"},
+            {"role": "assistant", "content": "calling", "tool_calls": [{"arguments": "x" * (13 * 1024 * 1024)}]},
+            {"role": "tool", "content": "done"},
+        ])
+        self.assertEqual(messages[1]["content"], "[Oversized earlier message was not kept.]")
+        record = {"messages": messages, "project": {"dirty": {"p": "x" * (13 * 1024 * 1024)}}, "landed": {}}
+        helper_memory._fit(record)
+        self.assertEqual(record["project"], {"too_many": True})
+        self.assertLessEqual(len(json.dumps(record).encode()), helper_memory.MAX_RECORD_BYTES)
+
+
 def git(root: Path, *args) -> str:
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
 

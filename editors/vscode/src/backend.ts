@@ -416,7 +416,9 @@ export class DgcBackend extends EventEmitter {
         return;                                  // a launch failure, or already reported
       }
       this.life.delete(child);
-      this.stopLivenessPings();
+      if (this.proc === child) {
+        this.stopLivenessPings();
+      }
       if (this.route && !this.ready && this.proc === child && code !== 0 && this.route.notSetUp(this.earlyStderr)) {
         // DGC's distro, or DGC in it, isn't there yet: say so once, as a missing CLI is, and don't restart into it.
         record.cause = "DGC is not set up in WSL";

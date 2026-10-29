@@ -1,0 +1,13 @@
+{
+  "name": "context",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "title": "Context",
+  "description": "What fills the context window, part by part, in a panel that follows each turn.",
+  "capabilities": {
+    "events": ["session.start", "turn.complete"],
+    "draws": ["pane", "status"],
+    "reads": ["usage"],
+    "commands": [{"name": "window", "description": "The context window, part by part"}]
+  }
+}

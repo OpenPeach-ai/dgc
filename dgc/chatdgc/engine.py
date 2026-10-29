@@ -19,11 +19,12 @@ from ..editor_protocol import CHATDGC_THINKING as THINKING
 from . import attachments as attached
 from . import canvas as chat_canvas
 from . import data as chat_data
+from . import folder as chat_folder
 from . import plugins as chat_plugins
 from . import window as fit_window
 from . import research
 from .. import context_breakdown as breakdown
-from .. import memory_review, shared_memory
+from .. import artifact_tools, memory_review, shared_memory
 from .prompt import system_prompt
 from .research import NO_TOOLS
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
@@ -135,6 +136,7 @@ MAKE_FILE_TOOL = {"type": "function", "function": {
                       "required": ["title"]}}},
         "required": ["name", "format"]}}}
 MAX_FILES_PER_REPLY = 3
+MAX_ARTIFACT_CALLS = 6       # make_artifact and edit_artifact calls in one reply
 # Canvas (canvas.py), ChatGPT's: a document or code beside the chat, in a real editor, that both sides change.
 CANVAS_CREATE_TOOL = {"type": "function", "function": {
     "name": "canvas_create",
@@ -382,7 +384,7 @@ class ChatEngine:
                            context_size=int(config.get("context_size", 0)),
                            first_token_timeout=config.get("model_first_token_timeout_s", "auto"),
                            idle_timeout=config.get("model_idle_timeout_s", 300),
-                           stall_notice=config.get("model_stall_notice_s", 45),
+                           stall_notice=config.get("model_stall_notice_s", 45), learn_pace=True,
                            stall_retries=config.get("model_stall_retries", 2),
                            load_timeout=config.get("model_load_timeout_s", "auto"))
 
@@ -457,6 +459,8 @@ class ChatEngine:
             if draft is not None:
                 # In its project, unless the project was deleted before the first message: then in your chats.
                 self.store.create(chat_id=chat["id"], project=(self._project_of(draft) or {}).get("id"))
+                if draft.get("folder"):                     # a folder chosen before the first message stays
+                    self.store.set_folder(chat["id"], draft["folder"])
         return self.store.save(chat)
 
     # -- projects (ChatGPT's): chats, files and instructions together; the store keeps them (store.py)
@@ -666,7 +670,7 @@ class ChatEngine:
              search: str = "off", attachments=None, on_start=None, on_text=None, on_thinking=None,
              on_activity=None, on_compacted=None, on_question=None, on_images=None, on_action=None, on_file=None, on_canvas=None, on_widget=None,
              cancel: threading.Event | None = None, answering: dict | None = None, study: bool | None = None,
-             canvas_selection: dict | None = None, voice: bool = False) -> dict:
+             canvas_selection: dict | None = None, voice: bool = False, output: str | None = None) -> dict:
         """Add the user's message and stream the reply. Returns the reply message (also saved).
 
         ``on_start(user_message, reply_id)`` runs once the message is saved, before the model is asked:
@@ -712,6 +716,8 @@ class ChatEngine:
         mine = {"id": new_message_id(), "role": "user", "text": text, "created_at": now()}
         if voice is True:
             mine["voice"] = True             # spoken in voice mode: its reply is read aloud, so it sounds like speech
+        if output and output != "auto":
+            mine["output"] = str(output)     # the Output chip: what this message's reply should make (artifact_tools)
         if prepared:
             mine["attachments"] = [item["meta"] for item in prepared]
         if answering:
@@ -1297,10 +1303,16 @@ class ChatEngine:
             text += "\n[What the images showed: " + message["vision"]["text"][:2000] + "]"
         return f"{who}: {text}"
 
-    def _summarize(self, client, earlier: str, messages: list[dict], room: int, cancel=None) -> str:
+    # What a failure says, by what the summary is for: the chat's own summary, or Continue in Work's brief.
+    _SUMMARY_WORDS = {"summary": ("The earlier messages couldn't be summarized", "summary"),
+                      "brief": ("The brief for Work couldn't be written", "brief")}
+
+    def _summarize(self, client, earlier: str, messages: list[dict], room: int, cancel=None,
+                   purpose: str = "summary") -> str:
         """A summary that grows by parts: ``earlier`` (the summary so far, if any) stays as it was, and ``messages``
         are summarized, in chunks that fit, and added after it. Past SUMMARY_SHARE of the window, it's shortened
         once, the one step that rewrites what came before."""
+        failed, noun = self._SUMMARY_WORDS.get(purpose, self._SUMMARY_WORDS["summary"])
         words = max(200, min(1500, int(room * 0.08 * 0.75)))
         chunk_chars = max(4000, int(room * 0.5) * fit_window.CHARS_PER_TOKEN)
         parts, pending = ([earlier] if earlier else []), [self._plain(m) for m in messages]
@@ -1320,13 +1332,13 @@ class ChatEngine:
                                       {"role": "user", "content": asked}], tools=None, reasoning_effort="off",
                                      cancel=cancel)
             except Exception as exc:              # noqa: BLE001 -- a summary that fails is said, never a crash
-                raise ChatEngineError("The earlier messages couldn't be summarized: "
+                raise ChatEngineError(f"{failed}: "
                                       f"{' '.join(str(exc).split())[:300] or type(exc).__name__}") from exc
             part = str(getattr(result, "content", "") or "").strip()
             if cancel is not None and cancel.is_set():
-                raise ChatEngineError("Stopped before the summary was written.")
+                raise ChatEngineError(f"Stopped before the {noun} was written.")
             if not part:
-                raise ChatEngineError("The model wrote no summary.")
+                raise ChatEngineError(f"The model wrote no {noun}.")
             parts.append(part)
         summary = "\n\n".join(parts)
         # Past its share it would fill the window it was written to free, and compact again on every reply: it's
@@ -1340,7 +1352,7 @@ class ChatEngine:
             except Exception:                     # noqa: BLE001 -- the long one still stands
                 shorter = ""
             if cancel is not None and cancel.is_set():
-                raise ChatEngineError("Stopped before the summary was written.")
+                raise ChatEngineError(f"Stopped before the {noun} was written.")
             if shorter and len(shorter) < len(summary):
                 summary = shorter
         return summary[:fit_window.MAX_SUMMARY_CHARS]
@@ -1434,7 +1446,7 @@ class ChatEngine:
                 fresh["carried"] = copy.deepcopy(chat["carried"])
             fresh["branched"] = {"from": chat["id"], "title": chat.get("title", ""), "at": message_id, "created_at": now()}
             self._canvas_store(chat).copy_chat(chat["id"], fresh["id"], into=self._canvases)
-            return self.store.save(fresh)
+            return self._keep_folder(chat, self.store.save(fresh))
         except BaseException:
             self.store.delete(fresh["id"])
             raise
@@ -1452,7 +1464,71 @@ class ChatEngine:
         fresh = self.store.create(model=chat.get("model"), thinking=chat.get("thinking"),
                                   title=chat.get("title") or "New chat")
         fresh["carried"] = {"from": chat["id"], "title": chat.get("title", ""), "text": text, "created_at": now()}
-        return self.store.save(fresh)
+        return self._keep_folder(chat, self.store.save(fresh))
+
+    def _keep_folder(self, chat: dict, fresh: dict) -> dict:
+        """A branch, or the chat it continues in, goes on with the same work, so it reads the same folder (when it's
+        still there): otherwise its first question about the code found nothing to read, and Continue in Work had no
+        folder to go to. Through set_folder: a save never writes a chat's folder, so a late reply can't undo one."""
+        root = self.folder_of(chat)
+        return self.store.set_folder(fresh["id"], str(root)) if root is not None else fresh
+
+    # -- a folder the chat reads (folder.py): one the user picked, read-only; "Continue in Work" carries it there
+
+    def set_folder(self, chat_id: str, path: str) -> dict:
+        """Give the chat a folder to read (the full path the user chose), or ("") take it away. The chat."""
+        try:
+            resolved = str(chat_folder.usable(path)) if path else ""
+        except chat_folder.FolderError as error:
+            raise ChatEngineError(str(error)) from None
+        with self._lock:
+            held = self._drafts.get(chat_id) or self._temporary.get(chat_id)
+            if held is not None:
+                if resolved:
+                    held["folder"] = resolved
+                else:
+                    held.pop("folder", None)
+                return {**held, "messages": list(held["messages"])}
+        self._chat(chat_id)                                  # a chat that isn't there says so
+        return self.store.set_folder(chat_id, resolved)
+
+    def folder_of(self, chat: dict):
+        """The folder the chat reads, if it has one that is still there."""
+        if not chat.get("folder"):
+            return None
+        try:
+            return chat_folder.usable(chat["folder"])
+        except chat_folder.FolderError:
+            return None
+
+    def _folder_context(self, chat: dict) -> str:
+        root = self.folder_of(chat)
+        if root is None or str(chat.get("model") or getattr(self.config, "model", "") or "") in self._toolless:
+            return ""
+        return (f"\n\nThe user gave this chat a folder to read: {root}. Besides this conversation, you can look at it "
+                "with folder_list, folder_search and folder_read; look before answering about it, and name the files "
+                "your answer comes from. You can read it but never change it: when they want files there changed, "
+                "say they can continue this chat in Work (Continue in Work), where DGC edits the folder with their "
+                "approval.")
+
+    def work_brief(self, chat_id: str, *, cancel=None) -> dict:
+        """Continue in Work: {folder, brief}, the brief a coding session in the chat's folder starts from (what the
+        chat was about and where it got to), for the user to send or change. Nothing runs until they do."""
+        chat = self._chat(chat_id)
+        root = self.folder_of(chat)
+        if root is None:
+            raise ChatEngineError("Choose a folder for this chat first." if not chat.get("folder")
+                                  else f"{chat['folder']} isn't there any more: choose the folder again.")
+        if not chat["messages"]:
+            raise ChatEngineError("Send a message first.")
+        client = self.client(chat.get("model") or None)
+        room, _ = fit_window.window(client, self._preset())
+        start = self._summary_start(chat)
+        text = self._summarize(client, (chat.get("summary") or {}).get("text", "") if start else "",
+                               chat["messages"][start:], room, cancel, purpose="brief")
+        brief = (f"Continuing from the chat \u201c{chat.get('title') or 'New chat'}\u201d, about this folder. What we "
+                 f"worked out there:\n\n{str(text or '').strip()}\n\nCarry on from here.")
+        return {"folder": str(root), "brief": brief}
 
     def context(self, chat_id: str) -> dict:
         """What the chat takes of its window now: counted by the model where its last reply was, else estimated.
@@ -1531,7 +1607,7 @@ class ChatEngine:
                               personality=str(config.get("chatdgc_personality", "default") or "default"), memory=memory)
         plain = system_prompt(**common, memory=memory)
         bare = system_prompt(**common, memory="" if memory is not None else None)
-        canvas, data = T(self._canvas_context(chat)), T(self._data_context(chat))
+        canvas, data = T(self._canvas_context(chat)), T(self._data_context(chat)) + T(self._folder_context(chat))
         remembered = (chat.get("summary") or {}).get("text", "") if self._summary_start(chat) else ""
         summary = T(remembered + (chat.get("carried") or {}).get("text", ""))
         project = max(0, T(system) - T(yours) - canvas - data - summary)
@@ -1583,6 +1659,7 @@ class ChatEngine:
             voice=bool((self._last_user(chat) or {}).get("voice")))
         instructions += self._canvas_context(chat)
         instructions += self._data_context(chat)
+        instructions += self._folder_context(chat)
         project, project_pictures = self._project_of(chat), []
         if project:
             told, _, project_pictures = self._project_context(chat, project, room, sees)
@@ -2127,6 +2204,44 @@ class ChatEngine:
                 + ("Say in a sentence or two what's in it; don't repeat its text in your reply." if created
                    else "Say in a sentence what you changed."))
 
+    on_artifact = None       # set by the service: (view, op, conversation_id) -> None, the artifact_changed event
+
+    def _artifact_call(self, chat: dict, call, cards: list, state: dict, canvases: list, canvas_state: dict, at: int,
+                       on_canvas) -> str:
+        """make_artifact / edit_artifact in a chat (dgc/artifact_tools). A document is a canvas, beside the chat as
+        canvas_create's is; every other type is kept in the store with its versions and gets a card under the reply.
+        A temporary chat keeps none: nothing it makes outlives it."""
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        state["calls"] += 1
+        if call.name == "make_artifact" and str(args.get("type") or "") == "doc":
+            proxy = type(call)(id=call.id, name="canvas_create", arguments={
+                "title": args.get("title"), "kind": "document", "content": args.get("content")})
+            told = self._canvas_call(chat, proxy, canvases, canvas_state, at, on_canvas)
+            if not told.startswith("error:"):
+                state["made"].append("doc")
+            return told
+        if chat.get("temporary"):
+            return ("error: a temporary chat keeps nothing after it ends, so it makes no artifacts. Use canvas_create "
+                    "for a document, or make_file for a file the user can save.")
+
+        def changed(view, op):
+            state["made"].append(view["type"])
+            state["any"] = True
+            card = {"id": view["id"], "type": view["type"], "label": view["label"], "title": view["title"],
+                    "version": view["version"], "op": op, "at": at}
+            made_here = next((c for c in cards if c["id"] == view["id"] and c.get("op") == "made"), None)
+            if made_here is not None:
+                card["op"] = "made"                         # made and changed in one reply: it was made here
+            cards[:] = [c for c in cards if c["id"] != view["id"]] + [card]
+            if callable(self.on_artifact):
+                self.on_artifact(view, op, chat["id"])
+
+        def no_local_pictures(src):
+            raise ValueError("a picture in a chat's deck comes from the web nowhere and from disk only as an "
+                             "attachment: use a data: URI")
+        return artifact_tools.run(call.name, args, origin={"surface": "chat", "chat": chat["id"]},
+                                  on_change=changed, resolve=no_local_pictures)
+
     def _make_file(self, chat: dict, call, files: list, at: int, on_file) -> str:
         """make_file: lay the file out (made.py), keep it with the chat as an attachment is kept (a temporary chat's
         only while DGC runs), and put its card under the reply. The model is told what to say of it."""
@@ -2416,7 +2531,15 @@ class ChatEngine:
         queries = [dict(q) for q in (existing or {}).get("queries") or []]
         widgets = [dict(w) for w in (existing or {}).get("widgets") or []]
         widget_state = {"calls": len(widgets), "fix": False}
+        # Artifacts (dgc/artifact_tools): decks, sheets, dashboards and pages the chat keeps with every version; a
+        # document is a canvas. `made` is every type this reply made or changed, for the Output chip's check.
+        artifact_cards = [dict(a) for a in (existing or {}).get("artifacts") or []]
+        artifact_state = {"calls": 0, "made": [c.get("type", "") for c in artifact_cards],
+                          # edit_artifact is offered once there is one to edit, as canvas_edit is
+                          "any": bool(artifact_cards) or any(m.get("artifacts") for m in chat.get("messages") or [])}
         nudged = {"widget": False}
+        folder_root = self.folder_of(chat) if name not in self._toolless else None
+        folder_state = {"calls": 0}
         tables = self._tables(chat) if name not in self._toolless else None
         plugins = self._plugins(chat) if name not in self._toolless else None
         plugins_now = plugins.pin() if plugins is not None else []
@@ -2437,13 +2560,22 @@ class ChatEngine:
                 out += [WIDGET_TOOL] if not widgets or (widget_state["fix"] and widget_state["calls"] < 2) else []
             if canvas_state["calls"] < MAX_CANVAS_CALLS and not spoken:
                 out += [CANVAS_CREATE_TOOL] + ([CANVAS_EDIT_TOOL] if canvas_state["any"] else [])
+            if artifact_state["calls"] < MAX_ARTIFACT_CALLS and not spoken:
+                out += [artifact_tools.MAKE_ARTIFACT] + ([artifact_tools.EDIT_ARTIFACT] if artifact_state["any"] else [])
             if self._memory_on(chat) and len(memory_ops) < MAX_MEMORY_PER_REPLY:
                 out += [REMEMBER_TOOL, FORGET_TOOL]
             if plugins_now and plugins.calls < chat_plugins.MAX_CALLS:
                 out += chat_plugins.schemas(plugins_now)
+            if folder_root is not None and folder_state["calls"] < chat_folder.MAX_CALLS:
+                out += list(chat_folder.TOOLS)
             return out or None
 
         messages = list(history)
+        chosen = str((self._last_user(chat) or {}).get("output") or "") if existing is None else ""
+        if chosen and artifact_tools.output_line(chosen):
+            messages = _with_line_on_last_user(messages, artifact_tools.output_line(chosen)
+                                               + (" A document here is a canvas (canvas_create)." if chosen == "document"
+                                                  else ""))
         web_images = (existing or {}).get("images")       # a continued reply keeps the pictures it has
         picturing = None
         if (search in ("auto", "on") or self._memory_on(chat)) and existing is None and name not in self._toolless:
@@ -2542,6 +2674,20 @@ class ChatEngine:
                             named = (call.arguments or {}).get("title") if isinstance(call.arguments, dict) else ""
                             on_activity("canvas", str(named or "the canvas")[:80])
                         told = self._canvas_call(chat, call, canvases, canvas_state, before + len("".join(streamed)), on_canvas)
+                        if not told.startswith("error:"):
+                            artifact_state["made"].append("doc")
+                    elif call.name in artifact_tools.NAMES:
+                        if on_activity is not None:
+                            on_activity("making", artifact_tools.args_preview(call.arguments)[:80])
+                        told = self._artifact_call(chat, call, artifact_cards, artifact_state, canvases, canvas_state,
+                                                   before + len("".join(streamed)), on_canvas)
+                    elif call.name in chat_folder.NAMES:
+                        folder_state["calls"] += 1
+                        args = call.arguments if isinstance(call.arguments, dict) else {}
+                        if on_activity is not None:
+                            on_activity("looking", str(args.get("path") or args.get("text") or "the folder")[:80])
+                        told = (chat_folder.call(folder_root, call.name, args) if folder_root is not None
+                                else "error: this chat has no folder to read.")
                     elif call.name == "make_file":
                         if on_activity is not None:
                             on_activity("making", str((call.arguments or {}).get("name") or "")[:80] if isinstance(
@@ -2597,7 +2743,9 @@ class ChatEngine:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,
                                        actions=actions, files=files, canvases=canvases, queries=queries,
-                                       widgets=widgets, plugins_used=used)
+                                       widgets=widgets, plugins_used=used, artifacts=artifact_cards,
+                                       output_note=(artifact_tools.missing_note(chosen, artifact_state["made"])
+                                                    if chosen and finish == "stop" else ""))
             return message
         finally:
             if picturing is not None:
@@ -2607,7 +2755,8 @@ class ChatEngine:
 
     def _keep_reply(self, chat, existing, reply_id, model, client, text, thought_text, finish, failure, usage, counted,
                     sources, searches, questions, memory_ops, web_images, *, actions=None, files=None,
-                    canvases=None, queries=None, widgets=None, plugins_used=None) -> dict:
+                    canvases=None, queries=None, widgets=None, plugins_used=None, artifacts=None,
+                    output_note: str = "") -> dict:
         """The reply as it ended, saved (with what it looked up, asked, remembered and showed)."""
         if failure is not None and not text:
             raise ChatEngineError(_failure_text(failure)) from failure
@@ -2636,6 +2785,8 @@ class ChatEngine:
                 message["widgets"] = widgets
             if plugins_used:
                 message["plugins"] = _merged_plugins(existing.get("plugins"), plugins_used)
+            if artifacts:
+                message["artifacts"] = artifacts
             chat["messages"][-1] = message
         else:
             message = {"id": reply_id, "role": "assistant", "text": text[:MAX_TEXT], "thinking": thought_text,
@@ -2662,6 +2813,10 @@ class ChatEngine:
                 message["widgets"] = widgets
             if plugins_used:
                 message["plugins"] = list(plugins_used)
+            if artifacts:
+                message["artifacts"] = artifacts
+            if output_note:
+                message["output_note"] = output_note       # the Output chip asked for something this reply didn't make
             chat["messages"].append(message)
         if counted:
             message["counted"] = counted
@@ -2856,3 +3011,19 @@ def _failure_text(exc) -> str:
 
 
 __all__ = ["ChatEngine", "ChatEngineError", "ChatStoreError", "THINKING"]
+
+
+def _with_line_on_last_user(messages: list, line: str) -> list:
+    """The request's copy of the messages with ``line`` after the last user message's text: this reply's own
+    guidance (the Output chip), never in the system prompt and never in the saved chat."""
+    out = list(messages)
+    for i in range(len(out) - 1, -1, -1):
+        if out[i].get("role") != "user":
+            continue
+        content = out[i].get("content")
+        if isinstance(content, str):
+            out[i] = {**out[i], "content": f"{content}\n\n{line}"}
+        elif isinstance(content, list):
+            out[i] = {**out[i], "content": [*content, {"type": "text", "text": line}]}
+        break
+    return out

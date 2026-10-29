@@ -65,6 +65,16 @@ class SetupNotificationTests(PipSetupTests):
         self.assertEqual(self.notify(s,b)[0]['notification'],'queued')
         self.assertEqual(b._start_turn.call_count,2)
 
+    def test_damaged_queued_receipt_does_not_block_retry(self):
+        s=self.draft(self.request(run_now=False));self.review(s)
+        b=SimpleNamespace(agent=SimpleNamespace(session_file=Path('main-chat.json'),messages=[]),
+                          _start_turn=Mock(return_value=('queued',1)),
+                          _queue=[(notices.PREFIX+'{bad json',None,None,'pip_setup','')])
+        self.assertEqual(self.notify(s,b)[0]['notification'],'queued')
+        self.assertEqual(b._start_turn.call_count,1)
+        with self.assertRaisesRegex(ValueError,'Invalid saved Pip setup notice'):
+            notices.decode(notices.PREFIX)
+
     def test_legacy_receipt_requires_owner_and_exact_saved_receipt(self):
         import json
         s=self.draft(self.request(run_now=False));self.review(s)

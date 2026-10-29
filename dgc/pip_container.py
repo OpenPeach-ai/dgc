@@ -203,8 +203,11 @@ def status() -> dict:
         state, value["error"] = "failed", value.get("error") or "Setting up stopped before it finished. Open the computer again to retry."
     if state == "ready" and not image_ready():
         state = "none"                     # the image was deleted: build it again
-    return {"state": state, "step": str(value.get("step") or "")[:200], "done": int(value.get("done") or 0),
-            "total": int(value.get("total") or 0), "error": str(value.get("error") or "")[:400] if state == "failed" else "",
+    def count(field):
+        item = value.get(field)
+        return item if type(item) is int and 0 <= item <= 10000 else 0
+    return {"state": state, "step": str(value.get("step") or "")[:200], "done": count("done"),
+            "total": count("total"), "error": str(value.get("error") or "")[:400] if state == "failed" else "",
             "chrome": str(value.get("chrome") or "")[:40], "checked_at": value.get("at") if state == "ready" else None}
 
 
@@ -586,9 +589,10 @@ class ContainerBox:
             "pkill -f -- '--user-data-dir=/home/pip/[.]browser' ; sleep 0.3; rm -f /home/pip/.browser/Singleton*", timeout=30)
         inner = ("exec 3<&0 4>&1 >>/run/dgc/log/chrome.log 2>&1 </dev/null; exec " + shlex.join(self.chrome_argv()))
         env = {"HOME": "/home/pip", "DISPLAY": DISPLAY} if self.on_screen else {"HOME": "/home/pip"}
-        self.proc = subprocess.Popen(self.computer.exec_argv(["sh", "-c", inner], interactive=True, env=env),
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(log_path, "ab"),
-                                     start_new_session=True)
+        with open(log_path, "ab") as log:
+            self.proc = subprocess.Popen(self.computer.exec_argv(["sh", "-c", inner], interactive=True, env=env),
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
+                                         start_new_session=True)
         self.read_fd, self.write_fd = self.proc.stdout.fileno(), self.proc.stdin.fileno()
 
     def stop(self) -> None:

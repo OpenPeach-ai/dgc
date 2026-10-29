@@ -778,8 +778,9 @@ def display_rows(messages) -> list[dict]:
         if isinstance(content, str):
             text = content
         elif isinstance(content, list):
-            text = " ".join(part.get("text", "") for part in content
-                            if isinstance(part, dict) and part.get("type") == "text")
+            text = " ".join(part["text"] for part in content
+                            if isinstance(part, dict) and part.get("type") == "text"
+                            and isinstance(part.get("text"), str))
         else:
             text = ""
         text = text.strip()
@@ -808,8 +809,12 @@ def display_rows(messages) -> list[dict]:
             if text:
                 rows.append({"who": "user", "body": text, "tools": ""})
         elif role == "assistant":
-            names = ", ".join((call.get("function") or {}).get("name", "?")
-                              for call in (message.get("tool_calls") or []) if isinstance(call, dict))
+            calls = message.get("tool_calls")
+            names = ", ".join(
+                name for call in (calls if isinstance(calls, list) else [])
+                if isinstance(call, dict) and isinstance(call.get("function"), dict)
+                for name in [call["function"].get("name")]
+                if isinstance(name, str))
             if text or names:
                 rows.append({"who": "assistant", "body": text, "tools": names})
     return rows
@@ -899,7 +904,7 @@ def recall_path(session_file, project_root) -> Path:
 def _recall_cap(max_bytes=None) -> int:
     try:
         value = int(max_bytes) if max_bytes is not None else _DEFAULT_RECALL_BYTES
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         value = _DEFAULT_RECALL_BYTES
     return max(_MIN_RECALL_BYTES, min(_MAX_RECALL_BYTES, value))
 
@@ -996,8 +1001,11 @@ def recall_summary(session_file, project_root) -> dict:
         return {}
     if not header:
         return {}
-    return {"rows": int(header.get("rows") or 0), "dropped": int(header.get("dropped") or 0),
-            "generations": int(header.get("generations") or 0)}
+    try:
+        values = {key: int(header.get(key) or 0) for key in ("rows", "dropped", "generations")}
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    return values if all(value >= 0 for value in values.values()) else {}
 
 
 def load_recall(session_file, project_root) -> list:

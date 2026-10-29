@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    "get_pip_artifacts",
     "list_pip_run_fixes",
     "list_pip_templates",
     "list_app_events",
@@ -85,6 +86,7 @@ PipMutationCommand = Literal[
     "decide_app_approval",
     "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
     "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
+    "set_pip_artifacts",
     "set_pip_level",
     "set_pip_working_notes",
     "save_pip_login", "remove_pip_login", "grant_pip_login",
@@ -353,8 +355,20 @@ MUTATION_COMMANDS |= API64_MUTATIONS
 # can say fixing, Fixed, failed or undone. A Personal Pip has none. Local only.
 API65_READS = frozenset({'list_pip_run_fixes'})
 READ_COMMANDS |= API65_READS
+# API 67: where a Pip's reports are kept and the dashboards it refreshes. get_pip_artifacts {pip_id} reads {report_as:
+# chat|doc|sheet, dashboards: [ids], report_doc, report_doc_title, report_doc_version, report_sheet,
+# report_sheet_title, report_sheet_version}; set_pip_artifacts {pip_id, report_as?, dashboards?}
+# changes them: with doc or sheet each finished review is also the newest version of the Pip's own document or sheet,
+# and after every run it finishes it refreshes those dashboards. Local only.
+API67_READS = frozenset({'get_pip_artifacts'})
+API67_MUTATIONS = frozenset({'set_pip_artifacts'})
+READ_COMMANDS |= API67_READS
+MUTATION_COMMANDS |= API67_MUTATIONS
+PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'get_pip_artifacts': frozenset({'pip_id'}),
+    'set_pip_artifacts': frozenset({'pip_id', 'report_as', 'dashboards'}),
     'list_pip_run_fixes': frozenset({'pip_id'}),
     'ensure_pip_template': frozenset({'template', 'accept_widening', 'overwrite_user_changes'}),
     'prune_pip_templates': frozenset({'keep'}),
@@ -660,7 +674,7 @@ def _check_api52_fields(values: Mapping[str, Any]) -> None:
     if 'spooled_images' in values and (
             type(images) is not list or not 1 <= len(images) <= 64
             or any(type(i) is not dict or set(i) != {'name', 'media_type'} or not _spool_name(i['name'])
-                   or i['media_type'] not in SPOOLED_IMAGE_TYPES for i in images)):
+                   or type(i['media_type']) is not str or i['media_type'] not in SPOOLED_IMAGE_TYPES for i in images)):
         raise DGCConfigError('spooled_images must be 1 to 64 {name, media_type} entries naming files in the image spool')
     files = values.get('spooled_files')
     if 'spooled_files' in values and (
@@ -761,7 +775,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API65_READS:
+        if command in API67_READS | API67_MUTATIONS:
+            minimum = 67
+        elif command in API65_READS:
             minimum = 65
         elif command in API64_READS | API64_MUTATIONS:
             minimum = 64
@@ -903,14 +919,17 @@ class Pips:
             if any(isinstance(choice, dict) and choice.get('mode') == 'subscription'
                    and (set(choice) != {'mode', 'engine'} or choice.get('engine') not in SUBSCRIPTION_ENGINES) for choice in choices):
                 raise DGCConfigError('A subscription model_choice is {"mode": "subscription", "engine": "claude" | "codex"}')
-        if command == 'set_pip_eyes' and values.get('choice') not in EYES_CHOICES:
+        if command == 'set_pip_eyes' and (type(values.get('choice')) is not str or values['choice'] not in EYES_CHOICES):
             raise DGCConfigError('choice must be ask, relay or off')
-        if command == 'set_pip_computer_apps' and values.get('choice') not in APPS_CHOICES:
+        if command == 'set_pip_computer_apps' and (type(values.get('choice')) is not str or values['choice'] not in APPS_CHOICES):
             raise DGCConfigError('choice must be download or not_now')
         if command == 'save_pip_login':
             _check_login_save(values)
-        if command == 'set_pip_level' and values.get('level') not in PIP_LEVELS:
+        if command == 'set_pip_level' and (type(values.get('level')) is not str or values['level'] not in PIP_LEVELS):
             raise DGCConfigError('level must be ask, approve or full')
+        if command == 'set_pip_artifacts' and 'report_as' in values and (
+                type(values['report_as']) is not str or values['report_as'] not in PIP_REPORT_AS):
+            raise DGCConfigError("report_as must be chat, doc or sheet")
         if command in API61_MUTATIONS and not (isinstance(values.get('name'), str) and APP_NAME.fullmatch(values['name'])):
             raise DGCConfigError("name is the app's name: 1 to 40 lowercase letters, digits or hyphens, such as shop")
         if command in ('register_app', 'update_app'):
@@ -1217,8 +1236,8 @@ class Pips:
             raise DGCUnsupportedError("This runtime has no image spool to hand files over through")
         if type(caps.get("pips_api_version")) is not int or caps["pips_api_version"] < 52:
             raise DGCUnsupportedError("Photos and files through the spool require a runtime advertising Pips API 52 or newer")
-        if not isinstance(data, (bytes, bytearray)) or not data:
-            raise DGCConfigError("spool takes the file's bytes")
+        if not isinstance(data, (bytes, bytearray)) or not data or len(data) > 2 * 1024 * 1024:
+            raise DGCConfigError("spool takes at most 2 MB of file bytes")
         if not isinstance(suffix, str) or not re.fullmatch(r"(\.[A-Za-z0-9]{1,10})?", suffix):
             raise DGCConfigError("suffix is empty or one extension, such as .jpg")
         name = uuid.uuid4().hex + suffix

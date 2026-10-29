@@ -334,9 +334,12 @@ class AppToolHandler:
             if callback is not None and not callable(callback):
                 raise DGCConfigError(f"{name} is not callable")
         self._approvals = {"approval_requested": on_approval_requested, "approval_resolved": on_approval_resolved}
-        self.max_skew = int(max_skew_seconds)
-        self.max_body = int(max_body)
-        self.max_nonces = int(max_nonces)
+        for name, value in (("max_skew_seconds", max_skew_seconds), ("max_body", max_body), ("max_nonces", max_nonces)):
+            if type(value) is not int or value < 1:
+                raise DGCConfigError(f"{name} must be a positive whole number")
+        self.max_skew = max_skew_seconds
+        self.max_body = max_body
+        self.max_nonces = max_nonces
         self._clock = clock
         self._nonces: OrderedDict[str, float] = OrderedDict()
         self._lock = threading.Lock()

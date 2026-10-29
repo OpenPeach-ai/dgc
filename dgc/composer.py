@@ -34,11 +34,13 @@ def composer_token(text: str, cursor: int) -> tuple[str, str, int, int] | None:
 
 
 def completion_rows(surface: str, project_root: Path | None, *, skills: dict | None = None,
-                    trigger: str = "/", query: str = "") -> list[dict]:
+                    trigger: str = "/", query: str = "", extra: list[dict] | None = None) -> list[dict]:
+    """``extra``: more rows for the / palette (the running mods' own commands, dgc/mods/terminal)."""
     rows = []
     if trigger == "/":
         rows.extend({"label": "/" + name, "desc": description, "kind": "command", "value": name}
                     for name, description in command_pairs(surface))
+        rows.extend(extra or [])
         if project_root is not None:
             rows.extend({"label": "/" + name, "desc": "custom prompt command", "kind": "template", "value": name}
                         for name in discover_commands(project_root))

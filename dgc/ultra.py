@@ -129,5 +129,5 @@ def summary(config) -> str:
     agents = (f"up to {width} parallel agents" if depth
               else "no sub-agents (max_subagent_depth is 0)")
     if widened:
-        agents += " (max_parallel_tasks pins a narrower width)"
+        agents += " (set max_parallel_tasks to choose a narrower width)"
     return f"Ultra · xhigh reasoning · {agents}"

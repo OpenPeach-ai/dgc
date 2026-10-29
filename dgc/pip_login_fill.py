@@ -278,8 +278,12 @@ class LoginPass:
     sent: list = field(default_factory=list)
 
     def admits(self, url: str, post: str, content_type: str) -> bool:
-        from .pip_logins import site_of
+        from .pip_logins import page_check, site_of
         if time.monotonic() > self.until or not post:
+            return False
+        # A secure sign-in page can submit to a different URL. Never grant the
+        # one-use exception to a cleartext destination on another computer.
+        if not page_check(url)[0]:
             return False
         host = (urlsplit(str(url or "")).hostname or "").lower().rstrip(".")
         if not host or not (host in self.hosts or (not self.exact and site_of(host) == self.site)):

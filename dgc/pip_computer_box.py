@@ -7,12 +7,11 @@ an egress proxy lets the browser reach public web servers and nothing on this co
 local network. Chromium is driven over ``--remote-debugging-pipe``, so the box listens on
 nothing.
 
-Reading is free. Anything that would change something on a website -- a form submit, a POST,
-PUT, PATCH or DELETE from any frame, popup or worker -- is caught inside the browser before it
-is sent and HELD: the request waits, unsent, until the user approves it, and approval releases
-that exact request rather than a re-typed copy. WebSockets are blocked, because the write gate
-cannot see what they carry, and there is no UDP at all, so WebRTC and QUIC cannot leave the box.
-A payment is a change like any other: held for the user, its review saying it carries payment card details.
+Reading is free. A write made within the Pip's or user's action window is held before it is
+sent; approval releases that exact request. Page-initiated background XHR/fetch and hidden-frame
+posts outside that window, and browser telemetry, pass through so ordinary pages can load.
+WebSockets are blocked because the gate cannot inspect their messages, and the box has no UDP.
+A payment initiated by the Pip is held for the user, with card details identified in its review.
 
 This module is the mechanism only. Who may start a computer, how held requests become reviews
 and how runs use it live in ``pip_computer``.
@@ -353,7 +352,7 @@ class EgressProxy:
             head = b""
             while b"\r\n\r\n" not in head:
                 chunk = client.recv(8192)
-                if not chunk or len(head) > 65536:
+                if not chunk or len(head) + len(chunk) > 65536:
                     return
                 head += chunk
             line = head.split(b"\r\n", 1)[0].decode("latin-1")
@@ -657,11 +656,16 @@ class Box:
         command_read, command_write = os.pipe()          # browser reads commands on fd 3
         reply_read, reply_write = os.pipe()              # browser writes replies on fd 4
         env = {k: os.environ[k] for k in ("PATH", "LANG") if k in os.environ}
-        with open(log_path, "ab") as log:
-            self.proc = subprocess.Popen(
-                [sys.executable, "-c", _PIPE_EXEC, str(command_read), str(reply_write), *self.argv(forwarder)],
-                pass_fds=(command_read, reply_write), stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                env=env, start_new_session=True)
+        try:
+            with open(log_path, "ab") as log:
+                self.proc = subprocess.Popen(
+                    [sys.executable, "-c", _PIPE_EXEC, str(command_read), str(reply_write), *self.argv(forwarder)],
+                    pass_fds=(command_read, reply_write), stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                    env=env, start_new_session=True)
+        except BaseException:
+            for fd in (command_read, command_write, reply_read, reply_write):
+                os.close(fd)
+            raise
         os.close(command_read); os.close(reply_write)
         self.write_fd, self.read_fd = command_write, reply_read
 
@@ -843,7 +847,7 @@ def carries_card_number(post_data: str) -> bool:
 
 
 class BoxedBrowser(BrowserSession):
-    """A BrowserSession that runs in a box and holds every write for the user's approval."""
+    """A BrowserSession in a box that holds writes associated with Pip or user actions."""
 
     def __init__(self, home: Path, egress_socket: Path, *, chrome: Path | None, log_path: Path,
                  viewport: tuple[int, int] = DEFAULT_VIEWPORT, on_write=None):

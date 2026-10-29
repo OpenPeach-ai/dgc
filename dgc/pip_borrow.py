@@ -749,17 +749,24 @@ class BorrowedTab(UserChromeSession):
         url = str(request.get("url", ""))
         kind = str(params.get("resourceType", ""))
         document = kind == "Document"
-        top = document and session == self._session_id and str(params.get("frameId", "")) == self._target_id
         if self._stop:
             self._refuse(request_id, session, document)      # given back: nothing more leaves the tab
             return
-        if top:
-            # The tab's own page, each redirect hop too: only the card's sites, before anything is sent.
-            why = self.page_refusal(url)
-            if why:
+        # Chrome's Fetch gate sees subframes, resources and background requests
+        # too. A GET can carry data in its URL, and a page can POST outside the
+        # brief period following a Pip click. Keep every request on the origins
+        # the user allowed, including each redirect hop.
+        why = self.page_refusal(url)
+        if why:
+            if document:
                 self.refused.append(("site", why))
-                self._refuse(request_id, session, True)
-                return
+            elif verb in READ_METHODS:
+                self.refused.append(("resource", why))
+            else:
+                host = urlsplit(url).hostname or "another site"
+                self.refused.append(("elsewhere", f"Sending to {host}, which isn't on the card"))
+            self._refuse(request_id, session, document)
+            return
         if verb in READ_METHODS or kind in TELEMETRY_KINDS:
             self._go(request_id, session)
             return
@@ -768,12 +775,6 @@ class BorrowedTab(UserChromeSession):
             return
         parts = urlsplit(url)
         host = parts.hostname or ""
-        from .permissions import _origin
-        if _origin(url) not in self.allowed_hosts:
-            # Something the Pip's step would send to a site the user didn't put on the card: never.
-            self.refused.append(("elsewhere", f"Sending to {host or 'another site'}, which isn't on the card"))
-            self._refuse(request_id, session, document)
-            return
         post = str(request.get("postData", "") or "")
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         fields = _fields(post, headers.get("content-type", ""))
@@ -1251,6 +1252,8 @@ class Session:
         for kind, what in tab.refused:
             if kind == "site":
                 lines.append(f"DGC stopped the tab going there: {what}. Nothing was sent or read there.")
+            elif kind == "resource":
+                lines.append(f"DGC stopped a request outside the card's sites: {what}. Nothing was sent or read there.")
             elif kind == "elsewhere":
                 lines.append(f"Not sent: {what}. Nothing of the user's leaves for a site they didn't allow.")
             elif kind == "payment":

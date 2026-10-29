@@ -25,7 +25,17 @@ body { --bg: var(--vscode-editor-background, var(--fallback-bg)); --cd-col: 760p
 .cd-head .cd-head-btn .codicon { font-size: 14px; margin-right: 1px; }
 .cd-head .cd-head-btn[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
 .cd-head-btn-count { font-variant-numeric: tabular-nums; }
-@media (max-width: 560px) { .cd-head-btn-label { display: none; } }
+/* Continue in Work: there once the chat has a folder and something to carry; while its brief is written, a spinner and
+   what it's doing, still legible though it can't be pressed. */
+.cd-head .cd-work:disabled { cursor: default; opacity: .6; }
+.cd-head .cd-work[aria-busy="true"] { opacity: 1; color: var(--text); cursor: progress; }
+.cd-head .cd-work:disabled:hover { background: transparent; }
+@media (max-width: 560px) {
+  .cd-head-btn-label { display: none; }
+  /* Narrow, it is "→ Work"; while its brief is written, the spinner alone (the chat says what it's doing). */
+  .cd-head .cd-work .cd-head-btn-label { display: inline; }
+  .cd-head .cd-work .cd-work-more, .cd-head .cd-work[aria-busy="true"] .cd-head-btn-label { display: none; }
+}
 
 /* Widgets in this chat: a panel under the button. Each row: the widget's mark, its name, when it was made and the prompt
    that asked; Open (lit on the row under the pointer), Show it in the chat, Delete (asked in the row). */
@@ -264,7 +274,7 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 /* One row however narrow the box. Below 640px the tools keep their icons and drop their words (each keeps its name
    for a screen reader, and its tooltip), so the meter, the model and Send hold their places on the right; the model's
    name gives way last, cut short. A container query: the box is as narrow as the editor group, not the window. */
-.cd-box { container: cd-box / inline-size; }
+.cd-box { container: cd-box / inline-size; position: relative; }     /* (relative: the Output menu opens above the box) */
 .cd-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); min-width: 0; }
 .cd-tools > * { flex: none; }
 .cd-tools > .cd-spacer { flex: 1 1 0; min-width: 0; }
@@ -277,6 +287,10 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 @container cd-box (max-width: 640px) {
   .cd-tool { width: var(--control); padding: 0; justify-content: center; }
   .cd-tool .cd-tool-label, .cd-toggle .cd-tool-label { display: none; }
+  /* Its choice stays in words, short: "Slides" beside the kind's icon (Auto is the icon alone). */
+  .cd-output .cd-tool[aria-pressed="true"] { width: auto; padding: 0 var(--sp-2); }
+  .cd-output .cd-tool[aria-pressed="true"] .cd-tool-label { display: inline; }
+  .cd-output .cd-tool[aria-pressed="true"] .cd-output-prefix { display: none; }
   .cd-toggle > .codicon.cd-toggle-icon { display: inline-block; }
   /* Without its word, Temporary is an icon button like its neighbours: the checkbox stays (focus, Space, the screen
      reader's "checkbox, checked") but is drawn by the icon, lit when on. A bare native box read as a stray white square. */
@@ -290,6 +304,8 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 @container cd-box (max-width: 420px) {
   .cd-tools, .cd-tools-end { gap: var(--sp-1); }
   .cd-model-name { display: none; }
+  /* With no name left to cut, the meter, the model, the microphone and Send keep their room: the chips give way. */
+  .cd-tools-end { flex-shrink: 0; }
 }
 /* ...and the meter its pie, and the model its arc alone (beside the microphone, the chevron has no room). */
 @container cd-box (max-width: 340px) {
@@ -420,7 +436,12 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 /* Its details, laid out as main DGC's context window menu (its own classes: context-head, -track, -split, -action). */
 .cd-pop { margin: 0 0 var(--sp-2) auto; width: min(320px, 100%); max-height: calc(100vh - 170px); overflow-y: auto; padding: var(--sp-3); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
-.cd-pop-pct { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1 var(--mono); font-variant-numeric: tabular-nums; }
+.cd-pop-pct { color: var(--accent-text); font: var(--w-bold) var(--t-xl)/1 var(--mono); font-variant-numeric: tabular-nums; }  /* main DGC's #ctx-pct */
+/* The context window floats over the chat as main DGC's does (.cmenu.context-menu), above the box: in the footer's
+   flow it made the footer taller, and the footer's band beside it covered the chat (reported 28 Oct). */
+.cd-foot .cd-column { position: relative; }
+#cd-context-pop { position: absolute; right: var(--sp-4); bottom: 100%; z-index: 20; margin: 0 0 var(--sp-2);
+  width: min(310px, calc(100vw - 20px)); }
 .cd-pop-rows { margin-top: var(--sp-2); }
 .cd-pop .context-split span + span { font-family: var(--sans); }
 .cd-pop .context-action + .context-action { margin-top: var(--sp-2); }
@@ -449,6 +470,46 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-tool:hover { background: var(--surface); color: var(--text); }
 .cd-tool[aria-pressed="true"] { background: color-mix(in srgb, var(--accent-fill) 18%, transparent); color: var(--accent-text, var(--text-strong)); }
 .cd-tool:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+/* The Output chip: a tool like Deep research, with its choices in a menu above it. */
+/* Its menu opens above the whole box (.cd-box is its containing block), so in a narrow chat it never runs off the
+   edge from where the chip sits. */
+.cd-output { position: static; display: inline-flex; }
+.cd-output .cd-tool { max-width: 180px; }
+.cd-output .cd-tool-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-output-menu { position: absolute; left: var(--sp-2); bottom: 100%; z-index: 20; margin-bottom: var(--sp-2); width: min(320px, calc(100% - var(--sp-4)));
+  padding: var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface);
+  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); }
+body.vscode-light .cd-output-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.cd-output-head { display: block; padding: var(--sp-2) var(--sp-2) var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1 var(--sans);
+  letter-spacing: .1em; text-transform: uppercase; }
+.cd-output-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text); text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.3 var(--sans); }
+.cd-output-item:hover, .cd-output-item:focus-visible { background: var(--surface2); outline: none; }
+.cd-output-item[aria-checked="true"] { background: var(--sel); }
+.cd-output-item > .codicon { color: var(--muted); }
+.cd-output-item[aria-checked="true"] > .codicon { color: var(--accent-text); }
+.cd-output-name { flex: none; color: var(--text-strong); }
+.cd-output-desc { margin-left: auto; padding-left: var(--sp-3); color: var(--faint); font-size: var(--t-xs); text-align: right; }
+/* The Folder chip: Output's look. With a folder it shows the folder's name, cut short, and is the first in the row to
+   give way when the row is full (the spacer goes first); its menu opens above the box as Output's does. */
+/* Chosen, Output and Folder give way first when the row is full (their words cut short, never their icons), well
+   before the model's name does: in a 360px tab with both chosen, Send was pushed past the box's edge. Not chosen, each
+   is a tool like Study and keeps its word. */
+.cd-tools > .cd-output:has(> .cd-tool[aria-pressed="true"]) { flex: 0 2 auto; min-width: var(--control); }
+.cd-tools > .cd-folder:has(> .cd-tool[aria-pressed="true"]) { flex-shrink: 8; }  /* first: its name is in its tooltip and menu */
+.cd-output .cd-tool { min-width: 0; }
+.cd-output .cd-tool > .codicon { flex: none; }
+.cd-output .cd-tool-label { min-width: 0; }
+.cd-folder .cd-tool { max-width: 200px; }
+.cd-folder .cd-tool[aria-busy="true"] { cursor: progress; }
+.cd-folder-path { display: block; padding: 0 var(--sp-2) 2px; color: var(--text-strong); overflow-wrap: anywhere;
+  font: var(--w-reg) var(--t-xs)/1.45 var(--mono); }
+.cd-folder-note { display: block; margin-bottom: var(--sp-1); padding: 0 var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border);
+  color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+.cd-folder-item[aria-disabled="true"] { cursor: default; }
+.cd-folder-item[aria-disabled="true"] .cd-output-name, .cd-folder-item[aria-disabled="true"] > .codicon { color: var(--muted); }
+.cd-folder-item[aria-disabled="true"]:hover { background: transparent; }
+.cd-folder-item[aria-disabled="true"]:focus-visible { background: var(--surface2); }
 .cd-research-chip { display: inline-flex; align-items: center; gap: var(--sp-1); align-self: flex-end; color: var(--muted);
   font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
 .cd-research { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border-strong);
@@ -635,7 +696,9 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 
 /* The Library (ChatGPT's): every file attached in ChatDGC, a list you can search and narrow to one kind. */
 .lib-body { margin: 0; background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
-.lib { box-sizing: border-box; max-width: 860px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
+/* width: 100%: with auto margins in the body's column it was sized to its content, and in a narrow tab that ran past the
+   edge (a 403px Library in a 360px tab: its words cut off, a row's last action out of reach). */
+.lib { box-sizing: border-box; width: 100%; max-width: 860px; margin: 0 auto; padding: var(--sp-5) var(--sp-4) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
 .lib-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
 .lib-title { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-strong); font: var(--w-semi) 22px/1.25 var(--sans); }
 .lib-title .codicon { font-size: 20px; color: var(--muted); }
@@ -674,6 +737,17 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 .lib-action:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .lib-action[aria-label^="Delete"]:hover { color: var(--err-text); }
 .lib-more { align-self: center; }
+/* The Artifacts tab: a kind's mark, and Export's formats in a menu under its button. */
+.lib-artifact .lib-preview .codicon { color: var(--accent-text); }
+body.vscode-light .lib-artifact .lib-preview .codicon, body.vscode-high-contrast-light .lib-artifact .lib-preview .codicon { color: var(--link); }
+.lib-menu-wrap { position: relative; display: inline-flex; }
+.lib-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
+body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.lib-menu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text);
+  text-align: left; white-space: nowrap; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
+.lib-menu-item:hover, .lib-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
+.lib-action[aria-label^="Remove"]:hover { color: var(--err-text); }
 @media (max-width: 560px) { .lib-actions { flex-wrap: wrap; width: 60px; } }
 
 /* A plugin's card under a reply (ChatGPT's confirmation): what it would do, its inputs (editable), and the choice. */
@@ -751,6 +825,25 @@ button.cd-project-card:hover { border-color: var(--border-strong); background: v
 
 /* A canvas the reply made or changed (it's open beside the chat), and a message asked about part of one. */
 .cd-canvas-badge { background: color-mix(in srgb, var(--accent) 70%, #1f2937); font-size: 16px; }
+/* An artifact a reply made (message.artifacts): its kind's mark, Open, and Export with its own formats. */
+.cd-artifact-badge { font-size: 16px; background: color-mix(in srgb, var(--accent) 70%, #1f2937); }
+.cd-artifact[data-type="slides"] .cd-artifact-badge { background: #c2410c; }
+.cd-artifact[data-type="sheet"] .cd-artifact-badge { background: #15803d; }
+.cd-artifact[data-type="doc"] .cd-artifact-badge { background: #2563eb; }
+.cd-artifact[data-type="page"] .cd-artifact-badge { background: #334155; }
+.cd-artifact-badge > .codicon { font-size: 18px; color: #fff; }
+.cd-artifact-export { position: relative; display: inline-flex; }
+.cd-artifact-export-button { display: inline-flex; align-items: center; gap: 2px; }
+.cd-artifact-export-button > .codicon { font-size: 12px; }
+.cd-artifact-menu { position: absolute; top: calc(100% + var(--sp-1)); right: 0; z-index: 15; min-width: 210px; padding: var(--sp-1);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 14px 40px -10px rgba(0,0,0,.6); }
+body.vscode-light .cd-artifact-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
+.cd-artifact-menu-item { display: block; width: 100%; padding: var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--text); text-align: left; white-space: nowrap; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); }
+.cd-artifact-menu-item:hover, .cd-artifact-menu-item:focus-visible { background: var(--sel); color: var(--text-strong); outline: none; }
+@media (max-width: 420px) { .cd-artifact-menu { right: auto; left: 0; } }
+/* The Output chip asked for something this reply didn't make: a quiet line under it. */
+.cd-output-note { margin: var(--sp-2) 0 0; color: var(--muted); font: italic var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .cd-canvas[data-kind="code"] .cd-canvas-badge { background: #334155; }
 .cd-user-canvas { display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; margin-bottom: 4px;
   color: var(--muted); font-size: var(--t-sm); }
@@ -834,3 +927,5 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 /* Read-only while another window writes to this chat (Open here): the muted look is main.css's; an option's words too. */
 .cd-option:has(input[data-held="1"]) { color: var(--muted); cursor: default; }
 .cd-option:has(input[data-held="1"]):hover { background: transparent; }
+/* ChatDGC's mods above the message box (media/mods.js; main.css draws them). */
+.cd-foot .mod-strip { margin: 0 0 var(--sp-2); }

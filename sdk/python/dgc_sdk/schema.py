@@ -7,6 +7,7 @@ ignored. Remote ``$ref`` is refused. Repair happens in the session after tools h
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any, Mapping
 
@@ -18,29 +19,80 @@ _ALLOWED = frozenset({
     "description", "title", "default",
 })
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
+_TYPES = frozenset({"object", "array", "string", "integer", "number", "boolean", "null"})
+_COUNTS = frozenset({"minLength", "maxLength", "minItems", "maxItems"})
+_LIMITS = frozenset({"minimum", "maximum"})
 
 
 def assert_supported(schema: Mapping[str, Any]) -> None:
     if not isinstance(schema, dict) or not schema:
         raise DGCConfigError("output_schema must be a non-empty object")
-    _walk(schema)
+    _walk(schema, set(), 0)
 
 
-def _walk(node: Any) -> None:
-    if not isinstance(node, dict):
-        return
+def _walk(node: Any, ancestors: set[int], depth: int) -> None:
+    if not isinstance(node, dict) or depth > 64 or id(node) in ancestors:
+        raise DGCConfigError("output_schema must contain finite, acyclic schema objects")
+    ancestors.add(id(node))
+    try:
+        _check_node(node, ancestors, depth)
+    finally:
+        ancestors.remove(id(node))
+
+
+def _check_node(node: dict[str, Any], ancestors: set[int], depth: int) -> None:
     if "$ref" in node or "$id" in node or "$schema" in node:
         raise DGCConfigError("output_schema must not use $ref, $id, or $schema")
+    if any(not isinstance(key, str) for key in node):
+        raise DGCConfigError("output_schema keys must be strings")
     unknown = set(node) - _ALLOWED
     if unknown:
         raise DGCConfigError(f"output_schema has unsupported keyword: {sorted(unknown)[0]}")
+    expected = node.get("type")
+    if "type" in node:
+        types = expected if isinstance(expected, list) else [expected]
+        if not types or any(not isinstance(kind, str) or kind not in _TYPES for kind in types):
+            raise DGCConfigError("output_schema type must name supported JSON types")
+    required = node.get("required")
+    if "required" in node and (not isinstance(required, list) or
+                                 any(not isinstance(key, str) for key in required)):
+        raise DGCConfigError("output_schema required must be an array of strings")
+    enum = node.get("enum")
+    if "enum" in node and (not isinstance(enum, list) or not enum):
+        raise DGCConfigError("output_schema enum must be a non-empty array")
+    for key in ("enum", "default"):
+        if key in node:
+            try:
+                json.dumps(node[key], allow_nan=False)
+            except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+                raise DGCConfigError(f"output_schema {key} must contain JSON values") from exc
+    for key in _COUNTS & node.keys():
+        count = node[key]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise DGCConfigError(f"output_schema {key} must be a non-negative integer")
+    for key in _LIMITS & node.keys():
+        limit = node[key]
+        try:
+            finite = isinstance(limit, (int, float)) and not isinstance(limit, bool) and math.isfinite(limit)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise DGCConfigError(f"output_schema {key} must be a finite number")
+    for key in ("title", "description"):
+        if key in node and not isinstance(node[key], str):
+            raise DGCConfigError(f"output_schema {key} must be a string")
     props = node.get("properties")
-    if isinstance(props, dict):
+    if "properties" in node:
+        if not isinstance(props, dict) or any(not isinstance(key, str) for key in props):
+            raise DGCConfigError("output_schema properties must be an object")
         for child in props.values():
-            _walk(child)
+            _walk(child, ancestors, depth + 1)
     items = node.get("items")
-    if isinstance(items, dict):
-        _walk(items)
+    if "items" in node:
+        _walk(items, ancestors, depth + 1)
+    additional = node.get("additionalProperties")
+    if "additionalProperties" in node and not isinstance(additional, bool):
+        _walk(additional, ancestors, depth + 1)
 
 
 def extract_json(text: str) -> Any:

@@ -105,7 +105,7 @@ def transcript(turns: list[dict]) -> str:
 
 # What a user pastes into their own message (an email in quotes, a code block, a quoted reply) is someone else's
 # words: it can't back a fact either, though the model still reads it for context.
-_PASTED = re.compile(r"```.*?```|\"[^\"\n]{30,}\"|“[^”]{30,}”|^\s*>.*$", re.S | re.M)
+_PASTED = re.compile(r"```.*?```|\"[^\"\n]{30,}\"|“[^”]{30,}”|^[ \t]*>[^\n]*$", re.S | re.M)
 
 
 def own_words(text: str) -> str:

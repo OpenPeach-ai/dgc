@@ -41,7 +41,7 @@ class RetryPolicy:
                 f"RetryPolicy.max_attempts must be an integer from 1 to {_MAX_ATTEMPTS}")
         try:
             statuses = tuple(sorted(int(code) for code in self.retry_on))
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise DGCConfigError(
                 "RetryPolicy.retry_on must be a sequence of HTTP status codes") from exc
         if statuses != tuple(sorted(RUNTIME_RETRY_STATUSES)):

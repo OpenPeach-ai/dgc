@@ -16,6 +16,8 @@ and high-confidence credential shapes cannot leak into a training corpus.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 from . import sessions as sessions_mod
@@ -23,6 +25,7 @@ from .redaction import redact_value, secret_values
 
 # The exported record documents its own shape so a downstream loader can validate it.
 RECORD_SCHEMA_VERSION = 1
+MAX_TRAINING_SESSION_BYTES = 64 * 1024 * 1024
 _TRAINING_ROLES = ("system", "user", "assistant", "tool")
 _GOAL_COMPLETED = "completed"
 
@@ -190,8 +193,23 @@ def build_record(record: dict, config=None, *, path: Path | None = None,
 def _load_session_file(path: Path) -> dict | None:
     """Read one session transcript defensively; never raise on a malformed/foreign file."""
     try:
-        data = json.loads(Path(path).read_text())
-    except (OSError, ValueError, TypeError):
+        flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_BINARY", 0))
+        fd = os.open(path, flags)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TRAINING_SESSION_BYTES:
+                return None
+            with os.fdopen(fd, "rb") as source:
+                fd = -1
+                raw = source.read(MAX_TRAINING_SESSION_BYTES + 1)
+        finally:
+            if fd >= 0:
+                os.close(fd)
+        if len(raw) > MAX_TRAINING_SESSION_BYTES:
+            return None
+        data = json.loads(raw)
+    except (OSError, ValueError, TypeError, UnicodeError):
         return None
     if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
         return None

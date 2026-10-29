@@ -101,6 +101,26 @@ install in a temporary home. If promotion fails, do not rebuild: fix the channel
 same bytes. Roll back by redeploying prior committed site artifacts; never move or rewrite an
 existing release tag.
 
+## Google sign-in: the file vibedgc.com serves
+
+The Google Workspace plugin signs in with DGC's own Google app (a desktop app client). Its client id is in
+`dgc/plugin_catalog.json`; its secret is never in this repository. DGC fetches it at sign-in from
+`https://vibedgc.com/oauth/google-client.json`, which the site must serve with `Content-Type: application/json`,
+no redirect, and this body (the secret from the Google Cloud console, under Clients):
+
+```json
+{"client_id": "<the catalog's client_id>", "client_secret": "<the client's secret>"}
+```
+
+Google's downloaded client JSON (`{"installed": {...}}`) is also accepted as is. DGC refuses the file when its
+`client_id` differs from the catalog's. Rotating the secret at Google needs only the file changed; existing sign-ins
+keep refreshing with the secret they were made with until Google stops accepting it, then sign in again.
+
+**Before the site serves it (maintainers only):** set `DGC_MAINTAINER_OAUTH_CLIENT_FILE` to the path of the client
+JSON you downloaded from Google (mode 600; DGC refuses a file others can read). DGC then uses that file in place of
+the address, for the client it names. It is a testing aid, not a user setting: never document it for users or put
+the file in a repository.
+
 ## SDK releases
 
 The SDK (`dgc-sdk` on PyPI, `@vibedgc/sdk` as a release tarball) has its own version stream and

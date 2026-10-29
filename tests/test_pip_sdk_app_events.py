@@ -281,6 +281,16 @@ class WhoRunsItTests(EventWorld, unittest.TestCase):
         with self.assertRaises(RegistryError):
             self.control("list_app_events", app="billing")
 
+    def test_corrupt_saved_receipt_does_not_requeue_a_repeated_event(self):
+        self.routine()
+        self.send(key="bad-receipt")
+        self.registry.db.execute("UPDATE pip_app_events SET answer='[]' WHERE idempotency_key='bad-receipt'")
+        with self.assertRaisesRegex(RegistryError, "saved app event receipt"):
+            self.send(key="bad-receipt")
+        listed = self.control("list_app_events", app="shop")
+        self.assertEqual(listed["events"][0]["queued"], 0)
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_app_events").fetchone()[0], 1)
+
 
 class SuggestedTests(EventWorld, unittest.TestCase):
     def test_the_pips_add_routine_on_an_app_event_waits_for_the_users_add(self):

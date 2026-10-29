@@ -34,6 +34,7 @@ from . import troupe
 from .workspace_registry import RegistryError
 
 MAX_PAYLOAD = 32768
+MAX_SNAPSHOT_ARCHIVE = 1024 * 1024 * 1024
 JOB_SECONDS = 3600
 FIRST_LOOK_DAYS = 7
 POST_RETRIES = 30                # a busy Pip: try the report turn again every minute for half an hour
@@ -198,12 +199,25 @@ def _check_snapshot_members(tar: tarfile.TarFile, dest: Path) -> None:
 
 def snapshot(root: str, commit: str, dest: Path) -> None:
     """The committed tree at COMMIT, unpacked into DEST (no .git, nothing uncommitted)."""
-    archive = subprocess.run(["git", "-C", root, "archive", "--format=tar", commit], capture_output=True, timeout=300,
-                             stdin=subprocess.DEVNULL)
-    if archive.returncode:
-        raise RegistryError("troupe_failed", "git archive failed: " + archive.stderr.decode("utf-8", "replace")[:200])
     with tempfile.TemporaryFile() as handle:
-        handle.write(archive.stdout)
+        process = subprocess.Popen(["git", "-C", root, "archive", "--format=tar", commit], stdout=handle,
+                                   stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        deadline = time.monotonic() + 300
+        try:
+            while process.poll() is None:
+                if os.fstat(handle.fileno()).st_size > MAX_SNAPSHOT_ARCHIVE:
+                    raise RegistryError("troupe_failed", "the committed snapshot is too large to review")
+                if time.monotonic() >= deadline:
+                    raise RegistryError("troupe_failed", "git archive took too long")
+                time.sleep(0.1)
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        if process.returncode:
+            raise RegistryError("troupe_failed", "git archive failed")
+        if os.fstat(handle.fileno()).st_size > MAX_SNAPSHOT_ARCHIVE:
+            raise RegistryError("troupe_failed", "the committed snapshot is too large to review")
         handle.seek(0)
         with tarfile.open(fileobj=handle) as tar:
             if hasattr(tarfile, "data_filter"):
@@ -263,7 +277,13 @@ def _job(directory: Path, config, row: dict, occurrence: str, runner) -> None:
             why="no file changed since it last ran" if payload["items_from"]["kind"] == "changed" else "no item matched"))
         _remember(directory, row, payload, head)
         return
-    result = (runner or run_job)(payload, items, head)
+    try:
+        result = (runner or run_job)(payload, items, head)
+    except Exception as error:  # noqa: BLE001 -- a failed background job must still reach the Pip
+        _post(directory, config, row, occurrence, NOTHING_TURN.format(
+            title=title, when=label(trigger), project=project,
+            why=f"its troupe could not finish ({type(error).__name__})"))
+        return
     _charge(directory, row["pip_id"], int(result.get("tokens") or 0))
     _remember(directory, row, payload, head)
     source = summary(payload)["items"]

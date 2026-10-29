@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import re
+import stat
 import uuid
 from pathlib import Path
 
@@ -107,12 +109,26 @@ def _file(item: dict) -> dict:
     if not path.is_absolute():
         raise AttachmentError(f"{name}: choose the file again.")
     try:
-        size = path.stat().st_size
-        if not path.is_file():
+        before = path.stat()
+        if not stat.S_ISREG(before.st_mode):
             raise AttachmentError(f"{name} isn't a file.")
-        if size > MAX_FILE_BYTES:
+        if before.st_size > MAX_FILE_BYTES:
             raise AttachmentError(f"{name} is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB.")
-        raw = path.read_bytes()
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                raise AttachmentError(f"{name} changed while opening it. Choose the file again.")
+            if opened.st_size > MAX_FILE_BYTES:
+                raise AttachmentError(f"{name} is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB.")
+            with os.fdopen(fd, "rb") as source:
+                fd = -1
+                raw = source.read(MAX_FILE_BYTES + 1)
+        finally:
+            if fd >= 0:
+                os.close(fd)
     except FileNotFoundError:
         raise AttachmentError(f"{name} is no longer there.") from None
     except OSError as exc:

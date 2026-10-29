@@ -47,8 +47,8 @@ assert.match(panelSrc, /workspaceRootsInFlight/,
   "workspace-root grants must stay pending until the backend acknowledges them");
 assert.match(panelSrc, /path: uri\.fsPath/,
   "file mentions must carry canonical filesystem paths separately from display labels");
-assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
-  "approving a plan into auto mode must pass an explicit warning gate");
+assert.match(panelSrc, /case "plan_response":[\s\S]*?await this\.confirmAutoMode\(false\)/,
+  "approving a plan into auto mode must use the same explicit warning gate");
 assert.match(panelSrc,
   /this\.routeState\.subscriptionEngine\s*\?\s*\{ command: \{ type: "set_config", values: \{ subscription_model: model \} \}/,
   "editor model changes must explicitly target the active subscription route");
@@ -1172,6 +1172,32 @@ test("an expanded goal shows the evidence recorded when it was met", () => {
   assert.match(panel.textContent, /VSIX installed/);
   assert.equal(panel.querySelectorAll(".goal-detail-evidence li").length, 2);
   assert.deepEqual(errors, []);
+});
+
+test("goal detail treats the objective, reason and evidence as text", () => {
+  const { errors, send, doc } = makeDom();
+  const markup = '<img src=x onerror="window.goalInjected=true">';
+  send({ type: "event", event: { type: "goal_changed", goal: markup, status: "blocked",
+    details: { reason: markup, evidence: [markup] } } });
+  doc.getElementById("goal-main").click();
+  const panel = doc.getElementById("goal-detail");
+  assert.equal(panel.querySelector("img"), null);
+  assert.equal(panel.querySelector(".goal-detail-objective").textContent, markup);
+  assert.match(panel.querySelector(".goal-detail-why").textContent, /<img/);
+  assert.equal(panel.querySelector(".goal-detail-evidence li").textContent, markup);
+  assert.deepEqual(errors, []);
+});
+
+test("a plan Auto receipt reflects cancellation by the host", () => {
+  const { dom, errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "plan_proposal", id: "plan-auto-receipt", plan: "Check then change" } });
+  const card = doc.querySelector('.card[data-request-id="plan-auto-receipt"]');
+  card.querySelector('button[data-d="auto"]').click();
+  assert.match(card.querySelector('.decision').textContent, /awaiting confirmation/);
+  send({ type: "planAutoDecision", id: "plan-auto-receipt", approved: false });
+  assert.equal(card.querySelector('.decision').textContent, "Kept planning · Auto was not confirmed");
+  assert.deepEqual(errors, []);
+  dom.window.close();
 });
 
 test("webview renders a full turn: thinking → text → progress cards → diff → permission round-trip", () => {

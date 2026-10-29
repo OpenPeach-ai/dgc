@@ -8,14 +8,17 @@ across its turns. When the provider reported nothing, the count is ``None`` (unk
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 USAGE_TOTAL_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens",
                     "requests")
+MAX_USAGE_LINE_CHARS = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,7 @@ def _count(value: Any) -> int | None:
         return None
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if number >= 0 else None
 
@@ -126,60 +129,80 @@ class UsageLog:
               until: float | None = None) -> dict[str, Any]:
         """Totals over recorded runs. ``unknown_usage_runs`` counts runs whose provider did not
         report tokens; their tokens and cost are excluded from the sums, not counted as 0."""
-        rows = []
+        rows = deque(maxlen=500)
+        runs = unknown = input_tokens = output_tokens = cached_input_tokens = 0
+        total_cost = 0.0
+        has_cost = False
+        buckets: dict[str, dict[str, Any]] = {}
         if self.path.is_file():
-            with self.path.open(encoding="utf-8") as handle:
-                for line in handle:
+            with self.path.open(encoding="utf-8", errors="replace") as handle:
+                while True:
+                    line = handle.readline(MAX_USAGE_LINE_CHARS + 1)
+                    if not line:
+                        break
+                    if len(line) > MAX_USAGE_LINE_CHARS:
+                        while line and not line.endswith("\n"):
+                            line = handle.readline(MAX_USAGE_LINE_CHARS + 1)
+                        continue
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         row = json.loads(line)
-                    except json.JSONDecodeError:
+                    except (ValueError, RecursionError):
                         continue
                     if not isinstance(row, dict):
                         continue
                     if department and str(row.get("department") or "") != department:
                         continue
-                    ts = float(row.get("ts") or 0)
+                    try:
+                        ts = float(row.get("ts") or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if not math.isfinite(ts):
+                        continue
                     if since is not None and ts < since:
                         continue
                     if until is not None and ts > until:
                         continue
+                    runs += 1
                     rows.append(row)
-        known = [row for row in rows if _row_known(row)]
-        costs = [float(row["cost_usd"]) for row in known
-                 if isinstance(row.get("cost_usd"), (int, float))]
+                    key = str(row.get("department") or "")
+                    slot = buckets.setdefault(key, {"department": key, "runs": 0,
+                        "unknown_usage_runs": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+                    slot["runs"] += 1
+                    if not _row_known(row):
+                        unknown += 1
+                        slot["unknown_usage_runs"] += 1
+                        continue
+                    inp = _count(row.get("input_tokens")) or 0
+                    out = _count(row.get("output_tokens")) or 0
+                    input_tokens += inp
+                    output_tokens += out
+                    cached_input_tokens += _count(row.get("cached_input_tokens")) or 0
+                    slot["input_tokens"] += inp
+                    slot["output_tokens"] += out
+                    cost = row.get("cost_usd")
+                    if isinstance(cost, (int, float)):
+                        try:
+                            cost = float(cost)
+                        except OverflowError:
+                            continue
+                        if math.isfinite(cost):
+                            total_cost += cost
+                            slot["cost_usd"] += cost
+                            has_cost = True
         return {
-            "runs": len(rows),
-            "unknown_usage_runs": len(rows) - len(known),
-            "input_tokens": sum(_count(row.get("input_tokens")) or 0 for row in known),
-            "output_tokens": sum(_count(row.get("output_tokens")) or 0 for row in known),
-            "cached_input_tokens": sum(_count(row.get("cached_input_tokens")) or 0 for row in known),
-            "cost_usd": round(sum(costs), 8) if costs else None,
-            "by_department": _by_department(rows),
-            "rows": rows[-500:],
+            "runs": runs,
+            "unknown_usage_runs": unknown,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "cost_usd": round(total_cost, 8) if has_cost else None,
+            "by_department": list(buckets.values()),
+            "rows": list(rows),
         }
 
 
 def _row_known(row: Mapping[str, Any]) -> bool:
     return _count(row.get("input_tokens")) is not None and _count(row.get("output_tokens")) is not None
-
-
-def _by_department(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    buckets: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        key = str(row.get("department") or "")
-        slot = buckets.setdefault(key, {
-            "department": key, "runs": 0, "unknown_usage_runs": 0, "input_tokens": 0,
-            "output_tokens": 0, "cost_usd": 0.0,
-        })
-        slot["runs"] += 1
-        if not _row_known(row):
-            slot["unknown_usage_runs"] += 1
-            continue
-        slot["input_tokens"] += _count(row.get("input_tokens")) or 0
-        slot["output_tokens"] += _count(row.get("output_tokens")) or 0
-        if isinstance(row.get("cost_usd"), (int, float)):
-            slot["cost_usd"] += float(row["cost_usd"])
-    return list(buckets.values())

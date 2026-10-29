@@ -707,6 +707,36 @@ class CheckpointManager:
             self._notify()
         return True
 
+    def note_elsewhere(self, path: str, editor: str) -> bool:
+        """A file that changed while one of this turn's commands ran, which the person was editing in another
+        editor meanwhile (dgc/editor_traces.py). Like a save the editor reported, it is not the command's: the
+        point holds no earlier state for it, so Undo leaves it as it is. Noted so Undo's question can name it
+        and the editor ("README.md: edited in vim while a command ran; it is left as it is")."""
+        if (self._pending_rewind is not None or not self.points or not isinstance(path, str)
+                or not isinstance(editor, str) or not editor):
+            return False
+        point = self.points[-1]
+        if path in point["files"]:
+            return False                       # the point restores it: Undo's guard speaks for it
+        marks = point.setdefault("elsewhere", {})
+        if path not in marks and len(marks) >= _MAX_FILES_PER_POINT:
+            return False
+        if marks.get(path) != editor[:40]:
+            marks[path] = editor[:40]
+            self._notify()
+        return True
+
+    def elsewhere_since(self, start: int) -> dict[str, str]:
+        """The files the person edited in another editor while a command of the turns from `start` on ran, and
+        which a rewind there leaves as they are (none of those points holds them): path -> editor, first seen."""
+        held = {path for point in list(self.points[max(0, start):]) for path in list(point["files"])}
+        found: dict[str, str] = {}
+        for point in list(self.points[max(0, start):]):
+            for path, editor in list((point.get("elsewhere") or {}).items()):
+                if path not in held and path not in found:
+                    found[path] = editor
+        return found
+
     def note_git_moved(self) -> None:
         """One of this turn's commands moved HEAD, changed the index or a stash: Undo puts the files back
         and leaves Git's commits, branches, stashes and staging as they are, and its question says so."""
@@ -1115,6 +1145,8 @@ class CheckpointManager:
         self.last_rewind_git = self.git_moved_since(idx)
         self.last_rewind_merged = [path for path in merged_paths if path in applied]
         self.last_rewind_kept = sorted(path for path in kept if path in restore)
+        # And the files the person edited in another editor while a command ran: never in the point, so left.
+        self.last_rewind_kept += [path for path in self.elsewhere_since(idx) if path not in self.last_rewind_kept]
         # What DGC put back is now what DGC last left there: a second Undo right after this one
         # must not take DGC's own restore for somebody else's edit.
         old_left = {path: (self._left.get(path), self._left_modes.get(path)) for path in applied}
@@ -1323,9 +1355,11 @@ class CheckpointManager:
     def undo_question(self, idx: int, name=None) -> dict:
         """Undo's question about point `idx`, file by file, each path as `name` shows it: `merged`
         (somebody's later edits are kept and DGC's taken out), `held` [{path, reason}] (left as it is
-        when their edits overlap DGC's; anything else stops the Undo and is named), and `commands`, the
+        when their edits overlap DGC's; anything else stops the Undo and is named), `commands`, the
         files it puts back because a command changed them while it ran (the person may have edited
-        one meanwhile in an editor DGC can't hear; the question lets them keep it)."""
+        one meanwhile in an editor DGC can't hear; the question lets them keep it), and `elsewhere`
+        [{path, editor}], the files the person edited in another editor while a command ran
+        (dgc/editor_traces.py), which it leaves as they are."""
         show = name if callable(name) else str
         plan = self.undo_plan(idx)
         try:
@@ -1336,7 +1370,9 @@ class CheckpointManager:
         return {"merged": [show(path) for path in plan["merged"]],
                 "held": [{"path": show(row["path"]), "reason": row["reason"]} for row in plan["held"]],
                 "commands": [show(row["path"]) for row in rows
-                             if row.get("by_command") and row["path"] not in held]}
+                             if row.get("by_command") and row["path"] not in held],
+                "elsewhere": [{"path": show(path), "editor": editor}
+                              for path, editor in self.elsewhere_since(idx).items()]}
 
     def _left_state(self) -> dict:
         """What DGC last left in each file, keyed by project-relative path.
@@ -1440,6 +1476,13 @@ class CheckpointManager:
                 durable["command_limits"] = limits
             if point.get("git_moved"):
                 durable["git_moved"] = True
+            elsewhere = {}
+            for path, editor in (point.get("elsewhere") or {}).items():
+                relative = self._lexical_project_path(path)
+                if relative is not None and relative not in files and isinstance(editor, str) and editor:
+                    elsewhere[relative] = editor[:40]
+            if elsewhere:
+                durable["elsewhere"] = elsewhere
             # DGC's runs of writes, with its after-bytes: the merge base an Undo needs after a restart.
             writes = {}
             for path, segments in (point.get("writes") or {}).items():
@@ -1609,7 +1652,7 @@ class CheckpointManager:
             return cls(project_root, on_change)
 
     def _point_extras(self, raw_point: dict, files: dict) -> dict | None:
-        """A saved point's optional fields (`outside`, `commands`, `made_dirs`), checked like the
+        """A saved point's optional fields (`outside`, `commands`, `made_dirs`, `elsewhere`), checked like the
         rest: None when one is malformed, so the whole state is refused rather than half believed."""
         extras: dict = {}
         outside = raw_point.get("outside", {})
@@ -1665,6 +1708,18 @@ class CheckpointManager:
             extras["command_limits"] = command_limits
         if git_moved:
             extras["git_moved"] = True
+        elsewhere = raw_point.get("elsewhere", {})
+        if not isinstance(elsewhere, dict) or len(elsewhere) > _MAX_FILES_PER_POINT:
+            return None
+        edited = {}
+        for relative, editor in elsewhere.items():
+            path = self._project_path(relative) if isinstance(relative, str) else None
+            if (path is None or str(path) in files or not isinstance(editor, str)
+                    or not 0 < len(editor) <= 40):
+                return None
+            edited[str(path)] = editor
+        if edited:
+            extras["elsewhere"] = edited
         writes = raw_point.get("writes", {})
         if not isinstance(writes, dict) or len(writes) > _MAX_FILES_PER_POINT:
             return None
@@ -1710,6 +1765,9 @@ class CheckpointManager:
         encoded, mode, digest = value.get("data", ""), value.get("mode", 0), value.get("sha256")
         if (not isinstance(encoded, str) or isinstance(mode, bool) or not isinstance(mode, int)
                 or not 0 <= mode <= 0o7777):
+            return None
+        remaining = _MAX_SNAPSHOT_BYTES - self._snapshot_bytes_total
+        if len(encoded) > 4 * ((remaining + 2) // 3):
             return None
         try:
             data = base64.b64decode(encoded, validate=True)

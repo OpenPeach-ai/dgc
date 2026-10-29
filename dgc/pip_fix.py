@@ -547,7 +547,11 @@ def check_project_file(project_root: Path, rel: str) -> tuple[Path | None, str]:
 
 def copy_project_file(source: Path, copy_root: Path, rel: str) -> None:
     """Copy (never link) one ignored file into the fix copy, replacing whatever is there."""
-    target = copy_root / rel
+    from .worktree import TaskWorkspaceError, _checked_target
+    try:
+        target = _checked_target(copy_root, rel)
+    except TaskWorkspaceError as exc:
+        raise OSError(f"the copy path escapes through a symlink: {rel}") from exc
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink() or target.exists():
         if target.is_dir() and not target.is_symlink():
@@ -761,20 +765,21 @@ def sweep(now: float | None = None) -> list[str]:
         if not folder.is_dir() or folder.is_symlink():
             continue
         meta = _read_json(folder / "project.json")
+        source_text = meta.get("project_root")
+        if not isinstance(source_text, str) or not source_text or folder.name != project_key(source_text):
+            continue  # unknown or damaged directory: ownership cannot be proved
         last = meta.get("last_used")
         if not isinstance(last, (int, float)):
-            try:
-                last = folder.stat().st_mtime
-            except OSError:
-                continue
+            continue
         if now - last < KEEP_UNUSED_S:
             continue
         lock = named_process_lock("pip-fix", folder.name)
         if not lock.acquire(timeout=0):
             continue                                   # a fix is running there right now
         try:
-            source = Path(str(meta.get("project_root") or folder))
-            KeptTaskWorkspace.remove(source, folder / "copy")
+            source = Path(source_text)
+            if KeptTaskWorkspace.remove(source, folder / "copy"):
+                continue
             shutil.rmtree(folder, ignore_errors=True)
             removed.append(folder.name)
         finally:
@@ -1030,6 +1035,9 @@ def _apply(agent, project: FixProject, workspace, fix_id: str, cancel: threading
         fields["undo"] = {"state": "available"}
         if integration.merged:
             fields["merged"] = list(integration.merged[:MAX_FILES_SHOWN])
+    # A held file is either one the user changed on the same lines, or one of the user's own uncommitted files
+    # the fix copy had no room for, which DGC never writes (dgc/worktree.py _populate).
+    left_out = set(getattr(integration, "left_out", ()) or ())
     if integration.status in ("partial", "conflict"):
         held, folder = [], _private_dir(project.undo_dir(fix_id) / "held")
         for n, repo_path in enumerate(list(workspace.held_paths)[:MAX_FILES_SHOWN]):
@@ -1038,8 +1046,10 @@ def _apply(agent, project: FixProject, workspace, fix_id: str, cancel: threading
                 (folder / f"{n}.fix").write_bytes(data if kind != "missing" else b"")
             except Exception:                           # noqa: BLE001 -- named, without its bytes
                 pass
-            held.append({"path": workspace.display_path(repo_path), "n": n,
-                         "why": "you changed the same lines while it worked"})
+            shown = workspace.display_path(repo_path)
+            held.append({"path": shown, "n": n,
+                         "why": ("your own file, which the fix copy didn't have, so it was left as it is"
+                                 if shown in left_out else "you changed the same lines while it worked")})
         fields["held"] = held
     if integration.status == "applied":
         fields["state"] = "applied"
@@ -1047,6 +1057,10 @@ def _apply(agent, project: FixProject, workspace, fix_id: str, cancel: threading
         fields["state"] = "partial"
     elif integration.status == "clean":
         fields["state"] = "unchanged"
+    elif integration.status == "conflict" and left_out and set(integration.conflicts) <= left_out:
+        fields.update(state="not_applied", message=(
+            "It only changed files of yours that the fix copy didn't have, so nothing was applied. Review shows "
+            "what it would change."))
     elif integration.status == "conflict":
         fields.update(state="not_applied", message=(
             "You changed the same lines while it worked, so nothing was applied. Review shows what it would change."))
@@ -1168,7 +1182,8 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
                 end_record("stopped" if stopped else "failed", error or "")
                 update(state="stopped" if stopped else "failed", step=None, ended_at=_now(), message=(
                     "Stopped. Nothing in your project was changed." if stopped else
-                    _clip(f"DGC couldn't make the fix copy: {error}. Nothing in your project was changed.", 400)))
+                    _clip(f"DGC couldn't make the fix copy: {str(error or '').rstrip('.')}. Nothing in your project "
+                          "was changed.", 400)))
                 return
             copied = _copy_remembered(project, workspace)
             deps = []
@@ -1212,7 +1227,8 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
                 if workspace is None:
                     end_record("failed", error or "")
                     update(state="failed", step=None, ended_at=_now(), message=_clip(
-                        f"DGC couldn't make the fix copy: {error}. Nothing in your project was changed.", 400))
+                        f"DGC couldn't make the fix copy: {str(error or '').rstrip('.')}. Nothing in your project "
+                        "was changed.", 400))
                     return
                 copied = _copy_remembered(project, workspace)
             update(state="running", step=None,

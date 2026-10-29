@@ -219,11 +219,15 @@ def unlearn(skill: dict) -> None:
     path = Path(str((skill or {}).get("path") or ""))
     if not path.is_absolute() or not _is_skill_file(path):
         raise SkillError("That skill can't be taken back from here.")
+    from .skills import MAX_SKILL_FILE_BYTES
+    from .workspace import WorkspaceBoundaryError, read_regular_bytes
     try:
-        data = path.read_bytes()
+        captured = read_regular_bytes(path, maximum=MAX_SKILL_FILE_BYTES)
+        assert captured is not None
+        data = captured[0]
     except FileNotFoundError as exc:
         raise SkillError("That skill is already gone.") from exc
-    except OSError as exc:
+    except (OSError, WorkspaceBoundaryError) as exc:
         raise SkillError("That skill couldn't be read.") from exc
     if hashlib.sha256(data).hexdigest() != str(skill.get("sha256") or ""):
         raise SkillError("That skill was changed after it was saved. Delete it in Skills if you don't want it.")

@@ -118,6 +118,10 @@ def _same(a: str, b: str) -> bool:
     return " ".join(_WORD.findall(a.lower())) == " ".join(_WORD.findall(b.lower()))
 
 
+def _same_fact_state(current: dict | None, recorded: dict) -> bool:
+    return current is not None and all(current.get(key) == recorded.get(key) for key in ("text", "kind", "until"))
+
+
 class SharedMemory:
     def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else default_root()
@@ -366,10 +370,14 @@ class SharedMemory:
             if op == "add":
                 if here is None:
                     raise NotRemembered("That memory is already gone.")
+                if not _same_fact_state(here, fact):
+                    raise NotRemembered("That memory changed since it was added. Undo its newer change first.")
                 data["facts"].remove(here)
             elif op == "edit":
                 if here is None:
                     raise NotRemembered("That memory is gone, so its edit can't be put back.")
+                if not _same_fact_state(here, fact):
+                    raise NotRemembered("That memory changed since this edit. Undo its newer change first.")
                 before = str(row.get("before") or "")
                 if not before:
                     raise NotRemembered("That edit can't be put back.")
@@ -432,7 +440,7 @@ def _shown(row: dict, undone: bool, facts: dict) -> dict:
         shown["what"] = str(row.get("what") or "")
     # Undo is offered while it would still do what it says.
     shown["undoable"] = (not undone and op in ("add", "edit", "forget", "clear", "learn")
-                         and (op not in ("add", "edit") or here is not None)
+                         and (op not in ("add", "edit") or _same_fact_state(here, fact))
                          and (op != "forget" or here is None))
     return shown
 

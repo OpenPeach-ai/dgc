@@ -233,7 +233,7 @@ function tableSource(tokens: any[], index: number): string {
     else if (token.type === "inline") row.push(String(token.content || "").replace(/\|/g, "\\|"));
   }
   if (!rows.length) return "";
-  const width = Math.max(...rows.map(r => r.length));
+  const width = rows.reduce((largest, cells) => Math.max(largest, cells.length), 0);
   const line = (cells: string[]) =>
     "| " + Array.from({ length: width }, (_, i) => cells[i] ?? "").join(" | ") + " |";
   const out = [line(rows[0]), "| " + Array.from({ length: width }, () => "---").join(" | ") + " |"];

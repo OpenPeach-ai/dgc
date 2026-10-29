@@ -2,7 +2,7 @@
 
 Discovery order (the first runtime that imports DGC and speaks this SDK's protocol wins):
 
-1. ``DGC_PYTHON`` or ``DGC_RUNTIME_PYTHON``: that interpreter runs ``-m dgc serve``.
+1. ``DGC_PYTHON`` or ``DGC_RUNTIME_PYTHON``: that interpreter runs ``dgc serve`` with a safe import path.
 2. The Python running this SDK, when it can import DGC itself.
 3. From a source checkout only: the checkout's ``.venv``.
 4. The installed CLI: ``dgc`` on ``PATH``, then ``~/.local/bin/dgc`` (the vibedgc.com installer),
@@ -63,6 +63,12 @@ _PROBE = (
     " sys.version_info[0], sys.version_info[1]))\n"
 )
 _PROBE_TIMEOUT_S = 30.0
+_SAFE_MODULE_BOOTSTRAP = (
+    "import runpy, sys\n"
+    "sys.path = [entry for entry in sys.path if entry]\n"
+    "sys.argv = ['dgc', 'serve']\n"
+    "runpy.run_module('dgc', run_name='__main__', alter_sys=True)\n"
+)
 
 
 def repo_root() -> Path:
@@ -133,7 +139,9 @@ def _python_argv(python: str, py_version: tuple[int, int]) -> tuple[str, ...]:
     # its own ``dgc/`` package would replace the runtime. -P (Python 3.11+) turns that off.
     if py_version >= (3, 11):
         return (python, "-P", "-m", "dgc", "serve")
-    return (python, "-m", "dgc", "serve")
+    # -c has an empty sys.path[0] on Python 3.10. Remove it before importing DGC,
+    # without disabling the user's installed site-packages as -I would.
+    return (python, "-c", _SAFE_MODULE_BOOTSTRAP)
 
 
 def _current_python_roots() -> tuple[str, ...] | None:

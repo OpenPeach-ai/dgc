@@ -31,6 +31,13 @@ function viewOf(panel: vscode.WebviewPanel): vscode.WebviewView {
   } as unknown as vscode.WebviewView;
 }
 
+/** A folder a tab works in: a full path (any platform's), never a relative one; "" for the window's. */
+function cwdOf(value: unknown): string {
+  const text = typeof value === "string" ? value : "";
+  return text.length <= 4096 && !/[\u0000-\u001f]/.test(text) && (text.startsWith("/") || /^[A-Za-z]:[\\/]/.test(text) || text.startsWith("\\\\"))
+    ? text : "";
+}
+
 /** A tab's name: its session's name, else its first prompt, else "New session". */
 export function tabTitle(text: string): string {
   const flat = String(text || "").replace(/\s+/g, " ").trim();
@@ -69,8 +76,9 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     return ids;
   }
 
-  /** A saved session in a tab of its own, or the tab it is already in. "" opens a new session. */
-  open(session: string, title = ""): DgcViewProvider {
+  /** A saved session in a tab of its own, or the tab it is already in. "" opens a new session; with `cwd`, a new
+   *  session in that folder (Continue in Work), not the window's. */
+  open(session: string, title = "", options: { cwd?: string } = {}): DgcViewProvider {
     const id = SESSION_ID.test(session) ? session : "";
     if (id) {
       for (const tab of this.tabs.values()) {
@@ -79,26 +87,34 @@ export class SessionTabs implements ChatPlaces, vscode.WebviewPanelSerializer, v
     }
     const panel = vscode.window.createWebviewPanel(CHAT_EDITOR, tabTitle(title), vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true });
-    return this.adopt(panel, randomBytes(8).toString("hex"), id);
+    return this.adopt(panel, randomBytes(8).toString("hex"), id, false, cwdOf(options.cwd));
   }
 
-  /** VS Code restoring a tab after a reload: the webview kept its key and session in its state. */
+  /** VS Code restoring a tab after a reload: the webview kept its key and session in its state, and the folder it
+   *  worked in when that wasn't the window's. Such a tab comes back in its folder or not at all: in the window's
+   *  folder, its session isn't there, and what it was about to send would go to the wrong project. */
   async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: any): Promise<void> {
     const key = TAB_KEY.test(String(state?.chatTab?.key || "")) ? state.chatTab.key : randomBytes(8).toString("hex");
     const session = SESSION_ID.test(String(state?.chatTab?.session || "")) ? state.chatTab.session : "";
+    const cwd = cwdOf(state?.chatTab?.cwd);
     if ([...this.tabs.values()].some((tab) => tab.key === key || (session && tab.provider.sessionId() === session))) {
       panel.dispose();                       // a second copy of a tab already open: one session, one tab
       return;
     }
-    this.adopt(panel, key, session, true);
+    if (cwd && !(await this.sidebar.mayRestoreChatIn(cwd))) {
+      panel.dispose();
+      void vscode.window.showInformationMessage(`The Work session in ${cwd} wasn't reopened.`);
+      return;
+    }
+    this.adopt(panel, key, session, true, cwd);
   }
 
-  private adopt(panel: vscode.WebviewPanel, key: string, session: string, restored = false): DgcViewProvider {
+  private adopt(panel: vscode.WebviewPanel, key: string, session: string, restored = false, cwd = ""): DgcViewProvider {
     // Not the activity bar's dgc.svg: its currentColor is black in a tab, invisible on a dark theme. Inline, so a
     // reload draws it before the tab is revived (tabIcon.ts).
     panel.iconPath = tabIcon(this.context.extensionUri, "dgc-tab");
     const provider = this.make({
-      key, session, places: this, host: this.sidebar, restored,
+      key, session, places: this, host: this.sidebar, restored, ...(cwd ? { cwd } : {}),
       title: (text) => { if (this.tabs.get(key)?.panel === panel) panel.title = tabTitle(text); },
     });
     const tab: Tab = { key, panel, provider, seq: ++this.seq };

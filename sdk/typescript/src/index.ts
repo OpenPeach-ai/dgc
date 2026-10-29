@@ -1,7 +1,7 @@
 /** DGC SDK for Node (@vibedgc/sdk). Protocol v14; pair with DGC CLI 0.41.6. */
 export { VERSION, PROTOCOL, REQUIRES_CLI } from "./types.ts";
 export type {
-  AbortSignalLike, AgentInfo, Artifact, Checkpoint, ClientOptions, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,
+  AbortSignalLike, AgentInfo, Artifact, ArtifactInfo, ArtifactOutput, ArtifactVersion, Checkpoint, ClientOptions, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,
   McpInputResponse, McpServerInfo, Monitor, PermissionAction, PermissionMode, PermissionRequest,
   PermissionRule, PlanAction, PlanRequest, Pricing, QuestionAnswers, QuestionRequest, ResumeOptions,
   RunEvent, RunOptions, RunResult, RunStatus, RuntimePolicy, SandboxRequirement, SandboxSetting,
@@ -9,7 +9,7 @@ export type {
   ToolRecord, UnhandledPolicy, VerificationResult,
 } from "./types.ts";
 export { DGC } from "./client.ts";
-export { RunHandle, Session } from "./session.ts";
+export { Artifacts, Mods, RunHandle, Session } from "./session.ts";
 export { Chat, Chats, CHAT_THINKING, type ChatAnswerOptions, type ChatEvent, type ChatReply, type ChatSearch, type ChatSendOptions, type ChatSource,
   type ChatSummary, type ChatThinking, type ChatsOptions, type ResearchOptions } from "./chat.ts";
 export { Pips, type PipReadCommand, type PipMutationCommand, type PipReadParams, type PipMutationParams,

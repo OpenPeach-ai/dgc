@@ -23,6 +23,7 @@ async function controlsAt(width) {
     const model = document.getElementById("btn-model");
     return {
       modelCopy: display(".model-copy"),
+      modelCompactText: getComputedStyle(document.querySelector(".model-copy"), "::before").content,
       modelIcon: display(".model-icon"),
       modeLabel: display("#modelabel"),
       contextLabel: display("#ctx"),
@@ -40,11 +41,19 @@ async function controlsAt(width) {
 
 test("model and supporting controls keep their labels at a comfortable width", async (t) => {
   if (!browser) return t.skip("Chromium is unavailable");
-  const state = await controlsAt(520);
+  const state = await controlsAt(720);
   assert.notEqual(state.modelCopy, "none");
   assert.equal(state.modelIcon, "none");
   assert.notEqual(state.modeLabel, "none");
   assert.notEqual(state.workspaceLabel, "none");
+});
+
+test("a narrower editor keeps one composer row and names the compact model picker", async (t) => {
+  if (!browser) return t.skip("Chromium is unavailable");
+  const state = await controlsAt(520);
+  assert.equal(state.footerFits, true);
+  assert.equal(state.modelCompactText, '"Model"');
+  assert.equal(state.workspaceLabel, "none");
 });
 
 test("a narrow chat collapses labels to icons without losing controls", async (t) => {

@@ -470,11 +470,13 @@ class _LSPClient:
                     return
                 try:
                     message = json.loads(body.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
+                except (UnicodeDecodeError, ValueError, RecursionError):
                     continue
                 if not isinstance(message, dict):
                     continue
                 mid = message.get("id")
+                if mid is not None and (isinstance(mid, bool) or not isinstance(mid, (str, int, float))):
+                    continue
                 if mid is not None and ("result" in message or "error" in message):
                     with self._pending_lock:
                         slot = self._pending.pop(mid, None)

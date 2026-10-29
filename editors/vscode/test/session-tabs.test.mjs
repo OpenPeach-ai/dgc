@@ -3,7 +3,7 @@
 // editor tabs are recorded, with backends that record every command instead of running `dgc serve`.
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -373,4 +373,66 @@ test("in a tab, Settings and the Pips open the side bar's, and + opens another t
   await tab.onMessage({ type: "newChat" });
   assert.equal(world.panels.length, 2, "+ in a tab is a new session in a new tab");
   assert.equal(tab.slots.length <= 1, true, "not a second chat inside the tab");
+});
+
+// ---- Continue in Work (a ChatDGC chat's folder): a Work session in that folder, in a tab of its own, its brief unsent
+
+const BRIEF = "Continuing from the chat “Uploads”, about this folder. What we worked out there:\n\nMove the upload limit into settings.\n\nCarry on from here.";
+/** What a tab's page has been told once it is ready (its webview loads after the tab opens). */
+const shown = (provider) => { for (const action of provider.pendingWebviewActions.splice(0)) action(); return provider.posted; };
+
+test("Continue in Work opens a session in the chat's folder, named by it, with the brief in its box and nothing sent", async () => {
+  const { sidebar, made } = windowWith();
+  const folder = join(scratch, "uploads");
+  mkdirSync(folder, { recursive: true });
+  assert.equal(await sidebar.continueInWork(folder, BRIEF), true);
+  assert.deepEqual(world.warnings, [], "a folder in the window's: nothing to ask");
+  assert.equal(world.panels.length, 1);
+  assert.equal(world.panels[0].title, "uploads", "named by its folder, not by the brief");
+  const [tab] = made;
+  assert.equal(tab.activeSlot().cwd, folder, "its chat works in that folder, with a backend of its own there");
+  assert.equal(tab.sessionId(), "", "a new session");
+  assert.deepEqual(shown(tab).filter((m) => m.type === "composer_text"), [{ type: "composer_text", text: BRIEF }]);
+  assert.equal(tab.backend.sent.some((c) => c.type === "prompt"), false, "nothing runs until the person sends it");
+  assert.match(world.panels[0].webview.html, new RegExp(`data-tab-cwd="${folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), "kept in the tab's state for a reload");
+  tab.retitle("Continuing from the chat");
+  assert.equal(world.panels[0].title, "uploads", "its first prompt doesn't rename it");
+  assert.equal(await sidebar.continueInWork(folder, "   "), false, "an empty brief opens nothing");
+});
+
+test("a folder outside the window's is asked about first, and a reload brings its tab back there without asking again", async () => {
+  const outside = mkdtempSync(join(tmpdir(), "dgc-work-elsewhere-"));
+  try {
+    const { sidebar, tabs, made } = windowWith();
+    assert.equal(await sidebar.continueInWork(outside, BRIEF), false, "said no: nothing opens");
+    assert.match(world.warnings[0], /Open a DGC chat in .*dgc-work-elsewhere-/);
+    assert.equal(world.panels.length, 0);
+    world.answer = "Trust it and open";
+    assert.equal(await sidebar.continueInWork(outside, BRIEF), true);
+    assert.equal(made.at(-1).activeSlot().cwd, outside);
+    assert.deepEqual(world.workspaceState.get("dgc.workFolders.v1"), [outside]);
+
+    // The window reloads: VS Code hands the tab back with what its page kept.
+    world.warnings.length = 0; world.answer = undefined;
+    const again = windowWith();
+    const back = fakePanel("dgc.chatEditor", "uploads");
+    await again.tabs.deserializeWebviewPanel(back, { chatTab: { key: "0123456789abcdef", session: "", cwd: outside } });
+    assert.equal(back.disposedCount, 0);
+    assert.equal(again.made.at(-1).activeSlot().cwd, outside, "in its folder, never the window's");
+    assert.deepEqual(world.warnings, [], "Continue in Work opened it there: not asked again");
+    // A folder this window never opened Work in is asked about; said no, the tab doesn't come back in the wrong folder.
+    world.workspaceState.delete("dgc.workFolders.v1");
+    const third = windowWith();
+    const stray = fakePanel("dgc.chatEditor", "x");
+    await third.tabs.deserializeWebviewPanel(stray, { chatTab: { key: "fedcba9876543210", session: "", cwd: outside } });
+    assert.equal(world.warnings.length, 1);
+    assert.equal(stray.disposedCount, 1);
+    assert.equal(third.made.length, 0);
+    assert.match(world.infos.at(-1), /wasn't reopened/);
+    // Not a full path: the tab comes back in the window's folder, as any tab does.
+    const odd = fakePanel("dgc.chatEditor", "y");
+    await third.tabs.deserializeWebviewPanel(odd, { chatTab: { key: "00112233445566aa", session: "", cwd: "relative/dir" } });
+    assert.equal(third.made.at(-1).activeSlot().cwd, undefined);
+    void tabs;
+  } finally { rmSync(outside, { recursive: true, force: true }); }
 });

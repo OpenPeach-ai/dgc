@@ -9,8 +9,8 @@ Pips are careful by design. Everything a Pip does that matters, from its own set
 to a file fix or an email, is a proposal that you review first. The model drafts;
 you approve.
 
-Pips ship in DGC CLI 0.48.4 (`dgc pips …` and the main chat's Pips tools), the VS
-Code extension 0.33.0 (the Pips view, setup cards and review dialogs) and SDK 0.7.0
+Pips ship in DGC CLI 0.50.0 (`dgc pips …` and the main chat's Pips tools), the VS
+Code extension 0.34.0 (the Pips view, setup cards and review dialogs) and SDK 0.8.0
 (`session.pips`). For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
@@ -202,7 +202,7 @@ the CLI: `dgc pips models` lists them, and `dgc pips create --personal --subscri
 The CLI is only the Pip's model. Its own tools are switched off, and the Pip's tools (its
 computer, its connected apps and drafts, its choices and cards, its routines and notes,
 web search) reach it from DGC for that one run. So every Pip rule still holds: its
-computer holds every submit and every payment for you, careful mode, the card rule (a
+computer holds submits initiated by the Pip and payments it starts for you, careful mode, the card rule (a
 Pip never types a card; one typed in its chat is refused), screenshot masking, Allow
 cards and routines work exactly as with a local model, and its chat and computer show
 the run the same way. DGC never reads, copies or refreshes the CLI's login; the CLI uses
@@ -1198,8 +1198,8 @@ without.
   a bill, UHID, phone or account number doesn't count) is not sent: DGC keeps nothing of it and says, in one line,
   to type it on the Pip's screen instead, with **Open its computer**. DGC's own chat warns once before sending one,
   since whatever you send there goes to the model.
-- **Anything it would send waits for you** (at Ask; see [How much it asks](#how-much-it-asks)). When a page would
-  submit a form or send any other data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
+- **Sends caused by the Pip wait for you** (at Ask; see [How much it asks](#how-much-it-asks)). When its click,
+  typing or choice makes a page submit a form or send data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
   **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits
   as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form or a
   payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
@@ -1212,7 +1212,9 @@ without.
   holds it.
 - **What you submit is yours, right away.** With no Pip run using the computer, a submit within
   three seconds of your own click or key is sent, because you made it. Anything a page sends on
-  its own, with nobody at the keyboard, waits for your approval like a Pip's.
+  its own may go through: background XHR, fetch, hidden-frame posts and browser telemetry outside
+  the action window are allowed so pages can load. Use the Pip's browser only with sites you trust;
+  a site's own scripts can send data while you are signed in there.
 - **It signs in with a login you saved; it never sees it.** When a site needs a sign-in, the Pip asks its computer
   to sign it in, and DGC types the login you saved for that site into the page, then the one-time code, and sends
   it (see [Saved logins](#saved-logins)). With none saved, its chat asks you once to save one. You can also sign in
@@ -1221,7 +1223,7 @@ without.
   because you did it. While a run is using the computer, the view only watches.
 - **Fenced in.** The browser reaches only public web addresses on ports 80 and 443. Your home
   network, this computer's own services and cloud metadata addresses are refused. A request
-  that carries a payment card number waits for you every time: its review says it sends payment
+  caused by the Pip that carries a payment card number waits for you every time: its review says it sends payment
   card details, it never offers **Always allow**, and no Always allow you gave for that site sends
   one. A Pip with
   a computer can't also have app reads, so private data from your accounts never sits in a
@@ -1239,7 +1241,7 @@ Only you change it, on this computer. A new Personal Pip starts at **Approve for
 
 | Level | What goes by itself | What still asks |
 |---|---|---|
-| **Ask** | Reading | A new site (careful mode), every submit and every send, as above |
+| **Ask** | Reading and the page's own background requests | A new site (careful mode), each submit and send caused by the Pip |
 | **Approve for me** | A new site's first visit, a search, a filter or sort, adding to a cart, saving a draft, an upload of a file you sent it in its chat, an email to someone you named in its chat or already wrote to from it, a calendar event with no guests | Placing an order or checking out, any payment, sending to someone new, posting, deleting, changing an account's settings or password, anything the page calls pay, purchase, subscribe, transfer or book, and anything DGC can't place |
 | **Full access** | Every new site, submit and send, connected-app sends included | Any payment |
 

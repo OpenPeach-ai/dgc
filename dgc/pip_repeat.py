@@ -29,15 +29,17 @@ def words(text: str) -> frozenset:
 
 def _first_prompt(path: Path) -> str | None:
     from .clock import strip_turn_clock
+    from .workspace import read_regular_bytes
     try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
+        data = json.loads(read_regular_bytes(path, maximum=MAX_BYTES)[0])
+    except (OSError, ValueError, UnicodeError):
         return None
     for message in data.get("messages", []) if isinstance(data, dict) else []:
         if isinstance(message, dict) and message.get("role") == "user":
             content = message.get("content")
             if isinstance(content, list):
-                content = " ".join(part.get("text", "") for part in content if isinstance(part, dict))
+                content = " ".join(part["text"] for part in content if isinstance(part, dict)
+                                   and isinstance(part.get("text"), str))
             return str(strip_turn_clock(content or ""))
     return None
 

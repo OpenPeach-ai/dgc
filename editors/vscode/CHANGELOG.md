@@ -1,5 +1,66 @@
 # Changelog
 
+## Unreleased
+
+- **Settings keeps its navigation in narrow tabs.** The side menu becomes an icon rail with hover labels and
+  keyboard navigation; full labels return when the tab is wide enough.
+
+- **Confirm before switching to Auto.** A warning explains access to files, terminal commands and connected apps.
+  Cancel is focused first, Escape cancels, and the chat keeps its current mode until confirmation succeeds.
+- **Artifact and Mod permission reviews stay tied to what you saw.** A dashboard source or Mod that changes while
+  its Allow is open needs a fresh review. A failed connection cannot replay an already-failed artifact edit later.
+- **Shown pictures keep their order and survive reopening the chat.** Delayed previews fall back to an openable
+  file, and the viewer's zoom percentage follows the actual rendered size.
+- **Your mods, in Work and in Chat.** A mod's status sits in one line above the prompt box under its name ("Tally 214
+  steps"), cut short when it is long, with all of it when you point at it; its band is a thin strip above that, which
+  you can fold. Its panel opens beside the chat ("From Tally"), from its status or from `/mods`, and its buttons,
+  fields and choices work there. Its notices appear under its name. Its commands are in the `/` menu ("from Tally")
+  and run at once, even while DGC is working, and never go to the model; what one answers shows as a small card under
+  the mod's name. `/mods` lists every mod with what it can do, where it came from, and Allow, Turn on, Turn off or
+  Reload.
+- **Settings → Plugins → Mods** lists the same mods with what each can do in plain words and the same actions, and
+  says how to get out of a broken one (`dgc --safe-mode`) and how to make one (`$mod-author`, `dgc mods dev`). A
+  plugin's install review lists the mods it brings and what each can do; installing it is your Allow.
+- **When DGC writes a mod for you,** a card in the chat asks once, "Turn on the mods DGC writes in this session?",
+  showing the mod and what it can do, with Allow and Not now.
+- **Microsoft Outlook and OneDrive in Settings → Plugins.** Choose Outlook Mail, Outlook Calendar or OneDrive, see
+  under each what it lets DGC do, choose a personal or a work or school account, and sign in with Microsoft once. The
+  dialog says up front that DGC's Microsoft app isn't verified by Microsoft yet: a personal account can approve it, and
+  in a company an admin approves it once. The plugin's page shows which kind of account it signs in with.
+- **Microsoft Work IQ in Settings → Plugins**, Microsoft's own server for work accounts with Microsoft 365 Copilot.
+- **Google Workspace's setup, ready for when Google approves DGC's app.** Once it appears in Settings → Plugins you
+  choose Gmail, Google Calendar, Drive, Docs or Slides, see under each what it lets DGC do, and sign in with Google once
+  for all of them.
+- **Artifacts in VS Code.** The Output chip under the prompt, in Work and in Chat, chooses what the reply makes:
+  Auto, Document, Slides, Spreadsheet, Page or Dashboard (a choice is a promise; it goes back to Auto after the
+  reply). What DGC makes arrives as a card in the reply with its type, title and version, and opens beside the chat
+  in its own editor: a document to edit, slides to rearrange and present, a sheet to sort and filter, a dashboard to
+  refresh, a page in its frame. Every change is a version you can compare and restore, and Export saves it as Word,
+  PDF, PowerPoint, Excel, CSV, Markdown or HTML. One Artifacts tab lists them all, by type and by where they came
+  from.
+- **A chat can read a folder, and Continue in Work.** The Folder chip in Chat lets it read a folder you choose; it
+  never writes there. Continue in Work opens a Work session in that folder with a brief of the chat in its prompt
+  box, unsent.
+- **A Pip's reports and dashboards, on its page.** Choose whether a reviewing Pip also keeps its reviews as a
+  document or a spreadsheet, and which of your dashboards a Pip refreshes after every run.
+- **An image DGC shows you is a picture, not a file name.** When DGC shows you a screenshot or picture it made, the
+  chat now draws it with what DGC said about it underneath, and keeps it there after the answer. Click it to see it
+  full size, page through the others, or open the file. Other files stay as a chip, which now shows that description
+  after the name instead of only when you hover. PNG, JPEG, GIF and WebP pictures up to 8 MB are drawn; anything
+  else, or a file that has gone, stays a chip.
+- **ChatDGC says "Writing a brief" in every window.** When you choose Continue in Work, another window showing the
+  same chat said it was summarizing earlier messages; it now says a brief of the chat is being written for Work.
+- **A Pip's report document or sheet is named on its page.** Under Reports it said only "Open"; it now names the
+  document or sheet and how many reviews it holds.
+- **A tall picture is shown whole in its tile.** A tall screenshot DGC looked at was cut to its middle in the chat's
+  square tile; the whole picture now fits inside it.
+- **ChatDGC's context window floats over the chat, as main DGC's does.** Opening it used to blank the chat beside
+  it: the card sat in the footer and made it taller. It now floats above the message box with the chat visible
+  around it, and shows its percentage the way main DGC does.
+- **A delegation that never started says so.** When a helper couldn't be started, its step read "Delegated
+  <task>" with no mark of failure, beside an agents count of 0. It reads "Couldn't delegate <task>" now, with the
+  reason in the step (and "Couldn't message / stop / continue" for the other helper steps).
+
 ## 0.33.2 — 2026-10-27
 
 - Requires DGC CLI 0.48.4. Everything in 0.33.1 below, which was not published on its own.

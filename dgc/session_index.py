@@ -12,11 +12,13 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
 INDEX_NAME = ".index.sqlite"
 MAX_BODY = 262144              # characters of a session kept for search
+MAX_INDEX_FILE_BYTES = 32 * 1024 * 1024
 SNIPPET = 160
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS meta(path TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL, size INTEGER NOT NULL,"
@@ -65,7 +67,20 @@ def _read(path: Path):
     """What the list shows of one session file, and what search reads. Kept as written, beside the
     session it came from; each reader redacts what it shows (page)."""
     from .clock import strip_turn_clock
-    data = json.loads(path.read_text())
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+             | getattr(os, "O_BINARY", 0))
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Session index requires a regular file")
+        if info.st_size > MAX_INDEX_FILE_BYTES:
+            # Keep a large session in the picker while leaving its contents unindexed.
+            return info.st_mtime, "Large session — open to view", 0, "", ""
+        raw = stream.read(MAX_INDEX_FILE_BYTES + 1)
+        if len(raw) > MAX_INDEX_FILE_BYTES:
+            return info.st_mtime, "Large session — open to view", 0, "", ""
+    data = json.loads(raw)
     msgs = data.get("messages", [])
     if not isinstance(msgs, list):
         msgs = []
@@ -74,7 +89,7 @@ def _read(path: Path):
     name = str(data.get("name") or "")
     said = [_text_of(m.get("content")) for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
     text = " \n".join(t for t in said if t)[:MAX_BODY]
-    updated = float(data.get("updated", path.stat().st_mtime))
+    updated = float(data.get("updated", info.st_mtime))
     return updated, preview, len(msgs), name, text
 
 

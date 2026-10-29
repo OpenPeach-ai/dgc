@@ -12,10 +12,13 @@ import json
 import os
 import re
 import socket
+import subprocess
+import html as _html
 import sys
 import tempfile
 import time
 import unittest
+from urllib.parse import urlparse
 
 import os as _os, sys as _sys                             # noqa: E402
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
@@ -42,7 +45,20 @@ def _write(path: Path, text) -> Path:
     return path
 
 
-def request(port, method, path, host="default", headers=None, body=None, address="127.0.0.1"):
+def request(port, method, path, host="default", headers=None, body=None, address="127.0.0.1", follow=True):
+    """One request. An old /a/<id>/ link answers with a redirect to the artifact's own origin (its own port);
+    by default that is followed, on the same host name, the way a browser would."""
+    status, got, data = _request(port, method, path, host, headers, body, address)
+    if follow and status == 302 and path.startswith("/a/"):
+        target = urlparse(got["location"])
+        if host not in ("default", None):
+            name = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
+            host = f"{name}:{target.port}"
+        return _request(target.port, method, target.path or "/", host, headers, body, address)
+    return status, got, data
+
+
+def _request(port, method, path, host="default", headers=None, body=None, address="127.0.0.1"):
     conn = http.client.HTTPConnection(address, port, timeout=30)
     try:
         conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
@@ -207,7 +223,8 @@ class ArtifactServerSecurity(unittest.TestCase):
             self.assertNotIn(b"SERVER_SOURCE", body)
 
     def test_cross_origin_or_tokenless_stop_is_refused(self):
-        victim = self.srv.add("site", self.proj, "victim", preferred_port=MAIN_PORT)
+        _write(self.proj / "victim" / "index.html", "<h1>victim</h1>")     # its own page: the same page twice is one artifact
+        victim = self.srv.add("victim", self.proj, "victim", preferred_port=MAIN_PORT)
         path = f"/_stop/{victim.id}"
         token = self.srv.__dict__.get("token", "")
         for headers in ({"Origin": "http://evil.example.com"}, {},
@@ -221,7 +238,8 @@ class ArtifactServerSecurity(unittest.TestCase):
         self.srv.remove(victim.id)
 
     def test_the_shell_stop_button_still_works_with_its_token(self):
-        doomed = self.srv.add("site", self.proj, "doomed", preferred_port=MAIN_PORT)
+        _write(self.proj / "doomed" / "index.html", "<h1>doomed</h1>")
+        doomed = self.srv.add("doomed", self.proj, "doomed", preferred_port=MAIN_PORT)
         _, _, shell = self.get("/")
         match = re.search(rb'const TOKEN = "([^"]+)"', shell)
         self.assertIsNotNone(match)
@@ -348,11 +366,14 @@ class ArtifactServerSecurity(unittest.TestCase):
         status, _, body = self.get(f"/?a={self.site_art.id}")
         self.assertEqual(status, 200)
         self.assertIn(b"<select", body)
-        self.assertIn(f'src="/a/{self.site_art.id}/"'.encode(), body)
+        # Framed from its own origin (its own port), on the host name the browser used, in a sandbox.
+        self.assertIn(f'src="http://127.0.0.1:{self.site_art.port}/" title="artifact" sandbox="'.encode(), body)
         self.assertIn(self.root_art.id.encode(), body)
         _, _, retired = self.get("/?a=a1")                   # an id retired on upgrade frames the newest
         newest = self.srv.list()[0]
-        self.assertIn(f'src="{newest.path}"'.encode(), retired)
+        self.assertIn(f'src="http://127.0.0.1:{newest.port}{newest.path}"'.encode(), retired)
+        _, _, by_name = self.get(f"/?a={self.site_art.id}", host=f"localhost:{self.port}")
+        self.assertIn(f'src="http://localhost:{self.site_art.port}/"'.encode(), by_name)
         status, _, listing = self.get("/_list")
         ids = {item["id"] for item in json.loads(listing)["artifacts"]}
         self.assertEqual(status, 200)
@@ -390,6 +411,135 @@ class ArtifactServerSecurity(unittest.TestCase):
             self.assertEqual(request(port, "GET", f"/a/{art.id}/", host="other.tailnet.ts.net")[0], 421)
         finally:
             srv.shutdown()
+
+
+class EachArtifactItsOwnOrigin(unittest.TestCase):
+    """Before 0.50 every artifact shared one origin with the shell: script in any artifact could fetch the shell
+    page (and the stop token in it), the list, and every other artifact. Now each artifact has its own port."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory(prefix="dgc-artorigin-")
+        tmp = Path(os.path.realpath(cls._tmp.name))
+        cls._saved_state = A.STATE_FILE
+        A.STATE_FILE = tmp / "artifacts.json"
+        cls.proj = tmp / "proj"
+        _write(cls.proj / "one" / "index.html", "<h1>one</h1>")
+        _write(cls.proj / "one" / "secret-ish.json", '{"mine": true}')
+        _write(cls.proj / "two" / "index.html", "<h1>two</h1>")
+        _write(cls.proj / "two" / "data.json", '{"two": true}')
+        cls.srv = A._Server(persistent=False)
+        cls.one = cls.srv.add("one", cls.proj, "one", preferred_port=MAIN_PORT + 100)
+        cls.two = cls.srv.add("two", cls.proj, "two", preferred_port=MAIN_PORT + 100)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        A.STATE_FILE = cls._saved_state
+        cls._tmp.cleanup()
+
+    def test_each_artifact_listens_on_a_port_of_its_own(self):
+        ports = {self.srv.port, self.one.port, self.two.port}
+        self.assertEqual(len(ports), 3)
+        self.assertEqual(request(self.one.port, "GET", "/")[2], b"<h1>one</h1>")
+        self.assertEqual(request(self.two.port, "GET", "/data.json")[2], b'{"two": true}')
+
+    def test_an_artifacts_listener_serves_nothing_of_the_shell_or_another_artifact(self):
+        self.assertNotIn(b"TOKEN", request(self.one.port, "GET", "/")[2])
+        self.assertEqual(request(self.one.port, "GET", "/_list")[0], 404)
+        self.assertEqual(request(self.one.port, "GET", "/data.json")[0], 404)          # two's file
+        self.assertEqual(request(self.one.port, "GET", f"/a/{self.two.id}/data.json")[0], 404)
+        self.assertEqual(request(self.one.port, "POST", f"/_stop/{self.two.id}")[0], 405)
+        self.assertIn(self.two.id, self.srv.artifacts)
+
+    def test_old_links_on_the_shell_redirect_to_the_artifacts_own_origin(self):
+        status, headers, _ = request(self.srv.port, "GET", f"/a/{self.one.id}/secret-ish.json", follow=False)
+        self.assertEqual(status, 302)
+        self.assertEqual(headers["location"], f"http://127.0.0.1:{self.one.port}/secret-ish.json")
+        status, headers, _ = request(self.srv.port, "GET", f"/a/{self.one.id}/", host=f"localhost:{self.srv.port}",
+                                     follow=False)
+        self.assertEqual(headers["location"], f"http://localhost:{self.one.port}/")
+        self.assertEqual(request(self.srv.port, "GET", "/a/a0000000000000000/x", follow=False)[0], 404)
+
+    def test_only_the_shell_and_vscodes_panel_may_frame_an_artifact(self):
+        _, headers, _ = request(self.one.port, "GET", "/")
+        self.assertNotIn("x-frame-options", headers)
+        csp = headers["content-security-policy"]
+        ancestors = next(p.strip() for p in csp.split(";") if p.strip().startswith("frame-ancestors"))
+        allowed = set(ancestors.split()[1:])
+        self.assertIn("'self'", allowed)
+        self.assertIn(f"http://127.0.0.1:{self.srv.port}", allowed)
+        self.assertIn(f"http://localhost:{self.srv.port}", allowed)
+        self.assertTrue({"vscode-webview:", "vscode-file:"} <= allowed, "VS Code's artifact panel frames it too")
+        self.assertTrue(all(a in ("'self'", "vscode-webview:", "vscode-file:") or a.endswith(f":{self.srv.port}")
+                            for a in allowed), allowed)
+        self.assertFalse({"https:", "http:", "*"} & allowed, "never any web page")
+        _, shell_headers, _ = request(self.srv.port, "GET", "/")
+        self.assertIn("frame-src http://127.0.0.1:*", shell_headers["content-security-policy"])
+
+    def test_an_artifacts_port_is_remembered_across_restarts(self):
+        state = Path(self._tmp.name) / "remembered.json"
+        saved, A.STATE_FILE = A.STATE_FILE, state
+        try:
+            first = A._Server(persistent=True)
+            art = first.add("one", self.proj, "one", preferred_port=MAIN_PORT + 120)
+            port = art.port
+            first.shutdown()
+            again = A._Server(persistent=True)
+            again.ensure_started(MAIN_PORT + 120)
+            self.assertEqual(again.artifacts[art.id].port, port)
+            self.assertEqual(request(port, "GET", "/")[2], b"<h1>one</h1>")
+            again.shutdown()
+        finally:
+            A.STATE_FILE = saved
+
+    def test_a_script_in_one_artifact_cannot_read_the_shell_its_token_or_another_artifact(self):
+        """In a real browser. Before 0.50 the page's own '/' WAS the shell, token and all."""
+        from dgc import browser
+        # Playwright's headless shell answers --dump-dom at once; a full Chrome's --headless=new can sit on it.
+        # The suite's own HOME has no browser cache, so PLAYWRIGHT_BROWSERS_PATH says where it is.
+        cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
+        shells = sorted(cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"))
+        try:
+            chrome = shells[-1] if shells else browser.discover_browser()
+        except Exception:
+            if os.environ.get("DGC_REQUIRE_CHROMIUM") == "1":
+                raise
+            self.skipTest("no Chrome or Chromium on this computer")
+        headless = [] if shells else ["--headless=new"]
+        shell, other = f"http://127.0.0.1:{self.srv.port}", f"http://127.0.0.1:{self.two.port}"
+        probe = self.proj / "one" / "probe.html"
+        _write(probe, f"""<!doctype html><meta charset="utf-8"><body><pre id="out">running</pre><script>
+(async () => {{
+  const out = {{}};
+  const read = async (name, url) => {{
+    try {{ const r = await fetch(url); out[name] = 'READ ' + (await r.text()).slice(0, 400); }}
+    catch (e) {{ out[name] = 'blocked'; }}
+  }};
+  await read('shell', '{shell}/');
+  await read('list', '{shell}/_list');
+  await read('other', '{other}/data.json');
+  await read('own', '/');
+  document.getElementById('out').textContent = JSON.stringify(out);
+}})();
+</script>""")
+        profile = tempfile.mkdtemp(prefix="dgc-artorigin-chrome-")
+        try:
+            done = subprocess.run([str(chrome), *headless, "--no-sandbox", "--disable-gpu",
+                                   f"--user-data-dir={profile}", "--virtual-time-budget=10000", "--dump-dom",
+                                   f"http://127.0.0.1:{self.one.port}/probe.html"],
+                                  capture_output=True, text=True, timeout=90)
+        finally:
+            import shutil
+            shutil.rmtree(profile, ignore_errors=True)
+        found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
+        self.assertIsNotNone(found, done.stdout[-2000:] + done.stderr[-2000:])
+        results = json.loads(_html.unescape(found.group(1)))
+        self.assertEqual(results["shell"], "blocked")
+        self.assertEqual(results["list"], "blocked")
+        self.assertEqual(results["other"], "blocked")
+        self.assertTrue(results["own"].startswith("READ <h1>one</h1>"), results["own"])
+        self.assertNotIn("TOKEN", json.dumps(results))
 
 
 class ArtifactScopeEdges(unittest.TestCase):
@@ -573,11 +723,11 @@ class ArtifactScopeEdges(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.srv.add(f"artifacts/pyapp/{hostile}", self.proj, preferred_port=REVIEW_PORT)
         shell = A._Server(persistent=False)
-        legacy = A.Artifact(id="a" + "0" * 16, name="legacy", directory=str(self.app), entry=hostile)
+        legacy = A.Artifact(id="a" + "0" * 16, name="legacy", directory=str(self.app), entry=hostile, port=45999)
         legacy._owner = shell
         shell.artifacts[legacy.id] = legacy
         page = A._shell_html(shell, legacy.id, "n")
-        frame = re.search(r'<iframe id="frame" src="([^"]*)" title="artifact">', page)
+        frame = re.search(r'<iframe id="frame" src="([^"]*)" title="artifact" sandbox="[a-z\- ]*">', page)
         self.assertIsNotNone(frame, "the iframe keeps exactly its own attributes")
         self.assertNotIn('srcdoc="', page)
 

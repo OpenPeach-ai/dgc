@@ -56,4 +56,5 @@ test('spool writes the bytes where the runtime reads them, under a fresh name on
   assert.equal(statSync(join(folder, name)).mode & 0o777, 0o600);
   await assert.rejects(fixture(51, { image_spool: true, image_spool_dir: folder }).session.pips.spool(new Uint8Array([1])), DGCUnsupportedError);
   await assert.rejects(current.session.pips.spool(new Uint8Array([1]), { suffix: '/x' }), DGCConfigError);
+  await assert.rejects(current.session.pips.spool(new Uint8Array(2 * 1024 * 1024 + 1)), DGCConfigError);
 });

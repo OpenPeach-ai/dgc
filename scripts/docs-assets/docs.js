@@ -11,10 +11,12 @@
         navigator.clipboard.writeText(text).then(done).catch(fallback);
       } else { fallback(); }
       function fallback(){
-        try { var ta=document.createElement('textarea'); ta.value=text;
+        var ta;
+        try { ta=document.createElement('textarea'); ta.value=text;
           ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
-          ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
+          ta.select(); if (document.execCommand('copy')) done();
         } catch(e){}
+        finally { if (ta && ta.parentElement) ta.remove(); }
       }
     });
   });

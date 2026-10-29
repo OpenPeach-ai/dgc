@@ -22,6 +22,7 @@ from test_session_detach import (POSIX_SOCKETS, ChatModel, Serve, World, alive, 
                                  wait_until)
 
 from dgc import editor_protocol as ep  # noqa: E402
+from dgc.chatdgc.service import _writes  # noqa: E402
 
 HELD = "open in another window"
 
@@ -32,6 +33,13 @@ def held(event, state, conversation_id):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_all_chat_mutations_require_its_writer(self):
+        for command in ({"type": "chatdgc_update", "delete": True},
+                        {"type": "chatdgc_move", "project_id": ""},
+                        {"type": "chatdgc_library_file", "op": "remove"},
+                        {"type": "chatdgc_library_file", "op": "to_project"}):
+            self.assertTrue(_writes(command), command)
+
     def test_the_commands_and_the_event_are_declared(self):
         self.assertEqual(set(ep.COMMAND_FIELDS["chatdgc_shown"]), {"conversation_ids"})
         self.assertEqual(set(ep.COMMAND_FIELDS["chatdgc_open_here"]), {"request_id", "conversation_id"})
@@ -114,6 +122,8 @@ class ChatDGCOpenHereIntegrationTests(unittest.TestCase):
         self.assertFalse(self.holds(world, b.proc.pid, chat), "B holds nothing it only shows")
         self.send(b, "s2", chat, "CHAT_COUNT 2")
         self.refused(b, "s2")
+        b.send({"type": "chatdgc_update", "request_id": "u2", "conversation_id": chat, "delete": True})
+        self.refused(b, "u2")
 
         # Open here in B: A lets it go and goes read-only; B opens it from disk and writes to it.
         b.send({"type": "chatdgc_open_here", "request_id": "h1", "conversation_id": chat})

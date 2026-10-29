@@ -433,6 +433,11 @@ mode that needs it.
 
 ## In VS Code and Cursor
 
+Switching a Work chat into **Auto** opens **Turn on Auto mode?**, explaining its access to files,
+terminal commands, the internet and connected apps. **Cancel** is focused first; Escape cancels.
+The current mode stays unchanged until you confirm and DGC accepts the change. Your explicit
+permission rules and integration consent still apply. Switch modes again to leave Auto.
+
 The approval card shows what the step will do — its summary and, for an edit, the diff it
 would apply — so you approve against the change rather than raw arguments. **Deny** can carry
 a note; the model reads it as the reason and adjusts.
@@ -525,6 +530,9 @@ opens in the editor.
 - There is **no download button**, because the file is already on your machine. The
   chip opens it where you would edit it.
 - At most **8 chips per step**, so one turn cannot bury the transcript.
+- **A picture is shown, not named.** In the editor, a PNG, JPEG, GIF or WebP up to 8 MB appears as
+  a picture with the agent's caption under it; click it to see it full size or open the file.
+  Any other file is a chip, with the caption after its name.
 
 ## How the agent does it
 
@@ -552,34 +560,80 @@ Chips need an extension new enough to render them; DGC negotiates this at startu
 and simply omits them for an older panel rather than sending something it cannot
 draw. Update the extension to get them back.
 """ ),
-    ("Artifacts", "preview what the agent builds on a localhost URL", """
+    ("Artifacts", "documents, decks, sheets, dashboards and pages DGC makes and keeps", """
 # Artifacts
 
-An artifact is how the agent **proposes something visual** on a local URL — most
-often a **plan**. In plan mode, DGC renders the plan (`plan.md`) as a clean page
-and serves it, as a rendered page — so you read the steps,
-files and approach in your browser instead of raw markdown scrolling past. The
-agent can also serve any page/app/chart it builds the same way.
+An artifact is something DGC makes that you keep: a **Document**, **Slides**, a **Spreadsheet**, a
+**Dashboard** or a **Page**. Ask for one in a chat, in a coding session, or let a Pip keep its
+reports in one. Every artifact lives on this computer, in `~/.dgc/artifacts/`, whichever part of
+DGC made it, and nothing is hosted anywhere: exporting is how you share one.
 
-- **Project previews share one server and port** (`http://127.0.0.1:45000` by
-  default), with a top-left dropdown. Proposed plans use a separate transient
-  loopback server so a LAN setting can never expose them.
-- DGC prints the URL in the terminal; open it in your browser.
-- Run **/artifact** to see them, open one, **stop** one, or toggle **localhost ⇄
-  LAN** with `b`.
-- **Localhost or your LAN.** By default the server binds `127.0.0.1` (only this
-  machine). Switch it to your **local network** (`artifact_bind: lan`, or press
-  `b` in `/artifact`) and it binds `0.0.0.0` with a shareable LAN URL —
-  open your artifact on your phone or another device. (LAN means anyone on the
-  network can view it — there's no auth.) Every preview shares one browser
-  origin, so a page you preview can read and stop your other previews: preview
-  pages you trust.
-- **It persists.** The list is saved, so after you restart `dgc` the server
-  tries to reuse the same port with your artifacts intact (set the preferred port with
-  `artifact_port`, turn off relaunch with `artifact_autostart`). Artifacts saved by
-  an older DGC get new, unguessable ids the first time this version starts, so an
-  old `?a=a1` link opens the newest preview, and they are served in the
-  project-root way described below.
+- **You and DGC both edit it, and every change is a version**, marked with who made it (you, DGC
+  or a Pip's name) and when. Restoring an old version makes a new one, so nothing is lost.
+- **The model writes data, never layout.** A deck is slides with a layout and notes, a sheet is
+  columns and rows, a dashboard is its sources and charts; DGC lays them out, so a small local
+  model makes the same clean deck a large one does.
+- **Exports:** a Document as Word, PDF or Markdown; Slides as PowerPoint, PDF or one HTML file; a
+  Spreadsheet as Excel or CSV; a Dashboard as one HTML file or PDF; a Page as one HTML file or a zip.
+
+**Versions → Compare** shows saved changes without changing either version: text for Documents,
+slide changes for Slides, changed cells for Sheets, changed files and the start page for Pages,
+and changed settings for Dashboards. Large comparisons are shortened and labelled as partial.
+If you save a document's working file while DGC is finishing an edit, DGC preserves your file
+and keeps its proposed edit in Versions for review.
+
+In a Spreadsheet, filtering only changes which rows you see; hidden rows stay in the file.
+Select cells to chart their saved values. Formulas are calculated when you save, so save formula
+edits before charting them.
+
+## Asking for one
+
+The **Output** chip under the prompt (in Chat and in Work) chooses what the reply makes: Auto (the
+model decides), Document, Slides, Spreadsheet, Page or Dashboard. **A choice is a promise**: choose
+Slides and you get slides, or a plain line saying why not. After the reply it goes back to Auto.
+
+In the terminal: `dgc chat --make slides "A 6-slide pitch for the tea shop"`, `/make slides TEXT`
+in `dgc chat`, and `/make TYPE TEXT` in a coding session.
+
+## Dashboards
+
+A dashboard shows number tiles, charts and tables over data you allow: a CSV or Excel file, a
+SQLite file, the project's read-only Postgres account (`dgc readonly-db set`), a chat's tables, or
+a plugin's read-only tool. **You allow each source once for each dashboard**, and a chart over a
+source you haven't allowed says so instead of running. Every query is one read-only SELECT, shown
+under its chart with when it last ran. **Refresh runs on this computer with no model**, so it costs
+nothing, and a dashboard never writes anywhere. If an edit points a source at other data, DGC asks
+again. A Pip can keep a dashboard current: give it the dashboard on its page.
+
+## Pips
+
+A Pip that reviews your code can keep each review as the newest version of its own Document or
+Spreadsheet (its page, **Reports**), as well as the card in its chat. Any Pip can be given
+dashboards to refresh after every run it finishes.
+
+## In the terminal
+
+- `dgc artifacts` lists them (`--type doc|slides|sheet|dashboard|page`, `--from chat|work|pip`,
+  `--json`).
+- `dgc artifacts show ID` lists its versions; `open ID` opens it in your browser;
+  `export ID FORMAT [--to PATH]`; `restore ID VERSION`; `rm ID` moves it to DGC's trash
+  (`~/.dgc/artifacts/.trash`), where it can be put back.
+- `/artifacts` in the full-screen terminal lists them and opens one, and asks before the trash.
+
+## Pages
+
+A **Page** is a web page or app the agent builds in your project, and the **plan** in plan mode
+(`plan.md`, shown as a clean page so you read the steps in your browser). DGC serves each page at
+an address of its own on this computer and prints it; `/artifact` lists them, opens one, stops one,
+or switches between **localhost and your LAN** with `b`.
+
+- **Each artifact has its own address**, so a script in one page can't read another page, the
+  list, or the stop button. The address stays the same across restarts while its port is free.
+- **Localhost or your LAN.** By default pages are only on this machine (`127.0.0.1`). On your
+  local network (`artifact_bind: lan`, or `b` in `/artifact`) anyone on the network can open
+  them, with no sign-in. Plans always stay on this machine.
+- **Every publish of a page is a version**, so a later one can be compared with or restored to an
+  earlier one.
 - **What gets served.** The agent serves a page: an `.html`/`.htm` file, an
   image, an `.svg` or a `.pdf`, or a folder holding one — not a `.md`, `.json`
   or `.txt` file on its own, and never a page inside a dot-folder. Dot-files and
@@ -612,9 +666,8 @@ agent can also serve any page/app/chart it builds the same way.
   that only the DGC artifacts page (the bar with the dropdown) carries, so another
   website cannot stop your previews.
 
-Artifacts are built with DGC's own design language (the `dgc-design` skill) so
-the frontend looks polished by default. They stay on this machine unless you
-explicitly confirm LAN sharing; plan previews always stay private.
+Pages are built with DGC's own design language (the `dgc-design` skill), so they look polished by
+default.
 """.strip()),
 
     ("Plugins, apps and MCP",
@@ -665,7 +718,7 @@ dgc plugin marketplace add SOURCE
 ## Installing one
 
 A plugin's files are copied into `~/.dgc/plugins` at install. Its skills land in DGC's discovery
-root and show up in `/skills` after a reload. They are not part of the DGC source tree and stay
+root and show up in `/skills` as soon as installation finishes. They are not part of the DGC source tree and stay
 under their own upstream licence, which is why an entry whose terms need your agreement asks for it
 before anything is copied — `--accept-license ID` in the terminal.
 
@@ -681,8 +734,8 @@ come across.
 
 Some catalog entries are **withdrawn rather than offered**, and you will not see them in the
 directory at all. Figma's remote server requires a client it has approved and DGC is not one of
-them; Google Workspace needs a project you register yourself. An offer DGC cannot honour is worse
-than no offer, so it is taken out rather than left to fail at the sign-in. One you already installed,
+them. An offer DGC cannot honour is worse than no offer, so it is taken out rather than left to
+fail at the sign-in. One you already installed,
 or one that arrives from a marketplace you added yourself, does show — with the reason on its card.
 
 **Installing is not connecting.** **Connect** starts whatever sign-in the plugin declares — a
@@ -727,6 +780,87 @@ for coding tools. **Settings → Plugins → Apps → Connect** shows each step:
 The secret is kept in the editor's secret storage and handed to DGC in an owner-only file when it connects; the
 sign-in that follows is kept in your system keychain like any other. Reopening the setup keeps the saved secret if
 you leave it blank.
+
+## Google Workspace: Gmail, Calendar, Drive, Docs and Slides
+
+It appears in Settings → Plugins once Google approves DGC's Google app. Until then only the accounts DGC has added can
+sign in, and they install it by name: `dgc plugin install google-workspace`.
+
+Google runs an MCP server for each of its apps (a Developer Preview), and DGC signs in to them with DGC's own Google
+app: there is nothing to set up at Google. **Settings → Plugins → Google Workspace → Install** lets you choose the
+apps; you then sign in with Google once, for all of them, and the sign-in is kept in your system keychain. In a
+terminal: `dgc plugin install google-workspace --apps gmail,calendar` (all five without `--apps`).
+
+Each app asks Google for these permissions, and nothing else:
+
+- **Gmail:** read your email; write drafts and send email. Google's Gmail tools make drafts; none of them sends.
+- **Google Calendar:** see your calendars, when you're free, and your events. It can't create, change or answer
+  events.
+- **Google Drive:** read all your Drive files; create files, and change only the ones DGC made or you opened with it.
+- **Google Docs** and **Google Slides:** the Drive permissions, and read and edit your documents or presentations.
+
+A Google tool that needs more than this (labelling or deleting mail, say) answers that Google didn't allow it,
+naming the permission; DGC never widens the sign-in by itself. Choosing another app later asks Google once more,
+for that app's permissions.
+
+**While Google reviews DGC's app**, only accounts DGC has added as testers can sign in, and Google signs them out
+every 7 days. DGC then says so in those words: "Google signs you out every 7 days while DGC's Google app is in
+testing: sign in again". Choose **Connect** on the plugin's page to sign in again.
+
+The app's id is public and ships with DGC. Google also wants the app's secret when you sign in, and that is not in
+DGC's source: DGC fetches it from `https://vibedgc.com/oauth/google-client.json` while you sign in, uses it only if it
+is for the same app, and keeps it with your sign-in in the keychain, where refreshing finds it. It never goes into
+`config.json`, a log, an event or anything the model sees. Uninstalling the plugin asks Google to revoke DGC's access
+and deletes the sign-in.
+
+## Microsoft: Outlook mail, Outlook calendar and OneDrive
+
+Microsoft has no MCP server that a personal account can use, so DGC has its own: it runs inside DGC and calls
+Microsoft Graph, Microsoft's official API. Nothing is downloaded, and no community server is involved.
+**Settings → Plugins → Microsoft Outlook and OneDrive → Install** lets you choose the apps and your kind of account
+(**Personal** for Outlook.com, Hotmail or Live; **Work or school** for a Microsoft 365 account); you then sign in with
+Microsoft once, for all of them, and the sign-in is kept in your system keychain. In a terminal:
+`dgc plugin install microsoft --apps mail,calendar --account personal` (all three apps and a personal account without
+the options). `dgc plugin sign-in microsoft --account work` switches to the other kind of account.
+
+Each app asks Microsoft for these permissions, and nothing else (every sign-in also asks to stay signed in and to see
+your name and email address):
+
+- **Outlook Mail:** read and organize your email (search, read, draft, move); send email as you.
+- **Outlook Calendar:** read and change your calendar (list, create, change, answer and delete events).
+- **OneDrive:** read and change your OneDrive files (search, read text, download into the project, upload new files,
+  replace one you name).
+
+Reading runs like any tool. Sending email, creating, changing, moving or deleting anything is a change, approved like
+DGC's other changes; a Pip asks before each one. A tool answers in plain words when Microsoft refuses something,
+throttles DGC (it waits as long as Microsoft asks, a few times) or a list has more pages (`next_page`).
+
+**Signing in.** DGC opens Microsoft's sign-in page in your browser and listens on `http://localhost` for it to come
+back. Where this computer has no browser (a session over SSH, a Linux machine with no desktop), DGC shows a code
+instead: open `microsoft.com/devicelogin` on any device and enter it. `dgc plugin sign-in microsoft --code` asks for a
+code even where a browser could open. A personal account signs in at Microsoft's `consumers` sign-in server and a work
+or school account at `organizations`, and each refreshes where it signed in.
+
+**DGC's Microsoft app isn't publisher-verified yet**, so Microsoft's sign-in page marks it unverified. A personal
+account can still approve it there. In a company, people can't approve it themselves: an admin approves DGC once, for
+everyone. When that is what stops you, DGC says "Your organization needs an admin to approve DGC for Microsoft 365
+first" and gives the link to send them. When Microsoft ends a sign-in (you removed DGC's access, or it went unused
+for months), DGC says so in plain words; choose **Connect** to sign in again. Microsoft has no way for an app to sign
+itself out, so uninstalling deletes the sign-in from this computer and tells you where to remove DGC's access too
+(account.live.com for a personal account, myapps.microsoft.com for a work one).
+
+The same server also runs on its own for any MCP client on this computer, with the sign-in the plugin keeps:
+`python -m dgc.microsoft_graph mail calendar onedrive`. It can't sign in by itself.
+
+## Microsoft Work IQ
+
+**Microsoft Work IQ** is Microsoft's own MCP server for Microsoft 365 Copilot, for work accounts: it answers from your
+organization's email, meetings, documents, Teams chats and people. DGC runs Microsoft's package
+(`npx -y @microsoft/workiq@1.0.1 mcp`, so Node.js is needed), and Work IQ signs you in itself with Microsoft's own app,
+not DGC's. It needs a Microsoft 365 Copilot licence and your admin's one-time approval
+(`https://login.microsoftonline.com/organizations/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87`;
+Microsoft's admin guide is at github.com/microsoft/work-iq). It is in public preview, and its program is under
+Microsoft's pre-release licence terms, which you accept when you install it.
 
 Two consequences, and DGC now states both rather than leaving you to discover them:
 
@@ -898,6 +1032,55 @@ exact returned route with `call_mcp_tool`. Calls still pass through permission r
 hooks, the workspace lease, cancellation, progress/input consent, redaction, and output bounds.
 """.strip()),
 
+    ("Mods", "your own status lines, panels, commands and guards, in Python or TypeScript", """
+# Mods
+
+A **mod** is a small program, in Python or TypeScript, that adds something of your own to DGC: a
+line in the status bar, a band above the prompt, a panel, a toast, a slash command, or a guard that
+holds a risky step. It hears the events it asks for (a prompt you send, each step and its result,
+each turn's end), and the same mod works in the terminal, in VS Code's Work and Chat, and in the
+SDK.
+
+- **You allow it once, on what it showed you.** Before a mod runs, DGC lists in plain words
+  everything it can do: the events it hears, what it reads, what it draws, the commands it adds,
+  the internet hosts it may reach (none, unless it names them), and whether it may ask your model.
+  An update that asks for more asks again; one that asks for less just runs.
+  If a mod changes while its Allow card is open, refresh the list and review it again before allowing it.
+- **It can never approve anything for you.** On a step it may watch, stop it, or turn an Allow into
+  an Ask. It can't draw over or change an Allow card, and everything it draws says which mod drew it.
+- **It runs in a sandbox, one process per mod.** It reaches the internet only through DGC, to the
+  hosts it named, and reads files only through DGC, inside what it declared. A mod that crashes is
+  shown as stopped with its error; DGC carries on.
+- **In a Pip's run** a mod can only stop a step (an Ask stops it, since nobody is there to answer)
+  and never draws: Pips run unattended.
+
+## DGC's own
+
+Three ship with DGC, off until you allow them: **Context** (what fills the context window, part by
+part, in a panel that follows each turn), **Tally** (the steps DGC takes this session, by tool) and
+**Guard** (holds a risky command, such as deleting, force-pushing or throwing away changes, and asks
+you first, saying what it would change).
+
+## Managing them
+
+- `/mods` lists every mod with its state and what it asks for, with Allow, On, Off and Reload.
+- In a terminal: `dgc mods` (the list), `dgc mods allow NAME`, `dgc mods on NAME`,
+  `dgc mods off NAME`, `dgc mods install FOLDER|GIT-URL [--subdir PATH]` and `dgc mods remove NAME`.
+- `dgc --safe-mode` starts no mods at all, and so does the `mods_enabled` setting turned off.
+
+## Writing one
+
+Ask DGC: the built-in `mod-author` skill writes one with you. A mod is a folder holding
+`dgc-mod.json` (its name, version, entry file and capabilities) and its code, using
+`dgc_sdk.mods` (Python) or `@vibedgc/sdk/mods` (TypeScript).
+
+- `dgc mods validate [FOLDER]` prints what it hooks, draws and asks for.
+- `dgc mods test [FOLDER]` runs it against sample events.
+- `dgc mods dev [FOLDER]` runs it in this session and reloads it each time you save.
+  Its session approval covers that folder and the capabilities it requested when started; adding
+  capabilities needs another Allow. Ending the session ends its mod processes and workers.
+""".strip()),
+
     ("Lifecycle hooks", "run observable commands at agent boundaries", """
 # Lifecycle hooks
 
@@ -987,6 +1170,7 @@ portable `.agents/skills` directories.
 - **fix-ci** — inspect the failed CI job and commit, reproduce the cause and verify a fix.
 - **pr-feedback** — evaluate review comments against current code and address justified changes.
 - **skill-author** — create focused, portable skill packages with meaningful validation.
+- **mod-author** — write a DGC mod (a status line, panel, command or guard), validated and tested with `dgc mods`.
 - **mcp-builder** — implement and test the tools/resources/prompts an MCP server advertises.
 - Also included: **batch**, **code-review**, **dataviz**, **debug**, **deep-research**,
   **dgc-design**, **handoff**, **loop**, **onboard**, **plan**, **refactor**,
@@ -1134,18 +1318,21 @@ to serialized shared-checkout writes. `/worktree <name>` creates a deliberately 
 manual branch.
 
 The model's `task` delegation tool isolates itself automatically in Git projects. Its private
-checkout starts with the caller's tracked and non-ignored untracked state. DGC applies only a
-completed child's conflict-free delta; it never overwrites paths that were already dirty, and it
-retains conflicting or incomplete work with a visible worktree path and branch. Integrated edits
-remain part of the parent turn's `/rewind` checkpoint and usage/edit totals.
+checkout starts with every uncommitted change to the caller's tracked files, and with as many of
+its non-ignored untracked files as fit (see **Worktrees**). DGC applies only a completed child's
+conflict-free delta; it never overwrites paths that were already dirty, never writes an untracked
+file the checkout left out, and it retains conflicting or incomplete work with a visible worktree
+path and branch. Integrated edits remain part of the parent turn's `/rewind` checkpoint and
+usage/edit totals.
 
 The three checkout kinds — fleet, named `/worktree`, and delegated `task` — are on **Worktrees**.
 
 Use `/tasks` to inspect retained work. `/tasks apply ID` recomputes its delta, rejects paths that were
-dirty before delegation or changed in the parent, and adds an applied result to `/rewind`. `/tasks
-drop ID --confirm` permanently removes the isolated checkout. Older recovery records created before
-baseline fingerprints remain visible and droppable but deliberately require manual inspection instead
-of unsafe auto-apply. VS Code/Cursor exposes the same operations through its command Quick Pick.
+dirty before delegation, left out of its checkout, or changed in the parent, and adds an applied
+result to `/rewind`. `/tasks drop ID --confirm` permanently removes the isolated checkout. Older
+recovery records created before baseline fingerprints remain visible and droppable but deliberately
+require manual inspection instead of unsafe auto-apply. VS Code/Cursor exposes the same operations
+through its command Quick Pick.
 """.strip()),
 
     ("Sub-agents", "every sub-agent this chat started, and what each one is doing", """
@@ -2016,10 +2203,11 @@ backend's snapshot of that chat, taken under its turn lock and followed by a fre
 whatever approval or question it is blocked on. So a chat you left mid-turn comes back exactly
 where it is now, not where it was when you left it.
 
-Closing the window stops every chat in it. Closing one chat stops only that chat; the backend
-keeps running for the others, and the last one to close stops it. If a background chat's backend
-dies while you are not watching, its tab says so and switching to it starts a new one on the same
-session rather than an empty chat.
+Closing a chat tab affects that chat alone; if it is working, DGC asks whether to keep it running
+or stop it. Closing or reloading the window leaves active sessions with DGC under the windowless
+session limits described above. A backend with no work left ends after its last chat closes. If a
+background chat's backend dies while you are not watching, its tab says so and switching to it
+starts a new one on the same session rather than an empty chat.
 
 ## When another DGC is working here
 
@@ -2120,33 +2308,12 @@ in one window no longer has the new key wiped by the other window's next save.
 
 ## One session, one chat at a time
 
-A session is held by whichever DGC is running a turn in it, so a second window — or the second
-chat in this panel — opening the same session is told it has *an active turn in another DGC
-process*. That protects the transcript: two
-backends writing one session would interleave their turns.
+A session has one writer, including between turns. A second window or terminal shows who holds
+it and opens it read-only. **Open here** moves it deliberately; the former holder then becomes
+read-only. A backend that loses its window can keep active work running and let the reloaded window
+reattach, under the windowless limits above. A crashed backend cannot keep the session locked.
 
-The lease is released when that turn ends, when its DGC exits, and if its DGC crashes — it is an
-operating-system lock, not a file DGC has to remember to clean up.
-
-It is also released when the editor that owned the backend goes away. An editor says it is still
-there about once a minute; a backend that was hearing that and stops hearing it treats the window
-as closed and lets the session go, within about fifteen minutes. That wait exists because a
-backend cannot otherwise tell a closed window from a user who is thinking: its input stays open
-for as long as the editor *process* lives, and an editor can leave that process behind when it
-reloads. Nothing is dropped to make this happen — a backend with a turn running, a background
-monitor armed, a detached sub-agent still working, or an open goal stays up regardless, however
-long it has been quiet.
-
-Handing the session to a window that is *asking* for it is a faster, stricter question, and it is
-answered by the chat panel rather than by the editor process. The panel itself says it is on screen
-every twenty seconds. A window that reloaded takes its panel with it, so those statements stop at
-once -- even in the case that started all of this, an editor host that outlives its own window and
-goes on insisting, on a timer, that everything is fine. After about two minutes with no word from
-any panel, the window that asked gets the session. Closing the chat view without closing the window
-is the one case where a live window has no panel to speak for it: the editor says so, that buys a
-bounded extra minute, and then the session goes to whoever is waiting.
-
-If you would rather not wait, start a new session, or close the other window.
+Start a new session if you want to work without moving the one another DGC has open.
 """.strip()),
 
     ("Checkpoints & rewind", "what a recovery point holds, /rewind, the editor's Undo, and what cannot come back", """
@@ -2209,9 +2376,21 @@ conversation back to one of them.
   through a private inbox in DGC's home folder (only your user can read it, each message carries
   that DGC's own token, and nothing listens on the network), so a terminal user who edits in VS Code
   or Cursor is covered too.
-- **What no editor reports is told by time.** A file you save from an editor DGC can't hear (vim,
-  a JetBrains IDE, or VS Code with DGC not running) while a command runs counts as the command's,
-  and Undo would put it back. So Undo's question names those files — *Also puts back 2 files changed
+- **Saves in vim, Neovim, Emacs and nano are yours too.** Those editors tell nobody when you save,
+  but they leave their own files beside yours: vim's and Neovim's swap file (nano's too, with
+  locking on), and Emacs's lock while a file has unsaved changes. After each command DGC reads them
+  for every file it would otherwise take for the command's. A file one of them was editing during
+  the command (unsaved changes in it, or saved while the command ran) is yours, as a save in VS Code
+  is: Undo leaves it, and its question says so, *README.md: edited in vim while a command ran; it is
+  left as it is*. A file DGC had written is merged with your edit, like any later edit of yours. A
+  file that is only open in an editor is not enough, so a formatter's changes to a file you have
+  open are still undone. On Linux DGC also notices the names a save makes and removes while the
+  command runs, the only trace left when you save and quit (`:wq`) or save in Emacs; on macOS those
+  saves are told by time. Undo never removes, overwrites or brings back an editor's own swap or lock
+  file.
+- **What no editor reports is told by time.** A save that leaves nothing behind (nano without
+  locking, VS Code with DGC not running, an editor that writes the file in place) while a command
+  runs counts as the command's, and Undo would put it back. So Undo's question names those files — *Also puts back 2 files changed
   while a command ran: rates.py, README.md.* (five at most, then *and N more*) — and offers
   **Restore all** or **Keep the ones I edited…**, a list where you tick the ones you edited
   yourself: those are left as they are and the rest are put back. In the editor's Undo question it
@@ -2614,16 +2793,16 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-Current release: **dgc-sdk 0.7.0** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
-package `@vibedgc/sdk` 0.7.0, both tagged [`sdk-v0.7.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.7.0)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.48.0** over editor protocol
+Current release: **dgc-sdk 0.8.0** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
+package `@vibedgc/sdk` 0.8.0, both tagged [`sdk-v0.8.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.8.0)
+(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.50.0** over editor protocol
 v14 and are proven on Linux. The full guide and API reference is
-[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.7.0/docs/SDK.md).
+[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.8.0/docs/SDK.md).
 
 ## Install
 
 ```
-python3 -m pip install dgc-sdk==0.7.0
+python3 -m pip install dgc-sdk==0.8.0
 ```
 
 That installs `import dgc_sdk`. Do **not** run `pip install dgc`: PyPI's package named `dgc` is a
@@ -3649,12 +3828,24 @@ them.
 ## Delegated `task`
 
 A sub-agent in a Git project gets its own short-lived private checkout, populated with the
-caller's tracked and non-ignored untracked state. DGC applies only a completed child's
-conflict-free delta. It never auto-overwrites a path that was already dirty. Conflicting or
-incomplete work is retained with a visible path and branch.
+caller's uncommitted state. DGC applies only a completed child's conflict-free delta. It never
+auto-overwrites a path that was already dirty. Conflicting or incomplete work is retained with a
+visible path and branch.
+
+The checkout holds at most 64 MB and 4,096 files of uncommitted state. Every changed or deleted
+tracked file is always copied: when those alone are more than that, delegation is refused and DGC
+says so plainly ("This project has 70 MB of uncommitted changes to tracked files…"); commit some
+of them, or let the model do the work itself. Untracked files that Git does not ignore are copied
+while there is room: text and source files first, then images, media, archives, fonts, PDFs and
+databases, each smallest first. The rest are left out, which never stops a delegation. The
+sub-agent is told which files it does not have (up to 20 by name, then a count per folder) and to
+say in its report if it needs one. Those are your own files, so integration never writes,
+overwrites or deletes one of them: a change the sub-agent made at one of those paths is held back,
+named in the result, and kept for `/tasks`, while the rest of its work lands as usual.
 
 `/tasks` lists retained work. `/tasks apply ID` recomputes the delta, rejects paths that were
-dirty before delegation or changed in the parent, and adds an applied result to `/rewind`.
+dirty before delegation, left out of its checkout, or changed in the parent, and adds an applied
+result to `/rewind`.
 `/tasks drop ID --confirm` permanently removes the isolated checkout. The editor's command
 palette exposes the same typed recovery.
 
@@ -4353,8 +4544,10 @@ when you want to override it.
 - `model_idle_timeout_s` (default `300`; Settings → **Wait between words**) — how long a stream
   may go silent after it started. A stall after partial output continues from what already
   streamed; for a local model the server is asked first, as above. `0` turns it off.
-- `model_stall_notice_s` (default `45`) — when to say "No response from the model" (with the model
-  and host) in the status line and the editor. `0` never shows it.
+- `model_stall_notice_s` (default `45`) — the soonest DGC says "No response from the model" (with the model
+  and host) in the status line and the editor. Once DGC has seen a model reply a few times, it waits until a
+  request is well past that model's usual wait before its first token (twice it, and still before the request
+  is retried), and the notice says what is usual: a slow model is not flagged on every turn. `0` never shows it.
 - `model_stall_retries` (default `2`) — how many times a stalled request is re-issued. After that
   DGC switches to `fallback_model` when one is set, or fails the turn with a message naming the
   model and endpoint. Esc / Stop works in every phase, including before any response headers.
@@ -4395,8 +4588,8 @@ when you want to override it.
 ## Artifacts
 
 - `artifact_autostart` (default `true`) — serve artifacts automatically as they are produced.
-- `artifact_port` (default `45000`) — the shared port for project artifacts. Plan previews use a
-  separate transient loopback server and port.
+- `artifact_port` (default `45000`) — the port for the artifact list. Each artifact uses its own
+  port and browser origin. Plan previews use a separate transient loopback server and port.
 - `artifact_bind` (default `localhost`) — the bind mode. Set it to `lan` to preview
   from another device on your own network.
 - `artifact_hostname` — the hostname used when building the printed URL, if it differs from the

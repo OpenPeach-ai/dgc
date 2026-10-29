@@ -23,6 +23,27 @@ GitHub still wants the app's secret for the code exchange, PKCE or not. Its devi
 public client id: DGC shows a short code, opens the service's page for it, and polls until the user approves. That is
 used when DGC was given a client registered for it (``{"client_id": ..., "grant": "device"}``, the GitHub plugin's
 sign-in) and keeps that client with the sign-in, so refreshing needs nothing else.
+
+Google's sign-in server admits only registered apps too, and its token address wants the app's secret. DGC's own
+Google app is a desktop app; its id is public and ships in the plugin catalog, and its secret is never in DGC's
+source: the client names where to fetch it (``client_secret_url``, on vibedgc.com) and the one sign-in server it may
+be sent to (``issuer``). It is fetched when the user signs in, refused unless it is for the same client id, and kept
+with that sign-in in the system keychain, where refreshing finds it. The maintainers can test before the site serves
+it: ``DGC_MAINTAINER_OAUTH_CLIENT_FILE`` names an owner-only JSON file with the client (Google's download works as
+is), used in place of the address for the client it names. Google's MCP servers answer ``initialize`` and
+``tools/list`` without a token, so such a client says ``sign_in_first``: DGC signs in when the user connects, not at
+the first tool call, where nobody could approve it. The servers of one plugin can share one sign-in
+(``shared_sign_in``): one consent for every app the user chose.
+
+DGC's own Microsoft app is a public client: no secret anywhere, its id in the catalog. Microsoft publishes no MCP
+server for personal accounts, so DGC's own server (microsoft_graph.py) calls Microsoft Graph with this sign-in, and
+there is no server metadata to discover: the app names its sign-in server's addresses (``server_metadata``, all on the
+pinned ``issuer``'s host), one set per kind of account (personal accounts at ``consumers``, work and school accounts at
+``organizations``; ``account`` says which, and a sign-in made for the other kind is made again). Its redirect is
+registered as ``http://localhost`` (any port, no path: RFC 8252 section 7.3, as Microsoft matches loopback redirects),
+and where this computer has no browser the same app signs in with a code (RFC 8628). An organization that doesn't let
+its users approve apps answers with errors the app names (``admin_approval``); DGC then says, in plain words, that an
+admin must approve DGC first, with the link that does it.
 """
 from __future__ import annotations
 
@@ -38,6 +59,7 @@ import re
 import secrets
 import socket
 import socketserver
+import stat
 import threading
 import time
 from dataclasses import dataclass, field
@@ -62,6 +84,18 @@ CREDENTIALS_VERSION = 1
 CLIENT_METADATA_URL = "https://vibedgc.com/oauth/dgc-client.json"
 CLIENT_METADATA_PORT = 29167
 _document_checked: dict = {}                       # url -> (time checked, usable)
+# Where an app's secret may be fetched from at sign-in (a client's ``client_secret_url``): DGC's own site, over https.
+# Plain http is taken only from this computer, like every other sign-in address here (local servers and tests).
+CLIENT_SECRET_HOSTS = ("vibedgc.com",)
+MAX_CLIENT_INFO = 16 * 1024
+# A maintainers' setting, never a user's: a JSON file holding the app (its id and secret), used in place of the
+# client's ``client_secret_url`` when it is for the same client id, to test before the site serves the file.
+CLIENT_FILE_ENV = "DGC_MAINTAINER_OAUTH_CLIENT_FILE"
+# Extra parameters a registered app may add to its sign-in link (Google: offline access, so a refresh token comes
+# back, and the consent page each time, so a new sign-in gets a new one). Nothing else may be added.
+_AUTHORIZATION_PARAMS = {"access_type": ("offline", "online"), "prompt": ("consent", "select_account", "consent select_account"),
+                         "include_granted_scopes": ("true", "false")}
+_SHARED_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 
 class RemoteError(RuntimeError):
@@ -70,6 +104,57 @@ class RemoteError(RuntimeError):
 
 class SignInDeclined(RemoteError):
     pass
+
+
+class TokenRefused(RemoteError):
+    """The token address said no, with its OAuth error code (``invalid_grant``: the sign-in ended) and its
+    description (read for the codes a registered app names, never shown as is)."""
+
+    def __init__(self, message: str, error: str = "", description: str = ""):
+        super().__init__(message)
+        self.error = error
+        self.description = description
+
+
+def client_from_json(value) -> tuple[str, str]:
+    """(client id, secret) from an app's JSON: ``{"client_id", "client_secret"}``, or Google's download, which keeps
+    them under ``installed`` (a desktop app) or ``web``. ("", "") when it holds no such pair."""
+    if not isinstance(value, dict):
+        return "", ""
+    for key in ("installed", "web"):
+        if isinstance(value.get(key), dict) and "client_id" not in value:
+            value = value[key]
+            break
+    client_id, secret = value.get("client_id"), value.get("client_secret")
+    if not isinstance(client_id, str) or not isinstance(secret, str) or not client_id or not secret \
+            or not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", client_id) or len(secret) > 512 \
+            or any(ord(c) < 33 or ord(c) == 127 for c in secret):
+        return "", ""
+    return client_id, secret
+
+
+def _secret_source_allowed(url) -> bool:
+    """A client's secret comes only from DGC's own site over https (or from this computer, for tests)."""
+    try:
+        parts = urlsplit(str(url or ""))
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return False
+    if parts.scheme == "https":
+        return parts.hostname in CLIENT_SECRET_HOSTS and port in (None, 443)
+    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+
+
+def _same_issuer(first, second) -> bool:
+    """Two names for one sign-in server (Google's resource metadata names ``https://accounts.google.com/``, its own
+    metadata ``https://accounts.google.com``)."""
+    def plain(value):
+        parts = urlsplit(str(value or ""))
+        return (parts.scheme.lower(), (parts.netloc or "").lower(), parts.path.rstrip("/"))
+    a, b = plain(first), plain(second)
+    return bool(a[0] and a[1]) and a == b
 
 
 # ------------------------------------------------------------------------------------------------- the arguments
@@ -173,10 +258,13 @@ def _origin(url: str) -> str:
 
 def _allowed(url) -> bool:
     """Sign-in and metadata addresses: https, or plain http only to this computer (local servers and tests)."""
-    parts = urlsplit(str(url or ""))
-    if parts.scheme == "https" and parts.hostname:
-        return True
-    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+    try:
+        parts = urlsplit(str(url or ""))
+        if parts.scheme == "https" and parts.hostname:
+            return True
+        return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+    except ValueError:
+        return False
 
 
 def _well_known(base: str, suffix: str) -> list[str]:
@@ -205,15 +293,29 @@ def parse_www_authenticate(header: str) -> dict:
 
 
 def _get_json(session, url: str) -> dict | None:
-    """Public metadata: redirects are followed (no credential is sent), but only an https answer counts."""
+    """Public metadata: validate every redirect before following it; no credential is sent."""
     if not _allowed(url):
         return None
+    original_scheme = urlsplit(url).scheme
     try:
-        response = session.get(url, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=True,
-                               headers={"Accept": "application/json"})
-        if response.status_code != 200 or not _allowed(response.url) or len(response.content) > MAX_METADATA:
+        for _hop in range(6):
+            response = session.get(url, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False,
+                                   headers={"Accept": "application/json"})
+            try:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    following = urljoin(url, response.headers.get("Location") or "")
+                    if not _allowed(following) or (original_scheme == "https" and urlsplit(following).scheme != "https"):
+                        return None
+                    url = following
+                    continue
+                if response.status_code != 200 or not _allowed(response.url) or len(response.content) > MAX_METADATA:
+                    return None
+                value = response.json()
+                break
+            finally:
+                response.close()
+        else:
             return None
-        value = response.json()
     except Exception:                                    # noqa: BLE001 -- discovery tries the next address
         return None
     return value if isinstance(value, dict) else None
@@ -312,13 +414,16 @@ class _LoopbackListener(ThreadingHTTPServer):
 
 
 class _Callback:
-    """The loopback listener the browser returns to: one code, for one state, then it closes."""
+    """The loopback listener the browser returns to: one code, for one state, then it closes. It answers at
+    ``/oauth/callback``, or at ``/`` for an app registered with a bare loopback address (Microsoft's
+    ``http://localhost``)."""
 
-    def __init__(self, port: int, state: str):
+    def __init__(self, port: int, state: str, path: str = "/oauth/callback"):
         self.port, self.state = port, state
         self.code = self.error = self.iss = None
         self.done = threading.Event()
         outer = self
+        expected = path or "/"
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -326,7 +431,7 @@ class _Callback:
 
             def do_GET(self):
                 parts = urlsplit(self.path)
-                if parts.path != "/oauth/callback":
+                if (parts.path or "/") != expected:
                     self.send_response(404)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -335,7 +440,10 @@ class _Callback:
                 if query.get("state") != outer.state:
                     ok, message = False, "This sign-in link doesn't match the one DGC opened. Start again from DGC."
                 elif query.get("error"):
-                    outer.error = query.get("error_description") or query["error"]
+                    # Both: the code says what kind of refusal it was, the description names the service's own
+                    # reason (Microsoft's AADSTS numbers, which say when an admin must approve the app first).
+                    outer.error = " ".join(dict.fromkeys(str(query.get(k) or "") for k in ("error", "error_description")
+                                                         if query.get(k)))[:600]
                     ok, message = False, "The service didn't sign you in: " + str(outer.error)[:200]
                 elif query.get("code"):
                     outer.code = query["code"]
@@ -439,27 +547,47 @@ def uses_client_document(metadata: dict, session=None) -> bool:
 class RemoteAuth:
     """One server's OAuth client: its saved sign-in, refreshing it, and signing in again when it must."""
 
-    def __init__(self, name: str, options: RemoteOptions, session, *, sign_in, cancelled, note):
+    def __init__(self, name: str, options: RemoteOptions, session, *, sign_in, cancelled, note, can_ask=None):
         self.name, self.options, self.session = name, options, session
         self.sign_in, self.cancelled, self.note = sign_in, cancelled, note
+        # Whether anyone could approve a sign-in now (someone clicked Connect): a sign-in with a code asks the service
+        # for that code first, so it is asked only when the answer is yes.
+        self.can_ask = can_ask
         self.lock = threading.RLock()
         self.saved: dict = {}
         self._loaded = False
+        self.signed_out = ""                             # why the last sign-in ended, in words the user is shown
+        static = options.static_client or {}
+        shared = static.get("shared_sign_in")
+        # One sign-in for the servers of one plugin (Google's apps): kept under the plugin's name, and only for a
+        # registered app that names the one sign-in server it signs in with.
+        self.shared = (isinstance(shared, str) and bool(_SHARED_NAME.fullmatch(shared)) and shared != name
+                       and isinstance(static.get("client_id"), str) and isinstance(static.get("issuer"), str))
+        self.account = shared if self.shared else name
 
     # the saved sign-in ---------------------------------------------------------------------------------------
     def _load(self, force: bool = False) -> dict:
         if force or not self._loaded:
-            value = credentials.load(self.name) or {}
-            if value.get("version") != CREDENTIALS_VERSION or value.get("url") != self.options.url:
+            value = credentials.load(self.account) or {}
+            if value.get("version") != CREDENTIALS_VERSION:
+                value = {}
+            elif self.shared:
+                # A shared sign-in is this app's, made for one of the plugin's servers: never another server's.
+                if value.get("shared") is not True or (value.get("client") or {}).get("client_id") \
+                        != self.options.static_client.get("client_id"):
+                    value = {}
+            elif value.get("url") != self.options.url:
                 value = {}                               # another server once had this name: not its sign-in
             self.saved, self._loaded = value, True
         return self.saved
 
     def _store(self, value: dict) -> None:
         value = {**value, "version": CREDENTIALS_VERSION, "url": self.options.url}
+        if self.shared:
+            value["shared"] = True
         if self.options.static_client_file:
             value["static_client_file"] = self.options.static_client_file   # where its secret is, to sign out
-        where = credentials.save(self.name, value)
+        where = credentials.save(self.account, value)
         self.saved, self._loaded = value, True
         self.note("sign-in kept in the " + ("owner-only credentials file" if where == "file" else "system keychain"))
 
@@ -485,7 +613,28 @@ class RemoteAuth:
             return {"Authorization": f"Bearer {access}"} if isinstance(access, str) and access else {}
 
     # discovery ------------------------------------------------------------------------------------------------
+    def _pinned(self) -> dict | None:
+        """The sign-in server a registered app names with its addresses (DGC's Microsoft app, whose Graph has no
+        metadata to discover): nothing is fetched, and only addresses on the pinned issuer's own host are used."""
+        static = self.options.static_client or {}
+        given, issuer = static.get("server_metadata"), static.get("issuer")
+        if not isinstance(given, dict) or not isinstance(issuer, str) or not _allowed(issuer):
+            return None
+        host = urlsplit(issuer).hostname
+        metadata = {}
+        for key in ("authorization_endpoint", "token_endpoint", "device_authorization_endpoint"):
+            value = given.get(key)
+            if isinstance(value, str) and _allowed(value) and urlsplit(value).hostname == host:
+                metadata[key] = value
+        if "authorization_endpoint" not in metadata or "token_endpoint" not in metadata:
+            raise RemoteError("DGC's app for this service names sign-in addresses DGC can't use, so DGC didn't sign in")
+        metadata["code_challenge_methods_supported"] = ["S256"]
+        return {"issuer": issuer, "metadata": metadata, "resource_metadata": {}, "pinned": True}
+
     def discover(self, challenge: dict) -> dict:
+        pinned = self._pinned()
+        if pinned is not None:
+            return pinned
         resource_metadata = None
         candidates = ([challenge["resource_metadata"]] if challenge.get("resource_metadata") else []) + \
             _well_known(self.options.url, "oauth-protected-resource")
@@ -530,28 +679,188 @@ class RemoteAuth:
             client["client_secret"] = static["client_secret"]
         return client
 
-    def _registered_host(self, port: int) -> str:
-        """The loopback host of the redirect the user's own app was registered with on this port, else localhost.
-        Zoom matches only the numeric address (127.0.0.1) and says not to use localhost; most services take it."""
+    def _secret_url(self) -> str:
+        """Where this app's secret is fetched at sign-in (DGC's own Google app), or ''."""
+        value = (self.options.static_client or {}).get("client_secret_url")
+        return value if isinstance(value, str) else ""
+
+    def _provider(self) -> str:
+        static = self.options.static_client or {}
+        return str(static.get("provider") or "")[:40] or urlsplit(self.options.url).hostname or "The service"
+
+    def _check_issuer(self, found: dict) -> None:
+        """An app that names its sign-in server signs in there only. Its secret goes to that server's token address
+        and nowhere else, whatever the MCP server's own metadata says."""
+        pinned = (self.options.static_client or {}).get("issuer")
+        if not isinstance(pinned, str) or not pinned:
+            if self._secret_url():
+                raise RemoteError("DGC's app for this service names no sign-in server, so DGC didn't sign in")
+            return
+        named = (found.get("metadata") or {}).get("issuer") or found.get("issuer")
+        if not _same_issuer(found.get("issuer"), pinned) or not _same_issuer(named, pinned):
+            raise RemoteError(f"this server's sign-in isn't {self._provider()}'s, so DGC didn't sign in")
+
+    def _fetch_secret(self, client_id: str) -> str:
+        """The app's secret, fetched now (at sign-in, never before): from the maintainers' local file when one is set
+        and names this client, else from the client's address on DGC's site. Refused unless it is for this client
+        id. The caller keeps it with the sign-in (the system keychain); it is never noted, logged or shown."""
+        provider = self._provider()
+        local = os.environ.get(CLIENT_FILE_ENV, "").strip()
+        if local:
+            found_id, secret = self._client_file(local)
+            if found_id != client_id:
+                raise RemoteError(f"{CLIENT_FILE_ENV} names another app than DGC's {provider} app; DGC didn't use it")
+            self.note(f"using the {provider} app details from {CLIENT_FILE_ENV}")
+            return secret
+        url = self._secret_url()
+        if not _secret_source_allowed(url):
+            raise RemoteError(f"DGC's {provider} sign-in details may come only from vibedgc.com over https")
+        host = urlsplit(url).hostname
+        try:
+            response = self.session.get(url, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False, stream=True,
+                                        headers={"Accept": "application/json", "Cache-Control": "no-cache"})
+        except Exception as exc:                         # noqa: BLE001 -- said in words below
+            raise RemoteError(f"DGC couldn't reach {host} for its {provider} sign-in details "
+                              f"({type(exc).__name__}); try again in a moment") from None
+        try:
+            if response.status_code != 200:
+                raise RemoteError(f"DGC couldn't get its {provider} sign-in details from {host} "
+                                  f"(HTTP {response.status_code}); try again later")
+            try:
+                body = response.raw.read(MAX_CLIENT_INFO + 1, decode_content=True)
+            except Exception:                            # noqa: BLE001 -- a broken answer is said below
+                body = b""
+            if len(body) > MAX_CLIENT_INFO:
+                raise RemoteError(f"{host} sent sign-in details DGC can't use")
+            try:
+                value = json.loads(body)
+            except ValueError:
+                value = None
+        finally:
+            with contextlib.suppress(Exception):
+                response.close()
+        found_id, secret = client_from_json(value)
+        if not found_id:
+            raise RemoteError(f"{host} sent sign-in details DGC can't use")
+        if found_id != client_id:
+            raise RemoteError(f"the sign-in details from {host} are for another app than DGC's {provider} app, "
+                              "so DGC didn't use them")
+        return secret
+
+    @staticmethod
+    def _client_file(path: str) -> tuple[str, str]:
+        """The maintainers' local app file: a regular file only its owner can read, holding the app."""
+        try:
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CLIENT_INFO:
+                raise RemoteError(f"{CLIENT_FILE_ENV} must name a small regular file")
+            if os.name == "posix" and info.st_mode & 0o077:
+                raise RemoteError(f"{CLIENT_FILE_ENV} names a file others can read; make it owner-only (chmod 600)")
+            with open(path, encoding="utf-8") as handle:
+                value = json.loads(handle.read(MAX_CLIENT_INFO + 1))
+        except OSError:
+            raise RemoteError(f"DGC couldn't read the file {CLIENT_FILE_ENV} names") from None
+        except ValueError:
+            value = None
+        found = client_from_json(value)
+        if not found[0]:
+            raise RemoteError(f"the file {CLIENT_FILE_ENV} names holds no app id and secret")
+        return found
+
+    def _authorization_params(self) -> dict:
+        extra = (self.options.static_client or {}).get("authorization_params")
+        if not isinstance(extra, dict):
+            return {}
+        return {key: value for key, value in extra.items()
+                if key in _AUTHORIZATION_PARAMS and value in _AUTHORIZATION_PARAMS[key]}
+
+    def _registered_redirect(self, port: int) -> tuple[str, str]:
+        """(loopback host, path) of the redirect the app was registered with on this port, else localhost and
+        ``/oauth/callback``. Zoom matches only the numeric address (127.0.0.1) and says not to use localhost; most
+        services take it. A registered redirect without a port is a desktop app's (RFC 8252 section 7.3: any port),
+        Google's; one without a path too is Microsoft's (``http://localhost``), whose path must match exactly."""
         for uri in (self.options.static_client or {}).get("redirect_uris") or []:
             try:
                 parts = urlsplit(uri) if isinstance(uri, str) else None
-                if parts and parts.scheme == "http" and parts.port == port and parts.path == "/oauth/callback" \
+                if parts and parts.scheme == "http" and parts.port in (port, None) \
+                        and parts.path in ("/oauth/callback", "", "/") and not parts.query and not parts.fragment \
                         and parts.hostname in ("localhost", "127.0.0.1", "::1"):
-                    return "[::1]" if parts.hostname == "::1" else parts.hostname
+                    path = "/oauth/callback" if parts.path == "/oauth/callback" else ""
+                    return ("[::1]" if parts.hostname == "::1" else parts.hostname), path
             except ValueError:
                 continue
-        return "localhost"
+        return "localhost", "/oauth/callback"
+
+    def _registered_host(self, port: int) -> str:
+        return self._registered_redirect(port)[0]
+
+    def _own_app(self) -> bool:
+        """DGC's own registered app for this service (Google's, Microsoft's): it names the one sign-in server it signs
+        in with, and DGC keeps track of how its sign-ins end."""
+        static = self.options.static_client or {}
+        return isinstance(static.get("client_id"), str) and isinstance(static.get("issuer"), str)
 
     def _device_client(self) -> dict | None:
-        """A client registered for the device flow (no secret): given now, or kept with the sign-in."""
+        """A client registered for the device flow (no secret): given now, or kept with the sign-in. DGC's own app
+        (Microsoft's) signs in with a code only when it is told to now (this computer has no browser): a sign-in once
+        made with a code says nothing about the next one."""
         static = self.options.static_client or {}
         saved = (self.saved or {}).get("client") or {}
-        for client in (static, saved):
+        for client in ((static,) if self._own_app() else (static, saved)):
             if client.get("grant") == "device" and isinstance(client.get("client_id"), str) \
                     and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", client["client_id"]):
                 return {"client_id": client["client_id"], "grant": "device"}
         return None
+
+    def admin_approval(self, *texts) -> str:
+        """Plain words for a sign-in that a company's admin must approve first, when one of TEXTS (a refusal's code and
+        its description) names one of the errors the app lists for that (Microsoft's ``AADSTS90094``: users can't
+        approve an app their organization hasn't): what to do, and the link that does it. '' otherwise."""
+        found = (self.options.static_client or {}).get("admin_approval")
+        if not isinstance(found, dict):
+            return ""
+        codes = [code for code in (found.get("errors") or [])[:16] if isinstance(code, str) and 3 <= len(code) <= 40]
+        said = " ".join(str(text or "") for text in texts)
+        if not any(code in said for code in codes):
+            return ""
+        message = " ".join(str(found.get("message") or "").split())[:240]
+        url = found.get("url")
+        if isinstance(url, str) and len(url) <= 300 and urlsplit(url).scheme == "https":
+            return f"{message} Send your admin this link to approve it: {url}"
+        return message
+
+    def _refused(self, *texts) -> RemoteError:
+        """A sign-in the service refused, said plainly when the app names the refusal (an admin must approve it)."""
+        words = self.admin_approval(*texts)
+        if words:
+            return RemoteError(words)
+        return RemoteError(f"the service didn't sign you in ({' '.join(str(t or '') for t in texts).strip()[:80]})")
+
+    def _kept(self) -> dict:
+        """What a sign-in with DGC's own app keeps besides its tokens: the service's name, the kind of account (for
+        Microsoft), where the user can remove DGC's access, and when it was made."""
+        static = self.options.static_client or {}
+        kept = {"signed_in_at": time.time()}
+        if static.get("provider"):
+            kept["provider"] = self._provider()
+        if isinstance(static.get("account"), str) and re.fullmatch(r"[a-z]{1,16}", static["account"]):
+            kept["account"] = static["account"]
+        manage = static.get("manage_url")
+        if isinstance(manage, str) and len(manage) <= 200 and urlsplit(manage).scheme == "https":
+            kept["manage_url"] = manage
+        return kept
+
+    @staticmethod
+    def _server_kept(found: dict) -> dict:
+        """The sign-in server's addresses a sign-in keeps, for refreshing and signing out. A pinned server that offers
+        no revocation says so, so signing out never goes looking for one."""
+        metadata = found["metadata"]
+        kept = {key: metadata.get(key) for key in (
+            "token_endpoint", "revocation_endpoint", "token_endpoint_auth_methods_supported",
+            "revocation_endpoint_auth_methods_supported") if metadata.get(key) is not None}
+        if found.get("pinned") and not metadata.get("revocation_endpoint"):
+            kept["no_revocation"] = True
+        return kept
 
     def _device_sign_in(self, found: dict, client: dict, scope: str, saved: dict, step_up: bool) -> bool:
         """RFC 8628: a short code the user enters on the service's own page; DGC polls until they approve."""
@@ -559,6 +868,9 @@ class RemoteAuth:
         endpoint = metadata.get("device_authorization_endpoint")
         if not isinstance(endpoint, str) or not _allowed(endpoint):
             raise RemoteError("the service doesn't offer sign-in with a code")
+        if self.can_ask is not None and not self.can_ask():
+            # Nobody could enter a code now (a new chat starting): say so, without asking the service for one.
+            raise self._declined()
         body = {"client_id": client["client_id"], **({"scope": scope} if scope else {})}
         response = self.session.post(endpoint, data=body, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False,
                                      headers={"Accept": "application/json"})
@@ -569,6 +881,9 @@ class RemoteAuth:
         if response.status_code != 200 or not isinstance(started, dict) \
                 or not all(isinstance(started.get(k), str) for k in ("device_code", "user_code", "verification_uri")):
             reason = started.get("error") if isinstance(started, dict) else ""
+            admin = self.admin_approval(reason, started.get("error_description") if isinstance(started, dict) else "")
+            if admin:
+                raise RemoteError(admin)
             raise RemoteError(f"the service didn't start the sign-in (HTTP {response.status_code}"
                               f"{', ' + str(reason)[:60] if reason else ''})")
         code, page = started["user_code"], started["verification_uri"]
@@ -579,12 +894,14 @@ class RemoteAuth:
             value = started.get(key)
             return max(low, min(int(value), high)) if isinstance(value, int) and not isinstance(value, bool) else default
         interval, lasts = number("interval", 5, 1, 60), number("expires_in", 900, 60, 1800)
-        if not self.sign_in(page, None, code):
+        asked = self.sign_in(page, None, code, reason=self.signed_out) if self.signed_out \
+            else self.sign_in(page, None, code)
+        if not asked:
             if step_up:
                 self._store({**saved, "step_up_scope": scope})
                 raise SignInDeclined(f"{urlsplit(self.options.url).hostname} needs more access for this. "
                                      "Connect it again in Settings → Plugins to approve it.")
-            raise SignInDeclined("Needs sign-in. Connect it in Settings → Plugins.")
+            raise self._declined()
         self.note("waiting for the code to be entered")
         token_endpoint = metadata.get("token_endpoint")
         deadline = time.monotonic() + lasts
@@ -616,13 +933,18 @@ class RemoteAuth:
                 continue
             if error == "expired_token":
                 raise RemoteError("the sign-in code expired before it was entered; connect again for a new one")
-            if error == "access_denied":
+            admin = self.admin_approval(error, value.get("error_description"))
+            if admin:
+                raise RemoteError(admin)
+            if error in ("access_denied", "authorization_declined"):   # Microsoft's word for the user saying no
                 raise SignInDeclined("sign-in was cancelled")
             raise RemoteError(f"the service didn't sign you in ({error[:60] or 'HTTP ' + str(answer.status_code)})")
-        self._store({"client": client, "issuer": found["issuer"], "resource": "", "tokens": tokens,
-                     "server": {key: metadata.get(key) for key in (
-                         "token_endpoint", "revocation_endpoint", "token_endpoint_auth_methods_supported",
-                         "revocation_endpoint_auth_methods_supported") if metadata.get(key) is not None}})
+        own = self._own_app()
+        # DGC's own app keeps its id alone: whether the next sign-in uses a code depends on that computer then.
+        self._store({"client": {"client_id": client["client_id"]} if own else client, "issuer": found["issuer"],
+                     "resource": "", "tokens": tokens, "server": self._server_kept(found),
+                     **({"requested_scope": scope, **self._kept()} if own else {})})
+        self.signed_out = ""
         self.note("signed in")
         return True
 
@@ -672,8 +994,11 @@ class RemoteAuth:
             value = {}
         if response.status_code != 200 or not isinstance(value, dict) or not isinstance(value.get("access_token"), str):
             reason = value.get("error") if isinstance(value, dict) else ""
-            raise RemoteError(f"the service didn't issue a token (HTTP {response.status_code}"
-                              f"{', ' + str(reason)[:60] if reason else ''})")
+            reason = reason if isinstance(reason, str) else ""
+            described = value.get("error_description") if isinstance(value, dict) else ""
+            raise TokenRefused(f"the service didn't issue a token (HTTP {response.status_code}"
+                               f"{', ' + reason[:60] if reason else ''})", reason[:60],
+                               described[:600] if isinstance(described, str) else "")
         return self._tokens(value)
 
     @staticmethod
@@ -689,24 +1014,100 @@ class RemoteAuth:
             tokens["expires_at"] = time.time() + float(value["expires_in"])
         return tokens
 
+    def _refresh_client(self, current: dict) -> dict | None:
+        """The client a refresh authenticates as. An app whose secret is fetched at sign-in refreshes with the secret
+        kept with that sign-in, and only for the same client id (a new app means a new sign-in)."""
+        saved = current.get("client") if isinstance(current.get("client"), dict) else None
+        if self._secret_url():
+            wanted = (self.options.static_client or {}).get("client_id")
+            if saved and saved.get("client_id") == wanted and isinstance(saved.get("client_secret"), str):
+                return {"client_id": saved["client_id"], "client_secret": saved["client_secret"]}
+            return None
+        return self._static() or saved
+
+    def _ended(self, current: dict) -> str:
+        """Why a sign-in the service won't refresh ended, in plain words, for an app that says how long its sign-ins
+        last (Google keeps a testing app's for 7 days); '' for any other."""
+        static = self.options.static_client or {}
+        days, message = static.get("sign_in_lasts_days"), static.get("signed_out_message")
+        if not isinstance(days, (int, float)) or isinstance(days, bool) or days <= 0:
+            if self._own_app() and static.get("provider"):
+                # DGC's own app with no fixed lifetime (Microsoft's): the sign-in was revoked, or ran out unused.
+                return f"{self._provider()} ended DGC's sign-in (it was revoked or has expired): sign in again."
+            return ""
+        provider = self._provider()
+        signed_in = current.get("signed_in_at")
+        age = time.time() - float(signed_in) if isinstance(signed_in, (int, float)) else None
+        if isinstance(message, str) and message.strip() and (age is None or age >= (float(days) - 0.5) * 86400):
+            return message.strip()[:300]
+        return f"{provider} ended DGC's sign-in (it was revoked or has expired): sign in again."
+
     def refresh(self, stale: dict) -> None:
-        with credentials.locked(self.name, cancelled=self.cancelled, timeout=60):
+        with credentials.locked(self.account, cancelled=self.cancelled, timeout=60):
             current = self._load(force=True)
             held = current.get("tokens") or {}
             if held.get("access_token") and held.get("access_token") != stale.get("access_token"):
                 return                                   # another DGC window refreshed it a moment ago
-            server, client = current.get("server"), self._static() or current.get("client")
+            server, client = current.get("server"), self._refresh_client(current)
             if not held.get("refresh_token") or not isinstance(server, dict) or not isinstance(client, dict):
                 raise RemoteError("nothing to refresh with")
             data = {"grant_type": "refresh_token", "refresh_token": held["refresh_token"]}
             if current.get("resource"):
                 data["resource"] = current["resource"]
-            tokens = self._token_request(server, client, data)
+            if (self.options.static_client or {}).get("refresh_scope") is True and current.get("requested_scope"):
+                data["scope"] = str(current["requested_scope"])   # Microsoft's token address wants the scope again
+            try:
+                tokens = self._token_request(server, client, data)
+            except TokenRefused as exc:
+                # invalid_grant: the sign-in ended. interaction_required (Microsoft): the user's organization wants
+                # them to sign in again (a new MFA prompt, a changed policy). Either way, say so plainly.
+                if exc.error in ("invalid_grant", "interaction_required"):
+                    self.signed_out = self._ended(current)   # the sign-in itself ended: say why, if DGC knows
+                raise
+            self.signed_out = ""
             tokens.setdefault("refresh_token", held["refresh_token"])
             if held.get("scope"):
                 tokens.setdefault("scope", held["scope"])
             self._store({**current, "tokens": tokens})
             self.note("refreshed the sign-in")
+
+    def _declined(self) -> SignInDeclined:
+        if self.signed_out:
+            return SignInDeclined(f"{self.signed_out} Connect it in Settings → Plugins.")
+        return SignInDeclined("Needs sign-in. Connect it in Settings → Plugins.")
+
+    def _ask(self, url: str, redirect) -> bool:
+        """Ask whoever can (the editor's card, the terminal) to sign in, saying why when a sign-in just ended."""
+        if self.signed_out:
+            return self.sign_in(url, redirect, reason=self.signed_out)
+        return self.sign_in(url, redirect)
+
+    def needs_sign_in(self) -> bool:
+        """A server that answers without a token (Google's answer ``initialize`` and ``tools/list`` to anyone) signs
+        in when it is connected: at its first tool call nobody could approve it. True when there is no sign-in, when
+        it has ended, or when the user chose more apps since (their scopes weren't asked for)."""
+        static = self.options.static_client or {}
+        if static.get("sign_in_first") is not True:
+            return False
+        with self.lock:
+            tokens = self.tokens()
+            wanted = set(str(static.get("scope") or "").split())
+            if wanted - set(str(self.saved.get("requested_scope") or "").split()):
+                return True
+            if not tokens.get("access_token"):
+                return True
+            if isinstance(static.get("account"), str) and self.saved.get("account") != static["account"]:
+                return True                              # made with the other kind of Microsoft account
+            expires = float(tokens.get("expires_at") or 0)
+            if expires and time.time() >= expires - 60:
+                if not tokens.get("refresh_token"):
+                    return True
+                try:
+                    self.refresh(tokens)
+                except (RemoteError, credentials.CredentialError) as exc:
+                    self.note(f"couldn't refresh the sign-in ({exc})")
+                    return True
+            return False
 
     def on_unauthorized(self, header: str, stale: dict, *, may_refresh: bool = True) -> bool:
         """A 401: refresh if we can, otherwise sign in. Raises SignInDeclined when nobody signs in."""
@@ -733,15 +1134,30 @@ class RemoteAuth:
     def _chosen_scope(self) -> bool:
         """The sign-in asks for a scope the user chose on the plugin's page (Sign in with GitHub's checklist)."""
         static = self.options.static_client or {}
-        return static.get("scope_choice") is True and isinstance(static.get("scope"), str)
+        return (static.get("scope_choice") is True or static.get("scope_fixed") is True) \
+            and isinstance(static.get("scope"), str)
 
     def _needs_permission(self, wanted: str) -> str:
         """A tool needs a scope the user didn't choose: which permission, in the words of the plugin's checklist."""
         static = self.options.static_client or {}
         labels = static.get("scope_labels") if isinstance(static.get("scope_labels"), dict) else {}
         provider = str(static.get("provider") or "") or urlsplit(self.options.url).hostname or "The service"
-        named = list(dict.fromkeys(str(labels.get(s) or "")[:80] or f"the {s[:60]} permission"
+        # A scope that is an address (Google's) is named by its last part: "gmail.modify".
+        named = list(dict.fromkeys(str(labels.get(s) or "")[:80]
+                                   or f"the {s.rstrip('/').rsplit('/', 1)[-1][:60]} permission"
                                    for s in wanted.split()[:8]))
+        if static.get("scope_fixed") is True:
+            # Nothing to turn on: the plugin asks for a fixed set (Google's apps). Either this isn't in it, or the user
+            # didn't allow it on the service's consent page (Google lets you untick a permission there).
+            what = (named[0] if len(named) == 1 else ", ".join(named[:-1]) + " or " + named[-1]) if named \
+                else "more access"
+            asked = set(str(static.get("scope") or "").split())
+            if wanted.split() and set(wanted.split()) <= asked:
+                return (f"{provider} didn't allow this: it needs {what}, which wasn't allowed when you signed in to "
+                        f"{provider}. To allow it, uninstall the plugin in Settings → Plugins, install it again and "
+                        f"allow it on {provider}'s page.")
+            return (f"{provider} didn't allow this: it needs {what}, which DGC's {provider} sign-in doesn't ask for. "
+                    "DGC can't do this with this plugin.")
         where = f"“What DGC may do on {provider}” on {provider}’s page in Settings → Plugins, then choose Sign in again."
         if not named:
             return f"{provider} needs more access to do this. Check what's turned on under {where}"
@@ -763,18 +1179,19 @@ class RemoteAuth:
             # The user chose what this sign-in may do: a tool that needs more never widens it by itself. Its ask is
             # kept (the plugin's page marks that permission) and the tool is told which permission to turn on.
             wanted = str(challenge.get("scope") or "")
-            with credentials.locked(self.name, cancelled=self.cancelled, timeout=60):
+            with credentials.locked(self.account, cancelled=self.cancelled, timeout=60):
                 saved = self._load(force=True)
                 if saved and wanted:
                     self._store({**saved, "step_up_scope": " ".join(dict.fromkeys(
                         [*str(saved.get("step_up_scope") or "").split(), *wanted.split()]))})
             raise SignInDeclined(self._needs_permission(wanted))
-        with credentials.locked(self.name, cancelled=self.cancelled, timeout=self.options.auth_timeout + 60):
+        with credentials.locked(self.account, cancelled=self.cancelled, timeout=self.options.auth_timeout + 60):
             if not step_up:
                 fresh = self._load(force=True).get("tokens") or {}
                 if fresh.get("access_token") and fresh.get("access_token") != stale.get("access_token"):
                     return True                          # another DGC window signed in while this one waited
             found = self.discover(challenge)
+            self._check_issuer(found)
             metadata = found["metadata"]
             for key in ("authorization_endpoint", "token_endpoint"):
                 if not _allowed(metadata.get(key)):
@@ -807,17 +1224,18 @@ class RemoteAuth:
             if port is None:
                 kept = (saved.get("client") or {}).get("redirect_uris") or []
                 port = CLIENT_METADATA_PORT if document else ((urlsplit(kept[0]).port if kept else None) or free_port())
+            path = "/oauth/callback" if document else self._registered_redirect(port)[1]
             try:
-                callback = _Callback(port, state)
+                callback = _Callback(port, state, path)
             except OSError:
                 if self.options.callback_port is not None:
                     raise RemoteError(f"port {port} is in use, and the app registered for this service signs in "
                                       "on it; close what uses it and connect again") from None
                 port = free_port()
-                callback = _Callback(port, state)
+                callback = _Callback(port, state, path)
             # RFC 8252's loopback port exception is written for the IP literal, so a document client uses it; a
-            # registered app uses the address it was registered with.
-            redirect = f"http://{'127.0.0.1' if document else self._registered_host(port)}:{port}/oauth/callback"
+            # registered app uses the address it was registered with (Microsoft's has no path: http://localhost:port).
+            redirect = f"http://{'127.0.0.1' if document else self._registered_host(port)}:{port}{path}"
             try:
                 client = ({"client_id": CLIENT_METADATA_URL, "issuer": found["issuer"], "redirect_uris": [redirect],
                            "document": True} if document else self._client(found, redirect))
@@ -826,21 +1244,29 @@ class RemoteAuth:
                 resource = self.options.resource or (found["resource_metadata"].get("resource")
                                                      if isinstance(found["resource_metadata"].get("resource"), str)
                                                      else "")
+                if self.shared:
+                    resource = ""                        # one sign-in for several servers: not bound to one of them
                 query = {"response_type": "code", "client_id": client["client_id"], "redirect_uri": redirect,
                          "code_challenge": code_challenge.decode(), "code_challenge_method": "S256", "state": state}
                 if scope:
                     query["scope"] = scope
                 if resource:
                     query["resource"] = resource
+                for key, value in self._authorization_params().items():
+                    query.setdefault(key, value)
                 endpoint = metadata["authorization_endpoint"]
                 url = endpoint + ("&" if urlsplit(endpoint).query else "?") + urlencode(query)
-                if not self.sign_in(url, redirect):
+                if not self._ask(url, redirect):
                     if step_up:
                         # Nobody can approve it mid-conversation: the next Connect signs in for this scope.
                         self._store({**saved, "step_up_scope": scope})
                         raise SignInDeclined(f"{urlsplit(self.options.url).hostname} needs more access for this. "
                                              "Connect it again in Settings → Plugins to approve it.")
-                    raise SignInDeclined("Needs sign-in. Connect it in Settings → Plugins.")
+                    raise self._declined()
+                if self._secret_url():
+                    # DGC's own app (Google's): its secret is fetched now, while the user signs in, and never when
+                    # nobody can (a new chat whose sign-in has ended only says so).
+                    client = {"client_id": client["client_id"], "client_secret": self._fetch_secret(client["client_id"])}
                 deadline = time.monotonic() + self.options.auth_timeout
                 while not callback.done.wait(0.2):
                     if self.cancelled():
@@ -848,7 +1274,7 @@ class RemoteAuth:
                     if time.monotonic() >= deadline:
                         raise RemoteError("sign-in wasn't finished in time; connect again to retry")
                 if not callback.code:
-                    raise RemoteError(f"the service didn't sign you in ({str(callback.error)[:80]})")
+                    raise self._refused(callback.error)
                 # RFC 9207: a service that names itself on the redirect must be the one DGC opened.
                 issuer = metadata.get("issuer")
                 if issuer and (callback.iss is not None or metadata.get("authorization_response_iss_parameter_supported")) \
@@ -858,15 +1284,25 @@ class RemoteAuth:
                         "code_verifier": verifier}
                 if resource:
                     data["resource"] = resource
-                tokens = self._token_request(metadata, client, data)
+                try:
+                    tokens = self._token_request(metadata, client, data)
+                except TokenRefused as exc:
+                    admin = self.admin_approval(exc.error, exc.description)
+                    if admin:
+                        raise RemoteError(admin) from None
+                    raise
             finally:
                 callback.close()
-            kept_client = ({"client_id": client["client_id"]} if self.options.static_client
-                           else client)              # an app's secret stays where the editor keeps it
+            if self._secret_url():
+                # DGC's own app: its secret is kept with this sign-in, in the system keychain, for refreshing.
+                kept_client = {"client_id": client["client_id"], "client_secret": client["client_secret"]}
+            elif self.options.static_client:
+                kept_client = {"client_id": client["client_id"]}   # an app's secret stays where the editor keeps it
+            else:
+                kept_client = client
             self._store({"client": kept_client, "issuer": found["issuer"], "resource": resource, "tokens": tokens,
-                         "server": {key: metadata.get(key) for key in (
-                             "token_endpoint", "revocation_endpoint", "token_endpoint_auth_methods_supported",
-                             "revocation_endpoint_auth_methods_supported") if metadata.get(key) is not None}})
+                         "requested_scope": scope, **self._kept(), "server": self._server_kept(found)})
+            self.signed_out = ""
             self.note("signed in")
             return True
 
@@ -1127,8 +1563,10 @@ class RemoteConnection:
         body = json.dumps(message, separators=(",", ":")).encode("utf-8")
         is_request = "id" in message and "method" in message
         if message.get("method") == "initialize" and "Authorization" not in self.options.headers \
-                and self.auth.needs_step_up():
-            with self.auth.lock:                         # a tool asked for more access: approve it before connecting
+                and (self.auth.needs_step_up() or self.auth.needs_sign_in()):
+            # A tool asked for more access, or the server answers without a token (Google's): sign in before
+            # connecting, while someone who clicked Connect can approve it.
+            with self.auth.lock:
                 self.auth.authorize({}, self.auth.tokens())
         refusals = 0                                     # 401s: refresh first, then sign in, then give up
         restarted = stepped_up = False

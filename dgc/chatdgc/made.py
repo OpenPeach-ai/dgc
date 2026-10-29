@@ -162,8 +162,11 @@ def _slides(spec) -> list[dict]:
             slide = {"title": slide}
         if not isinstance(slide, dict):
             raise MadeError(f"Slide {i + 1} needs a title and bullets.")
+        raw_bullets = slide.get("bullets") or []
+        if not isinstance(raw_bullets, list):
+            raise MadeError(f"Slide {i + 1} needs bullets as a list.")
         bullets = []
-        for b in slide.get("bullets") or []:
+        for b in raw_bullets:
             if isinstance(b, dict):
                 level = b.get("level", 0)
                 bullets.append((_cell(b.get("text")), max(0, min(3, level if type(level) is int else 0))))
@@ -172,7 +175,11 @@ def _slides(spec) -> list[dict]:
         if len(bullets) > MAX_BULLETS:
             raise MadeError(f"Slide {i + 1} has {len(bullets)} bullets; keep a slide to {MAX_BULLETS} or split it.")
         table = slide.get("table")
-        rows = [[_cell(c) for c in (r if isinstance(r, list) else [r])] for r in table] if isinstance(table, list) else []
+        if table is not None and not isinstance(table, list):
+            raise MadeError(f"Slide {i + 1} needs table as a list of nonempty rows.")
+        rows = [[_cell(c) for c in (r if isinstance(r, list) else [r])] for r in table] if table else []
+        if any(not row for row in rows):
+            raise MadeError(f"Slide {i + 1} has an empty table row; give each row at least one cell.")
         out.append({"title": _cell(slide.get("title")), "subtitle": _cell(slide.get("subtitle")),
                     "bullets": [(str(t), lv) for t, lv in bullets if str(t).strip()], "table": rows[:16],
                     "notes": _cell(slide.get("notes"))})
@@ -217,6 +224,7 @@ class Block:
     text: str = ""                  # a code block
     rows: list = field(default_factory=list)       # a table: [[runs]]; rows[0] is the header
     aligns: list = field(default_factory=list)
+    task: bool | None = None        # a task-list item: checked / unchecked, not literal Markdown
 
 
 def _runs(token) -> list[Run]:
@@ -292,8 +300,13 @@ def parse(markdown: str) -> list[Block]:
             runs = _runs(tokens[i + 1])
             if lists and item_started and not item_started[-1]:
                 current = lists[-1]
+                task = None
+                match = re.match(r"^\[([ xX])\]\s+", runs[0].text) if runs and not runs[0].code else None
+                if match and not current["ordered"]:
+                    task = match.group(1).lower() == "x"
+                    runs[0].text = runs[0].text[match.end():]
                 blocks.append(Block("item", runs, level=len(lists) - 1, ordered=current["ordered"],
-                                    number=current["n"], list_id=current["id"]))
+                                    number=current["n"], list_id=current["id"], task=task))
                 item_started[-1] = True
             elif lists:
                 blocks.append(Block("para", runs, level=len(lists)))      # a second paragraph in an item
@@ -491,6 +504,13 @@ def docx(title: str, blocks: list[Block]) -> bytes:
             style = "Title" if titled and b is blocks[0] else f"Heading{min(3, max(1, b.level - (1 if titled else 0)))}"
             body += f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr>{_word_runs(b.runs, links)}</w:p>'
         elif b.kind == "item":
+            if b.task is not None:
+                mark = "☑" if b.task else "☐"
+                checkbox = ('<w:r><w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol"/></w:rPr>'
+                            f'<w:t xml:space="preserve">{mark} </w:t></w:r>')
+                body += (f'<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:ind w:left="{360 * (b.level + 1)}"/>'
+                         f'</w:pPr>{checkbox}{_word_runs(b.runs, links)}</w:p>')
+                continue
             num = num_of.get(b.list_id, 1) if b.ordered else 1
             body += (f'<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="{min(8, b.level)}"/>'
                      f'<w:numId w:val="{num}"/></w:numPr></w:pPr>{_word_runs(b.runs, links)}</w:p>')
@@ -567,6 +587,52 @@ def _column(n: int) -> str:
     return name
 
 
+@dataclass(frozen=True)
+class XlsxCell:
+    """A cell that knows its kind, for a sheet whose columns are typed (``dgc.artifact_sheet``); a plain value in
+    ``rows`` is written exactly as before. ``value`` is a number, a bool, text (kept as text even when it looks like a
+    number) or a formula ("=…"); ``fmt`` is an Excel number format ("#,##0.00", "0%", "d mmm yyyy"); ``cached`` is
+    what a formula computed to, kept beside it for readers that don't recalculate; ``shown`` is how the cell reads,
+    which sets its column's width."""
+    value: object = None
+    fmt: str = ""
+    cached: object = None
+    shown: str = ""
+
+
+_XLSX_ERRORS = ("#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A")
+
+
+def _xlsx_number(value) -> str:
+    return str(int(value)) if float(value).is_integer() and abs(value) < 1e15 else repr(float(value))
+
+
+def _xlsx_typed(ref: str, cell: XlsxCell, style: int) -> str:
+    s = f' s="{style}"' if style else ""
+    value = cell.value
+    if isinstance(value, str) and value.startswith("=") and len(value) > 1:
+        formula, cached = f"<f>{_x(value[1:])}</f>", cell.cached
+        if isinstance(cached, bool):
+            return f'<c r="{ref}"{s} t="b">{formula}<v>{int(cached)}</v></c>'
+        if isinstance(cached, (int, float)) and cached == cached and abs(cached) != float("inf"):
+            return f'<c r="{ref}"{s}>{formula}<v>{_xlsx_number(cached)}</v></c>'
+        if isinstance(cached, str) and cached in _XLSX_ERRORS:
+            return f'<c r="{ref}"{s} t="e">{formula}<v>{cached}</v></c>'
+        if isinstance(cached, str) and not cached.startswith("#"):
+            return f'<c r="{ref}"{s} t="str">{formula}<v>{_x(cached)}</v></c>'
+        return f'<c r="{ref}"{s}>{formula}</c>'
+    if isinstance(value, bool):
+        return f'<c r="{ref}"{s} t="b"><v>{int(value)}</v></c>'
+    if isinstance(value, (int, float)):
+        if value != value or abs(value) == float("inf"):
+            return f'<c r="{ref}"{s}/>' if style else ""
+        return f'<c r="{ref}"{s}><v>{_xlsx_number(value)}</v></c>'
+    text = "" if value is None else str(value)
+    if not text:
+        return f'<c r="{ref}"{s}/>' if style else ""
+    return f'<c r="{ref}" t="inlineStr"{s}><is><t xml:space="preserve">{_x(text)}</t></is></c>'
+
+
 def _xlsx_cell(ref: str, value, style: int) -> str:
     s = f' s="{style}"' if style else ""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -586,9 +652,17 @@ def _xlsx_cell(ref: str, value, style: int) -> str:
 
 
 def xlsx(sheets: list[dict]) -> bytes:
+    """A workbook: each sheet {"name", "rows", "header"}, and optionally "frozen" (how many top rows stay in view;
+    the header row when it isn't given). A cell in rows is a plain value or an XlsxCell."""
     main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     parts: dict[str, str] = {}
+    formats: dict[str, int] = {}          # each typed cell's number format: its style, after the three every book has
+    for sheet in sheets:
+        for row in sheet["rows"]:
+            for v in row:
+                if isinstance(v, XlsxCell) and v.fmt and v.fmt not in formats:
+                    formats[v.fmt] = 3 + len(formats)
     overrides = {"/xl/workbook.xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
                  "/xl/styles.xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml", **_PROPS}
     for n, sheet in enumerate(sheets, 1):
@@ -597,15 +671,18 @@ def xlsx(sheets: list[dict]) -> bytes:
         widths = [10.0] * cols
         for r in rows[:2000]:
             for c, v in enumerate(r):
-                longest = max((len(line) for line in str(v).split("\n")), default=0)
+                longest = max((len(line) for line in str(v.shown if isinstance(v, XlsxCell) else v).split("\n")),
+                              default=0)
                 widths[c] = min(60.0, max(widths[c], longest * 1.1 + 2))
         data = ""
         for r, row in enumerate(rows, 1):
             style = 1 if sheet["header"] and r == 1 else 0
-            cells = "".join(_xlsx_cell(f"{_column(c)}{r}", v, style) for c, v in enumerate(row))
+            cells = "".join(_xlsx_typed(f"{_column(c)}{r}", v, formats.get(v.fmt, style)) if isinstance(v, XlsxCell)
+                            else _xlsx_cell(f"{_column(c)}{r}", v, style) for c, v in enumerate(row))
             data += f'<row r="{r}">{cells}</row>'
-        freeze = ('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" '
-                  'state="frozen"/></sheetView></sheetViews>') if sheet["header"] else \
+        frozen = int(sheet.get("frozen", 1 if sheet["header"] else 0))
+        freeze = (f'<sheetViews><sheetView workbookViewId="0"><pane ySplit="{frozen}" topLeftCell="A{frozen + 1}" '
+                  'activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>') if frozen > 0 else \
             '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
         filt = f'<autoFilter ref="A1:{_column(cols - 1)}{len(rows)}"/>' if sheet["header"] else ""
         columns = "".join(f'<col min="{c + 1}" max="{c + 1}" width="{w:.1f}" customWidth="1"/>' for c, w in enumerate(widths))
@@ -626,18 +703,24 @@ def xlsx(sheets: list[dict]) -> bytes:
         + "".join(f'<Relationship Id="rId{n}" Type="{rel}/worksheet" Target="worksheets/sheet{n}.xml"/>'
                   for n in range(1, len(sheets) + 1))
         + f'<Relationship Id="rId{len(sheets) + 1}" Type="{rel}/styles" Target="styles.xml"/></Relationships>')
+    custom = "".join(f'<numFmt numFmtId="{161 + i}" formatCode="{_x(code)}"/>' for code, i in formats.items())
     parts["xl/styles.xml"] = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        f'<styleSheet xmlns="{main}"><fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font>'
+        f'<styleSheet xmlns="{main}">'
+        + (f'<numFmts count="{len(formats)}">{custom}</numFmts>' if formats else "")
+        + '<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font>'
         '<font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>'
         '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
         '<fill><patternFill patternType="solid"><fgColor rgb="FFF3F4F6"/><bgColor indexed="64"/></patternFill></fill></fills>'
         '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
         '<border><left/><right/><top/><bottom style="thin"><color rgb="FFD1D5DB"/></bottom><diagonal/></border></borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        f'<cellXfs count="{3 + len(formats)}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
-        '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
+        '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+        + "".join(f'<xf numFmtId="{161 + i}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+                  for i in formats.values())
+        + '</cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
     return _zip({"[Content_Types].xml": _types(_BASE_TYPES, overrides),
                  "_rels/.rels": _RELS.replace("{main}", "xl/workbook.xml"),
@@ -655,21 +738,27 @@ _SLIDE_W, _SLIDE_H = 12192000, 6858000
 _INK, _MUTED, _ACCENT = "1F2937", "6B7280", "4F46E5"
 
 
-def _theme() -> str:
-    colors = {"dk1": '<a:sysClr val="windowText" lastClr="000000"/>', "lt1": '<a:sysClr val="window" lastClr="FFFFFF"/>',
-              "dk2": '<a:srgbClr val="1F2937"/>', "lt2": '<a:srgbClr val="F3F4F6"/>',
-              "accent1": '<a:srgbClr val="4F46E5"/>', "accent2": '<a:srgbClr val="0EA5E9"/>',
-              "accent3": '<a:srgbClr val="10B981"/>', "accent4": '<a:srgbClr val="F59E0B"/>',
-              "accent5": '<a:srgbClr val="EF4444"/>', "accent6": '<a:srgbClr val="8B5CF6"/>',
-              "hlink": '<a:srgbClr val="1D4ED8"/>', "folHlink": '<a:srgbClr val="7C3AED"/>'}
-    scheme = "".join(f"<a:{k}>{v}</a:{k}>" for k, v in colors.items())
-    font = '<a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/>'
+def _theme(colors: dict | None = None, fonts: tuple = ("Calibri", "Calibri")) -> str:
+    """The deck's theme part. ``colors`` replaces scheme slots ({"accent1": "B4472A"}, hex without '#') and ``fonts``
+    is (headings, body); a Slides artifact passes its own, ChatDGC's plain deck takes these defaults."""
+    scheme_colors = {"dk1": '<a:sysClr val="windowText" lastClr="000000"/>',
+                     "lt1": '<a:sysClr val="window" lastClr="FFFFFF"/>',
+                     "dk2": '<a:srgbClr val="1F2937"/>', "lt2": '<a:srgbClr val="F3F4F6"/>',
+                     "accent1": '<a:srgbClr val="4F46E5"/>', "accent2": '<a:srgbClr val="0EA5E9"/>',
+                     "accent3": '<a:srgbClr val="10B981"/>', "accent4": '<a:srgbClr val="F59E0B"/>',
+                     "accent5": '<a:srgbClr val="EF4444"/>', "accent6": '<a:srgbClr val="8B5CF6"/>',
+                     "hlink": '<a:srgbClr val="1D4ED8"/>', "folHlink": '<a:srgbClr val="7C3AED"/>'}
+    for slot, value in (colors or {}).items():
+        if slot in scheme_colors and re.fullmatch(r"[0-9A-Fa-f]{6}", str(value)):
+            scheme_colors[slot] = f'<a:srgbClr val="{str(value).upper()}"/>'
+    scheme = "".join(f"<a:{k}>{v}</a:{k}>" for k, v in scheme_colors.items())
+    major, minor = (f'<a:latin typeface="{_x(name)}"/><a:ea typeface=""/><a:cs typeface=""/>' for name in fonts[:2])
     solid = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
     line = lambda w: f'<a:ln w="{w}" cap="flat" cmpd="sng" algn="ctr">{solid}<a:prstDash val="solid"/></a:ln>'  # noqa: E731
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="ChatDGC"><a:themeElements>'
             f'<a:clrScheme name="ChatDGC">{scheme}</a:clrScheme>'
-            f'<a:fontScheme name="ChatDGC"><a:majorFont>{font}</a:majorFont><a:minorFont>{font}</a:minorFont></a:fontScheme>'
+            f'<a:fontScheme name="ChatDGC"><a:majorFont>{major}</a:majorFont><a:minorFont>{minor}</a:minorFont></a:fontScheme>'
             f'<a:fmtScheme name="ChatDGC"><a:fillStyleLst>{solid * 3}</a:fillStyleLst>'
             f'<a:lnStyleLst>{line(6350)}{line(12700)}{line(19050)}</a:lnStyleLst>'
             '<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle>'
@@ -764,7 +853,9 @@ def _layout(kind: str, name: str) -> str:
             '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>')
 
 
-def _master() -> str:
+def _master(bg: str = "FFFFFF") -> str:
+    """The slide master; ``bg`` is its background (hex without '#'), white for ChatDGC's plain deck."""
+    bg = bg.upper() if re.fullmatch(r"[0-9A-Fa-f]{6}", str(bg)) else "FFFFFF"
     clr = ('bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" '
            'accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"')
     level = lambda n: (f'<a:lvl{n}pPr marL="{342900 * (n - 1)}" algn="l"><a:defRPr sz="1800" kern="1200">'  # noqa: E731
@@ -772,7 +863,7 @@ def _master() -> str:
                        f'</a:lvl{n}pPr>')
     styles = "".join(level(n) for n in range(1, 10))
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-            f'<p:sldMaster {_P}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+            f'<p:sldMaster {_P}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="{bg}"/></a:solidFill>'
             '<a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
             '</p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/>'
             '<a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld>'
@@ -877,7 +968,11 @@ def page_html(title: str, blocks: list[Block]) -> str:
             while len(open_lists) <= b.level:
                 open_lists.append((b.ordered, b.list_id))
                 body.append(f'<ol start="{b.number}">' if b.ordered else "<ul>")
-            body.append(f"<li>{runs(b.runs)}</li>")
+            if b.task is not None:
+                body.append(f'<li style="list-style:none"><span role="img" aria-label="{"Completed" if b.task else "Not completed"}">'
+                            f'{"☑" if b.task else "☐"}</span> {runs(b.runs)}</li>')
+            else:
+                body.append(f"<li>{runs(b.runs)}</li>")
             continue
         if b.kind == "para" and b.level and open_lists:
             close_to(b.level)
@@ -1117,7 +1212,7 @@ def plain_pdf(title: str, blocks: list[Block]) -> tuple[bytes, int, int]:
             flow(b.runs, 10.5, 18 * b.level if b.kind == "para" else 14)
             y -= 6
         elif b.kind == "item":
-            marker = f"{b.number}. " if b.ordered else "• "
+            marker = ("Done: " if b.task else "To do: ") if b.task is not None else f"{b.number}. " if b.ordered else "• "
             flow(b.runs, 10.5, 14 + 16 * b.level, prefix=marker)
             y -= 2
         elif b.kind == "code":

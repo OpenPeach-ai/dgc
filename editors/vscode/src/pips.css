@@ -611,3 +611,20 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .live-commands{font-family:var(--vscode-editor-font-family,monospace);font-size:12px;line-height:1.55;white-space:pre;overflow-x:auto}
 .live-command-list{margin:8px 0;padding-left:22px}.live-command-list pre{margin:4px 0}.live-reach{margin:8px 0 0}
 .live-command h3{margin:0 0 4px}.live-command .live-command-line{margin:4px 0 6px;font-weight:600}.live-summary{font-size:14px}
+/* Where a Pip's reports go and the dashboards it refreshes (Pips API 67). In a Pip's Settings tab, two sections like
+   "When it runs"; on a Personal Pip's page, one group of rows like "Seeing". A choice and its Open stay side by side and
+   go under the words when the page is narrow; each dashboard is a row with Open and Remove; Add is one more choice. */
+.pip-artifacts-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:0 1 auto;min-width:0;max-width:100%}
+.pip-artifacts-actions select,.pip-dashboard-add select{width:auto;max-width:100%;min-width:0}
+.pip-dashboards{list-style:none;margin:8px 0 10px;padding:0;border:1px solid var(--pip-edge,var(--line));border-radius:10px}
+.pip-dashboards>li{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;min-height:44px;padding:6px 8px 6px 12px}
+.pip-dashboards>li+li{border-top:1px solid var(--pip-edge,var(--line))}
+.pip-dashboards>li>.row-words{flex:1 1 160px}
+.pip-dashboard-name{font-weight:500;overflow-wrap:anywhere}
+.pip-artifacts-section>p.muted{margin-top:0}
+.pip-artifacts .pip-dashboards{margin:0;border:0;border-radius:0;border-top:1px solid var(--pip-edge)}
+.pip-artifacts .pip-dashboards>li{padding:6px 8px 6px 14px}
+.pip-artifacts>p.pip-artifacts-says{padding-top:0}
+.pip-artifacts>.pip-page-label+p.pip-artifacts-says{padding-top:2px}
+.pip-artifacts>.pip-dashboards+.pip-page-row,.pip-artifacts>.pip-dashboards+p{border-top:1px solid var(--pip-edge)}
+.pip-artifacts>.pip-dashboards+p.pip-artifacts-says{padding-top:10px}

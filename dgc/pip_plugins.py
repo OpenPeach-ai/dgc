@@ -186,15 +186,18 @@ def cleaned(text, config) -> str:
     2026-10-11). An address is published by design; a private key is 64 hex digits, not 40."""
     from .redaction import redact_text, secret_values
     secrets, kept = secret_values(config), []
+    marker = f"\x00DGC-ADDRESS-{uuid.uuid4().hex}-"
 
     def hold(match) -> str:
         if _CREDENTIAL_KEY.search(match.group(1)) or any(str(s) and str(s) in match.group(3) for s in secrets):
             return match.group(0)       # a field named like a real credential, or a saved one: redacted as ever
         kept.append(match.group(0))
-        return f"\x00DGC-ADDRESS-{len(kept) - 1}\x00"
+        return f"{marker}{len(kept) - 1}\x00"
 
     text = redact_text(_ADDRESS_PAIR.sub(hold, str(text or "")), secrets)
-    return re.sub(r"\x00DGC-ADDRESS-(\d+)\x00", lambda match: kept[int(match.group(1))], text)
+    for index, address in enumerate(kept):
+        text = text.replace(f"{marker}{index}\x00", address)
+    return text
 
 
 def _plugin_name(value, available) -> str:

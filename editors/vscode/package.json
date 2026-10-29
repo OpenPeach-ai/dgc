@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.33.2",
+  "version": "0.34.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -47,16 +47,20 @@
     "onView:dgc.chat",
     "onWebviewPanel:dgc.chatEditor",
     "onWebviewPanel:dgc.chatdgcEditor",
-    "onWebviewPanel:dgc.chatdgcWidget"
+    "onWebviewPanel:dgc.chatdgcWidget",
+    "onWebviewPanel:dgc.artifactPanel"
   ],
   "contributes": {
     "customEditors": [
       {
         "viewType": "dgc.chatdgcCanvasDoc",
-        "displayName": "ChatDGC Canvas (formatted)",
+        "displayName": "DGC Document (formatted)",
         "selector": [
           {
             "filenamePattern": "**/canvas/chat_*/cv_*/*.md"
+          },
+          {
+            "filenamePattern": "**/artifacts/ar_*/work/*.md"
           }
         ],
         "priority": "option"
@@ -275,6 +279,12 @@
         "command": "dgc.artifacts",
         "title": "Artifact Previews",
         "category": "DGC"
+      },
+      {
+        "command": "dgc.openArtifacts",
+        "title": "Artifacts",
+        "category": "DGC",
+        "icon": "$(library)"
       },
       {
         "command": "dgc.goal",
@@ -651,7 +661,11 @@
         },
         "dgc.closingAWorkingTab": {
           "type": "string",
-          "enum": ["ask", "keepRunning", "stop"],
+          "enum": [
+            "ask",
+            "keepRunning",
+            "stop"
+          ],
           "enumDescriptions": [
             "Ask each time, and remember the answer if you tick Remember my choice.",
             "Keep it running in the background: a session (Settings › Running sessions shows it, with Stop), or a ChatDGC reply, which is saved when it finishes.",
@@ -711,7 +725,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.48.4 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.50.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }
@@ -762,7 +776,7 @@
     "esbuild": "^0.28.2",
     "highlight.js": "11.12.0",
     "jsdom": "^30.0.1",
-    "katex": "0.16.47",
+    "katex": "0.18.2",
     "markdown-it": "15.0.3",
     "mermaid": "^12.0.0",
     "ovsx": "1.2.0",
@@ -790,5 +804,5 @@
     },
     "@azure/msal-node": "7.1.1"
   },
-  "dgcCliVersion": "0.48.4"
+  "dgcCliVersion": "0.50.0"
 }

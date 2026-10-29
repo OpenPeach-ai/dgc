@@ -82,7 +82,7 @@ def _get(url: str, headers: dict, limit: int) -> tuple[int, bytes, str]:
     """(status, body up to ``limit`` bytes, content type). Raises _Unreachable or _Slow."""
     deadline = time.monotonic() + _TOTAL_S
     try:
-        response = requests.get(url, headers=headers, stream=True, timeout=_TIMEOUT,
+        response = requests.get(url, headers={"Accept-Encoding": "identity", **headers}, stream=True, timeout=_TIMEOUT,
                                 allow_redirects=False)
     except requests.ConnectTimeout as exc:
         raise _Unreachable(str(exc)) from exc
@@ -95,12 +95,16 @@ def _get(url: str, headers: dict, limit: int) -> tuple[int, bytes, str]:
     try:
         body = bytearray()
         try:
-            for chunk in response.iter_content(chunk_size=65_536):
+            # http.client's read1 returns whatever arrived so far, rather than waiting for a full
+            # 64 KiB chunk. A server dribbling bytes must not keep this health check alive forever.
+            read1 = getattr(getattr(response.raw, "_fp", None), "read1", None)
+            chunks = iter(lambda: read1(65_536), b"") if callable(read1) else response.iter_content(chunk_size=1)
+            for chunk in chunks:
                 if chunk:
                     body.extend(chunk)
                 if len(body) > limit or time.monotonic() > deadline:
                     break
-        except requests.RequestException as exc:
+        except (requests.RequestException, OSError) as exc:
             raise _Slow(str(exc)) from exc
         ctype = str((response.headers or {}).get("Content-Type", "")).lower()
         return int(response.status_code), bytes(body[:limit]), ctype

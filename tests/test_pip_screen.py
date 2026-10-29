@@ -365,6 +365,45 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(self.events[0][0], "pip_desktop_closed")
         self.assertIn("runner", self.events[0][1]["reason"])
 
+    def test_close_during_open_does_not_resurrect_a_screen(self):
+        pip = "pip_" + "c" * 32
+        entered, release = threading.Event(), threading.Event()
+        def wait_for_view(*_args):
+            entered.set()
+            release.wait(2)
+            return None
+        with patch("dgc.pip_screen_stream.WorkspaceRegistry"), \
+                patch.object(pip_screen_stream, "OPEN_SECONDS", 0.4), \
+                patch.object(pip_computer, "request_open", return_value={"pip_id": pip, "ready": False}), \
+                patch.object(pip_computer, "view_endpoint", side_effect=wait_for_view):
+            self.streams.handle({"pip_id": pip, "op": "open"})
+            self.assertTrue(entered.wait(2))
+            self.streams.handle({"pip_id": pip, "op": "close"})
+            release.set()
+            self.wait(lambda: self.streams._opening == 0)
+        self.assertEqual(self.streams.streams, {})
+        self.assertEqual(self.events, [])
+
+    def test_pending_screen_opens_are_bounded(self):
+        first, second = ("pip_" + char * 32 for char in "de")
+        entered, release = threading.Event(), threading.Event()
+        def wait_for_view(*_args):
+            entered.set()
+            release.wait(2)
+            return None
+        with patch("dgc.pip_screen_stream.WorkspaceRegistry"), \
+                patch.object(pip_screen_stream, "OPEN_SECONDS", 0.4), \
+                patch.object(pip_screen_stream, "MAX_OPENING", 1), \
+                patch.object(pip_computer, "request_open", return_value={"ready": False}), \
+                patch.object(pip_computer, "view_endpoint", side_effect=wait_for_view):
+            self.streams.handle({"pip_id": first, "op": "open"})
+            self.assertTrue(entered.wait(2))
+            self.streams.handle({"pip_id": second, "op": "open"})
+            self.assertIn("Too many", self.events[-1][1]["reason"])
+            self.streams.handle({"pip_id": first, "op": "close"})
+            release.set()
+            self.wait(lambda: self.streams._opening == 0)
+
 
 class ServeRefusalTests(unittest.TestCase):
     """`dgc serve` refuses a screen exactly where it refuses Pips controls."""

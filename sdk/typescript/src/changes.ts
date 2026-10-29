@@ -237,7 +237,7 @@ function editScript(a: string[], b: string[]): Op[] {
     py -= 1;
     reversed.push({ kind: "=", line: x[px] });
   }
-  middle.push(...reversed.reverse());
+  for (let i = reversed.length - 1; i >= 0; i--) middle.push(reversed[i]);
   return [...head, ...middle, ...tail];
 }
 

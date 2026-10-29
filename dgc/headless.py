@@ -43,6 +43,7 @@ from .permissions import Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .history_stream import HistoryEmitter
+from . import shown_files
 from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
@@ -220,6 +221,9 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_models", "list_models_at", "list_mcp_tools", "list_skills", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
+    "artifact_list", "artifact_get", "mods_list",
+    # A client saying it shows the card for the mods DGC writes: nothing changes but what it is sent.
+    "watch_mod_offers",
     # The person saved a file in the editor: a fact for the command watch, not the person acting on the chat.
     "user_saved",
     "get_config", "status", "get_history", "get_outline", "list_monitors", "stop_monitor", "list_mcp_context",
@@ -365,7 +369,10 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # window (pips_propose model_choice, context_window; a Personal Pip with scope personal, which may run on Claude Code or
 # Codex), the Pips default (pips_settings) and gives a new Pip both (pips_setup), each asking the user like any tool.
 # No command is added; a client reads the new fields only from a runtime advertising 66.
-PIPS_API_VERSION = 66
+# API 67: get_pip_artifacts and set_pip_artifacts (artifact_pips): a Pip's report_as ("chat", "doc", "sheet": each
+# finished review also kept as the newest version of its own document or sheet) and the dashboards it refreshes after
+# each run it finishes (a Pulse keeps one current on its schedule).
+PIPS_API_VERSION = 67
 
 
 def _pips_platform_supported() -> bool:
@@ -399,6 +406,8 @@ _BUSY_MUTATIONS = {
     # request sees the new tools), not what it is ALLOWED to do, so they run on the package slot
     # beside the turn -- Codex draws the same line.
 }
+from .artifact_commands import CAPABILITY as _ARTIFACT_CAPABILITY     # noqa: E402
+
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
     "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs",
@@ -1025,7 +1034,7 @@ def _history_vision_items(seen) -> list:
 
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
-                   "tool_call", "tool_result", "tool_denied", "tool_images", "options_resolved",
+                   "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "options_resolved",
                    "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_files", "turn_end")
 
 
@@ -1926,6 +1935,10 @@ class HeadlessUI:
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
+    def artifact_changed(self, view: dict, op: str) -> None:
+        """The model made or changed an artifact in this Work turn: its card in the chat, and the Library."""
+        self.em.emit("artifact_changed", artifact=view, op=op, surface="work")
+
     def troupe_event(self, kind: str, fields: dict) -> None:
         """A troupe started, moved on, or ended (dgc/troupe.py): its card in the chat."""
         if kind in ("started", "progress", "finished") and isinstance(fields, dict):
@@ -2458,7 +2471,8 @@ class Backend:
     def _ready_payload(self) -> dict:
         """The validated backend handshake: everything `ready` says."""
         return dict(version=__version__, protocol_version=PROTOCOL_VERSION,
-            capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
+            capabilities={**_ARTIFACT_CAPABILITY, "mods": {"version": 1, "offers": 1, "consent_reviews": 1},
+                          "typed_editor_context": True, "multi_root": True, "usage": True,
                           "goal_state": True, "goal_runner": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
@@ -2651,9 +2665,10 @@ class Backend:
         # question_forms: a reply's card may hold several questions, and chatdgc_answer takes `choices` for it.
         # outline: chatdgc_outline is understood (every prompt of a chat, and the widgets its replies made).
         # holder: chatdgc_holder is understood (where a chat another window holds is open, and whether it is writing).
+        # folder: chatdgc_folder, chatdgc_set_folder and chatdgc_work_brief (a folder the chat reads; Continue in Work).
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1},
+                            "holder": 1, "folder": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
@@ -2714,6 +2729,85 @@ class Backend:
         self._emit_config()
         self._publish_model_capabilities()
         self._start_pip_report_watch()
+        # The user's mods (dgc/mods), started beside the chat: ready never waits for them.
+        threading.Thread(target=self._start_mods, daemon=True, name="dgc-mods").start()
+
+    # ---- the user's mods (dgc/mods): mods, mod_ui, mod_toast, mod_result; mods_list, mod_set, mod_command ------
+    def _start_mods(self):
+        from .mods import bridge as mod_bridge
+        try:
+            return mod_bridge.start(self.agent, on_ui=self._mod_ui, surface="work")
+        except Exception:                                    # noqa: BLE001 -- a mod's trouble never stops the chat
+            return None
+
+    def _mod_ui(self, kind: str, payload: dict) -> None:
+        host = getattr(self.agent, "mods", None)
+        if kind == "set":
+            self.em.emit("mod_ui", name=payload["name"], mod=payload["mod"], slot=payload["slot"],
+                         tree=payload["tree"], surface="work")
+        elif kind == "toast":
+            self.em.emit("mod_toast", name=payload["name"], mod=payload["mod"], text=payload["text"],
+                         **({"tone": payload["tone"]} if payload.get("tone") else {}))
+        elif kind == "mods" and host is not None:
+            self.em.emit("mods", mods=payload["mods"], on=bool(host.on))
+        elif kind == "offer" and getattr(self, "_mod_offers_on", False):
+            self._emit_mod_offer(payload)
+
+    def _emit_mod_offer(self, offer: dict) -> None:
+        """The card for a mod DGC wrote: only to a client that said it shows one (watch_mod_offers). An older editor,
+        the SDK or ACP is never sent it; /mods lists the mod as written this session, with an Allow."""
+        self.em.emit("mod_offer", id=offer["id"], name=offer["name"], mod=offer["title"], version=offer["version"],
+                     folder=offer["folder"], asks=list(offer["asks"]), more=bool(offer["more"]), surface="work")
+
+    def _mods_command(self, cmd: dict, request_id=None) -> None:
+        from .mods.runtime import ModError
+        t = cmd["type"]
+        request_id = cmd.get("request_id") if isinstance(cmd.get("request_id"), str) else request_id
+        host = getattr(self.agent, "mods", None) or self._start_mods()
+        if host is None:
+            self.em.emit("command_rejected", command=t, reason="unavailable", message="Mods couldn't start here.",
+                         **_request_fields(request_id))
+            return
+        if t == "mod_action":
+            host.action(str(cmd.get("name") or ""), str(cmd.get("id") or ""), cmd.get("value"))
+            return
+        if t == "watch_mod_offers":
+            self._mod_offers_on = True
+            if host.offer is not None:                          # asked before this client could show it
+                self._emit_mod_offer(dict(host.offer))
+            return
+        if t == "mods_list":
+            self.em.emit("mods", mods=host.mods(), on=bool(host.on), **_request_fields(request_id))
+            for name, slots in list(host.ui_state.items()):     # a webview that reloaded draws them again
+                run = host.running.get(name)
+                for slot, tree in list(slots.items()):
+                    self.em.emit("mod_ui", name=name, mod=run.manifest.title if run else name, slot=slot, tree=tree,
+                                 surface="work")
+            return
+
+        def work():
+            try:
+                if t == "mod_set":
+                    name, op = str(cmd.get("name") or ""), cmd.get("op")
+                    {"allow": lambda: host.allow(name, review=str(cmd.get("review") or "")), "on": lambda: host.turn_on(name),
+                     "off": lambda: host.turn_off(name), "reload": lambda: host.reload(name or None)}[op]()
+                    self.em.emit("mods", mods=host.mods(), on=bool(host.on), **_request_fields(request_id))
+                elif t == "mod_offer_answer":
+                    host.answer_offer(str(cmd.get("id") or ""), cmd.get("allow") is True)
+                    self.em.emit("mods", mods=host.mods(), on=bool(host.on), **_request_fields(request_id))
+                elif t == "mod_command":
+                    got = host.run_command(str(cmd.get("name") or ""), str(cmd.get("args") or ""))
+                    if got is None:
+                        self.em.emit("command_rejected", command=t, reason="unknown_command",
+                                     message=f"no running mod has /{str(cmd.get('name'))[:40]}",
+                                     **_request_fields(request_id))
+                        return
+                    self.em.emit("mod_result", request_id=request_id, name=str(cmd.get("name")), mod=got["mod"],
+                                 **{k: got[k] for k in ("text", "tree", "error") if k in got})
+            except ModError as error:
+                self.em.emit("command_rejected", command=t, reason="refused", message=str(error)[:300],
+                             **_request_fields(request_id))
+        threading.Thread(target=work, daemon=True, name=f"dgc-{t}").start()
 
     def _publish_model_capabilities(self, *, always: bool = False) -> None:
         """Learn what the selected model honours, off the command thread, and tell the editor.
@@ -3041,15 +3135,6 @@ class Backend:
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
-            if (kind != "pip_setup" and getattr(self, "_worker", None) is not None
-                    and getattr(self, "_running_turn_kind", "") == "monitor"
-                    and len(self._queue) < _MAX_QUEUED_TURNS):
-                # A turn DGC started on a monitor event yields to the person: their message is
-                # queued first, and the wake turn stops at its next boundary so it runs promptly.
-                self._queue.append(payload)
-                self._wake_yield = True
-                self.agent.cancelled.set()
-                return "queued", self._queued_prompt_count()
             if getattr(self, "_worker", None) is not None:
                 steers = getattr(self, "_steer_payloads", {})
                 pending_bytes = sum(_turn_payload_bytes(*item[:3], pip_references=item[5] if len(item)>5 else None)
@@ -3060,6 +3145,15 @@ class Backend:
                         or pending_bytes + _turn_payload_bytes(text, images, context, pip_references=pip_references)
                         > _MAX_QUEUED_TURN_BYTES):
                     return "full", self._queued_prompt_count()
+            if (kind != "pip_setup" and getattr(self, "_worker", None) is not None
+                    and getattr(self, "_running_turn_kind", "") == "monitor"):
+                # A turn DGC started on a monitor event yields to the person: their message is
+                # queued first, and the wake turn stops at its next boundary so it runs promptly.
+                self._queue.append(payload)
+                self._wake_yield = True
+                self.agent.cancelled.set()
+                return "queued", self._queued_prompt_count()
+            if getattr(self, "_worker", None) is not None:
                 config = getattr(self, "config", getattr(self.agent, "config", None))
                 config_get = getattr(config, "get", None)
                 engine = config_get("subscription_engine", "") if callable(config_get) else ""
@@ -3436,6 +3530,10 @@ class Backend:
                     self.agent.cancelled.clear()
 
                 self.agent._pending_images = images
+                # The Output chip's choice for this prompt (empty for Auto, and for every turn DGC starts itself).
+                turn_output = (self.__dict__.get("_turn_outputs", {}).pop(turn_request, "")
+                               if turn_kind == "prompt" else "")
+                self.agent._turn_output, self.agent._turn_artifact_types = turn_output, []
                 if getattr(self.agent, "session_file", None) is not None:
                     from .serve_detach import forget_interrupted
                     forget_interrupted(self.agent.session_file)   # a new turn: nothing to continue
@@ -3532,6 +3630,11 @@ class Backend:
                             with foreground_turn(origin):
                                 outcome = self.agent.run_turn(model_text, reset_cancel=False)
                     failed = outcome is False
+                    if turn_output and not failed:
+                        from .artifact_tools import missing_note
+                        note = missing_note(turn_output, getattr(self.agent, "_turn_artifact_types", []))
+                        if note:
+                            self.ui.info(note)      # under the reply: what was asked for wasn't made
                 except Exception as e:             # a model/endpoint failure must NOT kill the turn silently
                     failed = True                  # (unreachable base_url, model not pulled, HTTP error, …)
                     import traceback
@@ -4418,6 +4521,16 @@ class Backend:
         self.em.emit("mcp_servers", request_id=request_id, items=items,
                      total=len(items), **fields)
 
+    def _mcp_connections_changed(self, names) -> None:
+        """A successful sign-in happens after config fan-out; retry peers that missed it."""
+        connected = set(names) & set(self.agent.mcp.servers)
+        if not connected:
+            return
+        self.agent._mode_prompt_dirty = True
+        host = getattr(self, "_host", None)
+        if host is not None:
+            host.mcp_connected(self, connected)
+
     def _mcp_control(self, command: dict):
         from .mcp_management import set_server_enabled
         error = None
@@ -4432,6 +4545,7 @@ class Backend:
                 runtime = self.config.mcp_runtime_servers()
                 self.agent.mcp.reconnect(name, runtime[name], cancel=self.agent.cancelled,
                                          input_handler=self.agent._handle_mcp_input)
+            self._mcp_connections_changed({name})
         except (OSError, ValueError) as exc:
             error = str(exc)
         except Exception as exc:
@@ -4526,6 +4640,7 @@ class Backend:
         note = getattr(self.agent.mcp, "note_persisted", None)
         if callable(note):
             note(name, persisted)
+        self._mcp_connections_changed({name})
         return finish()
 
     def _emit_permissions(self, request_id: str) -> None:
@@ -4617,6 +4732,11 @@ class Backend:
             return {}
 
     def close(self, grace_s: float = 0.0, *, process: bool = True) -> str:
+        try:
+            from .mods import bridge as mod_bridge
+            mod_bridge.stop(self.agent)             # this chat's mods end with it
+        except Exception:
+            pass
         try:
             stop = getattr(self, "_peer_stop", None)
             if stop is not None:
@@ -5493,6 +5613,9 @@ class Backend:
                         items.extend(self._history_approval(record, None))
                 if text.startswith("<tool_results>") and m.get("_dgc_decision"):
                     items.extend(self._history_decisions_for_text_results(m, ensure_turn()))
+                if text.startswith("<tool_results>") and m.get("_dgc_files"):
+                    ensure_turn()
+                    items.extend(shown_files.events(m))
                 if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
@@ -5585,6 +5708,8 @@ class Backend:
                                   "output": output, "is_error": tool_output_is_error(output),
                                   "is_diff": is_diff, "diff": diff})
                 items.extend(self._history_after_tool_result(m, call_id, turn))
+                if not repaired and not denied_result:
+                    items.extend(shown_files.events(m))
                 items.extend(self._history_approval(m.get("_dgc_approval"), call_id))
                 if denied_result and not (isinstance(approval, dict) and
                         (approval.get("decision") == "no" or approval.get("denied_reason"))):
@@ -6245,8 +6370,12 @@ class Backend:
             reviewed = getattr(self, "_prepared_plugins", {}).pop(name, None)
             existing = next((row for row in _installed() if row["name"] == name), None)
             if reviewed is not None:
-                record = install(reviewed, accept_license=accept, selected_servers=cmd.get("selected_servers"))
+                # The kind of account a plugin with several signs in with (Microsoft's personal or work account).
+                account = cmd.get("sign_in_account") if isinstance(cmd.get("sign_in_account"), str) else ""
+                record = install(reviewed, accept_license=accept, selected_servers=cmd.get("selected_servers"),
+                                 sign_in_account=account)
                 name = record["name"]
+                self._plugin_mods_changed(record.get("mods") or [])
             elif existing is not None:
                 # Connect uses exactly the installed selection, never a newly fetched package.
                 record = existing
@@ -6285,6 +6414,7 @@ class Backend:
                     self.agent.mcp.failures[name] = detail
                     failure_message = detail
             connected = set(self.agent.mcp.servers)
+            self._mcp_connections_changed(set(record_servers(record)) & connected)
             items = self._editor_plugins(connected=connected)
             def terminal():
                 if failure_message:
@@ -6294,6 +6424,18 @@ class Backend:
         except (PluginError, OSError, StopIteration, ValueError) as exc:
             message = str(exc)
             return lambda: self.em.emit("command_rejected", command="install_plugin", reason="plugin", request_id=request_id, message=message)
+
+    def _plugin_mods_changed(self, names) -> None:
+        """A plugin's mods were installed (allowed by the install) or removed with it: this chat's mods start or stop
+        them now, rather than at the next session."""
+        host = getattr(self.agent, "mods", None)
+        if host is None or not names:
+            return
+        try:
+            for name in names:
+                host.reload(name)                       # stops it; starts it again only if it is there and allowed
+        except Exception:                                # noqa: BLE001 -- the plugin is installed either way
+            pass
 
     def _plugin_key(self, cmd: dict):
         """Save or remove a plugin's key; answered with plugin_operation (never the key) and the plugin list."""
@@ -6383,6 +6525,7 @@ class Backend:
             if action == "uninstall_plugin":
                 result = plugins.uninstall(name, config=self.config, manager=self.agent.mcp)
                 removed_servers = result["removed_servers"]
+                self._plugin_mods_changed(result.get("removed_mods") or [])
                 self.agent.reload_skills()
                 self._emit_skill_catalog(request)
                 self._emit_mcp_servers(request)
@@ -6601,6 +6744,10 @@ class Backend:
                     return
                 # Falls through as an ordinary prompt, quoting the question it answers.
                 text = deferred
+            if cmd.get("output") and cmd.get("output") != "auto":
+                # The Output chip: what this prompt's reply should make. Kept by its request id so a queued
+                # prompt keeps its own choice, and applied when its turn runs (_run_turn_queue).
+                self.__dict__.setdefault("_turn_outputs", {})[str(request_id or "")] = str(cmd["output"])
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
                              message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
@@ -7934,6 +8081,17 @@ class Backend:
         elif t == "get_background_output":
             self._background_shells_on = True
             self._emit_background_output(cmd, request_id)
+        elif isinstance(t, str) and t.startswith("artifact_"):
+            host = getattr(self, "_host", None)
+            if host is not None:
+                host.artifacts().dispatch(cmd)
+            else:
+                if getattr(self, "_artifact_commands", None) is None:
+                    from .artifact_commands import ArtifactCommands
+                    self._artifact_commands = ArtifactCommands(self.em.emit, self.config)
+                self._artifact_commands.dispatch(cmd)
+        elif t in ("mods_list", "mod_set", "mod_command", "mod_action", "watch_mod_offers", "mod_offer_answer"):
+            self._mods_command(cmd, request_id)
         elif t == "list_artifacts":
             self._emit_artifacts(request_id)
         elif t == "stop_artifact":
@@ -9231,6 +9389,7 @@ class Host:
         self._finalizer_wait = ""
         self._chatdgc = None                 # ChatDGC's service, made on its first command
         self._voice = None                   # voice (dgc/voice), made on its first command
+        self._artifacts = None               # artifacts (dgc/artifact_commands), made on its first command
         # Which connection holds the wire, and how long the process lives without one
         # (dgc/serve_detach.py). serve() sets it; a Host built by a test has none.
         self.switchboard = None
@@ -9282,6 +9441,20 @@ class Host:
             if catalogs:
                 threading.Thread(target=self._refresh_catalogs, args=(chat, catalogs), daemon=True,
                                  name=f"dgc-refresh-{chat.chat_id}").start()
+
+    def mcp_connected(self, source: "Backend", names: set[str]) -> None:
+        """Refresh the same configured servers in open peers after credentials are saved.
+
+        A config save can start their first connection before OAuth finishes. That failure
+        must not survive a successful sign-in, nor require closing the user's chats.
+        """
+        with self._chats_lock:
+            others = [chat for chat_id, chat in self.chats.items()
+                      if chat is not source and chat_id not in self._closing]
+        for chat in others:
+            threading.Thread(target=self._refresh_catalogs,
+                             args=(chat, {"mcp_servers"}, frozenset(names)), daemon=True,
+                             name=f"dgc-connected-{chat.chat_id}").start()
 
     def siblings_of(self, chat: "Backend") -> list[dict]:
         """The other open chats of this process in the same checkout, as peer notes. The registry
@@ -9336,47 +9509,55 @@ class Host:
                          daemon=True, name=f"dgc-refresh-{chat.chat_id}").start()
 
     @staticmethod
-    def _refresh_catalogs(chat: "Backend", keys: set) -> None:
+    def _refresh_catalogs(chat: "Backend", keys: set, names: frozenset[str] | None = None) -> None:
         """Bring one chat's MCP servers and skills in line with its refreshed config. Off the stdin
         thread (a connect takes seconds), and server by server: one that did not change is never
         restarted under a turn that may be using it."""
-        agent, config = chat.agent, chat.config
-        try:
-            if keys & {"mcp_servers", "disabled_mcp_servers"}:
-                manager = agent.mcp
-                raw = config.get("disabled_mcp_servers", []) or []
-                manager.disabled_names = {name for name in raw if isinstance(name, str)}
-                servers = (config.mcp_runtime_servers() if hasattr(config, "mcp_runtime_servers")
-                           else dict(config.get("mcp_servers", {}) or {}))
-                saved = dict(config.get("mcp_servers", {}) or {})
-                for name in list(manager.servers):
-                    if name not in servers or name in manager.disabled_names:
-                        manager.disconnect(name)
-                unchanged = getattr(manager, "unchanged", None)
-                moved = {}
-                for name, spec in servers.items():
-                    if name in manager.disabled_names or not isinstance(spec, dict):
-                        continue
-                    if (unchanged(name, saved.get(name), spec) if callable(unchanged)
-                            else name in manager.servers and manager._runtime_specs.get(name) == spec):
-                        continue
-                    # Set up only by an editor, with credentials only it holds: launched from here
-                    # it ran unauthenticated, or a setup-only preset ran that must never auto-start.
-                    # That chat's own editor connects it.
-                    if spec.get("defer_until_setup") is True or _needs_editor_credentials(spec):
-                        continue
-                    moved[name] = spec
-                if moved:
-                    manager.connect_all(moved)
-            if "disabled_skills" in keys:
-                fresh = discover_skills(config.project_root,
-                                        disabled_names=config.get("disabled_skills", []))
-                # Rebound, never cleared in place: a turn may be iterating the old dict right now.
-                agent.skills = fresh
-                if getattr(agent, "ctx", None) is not None:
-                    agent.ctx.skills = fresh
-        except Exception:
-            pass                     # the chat keeps what it had; its own reload still works
+        # Serialize a save-triggered attempt with the retry after sign-in. An earlier
+        # unauthenticated connection must finish before the successful retry starts.
+        with chat.__dict__.setdefault("_catalog_refresh_lock", threading.Lock()):
+            agent, config = chat.agent, chat.config
+            try:
+                if keys & {"mcp_servers", "disabled_mcp_servers"}:
+                    manager = agent.mcp
+                    raw = config.get("disabled_mcp_servers", []) or []
+                    manager.disabled_names = {name for name in raw if isinstance(name, str)}
+                    servers = (config.mcp_runtime_servers() if hasattr(config, "mcp_runtime_servers")
+                               else dict(config.get("mcp_servers", {}) or {}))
+                    saved = dict(config.get("mcp_servers", {}) or {})
+                    for name in list(manager.servers):
+                        if names is not None and name not in names:
+                            continue
+                        if name not in servers or name in manager.disabled_names:
+                            manager.disconnect(name)
+                    unchanged = getattr(manager, "unchanged", None)
+                    moved = {}
+                    for name, spec in servers.items():
+                        if names is not None and name not in names:
+                            continue
+                        if name in manager.disabled_names or not isinstance(spec, dict):
+                            continue
+                        if (unchanged(name, saved.get(name), spec) if callable(unchanged)
+                                else name in manager.servers and manager._runtime_specs.get(name) == spec):
+                            continue
+                        # Set up only by an editor, with credentials only it holds: launched from here
+                        # it ran unauthenticated, or a setup-only preset ran that must never auto-start.
+                        # That chat's own editor connects it.
+                        if spec.get("defer_until_setup") is True or _needs_editor_credentials(spec):
+                            continue
+                        moved[name] = spec
+                    if moved:
+                        manager.connect_all(moved)
+                    agent._mode_prompt_dirty = True
+                if "disabled_skills" in keys:
+                    fresh = discover_skills(config.project_root,
+                                            disabled_names=config.get("disabled_skills", []))
+                    # Rebound, never cleared in place: a turn may be iterating the old dict right now.
+                    agent.skills = fresh
+                    if getattr(agent, "ctx", None) is not None:
+                        agent.ctx.skills = fresh
+            except Exception:
+                pass                     # the chat keeps what it had; its own reload still works
 
     def _reject(self, cmd: dict, reason: str, message: str, chat_id: str = "") -> None:
         request_id = cmd.get("request_id")
@@ -9563,6 +9744,14 @@ class Host:
     def _sanitize(self, event):
         return sanitize_event(event, self._secret_values())
 
+    def artifacts(self):
+        """Artifacts: everything DGC made that the user keeps, in every window (dgc/artifact_commands)."""
+        with self._chats_lock:
+            if getattr(self, "_artifacts", None) is None:
+                from .artifact_commands import ArtifactCommands
+                self._artifacts = ArtifactCommands(self.core.emit, self.default.config)
+            return self._artifacts
+
     def voice(self):
         """Voice: the models in Settings -> Voice models, dictation and reading aloud (dgc/voice)."""
         with self._chats_lock:
@@ -9619,7 +9808,25 @@ class Host:
             if problem:
                 return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
             _hear_user_saved(cmd)
+            paths = [p for p in (cmd.get("paths") or []) if isinstance(p, str)]
+            from .config import dgc_home
+            home = str(dgc_home().resolve()) + os.sep
+            if any(os.path.realpath(p).startswith(home) for p in paths):
+                # A document's working file (a canvas's or an artifact's, both in DGC's own folder): its save is
+                # the user's version now (dgc/artifact_commands).
+                threading.Thread(target=self.artifacts().user_saved, args=(paths,), daemon=True,
+                                 name="dgc-artifact-saves").start()
             return
+        if isinstance(kind, str) and kind.startswith("artifact_"):
+            # The process's: an artifact belongs to the account, not to a folder (dgc/artifact_commands).
+            return self.artifacts().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
+        if kind in ("mods_list", "mod_set", "mod_command", "mod_action", "watch_mod_offers",
+                    "mod_offer_answer") and cmd.get("surface") == "chat":
+            # ChatDGC's own mods: the process's, one set for every chat (dgc/chatdgc/service).
+            problem = command_error(cmd)
+            if problem:
+                return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+            return self.chatdgc().mods_command({key: value for key, value in cmd.items() if key != "chat_id"})
         if isinstance(kind, str) and kind.startswith("voice_"):
             # The process's too: the same voice models in every folder (dgc/voice).
             problem = command_error(cmd)

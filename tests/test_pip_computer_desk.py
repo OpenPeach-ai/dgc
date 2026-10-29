@@ -59,6 +59,24 @@ class DeskTests(unittest.TestCase):
     def folder(self, pip):
         return desk.files_root(pip_computer.computer_root(self.registry.directory, pip["id"]))
 
+    def test_file_add_does_not_replace_a_name_taken_during_publication(self):
+        folder = self.folder(self.computer_pip())
+        real_link = os.link
+        raced = False
+
+        def race(source, target, **kwargs):
+            nonlocal raced
+            if target == "report.txt" and not raced:
+                raced = True
+                (folder / target).write_text("other writer", encoding="utf-8")
+            return real_link(source, target, **kwargs)
+
+        with patch.object(desk.os, "link", side_effect=race):
+            added = desk.add_raw_file(folder, "", "report.txt", b"ours")
+        self.assertEqual((folder / "report.txt").read_text(encoding="utf-8"), "other writer")
+        self.assertEqual(added["name"], "report (1).txt")
+        self.assertEqual((folder / added["name"]).read_bytes(), b"ours")
+
     def test_files_lists_reads_adds_and_removes_inside_its_own_folder(self):
         pip = self.computer_pip()
         listing = self.ok({"type": "list_pip_computer_files", "pip_id": pip["id"], "path": ""})

@@ -21,11 +21,14 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -90,17 +93,29 @@ class _File:
     def load(self, account: str) -> str | None:
         path = self._path(account)
         try:
-            info = path.lstat()
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
         except OSError:
             return None
-        if not path.is_file() or path.is_symlink() or info.st_size > MAX_BYTES:
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+                return None
+            data = bytearray()
+            while len(data) <= MAX_BYTES:
+                chunk = os.read(descriptor, min(65536, MAX_BYTES + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            return data.decode("utf-8") if len(data) <= MAX_BYTES else None
+        except (OSError, UnicodeError):
             return None
-        return path.read_text(encoding="utf-8")
+        finally:
+            os.close(descriptor)
 
     def save(self, account: str, secret: str) -> None:
         target = _private_dir(folder(account)) / "credentials.json"
-        tmp = target.with_name(f".credentials.{os.getpid()}.{threading.get_ident()}.tmp")
-        descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        descriptor, name = tempfile.mkstemp(prefix=".credentials.", suffix=".tmp", dir=target.parent)
+        tmp = Path(name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(secret)
@@ -333,7 +348,13 @@ def _decode(text: str | None) -> dict | None:
 def _newer(first: dict | None, second: dict | None) -> dict | None:
     if first is None or second is None:
         return first or second
-    return first if float(first.get("saved_at") or 0) >= float(second.get("saved_at") or 0) else second
+    def timestamp(item):
+        try:
+            value = float(item.get("saved_at") or 0)
+            return value if math.isfinite(value) else 0.0
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+    return first if timestamp(first) >= timestamp(second) else second
 
 
 def load(name: str) -> dict | None:

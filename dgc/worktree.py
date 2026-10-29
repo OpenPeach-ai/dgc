@@ -2,9 +2,10 @@
 
 Managed fleet worktrees are private interactive branches that retain changed work across resume;
 manual worktrees are long-lived branches selected with ``/worktree``. Task worktrees are private,
-unique, short-lived branches populated with the calling checkout's exact tracked/untracked state.
-Only the sub-agent's delta is integrated, after a content-level conflict check; pre-existing dirty
-files are never overwritten automatically.
+unique, short-lived branches populated with the calling checkout's exact tracked changes and as
+many of its untracked files as fit, code first; the rest are left out, named to the sub-agent, and
+never written by an integration. Only the sub-agent's delta is integrated, after a content-level
+conflict check; pre-existing dirty files are never overwritten automatically.
 """
 from __future__ import annotations
 
@@ -26,6 +27,10 @@ from pathlib import Path, PurePosixPath
 
 _MAX_TASK_FILES = 4096
 _MAX_TASK_BYTES = 64 * 1024 * 1024
+# How many uncommitted paths a helper's copy may choose from. Untracked files that do not fit are left
+# out rather than refusing the delegation, so this only bounds a pathological tree; the copy itself
+# still holds at most _MAX_TASK_FILES files and _MAX_TASK_BYTES bytes.
+_MAX_LISTED_PATHS = 200_000
 _MAX_RETAINED_METADATA_BYTES = 1024 * 1024
 _GIT_TIMEOUT = 30.0
 _MAX_GIT_TEXT_BYTES = 4 * 1024 * 1024
@@ -33,6 +38,7 @@ _MAX_GIT_PATH_BYTES = 20 * 1024 * 1024
 _MAX_GIT_STDERR_BYTES = 64 * 1024
 _RETAINED_SCHEMA = 2
 _FLEET_SCHEMA = 1
+_MAX_LEFT_OUT_NOTE = 16 * 1024      # a fleet agent's saved left-out note: 20 names and some folder counts
 _RETAINED_LEASE_WAIT_S = 2.0
 
 
@@ -514,6 +520,25 @@ class TaskWorkspaceError(RuntimeError):
     pass
 
 
+class _TooManyPaths(TaskWorkspaceError):
+    """A Git path listing longer than its caller allows. `which` says which listing, when known."""
+    which = ""
+
+
+def _size_words(size: int, *, up: bool = False) -> str:
+    """A size the way a person says it: 512 KB, 3.1 MB, 64 MB. `up` rounds up, so a size over a
+    limit never reads as the limit itself ("64.1 MB, more than ... 64 MB")."""
+    size = max(0, int(size))
+    for unit, scale in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if size >= scale:
+            value = size / scale
+            if up:
+                value = math.ceil(value * 10) / 10
+            text = f"{value:.1f}".rstrip("0").rstrip(".") if value < 100 else f"{value:.0f}"
+            return f"{text} {unit}"
+    return "1 byte" if size == 1 else f"{size} bytes"
+
+
 @dataclass(frozen=True)
 class _FileState:
     kind: str                         # missing | file | symlink
@@ -659,9 +684,12 @@ def _replace_state(path: Path, state: _FileState) -> None:
             pass
 
 
-def _nul_paths(result: subprocess.CompletedProcess) -> list[str]:
+def _nul_paths(result: subprocess.CompletedProcess, *, limit: int | None = None) -> list[str]:
+    limit = _MAX_TASK_FILES if limit is None else int(limit)
     if result.returncode != 0:
         raw = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr
+        if result.returncode == 125 and "stdout exceeded" in (raw or ""):
+            raise _TooManyPaths("git path query exceeded its output limit")
         raise TaskWorkspaceError((raw or "git path query failed").strip())
     raw = result.stdout if isinstance(result.stdout, bytes) else result.stdout.encode()
     paths = []
@@ -673,8 +701,8 @@ def _nul_paths(result: subprocess.CompletedProcess) -> list[str]:
         if parsed.is_absolute() or ".." in parsed.parts or path in ("", ".git"):
             raise TaskWorkspaceError(f"unsafe repository path: {path!r}")
         paths.append(path)
-        if len(paths) > _MAX_TASK_FILES:
-            raise TaskWorkspaceError(f"git path query exceeded {_MAX_TASK_FILES} entries")
+        if len(paths) > limit:
+            raise _TooManyPaths(f"git path query exceeded {limit} entries")
     return paths
 
 
@@ -737,11 +765,25 @@ def _gitlink_paths(repo: Path, project_rel: Path) -> set[str]:
     return found
 
 
-def _dirty_paths(repo: Path, base_commit: str, project_rel: Path) -> set[str]:
+def _dirty_paths(repo: Path, base_commit: str, project_rel: Path, *,
+                 limit: int | None = None) -> set[str]:
+    tracked, untracked = _dirty_split(repo, base_commit, project_rel, limit=limit)
+    return tracked | untracked
+
+
+def _dirty_split(repo: Path, base_commit: str, project_rel: Path, *,
+                 limit: int | None = None) -> tuple[set[str], set[str]]:
+    """The project's uncommitted paths, as (changed or deleted tracked files, untracked files Git
+    does not ignore). A path in both listings -- a file `git rm --cached` left on disk -- is a
+    tracked change. `limit` bounds each listing (default: the task file limit)."""
     pathspec = str(project_rel) if project_rel != Path(".") else "."
-    tracked = _nul_paths(_git_bytes(
-        ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames",
-         base_commit, "--", pathspec], repo))
+    try:
+        tracked = _nul_paths(_git_bytes(
+            ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames",
+             base_commit, "--", pathspec], repo), limit=limit)
+    except _TooManyPaths as exc:
+        exc.which = "tracked"
+        raise
     # A submodule whose HEAD differs from the recorded gitlink is reported here by name, and it is a
     # DIRECTORY on disk. `prepare` then calls `_read_state` on it, which raises "unsupported
     # non-file path", and `prepare` returning None refuses EVERY `task` call in the repository --
@@ -751,10 +793,330 @@ def _dirty_paths(repo: Path, base_commit: str, project_rel: Path) -> set[str]:
     gitlinks = _gitlink_paths(repo, project_rel)
     if gitlinks:
         tracked = [path for path in tracked if path not in gitlinks]
-    untracked = [path for path in _nul_paths(_git_bytes(
-        ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec], repo))
-        if not _is_cache(path)]
-    return {path for path in (*tracked, *untracked) if _inside_project(path, project_rel)}
+    try:
+        untracked = [path for path in _nul_paths(_git_bytes(
+            ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec], repo), limit=limit)
+            if not _is_cache(path)]
+    except _TooManyPaths as exc:
+        exc.which = "untracked"
+        raise
+    changed = {path for path in tracked if _inside_project(path, project_rel)}
+    return changed, {path for path in untracked if _inside_project(path, project_rel)} - changed
+
+
+# A helper's copy always has every changed tracked file, but not always every untracked one. A reported
+# project had 3.1 MB of tracked changes beside 908 untracked files (64.5 MB: report screenshots, a
+# downloaded UI template, and a few new source files), and the whole lot crossed the copy's 64 MB
+# limit, so every delegation was refused and no helper ever started. Untracked files are now copied
+# while there is room, code first, and the rest are left out (_plan_untracked). These extensions name
+# files a task does not read as code; content is checked as well (_looks_binary).
+_BINARY_SUFFIXES = frozenset({
+    # images
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico", ".icns", ".heic",
+    ".heif", ".avif", ".jxl", ".psd", ".raw", ".cr2", ".nef", ".dng",
+    # audio and video
+    ".mp3", ".mp4", ".m4a", ".m4v", ".mov", ".avi", ".mkv", ".webm", ".wav", ".flac", ".ogg", ".oga",
+    ".ogv", ".opus", ".aac", ".aiff", ".wma", ".wmv", ".flv", ".mpg", ".mpeg", ".3gp", ".mid", ".midi",
+    # archives and packages
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".zst", ".lz4", ".lzma", ".jar",
+    ".war", ".whl", ".egg", ".deb", ".rpm", ".dmg", ".iso", ".apk", ".ipa", ".nupkg",
+    # fonts
+    ".ttf", ".otf", ".ttc", ".woff", ".woff2", ".eot",
+    # documents
+    ".pdf",
+    # databases and data stores
+    ".db", ".db3", ".sqlite", ".sqlite3", ".mdb", ".accdb", ".duckdb", ".mdf", ".ldb", ".dbf",
+    ".realm", ".parquet", ".feather",
+})
+_SNIFF_BYTES = 8192
+
+
+def _looks_binary(path: Path) -> bool:
+    """Git's own test: a NUL byte in the first 8 KB. A file that cannot be read counts as binary."""
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return True
+    try:
+        return b"\0" in os.read(fd, _SNIFF_BYTES)
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+def _lstat_print(info: os.stat_result) -> tuple[int, int, int]:
+    """What lstat says about a file DGC did not copy: its type, size and modification time, which
+    is enough to tell later whether it changed, without ever reading it."""
+    return (stat.S_IFMT(info.st_mode), int(info.st_size), int(info.st_mtime_ns))
+
+
+def _path_print(path: Path) -> tuple[int, int, int] | None:
+    try:
+        return _lstat_print(path.lstat())
+    except OSError:
+        return None
+
+
+def _plan_untracked(repo: Path, untracked, room_files: int, room_bytes: int
+                    ) -> tuple[list[str], dict]:
+    """Which untracked files go into a helper's copy, in the order to copy them, and which do not.
+
+    The rule: text and source files first (no NUL byte in their first 8 KB, and not an image,
+    media, archive, font, PDF or database extension), smallest first; then every other file,
+    smallest first; each one only while the copy still has room for it under the same file and byte
+    limits as the rest of the copy. Smallest first fits the most files, and a project's new source
+    files are small beside its screenshots. Ties go by path, so helpers made from the same state get
+    the same copy (parallel siblings are compared on exactly that).
+
+    Returns (chosen, left_out). `left_out` maps every other path to its `_lstat_print`, or to None
+    when it could not be looked at. A path that is neither a file nor a symlink is always left out.
+    """
+    text: list[tuple[int, str, bool]] = []
+    other: list[tuple[int, str]] = []
+    prints: dict[str, tuple | None] = {}
+    left_out: dict[str, tuple | None] = {}
+    for repo_path in untracked:
+        try:
+            info = _checked_target(repo, repo_path).lstat()
+        except (OSError, TaskWorkspaceError):
+            left_out[repo_path] = None
+            continue
+        prints[repo_path] = _lstat_print(info)
+        if stat.S_ISLNK(info.st_mode):
+            text.append((int(info.st_size), repo_path, False))      # a link target is text
+        elif not stat.S_ISREG(info.st_mode):
+            left_out[repo_path] = prints[repo_path]
+        elif PurePosixPath(repo_path).suffix.lower() in _BINARY_SUFFIXES:
+            other.append((int(info.st_size), repo_path))
+        else:
+            text.append((int(info.st_size), repo_path, True))
+    chosen: list[str] = []
+    text.sort()
+    for index, (size, repo_path, sniff) in enumerate(text):
+        if len(chosen) >= room_files or size > room_bytes:
+            # Sorted by size: no text file after this one fits either, now or later.
+            for _size, rest, _sniff in text[index:]:
+                left_out[rest] = prints[rest]
+            break
+        # Opened only now, so a file past the cut is never read at all.
+        if sniff and _looks_binary(repo / repo_path):
+            other.append((size, repo_path))
+            continue
+        chosen.append(repo_path)
+        room_bytes -= size
+    other.sort()
+    for size, repo_path in other:
+        if len(chosen) < room_files and size <= room_bytes:
+            chosen.append(repo_path)
+            room_bytes -= size
+        else:
+            left_out[repo_path] = prints[repo_path]
+    return chosen, left_out
+
+
+# Whose copy it is, in the words a refusal or a note uses: a helper's (delegation) or a fleet agent's (Ctrl+N).
+_COPY_WORDS = {"helper": ("a helper's copy", ", or let the model do this itself"),
+               "agent": ("an isolated agent's copy", ", then open the agent again")}
+
+
+def _tracked_too_big(*, size: int | None = None, files: int | None = None, who: str = "helper") -> str:
+    """The one refusal a helper's (or a fleet agent's) copy still makes: the tracked changes alone do not fit."""
+    copy, then = _COPY_WORDS[who]
+    if files is not None:
+        return (f"This project has uncommitted changes to {files:,} tracked files, more than "
+                f"{copy} holds ({_MAX_TASK_FILES:,} files). Commit some of them{then}.")
+    return (f"This project has {_size_words(size or 0, up=True)} of uncommitted changes to tracked "
+            f"files, more than {copy} holds ({_size_words(_MAX_TASK_BYTES)}). Commit some "
+            f"of it{then}.")
+
+
+def _too_many_listed(which: str, who: str = "helper") -> str:
+    copy, then = _COPY_WORDS[who]
+    if which == "tracked":
+        return (f"This project has uncommitted changes to more than {_MAX_LISTED_PATHS:,} tracked "
+                f"files, more than {copy} holds ({_MAX_TASK_FILES:,} files). Commit some "
+                f"of them{then}.")
+    return (f"This project has more than {_MAX_LISTED_PATHS:,} files that Git neither tracks nor "
+            f"ignores, too many for DGC to choose {copy} from. Add the generated ones to "
+            f".gitignore{then}.")
+
+
+def _copy_uncommitted(repo: Path, base_commit: str, project_rel: Path, dest: Path, who: str = "helper"
+                      ) -> tuple[set[str], dict, dict]:
+    """Copy the project's uncommitted state into `dest` (a checkout of `base_commit`), as a helper's copy and a
+    fleet agent's copy both have it. Returns (every uncommitted path, {copied path: its _FileState}, left_out).
+
+    Every changed tracked file and every deletion is copied: they are the code the work is about, so the copy is
+    refused only when they alone do not fit, and then in words a person can act on, never a byte count. Untracked
+    files are copied while there is room (_plan_untracked); the rest are LEFT OUT, mapped to their _lstat_print.
+    Raises TaskWorkspaceError when the tracked changes are too big or the project changed meanwhile.
+    """
+    try:
+        tracked, untracked = _dirty_split(repo, base_commit, project_rel, limit=_MAX_LISTED_PATHS)
+    except _TooManyPaths as exc:
+        raise TaskWorkspaceError(_too_many_listed(exc.which, who)) from exc
+    initial_dirty = tracked | untracked
+    copied: dict[str, _FileState] = {}
+    if len(tracked) > _MAX_TASK_FILES:
+        raise TaskWorkspaceError(_tracked_too_big(files=len(tracked), who=who))
+    # Sizes first, from lstat, so a refusal reads nothing; a deletion costs nothing.
+    planned = 0
+    for repo_path in tracked:
+        try:
+            planned += max(0, _checked_target(repo, repo_path).lstat().st_size)
+        except FileNotFoundError:
+            pass
+    if planned > _MAX_TASK_BYTES:
+        raise TaskWorkspaceError(_tracked_too_big(size=planned, who=who))
+    total = 0
+    for repo_path in sorted(tracked):
+        state = _read_state(_checked_target(repo, repo_path))
+        total += len(state.data)
+        if total > _MAX_TASK_BYTES:                     # it grew after its size was read
+            raise TaskWorkspaceError(_tracked_too_big(size=total, who=who))
+        copied[repo_path] = state
+        _replace_state(_checked_target(dest, repo_path), state)
+    chosen, left_out = _plan_untracked(repo, untracked, _MAX_TASK_FILES - len(tracked), _MAX_TASK_BYTES - total)
+    for repo_path in chosen:
+        source = _checked_target(repo, repo_path)
+        try:
+            state = _read_state(source)
+        except (OSError, TaskWorkspaceError):            # unreadable now, or no longer a file
+            left_out[repo_path] = _path_print(source)
+            continue
+        if total + len(state.data) > _MAX_TASK_BYTES:      # it grew after it was chosen
+            left_out[repo_path] = _path_print(source)
+            continue
+        try:
+            _replace_state(_checked_target(dest, repo_path), state)
+        except TaskWorkspaceError:
+            # A folder in the way here (the empty shell of a tracked folder the user deleted): an extra is never
+            # the reason a copy is refused. A failing disk still is.
+            left_out[repo_path] = _path_print(source)
+            continue
+        total += len(state.data)
+        copied[repo_path] = state
+    # DGC's checkout lease excludes peer DGC writers; this second read also detects a manual editor change racing
+    # the baseline copy.
+    if _dirty_paths(repo, base_commit, project_rel, limit=_MAX_LISTED_PATHS) != initial_dirty:
+        raise TaskWorkspaceError("source file set changed while creating the isolated baseline")
+    for repo_path, expected in copied.items():
+        if _read_state(_checked_target(repo, repo_path)) != expected:
+            raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+    return initial_dirty, copied, left_out
+
+
+def _left_out_hits(paths, left_out) -> list[str]:
+    """The paths among `paths` whose write would touch one of the user's left-out files: the path
+    itself, a path below one (it needs a folder where the user has a file), or a folder that holds
+    one (a file where the user has a folder)."""
+    if not left_out:
+        return []
+    folders = {"/".join(parts[:i]) for parts in (str(path).split("/") for path in left_out)
+               for i in range(1, len(parts))}
+    hits = []
+    for path in paths:
+        parts = path.split("/")
+        if (path in left_out or path in folders
+                or any("/".join(parts[:i]) in left_out for i in range(1, len(parts)))):
+            hits.append(path)
+    return hits
+
+
+def _left_out_reason(names: list[str], who: str = "sub-agent") -> str:
+    """Why a change was held back because its path is one of the user's left-out files."""
+    shown = ", ".join(names[:12]) + (f" (+{len(names) - 12} more)" if len(names) > 12 else "")
+    if len(names) == 1:
+        return (f"the {who} wrote {shown}, one of the user's own uncommitted files that was not "
+                "copied into its checkout, so DGC did not write it: the user's file is unchanged")
+    return (f"the {who} wrote {shown}, the user's own uncommitted files that were not copied into "
+            "its checkout, so DGC did not write them: the user's files are unchanged")
+
+
+_LEFT_OUT_NAMED = 20
+_LEFT_OUT_FOLDERS = 12
+
+
+def _shown_name(name: str) -> str:
+    """A file name as a prompt or a log line can carry it: a control character is spelled out."""
+    return name if name.isprintable() else repr(name)[1:-1]
+
+
+def _left_out_display(workspace) -> list[str]:
+    left = getattr(workspace, "left_out", None) or {}
+    rel = PurePosixPath(str(getattr(workspace, "project_rel", None) or "."))
+    shown = []
+    for repo_path in left:
+        name = PurePosixPath(repo_path)
+        if str(rel) != ".":
+            try:
+                name = name.relative_to(rel)
+            except ValueError:
+                pass
+        shown.append(str(name))
+    return sorted(shown)
+
+
+def _left_out_bytes(workspace) -> int:
+    left = getattr(workspace, "left_out", None) or {}
+    return sum(int(found[1]) for found in left.values() if found)
+
+
+def left_out_summary(workspace, who: str = "helper") -> str:
+    """What a log line says about the user's files a helper's copy left out ("" when none were)."""
+    count = len(getattr(workspace, "left_out", None) or {})
+    if not count:
+        return ""
+    files = "file" if count == 1 else "files"
+    return (f" ({count:,} untracked {files} left out, {_size_words(_left_out_bytes(workspace))}: "
+            f"no room for them in {_COPY_WORDS[who][0]})")
+
+
+def left_out_note(workspace, who: str = "helper") -> str:
+    """The line of a helper's prompt that names the user's files its copy does not have ("" when
+    it has them all): up to _LEFT_OUT_NAMED paths, then the rest counted by top-level folder.
+
+    Named up front, as `absent_ignored_dirs` names the ignored folders: a helper that finds a file
+    missing otherwise concludes it was never there, and recreates it or works without it. The
+    helper cannot read them either (its read tools stay in its copy), so the useful thing for it to
+    do with one it needs is to say so.
+    """
+    shown = _left_out_display(workspace)
+    if not shown:
+        return ""
+    listed = ", ".join(_shown_name(name) for name in shown[:_LEFT_OUT_NAMED])
+    rest = shown[_LEFT_OUT_NAMED:]
+    if rest:
+        folders: dict[str, int] = {}
+        for name in rest:
+            top = name.split("/", 1)[0] + "/" if "/" in name else ""
+            folders[top] = folders.get(top, 0) + 1
+        ranked = sorted(folders.items(), key=lambda item: (-item[1], item[0]))
+        parts = [f"{count:,} in {_shown_name(top)}" if top else f"{count:,} at the top level"
+                 for top, count in ranked[:_LEFT_OUT_FOLDERS]]
+        others = sum(count for _top, count in ranked[_LEFT_OUT_FOLDERS:])
+        if others:
+            parts.append(f"{others:,} in other folders")
+        listed += f", and {len(rest):,} more ({', '.join(parts)})"
+    count = len(shown)
+    say, say_which = (("say so in your report", "say which in your report") if who == "helper"
+                      else ("tell the user", "tell the user which"))
+    if count == 1:
+        what, advice = ("1 of the user's own uncommitted files",
+                        "It exists only in the user's project. Do not recreate it or write a file at "
+                        "that path: DGC never brings such a file into the user's project. If the task "
+                        f"needs it, {say}.")
+    else:
+        what, advice = (f"{count:,} of the user's own uncommitted files",
+                        "They exist only in the user's project. Do not recreate them or write a file "
+                        "at any of those paths: DGC never brings such a file into the user's project. "
+                        f"If the task needs one of them, {say_which}.")
+    return (f"- Not in this checkout: {what} ({_size_words(_left_out_bytes(workspace))}), left out "
+            f"because {_COPY_WORDS[who][0]} holds at most {_size_words(_MAX_TASK_BYTES)} and "
+            f"{_MAX_TASK_FILES:,} files: {listed}. {advice}")
 
 
 def _skip_worktree_paths(repo: Path, project_rel: Path) -> set[str]:
@@ -852,6 +1214,10 @@ class TaskIntegration:
     # this task edited them" about files nobody had touched. AFTER `merged`, for the same reason
     # `merged` is after `error`.
     head_moved: bool = False
+    # The held-back paths (also in `conflicts`) that are the user's own uncommitted files the
+    # helper's copy left out: never written, whatever the helper did there. LAST, for the same
+    # positional reason as the two above.
+    left_out: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -879,6 +1245,12 @@ class TaskWorkspace:
     # Uncommitted files that are a continued helper's OWN earlier work, exactly as it landed (dgc/helper_memory.py):
     # not the user's, so its next run's change to them integrates like any file's. Set per checkout.
     own_dirty: frozenset = frozenset()
+    # The user's untracked files this copy has no room for (_populate), each with what lstat said
+    # about it then (_lstat_print, or None). They are in `initial_dirty`, never in `baseline`, and
+    # absent from this checkout. Each is the user's own file that the helper never saw, so
+    # integration never writes, overwrites or deletes one of these paths, and its absence here is
+    # never read as the helper deleting it.
+    left_out: dict = field(default_factory=dict)
 
     @classmethod
     def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None,
@@ -938,24 +1310,8 @@ class TaskWorkspace:
         task = cls(source_root, repo, project_rel, path, path / project_rel, branch, base_commit,
                    set(), {}, metadata_path)
         try:
-            task.initial_dirty = _dirty_paths(repo, base_commit, project_rel)
-            if len(task.initial_dirty) > _MAX_TASK_FILES:
-                raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_FILES} files")
-            total = 0
-            for repo_path in sorted(task.initial_dirty):
-                state = _read_state(_checked_target(repo, repo_path))
-                total += len(state.data)
-                if total > _MAX_TASK_BYTES:
-                    raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_BYTES} bytes")
-                task.baseline[repo_path] = state
-                _replace_state(_checked_target(path, repo_path), state)
-            # DGC's checkout lease excludes peer DGC writers; this second read also detects a
-            # manual editor change racing the baseline copy.
-            if _dirty_paths(repo, base_commit, project_rel) != task.initial_dirty:
-                raise TaskWorkspaceError("source file set changed while creating the isolated baseline")
-            for repo_path, expected in task.baseline.items():
-                if _read_state(_checked_target(repo, repo_path)) != expected:
-                    raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+            # The same copy a kept checkout gets (KeptTaskWorkspace.sync): one rule for both.
+            task._populate()
             # LAST: after the baseline is copied and verified, so a link can never be mistaken for
             # source state that changed mid-isolation.
             task._link_shared(link_paths)
@@ -969,29 +1325,18 @@ class TaskWorkspace:
             return None, detail
 
     def _populate(self) -> None:
-        """Copy the project's uncommitted state (dirty tracked files, untracked ones, deletions) into
-        this checkout, which holds `base_commit`, and record it as the baseline the delta is read
-        against. Raises TaskWorkspaceError when it is too big or the project changed meanwhile."""
-        repo, base_commit, project_rel = self.repo, self.base_commit, self.project_rel
-        self.initial_dirty = _dirty_paths(repo, base_commit, project_rel)
-        self.baseline = {}
-        if len(self.initial_dirty) > _MAX_TASK_FILES:
-            raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_FILES} files")
-        total = 0
-        for repo_path in sorted(self.initial_dirty):
-            state = _read_state(_checked_target(repo, repo_path))
-            total += len(state.data)
-            if total > _MAX_TASK_BYTES:
-                raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_BYTES} bytes")
-            self.baseline[repo_path] = state
-            _replace_state(_checked_target(self.path, repo_path), state)
-        # DGC's checkout lease excludes peer DGC writers; this second read also detects a
-        # manual editor change racing the baseline copy.
-        if _dirty_paths(repo, base_commit, project_rel) != self.initial_dirty:
-            raise TaskWorkspaceError("source file set changed while creating the isolated baseline")
-        for repo_path, expected in self.baseline.items():
-            if _read_state(_checked_target(repo, repo_path)) != expected:
-                raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+        """Copy the project's uncommitted state into this checkout, which holds `base_commit`, and
+        record it as the baseline the delta is read against.
+
+        Every changed tracked file and every deletion is copied: they are the code the task is
+        about, so a delegation is refused only when they alone do not fit, and then in words a
+        person can act on, never a byte count. Untracked files are copied while there is room
+        (_plan_untracked); the rest are LEFT OUT (`left_out`). The helper is told which
+        (left_out_note), and integration never writes one of those paths. Raises
+        TaskWorkspaceError when the tracked changes are too big or the project changed meanwhile.
+        """
+        self.initial_dirty, self.baseline, self.left_out = _copy_uncommitted(
+            self.repo, self.base_commit, self.project_rel, self.path)
 
     def _link_shared(self, link_paths) -> None:
         """Share a few parent directories into this checkout, by explicit user opt-in only.
@@ -1072,7 +1417,10 @@ class TaskWorkspace:
         return self.baseline.get(repo_path) or _head_state(self.repo, self.base_commit, repo_path)
 
     def changed_paths(self) -> list[str]:
-        candidates = self.initial_dirty | _dirty_paths(self.path, self.base_commit, self.project_rel)
+        # A left-out path is a candidate only when this checkout now holds a file there: one the
+        # helper made. Its absence is how the copy was made, never a deletion.
+        candidates = ((self.initial_dirty - set(self.left_out))
+                      | _dirty_paths(self.path, self.base_commit, self.project_rel))
         changed = []
         total = 0
         for repo_path in sorted(candidates):
@@ -1097,8 +1445,39 @@ class TaskWorkspace:
             "reason": str(reason)[:2000], "changed_paths": [self._display_path(p) for p in paths],
             "protected_baseline": {path: _state_fingerprint(state)
                                    for path, state in self.baseline.items()},
+            # How many of the user's files this copy left out, and the ones a later `/tasks apply`
+            # could touch, which RetainedTask holds back exactly as integrate does.
+            "left_out_count": len(self.left_out),
+            "left_out_paths": self._left_out_present(),
         }
         return _write_retained_metadata(self.metadata_path, payload)
+
+    def _left_out_present(self) -> list[str]:
+        """The left-out paths this checkout now has something at, or below a file it has.
+
+        Only the helper puts anything there, and only those could ever be touched by applying this
+        checkout later, so they are what a retained record keeps: all of them would not always fit
+        in it. Bounded like every other path list of a record.
+        """
+        found: list[str] = []
+        blocked: dict[str, bool] = {}
+
+        def is_file(folder: str) -> bool:
+            if folder not in blocked:
+                try:
+                    blocked[folder] = not stat.S_ISDIR((self.path / folder).lstat().st_mode)
+                except OSError:
+                    blocked[folder] = False
+            return blocked[folder]
+
+        for repo_path in sorted(self.left_out):
+            parts = repo_path.split("/")
+            if (os.path.lexists(self.path / repo_path)
+                    or any(is_file("/".join(parts[:i])) for i in range(1, len(parts)))):
+                found.append(repo_path)
+                if len(found) >= _MAX_TASK_FILES:
+                    break
+        return found
 
     def integrate(self, checkpoints=None) -> TaskIntegration:
         try:
@@ -1111,14 +1490,24 @@ class TaskWorkspace:
         if not changed:
             cleanup_error = self.cleanup() or ""
             return TaskIntegration("clean", cleanup_error=cleanup_error)
-        protected = ([path for path in changed if path in self.initial_dirty and path not in self.own_dirty]
+        # A path the copy left out is the user's own file, which the helper never saw. Whatever the
+        # helper did there is held back -- and only that, never the rest of its work -- whether or
+        # not this checkout protects dirty files: a kept checkout's Undo can put back bytes it
+        # wrote, but nothing can give the helper the file it did not have.
+        held_out = _left_out_hits(changed, self.left_out)
+        held_set = set(held_out)
+        protected = ([path for path in changed if path in self.initial_dirty and path not in self.own_dirty
+                      and path not in held_set]
                      if self.protect_dirty else [])
         if protected:
-            conflicts = [self._display_path(path) for path in protected]
+            conflicts = [self._display_path(path) for path in [*protected, *held_out]]
             reason = "sub-agent changed files that were already dirty before delegation"
+            if held_out:
+                reason += "; " + _left_out_reason([self._display_path(path) for path in held_out])
             metadata_error = self.retain(reason, changed)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("conflict", display, conflicts, detail)
+            return TaskIntegration("conflict", display, conflicts, detail,
+                                   left_out=[self._display_path(path) for path in held_out])
 
         skipped = _skip_worktree_paths(self.repo, self.project_rel)
         expected: dict[str, _FileState] = {}
@@ -1129,6 +1518,11 @@ class TaskWorkspace:
         conflicts = []
         try:
             for repo_path in changed:
+                if repo_path in held_set:
+                    # Decided before the user's copy is even read: "the parent has not touched it"
+                    # below would let the helper's bytes through wherever the user's file is gone.
+                    conflicts.append(repo_path)
+                    continue
                 expected[repo_path] = self._expected(repo_path)
                 child[repo_path] = _read_state(_checked_target(self.path, repo_path))
                 desired[repo_path] = child[repo_path]
@@ -1179,12 +1573,17 @@ class TaskWorkspace:
         # Nothing conflicting is applied, and a delta where EVERY path conflicts still refuses
         # wholesale, exactly as before.
         appliable = [path for path in changed if path not in conflicts]
+        left_shown = [self._display_path(path) for path in held_out]
+        reasons = (["parent checkout changed while the isolated task was running"]
+                   if any(path not in held_set for path in conflicts) else [])
+        if held_out:
+            reasons.append(_left_out_reason(left_shown))
         if conflicts and not appliable:
             shown = [self._display_path(path) for path in conflicts]
-            reason = "parent checkout changed while the isolated task was running"
+            reason = "; ".join(reasons)
             metadata_error = self.retain(reason, changed)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("conflict", display, shown, detail)
+            return TaskIntegration("conflict", display, shown, detail, left_out=left_shown)
 
         # A multi-file delta is not atomic. Each file lands atomically (_replace_state) but the loop
         # below is not, and the rollback below cannot run if the process is gone. Leave a breadcrumb
@@ -1251,12 +1650,11 @@ class TaskWorkspace:
             # Part of the delta is still in the worktree. Keep it, and record ONLY what is left to
             # resolve so a retry does not try to re-apply what already landed.
             held = [self._display_path(path) for path in conflicts]
-            reason = ("parent checkout changed while the isolated task was running; "
-                      f"{len(applied)} path(s) still applied")
+            reason = "; ".join([*reasons, f"{len(applied)} path(s) still applied"])
             metadata_error = self.retain(reason, conflicts)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("partial", landed, held, detail, merged=reconciled,
-                                   head_moved=self._head_moved())
+                                   head_moved=self._head_moved(), left_out=left_shown)
         # The delta landed: drop the in-flight breadcrumb BEFORE cleanup, so a worktree that cannot
         # be removed does not leave a retained row for work that is already applied (_cleanup_task
         # keeps the metadata on partial failure, by design).
@@ -1286,7 +1684,7 @@ class TaskWorkspace:
         `git ls-files --others` in the user's checkout, plus reading the files Git names. Raises
         TaskWorkspaceError when Git cannot be asked; the caller says so instead of guessing.
         """
-        now = _dirty_paths(self.repo, self.base_commit, self.project_rel)
+        now = _dirty_paths(self.repo, self.base_commit, self.project_rel, limit=_MAX_LISTED_PATHS)
         changes: list[SourceChange] = []
         for repo_path in sorted(self.initial_dirty | now):
             if len(changes) >= _MAX_SOURCE_CHANGES:
@@ -1295,6 +1693,14 @@ class TaskWorkspace:
                 target = _checked_target(self.repo, repo_path)
             except TaskWorkspaceError:
                 continue                       # a path that leaves the checkout is nobody's file here
+            if repo_path in self.left_out:
+                # Never copied, so DGC holds none of its bytes: it changed if what lstat says about
+                # it did. Its earlier state is not known exactly (exact_start_state says so).
+                if _path_print(target) == self.left_out[repo_path]:
+                    continue
+                changes.append(SourceChange(repo_path, self._display_path(repo_path), None,
+                                            _disk_digest(target), _changed_at(target, self.repo)))
+                continue
             before = self.baseline.get(repo_path) if repo_path in self.initial_dirty else None
             if repo_path in self.initial_dirty:
                 if before is None:
@@ -1319,8 +1725,11 @@ class TaskWorkspace:
         `working-tree-encoding` attribute, no `core.autocrlf`, not skip-worktree or
         assume-unchanged), because Git calls a converted file clean when its bytes differ. A path
         that was absent then is exact only while no `.gitignore` changed with it, since a file
-        the old rules ignored would look absent.
+        the old rules ignored would look absent. A file the copy left out is never exact: DGC
+        never read it, and the base commit's "absent" would make Undo delete the user's file.
         """
+        if change.repo_path in self.left_out:
+            return None
         if change.before is not None:
             return change.before
         try:
@@ -1406,8 +1815,9 @@ class KeptTaskWorkspace(TaskWorkspace):
 
     The same checkout, delta and integration as TaskWorkspace. `sync` puts the kept checkout at the
     project's HEAD plus its uncommitted state before each task -- exactly what `prepare` gives a new
-    checkout -- but what the project ignores (installed dependencies, a copied .env) stays between
-    tasks, so they are installed once rather than by every task. Integration never removes it, and
+    checkout, the same `_populate`, so the untracked files it has no room for are left out and
+    never written here either -- but what the project ignores (installed dependencies, a copied
+    .env) stays between tasks, so they are installed once rather than by every task. Integration never removes it, and
     a path it holds back (`held_paths`) is the caller's to keep: the next sync resets the checkout.
     Ask DGC to fix on a Pip report keeps one (dgc/pip_fix.py).
     """
@@ -1453,15 +1863,10 @@ class KeptTaskWorkspace(TaskWorkspace):
             known = False
         if not known:
             if path.exists() or path.is_symlink():
-                # A folder git no longer knows as this repository's worktree: what was ours is gone.
-                try:
-                    if path.is_symlink() or path.is_file():
-                        path.unlink()
-                    else:
-                        shutil.rmtree(path)
-                except OSError as exc:
-                    return None, f"could not clear the old kept checkout: {exc}"
-                prune_worktrees(repo)
+                # Ownership is no longer provable. It may contain the user's work, so never
+                # recursively remove it to make room for a new checkout.
+                return None, (f"kept checkout path exists but is not registered for this repository: {path}. "
+                              "Inspect or move it, then try again.")
             free = _free_bytes(path.parent)
             if free is not None and free < _MIN_FREE_BYTES:
                 return None, (f"only {free // (1024 * 1024)} MB free where the kept checkout is made "
@@ -1508,18 +1913,19 @@ class KeptTaskWorkspace(TaskWorkspace):
     def remove(source_root: Path, path: Path) -> str | None:
         """Remove a kept checkout and git's record of it. None, or what went wrong."""
         path = Path(path)
+        if not path.exists() and not path.is_symlink():
+            return None
         repo = repo_root(source_root) if Path(source_root).exists() else None
-        if repo is not None:
-            _git(["worktree", "remove", "--force", str(path)], repo)
-        try:
-            if path.is_symlink() or path.is_file():
-                path.unlink()
-            elif path.exists():
-                shutil.rmtree(path)
-        except OSError as exc:
-            return str(exc)
-        if repo is not None:
-            prune_worktrees(repo)
+        if repo is None:
+            return f"cannot verify ownership of kept checkout: {path}"
+        registered = any(Path(row.get("path", "")).resolve(strict=False) == path.resolve(strict=False)
+                         for row in list_worktrees(repo))
+        if not registered or path.is_symlink():
+            return f"kept checkout is not registered for this repository: {path}"
+        removed = _git(["worktree", "remove", "--force", str(path)], repo)
+        if removed.returncode != 0 or path.exists():
+            return (removed.stderr or f"could not remove kept checkout: {path}").strip()
+        prune_worktrees(repo)
         return None
 
 
@@ -1558,14 +1964,26 @@ class FleetWorkspace:
     baseline: dict[str, dict]
     metadata_path: Path
     payload: dict = field(default_factory=dict, repr=False)
+    left_out: dict = field(default_factory=dict)
+
+    @property
+    def left_out_note(self) -> str:
+        """The line of the agent's prompt naming the user's files its copy left out (as a helper's names them):
+        from the copy just made, or as saved with it for a conversation opened again."""
+        if self.left_out:
+            return left_out_note(self, "agent")
+        saved = self.payload.get("left_out_note")
+        return saved if isinstance(saved, str) and len(saved) <= _MAX_LEFT_OUT_NOTE else ""
 
     @classmethod
     def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None
                 ) -> tuple["FleetWorkspace | None", str | None]:
         """Snapshot a source project into a private fleet worktree.
 
-        The caller must hold the source checkout's mutation lease. This method copies tracked and
-        non-ignored untracked project state and verifies it a second time before returning.
+        The caller must hold the source checkout's mutation lease. The copy follows a helper's rule
+        (_copy_uncommitted): every tracked change, then untracked files while there is room; the rest
+        are left out (`left_out`) and named to the agent, so a project with big screenshots or a
+        downloaded template still gets its agent instead of "dirty baseline exceeds 67108864 bytes".
         """
         source_root = Path(source_root).resolve(strict=False)
         repo = repo_root(source_root)
@@ -1608,30 +2026,15 @@ class FleetWorkspace:
         workspace = cls(source_root, repo, project_rel, path, path / project_rel, branch,
                         base_commit, {}, metadata_path)
         try:
-            dirty = _dirty_paths(repo, base_commit, project_rel)
-            if len(dirty) > _MAX_TASK_FILES:
-                raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_FILES} files")
-            total = 0
-            captured: dict[str, _FileState] = {}
-            for repo_path in sorted(dirty):
-                state = _read_state(_checked_target(repo, repo_path))
-                total += len(state.data)
-                if total > _MAX_TASK_BYTES:
-                    raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_BYTES} bytes")
-                captured[repo_path] = state
-                workspace.baseline[repo_path] = _state_fingerprint(state)
-                _replace_state(_checked_target(path, repo_path), state)
-            if _dirty_paths(repo, base_commit, project_rel) != dirty:
-                raise TaskWorkspaceError("source file set changed while creating the fleet baseline")
-            for repo_path, expected in captured.items():
-                if _read_state(_checked_target(repo, repo_path)) != expected:
-                    raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+            _dirty, captured, workspace.left_out = _copy_uncommitted(repo, base_commit, project_rel, path, "agent")
+            workspace.baseline = {repo_path: _state_fingerprint(state) for repo_path, state in captured.items()}
             workspace.payload = {
                 "kind": "dgc-fleet-workspace", "schema_version": _FLEET_SCHEMA,
                 "source": str(source_root), "repo": str(repo), "project_rel": str(project_rel),
                 "worktree": str(path), "branch": branch, "base_commit": base_commit,
                 "baseline": workspace.baseline, "status": "active", "reason": "",
                 "changed_paths": [],
+                **({"left_out_note": workspace.left_out_note} if workspace.left_out else {}),
             }
             error = _write_retained_metadata(metadata_path, workspace.payload)
             if error:
@@ -1893,6 +2296,10 @@ class RetainedTask:
     available: bool
     problem: str
     payload: dict = field(repr=False)
+    # The user's files the task's copy left out, as far as applying it could touch them
+    # (TaskWorkspace._left_out_present). Never written from here either. Records written before
+    # copies left anything out have none.
+    left_out: frozenset = frozenset()
 
     def as_dict(self) -> dict:
         shown, used = [], 0
@@ -1963,13 +2370,20 @@ class RetainedTask:
         if not changed:
             cleanup_error = self.cleanup() or ""
             return TaskIntegration("clean", cleanup_error=cleanup_error)
+        # The same rule as the live integration: a path the task's copy left out is the user's own
+        # file, held back however long the record waits -- including after the user's file is gone.
+        held_out = _left_out_hits(changed, self.left_out)
+        held_set = set(held_out)
+        left_shown = [self._display_path(path) for path in held_out]
         protected = [path for path in changed if path in self.protected]
         if protected:
-            shown = [self._display_path(path) for path in protected]
+            shown = [self._display_path(path) for path in [*protected, *held_out]]
             reason = "retained task changed files that were dirty before delegation"
+            if held_out:
+                reason += "; " + _left_out_reason(left_shown, "retained task")
             metadata_error = self.retain(reason, changed)
             error = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("conflict", display, shown, error)
+            return TaskIntegration("conflict", display, shown, error, left_out=left_shown)
 
         expected: dict[str, _FileState] = {}
         desired: dict[str, _FileState] = {}
@@ -1980,6 +2394,9 @@ class RetainedTask:
         conflicts = []
         try:
             for repo_path in changed:
+                if repo_path in held_set:
+                    conflicts.append(repo_path)
+                    continue
                 expected[repo_path] = _head_state(self.repo, self.base_commit, repo_path)
                 child[repo_path] = _read_state(_checked_target(self.path, repo_path))
                 desired[repo_path] = child[repo_path]
@@ -2009,12 +2426,17 @@ class RetainedTask:
                     merged.append(repo_path)
         except Exception as exc:
             return TaskIntegration("error", display, error=str(exc))
+        reasons = (["parent checkout changed before retained task resolution"]
+                   if any(path not in held_set for path in conflicts) else [])
+        if held_out:
+            reasons.append(_left_out_reason(left_shown, "retained task") + "; copy the file from "
+                           "its worktree by hand if it is wanted")
         if conflicts and not [p for p in changed if p not in conflicts and p not in satisfied]:
             shown = [self._display_path(path) for path in conflicts]
-            reason = "parent checkout changed before retained task resolution"
+            reason = "; ".join(reasons)
             metadata_error = self.retain(reason, changed)
             error = reason + (f"; {metadata_error}" if metadata_error else "")
-            return TaskIntegration("conflict", display, shown, error)
+            return TaskIntegration("conflict", display, shown, error, left_out=left_shown)
 
         # Same partial rule as the live path: apply what reconciles, hold back only what collides.
         # `satisfied` paths are already in place, so they are neither applied nor held.
@@ -2071,12 +2493,11 @@ class RetainedTask:
         reconciled = [self._display_path(path) for path in merged if path in applied]
         if conflicts:
             held = [self._display_path(path) for path in conflicts]
-            reason = ("parent checkout changed before retained task resolution; "
-                      f"{len(applied)} path(s) still applied")
+            reason = "; ".join([*reasons, f"{len(applied)} path(s) still applied"])
             metadata_error = self.retain(reason, conflicts)
             detail = reason + (f"; {metadata_error}" if metadata_error else "")
             return TaskIntegration("partial", landed, held, detail, merged=reconciled,
-                                   head_moved=self._head_moved())
+                                   head_moved=self._head_moved(), left_out=left_shown)
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, merged=reconciled,
                                head_moved=self._head_moved(),
@@ -2275,6 +2696,15 @@ def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
                     and re.fullmatch(r"[0-9a-f]{64}", str(fingerprint.get("sha256", "")))):
                 raise TaskWorkspaceError(f"invalid protected baseline fingerprint: {repo_path}")
             protected[repo_path] = fingerprint
+        left_raw = payload.get("left_out_paths", []) if not legacy else []
+        if not isinstance(left_raw, list) or len(left_raw) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError("invalid retained task left-out list")
+        left_out = set()
+        for raw in left_raw:
+            repo_path = _validate_repo_path(raw)
+            if not _inside_project(repo_path, project_rel):
+                raise TaskWorkspaceError(f"left-out path is outside the project: {repo_path}")
+            left_out.add(repo_path)
         registered = next((item for item in list_worktrees(repo)
                            if Path(item.get("path", "")).resolve(strict=False) == path), None)
         available = bool(path.exists() and registered and registered.get("branch") == branch)
@@ -2294,7 +2724,7 @@ def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
         return RetainedTask(task_id, recorded_source, repo, project_rel, path, path / project_rel,
                             branch, base_commit, str(payload.get("reason", ""))[:2000],
                             changed, display, protected, metadata_path, legacy, available,
-                            problem, payload), None
+                            problem, payload, frozenset(left_out)), None
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError, TaskWorkspaceError) as exc:
         return None, f"could not load {metadata_path.name}: {exc}"
 

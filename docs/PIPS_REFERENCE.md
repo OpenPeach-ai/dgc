@@ -6,10 +6,10 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 
 | Component | Version |
 | --- | --- |
-| DGC CLI | 0.48.4 |
-| VS Code extension | 0.33.0 |
-| SDK (Python and TypeScript) | 0.7.0 |
-| Pips API | 66 |
+| DGC CLI | 0.50.0 |
+| VS Code extension | 0.34.0 |
+| SDK (Python and TypeScript) | 0.8.0 |
+| Pips API | 67 |
 | Editor protocol | v14 |
 | Pips registry schema | 46 |
 

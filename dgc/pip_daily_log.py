@@ -22,6 +22,7 @@ MAX_DAY_LINES = 30
 KEEP_DAYS = 30
 MAX_SAID = 120                  # characters of what a run said, in its line
 MAX_DAYS_PAGE = 14
+MAX_DAY_BYTES = 64 * 1024
 _PIP = re.compile(r"pip_[0-9a-f]{32}\Z")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _MORE = re.compile(r"^- … and (\d+) more runs?$")
@@ -39,6 +40,14 @@ def _first_words(text, limit: int = MAX_SAID) -> str:
         return text
     cut = text[:limit]
     return (cut.rsplit(" ", 1)[0] if " " in cut[limit // 2:] else cut).rstrip(",;:") + "…"
+
+
+def _read_day(path: Path) -> list[str]:
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_DAY_BYTES + 1)
+    if len(raw) > MAX_DAY_BYTES:
+        raise ValueError("Daily log exceeds its read budget")
+    return raw.decode("utf-8").splitlines()
 
 
 def line_for(*, when: datetime, what: str, status: str, said: str = "", error: str = "", secrets=()) -> str:
@@ -80,7 +89,7 @@ def record(directory, pip_id, line: str, *, now: datetime | None = None) -> None
         with _locked(folder):
             day = folder / f"{now.date().isoformat()}.md"
             try:
-                rows = day.read_text(encoding="utf-8").splitlines()
+                rows = _read_day(day)
             except FileNotFoundError:
                 rows = [f"# {now.date().isoformat()}"]
             entries = [r for r in rows[1:] if r.startswith("- ")]
@@ -122,8 +131,8 @@ def days(directory, pip_id, *, before: str | None = None, limit: int = 7) -> dic
     out = []
     for name in names[:limit]:
         try:
-            rows = (folder / f"{name}.md").read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeError):
+            rows = _read_day(folder / f"{name}.md")
+        except (OSError, UnicodeError, ValueError):
             continue
         lines, more = [], 0
         for row in rows[1:]:

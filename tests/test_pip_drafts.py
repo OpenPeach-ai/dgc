@@ -250,6 +250,46 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(result["draft"]["markdown"], self.body()["markdown"])
         self.assertEqual(result["tools_called"], 1)
 
+    def test_a_guard_mod_watches_a_pips_run_and_its_ask_stops_the_step(self):
+        """Guard mods apply to a Pip's run: here a mod that would ask about reading source.py stops that read, since
+        nobody is there to answer, and the model is told so (dgc/mods/host.py, surface "pip")."""
+        import textwrap
+        from dgc import sandbox
+        from dgc.mods import catalog, consent
+        self.commit(); _, _, manifest = self.queued()
+        src = self.base / "mod-src" / "careful"
+        src.mkdir(parents=True)
+        (src / "main.py").write_text(textwrap.dedent("""
+            import dgc_mod as dm
+            mod = dm.Mod()
+            @mod.on("tool.call")
+            def call(e):
+                if "source.py" in str(e.get("args")):
+                    return dm.ask("source.py is read by hand")
+            mod.run()
+        """))
+        (src / "dgc-mod.json").write_text(json.dumps({"name": "careful", "version": "1.0.0", "entry": "main.py",
+                                                       "title": "Careful", "capabilities": {"events": ["tool.call"]}}))
+        consent.allow(catalog.install_folder(src), unsandboxed=sandbox._backend() is None)
+        replies = iter([ChatResult(tool_calls=[ToolCall("read", "read_file", {"path": "source.py"})]),
+                        ChatResult(content=json.dumps(self.body()))])
+        seen = []
+        def chat(client, messages, tools=None, on_text=None, **kwargs):
+            seen.append(copy.deepcopy(messages))
+            value = next(replies)
+            if value.content and on_text: on_text(value.content)
+            return value
+        with patch.dict(os.environ, {"DGC_SESSION_POLICY": pips._json(pips.native_policy())}), \
+             patch.object(LLMClient, "chat", chat), patch("dgc.agent.discover_skills", return_value={}), \
+             patch("requests.sessions.Session.request", side_effect=AssertionError("No network")):
+            try:
+                pips.execute_native(self.cfg, self.root, manifest, lambda event: None)
+            except RegistryError:
+                pass                       # the draft cites a file it never read: refused, which is not this test
+        told = json.dumps(seen[1][-1])
+        self.assertIn("STOPPED by the user's Careful mod", told)
+        self.assertIn("nobody to ask", told)
+
     def test_controller_publishes_and_finishes_only_validated_draft(self):
         self.commit(); job, run, manifest = self.queued()
         row = self.store.claim_next()

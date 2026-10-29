@@ -224,6 +224,16 @@ class WhatIsSaidTests(Scene):
         self.attach(self.session)
         self.later(1)
 
+    def test_malformed_saved_report_fields_do_not_break_delivery(self):
+        row = {"id": identifier("run"), "pip_id": self.pip["id"], "workspace_id": self.workspace["id"],
+               "status": "failed", "finished_at": self.now, "manifest": json.dumps({"run_kind": "audit"}),
+               "result": None, "error": json.dumps("invalid saved error")}
+        candidate = delivery._candidate(self.registry, row, {"name": "ERP", "pip_type": "scout"})
+        self.assertEqual(candidate["signature"], "failed:")
+        saved = SimpleNamespace(execute=lambda *_: SimpleNamespace(
+            fetchone=lambda: ("active", json.dumps(["invalid saved definition"]))))
+        self.assertIsNone(delivery._pip(saved, self.pip["id"]))
+
     def test_a_failed_run_says_it_failed_and_why_in_plain_words(self):
         run = self.finished(error={"code": "snapshot_limit",
                               "message": "Snapshot exceeds 10,000 entries, 4 MiB per file or 64 MiB total."})

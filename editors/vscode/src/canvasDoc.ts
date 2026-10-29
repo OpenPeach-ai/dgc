@@ -13,6 +13,12 @@ const MAX_TEXT = 2_000_000;
 /** What the formatted canvas needs from ChatDGC (chatdgc.ts). */
 export interface CanvasDocHost {
   canvasOf(path: string): { conversation: string; canvas: string } | undefined;
+  /** An artifact's document (dgc/artifact_service: its working file, `<store>/ar_…/work/…md`), which opens formatted
+   *  too: its own versions, export and browser instead of a chat's Ask. */
+  artifactOf?(path: string): { id: string; title: string } | undefined;
+  artifactVersions?(id: string): unknown;
+  artifactExport?(id: string): unknown;
+  artifactBrowser?(id: string): unknown;
   /** Ask about these lines of the canvas (1-based, inclusive), as the Markdown editor's Ask does. */
   canvasAskAbout(conversation: string, canvas: string, text: string, startLine: number, endLine: number): Promise<void>;
   canvasShortcut(): Promise<void>;
@@ -20,7 +26,7 @@ export interface CanvasDocHost {
 
 const attr = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-export function canvasDocDocument(asset: (name: string) => string, cspSource: string): string {
+export function canvasDocDocument(asset: (name: string) => string, cspSource: string, artifact = false): string {
   const b = (does: string, icon: string, label: string, extra = "") =>
     `<button type="button" class="cv-btn" data-do="${does}" title="${attr(label)}" aria-label="${attr(label)}"${extra}><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -37,8 +43,10 @@ ${b("bullet", "list-unordered", "Bulleted list")}${b("ordered", "list-ordered", 
 <span class="cv-sep" aria-hidden="true"></span>
 ${b("table", "table", "Table")}${b("equation", "symbol-operator", "Equation (on an empty line, an equation of its own)")}
 <span class="cv-spacer"></span>
-<button type="button" id="cv-ask" class="cv-ask" data-do="ask" title="Ask ChatDGC about the selection"><span class="codicon codicon-sparkle" aria-hidden="true"></span><span>Ask ChatDGC</span></button>
-${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polish")}${b("markdown", "markdown", "Open as Markdown")}
+${artifact
+  ? `${b("versions", "history", "Versions: restore one, or export it")}${b("export", "desktop-download", "Export as Word, PDF or Markdown")}${b("browser", "link-external", "Open in browser")}${b("markdown", "markdown", "Open as Markdown")}`
+  : `<button type="button" id="cv-ask" class="cv-ask" data-do="ask" title="Ask ChatDGC about the selection"><span class="codicon codicon-sparkle" aria-hidden="true"></span><span>Ask ChatDGC</span></button>
+${b("shortcuts", "wand", "Shortcuts: suggest edits, length, reading level, polish")}${b("markdown", "markdown", "Open as Markdown")}`}
 </div>
 <div id="cv-table-bar" class="cv-bar cv-table-bar" role="toolbar" aria-label="Table" hidden>
 <span class="cv-bar-label">Table</span>
@@ -108,14 +116,15 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const found = this.host.canvasOf(document.uri.fsPath);
+    const artifact = found ? undefined : this.host.artifactOf?.(document.uri.fsPath);
     const roots = [vscode.Uri.joinPath(this.extensionUri, "dist"), vscode.Uri.joinPath(this.extensionUri, "media")];
-    panel.webview.options = { enableScripts: !!found, localResourceRoots: roots };
-    if (!found || !/\.md$/i.test(document.uri.fsPath)) {
-      panel.webview.html = `<!doctype html><html><body><p>Only a ChatDGC document canvas opens formatted. Reopen this file with the text editor.</p></body></html>`;
+    panel.webview.options = { enableScripts: !!(found || artifact), localResourceRoots: roots };
+    if (!(found || artifact) || !/\.md$/i.test(document.uri.fsPath)) {
+      panel.webview.html = `<!doctype html><html><body><p>Only a ChatDGC document canvas opens formatted, or a document DGC made. Reopen this file with the text editor.</p></body></html>`;
       return;
     }
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, name)).toString();
-    panel.webview.html = canvasDocDocument(asset, panel.webview.cspSource);
+    panel.webview.html = canvasDocDocument(asset, panel.webview.cspSource, !!artifact);
     panel.iconPath = tabIcon(this.extensionUri, "chatdgc-tab");
     this.open.set(panel, document);
     if (panel.active) { this.activePanel = panel; this.changed.fire(); }
@@ -141,14 +150,25 @@ export class CanvasDocEditor implements vscode.CustomTextEditorProvider {
             if (await vscode.workspace.applyEdit(edit)) save();
             break;
           }
+          case "versions":
+          case "export":
+          case "browser":
+            // An artifact's document: what its panel's header does for every other kind.
+            if (!artifact) return;
+            if (document.isDirty) await document.save();
+            if (msg.type === "versions") await this.host.artifactVersions?.(artifact.id);
+            else if (msg.type === "export") await this.host.artifactExport?.(artifact.id);
+            else await this.host.artifactBrowser?.(artifact.id);
+            break;
           case "ask": {
+            if (!found) return;
             const start = Number(msg.start_line), end = Number(msg.end_line), text = String(msg.text || "");
             if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || !text.trim()) return;
             if (document.isDirty) await document.save();
             await this.host.canvasAskAbout(found.conversation, found.canvas, selectionText(document.getText(), start, end, text).slice(0, 20_000), start, end);
             break;
           }
-          case "shortcuts": if (document.isDirty) await document.save(); await this.host.canvasShortcut(); break;
+          case "shortcuts": if (!found) return; if (document.isDirty) await document.save(); await this.host.canvasShortcut(); break;
           case "markdown":
             if (document.isDirty) await document.save();
             await vscode.commands.executeCommand("vscode.openWith", document.uri, "default", panel.viewColumn);

@@ -287,6 +287,10 @@ def store(session_file, data: bytes, *, name: object = "", source: str = "browse
         present = stat.S_ISREG(info.st_mode) and info.st_size == len(data)
     except FileNotFoundError:
         present = False
+    if present:
+        # A same-size stale or damaged file must not keep the content-addressed slot poisoned.
+        existing, _reason, _path = resolve(session_file, ImageRecord(ref=ref, name="", mime=mime))
+        present = existing == data
     if not present:
         fd, temporary = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".part")
         try:

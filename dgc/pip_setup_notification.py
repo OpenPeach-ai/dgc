@@ -23,7 +23,10 @@ def valid_notice(value):
     return dict(value)
 
 def decode(text):
-    value = valid_notice(json.loads(text.split('\n', 2)[1]))
+    try:
+        value = valid_notice(json.loads(text.split('\n', 2)[1]))
+    except (IndexError, TypeError, ValueError):
+        value = None
     if value is None:
         raise ValueError('Invalid saved Pip setup notice')
     return value
@@ -113,8 +116,12 @@ def notify(backend, config, request):
             pending += [item[0] for item in getattr(backend, '_steer_payloads', {}).values() if len(item)>4]
             pending += [getattr(backend, '_running_pip_setup_text', None)]
             for text in pending:
-                if isinstance(text, str) and text.startswith(PREFIX) and decode(text)['setup_id']==notice['setup_id']:
-                    return {'notification':'already_notified','setup_id':notice['setup_id']}
+                if isinstance(text, str) and text.startswith(PREFIX):
+                    try:
+                        if decode(text)['setup_id'] == notice['setup_id']:
+                            return {'notification':'already_notified','setup_id':notice['setup_id']}
+                    except ValueError:
+                        pass  # A damaged queued receipt cannot block a verified one.
             if any(isinstance(m,dict) and isinstance(m.get('_dgc_pip_setup'),dict)
                 and m['_dgc_pip_setup'].get('setup_id') == notice['setup_id'] for m in getattr(backend.agent,'messages',[]) or []):
                 return {'notification':'already_notified','setup_id':notice['setup_id']}

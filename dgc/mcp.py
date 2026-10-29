@@ -374,7 +374,9 @@ def validate_elicitation_response(params: dict, response) -> dict:
 
 
 def bridge_callback_url(authorize_url: str) -> str:
-    """Identify only the pinned bridge's exact loopback callback, never arbitrary elicitation data."""
+    """Identify only the pinned bridge's exact loopback callback, never arbitrary elicitation data. It is
+    ``/oauth/callback``, or the bare loopback address an app registered without a path (DGC's Microsoft app:
+    ``http://localhost:<port>``)."""
     try:
         redirects = parse_qs(urlsplit(authorize_url).query, max_num_fields=32).get("redirect_uri", [])
         if len(redirects) != 1:
@@ -383,7 +385,7 @@ def bridge_callback_url(authorize_url: str) -> str:
         parsed = urlsplit(value)
         if (parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
                 or not parsed.port or parsed.username or parsed.password or parsed.query or parsed.fragment
-                or parsed.path != "/oauth/callback" or any(ord(ch) < 32 for ch in value)):
+                or parsed.path not in ("/oauth/callback", "") or any(ord(ch) < 32 for ch in value)):
             raise ValueError("unexpected callback")
         return value
     except ValueError:
@@ -405,8 +407,12 @@ def sanitize_input_request(method: str, params) -> dict:
         # A sign-in link carries every scope the server asks for: Airwallex's runs past 2,000
         # characters, and the old 2,048 cap dropped it as "could not be completed".
         raw_url = _short_text(params.get("url"), "elicitation URL", 8192)
-        parsed = urlsplit(raw_url)
-        host = parsed.hostname or ""
+        try:
+            parsed = urlsplit(raw_url)
+            host = parsed.hostname or ""
+            _ = parsed.port
+        except ValueError:
+            raise MCPInputError("elicitation URL is malformed or embeds credentials") from None
         loopback = host in ("localhost", "127.0.0.1", "::1")
         if (parsed.scheme != "https" and not (parsed.scheme == "http" and loopback)):
             raise MCPInputError("URL elicitation requires HTTPS (HTTP is allowed only for loopback)")
@@ -488,6 +494,34 @@ def _has_device_sign_in(name: str, spec: dict) -> bool:
     tokens = saved.get("tokens") if isinstance(saved.get("tokens"), dict) else {}
     return (saved.get("url") == spec.get("url") and client.get("grant") == "device"
             and isinstance(tokens.get("access_token"), str) and bool(tokens["access_token"]))
+
+
+def _app_sign_in_launch(name: str, spec: dict) -> dict:
+    """A plugin server's launch with DGC's own registered app for its service (plugins.app_sign_in_launch), or the
+    spec unchanged."""
+    try:
+        from .plugins import app_sign_in_launch
+        return app_sign_in_launch(name, spec)
+    except Exception:  # noqa: BLE001 -- an unreadable catalog leaves the server as saved
+        return spec
+
+
+def _builtin_server(spec) -> bool:
+    """A saved server that is DGC's own Microsoft server (``python3 -m dgc.microsoft_graph <app>``): DGC runs it in
+    its own process once the plugin that owns it gives it DGC's sign-in (microsoft_graph.GraphConnection)."""
+    try:
+        from .microsoft_graph import is_builtin_spec
+        return is_builtin_spec(spec)
+    except Exception:  # noqa: BLE001 -- a broken install runs nothing in-process
+        return False
+
+
+def _builtin_launch(saved, launch) -> bool:
+    """A launch of DGC's own Microsoft server that app_sign_in_launch gave DGC's Microsoft app: the saved form is the
+    catalog's own, and the app was added now (never one that came with the saved form)."""
+    args = launch.get("args") if isinstance(launch, dict) else None
+    return (launch is not saved and _builtin_server(saved) and isinstance(args, list)
+            and "--static-oauth-client-info" in args)
 
 
 def _signed_in_launch(name: str, spec: dict) -> dict:
@@ -605,11 +639,15 @@ class MCPServer:
         self._subscription_generation = 0
         self._subscription_honored = False
         self.remote_bridge = remote_bridge
+        # DGC's own Microsoft server, run in this process (microsoft_graph.GraphConnection): like the remote client it
+        # starts no process, signs in through the same card, and keeps its sign-in in the system keychain.
+        self.builtin = False
         self._auth_handler = auth_handler
         self._connection_done = threading.Event()
         self._connection_cancel = None
         self._browser_auth_generation: int | None = None
         self._needs_sign_in = False
+        self._sign_in_reason = ""
         self._connecting = False
         self._sign_in_count = 0
 
@@ -639,8 +677,10 @@ class MCPServer:
         # first request, so legacy fallback always receives a fresh process.
         probe_timeout = min(max(0.25, float(timeout)), 3.0)
         # A remote server is reached over HTTP by DGC's own client (mcp_remote.py), with the initialize
-        # handshake its transports define. Probing first would start a sign-in, then repeat it.
-        discovered, discover_error = (None, None) if self.remote_bridge else self._request(
+        # handshake its transports define. Probing first would start a sign-in, then repeat it. DGC's own Microsoft
+        # server signs in at initialize too.
+        in_process = self.remote_bridge or self.builtin
+        discovered, discover_error = (None, None) if in_process else self._request(
             "server/discover", {}, probe_timeout, cancel, modern=True)
         if cancel is not None and cancel.is_set():
             self.error = CONNECTION_CANCELLED
@@ -675,6 +715,8 @@ class MCPServer:
         else:
             if self.remote_bridge:
                 self.negotiation_note = "remote server over HTTP: initialize handshake"
+            elif self.builtin:
+                self.negotiation_note = "DGC's own server, in DGC's process: initialize handshake"
             else:
                 note = discover_error or "invalid server/discover response"
                 self.negotiation_note = f"modern probe unavailable; used legacy handshake ({note[:240]})"
@@ -687,10 +729,16 @@ class MCPServer:
                 "clientInfo": _CLIENT_INFO,
             }, timeout, cancel, modern=False)
             if init is None:
+                # DGC's own Microsoft server says why its sign-in didn't happen in words meant for the user (an admin
+                # must approve DGC first, with the link): shown as they are, not as "initialize failed: ...".
+                said = getattr(self.proc, "sign_in_failure", "") if self.builtin else ""
                 self.stop()
                 if (cancel is not None and cancel.is_set()) or err == "sign-in was cancelled":
                     # Stopped, not broken: the person cancelled (or declined) the sign-in, or the connection.
                     self.error = SIGN_IN_CANCELLED if self._sign_in_count else CONNECTION_CANCELLED
+                    return False
+                if isinstance(said, str) and said and not self._needs_sign_in:
+                    self.error = said[:600]
                     return False
                 # Join the readers before inspecting stderr, so an exit does not discard
                 # the bridge's actual error. Never expose OAuth URLs or credential values.
@@ -750,7 +798,23 @@ class MCPServer:
             try:
                 proc = RemoteConnection(
                     self.name, self.args, self.env,
-                    sign_in=lambda url, redirect, code="": self._browser_sign_in(url, generation, code=code),
+                    sign_in=lambda url, redirect, code="", reason="": self._browser_sign_in(
+                        url, generation, code=code, reason=reason),
+                    cancelled=self._sign_in_cancelled)
+            except (RemoteError, OSError, ValueError) as exc:
+                self.error = f"could not start: {exc}"
+                return False
+        elif self.builtin:
+            # DGC's own Microsoft server: no process either. It speaks MCP over the same lines, calls Microsoft Graph
+            # itself, and signs in through this server's card when it is connected.
+            from .microsoft_graph import GraphConnection
+            from .mcp_remote import RemoteError
+            try:
+                proc = GraphConnection(
+                    self.name, self.args, root=self.root,
+                    sign_in=lambda url, redirect, code="", reason="": self._browser_sign_in(
+                        url, generation, code=code, reason=reason),
+                    can_ask=lambda reason="": self._can_ask_sign_in(generation, reason),
                     cancelled=self._sign_in_cancelled)
             except (RemoteError, OSError, ValueError) as exc:
                 self.error = f"could not start: {exc}"
@@ -1043,12 +1107,26 @@ class MCPServer:
         cancel = self._connection_cancel
         return bool(self._connecting and cancel is not None and cancel.is_set())
 
-    def _browser_sign_in(self, url: str, generation: int, *, code: str = "") -> bool:
+    def _can_ask_sign_in(self, generation: int, reason: str = "") -> bool:
+        """Whether a sign-in could be approved now: someone is connecting this server and there is a card to ask on.
+        When not, the server is marked as needing a sign-in (with why, when a sign-in just ended), as
+        _browser_sign_in marks it, without anything being asked of the service first."""
+        if self._connecting and self._generation == generation and callable(self._auth_handler) \
+                and self._sign_in_count < 2:
+            return True
+        self._sign_in_reason = " ".join(str(reason or "").split())[:300]
+        self._needs_sign_in = True
+        return False
+
+    def _browser_sign_in(self, url: str, generation: int, *, code: str = "", reason: str = "") -> bool:
         """DGC's remote client needs the user to sign in: ask whoever can (the editor's card, the terminal).
 
         True once they agreed and the browser opened; the client then waits for the service's redirect -- or, with a
-        ``code`` (a device sign-in, GitHub's), for the user to enter that code on the page it opened."""
+        ``code`` (a device sign-in, GitHub's), for the user to enter that code on the page it opened. A ``reason`` says
+        why a sign-in that worked has ended (Google signs a testing app out every 7 days); it is what the plugin's
+        page shows instead of a bare "Needs sign-in"."""
         self._append_diagnostic("Remote MCP browser sign-in requested")
+        self._sign_in_reason = " ".join(str(reason or "").split())[:300]
         if not self._connecting or self._generation != generation:
             # Mid-session (a sign-in that expired and couldn't refresh) nobody is waiting on a connection
             # to ask; the call fails and says to connect again.
@@ -1059,7 +1137,8 @@ class MCPServer:
             params = sanitize_input_request("elicitation/create", {
                 "mode": "url", "url": url,
                 "message": (f"Enter the code {code} on the page that opens to sign in, then come back."
-                            if code else "Sign in to this MCP server in your browser, then continue.")})
+                            if code else f"{self._sign_in_reason} Sign in again in your browser, then continue."
+                            if self._sign_in_reason else "Sign in to this MCP server in your browser, then continue.")})
             # Generic server input sanitization strips these private markers. Only DGC's own client
             # may ask the editor to forward its loopback callback, or show a code to enter.
             if code:
@@ -1451,7 +1530,7 @@ class MCPServer:
                 self._stop_process(proc, generation)
             return None, send_error
         def awaiting_browser():
-            return (method == "initialize" and self.remote_bridge
+            return (method == "initialize" and (self.remote_bridge or self.builtin)
                     and self._browser_auth_generation == generation)
 
         while not ev.wait(0.1 if awaiting_browser() else min(0.1, max(0.0, deadline - time.monotonic()))):
@@ -1603,6 +1682,8 @@ class MCPServer:
             return f"[MCP resource link: {block.get('name') or block.get('uri')} · {block.get('uri', '')}]"
         if kind == "resource":
             resource = block.get("resource") or {}
+            if not isinstance(resource, dict):
+                return "[MCP resource: invalid content]"
             uri = resource.get("uri", "")
             if "text" in resource:
                 return f"[MCP resource: {uri}]\n{resource.get('text', '')}"
@@ -1693,9 +1774,14 @@ class MCPManager:
         """
         if not isinstance(config_servers, dict):
             return
+        # Apply the limit before splitting hosted servers onto a background thread;
+        # otherwise each half could start its own allotment of 64 processes.
+        if len(config_servers) > _MAX_CONFIG_SERVERS:
+            config_servers = dict(itertools.islice(config_servers.items(), _MAX_CONFIG_SERVERS))
         if startup and not _background and input_handler is None:
+            # DGC's own Microsoft server counts as hosted here: connecting it may refresh its sign-in over the network.
             hosted = {name: spec for name, spec in config_servers.items()
-                      if isinstance(spec, dict) and spec.get("transport") == "remote"
+                      if isinstance(spec, dict) and (spec.get("transport") == "remote" or _builtin_server(spec))
                       and str(name) not in self.disabled_names and spec.get("defer_until_setup") is not True}
             if hosted:
                 config_servers = {name: spec for name, spec in config_servers.items() if name not in hosted}
@@ -1764,13 +1850,20 @@ class MCPManager:
                     # Its key is nowhere: say what to do, not "header refers to GITHUB_PAT_TOKEN, which isn't set".
                     self.failures[name] = _missing_key_message(name, auth_env)
                     continue
+            elif raw_spec.get("transport") == "remote" or _builtin_server(raw_spec):
+                # A plugin that signs in with DGC's own registered app (Google's, Microsoft's) gets that app at launch,
+                # from the catalog: never saved in config.json, so a catalog update reaches it at the next connect.
+                launch_spec = _app_sign_in_launch(name, raw_spec)
             args = _runtime_server_args(launch_spec)
             server = MCPServer(name, cmd, args, configured_env, self.root,
                                str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
             server.remote_bridge = raw_spec.get("transport") == "remote"
+            # Only the Microsoft plugin's own server, launched with its app, runs inside DGC and can sign in; the same
+            # command saved by anyone else stays an ordinary stdio process, which can't sign in by itself.
+            server.builtin = _builtin_launch(raw_spec, launch_spec)
             server._auth_handler = input_handler
             try:
-                if server.remote_bridge and callable(input_handler) and not startup:
+                if (server.remote_bridge or server.builtin) and callable(input_handler) and not startup:
                     started = server.start(timeout=150, cancel=cancel)
                 else:
                     started = server.start(cancel=cancel) if cancel is not None else server.start()
@@ -1787,7 +1880,9 @@ class MCPManager:
                 server.stop()
                 break
             if not started:
-                self.failures[name] = ("Needs sign-in. Connect it in Settings → Plugins."
+                self.failures[name] = ((f"{server._sign_in_reason} Connect it in Settings → Plugins."
+                                        if server._sign_in_reason else
+                                        "Needs sign-in. Connect it in Settings → Plugins.")
                                        if server._needs_sign_in else
                                        _refused_key_message(name, launch_spec, server.error or "connection failed"))
         self._rebuild_routes()

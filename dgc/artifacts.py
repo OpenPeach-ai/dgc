@@ -35,8 +35,14 @@ Security model (what a page on the network or in the browser can and cannot reac
   shell; plan pages get a CSP that forbids scripts and every network load.
 - A connection that stalls mid-request is closed after `request_timeout` seconds.
 
-Not covered: every artifact shares one origin with the shell, so script in one artifact can read the
-shell (and its stop token) and other artifacts; LAN mode has no authentication.
+- Every artifact has an origin of its own: its own listener on its own port (remembered, so a link keeps
+  working across restarts while the port is free), serving only that artifact. The shell, its list and
+  its stop token are on the shell's port, so script in one artifact can't read the shell, the token or
+  another artifact. An artifact's pages may be framed only by the shell (CSP frame-ancestors), and the
+  shell frames them sandboxed: no top navigation, no reaching back into the shell. Old /a/<id>/ links
+  on the shell's port redirect to the artifact's own address.
+
+Not covered: LAN mode has no authentication.
 """
 from __future__ import annotations
 
@@ -137,7 +143,7 @@ _MAX_PARSE_BYTES = 4 * 1024 * 1024
 SCOPED_NOTE = ("This page sits in a workspace root, so only the page and the web files it links to are "
                "served; put a multi-file site in its own folder to serve all of it.")
 _SHELL_CSP = ("default-src 'none'; script-src 'nonce-{n}'; style-src 'nonce-{n}'; img-src 'self' data:; "
-              "connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; "
+              "connect-src 'self'; frame-src {frames}; base-uri 'none'; form-action 'none'; "
               "frame-ancestors 'self'")
 _PLAN_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; "
              "form-action 'none'; frame-ancestors 'self'")
@@ -518,10 +524,19 @@ class Artifact:
     created: float = field(default_factory=time.time)
     temporary: bool = False # generated preview directory; safe to remove with the registry entry
     scoped: bool = False    # a workspace root: serve only the entry and the assets it references
+    port: int | None = None # its own listener's port: its own origin
+    store_id: str = ""      # its Page in the artifact store (dgc.artifact_store), where its versions are
 
     @property
     def path(self) -> str:
-        return f"/a/{self.id}/" + (self.entry or "")
+        """The page's path on its own origin."""
+        return "/" + (self.entry or "")
+
+    @property
+    def page_url(self) -> str:
+        """The page itself, at its own origin (what "Open in new tab" opens)."""
+        owner = getattr(self, "_owner", _SRV)
+        return f"http://{owner.host}:{self.port}{self.path}" if self.port else ""
 
     @property
     def url(self) -> str:
@@ -655,6 +670,7 @@ class _Server:
         self.thread = None
         self.counter = 0
         self.artifacts: dict[str, Artifact] = {}
+        self.listeners: dict[str, tuple] = {}         # artifact id -> (its httpd, its thread)
         self.lock = threading.Lock()
         if persistent:
             self._load()
@@ -683,11 +699,14 @@ class _Server:
                 # A record from before scoping existed carries no flag: scope it (its entry and the
                 # assets that entry references still load) rather than trusting a whole directory.
                 scoped = (bool(a.get("scoped", True)) or is_workspace_root(a["directory"]))
+                port = a.get("port")
                 art = Artifact(
                     id=aid, name=_clean_name(a["name"]), directory=a["directory"],
                     entry=entry, created=float(a.get("created", time.time())),
                     temporary=False,  # never delete paths resurrected from persisted state
-                    scoped=scoped)
+                    scoped=scoped,
+                    port=port if isinstance(port, int) and 1024 <= port <= 65535 else None,
+                    store_id=str(a.get("store_id") or ""))
                 art._owner = self
                 self.artifacts[aid] = art
             except (KeyError, TypeError, ValueError):
@@ -724,8 +743,41 @@ class _Server:
             self.thread = threading.Thread(target=self.httpd.serve_forever,
                                            name="artifact-server", daemon=True)
             self.thread.start()
+            for art in self.artifacts.values():
+                self._listen(art)
             self._save()
             return port
+
+    def _listen(self, art: Artifact) -> None:
+        """The artifact's own listener (its own origin), bound like the shell. Its remembered port when free,
+        else one the system gives. Called with self.lock held."""
+        if art.id in self.listeners or self.httpd is None:
+            return
+        bind = "0.0.0.0" if self.lan else "127.0.0.1"
+        httpd = None
+        for cand in ([art.port] if art.port else []) + [0]:
+            if cand and (cand == self.port or not _port_free(cand)):
+                continue
+            try:
+                httpd = ThreadingHTTPServer((bind, cand), _make_page_handler(self, art))
+                break
+            except OSError:
+                continue
+        if httpd is None:
+            return
+        art.port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, name=f"artifact-{art.id}", daemon=True)
+        thread.start()
+        self.listeners[art.id] = (httpd, thread)
+
+    def _unlisten(self, aid: str) -> None:
+        pair = self.listeners.pop(aid, None)
+        if pair:
+            try:
+                pair[0].shutdown()
+                pair[0].server_close()
+            except Exception:
+                pass
 
     def _pick_port(self, preferred: int | None = None) -> int:
         # the port we last bound wins (stable across restarts), then the configured/default one,
@@ -787,18 +839,28 @@ class _Server:
             self.public_host = _hostname_of(hostname)
         self.ensure_started(preferred_port, lan)
         with self.lock:
+            for existing in self.artifacts.values():
+                if (existing.directory, existing.entry or "index.html", existing.scoped) == \
+                        (str(directory), entry or "index.html", scoped) and not existing.temporary:
+                    # The same page published again: the same artifact, address and port; a new version.
+                    existing.name = _clean_name(name) or existing.name
+                    self._listen(existing)
+                    self._save()
+                    return existing
             self.counter += 1
             aid = _new_id(self.id_prefix, self.artifacts)
             art = Artifact(id=aid, name=(_clean_name(name) or target.stem or f"artifact {self.counter}"),
                            directory=str(directory), entry=entry, scoped=scoped)
             art._owner = self
             self.artifacts[aid] = art
+            self._listen(art)
             self._save()
         return art
 
     def remove(self, aid: str) -> bool:
         with self.lock:
             art = self.artifacts.pop(aid, None)
+            self._unlisten(aid)
             if art:
                 self._save()
         if art and art.temporary:
@@ -836,6 +898,8 @@ class _Server:
 
     def shutdown(self):
         with self.lock:
+            for aid in list(self.listeners):
+                self._unlisten(aid)
             if self.httpd is not None:
                 try:
                     self.httpd.shutdown()
@@ -991,7 +1055,7 @@ def serve_document(md: str, title: str) -> tuple[str, str]:
         art = _PLAN_SRV.add("index.html", directory, title, lan=False)
         art.temporary = True
         art._document_source = True
-        base = f"http://{_PLAN_SRV.host}:{_PLAN_SRV.port}/a/{art.id}/"
+        base = f"http://{_PLAN_SRV.host}:{art.port}/"
         return base + "index.html", base + "document.md"
     except Exception:
         shutil.rmtree(directory, ignore_errors=True)
@@ -1004,6 +1068,62 @@ def serve_document(md: str, title: str) -> tuple[str, str]:
 def add(path: str, project_root, name: str = "", preferred_port: int | None = None,
         lan: bool = False, hostname: str | None = None) -> Artifact:
     return _SRV.add(path, project_root, name, preferred_port, lan, hostname)
+
+
+def _snapshot(art: Artifact) -> dict[str, bytes] | None:
+    """The files the page reaches, as they are now, by the same rules the server serves them by: what one
+    version of it keeps. None when there is nothing to keep, or more than one version may hold."""
+    from . import artifact_store
+    entry = art.entry or "index.html"
+    names = set(linked_files(Path(art.directory), entry, True)) | {entry}
+    files, total = {}, 0
+    for rel in sorted(names):
+        target, _, _ = resolve_request(art, rel)
+        if target is None:
+            continue
+        try:
+            data = target.read_bytes()
+        except OSError:
+            continue
+        total += len(data)
+        if total > artifact_store.MAX_VERSION_BYTES or len(files) >= artifact_store.MAX_FILES:
+            return None
+        files[rel] = data
+    return files or None
+
+
+def _record_version(server: "_Server", art: Artifact, project_root, session: str = "") -> str:
+    """Keep this publish as a version of the artifact's Page in the store. Serving never fails for it: a page too
+    big for a version, or a store that can't be written, is still served, and the reason comes back."""
+    from . import artifact_store
+    files = _snapshot(art)
+    if not files:
+        return "not versioned: the page and what it links to are more than one version can hold"
+    store = artifact_store.store()
+    entry = art.entry or "index.html"
+    try:
+        if art.store_id and store.exists(art.store_id):
+            store.update(art.store_id, files, author="DGC", summary="Published", title=art.name, entry=entry)
+        else:
+            page = store.create(
+                "page", art.name, files, author="DGC", summary="Published", entry=entry,
+                origin={"surface": "work", "project": str(project_root), **({"session": session} if session else {})},
+                link={"path": art.directory, "entry": entry, "project": str(project_root)},
+                legacy={"server": art.id})
+            with server.lock:
+                art.store_id = page.id
+                server._save()
+        return ""
+    except (artifact_store.ArtifactError, OSError) as exc:
+        return f"not versioned: {exc}"
+
+
+def publish(path: str, project_root, name: str = "", preferred_port: int | None = None, lan: bool = False,
+            hostname: str | None = None, session: str = "") -> tuple[Artifact, str]:
+    """Work's artifact tool: serve the page at its own address and keep this publish as a version of it.
+    Returns the artifact and, when it couldn't be versioned, why (it is served either way)."""
+    art = _SRV.add(path, project_root, name, preferred_port, lan, hostname)
+    return art, _record_version(_SRV, art, project_root, session)
 
 
 # back-compat alias for the old per-port name
@@ -1037,6 +1157,12 @@ def base_url() -> str:
 
 def url_for(aid: str) -> str:
     return _SRV.url_for(aid)
+
+
+def page_url(aid: str) -> str:
+    """The artifact's page at its own origin (url_for is the shell with it chosen)."""
+    art = get(aid)
+    return art.page_url if art else ""
 
 
 def running() -> bool:
@@ -1132,48 +1258,87 @@ def resolve_request(art: Artifact, sub: str) -> tuple[Path | None, int, bytes]:
     return target, 200, b""
 
 
+def _url_host(host: str) -> str:
+    """A host as it goes in a URL: an IPv6 literal in brackets."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def _shell_hosts(server: "_Server") -> list[str]:
+    """Every name the shell answers to, for the frame-ancestors of the pages it frames."""
+    hosts = {"localhost", "127.0.0.1", "::1", server.host, *server.lan_hosts}
+    if server.public_host:
+        hosts.add(server.public_host)
+    return sorted(h for h in hosts if h)
+
+
+# VS Code's webview panels (the editor's artifact panel frames a page there): the webview's own frame and the desktop
+# workbench around it. VS Code for the Web is not among them; there a page opens in the browser instead.
+_EDITOR_ANCESTORS = ("vscode-webview:", "vscode-file:")
+
+
+def _page_csp(server: "_Server", base: str) -> str:
+    """The artifact's own CSP with its frame-ancestors narrowed to the shell's origin and VS Code's panels: they may
+    frame the page and the page may open itself; nothing else may frame it."""
+    ancestors = " ".join(["'self'", *(f"http://{_url_host(h)}:{server.port}" for h in _shell_hosts(server)),
+                          *_EDITOR_ANCESTORS])
+    kept = [part.strip() for part in base.split(";") if part.strip() and not part.strip().startswith("frame-ancestors")]
+    return "; ".join([*kept, f"frame-ancestors {ancestors}"])
+
+
+class _Handler(BaseHTTPRequestHandler):
+    """What the shell's listener and every artifact's listener share: the host check and the headers."""
+    server_ref: "_Server"
+    frame_options: str | None = "SAMEORIGIN"
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body: bytes, ctype="text/html; charset=utf-8", csp: str = _PLAIN_CSP,
+              headers: dict | None = None):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if self.frame_options:
+            self.send_header("X-Frame-Options", self.frame_options)
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        if csp:
+            self.send_header("Content-Security-Policy", csp)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _text(self, code, body: bytes):
+        self._send(code, body, "text/plain; charset=utf-8")
+
+    def _local_ip(self) -> str:
+        try:
+            return str(self.connection.getsockname()[0])
+        except (OSError, AttributeError, IndexError):
+            return ""
+
+    def _host_ok(self) -> bool:
+        hosts = self.headers.get_all("Host") or []
+        if len(hosts) == 1 and host_allowed(self.server_ref, hosts[0], self._local_ip()):
+            return True
+        self.close_connection = True
+        self._text(421, b"misdirected request: this DGC artifact server answers only to "
+                        b"localhost and this machine's own addresses")
+        return False
+
+    def _request_host(self) -> str:
+        """The host the browser used (already allowed by _host_ok), so links stay on the same name."""
+        return split_host((self.headers.get_all("Host") or [""])[0]) or self.server_ref.host
+
+
 def _make_handler(server: "_Server"):
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(_Handler):
+        server_ref = server
         timeout = server.request_timeout     # a client that never finishes its request is dropped
-
-        def log_message(self, *a):
-            pass
-
-        def _send(self, code, body: bytes, ctype="text/html; charset=utf-8", csp: str = _PLAIN_CSP,
-                  headers: dict | None = None):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "SAMEORIGIN")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-            if csp:
-                self.send_header("Content-Security-Policy", csp)
-            for key, value in (headers or {}).items():
-                self.send_header(key, value)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
-
-        def _text(self, code, body: bytes):
-            self._send(code, body, "text/plain; charset=utf-8")
-
-        def _local_ip(self) -> str:
-            try:
-                return str(self.connection.getsockname()[0])
-            except (OSError, AttributeError, IndexError):
-                return ""
-
-        def _host_ok(self) -> bool:
-            hosts = self.headers.get_all("Host") or []
-            if len(hosts) == 1 and host_allowed(server, hosts[0], self._local_ip()):
-                return True
-            self.close_connection = True
-            self._text(421, b"misdirected request: this DGC artifact server answers only to "
-                            b"localhost and this machine's own addresses")
-            return False
 
         def _same_origin_write(self) -> bool:
             token = self.headers.get(TOKEN_HEADER, "")
@@ -1203,20 +1368,28 @@ def _make_handler(server: "_Server"):
                 q = parse_qs(parsed.query)
                 sel = (q.get("a") or [""])[0]
                 nonce = secrets.token_urlsafe(18)
-                self._send(200, _shell_html(server, sel, nonce).encode("utf-8"),
-                           csp=_SHELL_CSP.format(n=nonce))
+                host = self._request_host()
+                self._send(200, _shell_html(server, sel, nonce, host).encode("utf-8"),
+                           csp=_SHELL_CSP.format(n=nonce, frames=f"http://{_url_host(host)}:*"))
                 return
             if path == "/favicon.ico":
                 self._send(200, _ICON_SVG.encode("utf-8"), "image/svg+xml")
                 return
             if path == "/_list":
-                items = [{"id": a.id, "name": a.name, "path": a.path, "uptime": a.uptime}
+                items = [{"id": a.id, "name": a.name, "path": a.path, "port": a.port, "uptime": a.uptime}
                          for a in server.list()]
                 self._send(200, json.dumps({"artifacts": items}).encode(),
                            "application/json")
                 return
             if path.startswith("/a/"):
-                self._serve_artifact_file(path)
+                # An old link: the page now lives at its own origin.
+                aid, _, sub = path[len("/a/"):].partition("/")
+                art = server.artifacts.get(aid)
+                if not art or not art.port:
+                    self._text(404, b"unknown artifact")
+                    return
+                location = f"http://{_url_host(self._request_host())}:{art.port}/{quote(sub)}"
+                self._send(302, b"", headers={"Location": location})
                 return
             self._text(404, b"not found")
 
@@ -1237,40 +1410,68 @@ def _make_handler(server: "_Server"):
                 return
             self._text(404, b"not found")
 
-        def _serve_artifact_file(self, path: str):
-            rest = path[len("/a/"):]
-            aid, _, sub = rest.partition("/")
-            art = server.artifacts.get(aid)
-            if not art:
-                self._text(404, b"unknown artifact")
+    return Handler
+
+
+def _make_page_handler(server: "_Server", art: Artifact):
+    """One artifact's own listener: its files only, at its own origin, framed only by the shell."""
+    class PageHandler(_Handler):
+        server_ref = server
+        frame_options = None                 # frame-ancestors in the CSP says who may frame it
+        timeout = server.request_timeout
+
+        def do_GET(self):
+            if not self._host_ok():
                 return
+            sub = unquote(urlparse(self.path).path).lstrip("/")
             target, status, why = resolve_request(art, sub)
             if target is None:
+                if sub == "favicon.ico":
+                    self._send(200, _ICON_SVG.encode("utf-8"), "image/svg+xml")
+                    return
                 self._text(status, why)
                 return
             try:
                 download = (server is _PLAN_SRV and getattr(art, "_document_source", False)
                             and sub == "document.md")
-                self._send(200, target.read_bytes(), "text/markdown; charset=utf-8" if download else _guess_type(target),
-                           csp=server.file_csp, headers={"Content-Disposition": 'attachment; filename="document.md"'}
+                self._send(200, target.read_bytes(),
+                           "text/markdown; charset=utf-8" if download else _guess_type(target),
+                           csp=_page_csp(server, server.file_csp),
+                           headers={"Content-Disposition": 'attachment; filename="document.md"'}
                            if download else None)
             except OSError:
                 self._text(500, b"read error")
 
-    return Handler
+        do_HEAD = do_GET
+
+        def do_POST(self):
+            if not self._host_ok():
+                return
+            self._text(405, b"an artifact is read-only")
+
+    return PageHandler
 
 
-def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
-    """The dgc-design shell: a top-left dropdown listing every artifact + an iframe. `nonce` marks the
-    inline style and script the response's CSP allows; the stop token rides in the script."""
+# The frame an artifact is shown in: its own origin keeps it out of the shell; the sandbox also keeps it from
+# navigating the shell's tab. allow-same-origin lets the page keep its own storage, which is safe only
+# because that origin is the artifact's own, never the shell's.
+_FRAME_SANDBOX = ("allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox "
+                  "allow-modals allow-downloads")
+
+
+def _shell_html(server: "_Server", selected: str, nonce: str = "", host: str = "") -> str:
+    """The dgc-design shell: a top-left dropdown listing every artifact + an iframe showing the chosen one from
+    its own origin, on the host name the browser used. `nonce` marks the inline style and script the
+    response's CSP allows; the stop token rides in the script."""
     na = f' nonce="{_esc(nonce)}"' if nonce else ""
+    host = _url_host(host or server.host)
     arts = server.list()
     if arts and not any(a.id == selected for a in arts):
         selected = arts[0].id                      # none, stopped, or a retired id: the newest one
     opts = "".join(
         f'<option value="{a.id}"{" selected" if a.id == selected else ""}>{_esc(a.name)}</option>'
         for a in arts)
-    initial = _esc(next((a.path for a in arts if a.id == selected), ""))
+    initial = _esc(next((f"http://{host}:{a.port}{a.path}" for a in arts if a.id == selected and a.port), ""))
     empty = "" if arts else '<div class="empty">No artifacts yet — the agent serves one with the <code>artifact</code> tool.</div>'
     reach = (f'<span class="reach" title="reachable by other devices on your network">◈ LAN · {server.host}</span>'
              if server.lan else '')
@@ -1319,15 +1520,16 @@ def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
   </div>
   <div class="stage">
     {empty}
-    <iframe id="frame" src="{initial}" title="artifact"></iframe>
+    <iframe id="frame" src="{initial}" title="artifact" sandbox="{_FRAME_SANDBOX}"></iframe>
   </div>
 <script{na}>
   const TOKEN = {_script_json(server.token)};
   const sel = document.getElementById('sel'), frame = document.getElementById('frame'),
         open = document.getElementById('open'), stop = document.getElementById('stop'),
         count = document.getElementById('count');
-  let items = {_script_json([{ "id": a.id, "name": a.name, "path": a.path } for a in arts])};
-  function pathFor(id){{ const it = items.find(x=>x.id===id); return it ? it.path : ''; }}
+  let items = {_script_json([{ "id": a.id, "name": a.name, "path": a.path, "port": a.port } for a in arts])};
+  function pathFor(id){{ const it = items.find(x=>x.id===id);
+    return it && it.port ? location.protocol + '//' + location.hostname + ':' + it.port + it.path : ''; }}
   function show(id){{ const p = pathFor(id); if(!p) return; frame.src = p; open.href = p;
     history.replaceState(null,'', '/?a='+encodeURIComponent(id)); }}
   function render(){{
@@ -1343,7 +1545,7 @@ def _shell_html(server: "_Server", selected: str, nonce: str = "") -> str:
   }});
   async function refresh(){{
     try{{ const r = await fetch('/_list'); const d = await r.json();
-      items = d.artifacts.map(a=>({{id:a.id,name:a.name,path:a.path}}));
+      items = d.artifacts.map(a=>({{id:a.id,name:a.name,path:a.path,port:a.port}}));
       const cur = sel.value;
       sel.replaceChildren(...items.map(a=>{{
         const option = document.createElement('option'); option.value = a.id; option.textContent = a.name;

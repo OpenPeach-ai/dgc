@@ -25,6 +25,12 @@ HINT = browser.BrowserError(browser.INSTALL_HINT)
 
 
 class EnsureBrowserTests(unittest.TestCase):
+    def test_package_command_drains_large_output_and_keeps_error_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            command = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 262144 + '\\napt failure\\n'); sys.exit(7)"]
+            with self.assertRaisesRegex(RuntimeError, "apt failure"):
+                browser_setup._run_cancellable(command, "Downloading Chrome", Path(directory), None)
+
     def test_a_browser_you_have_is_used_and_nothing_is_fetched(self):
         with patch.object(browser, "discover_browser", return_value=Path("/usr/bin/chromium")), \
                 patch.object(browser_setup, "own_chrome", return_value=None), \

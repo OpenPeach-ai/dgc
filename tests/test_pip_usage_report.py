@@ -35,6 +35,18 @@ class PipUsageReportTests(unittest.TestCase):
                 patch.object(self.registry, "close"), patch("dgc.workspace_registry.in_use", return_value=True):
             return pip_usage_report.report(range_name, now=NOW)
 
+    def test_malformed_saved_usage_and_definition_do_not_break_the_page(self):
+        job = self.job()
+        run = self.run_for(job, "malformed", tokens=1_000)
+        self.registry.db.execute("UPDATE pip_runs SET result=? WHERE id=?",
+                                 ('{"usage":{"input_tokens":"Infinity","output_tokens":2}}', run["id"]))
+        self.registry.db.execute("DROP TRIGGER immutable_job_version")
+        self.registry.db.execute("UPDATE pip_versions SET definition='[]' WHERE pip_id=?", (job["id"],))
+        with patch("dgc.pip_usage.run_totals", return_value={}):
+            row = self.report()["by_pip"][0]
+        self.assertEqual(row["name"], "Removed Pip")
+        self.assertEqual((row["input_tokens"], row["output_tokens"]), (0, 0))
+
     def test_each_pip_gets_its_share_most_tokens_first(self):
         auditor, docs = self.job(), self.job("Docs writer")
         self.run_for(auditor, "a1", tokens=5_000)

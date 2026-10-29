@@ -13,6 +13,24 @@ import socket
 import sys
 import threading
 
+MAX_REQUEST = 4 * 1024 * 1024  # Keep in sync with pip_brain.MAX_REQUEST; this script runs isolated.
+
+
+def upstream(reader, link) -> None:
+    """Forward complete request lines while bounding memory to the server's request limit."""
+    try:
+        while True:
+            line = reader.readline(MAX_REQUEST + 1)
+            if not line or len(line) > MAX_REQUEST:
+                break
+            link.sendall(line if line.endswith(b"\n") else line + b"\n")
+    except (OSError, ValueError):
+        pass
+    try:
+        link.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+
 
 def main() -> int:
     path = os.environ.get("DGC_PIP_MCP_SOCKET", "")
@@ -20,30 +38,18 @@ def main() -> int:
     if not path or not token:
         sys.stderr.write("dgc pip tools: no run to reach\n")
         return 2
+    link = None
     try:
         link = socket.socket(socket.AF_UNIX)
         link.connect(path)
         link.sendall(json.dumps({"token": token}).encode("ascii") + b"\n")
     except OSError as error:
+        if link is not None:
+            link.close()
         sys.stderr.write(f"dgc pip tools: the run is gone ({error})\n")
         return 1
 
-    def upstream():
-        # The CLI's requests, line by line. Its stdin closing ends this run's tools.
-        try:
-            while True:
-                line = sys.stdin.buffer.readline()
-                if not line:
-                    break
-                link.sendall(line if line.endswith(b"\n") else line + b"\n")
-        except OSError:
-            pass
-        try:
-            link.shutdown(socket.SHUT_WR)
-        except OSError:
-            pass
-
-    threading.Thread(target=upstream, daemon=True).start()
+    threading.Thread(target=upstream, args=(sys.stdin.buffer, link), daemon=True).start()
     out = sys.stdout.buffer
     try:
         while True:
@@ -54,6 +60,7 @@ def main() -> int:
             out.flush()
     except OSError:
         pass
+    link.close()
     return 0
 
 

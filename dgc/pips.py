@@ -79,6 +79,7 @@ CONTROL_COMMANDS = frozenset({
     "check_pip_source", "get_pip_run_source",
     "list_pip_run_posts", "list_pip_run_fixes",
     "get_pip_eyes", "set_pip_eyes",
+    "get_pip_artifacts", "set_pip_artifacts",
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
     "get_pip_level", "set_pip_level",
@@ -131,6 +132,9 @@ _COMMAND_ARGS = {
     "forget_pip_site": {"pip_id", "site"}, "get_pip_chat_context": {"pip_id", "context_size"},
     "set_pip_chat_options": {"pip_id", "chat_options"},
     "get_pip_eyes": {"pip_id"}, "set_pip_eyes": {"pip_id", "choice"},
+    # API 67: where a Pip's reports are kept (the chat card, or also its own document or sheet) and the dashboards
+    # it refreshes after each run (artifact_pips).
+    "get_pip_artifacts": {"pip_id"}, "set_pip_artifacts": {"pip_id", "report_as", "dashboards"},
     "get_pip_computer_apps": set(), "set_pip_computer_apps": {"choice"},
     # Saved logins (pip_logins, API 56): a save carries the password and the authenticator key; nothing answers with them.
     "list_pip_logins": {"pip_id"}, "remove_pip_login": {"login_id"}, "grant_pip_login": {"login_id", "pips"},
@@ -1838,6 +1842,9 @@ class PipStore:
         from . import pip_daily_log
         pip_daily_log.after_run(self.registry.directory, self.db, run, status=status, result=result, error=error,
                                 secrets=self._saved_secrets())
+        # Its review as its own document or sheet, and the dashboards it keeps current (artifact_pips).
+        from . import artifact_pips
+        artifact_pips.after_run(self.db, run, status=status, result=result)
         return self._transition_view(run_id)
 
     def _saved_secrets(self):
@@ -2973,6 +2980,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 # Only the top-level turn opens a recovery point; use its manager
                 # so reviewed edits retain the ordinary pre-edit capture guard.
                 child.checkpoints = self.checkpoints
+                child.mods = getattr(self, "mods", None)      # the run's guard mods watch its specialists' steps too
                 return child
             return pip_specialists.run(self, agent_name, description, prompt, budget=specialist_budget,
                                        make_child=make_child, call_id=call_id)
@@ -3632,6 +3640,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                 changing=[reference.get("conversation_continuation"), conversation["text"], files_note])
         except Exception:                      # noqa: BLE001
             context_measure = None
+    # Guard mods (ones that hear tool.call) watch a Pip's run too: they may stop a step, never allow one, and one
+    # that would ask stops it instead, since nobody is there to answer (dgc/mods/host.py, surface "pip").
+    from .mods import bridge as mod_bridge
+    mod_bridge.start(agent, surface="pip")
     try:
         if eyes_photo_card:
             agent.messages.append({"role": "user", "content": prompt})
@@ -3773,6 +3785,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             verify(snapshot, source['source_snapshot'])
         return result
     finally:
+        mod_bridge.stop(agent)
         mcp.stop_all()
 
 
@@ -4440,6 +4453,12 @@ def _execute_run(registry, row, config):
             result = publish(result, snapshot, run_dir, secrets=secrets)
             if timed_out.is_set() or state_unavailable.is_set() or execution_cancel.is_set():
                 raise RegistryError("runner_state_unavailable" if state_unavailable.is_set() else "timeout" if timed_out.is_set() else "cancelled", "The draft stopped before completion; its private artifact was not accepted as a completed result.")
+            # The finished draft is also the newest version of the Pip's own document (dgc/artifact_pips), by the Pip.
+            from .artifact_pips import keep_draft
+            from .pip_report_delivery import _pip
+            named = _pip(registry.db, row["pip_id"]) or {}
+            keep_draft(row["pip_id"], named.get("name", ""), str(result.get("title") or ""),
+                       result["draft"]["markdown"], workspace=str(row["workspace_id"]))
         return result
     finally:
         stop.set()
@@ -5031,6 +5050,19 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError('local_only', "How a Pip sees is set on this computer only.")
                 result = {"eyes": pip_eyes.status(store, pip_id, config) if command == 'get_pip_eyes'
                           else pip_eyes.set_choice(store, pip_id, request.get('choice'), actor, config)}
+            elif command in ('get_pip_artifacts', 'set_pip_artifacts'):
+                # Where a Pip's reports are kept and the dashboards it refreshes (artifact_pips): set on this computer.
+                from . import artifact_pips
+                if registry.db.execute("SELECT 1 FROM pips WHERE id=? AND status!='archived'", (pip_id,)).fetchone() is None:
+                    raise RegistryError('not_found', "That Pip isn't here.")
+                if command == 'set_pip_artifacts' and actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', "Where a Pip's reports are kept is set on this computer only.")
+                if command == 'get_pip_artifacts':
+                    result = {"artifacts": artifact_pips.settings(registry.db, pip_id)}
+                else:
+                    with registry.transaction():
+                        result = {"artifacts": artifact_pips.set_settings(
+                            registry.db, pip_id, report_as=request.get('report_as'), dashboards=request.get('dashboards'))}
             elif command in ('get_pip_level', 'set_pip_level'):
                 # How much a Personal Pip asks (pip_levels): Ask, Approve for me or Full access, and what its level did.
                 from . import pip_levels

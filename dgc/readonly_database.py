@@ -19,10 +19,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import time
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
 ENV = "DGC_READONLY_DATABASE_URL"
 SCHEMES = ("postgresql", "postgres")
@@ -74,14 +73,20 @@ def parse(url) -> dict:
     what to change. Never echoes the string (it holds a password)."""
     if not isinstance(url, str) or not url.strip() or len(url) > MAX_URL or any(ord(c) < 32 for c in url):
         raise ReadOnlyDatabaseError("Give one postgresql://user:password@localhost:5432/database connection string.")
-    parts = urlsplit(url.strip())
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError as exc:
+        raise ReadOnlyDatabaseError("The Postgres connection string is malformed.") from exc
     if parts.scheme not in SCHEMES:
         raise ReadOnlyDatabaseError("Only a Postgres connection string (postgresql://...) is supported.")
     try:
         port = parts.port or 5432
     except ValueError:
         raise ReadOnlyDatabaseError("The port in the connection string isn't a number.") from None
-    host = (parts.hostname or "").lower()
+    try:
+        host = (parts.hostname or "").lower()
+    except ValueError as exc:
+        raise ReadOnlyDatabaseError("The host in the connection string is malformed.") from exc
     if host not in LOOPBACK:
         raise ReadOnlyDatabaseError("The read-only database must be on this computer (host localhost or 127.0.0.1): "
                                     "a checker's box reaches it through one forwarded local port and no other "
@@ -93,9 +98,17 @@ def parse(url) -> dict:
         raise ReadOnlyDatabaseError("The connection string needs the database name after the port (…:5432/name).")
     if parts.fragment:
         raise ReadOnlyDatabaseError("The connection string can't have a #fragment.")
-    query = parts.query
-    if re.search(r"(?:^|&)(?:host|hostaddr|port)=", query):
-        raise ReadOnlyDatabaseError("Give the host and port in the address, not as query options.")
+    try:
+        options = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
+                            max_num_fields=8) if parts.query else []
+    except ValueError as exc:
+        raise ReadOnlyDatabaseError("The connection string has invalid query options.") from exc
+    if any(key != "sslmode" for key, _ in options):
+        raise ReadOnlyDatabaseError("Give the host and port in the address, not as query options. Only sslmode is supported.")
+    if len(options) > 1 or (options and options[0][1] not in
+                             {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}):
+        raise ReadOnlyDatabaseError("Choose one supported Postgres sslmode.")
+    query = "sslmode=" + options[0][1] if options else ""
     return {"scheme": parts.scheme, "user": unquote(parts.username), "password": unquote(parts.password or ""),
             "host": host, "port": port, "database": database, "query": query}
 

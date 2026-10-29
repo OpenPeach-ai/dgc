@@ -1,21 +1,43 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
+import * as fsp from "node:fs/promises";
 import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-async function moduleAt(path) {
+async function moduleAt(path, overrides = {}) {
   const built = await build({ entryPoints: [new URL(path, import.meta.url).pathname], bundle: true,
     platform: "node", format: "cjs", write: false });
   const module = { exports: {} };
-  new Function("require", "module", "exports", built.outputFiles[0].text)(require, module, module.exports);
+  new Function("require", "module", "exports", built.outputFiles[0].text)((name) => overrides[name] || require(name), module, module.exports);
   return module.exports;
 }
-const { workspaceFile } = await moduleAt("../src/navigation.ts");
+const { workspaceFile, workspaceImage, THUMB_MAX_BYTES } = await moduleAt("../src/navigation.ts");
 const { linkTarget, render } = await moduleAt("../src/markdown.ts");
+
+test("a preview refuses a file replaced by an external symlink after workspace validation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dgc-thumb-race-"));
+  try {
+    const project = join(root, "project"), target = join(project, "shot.png"), outside = join(root, "private.png");
+    await mkdir(project);
+    await writeFile(target, "allowed image");
+    await writeFile(outside, "private image");
+    let swapped = false;
+    const reader = await moduleAt("../src/navigation.ts", {"fs/promises": {...fsp, stat: async (path, ...args) => {
+      const info = await fsp.stat(path, ...args);
+      if (path === target && !swapped) {
+        swapped = true;
+        await rm(target); await symlink(outside, target);
+      }
+      return info;
+    }}});
+    assert.equal(await reader.workspaceImage("shot.png", [project]), "", "never return the outside file's bytes");
+    assert.equal(swapped, true, "the replacement happened after the original file was checked");
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
 
 test("file navigation follows only canonical paths within currently open roots", async () => {
   const root = await mkdtemp(join(tmpdir(), "dgc-navigation-"));
@@ -34,6 +56,31 @@ test("file navigation follows only canonical paths within currently open roots",
     }
     assert.equal(await workspaceFile(join(secondary, "test.ts"), [project]), undefined,
       "a removed root loses its file navigation grant");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a shown image's tile picture is read only inside the workspace, only for raster images, only up to 8 MB", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dgc-thumb-"));
+  try {
+    const project = join(root, "project");
+    await mkdir(project);
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+    await writeFile(join(project, "shot.png"), png);
+    await writeFile(join(project, "photo.JPG"), png);
+    await writeFile(join(project, "logo.svg"), "<svg onload=alert(1)/>");
+    await writeFile(join(project, "notes.txt"), "text");
+    await writeFile(join(root, "private.png"), png);
+    await symlink(join(root, "private.png"), join(project, "link.png"));
+    await writeFile(join(project, "huge.png"), Buffer.alloc(THUMB_MAX_BYTES + 1));
+    await writeFile(join(project, "edge.png"), Buffer.alloc(THUMB_MAX_BYTES));
+    assert.equal(await workspaceImage("shot.png", [project]), `data:image/png;base64,${png.toString("base64")}`);
+    assert.match(await workspaceImage("photo.JPG", [project]), /^data:image\/jpeg;base64,/);
+    assert.match(await workspaceImage("edge.png", [project]), /^data:image\/png;base64,/, "8 MB exactly is allowed");
+    for (const value of ["logo.svg", "notes.txt", "huge.png", "link.png", "../private.png", join(root, "private.png"),
+      "missing.png", "shot.png\0", 42, undefined]) {
+      assert.equal(await workspaceImage(value, [project]), "", `refused: ${String(value)}`);
+    }
+    assert.equal(await workspaceImage("shot.png", []), "", "no open folder, no picture");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

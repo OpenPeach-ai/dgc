@@ -1,9 +1,10 @@
 /** Public DGC client. Mirrors sdk/python/dgc_sdk/client.py. */
 import {
-  closeSync, constants as fsConstants, mkdirSync, openSync, realpathSync, rmSync, statSync, unlinkSync, writeSync,
+  closeSync, constants as fsConstants, existsSync, mkdirSync, openSync, realpathSync, rmSync, statSync, unlinkSync,
+  writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AuditLog, rememberSecret } from "./audit.ts";
 import {
@@ -220,6 +221,13 @@ export class DGC {
       }
     }
     Object.assign(extra, plan.env);
+    if (options.mods?.length) {
+      const folders = options.mods.map((folder) => resolve(folder));
+      for (const folder of folders) {
+        if (!existsSync(join(folder, "dgc-mod.json"))) throw new DGCConfigError(`mods: ${folder} has no dgc-mod.json`);
+      }
+      extra.DGC_MODS_EXTRA = folders.join(delimiter);
+    }
     let values: Record<string, unknown> | null = null;
     if (!inherit) {
       values = {

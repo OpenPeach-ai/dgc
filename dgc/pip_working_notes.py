@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 from .workspace_registry import RegistryError
@@ -32,6 +33,7 @@ MAX_LINES = 60
 MAX_BYTES = 6000
 MAX_LINE = 300
 MAX_OPS = 12                    # changes one run may make
+MAX_STORED_BYTES = 16 * 1024    # includes Markdown bullets and newlines
 LOCAL = ("editor-user", "local-console")
 _LONG_NUMBER = re.compile(r"(?:\d[ -]?){13,}")
 _PIP = re.compile(r"pip_[0-9a-f]{32}\Z")
@@ -141,8 +143,12 @@ def _locked(path: Path):
     except ImportError:
         yield
         return
-    fd = os.open(str(path.with_suffix(".lock")), os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o600)
+    fd = os.open(str(path.with_suffix(".lock")), os.O_CREAT | os.O_RDWR |
+                 getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) |
+                 getattr(os, "O_NONBLOCK", 0), 0o600)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("working notes lock is not a regular file")
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
@@ -154,19 +160,23 @@ def _locked(path: Path):
 
 def _read_lines(path: Path) -> tuple[list[str], str]:
     try:
-        raw = path.read_text(encoding="utf-8")
-        when = _mtime(path)
+        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+                               getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)), "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STORED_BYTES:
+                return [], ""
+            data = stream.read(MAX_STORED_BYTES + 1)
+            if len(data) > MAX_STORED_BYTES:
+                return [], ""
+            from datetime import datetime, timezone
+            when = datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        raw = data.decode("utf-8")
     except FileNotFoundError:
         return [], ""
     except (OSError, UnicodeError):
         return [], ""
     lines = [" ".join(row.split()).strip(" -•*") for row in raw.splitlines()]
     return [line for line in lines if line][:MAX_LINES], when
-
-
-def _mtime(path: Path) -> str:
-    from datetime import datetime, timezone
-    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:

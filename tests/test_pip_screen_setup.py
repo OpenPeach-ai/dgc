@@ -100,6 +100,13 @@ class SetupTests(unittest.TestCase):
         setup._run_logged(list(needs))
         return setup.status()
 
+    def test_malformed_progress_counters_do_not_break_desktop_status(self):
+        target = setup._status_path()
+        target.parent.mkdir(parents=True)
+        target.write_text(json.dumps({"state": "failed", "done": "nan", "total": {}, "error": "stopped"}))
+        value = setup.status()
+        self.assertEqual((value["state"], value["done"], value["total"]), ("failed", 0, 0))
+
     def test_it_downloads_what_is_missing_unpacks_it_into_its_own_folder_and_switches_to_it(self):
         value = self.run_setup()
         self.assertEqual(value["state"], "ready", value)

@@ -175,6 +175,7 @@ const mail={recipient_email:'friend@example.test',subject:'A short note',body:'L
 const source={run_id:RUN,pip_id:PIP,workspace_id:PW,job_version:1,lifecycle_revision:0,result_digest:'e'.repeat(64)};
 const draft=(extra={})=>({id:DRAFT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,payload:{schema_version:1,source,message:mail},...extra});
 const action=(status='pending')=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:1,kind:'gmail_send',source,server:'composio',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),account:'ca_home',message:mail},receipt:null});
+const sentMail=(prepared=action())=>({...prepared,status:'succeeded',receipt:{provider:'Gmail',message_id:'mail_123',meaning:'Provider accepted the message; delivery to the recipient is not confirmed.'}});
 const gmail=()=>link({status:'connected',label:'me@example.com',server:'composio',account:'ca_home',updated_at:'2026-10-01T09:00:00.000Z'});
 test('the email a Pip wrote is an Allow card; Send prepares that exact draft on its Gmail account and sends it once',async()=>{
  const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
@@ -190,8 +191,16 @@ test('the email a Pip wrote is an Allow card; Send prepares that exact draft on 
  x.answer(prep,{action:action()});await flush();
  const ok=x.requests('accept_pip_app_action').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(ok.request)),{type:'accept_pip_app_action',action_id:ACTION,expected_digest:'d'.repeat(64)});
  assert.equal(x.requests('always_allow_pip_app_action').length,0);
- x.answer(ok,{action:action('approved')});await x.drain();
+ x.answer(ok,{action:sentMail()});await x.drain();
  assert.match(x.d.body.textContent,/Sent, exactly as shown\./);
+});
+test('an unconfirmed Gmail response never claims the email was sent',async()=>{
+ const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
+ x.click(`[data-allow-send="${DRAFT}"]`);await flush();await answerGmail(x);
+ x.answer(x.requests('prepare_pip_message_draft').at(-1),{action:action()});await flush();
+ x.answer(x.requests('accept_pip_app_action').at(-1),{action:{...action('unknown'),receipt:{meaning:'Delivery is unconfirmed.'}}});await x.drain();
+ assert.match(x.d.body.textContent,/email is unconfirmed.*Check Gmail Sent/);
+ assert.doesNotMatch(x.d.body.textContent,/Sent, exactly as shown/);
 });
 test('Always allow sends this one and saves the grant; without a connected Gmail the card asks for an account; Don’t send dismisses',async()=>{
  const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
@@ -306,7 +315,7 @@ test('Edit changes the email on its card; Send sends the edited email, and a bad
  const act={...action(),payload:{...action().payload,message:edited}};
  x.answer(prep,{action:act});await flush();
  const ok=x.requests('accept_pip_app_action').at(-1);assert.ok(ok);
- x.answer(ok,{action:{...act,status:'approved'}});await x.drain();
+ x.answer(ok,{action:sentMail(act)});await x.drain();
  assert.match(x.d.body.textContent,/Sent with your changes\./);
 });
 test('a prepared email that differs from what the card showed is refused, never sent',async()=>{
@@ -323,6 +332,7 @@ const meet={summary:'Coffee with Sam',description:'At the corner cafe.',start_da
 const calDraft=(extra={})=>({id:EVENT,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status:'pending',digest:'c'.repeat(64),expired:false,expires_at:'2099-10-05T06:00:00Z',action_id:null,payload:{schema_version:1,source,event:meet},...extra});
 const calendarLink=()=>link({id:'applink_'+'c'.repeat(32),toolkit:'googlecalendar',app:'Google Calendar',status:'connected',label:'me@example.com',server:'composio',account:'ca_cal',updated_at:'2026-10-01T09:00:00.000Z'});
 const calAction=(event,status='pending')=>({id:ACTION,pip_id:PIP,workspace_id:PW,source_run_id:RUN,status,digest:'d'.repeat(64),expires_at:'2099-10-05T06:00:00Z',payload:{schema_version:event.attendees?4:2,kind:'calendar_create',source,server:'composio',connection_digest:'a'.repeat(64),schema_digest:'b'.repeat(64),account:'ca_cal',event},receipt:null});
+const createdEvent=event=>({...calAction(event,'succeeded'),receipt:{provider:'Google Calendar',event_id:'abcde12345',meaning:'Provider confirmed creation of this calendar event.'}});
 async function answerCalendar(x){
  x.answer(x.requests('list_pip_accounts').at(-1),{server:'composio',connection_digest:'a'.repeat(64),accounts:[{id:'ca_cal',label:'Home',toolkit:'googlecalendar'}]});
  x.answer(x.requests('inspect_pip_calendar_connection').at(-1),{server:'composio',connection_digest:'a'.repeat(64),tool:'GOOGLECALENDAR_CREATE_EVENT',schema_digest:'b'.repeat(64),account_required:true});await flush();
@@ -338,8 +348,16 @@ test('a calendar event the Pip drafted is an Allow card too: when, in its own zo
  assert.deepEqual(JSON.parse(JSON.stringify(prep.request)),{type:'prepare_pip_calendar_draft',draft_id:EVENT,expected_digest:'c'.repeat(64),server:'composio',connection_digest:'a'.repeat(64),account:'ca_cal',schema_digest:'b'.repeat(64),event:meet});
  x.answer(prep,{action:calAction(meet)});await flush();
  const ok=x.requests('accept_pip_app_action').at(-1);assert.ok(ok);
- x.answer(ok,{action:calAction(meet,'approved')});await x.drain();
+ x.answer(ok,{action:createdEvent(meet)});await x.drain();
  assert.match(x.d.body.textContent,/Added, exactly as shown\./);
+});
+test('an unconfirmed calendar response never claims the event or invitations were created',async()=>{
+ const x=setup({links:[calendarLink()],events:[calDraft()]});await openChat(x);
+ x.click(`[data-allow-create="${EVENT}"]`);await flush();await answerCalendar(x);
+ x.answer(x.requests('prepare_pip_calendar_draft').at(-1),{action:calAction(meet)});await flush();
+ x.answer(x.requests('accept_pip_app_action').at(-1),{action:{...calAction(meet,'unknown'),receipt:{meaning:'Creation is unconfirmed.'}}});await x.drain();
+ assert.match(x.d.body.textContent,/calendar event is unconfirmed.*Check the calendar/);
+ assert.doesNotMatch(x.d.body.textContent,/Added, exactly as shown/);
 });
 test('Edit changes the event on its card: a new time and a guest (who is invited), and Add creates the edited event',async()=>{
  const x=setup({links:[calendarLink()],events:[calDraft()]});await openChat(x);
@@ -355,8 +373,8 @@ test('Edit changes the event on its card: a new time and a guest (who is invited
  const prep=x.requests('prepare_pip_calendar_draft').at(-1);
  assert.deepEqual(JSON.parse(JSON.stringify(prep.request.event)),edited);
  x.answer(prep,{action:calAction(edited)});await flush();
- x.answer(x.requests('accept_pip_app_action').at(-1),{action:calAction(edited,'approved')});await x.drain();
- assert.match(x.d.body.textContent,/Added with your changes\. Invitations went to the guests\./);
+ x.answer(x.requests('accept_pip_app_action').at(-1),{action:createdEvent(edited)});await x.drain();
+ assert.match(x.d.body.textContent,/Added with your changes\. Invitations were requested; delivery is not confirmed\./);
 });
 test('Don’t add dismisses the calendar draft; without Google Calendar the card asks for an account',async()=>{
  const x=setup({links:[],events:[calDraft()]});await openChat(x);

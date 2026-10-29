@@ -666,6 +666,15 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(listed[-1]["id"], many[-2]["id"])
         self.assertLess(len(json.dumps({"type": "chatdgc_outline", "prompts": listed}).encode()), 4 * 1024 * 1024)
 
+    def test_an_outline_with_many_widgets_stays_inside_one_frame(self):
+        prompt = {"id": "msg_" + "1" * 32, "role": "user", "text": "Show my widgets"}
+        reply = {"id": "msg_" + "2" * 32, "role": "assistant", "text": "Done",
+                 "widgets": [{"id": f"wg_{i:016x}", "title": "Widget"} for i in range(20_000)]}
+        listed = service_module.outline([prompt, reply])
+        self.assertEqual(listed[0]["id"], prompt["id"])
+        self.assertLessEqual(len(listed[0]["widgets"]), service_module.OUTLINE_WIDGETS)
+        self.assertLess(len(json.dumps({"type": "chatdgc_outline", "prompts": listed}).encode()), 4 * 1024 * 1024)
+
     def test_a_message_too_large_for_one_frame_is_cut_for_showing(self):
         huge = {"id": "msg_" + "a" * 32, "role": "assistant", "text": "😀" * 1_000_000, "thinking": "t" * 1000}
         shown = fit(huge)
@@ -673,6 +682,24 @@ class ServiceTests(unittest.TestCase):
         self.assertLessEqual(len(json.dumps(shown, ensure_ascii=False).encode()), service_module.PAGE_BYTES)
         self.assertTrue(huge["text"].startswith(shown["text"]))
         self.assertEqual(page([huge])[0][0]["partial"], True)
+
+    def test_large_non_text_message_still_fits_one_frame(self):
+        huge = {"id": "msg_" + "b" * 32, "role": "user", "text": "See attached",
+                "attachments": [{"name": "photo.png", "data": "a" * (service_module.PAGE_BYTES + 100)}]}
+        shown = fit(huge)
+        self.assertTrue(shown["partial"])
+        self.assertEqual(shown["text"], "See attached")
+        self.assertLessEqual(len(json.dumps(shown, ensure_ascii=False).encode()), service_module.PAGE_BYTES)
+
+    def test_export_uses_a_new_private_temp_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target, victim = root / "export.txt", root / "victim.txt"
+            victim.write_text("keep")
+            (root / f".{target.name}.{os.getpid()}.tmp").symlink_to(victim)
+            service_module._save_export(target, b"exported", "Failed")
+            self.assertEqual(target.read_bytes(), b"exported")
+            self.assertEqual(victim.read_text(), "keep")
 
     def test_deltas_are_batched(self):
         chat = self.new()
@@ -849,7 +876,8 @@ class HostTests(unittest.TestCase):
     def test_ready_offers_it(self):
         self.assertEqual(self.host.default._ready_payload()["capabilities"]["chatdgc"], {"version": 1, "widget_report": 1, "widget_library": 1,
                           "windows": ["8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "max"], "context_breakdown": 1,
-                          "voice_replies": 1, "question_forms": 1, "outline": 1, "holder": 1})   # holder: 25 Oct, Open here
+                          "voice_replies": 1, "question_forms": 1, "outline": 1, "holder": 1,   # holder: 25 Oct, Open here
+                          "folder": 1})                                    # folder: 28 Oct, a folder the chat reads
 
     def test_no_frame_carries_a_sessions_chat_id_even_with_several_sessions(self):
         self.host.dispatch({"type": "open_chat", "request_id": "oc", "cwd": str(self.tmp / "b")})

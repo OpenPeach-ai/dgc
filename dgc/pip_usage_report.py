@@ -31,7 +31,7 @@ def _split(row, imported) -> tuple[int, int]:
         used = value.get("usage") if isinstance(value, dict) else None
         if isinstance(used, dict):
             return (max(0, int(used.get("input_tokens", 0) or 0)), max(0, int(used.get("output_tokens", 0) or 0)))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         pass
     return (0, 0)
 
@@ -86,7 +86,9 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                     "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version WHERE p.id=?", (pip_id,)).fetchone()
                 try:
                     definition = json.loads(meta[3]) if meta else {}
-                except ValueError:
+                except (ValueError, TypeError):
+                    definition = {}
+                if not isinstance(definition, dict):
                     definition = {}
                 pips.append({"pip_id": pip_id, "name": str(definition.get("name") or "Removed Pip")[:120],
                              "pip_type": str(definition.get("pip_type") or "")[:16],

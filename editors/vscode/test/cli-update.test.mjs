@@ -166,6 +166,15 @@ test("cancelling stops the installer and says so", async () => {
   assert.equal(result.reason, "cancelled");
 });
 
+test("an already-cancelled update settles before spawning the installer", async () => {
+  let disposed = false;
+  const token = { onCancellationRequested: (fn) => { fn(); return { dispose() { disposed = true; } }; } };
+  const result = await runCliUpdate(join(scratch, "does-not-exist"), token);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "cancelled");
+  assert.equal(disposed, true);
+});
+
 test("the executable is spawned directly, so shell metacharacters in its path are just characters", async () => {
   // A shell would read this name as a command, a comment and a redirect. spawn() without a shell
   // treats the whole string as one path, so the only thing that can run is that file.

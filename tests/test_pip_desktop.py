@@ -46,6 +46,15 @@ class NotifierTests(unittest.TestCase):
         restarted = desktop.Notifier(self.cfg, clock=self.clock, send=lambda t, b: self.shown.append((t, b)) or True)
         self.assertIsNone(restarted.tick(self.registry), "a restarted runner remembers what it said")
 
+    def test_damaged_seen_metadata_does_not_stop_notifications(self):
+        for damaged in ('null', '["review"]', '{"reviews": "not a list"}', '{"reviews": 4}', 'not json'):
+            with self.subTest(damaged=damaged):
+                with self.registry.transaction():
+                    self.registry.db.execute("INSERT OR REPLACE INTO metadata VALUES(?,?)", (desktop.SEEN_KEY, damaged))
+                self.assertEqual(self.notifier._seen(self.registry)["reviews"], [])
+        self.propose("Review after recovery")
+        self.assertEqual(self.tick(), "1 review waiting for you. Open the Pips view to decide.")
+
     def test_at_most_once_a_minute(self):
         self.propose("One")
         self.tick()

@@ -143,14 +143,24 @@ def _timeout_seconds(value) -> float:
 
 
 def _terminate_tree(proc: subprocess.Popen) -> None:
-    """Terminate the complete POSIX hook group, or the direct child on other platforms."""
+    """Terminate the hook process group or Windows child tree before closing pipes."""
     try:
         if os.name == "posix":
             os.killpg(proc.pid, signal.SIGKILL)
-        else:  # Windows process-tree Job Object coverage remains a cross-platform evidence gap.
+        elif os.name == "nt":
+            # A hook may spawn children that keep its output pipe open after its parent exits.
+            # Terminate that tree before waiting on the reader thread.
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5, check=False)
             proc.kill()
-    except (OSError, ProcessLookupError, PermissionError):
-        pass
+        else:
+            proc.kill()
+    except (OSError, ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+        try:
+            proc.kill()
+        except (OSError, ProcessLookupError, PermissionError):
+            pass
     try:
         proc.wait(timeout=5)
     except (OSError, subprocess.TimeoutExpired):
@@ -201,10 +211,15 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
         try:
             if proc.stdin is not None:
                 proc.stdin.write(payload)
-                proc.stdin.close()
         except (BrokenPipeError, OSError, ValueError):
             # A successful hook is allowed to ignore stdin and exit before the writer finishes.
             pass
+        finally:
+            try:
+                if proc.stdin is not None:
+                    proc.stdin.close()
+            except (OSError, ValueError):
+                pass
 
     def read_output() -> None:
         try:
@@ -221,6 +236,12 @@ def _run_one(command: str, payload: bytes, config, cwd, timeout: float,
                     capture.feed(final.encode("utf-8"))
         except (OSError, ValueError) as exc:
             io_errors.append(f"output failed ({type(exc).__name__})")
+        finally:
+            try:
+                if proc.stdout is not None:
+                    proc.stdout.close()
+            except (OSError, ValueError):
+                pass
 
     writer = threading.Thread(target=write_payload, daemon=True)
     reader = threading.Thread(target=read_output, daemon=True)

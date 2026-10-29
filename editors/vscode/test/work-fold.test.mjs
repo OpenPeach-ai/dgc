@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeDom } from "./support/webview-dom.mjs";
 import { ANSWER, ONE_LINE, detailTurn } from "./support/commentary-detail-scene.mjs";
+import { SENT, splitTurn } from "./support/split-turn-scene.mjs";
 
 const sid = (n) => `sub-${String(n).padStart(12, "0")}`;
 function panel(capabilities = {}) {
@@ -287,4 +288,57 @@ test("a turn a background command woke folds its card under the answer and keeps
   assert.match(note.textContent, /^Woke on background command · /, "the line that says why DGC woke stays");
   assert.equal(note.classList.contains("work-step"), false);
   assert.deepEqual(p.errors, []);
+});
+
+// Reported 28 Oct: an hour-long turn with a message sent 18 minutes in read "Worked for 3837s", then the message,
+// then the answer: one row above the message, as if the whole hour came before it, and in seconds.
+const rows = (block) => [...block.querySelectorAll(":scope > .work-toggle")];
+const shownSteps = (block) => [...block.querySelectorAll(":scope > .work-step")].map((node) => node.classList.contains("wf-open"));
+
+test("a message sent mid-turn splits the work: a row above it for what came first, one under it for what came after", () => {
+  const p = panel({ history_snapshot: true });
+  p.event({ type: "history", complete: true, items: splitTurn() });
+  const [block] = p.blocks();
+  assert.deepEqual(shape(block), ["row", "line (folded)", "tools (folded)", "you", "row", "line (folded)", "tools (folded)",
+    "answer"]);
+  const [first, second] = rows(block);
+  assert.equal(first, row(block), "the turn's own row heads it");
+  assert.equal(first.textContent, "Worked for 18m 12s", "from the prompt to the message");
+  assert.equal(second.textContent, "Worked for 45m 45s", "from the message to the answer");
+  for (const each of [first, second]) {
+    assert.equal(each.getAttribute("role"), "button");
+    assert.equal(each.getAttribute("aria-expanded"), "false");
+  }
+  // Each part opens on its own, in place under its row.
+  p.click(second);
+  assert.equal(second.getAttribute("aria-expanded"), "true");
+  assert.equal(first.getAttribute("aria-expanded"), "false");
+  assert.deepEqual(shownSteps(block), [false, false, true, true], "only what came after the message");
+  assert.ok(block.classList.contains("work-folded"), "a part is still folded");
+  p.key(first, "Enter");
+  assert.deepEqual(shownSteps(block), [true, true, true, true]);
+  assert.equal(block.classList.contains("work-folded"), false, "both open");
+  p.click(second);
+  assert.deepEqual(shownSteps(block), [true, true, false, false]);
+  // The next turn's answer folds both again.
+  p.events(detailTurn("t2"));
+  assert.deepEqual(rows(block).map((each) => each.getAttribute("aria-expanded")), ["false", "false"]);
+  assert.deepEqual(shownSteps(block), [false, false, false, false]);
+  assert.deepEqual(p.errors, []);
+});
+
+test("a long turn says its time in minutes and hours, and a split turn with no send time says no number", () => {
+  const p = panel({ history_snapshot: true });
+  const whole = splitTurn().filter((item) => item.role !== "steering" && item.of !== "steering");
+  p.event({ type: "history", complete: true, items: whole });
+  assert.deepEqual(rows(p.blocks()[0]).map((each) => each.textContent), ["Worked for 1h 3m"], "never 3837s");
+  // A session saved before DGC kept a steering message's time: two rows, and neither makes a number up.
+  const q = panel({ history_snapshot: true });
+  q.event({ type: "history", complete: true, items: splitTurn({ timed: false }) });
+  assert.deepEqual(rows(q.blocks()[0]).map((each) => each.textContent), ["Worked", "Worked"]);
+  // A send time a clock apart from the turn's own never makes a part negative.
+  const r = panel({ history_snapshot: true });
+  r.event({ type: "history", complete: true, items: splitTurn({ steeredAt: SENT - 30 }) });
+  assert.deepEqual(rows(r.blocks()[0]).map((each) => each.textContent), ["Worked for 0s", "Worked for 1h 3m"]);
+  assert.deepEqual([...p.errors, ...q.errors, ...r.errors], []);
 });

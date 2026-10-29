@@ -43,6 +43,7 @@ UNSHARP_RADIUS, UNSHARP_AMOUNT = 1.2, 0.6
 HEIC_LONG_SIDE = 4096           # an iPhone photo bigger than this (24 or 48 MP) is kept at 4096
 HEIC_JPEG_QUALITY = 92
 MAX_CONVERTED_BYTES = 8 * 1024 * 1024
+MAX_TOOL_OUTPUT_BYTES = 32 * 1024 * 1024
 TOOL_SECONDS = 60
 HEIC_TYPES = ("image/heic", "image/heif")
 # A file's ftyp brands that say it is HEIF: HEVC stills and sequences, and the generic image brands.
@@ -310,6 +311,8 @@ def _convert(raw: bytes, suffix: str, kind: str, side: int | None, quality: int,
             tried_sure = tried_sure or name in _READS_HEIC
             try:
                 tool(source, target, kind, side, quality)
+                if target.stat().st_size > MAX_TOOL_OUTPUT_BYTES:
+                    continue
                 made = target.read_bytes()
             except Exception:
                 continue

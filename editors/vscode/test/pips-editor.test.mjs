@@ -349,6 +349,14 @@ test('each broker mount has a distinct request namespace and ignores replies own
  second.receive({id:a[0].id,ok:true,result:'stale'});await flush();assert.equal(resolved,false);
  first.receive({id:a[0].id,ok:true,result:'old'});second.receive({id:b[0].id,ok:true,result:'current'});assert.equal(await old,'old');assert.equal(await fresh,'current');
 });
+test('broker send failure does not retain a pending request',async()=>{
+ let failed=true;const sent=[];
+ const broker=model.exports.requestBroker(message=>{if(failed)throw Error('webview closed');sent.push(message);},'send-failure');
+ for(let i=0;i<49;i++)await assert.rejects(broker.request({type:'get_pip_runner'}),/webview closed/);
+ failed=false;const request=broker.request({type:'get_pip_runner'});
+ assert.equal(sent.length,1);broker.receive({id:sent[0].id,ok:true,result:'ready'});
+ assert.equal(await request,'ready');
+});
 test('an old mutation cannot close a newer review after selecting A then B then A',async()=>{
  const x=setup({jobs:[job('a'),job('b')],runs:[]});await x.drain();x.click('[data-tab=job]');await x.drain();x.click('#toggle-pip');const old=x.requests('pause_pip')[0];x.click('[data-job=b]');await x.drain();x.click('[data-job=a]');await x.drain();x.click('#stop-all');assert.ok(x.d.querySelector('[role=dialog]'));
  x.answer(old,{pip:job('a',{status:'paused'})});await flush();assert.match(x.d.querySelector('[role=dialog]').textContent,/Stop all Pips\?/);assert.equal(x.requests('stop_pips').length,0);

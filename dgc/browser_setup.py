@@ -324,18 +324,23 @@ def chrome_package(*, cancelled=None) -> Path:
 
 
 def _run_cancellable(argv: list[str], step: str, cwd: Path, cancelled) -> None:
-    proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            text=True, env={**os.environ, "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"})
-    deadline = time.monotonic() + 15 * 60
-    while proc.poll() is None:
-        if (cancelled is not None and cancelled.is_set()) or time.monotonic() > deadline:
-            proc.kill()
-            proc.wait()
-            raise RuntimeError(f"{step} was stopped.")
-        time.sleep(0.2)
-    if proc.returncode != 0:
-        tail = (proc.stdout.read() if proc.stdout else "").strip().splitlines()[-2:]
-        raise RuntimeError(f"{step} failed: " + " ".join(tail)[:300])
+    # apt can print more than a pipe holds before exiting. A pipe that nobody reads would
+    # stall the download until our 15-minute deadline, so spool it and inspect only the tail.
+    with tempfile.TemporaryFile() as output:
+        proc = subprocess.Popen(argv, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                env={**os.environ, "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"})
+        deadline = time.monotonic() + 15 * 60
+        while proc.poll() is None:
+            if (cancelled is not None and cancelled.is_set()) or time.monotonic() > deadline:
+                proc.kill()
+                proc.wait()
+                raise RuntimeError(f"{step} was stopped.")
+            time.sleep(0.2)
+        if proc.returncode != 0:
+            output.seek(0, os.SEEK_END)
+            output.seek(max(0, output.tell() - 4096))
+            tail = output.read().decode("utf-8", "replace").strip().splitlines()[-2:]
+            raise RuntimeError(f"{step} failed: " + " ".join(tail)[-300:])
 
 
 def install_request(package: Path) -> str:

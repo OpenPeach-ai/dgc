@@ -44,6 +44,21 @@ def convert_like_sips(source, target, kind, side, quality):
 class SpooledPhotoTests(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
 
+    def test_malformed_media_type_is_a_user_error(self):
+        with self.assertRaises(RegistryError):
+            pip_chat.bounded_spooled_images([{"name": "photo.jpg", "media_type": []}])
+        with self.assertRaises(RegistryError):
+            pip_chat.validate_images([{"sha256": "a" * 64, "mime": [], "bytes": 1}])
+
+    def test_invalid_retry_key_does_not_keep_photo(self):
+        pip = self.pip()
+        name = self.spool(jpeg(size=100))
+        refused = self.send(pip, idempotency_key="invalid!", spooled_images=[{"name": name, "media_type": "image/jpeg"}])
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["error"]["code"], "invalid_request")
+        self.assertEqual(self.spooled(), [])
+        self.assertFalse(pip_chat.image_directory(self.registry.directory, pip["id"]).exists())
+
     def pip(self):
         return self.store.create(self.registry.personal()["id"], "Bills", None, "editor-user", pip_type="lens")
 

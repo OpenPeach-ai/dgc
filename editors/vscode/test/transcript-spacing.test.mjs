@@ -587,16 +587,17 @@ for (const width of WIDTHS) {
       await panel.events([{ type: "prompt_accepted", request_id: next, state: "started" },
         ...answeredTurn("t2", "S4 an ordinary prompt after the steered turn").map((e, i) => (i === 0 ? { ...e, request_id: next } : e))]);
       await panel.settle(); await toBottom(panel); await panel.settle();
-      // Answered, the turn folds its work into its "Worked for" row (work-fold.test.mjs): the steered prompts
-      // stay, spaced by what is still drawn beside them -- S1 now stands right above S2, two prompts in a row.
+      // Answered, the turn folds its work into its "Worked for" rows (work-fold.test.mjs), one for each part a
+      // steered prompt starts: the prompts stay, spaced by what is still drawn beside them -- S1 by the row of
+      // the prose that came after it, at 16px, as a reply follows a prompt.
       const folded = await measure(panel);
       assertSpacing(folded, `steered and folded at ${width}px`);
       const shown = folded.bubbles.filter((b) => b.steered);
       assert.equal(shown.length, 3, "the steered prompts stay when the work folds");
       for (const b of shown) assert.equal(b.above, ABOVE_PROMPT, `folded: "${b.text}" is ${b.above}px below what precedes it`);
-      assert.equal(around(folded, "S1 after a tool group").below, ABOVE_PROMPT, "folded: a prompt follows it, 24px as always");
+      assert.equal(around(folded, "S1 after a tool group").below, BETWEEN_BLOCKS, "folded: the row of what came after it, 16px");
       // Opened, every neighbour is back: the same rhythm beside the tool group and the prose.
-      await panel.page.evaluate(() => document.querySelector("#log .msg.dgc.work-folded > .work-toggle").click());
+      await panel.page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
       await panel.settle();
       const m = await measure(panel);
       assertSpacing(m, `steered at ${width}px`);
@@ -978,15 +979,16 @@ for (const width of WIDTHS) {
         const hit = m.bubbles.find((b) => b.text.startsWith(key));
         return [key, hit ? [hit.above, hit.below] : null];
       }));
-      // Answered, the turn folds its work into its "Worked for" row (work-fold.test.mjs). What stays -- the
-      // steered prompts, the permission card and its "Allowed once", the error line, the answer -- is spaced
-      // by what is still drawn beside it, never by a folded step: a prompt whose prose, tool line or monitor
-      // card folded away now has the next prompt beside it, 24px, as two prompts in a row always are.
+      // Answered, the turn folds its work into its "Worked for" rows (work-fold.test.mjs), one under each steered
+      // prompt that work came after. What stays -- the steered prompts, their rows, the permission card and its
+      // "Allowed once", the error line, the answer -- is spaced by what is still drawn beside it, never by a
+      // folded step: a prompt is followed by its row at 16px, or by the next prompt at 24px (S7, which nothing
+      // came after), the same rhythm as with every step open.
       const folded = await measure(panel);
       assertSpacing(folded, `steered beside everything, folded, at ${width}px`);
-      assert.deepEqual(spaced(folded), { S1: [24, 24], S2: [24, 24], S3: [24, 16], S4: [24, 16], S5: [24, 24], S6: [24, 16],
+      assert.deepEqual(spaced(folded), { S1: [24, 16], S2: [24, 16], S3: [24, 16], S4: [24, 16], S5: [24, 16], S6: [24, 16],
         S7: [24, 24], S8: [24, 16], S9: [24, 16] }, "folded: above/below each steered prompt");
-      await panel.page.evaluate(() => document.querySelector("#log .msg.dgc.work-folded > .work-toggle").click());
+      await panel.page.evaluate(() => document.querySelectorAll("#log .msg.dgc.work-folded > .work-toggle").forEach((row) => row.click()));
       await panel.settle(); await toBottom(panel); await panel.settle();
       const m = await measure(panel);
       assertSpacing(m, `steered beside everything at ${width}px`);

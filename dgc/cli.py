@@ -609,6 +609,13 @@ class UI:
             except Exception:
                 opened = False
             if not opened:
+                code = payload.get("_dgc_device_code")
+                if isinstance(code, str) and code:
+                    # A sign-in with a code (no browser on this computer, over SSH say) works from any device.
+                    self.console.print(f"Open {terminal_safe_text(url)} on any device and enter the code "
+                                       f"{terminal_safe_text(code)}. DGC waits here.", style="bold",
+                                       markup=False, highlight=False, soft_wrap=True)
+                    return {"action": "accept"}
                 self.error("could not open the MCP URL in a browser")
                 return {"action": "cancel"}
             return {"action": "accept"}
@@ -707,6 +714,11 @@ class UI:
 
     def artifact_ready(self, art) -> None:
         self.info(f"artifact ready: {art.name} · {art.url}")
+
+    def artifact_changed(self, view, op) -> None:
+        verb = "made" if op == "made" else "changed"
+        self.info(f"{view['label'].lower()} {verb}: {view['title']} · version {view['version']} · "
+                  f"dgc artifacts open {view['id']}")
 
     def files_ready(self, call_id, items) -> None:
         for item in items:
@@ -2887,6 +2899,8 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "setup": "dgc setup                          configure provider, model and context interactively",
     "doctor": "dgc doctor                         check that the endpoint and model are reachable",
     "readonly-db": "dgc readonly-db [show|set|clear|guide]  this project's read-only database, for Troupe checkers",
+    "artifacts": "dgc artifacts [list|show|open|export|restore|rm]  the documents, decks, sheets, dashboards and pages DGC made",
+    "mods": "dgc mods [allow|on|off|install|remove|validate|test|dev]  your mods, and the tools for writing one",
     "help": "dgc help                           the command overview",
     "update": "dgc update [--rollback|--version X|--list]  install the latest DGC beside this one, or switch versions",
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
@@ -3050,6 +3064,14 @@ def main(argv: list[str] | None = None) -> int | None:
         if raw_argv[0] == "pips":
             from .pip_daemon import handle_command
             return handle_command(Config(), raw_argv[1:])
+        if raw_argv[0] == "mods":
+            # The user's mods, and the tools for writing one (dgc/mods/cli.py).
+            from .mods.cli import main as mods_main
+            return mods_main(raw_argv[1:])
+        if raw_argv[0] == "artifacts":
+            # Everything DGC made that the user keeps (dgc/artifact_cli.py): no model, no session.
+            from .artifact_cli import main as artifacts_main
+            return artifacts_main(raw_argv[1:])
         if raw_argv[0] == "readonly-db":
             # A connection string is a secret: `set` reads it from the terminal or a pipe, never argv.
             from .readonly_database import command as readonly_db_command
@@ -3129,8 +3151,12 @@ def main(argv: list[str] | None = None) -> int | None:
                         help='pre-approve a tool for this run, e.g. "Bash(npm test)" or "Edit" (repeatable)')
     parser.add_argument("--sandbox", choices=("on", "off", "read-only"), default=None,
                         help="confine shell commands for this run; read-only also denies every file edit")
+    parser.add_argument("--safe-mode", action="store_true",
+                        help="run with every mod turned off (dgc mods lists them)")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
+    if args.safe_mode:
+        os.environ["DGC_SAFE_MODE"] = "1"        # every process this one starts runs with mods off too
     if not args.prompt:          # one-shot `-p` has no banner to show an update in — skip the check
         refresh_update_async()
 

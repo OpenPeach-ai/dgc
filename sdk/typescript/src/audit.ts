@@ -8,7 +8,7 @@
  * plus the exact values of credential-named variables in this process's environment and any
  * secret the SDK was given (the provider `apiKey`).
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendPrivate, privateDir } from "./state.ts";
 
@@ -177,7 +177,16 @@ export class AuditLog {
     const rows: Array<Record<string, unknown>> = [];
     for (const path of paths) {
       if (!existsSync(path)) continue;
-      for (const line of readFileSync(path, "utf8").split("\n")) {
+      let fd: number;
+      try {
+        fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+      } catch { continue; }
+      let content: string;
+      try {
+        if (!fstatSync(fd).isFile()) continue;
+        content = readFileSync(fd, "utf8");
+      } finally { closeSync(fd); }
+      for (const line of content.split("\n")) {
         if (!line.trim()) continue;
         try {
           const row = JSON.parse(line) as Record<string, unknown>;

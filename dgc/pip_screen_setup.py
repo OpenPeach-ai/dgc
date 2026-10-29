@@ -138,8 +138,14 @@ def status() -> dict:
         value.setdefault("error", "The download stopped before it finished. Open the computer again to retry.")
     if state != "running" and current_root() is not None:
         state = "ready"
-    return {"state": state, "step": str(value.get("step") or "")[:200], "done": int(value.get("done") or 0),
-            "total": int(value.get("total") or 0), "error": str(value.get("error") or "")[:400] if state == "failed" else "",
+    def count(key):
+        try:
+            raw = value.get(key)
+            return max(0, int(raw)) if isinstance(raw, (int, float, str)) and not isinstance(raw, bool) else 0
+        except (ValueError, OverflowError):
+            return 0
+    return {"state": state, "step": str(value.get("step") or "")[:200], "done": count("done"),
+            "total": count("total"), "error": str(value.get("error") or "")[:400] if state == "failed" else "",
             "chrome": str(manifest().get("chrome") or "")[:40], "checked_at": manifest().get("checked_at")}
 
 

@@ -61,14 +61,21 @@ test("the chip wears the same kind mark a file link wears", () => {
     "a produced .py and a mentioned .py should read as the same kind of thing");
 });
 
-test("a caption rides along without crowding the name", () => {
+test("a caption rides along on the chip, after the name, without crowding it", () => {
+  // Reported 28 Oct: what the model said a file IS was only in the hover label, so nobody saw it.
   const { doc } = turnWith([
     { name: "demo.mp4", rel: "out/demo.mp4", bytes: 10, caption: "the recording" },
   ]);
   const chip = doc.querySelector(".chip.made-file");
   assert.match(chip.getAttribute("aria-label"), /demo\.mp4 — the recording/);
-  assert.equal(chip.textContent.includes("the recording"), false,
-    "the caption belongs in the label and the hover, not in a chip that has to stay one line");
+  const parts = [...chip.children].map((c) => c.className);
+  assert.deepEqual(parts, ["chip-label", "chip-size", "chip-caption"], "name first, the caption last");
+  assert.equal(chip.querySelector(".chip-caption").textContent, "the recording");
+  // The chip stays one line: the caption is the part that gives way.
+  const rule = /\.chip\.made-file \.chip-caption\s*\{([^}]*)\}/.exec(mainCss);
+  assert.ok(rule, "the caption has its own rule");
+  assert.match(rule[1], /text-overflow:\s*ellipsis/);
+  assert.match(rule[1], /white-space:\s*nowrap/);
 });
 
 test("an item with no path is ignored rather than rendered as a dead chip", () => {
@@ -115,4 +122,91 @@ test("a chip is actually styled, not a bare browser button", () => {
   }
   assert.match(mainCss, /\.chip\.made-file:focus-visible/,
     "a chip is a button; a keyboard user must be able to see which one is focused");
+});
+
+// An image the model shows on purpose is SHOWN: a picture tile with its caption, as a viewed image is, not a file
+// name (reported 28 Oct). The picture comes from the extension host by path, never from the event.
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+function shownImage(reply, items = [{ name: "login.png", rel: "out/login.png", bytes: 2048, caption: "the login page" }]) {
+  const harness = turnWith(items);
+  const asks = harness.posted.filter((m) => m.type === "fileThumb");
+  if (reply !== undefined) for (const ask of asks) harness.send({ type: "fileThumb", requestId: ask.requestId, src: reply });
+  return { ...harness, asks };
+}
+
+test("a shown image asks the host for its picture by path, and waits in a tile with its caption", () => {
+  const { doc, asks, errors } = shownImage(undefined);
+  assert.equal(asks.length, 1);
+  assert.equal(asks[0].path, "out/login.png", "the workspace path the event named; the host checks it");
+  assert.match(asks[0].requestId, /^[A-Za-z0-9_.:-]{1,128}$/, "an id the host accepts");
+  const figure = doc.querySelector(".made-files .made-image");
+  assert.ok(figure.querySelector(".image-tile.skeleton"), "a waiting tile, not an empty gap");
+  assert.equal(figure.querySelector("figcaption").textContent, "the login page");
+  assert.equal(doc.querySelector(".chip.made-file"), null);
+  assert.deepEqual(errors, []);
+});
+
+test("the picture arrives in the tile; clicking it opens the image viewer, whose Open opens the file", () => {
+  const { doc, posted, errors } = shownImage(PNG);
+  const tile = doc.querySelector(".made-image .image-chip");
+  assert.ok(tile, "the picture tile replaces the waiting one");
+  assert.equal(tile.querySelector("img").getAttribute("src"), PNG);
+  assert.equal(doc.querySelector(".made-image .skeleton"), null);
+  assert.equal(doc.querySelector(".made-image figcaption").textContent, "the login page", "the caption stays under it");
+  assert.match(tile.getAttribute("aria-label"), /login\.png: the login page/);
+  tile.click();
+  const viewer = doc.getElementById("image-viewer");
+  assert.ok(viewer && !viewer.hidden, "the image viewer opens");
+  const open = viewer.querySelector('[aria-label="Open file"]');
+  assert.equal(open.hidden, false, "a shown file can always be opened");
+  open.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1))), { type: "openFile", path: "out/login.png" });
+  assert.deepEqual(errors, []);
+});
+
+test("an image the host won't read stays the plain chip, caption and all", () => {
+  for (const reply of ["", "data:text/html;base64,PHNjcmlwdD4=", "javascript:alert(1)", 42]) {
+    const { doc, errors } = shownImage(reply);
+    assert.equal(doc.querySelector(".made-image"), null, `no tile for ${JSON.stringify(reply)}`);
+    const chip = doc.querySelector(".chip.made-file");
+    assert.ok(chip, "the file is never lost");
+    assert.equal(chip.querySelector(".chip-caption").textContent, "the login page");
+    assert.equal(doc.querySelector(".made-files img"), null);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("only raster pictures are asked for; an SVG, a video or a PDF stays a chip", () => {
+  const { doc, asks } = shownImage(PNG, [
+    { name: "logo.svg", rel: "logo.svg", bytes: 10 },
+    { name: "demo.mp4", rel: "demo.mp4", bytes: 10 },
+    { name: "report.pdf", rel: "report.pdf", bytes: 10 },
+    { name: "a.JPG", rel: "a.JPG", bytes: 10 },
+  ]);
+  assert.deepEqual(asks.map((a) => a.path), ["a.JPG"]);
+  assert.equal(doc.querySelectorAll(".chip.made-file").length, 3);
+  assert.equal(doc.querySelectorAll(".made-image .image-chip").length, 1);
+});
+
+test("several shown images page through the viewer together", () => {
+  const { doc } = shownImage(PNG, [
+    { name: "before.png", rel: "before.png", bytes: 10, caption: "before" },
+    { name: "after.webp", rel: "after.webp", bytes: 10, caption: "after" },
+  ]);
+  const tiles = [...doc.querySelectorAll(".made-image .image-chip")];
+  assert.equal(tiles.length, 2);
+  tiles[0].click();
+  const viewer = doc.getElementById("image-viewer");
+  assert.match(viewer.querySelector(".iv-pos").textContent, /1\s*(of|\/)\s*2/);
+});
+
+test("a late answer for a tile that has gone does nothing", () => {
+  const harness = turnWith([{ name: "x.png", rel: "x.png", bytes: 1 }]);
+  const ask = harness.posted.find((m) => m.type === "fileThumb");
+  harness.doc.querySelector(".made-image").remove();
+  harness.send({ type: "fileThumb", requestId: ask.requestId, src: PNG });
+  harness.send({ type: "fileThumb", requestId: ask.requestId, src: PNG });
+  harness.send({ type: "fileThumb", requestId: "never-asked", src: PNG });
+  assert.equal(harness.doc.querySelector(".made-files img"), null);
+  assert.deepEqual(harness.errors, []);
 });

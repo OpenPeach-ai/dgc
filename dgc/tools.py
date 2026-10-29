@@ -731,6 +731,11 @@ TROUPE_TOOL_SCHEMA = _fn(
                  "required": ["every"]}},
     ["title"])
 
+# Artifacts (dgc/artifact_tools): the same two tools ChatDGC has, so an artifact made in Work is the one the Library
+# and every other part of DGC shows. NOT part of TOOL_SCHEMAS, for SUPERVISION_TOOL_SCHEMAS' reason below: an installed
+# dgc-sdk that sets allow_tools could not name them. Agent._tool_schemas offers them when no such policy governs.
+from .artifact_tools import TOOLS as ARTIFACT_TOOL_SCHEMAS  # noqa: E402
+
 # Supervising the background children `task` already starts. Deliberately NOT part of
 # TOOL_SCHEMAS: `dgc serve` publishes every TOOL_SCHEMAS name in the `ready` event's `tools`
 # array, and an ALREADY INSTALLED dgc-sdk whose RuntimePolicy sets `allow_tools` raises
@@ -1690,15 +1695,15 @@ def edit_file(args: dict, ctx) -> str:
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p), ctx)}"
 
 
-# The one matcher tier that replaces a REGION with text the model composed, rather than patching a
+# Matcher tiers that replace a REGION with text the model composed, rather than patching a
 # located string. Measured against a file a colleague had changed since the model read it:
 #   corroborated line drift -> the colleague's line SURVIVED (the tier re-checks it)
-#   block anchor            -> refused outright
+#   block anchor            -> can overwrite two or more drifted interior lines
 #   exact / normalized      -> patch what is there, so there is nothing to lose
 #   elision                 -> the colleague's inserted line was GONE, reported as a clean success
-# Elision anchors on a head and a tail and swaps everything between them for `new`. When `new` came
-# from a stale read, whatever arrived in between is deleted and nothing notices.
-_SPAN_REPLACING_TIERS = frozenset({"elision"})
+# Elision and block anchor swap a bounded region for `new`. When `new` came from a stale read,
+# another writer's changes inside that region could be deleted without notice.
+_SPAN_REPLACING_TIERS = frozenset({"elision", "block anchor"})
 
 
 def _span_is_stale(ctx, path, version, how: str) -> bool:
@@ -3360,6 +3365,8 @@ def _browser_args_error(operation: str, args: dict) -> str:
         return f"error: {operation} needs a ref from a snapshot, such as e12"
     if operation == "type" and not str(args.get("text", "")):
         return "error: type needs text"
+    if operation == "type" and len(str(args.get("text", ""))) > 100_000:
+        return "error: type text is too long"
     if operation == "select" and not str(args.get("text", "")).strip():
         return "error: select needs the option text in `text`"
     if operation == "press" and not str(args.get("key", "")).strip():
@@ -4504,8 +4511,8 @@ def code_intel(args: dict, ctx) -> str:
 _TAG = re.compile(r"<[^>]+>")
 
 
-def _validate_public_url(url: str) -> str:
-    """Reject non-web and non-public destinations before a model-controlled fetch."""
+def _public_destination(url: str) -> tuple[str, str]:
+    """Validate a URL and return one of the public addresses just checked."""
     try:
         parsed = urlsplit(str(url).strip())
         port = parsed.port
@@ -4533,7 +4540,28 @@ def _validate_public_url(url: str) -> str:
             raise ValueError("URL host resolved to an invalid address") from e
         if not addr.is_global:
             raise ValueError("local, private, link-local, and reserved network URLs are blocked")
-    return parsed.geturl()
+    return parsed.geturl(), next(iter(sorted(addresses)))
+
+
+def _validate_public_url(url: str) -> str:
+    """Reject non-web and non-public destinations before a model-controlled fetch."""
+    return _public_destination(url)[0]
+
+
+class _PublicAddressAdapter(requests.adapters.HTTPAdapter):
+    """Keep TLS name checks on the original host while connecting to a checked IP."""
+
+    def __init__(self, hostname: str):
+        self.hostname = hostname
+        super().__init__()
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        if urlsplit(request.url).scheme.lower() != "https":
+            return super().get_connection_with_tls_context(request, verify, proxies, cert)
+        host_params, pool_kwargs = self.build_connection_pool_key_attributes(request, verify, cert)
+        pool_kwargs["server_hostname"] = self.hostname
+        pool_kwargs["assert_hostname"] = self.hostname
+        return self.poolmanager.connection_from_host(**host_params, pool_kwargs=pool_kwargs)
 
 
 def _fetch_public_text(url: str, *, max_bytes: int = MAX_FETCH_BYTES,
@@ -4552,10 +4580,18 @@ def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: boo
     current = str(url).strip()
     try:
         for redirect_n in range(MAX_FETCH_REDIRECTS + 1):
-            current = _validate_public_url(current)
+            current, address = _public_destination(current)
             if https_only and urlsplit(current).scheme.lower() != "https":
                 raise ValueError("the page redirected away from https")
-            response = session.get(current, timeout=(10, 20), headers={"User-Agent": "dgc/0.20"},
+            parsed = urlsplit(current)
+            literal = f"[{address}]" if ":" in address else address
+            pinned_url = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
+            previous = session.adapters.get(f"{parsed.scheme.lower()}://")
+            if previous is not None:
+                previous.close()
+            session.mount(f"{parsed.scheme.lower()}://", _PublicAddressAdapter(parsed.hostname))
+            response = session.get(pinned_url, timeout=(10, 20),
+                                   headers={"User-Agent": "dgc/0.20", "Host": parsed.netloc},
                                    allow_redirects=False, stream=True)
             try:
                 if response.is_redirect or response.is_permanent_redirect:
@@ -4984,6 +5020,38 @@ def present_document(args: dict, ctx) -> str:
             "Use the browser's Print → Save as PDF to export a PDF. No execution approval was requested.")
 
 
+def _artifact_picture(ctx):
+    """Where a deck's picture may come from in Work: inside the project, never a dot folder or a private file
+    (the artifact server's own rules), so a deck can't carry a key or a .env out into an export."""
+    from .artifacts import _private_rel
+    from .workspace import canonical_root
+    root = Path(ctx.project_root)
+
+    def resolve(src: str) -> Path:
+        path = resolve_path(src, root)
+        rel = path.relative_to(canonical_root(root))
+        if any(part.startswith(".") for part in rel.parts) or _private_rel(rel.name):
+            raise WorkspaceBoundaryError(f"{rel.as_posix()} is private and never goes into a deck")
+        return path
+    return resolve
+
+
+def _artifact_call(name: str, args: dict, ctx) -> str:
+    from . import artifact_tools
+    origin = ctx.artifact_origin() if callable(getattr(ctx, "artifact_origin", None)) else None
+    origin = origin or {"surface": "work", "project": str(ctx.project_root)}
+    return artifact_tools.run(name, args, origin=origin, on_change=getattr(ctx, "on_artifact", None),
+                              base=ctx.project_root, resolve=_artifact_picture(ctx))
+
+
+def make_artifact(args, ctx):
+    return _artifact_call("make_artifact", args, ctx)
+
+
+def edit_artifact(args, ctx):
+    return _artifact_call("edit_artifact", args, ctx)
+
+
 def pips_context(args, ctx):
     from .pip_context_tool import read
     return read(args, ctx)
@@ -5062,6 +5130,7 @@ EXECUTORS = {
     "draft_pip_calendar_event": draft_pip_calendar_event,
     "draft_pip_connector_action": draft_pip_connector_action,
     "present_document": present_document,
+    "make_artifact": make_artifact, "edit_artifact": edit_artifact,
     "show_file": show_file,
     "read_file": read_file, "view_image": view_image, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,

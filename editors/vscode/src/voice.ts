@@ -292,7 +292,8 @@ export class Dictation {
     this.stopPolling();
     owner.post({ type: "mic", state: "writing", mode });
     const said = await this.client.stop();
-    if (this.owner === owner) this.owner = undefined;
+    if (this.owner !== owner) return;
+    this.owner = undefined;
     owner.post(said.ok ? { type: "mic", state: "idle", text: said.text || "", mode }
                        : { type: "mic", state: "idle", error: said.error, kind: said.code === "no_model" ? "info" : "error" });
   }

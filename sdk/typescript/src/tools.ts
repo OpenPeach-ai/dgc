@@ -35,6 +35,7 @@ export const SERVER_NAME = "app";
 const HELLO_KEY = "dgc_sdk_bridge";
 const HELLO_TIMEOUT_MS = 10_000;
 const HELLO_MAX = 4096;
+const FRAME_MAX = 16 * 1024 * 1024;
 // sun_path holds 104 bytes on macOS and 108 on Linux, terminator included.
 const SOCKET_PATH_MAX = 100;
 export const BRIDGE = fileURLToPath(new URL("./mcp-bridge.mjs", import.meta.url));
@@ -190,6 +191,7 @@ export class ToolHub {
           if (buf.length > HELLO_MAX) refuse();
           return;
         }
+        if (nl > HELLO_MAX) { refuse(); return; }
         let hello: unknown;
         try { hello = JSON.parse(buf.subarray(0, nl).toString("utf8")); } catch { refuse(); return; }
         const token = hello && typeof hello === "object" ? (hello as Record<string, unknown>).token : undefined;
@@ -206,6 +208,7 @@ export class ToolHub {
       }
       let nl: number;
       while ((nl = buf.indexOf(0x0a)) !== -1) {
+        if (nl > FRAME_MAX) { refuse(); return; }
         const line = buf.subarray(0, nl).toString("utf8").trim();
         buf = buf.subarray(nl + 1);
         if (!line) continue;
@@ -215,6 +218,7 @@ export class ToolHub {
           if (reply && !socket.destroyed) socket.write(JSON.stringify(reply) + "\n");
         });
       }
+      if (buf.length > FRAME_MAX) refuse();
     });
   }
 

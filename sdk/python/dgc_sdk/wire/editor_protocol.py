@@ -675,6 +675,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # it a message steered while a question is open is just a message -- a follow-up on another
     # subject must never be recorded as an answer.
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
+               # The Output chip (only sent to a backend offering capabilities.artifacts): what this reply should
+               # make as an artifact. "auto" or leaving it out lets the model choose.
+               "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet", "page",
+                                                          "dashboard")),
                "answers": _NA(False), "pip_references": _A(False),
                # Images handed over as files in the backend's spool rather than inlined as base64.
                # Only sent by a client that saw capabilities.image_spool, so an older backend is
@@ -754,7 +758,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "list_skills": {"request_id": _S()},
     "list_plugins": {"request_id": _S()},
-    "install_plugin": {"request_id": _S(), "name": _S(), "accept_license": _S(False), "selected_servers": _A(False)},
+    "install_plugin": {"request_id": _S(), "name": _S(), "accept_license": _S(False), "selected_servers": _A(False),
+                       "sign_in_account": _S(False)},
     "composio_connection": {"request_id": _S(), "action": _f("string", enum=("connect", "check")), "toolkit": _f("string", enum=("gmail", "googlecalendar", "googledrive", "figma"))},
     "inspect_plugin": {"request_id": _S(), "name": _S()},
     "uninstall_plugin": {"request_id": _S(), "name": _S()},
@@ -1324,6 +1329,9 @@ COMMAND_FIELDS.update({
     # Widgets list read it (offered as ready.capabilities.chatdgc.outline). Answered by `chatdgc_outline`.
     "chatdgc_outline": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
+                     # The Output chip, as on `prompt` (only with capabilities.artifacts).
+                     "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet",
+                                                                "page", "dashboard")),
                      # Spoken in voice mode: the reply will be read aloud, so it is asked to sound like speech.
                      "voice": _B(False),
                      "thinking": _f("string", required=False, enum=CHATDGC_THINKING),
@@ -1417,9 +1425,19 @@ COMMAND_FIELDS.update({
     # Rename, pin, archive or delete. Answered by `chatdgc_changed`.
     "chatdgc_update": {"request_id": _S(), "conversation_id": _S(), "title": _S(False),
                        "pinned": _B(False), "archived": _B(False), "delete": _B(False)},
+    # A folder the chat reads, read-only (dgc/chatdgc/folder.py; ready.capabilities.chatdgc.folder). `chatdgc_folder`
+    # asks which, answered by `chatdgc_folder` {conversation_id, folder: "" for none}. `chatdgc_set_folder` sets it to
+    # the full path the user chose ("" takes it away), answered by `chatdgc_folder` too. `chatdgc_work_brief` is
+    # Continue in Work, answered by `chatdgc_work_brief` {conversation_id, folder, brief}: the editor opens a Work
+    # session in `folder` with `brief` in its prompt box, and nothing runs until the user sends it.
+    "chatdgc_folder": {"request_id": _S(), "conversation_id": _S()},
+    "chatdgc_set_folder": {"request_id": _S(), "conversation_id": _S(), "folder": _S()},
+    "chatdgc_work_brief": {"request_id": _S(), "conversation_id": _S()},
 })
 EVENT_FIELDS.update({
     "chatdgc_chats": {"request_id": _S(), "chats": _A(), "total": _I(), "next_offset": _f("integer", "null")},
+    "chatdgc_folder": {"request_id": _S(False), "conversation_id": _S(), "folder": _S()},
+    "chatdgc_work_brief": {"request_id": _S(), "conversation_id": _S(), "folder": _S(), "brief": _S()},
     # `earlier` counts the messages before the first one sent (0: this is the whole conversation);
     # `busy` is true while a turn runs in it, from this or another client of this process.
     "chatdgc_opened": {"request_id": _S(), "conversation": _O(), "messages": _A(), "earlier": _I(),
@@ -1520,6 +1538,101 @@ EVENT_FIELDS.update({
     "chatdgc_compacted": {"conversation_id": _S(), "summary": _f("object", "null"), "request_id": _S(False)},
 })
 
+# ---- Artifacts: one store for everything DGC makes that you keep (dgc/artifact_store, dgc/artifact_service) -----
+# Offered as ready.capabilities.artifacts ({version, types, outputs, exports}); the process answers artifact_*
+# itself, whichever chat sends it, because an artifact belongs to the account, not to a folder. An artifact as these
+# events carry it is artifact_service.view(): {id, type, label, title, version, created, updated, origin, exports,
+# link?, canvas?, versions?: [{n, author, at, summary, size}]}.
+ARTIFACT_TYPES = ("page", "doc", "slides", "sheet", "dashboard")
+# The Output chip: what the next reply should make. "auto" (or leaving it out) lets the model choose, as before.
+ARTIFACT_OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
+ARTIFACT_OPS = ("made", "changed", "restored", "removed", "refreshed")
+COMMAND_FIELDS.update({
+    "artifact_list": {"request_id": _S(), "artifact_type": _f("string", required=False, enum=ARTIFACT_TYPES),
+                      "surface": _f("string", required=False, enum=("chat", "work", "pip", "sdk", "cli"))},
+    # One artifact with its versions and, when asked, a version's content for an editor (`version`: the current one
+    # if left out).
+    "artifact_get": {"request_id": _S(), "id": _S(), "content": _B(False), "version": _I(False)},
+    # The user's own change from an editor: the whole new content (a document's text, a deck's, sheet's or
+    # dashboard's data), a version by "you". base_version is the version the editor started from: if the artifact
+    # moved on since, nothing is written and the answer says so (command_rejected, reason "conflict").
+    "artifact_update": {"request_id": _S(), "id": _S(), "content": _f("string", "object"), "base_version": _I(),
+                        "note": _S(False), "title": _S(False)},
+    "artifact_restore": {"request_id": _S(), "id": _S(), "version": _I()},
+    # Compare saved versions without changing either; gated by capabilities.artifacts.compare.
+    "artifact_compare": {"request_id": _S(), "id": _S(), "before": _I(), "after": _I(False)},
+    "artifact_export": {"request_id": _S(), "id": _S(), "format": _S(), "version": _I(False)},
+    # Show it in the browser at an address of its own: answered by artifact_served.
+    # `mode` "present" (offered as ready.capabilities.artifacts.present): a deck's present mode, at its own address.
+    "artifact_open": {"request_id": _S(), "id": _S(), "mode": _f("string", required=False, enum=("view", "present"))},
+    "artifact_remove": {"request_id": _S(), "id": _S()},
+    # A dashboard: run its queries now (no model), answered by artifact_detail with its numbers.
+    "artifact_refresh": {"request_id": _S(), "id": _S()},
+    # A dashboard's source allowed (or no longer allowed), asked once per dashboard.
+    "artifact_allow_source": {"request_id": _S(), "id": _S(), "source": _S(), "allowed": _B(),
+                              "base_version": _I(False)},
+})
+EVENT_FIELDS.update({
+    "artifact_items": {"items": _A(), "request_id": _S(False)},
+    # Something made or changed an artifact: the model's tool in a chat or a Work turn, the user's editor, a Pip.
+    # `surface` says which part of DGC did it; conversation_id is the chat's when it was ChatDGC's.
+    "artifact_changed": {"artifact": _O(), "op": _f("string", enum=ARTIFACT_OPS), "surface": _S(False),
+                         "conversation_id": _S(False), "request_id": _S(False)},
+    # artifact_get's answer (and artifact_refresh's): `content` when asked, `state` a dashboard's last numbers.
+    "artifact_detail": {"artifact": _O(), "content": _f("string", "object", required=False), "state": _O(False),
+                        "request_id": _S(False)},
+    "artifact_served": {"id": _S(), "url": _S(), "request_id": _S(False)},
+    "artifact_exported": {"id": _S(), "format": _S(), "path": _S(), "request_id": _S(False)},
+    "artifact_comparison": {"comparison": _O(), "request_id": _S(False)},
+})
+
+# ---- Mods (dgc/mods): the user's own panels, status lines, commands and guards, per chat -------------------------
+# Offered as ready.capabilities.mods. `mods` lists every mod this chat knows (each {name, title, version, description,
+# builtin, dev, state: running|stopped|crashed|starting|off|needs_allow, error, asks: [plain-words lines], missing,
+# commands: [{name, description}], draws}) with `on` false when safe mode or mods_enabled turned them all off; it is
+# sent again whenever one starts or stops. `mod_ui` is what one draws in a slot it declared (tree null clears it;
+# dgc/mods/ui.py says what a tree may hold), always shown under its name; `mod_toast` a short notice. `mod_set`
+# changes one: allow (the user's Allow, after seeing `asks`), on, off, reload. `mod_command` runs one of a mod's
+# commands at once, with no model turn (answered by `mod_result`); `mod_action` is a Button pressed or an Input or
+# Select changed in what it drew. A mod can never approve anything: those cards are DGC's own.
+MOD_SLOTS = ("pane", "band", "status")
+# `surface` "chat" is ChatDGC's own mods (the process's, one set for every chat); left out, a Work chat's.
+MOD_SURFACES = ("work", "chat")
+_MOD_SURFACE = _f("string", required=False, enum=MOD_SURFACES)
+COMMAND_FIELDS.update({
+    "mods_list": {"request_id": _S(), "surface": _MOD_SURFACE},
+    "mod_set": {"request_id": _S(), "name": _S(), "op": _f("string", enum=("allow", "on", "off", "reload")),
+                "surface": _MOD_SURFACE, "review": _S(False)},
+    "mod_command": {"request_id": _S(), "name": _S(), "args": _S(False), "surface": _MOD_SURFACE},
+    "mod_action": {"name": _S(), "id": _S(), "value": _S(False), "surface": _MOD_SURFACE},
+})
+EVENT_FIELDS.update({
+    "mods": {"mods": _A(), "on": _B(), "request_id": _S(False), "surface": _MOD_SURFACE},
+    "mod_ui": {"name": _S(), "mod": _S(), "slot": _f("string", enum=MOD_SLOTS), "tree": _f("object", "null"),
+               "surface": _S()},
+    "mod_toast": {"name": _S(), "mod": _S(), "text": _S(), "tone": _S(False), "surface": _MOD_SURFACE},
+    "mod_result": {"request_id": _S(), "name": _S(), "mod": _S(), "text": _S(False), "tree": _O(False),
+                   "error": _S(False)},
+})
+# A mod's entry in `mods` is an open object, so it says more without a new field: `plugin` and `plugin_title` name the
+# plugin an installed one came with, and `written` marks one DGC wrote in this session.
+# The mods DGC writes (dgc/mods/host.py): the first time in a session the model writes a mod's folder in the project,
+# DGC asks once, "Turn on the mods DGC writes in this session?". Offered as ready.capabilities.mods.offers; a client
+# that shows the card says so with `watch_mod_offers` (until then none is sent, and the mod is listed as written this
+# session). `mod_offer` is the question: the mod's name, title (`mod`), version, folder (from the project's root) and
+# everything it asks for in plain words; `more` when it asks for more than the user allowed for the ones written
+# earlier this session. `mod_offer_answer` is Allow (allow true: its folder runs for this session, reloaded as it
+# changes) or Not now (nothing runs, and nothing more is asked this session), answered by `mods`; a question already
+# answered is refused. Never in a Pip's run, in safe mode, or with mods_enabled off.
+COMMAND_FIELDS.update({
+    "watch_mod_offers": {"surface": _MOD_SURFACE},
+    "mod_offer_answer": {"request_id": _S(), "id": _S(), "allow": _B(), "surface": _MOD_SURFACE},
+})
+EVENT_FIELDS.update({
+    "mod_offer": {"id": _S(), "name": _S(), "mod": _S(), "version": _S(), "folder": _S(), "asks": _A(), "more": _B(),
+                  "surface": _MOD_SURFACE},
+})
+
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire
 # (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.
 RESERVED_FIELD_NAMES = frozenset({"type", "seq", "chat_id"})
@@ -1559,13 +1672,19 @@ def _shown(value) -> str:
     if isinstance(value, str):
         return repr(value[:128] + ("…" if len(value) > 128 else ""))
     if value is None or isinstance(value, (int, float, bool)):
-        return repr(value)
+        try:
+            return repr(value)
+        except ValueError:
+            # Python limits decimal conversion of very large integers.
+            return f"<{type(value).__name__}>"
     return f"<{type(value).__name__}>"
 
 
 def _message_error(value, specs: dict[str, dict[str, dict]], *, sequence: bool) -> str | None:
     if not isinstance(value, dict):
         return "message must be an object"
+    if any(not isinstance(key, str) for key in value):
+        return "message field names must be strings"
     name = value.get("type")
     if not isinstance(name, str) or name not in specs:
         return f"unknown message type {_shown(name)}"

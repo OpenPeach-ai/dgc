@@ -183,6 +183,64 @@ function requestTypes(timeline) {
     .map((item) => item.slice("request:".length));
 }
 
+function autoWarningHarness(options) {
+  const h = harness(options);
+  const messages = [];
+  h.provider.view = { visible: true, webview: { postMessage: async message => { messages.push(message); return true; } } };
+  h.provider.webviewReady = true;
+  h.provider.postState = () => {};
+  return { ...h, messages };
+}
+
+test("Auto elevation needs the current host-issued confirmation; Cancel and stale replies cannot elevate", async () => {
+  const { provider, messages, commands } = autoWarningHarness();
+  let pending = provider.requestMode("auto");
+  const first = messages.at(-1);
+  assert.equal(first.type, "autoModePrompt");
+  await provider.onMessage({ type: "autoModeAnswer", requestId: "forged", accepted: true });
+  assert.deepEqual(commands, []);
+  await provider.onMessage({ type: "autoModeAnswer", requestId: first.requestId, accepted: false });
+  assert.equal(await pending, false);
+  assert.deepEqual(commands, []);
+  pending = provider.requestMode("auto");
+  const second = messages.at(-1);
+  assert.notEqual(second.requestId, first.requestId);
+  await provider.onMessage({ type: "autoModeAnswer", requestId: first.requestId, accepted: true });
+  assert.deepEqual(commands, []);
+  await provider.onMessage({ type: "autoModeAnswer", requestId: second.requestId, accepted: true });
+  assert.equal(await pending, true);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].type, "set_mode");
+  assert.equal(commands[0].mode, "auto");
+});
+
+test("approving a plan into Auto uses the same confirmation before changing mode", async () => {
+  const { provider, messages, commands } = autoWarningHarness({ mode: "plan" });
+  provider.backend.send = command => { commands.push(command); return true; };
+  const pending = provider.onMessage({ type: "plan_response", id: "plan-auto", decision: "auto" });
+  await Promise.resolve();
+  const prompt = messages.find(message => message.type === "autoModePrompt");
+  assert.ok(prompt);
+  assert.equal(commands.length, 0);
+  await provider.onMessage({ type: "autoModeAnswer", requestId: prompt.requestId, accepted: true });
+  await pending;
+  assert.equal(commands.find(command => command.type === "plan_response")?.decision, "auto");
+});
+
+test("an Auto prompt cannot approve a replacement session or override a newer mode choice", async () => {
+  for (const change of ["session", "generation", "mode"]) {
+    const { provider, messages, commands } = autoWarningHarness();
+    const pending = provider.requestMode("auto");
+    const prompt = messages.at(-1);
+    if (change === "session") provider.currentSessionId = "different-session";
+    else if (change === "generation") provider.sessionHandshakeGeneration++;
+    else await provider.requestMode("default");
+    await provider.onMessage({ type: "autoModeAnswer", requestId: prompt.requestId, accepted: true });
+    assert.equal(await pending, false);
+    assert.equal(commands.some(c => c.type === "set_mode" && c.mode === "auto"), false);
+  }
+});
+
 function restorationHarness() {
   const saved = new Map(), posted = [], calls = [];
   let resolve, reject, released = 0, disposed = 0;
@@ -2672,6 +2730,27 @@ test("only selected reviewed stdio commands require native execution confirmatio
   const count=notices.warnings.length;
   await provider.onSettingsMessage({type:"installPlugin",name:"fixture",selectedServers:["remote"]});
   assert.equal(notices.warnings.length,count);
+});
+
+test("DGC's own Microsoft server installs without a run-a-command warning, with the chosen kind of account", async () => {
+  const {provider} = catalogHarness([]);
+  const commands=[],messages=[];
+  provider.ensureBackend=()=>({send:m=>{commands.push(m);return true;}});
+  provider.settingsEditor={webview:{postMessage:m=>messages.push(m)}};
+  const own=app=>({transport:"stdio",command:"python3",args:["-m","dgc.microsoft_graph",app]});
+  provider.settingsPreviews.set("microsoft",{name:"microsoft",display_name:"Microsoft Outlook and OneDrive",install:"allow",
+    sign_in_accounts:[{id:"personal",label:"Personal account"},{id:"work",label:"Work or school account"}],
+    server_specs:{"microsoft--mail":own("mail"),"microsoft--onedrive":own("onedrive")}});
+  const count=notices.warnings.length;
+  await provider.onSettingsMessage({type:"installPlugin",name:"microsoft",selectedServers:["microsoft--mail"],signInAccount:"work"});
+  assert.equal(notices.warnings.length,count,"nothing to download or review: it is DGC's own code");
+  assert.equal(commands.at(-1).type,"install_plugin");
+  assert.equal(commands.at(-1).sign_in_account,"work");
+  assert.deepEqual(commands.at(-1).selected_servers,["microsoft--mail"]);
+  // A plugin that offers no kinds of account is never sent one, whatever the page says.
+  provider.settingsPreviews.set("fixture",{name:"fixture",display_name:"Fixture",install:"allow",server_specs:{remote:{url:"https://example.com/mcp"}}});
+  await provider.onSettingsMessage({type:"installPlugin",name:"fixture",signInAccount:"work"});
+  assert.equal(commands.at(-1).sign_in_account,undefined);
 });
 
 test("uninstall clears editor server records and secrets without dropping unrelated records", async () => {

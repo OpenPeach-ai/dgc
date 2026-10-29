@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dgc.chatdgc.engine import LOOK_UP, ChatEngine, ChatEngineError
-from dgc.chatdgc.store import ChatStore
+from dgc.chatdgc.store import ChatStore, ChatStoreError
 from dgc.llm import ToolCall
 from dgc.shared_memory import SharedMemory
 
@@ -58,6 +58,23 @@ class Phase7(unittest.TestCase):
     def say(self, chat_id, text, replies=("OK.",), **kwargs):
         self.world["replies"] += list(replies)
         return self.engine.send(chat_id, text, search="off", **kwargs)
+
+    def test_file_removal_rejects_path_bearing_ids(self):
+        chat = self.store.create()
+        project = self.store.create_project("Test")
+        chat["messages"] = [{"id": "msg_" + "a" * 32, "role": "user", "text": "file",
+                             "attachments": [{"id": "../../victim.txt", "name": "victim.txt"}]}]
+        self.store.save(chat)
+        projects = self.store._read_projects()
+        projects[0]["files"] = [{"id": "../../victim.txt", "name": "victim.txt"}]
+        self.store._write_projects(projects)
+        victim = self.store.root / "victim.txt"
+        victim.write_text("keep")
+        with self.assertRaises(ChatStoreError):
+            self.store.remove_file(chat["id"], "../../victim.txt")
+        with self.assertRaises(ChatStoreError):
+            self.store.remove_project_file(project["id"], "../../victim.txt")
+        self.assertEqual(victim.read_text(), "keep")
 
 
 class BranchTests(Phase7):

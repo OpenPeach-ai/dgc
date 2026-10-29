@@ -262,22 +262,31 @@ def _write_new(root: Path, parts: list[str], name: str, raw: bytes) -> dict:
     if folder_bytes(root) + len(raw) > MAX_FOLDER_BYTES:
         raise RegistryError("computer_full", "This computer's Files are full (1 GB). Remove something first.")
     fd = _open_dir(root, parts)
+    staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
     try:
-        staging = f".dgc-add-{os.getpid()}-{os.urandom(6).hex()}"
         ffd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
         with os.fdopen(ffd, "wb") as handle:
             handle.write(raw)
-        final = name
-        for n in range(1, 100):
+        for n in range(100):
+            if n == 0:
+                final = name
+            else:
+                stem, dot, ext = name.rpartition(".")
+                suffix = f" ({n})" + (f".{ext}" if dot and stem and len(ext.encode("utf-8")) <= 64 else "")
+                base = stem if dot and stem and len(ext.encode("utf-8")) <= 64 else name
+                final = base.encode("utf-8")[:MAX_NAME_BYTES - len(suffix.encode("utf-8"))].decode("utf-8", "ignore") + suffix
             try:
-                os.stat(final, dir_fd=fd, follow_symlinks=False)
-            except FileNotFoundError:
-                break
-            stem, dot, ext = name.rpartition(".")
-            final = f"{stem} ({n}).{ext}" if dot and stem else f"{name} ({n})"
-        os.rename(staging, final, src_dir_fd=fd, dst_dir_fd=fd)
-        return {"path": "/".join(parts + [final]), "name": final, "bytes": len(raw)}
+                # link fails atomically when another writer just took the name; rename would replace it.
+                os.link(staging, final, src_dir_fd=fd, dst_dir_fd=fd)
+            except FileExistsError:
+                continue
+            return {"path": "/".join(parts + [final]), "name": final, "bytes": len(raw)}
+        raise RegistryError("computer_files", "Too many files share that name. Choose a different name.")
     finally:
+        try:
+            os.unlink(staging, dir_fd=fd)
+        except OSError:
+            pass
         os.close(fd)
 
 

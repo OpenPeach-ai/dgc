@@ -61,13 +61,15 @@ def validate(value) -> dict:
     def count(n):
         return type(n) is int and 0 <= n <= MAX_TOKENS
     bad = RegistryError("invalid_reply", "This reply's context measure is invalid.")
-    if (not isinstance(value, dict) or set(value) != {"version", "parts"} or value["version"] != VERSION
+    if (not isinstance(value, dict) or set(value) != {"version", "parts"}
+            or type(value["version"]) is not int or value["version"] != VERSION
             or not isinstance(value["parts"], list) or len(value["parts"]) > len(FIXED)):
         raise bad
     seen = set()
     for part in value["parts"]:
         if (not isinstance(part, dict) or not {"id", "label", "tokens"} <= set(part) <= {"id", "label", "tokens", "items"}
-                or part["id"] not in FIXED or part["id"] in seen or part["label"] != FIXED[part["id"]]
+                or not isinstance(part["id"], str) or part["id"] not in FIXED
+                or part["id"] in seen or part["label"] != FIXED[part["id"]]
                 or not count(part["tokens"])):
             raise bad
         items = part.get("items", [])

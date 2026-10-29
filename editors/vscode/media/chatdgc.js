@@ -51,7 +51,7 @@
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
                   projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {}, outline: null,
-                  elsewhere: null };
+                  elsewhere: null, output: "auto", folderOn: false, folder: "", folderBusy: false, briefing: false };
   // Another window's DGC writes to this chat (Open here there, or it was open there first): it shows as last saved,
   // read-only, with Open here, as Work's session does. {state: "elsewhere" | "moved", conversation}.
   const readOnly = () => !!state.elsewhere && state.elsewhere.conversation === (state.conversation?.id || state.elsewhere.conversation);
@@ -1339,6 +1339,8 @@
     }
     for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
     for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
+    for (const card of Array.isArray(message.artifacts) ? message.artifacts : []) { const box = artifactCard(card); if (box) node.append(box); }
+    if (!live && typeof message.output_note === "string" && message.output_note.trim()) node.append(el("p", "cd-output-note", message.output_note.trim()));
     for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
     const doing = live && state.searching[message.id];
     if (doing) node.append(wave(doing.kind === "looking"
@@ -1601,6 +1603,310 @@
     return box;
   }
 
+  // ---- artifacts a reply made or changed (message.artifacts: a deck, a sheet, a dashboard, a page): a card each, which
+  // opens it in its panel or exports it. They're kept with the reply, so they come back with the chat; what each one
+  // is now (a later version, a new title, removed) comes from artifactChanged and, after a reload, artifactViews.
+  const ARTIFACT_ICON = { doc: "file-text", slides: "preview", sheet: "table", dashboard: "dashboard", page: "browser" };
+  const ARTIFACT_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", dashboard: "Dashboard", page: "Page" };
+  const ARTIFACT_FORMAT = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
+                            xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
+  const artifactsNow = new Map();          // id -> the artifact as last heard (null: removed)
+  let artifactsOffer = null;
+  function artifactFormats(card) {
+    const now = artifactsNow.get(card.id);
+    const own = Array.isArray(now?.exports) && now.exports.length ? now.exports : Array.isArray(card.exports) ? card.exports : [];
+    return own.length ? own : Array.isArray(artifactsOffer?.exports?.[card.type]) ? artifactsOffer.exports[card.type] : [];
+  }
+  let artifactMenu = null;
+  function closeArtifactMenu(focus) {
+    if (!artifactMenu) return;
+    artifactMenu.menu.hidden = true; artifactMenu.button.setAttribute("aria-expanded", "false");
+    if (focus) artifactMenu.button.focus();
+    artifactMenu = null;
+  }
+  document.addEventListener("click", (e) => {
+    if (artifactMenu && !artifactMenu.menu.contains(e.target) && !artifactMenu.button.contains(e.target)) closeArtifactMenu(false);
+  });
+  function artifactCard(card) {
+    if (!card || !/^ar_[a-f0-9]{16}$/.test(String(card.id || "")) || !ARTIFACT_KIND[card.type]) return null;
+    const box = el("div", "cd-file cd-artifact");
+    box.dataset.artifact = card.id;
+    box.dataset.type = card.type;
+    box.setAttribute("role", "group");
+    paintArtifact(box, card);
+    return box;
+  }
+  function paintArtifact(box, card) {
+    const now = artifactsNow.get(card.id);
+    const removed = now === null;
+    const shown = now || card;
+    const kind = ARTIFACT_KIND[card.type];
+    if (removed) box.dataset.removed = "true"; else delete box.dataset.removed;     // .cd-file[data-removed] dims it
+    box.setAttribute("aria-label", `${kind}: ${shown.title || kind}`);
+    const mark = el("span", "cd-file-badge cd-artifact-badge");
+    mark.append(icon(ARTIFACT_ICON[card.type]));
+    const words = el("div", "cd-file-words");
+    words.append(el("strong", "cd-file-name", shown.title || kind));
+    const did = card.op === "made" ? "made" : card.op === "restored" ? "restored" : "changed";
+    const version = Number(shown.version) || Number(card.version) || 1;
+    const moved = now && Number(now.version) > Number(card.version);
+    words.append(el("small", "cd-file-meta", removed ? `${kind} · removed: it's in DGC's trash, where it can be recovered`
+      : moved ? `${kind} · ${did} here as version ${card.version} · now version ${version}` : `${kind} · ${did} · version ${version}`));
+    const buttons = el("div", "cd-file-actions");
+    if (!removed) {
+      const open = el("button", "cd-continue cd-artifact-open", "Open");
+      open.type = "button";
+      open.addEventListener("click", () => vscode.postMessage({ type: "artifactOpen", id: card.id, artifactType: card.type, title: shown.title || "" }));
+      buttons.append(open);
+      const formats = artifactFormats(card);
+      if (formats.length) {
+        const wrap = el("span", "cd-artifact-export");
+        const button = el("button", "cd-edit-cancel cd-artifact-export-button");
+        button.type = "button";
+        button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+        button.append(el("span", "", "Export"), icon("chevron-down"));
+        const menu = el("span", "cd-artifact-menu");
+        menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Export as"); menu.hidden = true;
+        for (const format of formats) {
+          const item = el("button", "cd-artifact-menu-item", ARTIFACT_FORMAT[format] || format.toUpperCase());
+          item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
+          item.addEventListener("click", () => {
+            closeArtifactMenu(true);
+            vscode.postMessage({ type: "artifactExport", id: card.id, format, artifactType: card.type, title: shown.title || "", exports: formats });
+          });
+          menu.append(item);
+        }
+        menu.addEventListener("keydown", (e) => {
+          const items = [...menu.querySelectorAll("button")];
+          const at = items.indexOf(document.activeElement);
+          if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeArtifactMenu(true); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+          else if (e.key === "Tab") closeArtifactMenu(false);
+        });
+        button.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (artifactMenu?.menu === menu) { closeArtifactMenu(true); return; }
+          closeArtifactMenu(false);
+          menu.hidden = false; button.setAttribute("aria-expanded", "true");
+          artifactMenu = { menu, button };
+          menu.querySelector("button")?.focus();
+        });
+        wrap.append(button, menu);
+        buttons.append(wrap);
+      }
+    }
+    box.replaceChildren(mark, words, buttons);
+  }
+  /** What an artifact is now, on every card that shows it. */
+  function artifactHeard(id, now) {
+    artifactsNow.set(id, now);
+    for (const box of document.querySelectorAll(".cd-artifact")) {
+      if (box.dataset.artifact !== id) continue;
+      const card = state.messages.flatMap((m) => (Array.isArray(m.artifacts) ? m.artifacts : [])).find((a) => a.id === id)
+        || { id, type: box.dataset.type, title: now?.title || "", version: now?.version || 1, op: "changed" };
+      const focused = box.contains(document.activeElement) ? document.activeElement.className : "";
+      paintArtifact(box, card);
+      if (focused) box.querySelector(`.${focused.split(" ")[0]}`)?.focus();
+    }
+  }
+
+  // ---- the Output chip (ready.capabilities.artifacts): what the next reply should make. Auto is never sent; a choice
+  // goes with one message and the chip is Auto again, as Deep research is.
+  const OUTPUT_CHOICES = [
+    ["auto", "Auto", "The model picks what to make, if anything", "sparkle"],
+    ["document", "Document", "A document to keep editing", "file-text"],
+    ["slides", "Slides", "A deck to present", "preview"],
+    ["spreadsheet", "Spreadsheet", "A sheet, formulas and all", "table"],
+    ["page", "Page", "One self-contained web page", "browser"],
+    ["dashboard", "Dashboard", "Charts over data you allow", "dashboard"],
+  ];
+  const outputButton = $("cd-output"), outputMenu = $("cd-output-menu");
+  function outputOffered(offer) {
+    artifactsOffer = offer && typeof offer === "object" && Number(offer.version) >= 1 ? offer : null;
+    $("cd-output-wrap").hidden = !artifactsOffer;
+    if (!artifactsOffer) { closeOutputMenu(false); outputChoice("auto"); }
+  }
+  function outputChoice(value) {
+    const choice = OUTPUT_CHOICES.find(([v]) => v === value) || OUTPUT_CHOICES[0];
+    state.output = choice[0];
+    const on = state.output !== "auto";
+    outputButton.setAttribute("aria-pressed", String(on));
+    $("cd-output-icon").className = `codicon codicon-${on ? choice[3] : "output"}`;
+    const label = $("cd-output-label");
+    label.replaceChildren(...(on ? [el("span", "cd-output-prefix", "Output: "), el("span", "", choice[1])] : [el("span", "", "Output")]));
+    outputButton.setAttribute("aria-label", on ? `Output: ${choice[1]}, for the next reply` : "Output: Auto. The model picks");
+    outputButton.title = on ? `Output: ${choice[1]} for the next reply (then Auto again)` : "Output: what the next reply should make. Auto lets the model pick";
+  }
+  function closeOutputMenu(focus) {
+    if (outputMenu.hidden) return;
+    outputMenu.hidden = true; outputButton.setAttribute("aria-expanded", "false");
+    if (focus) outputButton.focus();
+  }
+  function openOutputMenu() {
+    const listed = Array.isArray(artifactsOffer?.outputs) ? artifactsOffer.outputs : [];
+    outputMenu.replaceChildren(el("span", "cd-output-head", "Make, with the next reply"), ...OUTPUT_CHOICES
+      .filter(([value]) => value === "auto" || !listed.length || listed.includes(value))
+      .map(([value, label, desc, glyph]) => {
+        const row = el("button", "cd-output-item");
+        row.type = "button"; row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(value === state.output));
+        row.dataset.output = value;
+        row.append(icon(glyph), el("span", "cd-output-name", label), el("span", "cd-output-desc", desc));
+        row.addEventListener("click", () => { outputChoice(value); closeOutputMenu(true); });
+        return row;
+      }));
+    outputMenu.hidden = false; outputButton.setAttribute("aria-expanded", "true");
+    (outputMenu.querySelector('[aria-checked="true"]') || outputMenu.querySelector("button"))?.focus();
+  }
+  outputButton.addEventListener("click", (e) => { e.stopPropagation(); if (outputMenu.hidden) openOutputMenu(); else closeOutputMenu(true); });
+  outputMenu.addEventListener("keydown", (e) => {
+    const items = [...outputMenu.querySelectorAll("button")];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeOutputMenu(true); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); items.at(-1).focus(); }
+    else if (e.key === "Tab") closeOutputMenu(false);
+  });
+  document.addEventListener("click", (e) => { if (!outputMenu.hidden && !outputMenu.contains(e.target) && !outputButton.contains(e.target)) closeOutputMenu(false); });
+
+  // ---- a folder this chat reads (ready.capabilities.chatdgc.folder): the Folder chip beside Output. The chat reads the
+  // folder with read-only tools and never writes there. Continue in Work (the chip's menu, and the header once there is
+  // something to carry) brings a brief of the chat to a Work session in that folder, in its prompt box, unsent. VS Code's
+  // own picker chooses the folder (the host shows it): the page asks for it, and says to take it away, never names one.
+  // Function declarations and $() at call time: controls() reaches folderChrome() before this part of the page has run.
+  /** The last part of a path, Windows or not: what the chip shows ("uploads"). */
+  function folderName(path) {
+    const text = String(path || "");
+    return text.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || text;
+  }
+  /** Why Continue in Work can't go now, or "" when it can. */
+  function workBlocked() {
+    if (!state.folder) return "Choose a folder first";
+    if (!state.conversation || !(state.messages.length || state.earlier)) return "Send a message first";
+    if (state.briefing) return "Writing the brief…";
+    if (busyNow()) return "When the reply finishes";
+    if (readOnly()) return "Open here first";
+    return "";
+  }
+  function folderOffered(on) {
+    state.folderOn = !!on;
+    if (!state.folderOn) { closeFolderMenu(false); state.folderBusy = false; }
+    folderChrome();
+    placeholder();
+  }
+  /** The chip and the header's Continue in Work, as the chat is now. controls() calls it on every keystroke: it only
+   *  writes what changed. */
+  function folderChrome() {
+    const button = $("cd-folder"), work = $("cd-work");
+    if (!button || !work) return;
+    const set = state.folderOn && !!state.folder, name = set ? folderName(state.folder) : "";
+    $("cd-folder-wrap").hidden = !state.folderOn;
+    const write = (node, key, value) => { if (node.getAttribute(key) !== value) node.setAttribute(key, value); };
+    const label = $("cd-folder-label"), glyph = $("cd-folder-icon");
+    if (label.textContent !== (set ? name : "Folder")) label.textContent = set ? name : "Folder";
+    const shape = `codicon codicon-${set ? "folder-opened" : "folder"}`;
+    if (glyph.className !== shape) glyph.className = shape;
+    write(button, "aria-pressed", String(set));
+    if (set) write(button, "aria-haspopup", "menu");
+    else { button.removeAttribute("aria-haspopup"); button.removeAttribute("aria-expanded"); }
+    write(button, "aria-label", set ? `Folder: ${name}. This chat reads it` : "Folder: give this chat a folder to read");
+    const tip = set ? `${state.folder}\nThis chat reads this folder and never changes it.`
+      : "Folder: give this chat a folder to read. It reads the files there and never changes them";
+    if (button.title !== tip) button.title = tip;
+    write(button, "aria-busy", String(state.folderBusy));
+    // Continue in Work in the header: once the chat has a folder and something to carry.
+    work.hidden = !(set && !!state.conversation && (state.messages.length > 0 || state.earlier > 0));
+    const blocked = workBlocked();
+    work.disabled = !!blocked;
+    write(work, "aria-busy", String(state.briefing));
+    const words = $("cd-work-label");
+    if (words.dataset.state !== String(state.briefing)) {
+      words.dataset.state = String(state.briefing);
+      words.replaceChildren(...(state.briefing ? [el("span", "", "Writing the brief…")]
+        : [el("span", "cd-work-more", "Continue in "), el("span", "", "Work")]));
+      $("cd-work-icon").className = state.briefing ? "codicon codicon-loading codicon-modifier-spin" : "codicon codicon-arrow-right";
+    }
+    write(work, "aria-label", state.briefing ? "Writing a brief of this chat for Work" : `Continue in Work, in ${name}`);
+    const workTip = state.briefing ? "Writing a brief of this chat for a Work session in its folder…"
+      : blocked ? `Continue in Work: ${blocked.toLowerCase()}.`
+      : `Continue in Work: a coding session in ${name} that starts from a brief of this chat. You read it and send it.`;
+    if (work.title !== workTip) work.title = workTip;
+  }
+  function closeFolderMenu(focus) {
+    const menu = $("cd-folder-menu");
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    $("cd-folder").setAttribute("aria-expanded", "false");
+    if (focus) $("cd-folder").focus();
+  }
+  function folderItem(glyph, name, desc, action, blocked = "") {
+    const row = el("button", "cd-output-item cd-folder-item");
+    row.type = "button"; row.setAttribute("role", "menuitem"); row.dataset.folderAction = action;
+    if (blocked) row.setAttribute("aria-disabled", "true");      // focusable, said as unavailable, does nothing
+    row.append(icon(glyph), el("span", "cd-output-name", name), el("span", "cd-output-desc", blocked || desc));
+    row.addEventListener("click", () => {
+      if (row.getAttribute("aria-disabled") === "true") return;
+      closeFolderMenu(action !== "work");
+      if (action === "pick") pickFolder();
+      else if (action === "remove") removeFolder();
+      else continueInWork();
+    });
+    return row;
+  }
+  function openFolderMenu() {
+    const menu = $("cd-folder-menu");
+    const where = el("span", "cd-folder-path", state.folder);
+    where.title = state.folder;
+    menu.replaceChildren(el("span", "cd-output-head", "This chat reads"), where,
+      el("span", "cd-folder-note", "Its files, to answer from. It never changes them."),
+      folderItem("arrow-right", "Continue in Work", "Code in that folder", "work", workBlocked()),
+      folderItem("folder-opened", "Choose another folder…", "", "pick"),
+      folderItem("close", "Remove folder", "It stops reading it", "remove"));
+    menu.hidden = false;
+    $("cd-folder").setAttribute("aria-expanded", "true");
+    menu.querySelector("button")?.focus();
+  }
+  function pickFolder() {
+    if (state.folderBusy || readOnly() || !state.folderOn) return;
+    state.folderBusy = true; folderChrome();
+    vscode.postMessage({ type: "folderPick" });
+  }
+  function removeFolder() {
+    if (state.folderBusy || readOnly() || !state.folder) return;
+    state.folderBusy = true; folderChrome();
+    vscode.postMessage({ type: "folderSet", folder: "" });
+  }
+  /** Continue in Work: the brief is a model's summary of the chat, so the chat is busy with it as with Compact now. */
+  function continueInWork() {
+    if (workBlocked()) return;
+    hideNotice();
+    state.briefing = true; state.compacting = true;
+    render(); controls();
+    vscode.postMessage({ type: "workBrief" });
+  }
+  $("cd-folder").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!state.folder) { pickFolder(); return; }
+    if ($("cd-folder-menu").hidden) openFolderMenu(); else closeFolderMenu(true);
+  });
+  $("cd-folder-menu").addEventListener("keydown", (e) => {
+    const items = [...$("cd-folder-menu").querySelectorAll("button")];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFolderMenu(true); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); items.at(-1).focus(); }
+    else if (e.key === "Tab") closeFolderMenu(false);
+  });
+  document.addEventListener("click", (e) => {
+    const menu = $("cd-folder-menu");
+    if (!menu.hidden && !menu.contains(e.target) && !$("cd-folder").contains(e.target)) closeFolderMenu(false);
+  });
+  $("cd-work").addEventListener("click", continueInWork);
+
   /** A canvas the reply made or changed: it's open in an editor beside the chat; Open brings it back. */
   function canvasCard(canvas) {
     const box = el("div", "cd-file cd-canvas");
@@ -1814,7 +2120,7 @@
     const presets = { "8k": "8k", "32k": "32k", "128k": "128k", max: "the model's maximum" };
     // Compact now keeps the last exchange word for word: with nothing older left to summarize, it says so here
     // rather than failing after the click.
-    const compact = el("button", "cd-edit-cancel", state.compacting ? "Summarizing…" : "Compact now");
+    const compact = el("button", "cd-edit-cancel", state.compacting ? (state.briefing || state.compactingBrief ? "Writing the brief…" : "Summarizing…") : "Compact now");
     compact.type = "button"; compact.dataset.whileIdle = "1";
     if (!c.compactable) compact.dataset.never = "1";
     compact.disabled = state.busy || state.compacting || readOnly() || !c.compactable;
@@ -2143,7 +2449,8 @@
       if (after >= 0) nodes.splice(after + 1, 0, branchedNode());
     }
     if (state.conversation?.carried?.text) nodes.unshift(carriedNode());
-    if (state.compacting) nodes.push(wave("Summarizing earlier messages to fit the context window…", "div", "cd-working cd-activity"));
+    if (state.compacting) nodes.push(wave(state.briefing || state.compactingBrief ? `Writing a brief of this chat for Work in ${folderName(state.folder) || "its folder"}…`
+      : "Summarizing earlier messages to fit the context window…", "div", "cd-working cd-activity"));
     // Each thinking box keeps the reader's place in it, and its focus, through a whole redraw (a reply finishing).
     const places = [...log.querySelectorAll("details.cd-thinking")].map((d) => {
       const words = d.querySelector(".cd-thought");
@@ -2273,7 +2580,7 @@
     // While it answers, Send stays beside Stop for what you've typed: it queues it (Codex's queue).
     const queueing = busyNow() && !empty;
     send.hidden = offerVoice || (busyNow() && empty);
-    stop.hidden = !state.busy || locked;
+    stop.hidden = !(state.busy || state.briefing) || locked;      // Stop ends a reply, or Continue in Work's brief
     send.disabled = empty || !state.conversation || !!state.unavailable;
     const sendLabel = queueing ? "Queue: sends when the reply finishes" : "Send";
     if (send.title !== sendLabel) { send.title = sendLabel; send.setAttribute("aria-label", queueing ? "Queue message" : "Send"); }
@@ -2286,6 +2593,7 @@
     $("cd-temporary").checked = !!state.conversation?.temporary;
     $("cd-temp-badge").hidden = !state.conversation?.temporary;
     $("cd-menu").hidden = !state.conversation || !!state.conversation.temporary || fresh;
+    folderChrome();
     if (locked) holdChanges(document, true);            // the box's own too: attach, research, study, model, mic, send
   }
   function grow() {
@@ -2317,6 +2625,23 @@
     }
   });
   $("cd-box").addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+  // ChatDGC's own mods (media/mods.js, the same as Work's): each band and one status line above the message box, a
+  // mod's panel in a drawer beside the chat, its notices in this page's notice, a slash menu of /mods and each running
+  // mod's commands (run at once, never sent as a message), and the question about the mods DGC writes.
+  const mods = window.DgcMods ? window.DgcMods.create({
+    surface: "chat",
+    post: (msg) => vscode.postMessage(msg),
+    strip: $("cd-mod-strip"),
+    // A mod's notice is this page's notice, under its title; it goes again by itself, as the terminal's does.
+    notice: (title, text, tone) => {
+      const said = `${title}: ${text}`;
+      showNotice(said, tone === "bad" ? "error" : "info");
+      setTimeout(() => { if (!notice.hidden && notice.textContent === said) hideNotice(); }, 6000);
+    },
+    transcript: (node) => { log.append(node); follow(); },
+    announce: (text) => { const say = $("cd-announce"); if (say) say.textContent = text; },
+  }) : null;
+  mods?.menu(input, { host: $("cd-box"), cleared: () => { grow(); saveDraft(); } });
   /** Stop: the reply ends where it is, and nothing queued goes after it. */
   function stopReply() { state.stopping = true; vscode.postMessage({ type: "stop" }); }
   stop.addEventListener("click", stopReply);
@@ -2394,15 +2719,23 @@
   }
   function submit(spoken = false) {
     const text = input.value;
+    // /mods, or a running mod's own "/name args": run here at once, never sent to the model.
+    if (!spoken && !state.pending.length && mods?.intercept(text)) {
+      edit(() => { input.value = ""; });
+      grow(); saveDraft();
+      return;
+    }
     if ((!text.trim() && !state.pending.length) || !state.conversation || state.unavailable || readOnly()) return;
     if (state.research && state.pending.length) { showNotice("Deep research reads the web: send files without it, or turn it off.", "info"); return; }
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
-                   search: searchMode(), study: !!state.study, pending: state.pending };
+                   search: searchMode(), study: !!state.study, pending: state.pending,
+                   output: !state.research && artifactsOffer && state.output !== "auto" ? state.output : "" };
     // One step, so Cmd+Z right after sending brings the message back, chips and all.
     edit(() => { input.value = ""; state.pending = []; });
     grow(); saveDraft(); chips();
     if (state.research) researchMode(false);
+    if (state.output !== "auto") outputChoice("auto");
     // While it's answering (or summarizing), the message waits its turn, as Codex queues one: it goes when the
     // reply finishes. Voice mode never gets here busy -- it waits for the reply itself.
     if (busyNow()) { enqueue(item); controls(); return; }
@@ -2419,6 +2752,7 @@
     }
     vscode.postMessage({ type: "send", text: item.text, model: item.model, thinking: item.thinking,
                          search: item.search, study: item.study, ...(spoken ? { voice: true } : {}),
+                         ...(item.output ? { output: item.output } : {}),
                          ...(item.pending.length ? { attachments: item.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
@@ -2446,7 +2780,10 @@
   function saveQueue() {
     try {
       // Pasted images and long pastes stay in memory only: the state a webview keeps is small.
-      const light = queued().map((item) => ({ ...item, pending: item.pending.filter((p) => !p.data) }));
+      const light = queued().map((item) => {
+        const pending = item.pending.filter((p) => !p.data && !p.text);
+        return { ...item, pending, lostAttachments: item.pending.length - pending.length };
+      });
       vscode.setState({ ...(vscode.getState() || {}), [queueKey(state.queueFor)]: light.length ? light : undefined });
     } catch {}
   }
@@ -2475,6 +2812,7 @@
   function restoreQueue() {
     const list = queued().splice(0);
     if (!list.length) return;
+    const lost = list.some((item) => item.lostAttachments > 0);
     const typed = input.value.trim();
     edit(() => {
       input.value = [...list.map((item) => item.text.trim()), ...(typed ? [typed] : [])].filter(Boolean).join("\n\n");
@@ -2483,6 +2821,7 @@
     chips();
     grow(); saveDraft(); saveQueue(); queueView(); controls();
     announce(list.length === 1 ? "The queued message is back in the box." : `The ${list.length} queued messages are back in the box.`);
+    if (lost) showNotice("A queued message had pasted files that could not survive the reload. Review it and attach them again before sending.", "info");
   }
   /** The reply finished: the next queued message goes. */
   function sendNext() {
@@ -2538,7 +2877,7 @@
     const project = isProjectPage() ? projectOf(state.conversation) : null;
     input.placeholder = readOnly() ? "Open here to carry on in this window"
       : state.research ? "What should I research?" : state.study ? "What do you want to learn?"
-      : project ? `New chat in ${project.name}` : "Ask anything";
+      : project ? `New chat in ${project.name}` : state.folderOn && state.folder ? `Ask about ${folderName(state.folder)}` : "Ask anything";
   }
   /** The read-only bar above the box, in Work's words, while another window's DGC writes to this chat. */
   function elsewhereBar() {
@@ -2847,6 +3186,12 @@
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
     switch (msg.type) {
+      case "modsReady":
+        mods?.ready(msg.capabilities || {});
+        break;
+      case "modsEvent":
+        mods?.event(msg.event);
+        break;
       case "voiceReady":
         voiceMode?.receive(msg);
         break;
@@ -2895,12 +3240,77 @@
         elsewhereBar(); render(); controls();
         return;
       }
+      case "artifacts":
+        outputOffered(msg.offered);
+        return;
+      case "folderOffered":
+        folderOffered(msg.on === true);
+        return;
+      case "folder": {
+        // The folder this chat reads, asked as it opened or changed in any tab on it ("" for none).
+        if (!state.conversation || msg.conversation !== state.conversation.id) return;
+        const now = typeof msg.folder === "string" ? msg.folder : "";
+        state.folderBusy = false;
+        if (now !== state.folder) {
+          state.folder = now;
+          if (!now) closeFolderMenu(false);
+          if (state.compacting && state.briefing) render();
+        }
+        if (msg.mine) announce(now ? `This chat reads ${folderName(now)} now. It never changes it.` : "This chat reads no folder now.");
+        controls();
+        return;
+      }
+      case "folderPicked":                              // the picker closed with nothing chosen
+        state.folderBusy = false;
+        folderChrome();
+        return;
+      case "folderError":
+        state.folderBusy = false;
+        folderChrome();
+        showNotice(msg.message || "That folder can't be used. Choose another.");
+        return;
+      case "briefing": {
+        // Continue in Work's brief: being written (in any tab on this chat), or done with, or refused.
+        if (msg.on === true) {
+          if (!state.briefing) { state.briefing = true; state.compacting = true; render(); controls(); }
+          return;
+        }
+        const stopped = state.stopping;
+        if (state.briefing) { state.briefing = false; state.compacting = false; state.stopping = false; render(); controls(); }
+        if (msg.error) {
+          showNotice(stopped ? "Stopped. Nothing went to Work." : msg.error);
+          restoreQueue();                               // what you queued meanwhile comes back to the box
+        } else sendNext();                              // what you queued meanwhile goes now
+        return;
+      }
+      case "workOpened": {
+        const where = folderName(msg.folder) || "its folder";
+        if (msg.opened) {
+          showNotice(`A Work session in ${where} has the brief in its prompt box. Change it if you like, then send it.`, "info");
+          announce(`Opened Work in ${where}, with the brief in its prompt box.`);
+        } else showNotice(msg.message ? `Work didn't open: ${msg.message}` : "Work didn't open. Continue in Work again when you're ready.", "info");
+        return;
+      }
+      case "artifactChanged":
+        if (msg.artifact?.id) artifactHeard(msg.artifact.id, msg.op === "removed" ? null : msg.artifact);
+        return;
+      case "artifactViews": {
+        // After a reload: what every card's artifact is now. One that isn't listed was removed.
+        const items = new Map((Array.isArray(msg.items) ? msg.items : []).filter((a) => a?.id).map((a) => [a.id, a]));
+        const ids = new Set([...document.querySelectorAll(".cd-artifact")].map((box) => box.dataset.artifact));
+        for (const id of ids) artifactHeard(id, items.get(id) ?? null);
+        return;
+      }
       case "opened": {
         // keep: the same chat shown again (a new version, or another one chosen): what you're typing and the
         // model and thinking you picked stay, and so does where you were reading.
         const keep = msg.keep === true && state.conversation?.id === msg.conversation?.id;
         if (state.elsewhere && state.elsewhere.conversation !== msg.conversation?.id) { state.elsewhere = null; elsewhereBar(); }
-        if (state.conversation?.id !== msg.conversation?.id) { state.picks = {}; removedWidgets.clear(); closeWidgets(false); }
+        if (state.conversation?.id !== msg.conversation?.id) {
+          state.picks = {}; removedWidgets.clear(); closeWidgets(false);
+          // Another chat: its own folder is asked for as it opens (the host does), and nothing of this one's carries.
+          state.folder = ""; state.folderBusy = false; state.briefing = false; closeFolderMenu(false);
+        }
         // A long chat opens on its latest pages: the rest of its prompts and widgets come as its outline.
         state.outline = null; seeking = null;
         if (Number(msg.earlier) > 0 && msg.conversation?.id) vscode.postMessage({ type: "outline" });
@@ -2919,18 +3329,20 @@
         $("cd-title").textContent = state.conversation?.title || "New chat";
         vscode.setState({ ...(vscode.getState() || {}), conversation: state.conversation?.id || "",
                           temporary: !!state.conversation?.temporary });
+        hideNotice();
         if (!keep) {
           restoreDraft();
           // This chat's queue: shown while it answers (it drains when the reply ends); found after a reload with
           // nothing running, it's back in the box rather than sent on its own.
           queueView();
-          if (!state.busy && queued().length) restoreQueue();
+          if (queued().some((item) => item.lostAttachments > 0) || (!state.busy && queued().length)) restoreQueue();
         }
-        hideNotice();
         fillModels();
         if (!keep) pinned = true;
         render();
         if (!keep) input.focus();
+        // Its replies' artifact cards say what each artifact is now (changed since, or removed).
+        if (artifactsOffer && state.messages.some((m) => Array.isArray(m.artifacts) && m.artifacts.length)) vscode.postMessage({ type: "artifactViews" });
         return;
       }
       case "earlier": {
@@ -2970,7 +3382,8 @@
         return;
       case "activity":
         if (msg.kind === "compacting" && msg.messageId !== state.replyId) {
-          state.compacting = true; render(); controls();        // Compact now, or a summary for a new chat
+          // Compact now, a summary for a new chat, or (text "brief") Continue in Work asked for in another window.
+          state.compacting = true; state.compactingBrief = msg.text === "brief"; render(); controls();
           return;
         }
         if (["searching", "looking", "compacting", "plugin", "making", "canvas", "analyzing"].includes(msg.kind) && msg.messageId) {

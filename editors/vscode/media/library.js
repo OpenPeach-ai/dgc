@@ -1,6 +1,8 @@
 // The Library (ChatGPT's): every file attached in ChatDGC, in every chat and project, newest first. Search by name,
 // show one kind, and for each: open where it is, use it in a new chat, save a copy, add it to a project, delete it.
 // And its widgets (a backend that keeps them says so): every interactive answer, to open beside you again or delete.
+// And its artifacts (ready.capabilities.artifacts): every document, deck, sheet, page and dashboard DGC made, wherever it
+// made it, newest first; shown by kind and by where it was made; to open, export or remove (to DGC's trash).
 // Names are the user's words: text nodes only. Images are asked of the backend by id, as the chat screen asks.
 (function () {
   const vscode = acquireVsCodeApi();
@@ -15,9 +17,18 @@
   const ORIGINS = [["", "All"], ["uploaded", "Uploaded"], ["made", "Made by ChatDGC"]];
   const state = { query: "", kind: KINDS.some(([k]) => k === saved.kind) ? saved.kind : "", files: [], total: 0, next: null, counts: {},
                   origin: ORIGINS.some(([o]) => o === saved.origin) ? saved.origin : "", origins: {}, loading: true, asking: 0,
-                  view: saved.view === "widgets" ? "widgets" : "files", offered: false, widgets: [], widgetsNext: null };
+                  view: ["widgets", "artifacts"].includes(saved.view) ? saved.view : "files", offered: false, widgets: [], widgetsNext: null,
+                  artifactsOffered: false, artifacts: [], atype: typeof saved.atype === "string" ? saved.atype : "", made: typeof saved.made === "string" ? saved.made : "" };
+  const ATYPES = [["", "All"], ["doc", "Documents"], ["slides", "Slides"], ["sheet", "Spreadsheets"], ["page", "Pages"], ["dashboard", "Dashboards"]];
+  const MADE = [["", "Anywhere"], ["chat", "Chat"], ["work", "Work"], ["pip", "Pips"]];
+  const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard" };
+  const A_ICON = { doc: "file-text", slides: "preview", sheet: "table", page: "browser", dashboard: "dashboard" };
+  const A_MADE = { chat: "made in Chat", work: "made in Work", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
+  const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
+                    xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const ABOUT = { files: "Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.",
-                  widgets: "Every calculator, timer or quiz ChatDGC made for you, in every chat. Open one beside you, or delete it." };
+                  widgets: "Every calculator, timer or quiz ChatDGC made for you, in every chat. Open one beside you, or delete it.",
+                  artifacts: "Every document, deck, sheet, page and dashboard DGC made for you, in Chat, Work and your Pips, with every version. Open one, export it, or remove it." };
   const images = new Map();
   const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
   function when(stamp) {
@@ -33,15 +44,17 @@
     state.loading = true; state.asking = offset;       // a later page adds to the list; a new search replaces it
     status();
     if (state.view === "widgets") { vscode.postMessage({ type: "widgets", query: state.query, offset }); return; }
+    if (state.view === "artifacts") { vscode.postMessage({ type: "artifactList" }); return; }
     vscode.postMessage({ type: "list", query: state.query, kind: state.kind, ...(state.origin ? { origin: state.origin } : {}), offset });
   }
   function views() {
-    // Files and Widgets, as tabs; Widgets only once the backend says it keeps them.
+    // Files, Widgets and Artifacts, as tabs; Widgets and Artifacts only once the backend says it keeps them.
     const bar = $("lib-views");
-    bar.hidden = !state.offered;
+    const offered = [["files", "Files"], ...(state.offered ? [["widgets", "Widgets"]] : []), ...(state.artifactsOffered ? [["artifacts", "Artifacts"]] : [])];
+    bar.hidden = offered.length < 2;
     bar.replaceChildren();
-    if (!state.offered) return;
-    for (const [view, label] of [["files", "Files"], ["widgets", "Widgets"]]) {
+    if (bar.hidden) return;
+    for (const [view, label] of offered) {
       const tab = el("button", "lib-view", label);
       tab.type = "button";
       tab.setAttribute("role", "tab");
@@ -60,14 +73,23 @@
     ask();
   }
   function place() {
-    const widgets = state.view === "widgets";
+    const noun = { files: "files", widgets: "widgets", artifacts: "artifacts" }[state.view];
     $("lib-about").textContent = ABOUT[state.view];
-    $("lib-search").placeholder = widgets ? "Search widgets" : "Search files";
-    $("lib-search").setAttribute("aria-label", widgets ? "Search your widgets by name" : "Search your files by name");
-    $("lib-list").setAttribute("aria-label", widgets ? "Your widgets" : "Your files");
+    $("lib-search").placeholder = `Search ${noun}`;
+    $("lib-search").setAttribute("aria-label", `Search your ${noun} by name`);
+    $("lib-list").setAttribute("aria-label", `Your ${noun}`);
   }
   function status() {
     const line = $("lib-status");
+    if (state.view === "artifacts") {
+      const shown = artifactsShown();
+      line.textContent = state.loading && !state.artifacts.length ? "Loading…" : shown.length ? ""
+        : state.query ? `No artifact named like “${state.query}”.`
+        : state.atype || state.made ? "None like that yet."
+        : "Documents, decks, sheets, pages and dashboards DGC makes for you show here.";
+      line.hidden = !line.textContent;
+      return;
+    }
     if (state.view === "widgets") {
       line.textContent = state.loading && !state.widgets.length ? "Loading…" : state.widgets.length ? ""
         : state.query ? `No widget named like “${state.query}”.` : "Calculators, timers and quizzes ChatDGC makes for you show here.";
@@ -177,20 +199,108 @@
     item.append(box, main, actions);
     return item;
   }
+  // ---- artifacts
+  function artifactsShown() {
+    const q = state.query.toLowerCase();
+    return state.artifacts.filter((a) => (!state.atype || a.type === state.atype) && (!state.made || a.origin?.surface === state.made)
+      && (!q || String(a.title || "").toLowerCase().includes(q)))
+      .sort((a, b) => String(b.updated || b.created || "").localeCompare(String(a.updated || a.created || "")));
+  }
+  function chips(bar, options, current, count, set) {
+    bar.replaceChildren();
+    for (const [value, label] of options) {
+      const n = count(value);
+      if (value && !n && current !== value) continue;
+      const chip = el("button", "lib-kind");
+      chip.type = "button";
+      chip.dataset.value = value;
+      chip.setAttribute("aria-pressed", String(current === value));
+      chip.append(el("span", "", label), el("span", "lib-kind-count", String(n)));
+      chip.addEventListener("click", () => set(value));
+      bar.append(chip);
+    }
+  }
+  function artifactFilters() {
+    const byType = (t) => state.artifacts.filter((a) => (!t || a.type === t) && (!state.made || a.origin?.surface === state.made)).length;
+    const byMade = (m) => state.artifacts.filter((a) => (!m || a.origin?.surface === m) && (!state.atype || a.type === state.atype)).length;
+    const keep = () => { try { vscode.setState({ ...(vscode.getState() || {}), atype: state.atype, made: state.made }); } catch {} };
+    chips($("lib-kinds"), ATYPES, state.atype, byType, (t) => { state.atype = t; keep(); render(); });
+    chips($("lib-made"), MADE, state.made, byMade, (m) => { state.made = m; keep(); render(); });
+    $("lib-kinds").setAttribute("aria-label", "Show kind");
+  }
+  let menuOpen = null;
+  function closeMenu(focus) {
+    if (!menuOpen) return;
+    menuOpen.menu.remove(); menuOpen.button.setAttribute("aria-expanded", "false");
+    if (focus) menuOpen.button.focus();
+    menuOpen = null;
+  }
+  document.addEventListener("click", (e) => { if (menuOpen && !menuOpen.menu.contains(e.target) && !menuOpen.button.contains(e.target)) closeMenu(false); });
+  function exportMenu(button, a) {
+    if (menuOpen?.button === button) { closeMenu(true); return; }
+    closeMenu(false);
+    const menu = el("div", "lib-menu");
+    menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", `Export ${a.title || "it"} as`);
+    for (const format of Array.isArray(a.exports) ? a.exports : []) {
+      const item = el("button", "lib-menu-item", FORMATS[format] || format.toUpperCase());
+      item.type = "button"; item.setAttribute("role", "menuitem"); item.dataset.format = format;
+      item.addEventListener("click", () => { closeMenu(true); vscode.postMessage({ type: "artifactExport", artifact: a, format }); });
+      menu.append(item);
+    }
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll("button")];
+      const at = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { e.preventDefault(); closeMenu(true); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+      else if (e.key === "Tab") closeMenu(false);
+    });
+    button.parentElement.append(menu);
+    button.setAttribute("aria-expanded", "true");
+    menuOpen = { menu, button };
+    menu.querySelector("button")?.focus();
+  }
+  function artifactRow(a) {
+    const item = el("li", "lib-row lib-artifact");
+    item.dataset.artifact = a.id; item.dataset.type = a.type;
+    const main = el("div", "lib-main");
+    main.append(el("span", "lib-name", a.title || A_KIND[a.type] || "Artifact"));
+    main.append(el("span", "lib-meta", [A_KIND[a.type] || a.type, `version ${Number(a.version) || 1}`, A_MADE[a.origin?.surface] || "", when(a.updated || a.created)].filter(Boolean).join(" · ")));
+    const actions = el("div", "lib-actions");
+    actions.append(action("go-to-file", a.type === "doc" ? "Open it in the editor" : "Open it", () => vscode.postMessage({ type: "artifactOpen", artifact: a })));
+    if (Array.isArray(a.exports) && a.exports.length) {
+      const wrap = el("span", "lib-menu-wrap");
+      const exp = action("desktop-download", "Export…", () => exportMenu(exp, a));
+      exp.setAttribute("aria-haspopup", "menu"); exp.setAttribute("aria-expanded", "false");
+      wrap.append(exp);
+      actions.append(wrap);
+    }
+    actions.append(action("trash", "Remove: it goes to DGC's trash, where it can be recovered", () => vscode.postMessage({ type: "artifactRemove", artifact: a })));
+    const box = el("span", "lib-preview");
+    box.append(icon(A_ICON[a.type] || "file"));
+    item.append(box, main, actions);
+    return item;
+  }
+
   function render() {
     views();
-    const widgets = state.view === "widgets";
-    $("lib-origins").hidden = true; $("lib-kinds").hidden = widgets;
-    if (!widgets) { origins(); kinds(); }
-    $("lib-list").replaceChildren(...(widgets ? state.widgets.map(widgetRow) : state.files.map(row)));
-    const next = widgets ? state.widgetsNext : state.next;
+    const widgets = state.view === "widgets", artifacts = state.view === "artifacts";
+    $("lib-origins").hidden = true; $("lib-kinds").hidden = widgets; $("lib-made").hidden = !artifacts;
+    if (artifacts) artifactFilters();
+    else if (!widgets) { $("lib-kinds").setAttribute("aria-label", "Show"); origins(); kinds(); }
+    $("lib-list").replaceChildren(...(artifacts ? artifactsShown().map(artifactRow) : widgets ? state.widgets.map(widgetRow) : state.files.map(row)));
+    const next = artifacts ? null : widgets ? state.widgetsNext : state.next;
     $("lib-more").hidden = next === null || next === undefined;
     status();
   }
   let timer = 0;
   $("lib-search").addEventListener("input", (e) => {
     clearTimeout(timer);
-    timer = setTimeout(() => { state.query = e.target.value.trim(); state.files = []; ask(); }, 250);
+    timer = setTimeout(() => {
+      state.query = e.target.value.trim();
+      if (state.view === "artifacts") { render(); return; }       // the whole list is here: searched as it is
+      state.files = []; ask();
+    }, 250);
   });
   $("lib-more").addEventListener("click", () => ask(state.view === "widgets" ? state.widgets.length : state.files.length));
   window.addEventListener("message", (event) => {
@@ -215,9 +325,24 @@
       state.offered = msg.on === true;
       if (!state.offered && state.view === "widgets") show("files");        // as if Files were chosen
       else { if (state.offered && !was && state.view === "widgets") ask(); render(); }
+    } else if (msg.type === "artifactsOffered") {
+      const was = state.artifactsOffered;
+      state.artifactsOffered = msg.on === true;
+      if (!state.artifactsOffered && state.view === "artifacts") show("files");
+      else { if (state.artifactsOffered && !was && state.view === "artifacts") ask(); render(); }
+    } else if (msg.type === "artifacts") {
+      state.artifacts = Array.isArray(msg.items) ? msg.items.filter((a) => a && /^ar_[a-f0-9]{16}$/.test(String(a.id || ""))) : [];
+      state.loading = false;
+      render();
+    } else if (msg.type === "artifactRemoved") {
+      state.artifacts = state.artifacts.filter((a) => a.id !== msg.id);
+      render();
+    } else if (msg.type === "artifactChanged") {
+      if (state.view === "artifacts") ask();       // made, changed or removed anywhere: the list as it is now
     } else if (msg.type === "view") {
       // Opened from a chat's Widgets list: the Widgets tab (the host says so only to a backend that keeps them).
       if (msg.view === "widgets" && state.offered) show("widgets");
+      if (msg.view === "artifacts" && state.artifactsOffered) show("artifacts");
     } else if (msg.type === "refresh") {
       ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {

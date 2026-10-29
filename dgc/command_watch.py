@@ -23,6 +23,12 @@ runs -- `bash` in the foreground, `python`, and the tool hooks -- DGC looks befo
 What Git ignores (node_modules, build output) and files outside the project are not seen: reading them
 around every command would cost more than the command. A background shell is not watched at all.
 
+**The person's saves.** A file the person saved meanwhile is not the command's: one VS Code reported
+(`user_saved`, passed on to a terminal DGC by dgc/save_inbox.py), or one another editor was editing, read
+from the files vim, Neovim, Emacs and nano leave beside it and, on Linux, from the names their saves make
+while the command runs (dgc/editor_traces.py). An editor's own swap or lock file is never the command's
+change either.
+
 **Uncommitted work.** Before each command DGC also copies every file with uncommitted changes (tracked
 files Git sees as modified or deleted, untracked files it does not ignore): a model's `git checkout .`,
 `git reset --hard`, `git clean -fd`, `git stash` or `rm` over them is put back by Undo from that copy.
@@ -39,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import sys
 import threading
 import time
 from collections import deque
@@ -72,8 +79,12 @@ _NO_CONVERSION = frozenset({"unspecified", "unset"})
 # after the command was looked at takes back what that look recorded for the file (note_saves).
 # A terminal DGC hears them too when a window's DGC works in the same folder: that backend passes each
 # save on to this process's inbox (dgc/save_inbox.py), read here before a command's changes are
-# attributed and before an Undo. A save from an editor no DGC hears (vim, JetBrains) is attributed by
-# time, and Undo's question lets the person keep a file a command changed (Keep the ones I edited).
+# attributed and before an Undo. An editor no DGC hears (vim, Neovim, Emacs, nano, a JetBrains IDE) is
+# read from the traces it leaves (dgc/editor_traces.py: its swap or lock, and on Linux the names that
+# came and went while the command ran): a file one of them edited during the command is the person's
+# in the same way, and its point notes the editor so Undo's question names it. A save that leaves no
+# trace (nano by default, an editor that writes in place) is attributed by time, and Undo's question
+# lets the person keep a file a command changed (Keep the ones I edited).
 _SAVE_SLACK_S = 2.0                    # a save this close to a command's start or end counts as during it
 _CLOCK_SLACK_S = 0.015                 # the kernel stamps file times from a coarse clock, a few ms behind
 _SAVES: "deque[tuple[str, float]]" = deque(maxlen=4096)
@@ -459,10 +470,11 @@ def _index_of(repo: Path) -> _Index:
 class Watch:
     """One command's before-look (`begin`) and after-look (`finish`)."""
 
-    def __init__(self, agent, manager, git: tuple[Path, Path] | None):
+    def __init__(self, agent, manager, git: tuple[Path, Path] | None, text: str = ""):
         self.agent = agent
         self.manager = manager
         self.git = git
+        self.text = text if isinstance(text, str) else ""     # the command itself, for editor_traces
         self.started = time.time()
         self.head: str | None = None
         self.listed: dict[str, str] | None = None
@@ -478,6 +490,13 @@ class Watch:
         # What this look recorded, so a save the editor reports late can take it back:
         # (kind, path, point, snapshot, left before, mode before, row before).
         self.records: list[tuple] = []
+        # Another editor's traces (dgc/editor_traces.py): the listener while the command runs (Linux), what
+        # it heard, and the files the person edited in another editor meanwhile, path -> editor.
+        self.listener = None
+        self.events = None
+        self.traces = None
+        self.elsewhere: dict[str, str] = {}
+        self.listen_s, self.listen_folders = 0.0, 0
 
     # ---------------------------------------------------------------- before ---
     def begin(self) -> None:
@@ -503,7 +522,71 @@ class Watch:
         for path in self._earlier(set(current)):
             if path not in self.before:
                 self.before[path] = _mark(Path(path), [0], 0)
+        self._listen()
         self.cost_s += time.monotonic() - clock
+
+    def _listen(self) -> None:
+        """Linux: hear the names other editors' saves leave while the command runs (never raises)."""
+        try:
+            from . import editor_traces
+            self.listener = editor_traces.listen(self._listen_folders())
+            if self.listener is not None:
+                self.listen_s, self.listen_folders = self.listener.cost_s, len(self.listener.wds)
+        except Exception:                      # noqa: BLE001 -- no extra hearing, never a failed command
+            self.listener = None
+
+    def _listen_folders(self):
+        """The folders the listener watches, most wanted first: the project's own; those of the files Git
+        lists as changed and of the files the turns' tools wrote, where the person is working; then every
+        folder Git tracks, shallowest first (asked of Git after an earlier command, never before this one)."""
+        from . import editor_traces
+        if self.git is not None:
+            repo, project = self.git
+            root = repo / project if project != Path(".") else repo
+        else:
+            repo = project = None
+            root = Path(self.manager.project_root)
+        top = str(root)
+        yield top
+        for path in list(self.before):
+            folder = os.path.dirname(path)
+            if folder == top or folder.startswith(top.rstrip(os.sep) + os.sep):
+                yield folder
+        if repo is not None and self.head:
+            yield from editor_traces.tracked_folders(repo, self.head, project) or ()
+
+    def _hear_editors(self) -> None:
+        """What the listener heard, now the command has ended; it is closed (never raises)."""
+        listener, self.listener = self.listener, None
+        if listener is None:
+            return
+        try:
+            self.events = listener.stop()
+        except Exception:                      # noqa: BLE001
+            self.events = None
+            listener.close()
+
+    def _traces(self):
+        if self.traces is None:
+            from . import editor_traces
+            self.traces = editor_traces.Traces(self.started, time.time(), self.events, self.text)
+        return self.traces
+
+    def _edited_in(self, path: Path) -> str | None:
+        """The editor the person edited `path` in while the command ran, from the traces it leaves, or None."""
+        try:
+            return self._traces().editor_of(path)
+        except Exception:                      # noqa: BLE001
+            return None
+
+    def _editors_own(self, path: Path) -> bool:
+        """Is `path` one of an editor's own files (vim's swap, Emacs's lock), made or removed while this ran? One
+        that is gone is shown to be by its copy from before the command."""
+        try:
+            copy = self.copies.get(str(path))
+            return self._traces().is_trace(path, (copy[0], copy[1]) if copy else None)
+        except Exception:                      # noqa: BLE001
+            return False
 
     def _copy_dirty(self, repo: Path) -> None:
         """Copy every file Git lists as changed or untracked, as it is before the command: its bytes, its
@@ -585,9 +668,14 @@ class Watch:
         clock = time.monotonic()
         try:
             hear_saves()                         # what other DGCs passed on, before anything is attributed
+            self._hear_editors()                 # and what other editors left while it ran
             with self.manager.batch():
                 self._settle()
+                self._note_elsewhere()
+            self._ask_tracked()
         finally:
+            self._hear_editors()                 # closed, whatever happened
+            self.events = self.traces = None     # needed only for this look; a late save never reads them
             self.ended = time.time()
             with _LOCK:
                 _RECENT.append(self)
@@ -598,6 +686,29 @@ class Watch:
             copied = self.agent.__dict__.setdefault("_command_watch_copied", [])
             copied.append(self.copied_new)       # bytes copied before it that were not in the store yet
             del copied[:-200]
+
+    def _note_elsewhere(self) -> None:
+        """The files the person edited in another editor while the command ran, noted in the turn's point so
+        Undo's question can name them (a file the turn's own tools wrote needs no note: Undo's guard sees the
+        change after DGC's write, merges it or holds it back, and says so)."""
+        note = getattr(self.manager, "note_elsewhere", None)
+        if not self.elsewhere or not callable(note) or not self.manager.points:
+            return
+        files = self.manager.points[-1]["files"]
+        for path, editor in list(self.elsewhere.items()):
+            if path not in files:
+                note(path, editor)
+
+    def _ask_tracked(self) -> None:
+        """Linux, with Git: the folders Git tracks at this HEAD, asked once per HEAD after a command, so the
+        next command's listener can watch them all without asking Git first."""
+        if self.git is None or not self.head or not sys.platform.startswith("linux"):
+            return
+        try:
+            from . import editor_traces
+            editor_traces.tracked_folders(self.git[0], self.head, self.git[1], ask=True)
+        except Exception:                      # noqa: BLE001
+            pass
 
     # What this look records, kept so a late save can take it back.
     def _before_note(self, path: str) -> tuple:
@@ -684,6 +795,12 @@ class Watch:
                 continue                       # this chat's, or one of its helpers'
             if span.start - _CLOCK_SLACK_S <= changed_at <= span.until(now) + _CLOCK_SLACK_S:
                 return False                   # another chat's command was running too: can't say whose
+        if self._editors_own(path):
+            return False                       # an editor's own swap or lock: not a change Undo should make
+        editor = self._edited_in(path)
+        if editor:
+            self.elsewhere[str(path)] = editor
+            return False                       # the person edited it in another editor while this ran
         return True
 
     def _repo_path(self, path: str) -> str | None:
@@ -841,10 +958,14 @@ def begin(agent, name: str, args=None) -> Watch | None:
         return None
     listen_for_saves()
     git = None if agent.__dict__.get("_command_watch_git_off") else _repo_of(agent)
-    watch = Watch(agent, manager, git)
+    text = ""
+    if isinstance(args, dict):
+        text = args.get("command") if name == "bash" else args.get("code") if name == "python" else ""
+    watch = Watch(agent, manager, git, text if isinstance(text, str) else "")
     try:
         watch.begin()
     except Exception:                          # noqa: BLE001 -- a look that fails never stops the command
+        watch._hear_editors()                  # its listener, if it had one, is closed
         return None
     return watch
 

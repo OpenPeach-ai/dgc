@@ -503,8 +503,8 @@ function paintBar(): void {
     align.value = cell.attrs.align || "";
   }
   style.value = blockStyle();
-  const ask = document.getElementById("cv-ask") as HTMLButtonElement;
-  ask.title = view.state.selection.empty ? "Ask ChatDGC about this paragraph" : "Ask ChatDGC about the selection";
+  const ask = document.getElementById("cv-ask") as HTMLButtonElement | null;     // a chat's canvas has it; a DGC document doesn't
+  if (ask) ask.title = view.state.selection.empty ? "Ask ChatDGC about this paragraph" : "Ask ChatDGC about the selection";
 }
 
 function run(command: (state: EditorState, dispatch?: any, view?: EditorView) => boolean): void {
@@ -602,6 +602,10 @@ const actions: Record<string, () => void> = {
   delRow: () => run(keepInTable(deleteRow)), delCol: () => run(keepInTable(deleteColumn)), delTable: () => run(deleteTable),
   ask, shortcuts: () => { flush(); host.postMessage({ type: "shortcuts" }); },
   markdown: () => { flush(); host.postMessage({ type: "markdown" }); },
+  // A DGC document (an artifact's, not a chat's canvas): its versions, export and its own address.
+  versions: () => { flush(); host.postMessage({ type: "versions" }); },
+  export: () => { flush(); host.postMessage({ type: "export" }); },
+  browser: () => { flush(); host.postMessage({ type: "browser" }); },
 };
 
 for (const row of [bar, tableBar]) {

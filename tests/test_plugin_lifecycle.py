@@ -163,8 +163,9 @@ class PluginLifecycleTests(unittest.TestCase):
         with patch.dict('os.environ',{},clear=True): plugins.connect(self.config,manager,record,input_handler=None)
         self.assertEqual(calls,[]);self.assertIn('DGC_TEST_MISSING_TOKEN',manager.failures['fixture'])
 
-    def test_google_setup_only_never_starts_servers(self):
-        entry={**next(e for e in plugins.load_catalog()['plugins'] if e['name']=='google-workspace'), 'name':'setup-fixture', 'install':'accept'}
+    def test_a_setup_only_preset_never_starts_servers(self):
+        # Google Workspace was one until DGC had its own Google app (28 Oct 2026); its servers make a setup-only one.
+        entry={**next(e for e in plugins.load_catalog()['plugins'] if e['name']=='google-workspace'), 'name':'setup-fixture', 'install':'accept', 'setup_required':True}
         record=plugins.install(entry,accept_license=entry['license'],selected_servers=['setup-fixture--gmail','setup-fixture--drive'])
         manager=SimpleNamespace(connect_all=lambda *a,**kw:self.fail('setup-only server launched'))
         plugins.connect(self.config,manager,record,input_handler=None)

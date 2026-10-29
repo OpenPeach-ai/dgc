@@ -7,6 +7,8 @@ Downloaded on 2026-09-22, without recoloring or redrawing. These are Google mark
 - Calendar: https://www.gstatic.com/images/branding/product/2x/calendar_2020q4_48dp.png
 - Contacts: https://www.gstatic.com/images/branding/product/2x/contacts_2022_48dp.png
 - Drive: https://www.gstatic.com/images/branding/product/2x/drive_2020q4_48dp.png
+- Docs (downloaded 2026-10-28): https://www.gstatic.com/images/branding/product/2x/docs_2020q4_48dp.png
+- Slides (downloaded 2026-10-28): https://www.gstatic.com/images/branding/product/2x/slides_2020q4_48dp.png
 
 The DGC mark comes from the existing `media/dgc-mark.svg`.
 
@@ -19,7 +21,7 @@ image requests in the webview. Arcade's SVG embeds its own PNG, no external asse
 - Zapier: https://zapier.com/favicon.ico
 - Make: https://www.make.com/favicon.ico
 - n8n: https://n8n.io/favicon.ico
-- Arcade: https://www.arcade.dev/favicon.svg
+- Arcade: https://www.arcade.dev/favicon.svg (official SVG fetched 2026-10-29; SHA-256 `64d2635fc345810d433264e60a7ac6f1a7c3c7f29418b61de2ee952505905cd7`)
 
 # Plugin marks
 
@@ -87,3 +89,16 @@ only to identify the service; no partnership implied. Bundled locally.
 - Docusign: https://www.docusign.com/assets/images/apple-touch-icon-180x180.png
 - Zoom: https://avatars.githubusercontent.com/u/29114944 (Zoom's own GitHub organisation mark, downloaded on
   18 October 2026, 460×460, resized to 128×128)
+
+# Microsoft marks
+
+Downloaded on 29 October 2026 from Microsoft's own sites, without recolouring, redrawing or resizing. Used only to
+identify Microsoft's services in the Microsoft plugin (DGC's own server for Outlook and OneDrive) and Microsoft's Work
+IQ plugin; no partnership or endorsement implied. Bundled locally, so the Settings page makes no image requests.
+
+- Microsoft (microsoft.png, and work-iq.png, the same file): the 128×128 image in https://www.microsoft.com/favicon.ico,
+  Microsoft's four-square symbol, taken out of the icon file as it is.
+- Outlook (outlook.png, for Outlook Mail and Outlook Calendar): Microsoft's Fluent product icon,
+  https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/outlook_96x1.png
+- OneDrive (onedrive.png): Microsoft's Fluent product icon,
+  https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/onedrive_96x1.png

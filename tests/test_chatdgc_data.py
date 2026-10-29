@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from dgc.chatdgc import data, made
 from dgc.chatdgc.engine import LOOK_UP, ChatEngine
@@ -63,6 +64,14 @@ class Tables(unittest.TestCase):
         result = big.query("SELECT n FROM n")
         self.assertEqual((len(result["rows"]), result["more"]), (data.MAX_RESULT_ROWS, True))
         self.assertIn(f"(more than {data.MAX_RESULT_ROWS} rows; showing the first {data.SHOWN_ROWS}.", data.as_table(result))
+
+    def test_xlsx_expansion_and_row_limits_apply_during_parsing(self):
+        workbook = made.make({"name": "Limits", "format": "xlsx", "sheets": [
+            {"name": "Data", "rows": [["n"], [1], [2]]}]}, CONFIG).raw
+        with patch.object(data, "MAX_XLSX_XML_BYTES", 100), self.assertRaisesRegex(data.DataError, "expands past"):
+            data._xlsx_sheets(workbook)
+        with patch.object(data, "MAX_ROWS", 1), self.assertRaisesRegex(data.DataError, "more than 1 rows"):
+            data._xlsx_sheets(workbook)
 
 
 class Model:

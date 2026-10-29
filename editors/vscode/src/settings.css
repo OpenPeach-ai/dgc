@@ -44,7 +44,7 @@ a{color:var(--link);text-underline-offset:3px}a:hover{color:var(--link);text-dec
 code{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:4px;background:var(--surface2)}
 svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
-/* ---- The shell: the side list, and in a narrow tab a page picker instead of unlabeled icons ---- */
+/* ---- The shell: labeled navigation, with a compact icon rail in narrow tabs ---- */
 .shell{display:flex;height:100vh;overflow:hidden}
 .sidebar{width:172px;flex:none;padding:16px 10px;overflow:auto;background:var(--side);border-right:1px solid var(--border)}
 .nav-head{height:32px;display:flex;align-items:center;gap:8px;padding:0 6px;margin-bottom:12px;color:var(--muted);font-size:12px}
@@ -56,10 +56,7 @@ svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:
 .sidebar .nav-divider{height:1px;background:var(--border);margin:10px 8px}
 .icon-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:transparent;border-radius:6px;color:var(--muted)}
 .icon-button:hover{background:var(--hover);color:var(--text)}
-.collapsed .sidebar{width:52px;padding-inline:8px}.collapsed .sidebar nav button{padding:8px}.collapsed .sidebar .nav-text,.collapsed .nav-head>span{display:none}.collapsed .nav-head{padding:0}.collapsed .nav-divider{margin-inline:4px}
-.page-picker{display:none;align-items:center;gap:8px;margin:0 0 18px}
-.page-picker label{color:var(--muted);font-size:12px}
-.page-picker select{flex:1;min-width:0;height:var(--control)}
+.collapsed .sidebar{width:52px;padding-inline:6px;scrollbar-width:thin}.collapsed .sidebar nav button{padding:8px 4px;justify-content:center}.collapsed .sidebar .nav-text,.collapsed .nav-head>span{display:none}.collapsed .nav-head{padding:0}.collapsed .nav-divider{margin-inline:4px}
 main{min-width:0;flex:1;overflow:auto;padding:28px 28px 0;scrollbar-gutter:stable;background:var(--bg)}
 .page{max-width:760px;margin:auto;padding-bottom:40px}
 
@@ -226,6 +223,8 @@ details.more>summary:hover{color:var(--text)}
 .google-choice:last-child{border-bottom:0}.service-tile{display:grid;place-items:center;width:40px;height:40px;flex:none;border:1px solid var(--border);border-radius:11px}.service-tile img{object-fit:contain}
 .google-choice input{appearance:none;flex:none;width:34px;height:20px;min-width:34px;margin:0 0 0 auto;padding:0;background:var(--border-strong);border:0;border-radius:20px;cursor:pointer;position:relative}
 .google-choice input:before{content:'';position:absolute;width:16px;height:16px;border-radius:50%;left:2px;top:2px;background:#fff;transition:transform .12s ease}.google-choice input:checked{background:var(--accent-fill)}.google-choice input:checked:before{transform:translateX(14px)}
+.account-choices{border:0;margin:12px 0 0;padding:0;min-width:0}.account-choices legend{padding:0 0 6px;font-size:12px;color:var(--muted)}.account-choice{display:flex;align-items:center;gap:12px;padding:8px 0;cursor:pointer}.account-choice input{flex:none;margin:0}
+.google-app{display:flex;flex-direction:column;gap:2px;min-width:0}.google-scopes{color:var(--muted);font-size:11px;line-height:1.4}.google-permissions{margin:2px 0 8px;padding-left:18px}.google-permissions li{margin:2px 0}
 .google-setup{margin:16px 0 0;padding:12px 14px;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:11px;line-height:1.6}.google-setup strong{font-weight:500;color:var(--text)}.google-setup p{margin:4px 0}.google-setup summary{cursor:pointer;color:var(--text);margin-top:6px}
 .connection-dialog .dialog-footer{padding:18px 32px 22px;border:0;flex-direction:column;gap:10px}.connection-dialog .dialog-footer .save{width:100%;border-radius:30px;min-height:40px;font-size:13px}
 .connection-dialog #dialog-cancel{background:transparent;color:var(--muted)}
@@ -280,10 +279,12 @@ details.more>summary:hover{color:var(--text)}
 
 /* ---- Narrow tabs ---- */
 @media(max-width:860px){.examples{grid-template-columns:1fr}.example{min-height:0}.hero{flex-wrap:wrap}.hero .actions{margin-left:0}.page-heading{flex-wrap:wrap}.page-heading>.actions{margin-bottom:16px}.directory-grid{grid-template-columns:1fr}.directory-toolbar .search{flex-basis:100%}}
-/* A tab narrower than 620px: the side list gives way to a page picker with every page's name, and each row puts
-   its control under its words (a switch stays beside them). */
+/* Narrow tabs keep every page reachable in an icon rail. Rows put controls under their words. */
 @media(max-width:620px){
-  .sidebar{display:none}.page-picker{display:flex}
+  .sidebar,.collapsed .sidebar{width:52px;padding-inline:6px;scrollbar-width:thin}
+  .sidebar nav button,.collapsed .sidebar nav button{padding:8px 4px;justify-content:center}
+  .sidebar .nav-text,.sidebar .nav-head{display:none}
+  .sidebar .nav-divider{margin-inline:4px}
   main{padding:18px 16px 0}
   .field{flex-wrap:wrap;gap:8px}.field>span:first-child,.field>.words{flex-basis:100%}
   .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control{width:100%;max-width:none}
@@ -303,3 +304,29 @@ details.more>summary:hover{color:var(--text)}
   .memory-edit input{flex-basis:100%}.page-heading .actions{flex-wrap:wrap}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Settings -> Plugins -> Mods and a plugin's mods in its install review: the chats' /mods list (media/mods.js
+   listView), in this page's tokens. */
+.mods-page>h3{margin:18px 0 4px}.mods-page>.note{margin:0 0 12px}
+.mod-list{display:flex;flex-direction:column;gap:8px}
+.mod-item{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);min-width:0}
+.mod-item-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0}
+.mod-item-title{color:var(--text-strong);font-weight:var(--w-semi);overflow-wrap:anywhere}
+.mod-item-version{color:var(--muted)}
+.mod-state{margin-left:auto;color:var(--muted);font-weight:var(--w-med)}
+.mod-state[data-tone="ok"]{color:var(--good)}.mod-state[data-tone="warn"]{color:var(--need-text)}.mod-state[data-tone="bad"],.mod-item-error{color:var(--error)}
+body.vscode-light .mod-state[data-tone="ok"]{color:#1D7A44}
+.mod-item p{margin:0;overflow-wrap:anywhere}.mod-item-where{color:var(--muted)}
+.mod-asks,.review-mod-asks{margin:0;padding-left:18px}.mod-asks li+li,.review-mod-asks li+li{margin-top:2px}
+.mod-asks-more>summary{cursor:pointer;color:var(--muted)}.mod-asks-more>summary:hover{color:var(--text)}
+.mod-item-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.mod-item-actions .act{min-height:26px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--button2);color:var(--button2-text);cursor:pointer}
+.mod-item-actions .act:hover{background:var(--button2-hover)}
+.mod-item-actions .act.primary{border-color:var(--accent-fill);background:var(--accent-fill);color:#fff}
+.mod-item-actions .act.primary:hover{background:var(--accent-hover)}
+.mod-item-actions .act:disabled{opacity:.6;cursor:default}
+.mod-item-actions .act:focus-visible{outline:1px solid var(--focus);outline-offset:1px}
+.mod-off{padding:8px;border:1px solid var(--need);border-radius:var(--r-md);color:var(--need-text)}
+.mod-empty{color:var(--muted)}
+.mod-about{margin-top:12px;color:var(--muted)}.mod-about p{margin:0 0 4px}.mod-about code{font-family:var(--mono);color:var(--text)}
+.review-mods{display:flex;flex-direction:column;gap:10px}.review-mod p{margin:0 0 4px}.review-mod-more{color:var(--need-text)}

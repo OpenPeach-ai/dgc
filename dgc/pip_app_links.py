@@ -140,8 +140,9 @@ def apps_overview(registry) -> dict:
                            "account": row["account"], "pips": []}
             order.append(key)
         try:
-            name = json.loads(row["definition"]).get("name") or "Pip"
-        except ValueError:
+            definition = json.loads(row["definition"])
+            name = (definition.get("name") or "Pip") if isinstance(definition, dict) else "Pip"
+        except (ValueError, TypeError):
             name = "Pip"
         if all(p["pip_id"] != row["pip_id"] for p in groups[key]["pips"]):
             groups[key]["pips"].append({"pip_id": row["pip_id"], "name": str(name)[:120], "link_id": row["id"]})
@@ -536,13 +537,15 @@ class RunSocket:
                     else:
                         self.calls += 1
                         op = str(message.get("op", ""))
+                        args = message.get("args")
                         from .pip_plugins import TOOLS as PLUGIN_TOOLS
                         from .pip_borrow import TOOLS as BORROW_TOOLS
-                        answer = (self.call(op, message.get("args") or {}) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
+                        answer = ("error: invalid app arguments" if not isinstance(args, dict) else
+                                  self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
                                   else "error: unknown app operation")
                         reply = answer if isinstance(answer, dict) else {"text": answer}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
-                except (OSError, ValueError):
+                except (OSError, ValueError, TypeError):
                     continue
 
     def close(self) -> None:
@@ -580,6 +583,8 @@ def worker_reply(pin: dict, op: str, args: dict, *, timeout: float = 120) -> dic
                 if not chunk:
                     break
                 raw += chunk
+                if len(raw) > 4 * 1024 * 1024:
+                    raise ValueError("app reply exceeded its 4 MiB limit")
         reply = json.loads(raw.decode("utf-8"))
         out = {"text": str(reply.get("text", "error: no reply"))[:MAX_TEXT + 1000]}
         if isinstance(reply.get("draft"), dict):

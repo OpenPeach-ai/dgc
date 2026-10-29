@@ -13,6 +13,8 @@ showing (``partial: true``); the file keeps all of it.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -28,6 +30,7 @@ WIDGET_REPORT_CHARS = 4_000
 PAGE_BYTES = 3 * 1024 * 1024          # one frame's messages, encoded
 OUTLINE_PROMPTS = 4000                # the latest prompts an outline lists: well inside one frame
 OUTLINE_CHARS = 160                   # of each prompt's words
+OUTLINE_WIDGETS = 1000                # bound widget references across an outline
 PREVIEW_BYTES = 2_500_000             # an image shown in the chat: its data: URI must fit one frame
 FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
@@ -52,7 +55,8 @@ CHAT_ID_CHARS = 37
 # the reply ends and the chat is this window's (a message typed meanwhile goes then, as ChatDGC's queue sends it).
 WRITES = frozenset({"chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate", "chatdgc_version",
                     "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_compact", "chatdgc_summary",
-                    "chatdgc_carry", "chatdgc_branch", "chatdgc_draft", "chatdgc_action"})
+                    "chatdgc_carry", "chatdgc_branch", "chatdgc_draft", "chatdgc_action", "chatdgc_set_folder",
+                    "chatdgc_update", "chatdgc_move"})
 # What a window that took a chat mid-reply asks of the process writing the reply: what it has now (open), Stop, a
 # steer for research, what a widget shows. Anything else it reads from disk itself.
 THROUGH = frozenset({"chatdgc_open", "chatdgc_cancel", "chatdgc_research_steer", "chatdgc_widget_report"})
@@ -65,7 +69,8 @@ class _HeldElsewhere(ChatEngineError):
 def _writes(cmd: dict) -> bool:
     kind = cmd.get("type")
     return (kind in WRITES or (kind == "chatdgc_canvas" and cmd.get("op") == "restore")
-            or (kind == "chatdgc_widgets" and cmd.get("op") == "remove"))
+            or (kind == "chatdgc_widgets" and cmd.get("op") == "remove")
+            or (kind == "chatdgc_library_file" and cmd.get("op") in ("remove", "to_project")))
 
 
 def _epoch(stamp) -> float | None:
@@ -172,18 +177,45 @@ def _size(value) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
+def _save_export(target: Path, data: bytes, error_prefix: str) -> None:
+    """Write a chosen export through a private new file, then replace atomically."""
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+        os.replace(temporary, target)
+    except OSError as exc:
+        raise ChatEngineError(f"{error_prefix}: {exc.strerror or exc}.") from exc
+    finally:
+        if temporary is not None:
+            try:
+                Path(temporary).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def fit(message: dict, budget: int = PAGE_BYTES) -> dict:
     """The message, or (too large for one frame) a copy cut to fit, marked partial."""
     if _size(message) <= budget:
         return message
     cut = dict(message)
     cut["thinking"] = ""
-    for key in ("text",):
-        text = str(cut.get(key) or "")
-        while text and _size({**cut, key: text}) > budget:
-            text = text[: len(text) * 3 // 4]
-        cut[key] = text
     cut["partial"] = True
+    # Attachments, images and widget data can outweigh the text. Preserve ordinary
+    # message metadata and as much text as fits; the saved message remains complete.
+    for key in ("attachments", "images", "widgets", "canvases", "actions", "files", "questions", "research", "sources"):
+        if _size(cut) <= budget:
+            break
+        cut.pop(key, None)
+    if _size({**cut, "text": ""}) > budget:
+        cut = {key: str(message[key])[:limit] for key, limit in (("id", 128), ("role", 32), ("created_at", 64))
+               if key in message}
+        cut.update(text="", partial=True)
+    text = str(message.get("text") or "")
+    while text and _size({**cut, "text": text}) > budget:
+        text = text[: len(text) * 3 // 4]
+    cut["text"] = text
     return cut
 
 
@@ -225,7 +257,22 @@ def outline(messages: list[dict]) -> list[dict]:
                     for w in m.get("widgets") or [] if isinstance(w, dict) and w.get("id")]
             if made:
                 prompts[-1].setdefault("widgets", []).extend(made)
-    return prompts[-OUTLINE_PROMPTS:]
+    # Keep the newest prompts and widgets within one wire frame. A long-lived chat
+    # can attach arbitrarily many widgets to one prompt.
+    selected, used, widgets_left = [], 0, OUTLINE_WIDGETS
+    for prompt in reversed(prompts[-OUTLINE_PROMPTS:]):
+        row = dict(prompt)
+        if row.get("widgets"):
+            row["widgets"] = row["widgets"][-widgets_left:] if widgets_left else []
+            widgets_left -= len(row["widgets"])
+            if not row["widgets"]:
+                row.pop("widgets")
+        size = _size(row) + 1
+        if used + size > PAGE_BYTES:
+            break
+        selected.append(row)
+        used += size
+    return list(reversed(selected))
 
 
 class _Stream:
@@ -380,6 +427,9 @@ class ChatService:
         self._wire = emit
         self.emit = self._out
         self.engine = engine or ChatEngine(config)
+        # An artifact a reply made or changed: every screen hears it (the chat's card, the Library).
+        self.engine.on_artifact = lambda view, op, chat_id: self.emit(
+            "artifact_changed", artifact=view, op=op, surface="chat", conversation_id=chat_id)
         self._turns: dict[str, dict] = {}
         self._naming: set[threading.Thread] = set()     # chats being named after their first reply
         self._lock = threading.Lock()
@@ -415,6 +465,11 @@ class ChatService:
         self.log = None                                  # the Host's: serve.log
         store_root = getattr(getattr(self.engine, "store", None), "root", None)
         self._locks = HeldLocks((Path(store_root) if store_root else default_root()) / "held", log=self._log_line)
+        # ChatDGC's own mods (the user's, allowed ones only), started off this thread so no command waits for them.
+        self._mod_host = None
+        self._mod_lock = threading.Lock()
+        if engine is None:                               # a test's own engine has no mods unless it starts them
+            threading.Thread(target=self._mods, daemon=True, name="chatdgc-mods").start()
 
     # -- the router's door
 
@@ -437,6 +492,7 @@ class ChatService:
              "chatdgc_regenerate": self._regenerate, "chatdgc_version": self._version, "chatdgc_answer": self._answer,
              "chatdgc_export": self._export, "chatdgc_compact": self._compact_now, "chatdgc_summary": self._summary,
              "chatdgc_carry": self._carry, "chatdgc_branch": self._branch, "chatdgc_research": self._research,
+             "chatdgc_folder": self._folder, "chatdgc_set_folder": self._set_folder, "chatdgc_work_brief": self._work_brief,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
              "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
@@ -1313,11 +1369,12 @@ class ChatService:
         self._compacted(cmd["conversation_id"], summary, cmd["request_id"])
         self._context_later(cmd["conversation_id"])
 
-    def _occupied(self, cmd: dict, work) -> None:
+    def _occupied(self, cmd: dict, work, what: str = "") -> None:
         """Work on a chat that takes a while (a summary is a model request): in the chat's turn slot, on a thread
         of its own, so nothing else runs in that chat meanwhile and Stop ends it. What ``work`` returns, if it's
         callable, runs once the chat is free again: a screen that acts on the news at once (Edit the summary just
-        made) is never told the chat is still answering."""
+        made) is never told the chat is still answering. ``what`` is the activity's text: "brief" for Continue in
+        Work, so a window that didn't ask says a brief is being written, not that earlier messages are summarized."""
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
         chat = self.engine.open(conversation_id)
         cancel = threading.Event()
@@ -1333,7 +1390,7 @@ class ChatService:
             after = None
             try:
                 self.emit("chatdgc_activity", conversation_id=conversation_id, message_id=request_id[:64],
-                          kind="compacting", text="")
+                          kind="compacting", text=what)
                 after = work(cancel)
             except (ChatEngineError, ChatStoreError) as exc:
                 self._error(str(exc), request_id, conversation_id)
@@ -1372,6 +1429,26 @@ class ChatService:
             self._changed(fresh["id"], None)
             self._context(fresh["id"])
         self._occupied(cmd, work)
+
+    # -- a folder the chat reads (folder.py), and Continue in Work
+
+    def _folder(self, cmd: dict) -> None:
+        chat = self.engine.open(cmd["conversation_id"])
+        self.emit("chatdgc_folder", request_id=cmd["request_id"], conversation_id=chat["id"],
+                  folder=str(chat.get("folder") or ""))
+
+    def _set_folder(self, cmd: dict) -> None:
+        chat = self.engine.set_folder(cmd["conversation_id"], str(cmd.get("folder") or ""))
+        # Every window showing the chat sees its folder change; the one that asked hears it as its answer.
+        self.emit("chatdgc_folder", request_id=cmd["request_id"], conversation_id=chat["id"],
+                  folder=str(chat.get("folder") or ""))
+
+    def _work_brief(self, cmd: dict) -> None:
+        def work(cancel):
+            got = self.engine.work_brief(cmd["conversation_id"], cancel=cancel)
+            self.emit("chatdgc_work_brief", request_id=cmd["request_id"], conversation_id=cmd["conversation_id"],
+                      folder=got["folder"], brief=got["brief"])
+        self._occupied(cmd, work, "brief")
 
     def _branch(self, cmd: dict) -> None:
         conversation_id = cmd["conversation_id"]
@@ -1429,19 +1506,11 @@ class ChatService:
         ref = {key: cmd[key] for key in ("conversation_id", "project_id", "attachment_id") if cmd.get(key)}
         op, fields = cmd["op"], {}
         if op == "save":
-            import os
-            from pathlib import Path
             target = Path(cmd.get("path") or "")
             if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
                 raise ChatEngineError("Choose where to save the file.")
             _meta, raw, _text = self.engine.library_file(ref)
-            temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-            try:
-                temp.write_bytes(raw)
-                os.replace(temp, target)
-            except OSError as exc:
-                temp.unlink(missing_ok=True)
-                raise ChatEngineError(f"The file couldn't be saved: {exc.strerror or exc}.") from exc
+            _save_export(target, raw, "The file couldn't be saved")
             fields = {"path": str(target), "bytes": len(raw)}
         elif op == "to_project":
             self.engine.library_to_project(ref, cmd.get("target_project") or "")
@@ -1458,8 +1527,6 @@ class ChatService:
         where the user chose (export: Word, PDF or Markdown for a document; the code file for code)."""
         conversation_id, canvas_id, op = cmd["conversation_id"], cmd["canvas_id"], cmd["op"]
         if op == "export":
-            import os
-            from pathlib import Path
             from . import made
             target = Path(cmd.get("path") or "")
             if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
@@ -1473,13 +1540,7 @@ class ChatService:
                     data = made.make({"name": view["title"], "format": fmt, "content": view["text"]}, self.engine.config).raw
                 except made.MadeError as exc:
                     raise ChatEngineError(str(exc)) from None
-            temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-            try:
-                temp.write_bytes(data)
-                os.replace(temp, target)
-            except OSError as exc:
-                temp.unlink(missing_ok=True)
-                raise ChatEngineError(f"It couldn't be saved: {exc.strerror or exc}.") from exc
+            _save_export(target, data, "It couldn't be saved")
             self.emit("chatdgc_exported", request_id=cmd["request_id"], conversation_id=conversation_id,
                       path=str(target), bytes=len(data))
             return
@@ -1632,31 +1693,122 @@ class ChatService:
             self.emit("chatdgc_file", error=str(exc)[:300], **fields)
 
     def _export(self, cmd: dict) -> None:
-        import os
-        from pathlib import Path
         target = Path(cmd["path"])
         if not target.is_absolute() or target.is_dir() or not target.parent.is_dir():
             raise ChatEngineError("Choose where to save the export.")
         data = self.engine.export(cmd["conversation_id"], cmd["format"], cmd.get("message_id")).encode("utf-8")
-        temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-        try:
-            temp.write_bytes(data)
-            os.replace(temp, target)
-        except OSError as exc:
-            temp.unlink(missing_ok=True)
-            raise ChatEngineError(f"The export couldn't be saved: {exc.strerror or exc}.") from exc
+        _save_export(target, data, "The export couldn't be saved")
         self.emit("chatdgc_exported", request_id=cmd["request_id"], conversation_id=cmd["conversation_id"],
                   path=str(target), bytes=len(data))
 
     # -- turns
 
+    # -- the user's mods (dgc/mods), ChatDGC's own: they hear each message and each reply, and may draw a panel ----
+    def _mods(self):
+        with self._mod_lock:
+            if self._mod_host is not None:
+                return self._mod_host
+            from ..mods.host import ModHost
+            self._mod_host = ModHost(project_root=None, session_id="chatdgc", surface="chat", on_ui=self._mod_ui,
+                                     config=getattr(self.engine, "config", None))
+        try:
+            self._mod_host.start()
+        except Exception:                                    # noqa: BLE001 -- a mod's trouble never stops a chat
+            pass
+        return self._mod_host
+
+    def _mod_ui(self, kind: str, payload: dict) -> None:
+        if kind == "set":
+            self.emit("mod_ui", name=payload["name"], mod=payload["mod"], slot=payload["slot"], tree=payload["tree"],
+                      surface="chat")
+        elif kind == "toast":
+            self.emit("mod_toast", name=payload["name"], mod=payload["mod"], text=payload["text"], surface="chat",
+                      **({"tone": payload["tone"]} if payload.get("tone") else {}))
+        elif kind == "mods":
+            self.emit("mods", mods=payload["mods"], on=bool(self._mod_host.on), surface="chat")
+        elif kind == "offer" and getattr(self, "_mod_offers_on", False):
+            self._emit_mod_offer(payload)
+
+    def _emit_mod_offer(self, offer: dict) -> None:
+        # ChatDGC's model writes no project files today, so its mods are never asked about; said the same way as Work's
+        # (dgc/headless.py) for when it does.
+        self.emit("mod_offer", id=offer["id"], name=offer["name"], mod=offer["title"], version=offer["version"],
+                  folder=offer["folder"], asks=list(offer["asks"]), more=bool(offer["more"]), surface="chat")
+
+    def mods_command(self, cmd: dict) -> None:
+        """mods_list, mod_set, mod_command, mod_action, watch_mod_offers, mod_offer_answer with surface "chat" (the
+        Host routes them here)."""
+        from ..mods.runtime import ModError
+        t, request_id = cmd["type"], cmd.get("request_id")
+        host = self._mods()
+        if t == "mod_action":
+            host.action(str(cmd.get("name") or ""), str(cmd.get("id") or ""), cmd.get("value"))
+            return
+        if t == "watch_mod_offers":
+            self._mod_offers_on = True
+            if host.offer is not None:
+                self._emit_mod_offer(dict(host.offer))
+            return
+        if t == "mods_list":
+            self.emit("mods", mods=host.mods(), on=bool(host.on), request_id=request_id, surface="chat")
+            for name, slots in list(host.ui_state.items()):
+                run = host.running.get(name)
+                for slot, tree in list(slots.items()):
+                    self.emit("mod_ui", name=name, mod=run.manifest.title if run else name, slot=slot, tree=tree,
+                              surface="chat")
+            return
+
+        def work():
+            try:
+                if t == "mod_set":
+                    name, op = str(cmd.get("name") or ""), cmd.get("op")
+                    {"allow": lambda: host.allow(name, review=str(cmd.get("review") or "")), "on": lambda: host.turn_on(name),
+                     "off": lambda: host.turn_off(name), "reload": lambda: host.reload(name or None)}[op]()
+                    self.emit("mods", mods=host.mods(), on=bool(host.on), request_id=request_id, surface="chat")
+                elif t == "mod_offer_answer":
+                    host.answer_offer(str(cmd.get("id") or ""), cmd.get("allow") is True)
+                    self.emit("mods", mods=host.mods(), on=bool(host.on), request_id=request_id, surface="chat")
+                else:
+                    got = host.run_command(str(cmd.get("name") or ""), str(cmd.get("args") or ""))
+                    if got is None:
+                        self.emit("command_rejected", command=t, reason="unknown_command", request_id=request_id,
+                                  message=f"no running mod has /{str(cmd.get('name'))[:40]}")
+                        return
+                    self.emit("mod_result", request_id=request_id, name=str(cmd.get("name")), mod=got["mod"],
+                              **{k: got[k] for k in ("text", "tree", "error") if k in got})
+            except ModError as error:
+                self.emit("command_rejected", command=t, reason="refused", message=str(error)[:300],
+                          request_id=request_id)
+        threading.Thread(target=work, daemon=True, name=f"chatdgc-{t}").start()
+
+    def _mod_message(self, conversation_id: str, text: str) -> str:
+        """The mods hear the message (one allowed to may rewrite it, said as a notice) and that a reply starts."""
+        host = getattr(self, "_mod_host", None)
+        if host is None or not host.running:
+            return text
+        host.fire("turn.start", {"source": "chat", "conversation": conversation_id})
+        new, edit = host.prompt(text)
+        if edit is not None:
+            note = f" ({edit['note']})" if edit.get("note") else ""
+            self.emit("mod_toast", name="", mod=edit["mod"], surface="chat",
+                      text=f"Edited your message{note}. What you typed: {edit['original'][:200]}")
+        return new
+
     def _send(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
-            return self.engine.send(cmd["conversation_id"], cmd["text"], model=cmd.get("model"),
-                                    thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
-                                    attachments=cmd.get("attachments"), study=cmd.get("study"), voice=cmd.get("voice") is True,
-                                    canvas_selection=cmd.get("canvas_selection"),
-                                    on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
+            text = self._mod_message(cmd["conversation_id"], cmd["text"])
+            try:
+                return self.engine.send(cmd["conversation_id"], text, model=cmd.get("model"),
+                                        thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
+                                        attachments=cmd.get("attachments"), study=cmd.get("study"),
+                                        voice=cmd.get("voice") is True,
+                                        output=cmd.get("output"),
+                                        canvas_selection=cmd.get("canvas_selection"),
+                                        on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
+            finally:
+                host = getattr(self, "_mod_host", None)
+                if host is not None:
+                    host.fire("turn.complete", {"conversation": cmd["conversation_id"]})
         self._start(cmd, run)
 
     def _edit(self, cmd: dict) -> None:
@@ -2125,6 +2277,9 @@ class ChatService:
 
     def close(self, grace_s: float = CLOSE_GRACE_S) -> None:
         """Stop every reply and wait (briefly) for each to save what it wrote."""
+        host = getattr(self, "_mod_host", None)
+        if host is not None:
+            host.stop()                                  # ChatDGC's mods end with it
         with self._lock:
             self._closing = True
             turns = list(self._turns.values())

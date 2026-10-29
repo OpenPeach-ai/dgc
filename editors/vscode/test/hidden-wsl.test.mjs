@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { EventEmitter } from "node:events";
 import { build } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,28 @@ test("wsl.exe's UTF-16 output and its UTF-8 output read the same", () => {
   const utf16 = Buffer.from("\uFEFFUbuntu\r\nDGC\r\n", "utf16le");
   assert.equal(host.wslText(utf16), "Ubuntu\nDGC\n");
   assert.equal(host.wslText(Buffer.from("Ubuntu\nDGC\n", "utf8")), "Ubuntu\nDGC\n");
+});
+
+test("WSL setup stops and reports a child that prints more than the output budget", async () => {
+  let killed = false;
+  const fakeSpawn = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
+    child.kill = () => { killed = true; queueMicrotask(() => child.emit("close", null)); };
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.alloc(4 * 1024 * 1024, 65));
+      child.stderr.emit("data", Buffer.alloc(4 * 1024 * 1024, 66));
+      child.stdout.emit("data", Buffer.from("extra"));
+    });
+    return child;
+  };
+  const result = await host.runWsl({ SystemRoot: "C:\\Windows" }, fakeSpawn)(["--list"]);
+  assert.equal(killed, true);
+  assert.equal(result.code, null);
+  assert.match(result.err, /output exceeded 8 MiB/);
+  assert.equal(result.out.length, 4 * 1024 * 1024);
 });
 
 test("where this computer is: no WSL, no distro, no DGC, ready", async () => {
@@ -157,4 +180,36 @@ test("what a real Windows 11 (26300, WSL 3.0.3) said, read and recognised", () =
   }
   assert.equal(host.notSetUp("Traceback (most recent call last):\n  KeyError: 'x'"), false);
   assert.equal(host.notSetUp("chdir(/mnt/z/gone) failed 2"), false, "a folder problem is not 'not set up'");
+});
+
+test("artifacts: a document's working file and an export's path come over as Windows paths; nothing else does", () => {
+  const b = wire.bridge(paths.pathMap("DGC"));
+  const view = { id: "ar_" + "a".repeat(16), type: "doc", title: "Notes", file: "/home/dgc/.dgc/artifacts/ar_aaaaaaaaaaaaaaaa/work/Notes.md",
+                 link: { path: "/mnt/c/proj/site" }, origin: { surface: "work", project: "/mnt/c/proj" } };
+  const changed = b.toEditor({ type: "artifact_changed", artifact: structuredClone(view), op: "changed" });
+  assert.equal(changed.artifact.file, "\\\\wsl.localhost\\DGC\\home\\dgc\\.dgc\\artifacts\\ar_aaaaaaaaaaaaaaaa\\work\\Notes.md");
+  assert.equal(changed.artifact.origin.project, "/mnt/c/proj", "where it came from is the backend's to read, as it said it");
+  assert.equal(b.toEditor({ type: "artifact_detail", artifact: structuredClone(view) }).artifact.file, changed.artifact.file);
+  assert.equal(b.toEditor({ type: "artifact_items", items: [structuredClone(view)] }).items[0].file, changed.artifact.file);
+  assert.equal(b.toEditor({ type: "artifact_exported", id: view.id, format: "pdf", path: "/home/dgc/.dgc/artifacts/x/exports/Notes.pdf" }).path,
+    "\\\\wsl.localhost\\DGC\\home\\dgc\\.dgc\\artifacts\\x\\exports\\Notes.pdf");
+  const served = { type: "artifact_served", id: view.id, url: "http://127.0.0.1:45001/" };
+  assert.deepEqual(b.toEditor(structuredClone(served)), served, "an address is not a path");
+});
+
+test("a chat's folder: picked on Windows it reaches DGC as the distro's path, and comes back as the Windows path", () => {
+  const b = wire.bridge(paths.pathMap("DGC"));
+  assert.deepEqual(b.toBackend({ type: "chatdgc_set_folder", request_id: "r", conversation_id: "c", folder: "C:\\Users\\Me\\uploads" }),
+    { type: "chatdgc_set_folder", request_id: "r", conversation_id: "c", folder: "/mnt/c/Users/Me/uploads" });
+  assert.equal(b.toBackend({ type: "chatdgc_set_folder", request_id: "r", conversation_id: "c", folder: "" }).folder, "", "taking it away stays \"\"");
+  const shown = b.toEditor({ type: "chatdgc_folder", request_id: "r", conversation_id: "c", folder: "/mnt/c/Users/Me/uploads" });
+  assert.equal(shown.folder, "C:\\Users\\Me\\uploads");
+  assert.equal(b.toEditor({ type: "chatdgc_folder", conversation_id: "c", folder: "" }).folder, "");
+  const brief = b.toEditor({ type: "chatdgc_work_brief", request_id: "r", conversation_id: "c", folder: "/mnt/c/Users/Me/uploads",
+                             brief: "Continuing from the chat. Look at /mnt/c/Users/Me/uploads/src/upload.py." });
+  assert.equal(brief.folder, "C:\\Users\\Me\\uploads", "Work opens in the Windows folder the person picked");
+  assert.equal(brief.brief, "Continuing from the chat. Look at /mnt/c/Users/Me/uploads/src/upload.py.", "the brief is the model's words, as written");
+  assert.equal(b.toBackend({ type: "chatdgc_set_folder", request_id: "r", conversation_id: "c", folder: shown.folder }).folder, "/mnt/c/Users/Me/uploads", "round trip");
+  const home = b.toEditor({ type: "chatdgc_folder", conversation_id: "c", folder: "/home/dgc/projects/api" });
+  assert.equal(home.folder, "\\\\wsl.localhost\\DGC\\home\\dgc\\projects\\api", "a folder inside the distro, as Windows reaches it");
 });

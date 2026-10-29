@@ -985,7 +985,7 @@ test("attachments: only files this tab's picker returned, real pasted images, an
   assert.match(panel.last("error").message, /too large to send together/);
 });
 
-test("images the chat keeps are asked for by the tab showing them; dropped files are as good as picked, but not from hidden folders", async () => {
+test("images the chat keeps are asked for by the tab showing them; dropped files need host confirmation and cannot come from hidden folders", async () => {
   chat.open(ID(6));
   const [panel] = world.panels;
   panel.say({ type: "ready" }); opened(panel, { id: ID(6), title: "x" });
@@ -998,9 +998,15 @@ test("images the chat keeps are asked for by the tab showing them; dropped files
   assert.deepEqual(panel.last("image"), { type: "image", id: att, data: "data:image/png;base64,AAAA" });
   world.dirs = ["/home/u/photos"]; world.missing = ["/home/u/gone.txt"];
   world.sizes = { "/home/u/trip notes.md": 300 };
+  world.answer = undefined;
+  panel.say({ type: "dropped", uris: ["file:///home/u/trip%20notes.md"] });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(panel.last("attached"), undefined, "a forged or declined drop never grants the path");
+  world.answer = "Attach";
   panel.say({ type: "dropped", uris: ["file:///home/u/trip%20notes.md", "file:///home/u/.ssh/id_ed25519", "file:///home/u/project/.git/config",
                                       "file:///home/u/photos", "file:///home/u/gone.txt", "https://example.com/x.pdf"] });
   await new Promise((r) => setTimeout(r, 0));
+  assert.match(world.warnings.at(-1), /Attach these dropped files/);
   assert.deepEqual(panel.last("attached").items, [{ kind: "file", path: "/home/u/trip notes.md", name: "trip%20notes.md", size: 300 }]);
   panel.say({ type: "send", text: "", attachments: [{ kind: "file", path: "/home/u/trip notes.md", name: "trip notes.md" }] });
   assert.equal(last("chatdgc_send").attachments[0].path, "/home/u/trip notes.md", "a dropped file can be sent");
@@ -1661,4 +1667,227 @@ test("Open here: a read-only chat's menu offers only Export; its own again, the 
   panel.say({ type: "menu" });
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(world.picks.at(-1), ["rename", "pin", "archive", "move", "export", "delete"]);
+});
+
+// ---- artifacts (src/artifacts.ts): the Output chip's field, a card's actions, the Library's Artifacts tab
+const ARTIFACTS = { version: 1, types: ["page", "doc", "slides", "sheet", "dashboard"], outputs: ["auto", "document", "slides", "spreadsheet", "page", "dashboard"],
+                    exports: { slides: ["pptx", "pdf", "html"], sheet: ["xlsx", "csv"] } };
+function fakeArtifacts(offer = ARTIFACTS) {
+  return { offer, opened: [], exported: [], removed: [], answer: true, heard: [],
+    offers() { return this.offer; }, listen(fn) { this.tell = fn; return { dispose() {} }; },
+    open(id, hint) { this.opened.push([id, hint]); }, async exportArtifact(view, format) { this.exported.push([view, format]); },
+    async remove(view) { this.removed.push(view); return this.answer; }, async list() { return [{ id: "ar_" + "1".repeat(16), type: "slides" }]; },
+    docAt() { return undefined; }, title() { return ""; } };
+}
+
+test("the Output chip's choice goes to chatdgc_send only when the process offers artifacts, and never Auto", () => {
+  const hub = fakeArtifacts(null);
+  chat.useArtifacts(hub);
+  chat.open(ID(7));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  assert.deepEqual(panel.last("artifacts"), { type: "artifacts", offered: null }, "the page hides the chip");
+  opened(panel, { id: ID(7), title: "x" });
+  panel.say({ type: "send", text: "Make a deck", output: "slides" });
+  assert.equal("output" in last("chatdgc_send"), false, "an older CLI refuses the whole send over a field it doesn't know");
+  hub.offer = ARTIFACTS;
+  panel.say({ type: "ready" });
+  assert.deepEqual(panel.last("artifacts"), { type: "artifacts", offered: ARTIFACTS });
+  panel.say({ type: "send", text: "Make a deck", output: "slides" });
+  assert.equal(last("chatdgc_send").output, "slides");
+  panel.say({ type: "send", text: "Again", output: "auto" });
+  assert.equal("output" in last("chatdgc_send"), false);
+  hub.tell({ type: "artifactChanged", artifact: { id: "ar_" + "1".repeat(16), type: "slides", version: 2 }, op: "changed" });
+  assert.equal(panel.last("artifactChanged").artifact.version, 2, "every tab hears a change, for its cards");
+});
+
+test("a card's Open and Export go to the artifacts; the Library's Remove is asked about, and listed after", async () => {
+  const hub = fakeArtifacts();
+  chat.useArtifacts(hub);
+  chat.open(ID(8));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" }); opened(panel, { id: ID(8), title: "x" });
+  const id = "ar_" + "2".repeat(16);
+  panel.say({ type: "artifactOpen", id, artifactType: "sheet", title: "Budget" });
+  panel.say({ type: "artifactOpen", id: "../etc", artifactType: "sheet" });
+  assert.deepEqual(hub.opened, [[id, { type: "sheet", title: "Budget" }]], "only an artifact's id");
+  panel.say({ type: "artifactExport", id, format: "csv", artifactType: "sheet", title: "Budget", exports: ["xlsx", "csv"] });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(hub.exported, [[{ id, title: "Budget", type: "sheet", exports: ["xlsx", "csv"] }, "csv"]]);
+  panel.say({ type: "artifactViews" });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(panel.last("artifactViews").items.length, 1, "after a reload, what each card's artifact is now");
+  chat.openLibrary("artifacts");
+  const library = world.panels.at(-1);
+  library.say({ type: "ready" });
+  assert.equal(library.last("artifactsOffered").on, true);
+  library.say({ type: "artifactList" });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(library.last("artifacts").items.length, 1);
+  hub.answer = false;
+  library.say({ type: "artifactRemove", artifact: { id, title: "Budget" } });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(hub.removed, [{ id, title: "Budget" }], "the host asks first (Artifacts.remove: a modal)");
+  assert.equal(library.last("artifactRemoved"), undefined, "said no: still listed");
+  hub.answer = true;
+  library.say({ type: "artifactRemove", artifact: { id, title: "Budget" } });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(library.last("artifactRemoved"), { type: "artifactRemoved", id });
+});
+
+test("a DGC document (an artifact's working file) opens formatted with its versions, export and browser, and no chat's Ask", async () => {
+  const hub = fakeArtifacts();
+  const id = "ar_" + "3".repeat(16);
+  const path = `/home/u/.dgc/artifacts/${id}/work/Launch notes.md`;
+  const calls = [];
+  Object.assign(hub, { docAt: (p) => (p === path ? { id, title: "Launch notes" } : undefined),
+    docVersions: async (a) => calls.push(["versions", a]), docExport: async (a) => calls.push(["export", a]),
+    openInBrowser: (v) => calls.push(["browser", v.id]) });
+  chat.useArtifacts(hub);
+  chat.register();
+  const file = doc(path, "# Launch\n");
+  world.docs = [file];
+  const page = fakePanel("dgc.chatdgcCanvasDoc", "Launch notes.md");
+  page.active = true; page.onDidChangeViewState = () => ({ dispose() {} });
+  await world.customEditors.provider.resolveCustomTextEditor(file, page);
+  assert.equal(page.webview.options.enableScripts, true);
+  assert.doesNotMatch(page.webview.html, /Ask ChatDGC/, "no chat to ask");
+  for (const does of ["versions", "export", "browser", "markdown"]) assert.match(page.webview.html, new RegExp(`data-do="${does}"`));
+  page.say({ type: "versions" }); await tick();
+  page.say({ type: "export" }); await tick();
+  page.say({ type: "browser" }); await tick();
+  page.say({ type: "ask", text: "x", start_line: 1, end_line: 1 }); await tick();
+  assert.deepEqual(calls, [["versions", id], ["export", id], ["browser", id]]);
+});
+
+// ---- a folder the chat reads, and Continue in Work (ready.capabilities.chatdgc.folder)
+
+/** A tab on chat `n`, opened, on a backend that offers folders (or doesn't). */
+function folderTab(n, offered = true) {
+  host.offers = { version: 1, ...(offered ? { folder: 1 } : {}) };
+  chat.open(ID(n));
+  const panel = world.panels.at(-1);
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(n), title: "Uploads" });
+  return panel;
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+test("a chat's folder is asked as it opens, only of a backend that offers it, and every tab on the chat shows it", async () => {
+  const old = folderTab(7, false);
+  assert.deepEqual(old.webview.posted.filter((m) => m.type === "folderOffered"), [{ type: "folderOffered", on: false }]);
+  assert.equal(last("chatdgc_folder"), undefined, "never asked of a backend that doesn't offer it");
+  old.say({ type: "folderPick" });
+  old.say({ type: "workBrief" });
+  await settle();
+  assert.equal(last("chatdgc_set_folder"), undefined);
+  assert.equal(last("chatdgc_work_brief"), undefined);
+  assert.match(old.last("folderError").message, /Update CLI/);
+  assert.match(old.last("briefing").error, /Update CLI/);
+
+  const a = folderTab(8);
+  assert.equal(a.last("folderOffered").on, true);
+  const asked = last("chatdgc_folder");
+  assert.deepEqual({ ...asked, request_id: "" }, { type: "chatdgc_folder", conversation_id: ID(8), request_id: "" });
+  chat.onEvent({ type: "chatdgc_folder", request_id: asked.request_id, conversation_id: ID(8), folder: "/work/uploads" });
+  assert.deepEqual(a.last("folder"), { type: "folder", conversation: ID(8), folder: "/work/uploads" });
+  // The same chat in a second tab hears a change made in the first; another chat's tab doesn't.
+  chat.open(ID(9)); const other = world.panels.at(-1); other.say({ type: "ready" }); opened(other, { id: ID(9), title: "Other" });
+  chat.onEvent({ type: "chatdgc_folder", conversation_id: ID(8), folder: "" });
+  assert.equal(a.last("folder").folder, "");
+  assert.equal(other.webview.posted.some((m) => m.type === "folder" && m.conversation === ID(8)), false);
+  chat.onEvent({ type: "chatdgc_folder", conversation_id: ID(8), folder: "x".repeat(5000) });
+  assert.equal(a.last("folder").folder, "", "an oversized path is not shown");
+});
+
+test("the Folder chip: VS Code's picker chooses (at the window's folder), the page can only take it away", async () => {
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const picker = vs.window.showOpenDialog;
+  let options;
+  vs.window.showOpenDialog = async (o) => { options = o; return world.chosen; };
+  vs.workspace.workspaceFolders = [{ uri: { fsPath: "/work" } }];
+  try {
+    const panel = folderTab(8);
+    panel.say({ type: "folderSet", folder: "/etc" });
+    assert.equal(last("chatdgc_set_folder"), undefined, "a path from the page is never sent");
+    world.chosen = undefined;
+    panel.say({ type: "folderPick" });
+    await settle();
+    assert.equal(options.canSelectFolders, true);
+    assert.equal(options.canSelectFiles, false);
+    assert.equal(options.canSelectMany, false);
+    assert.equal(options.defaultUri.fsPath, "/work", "it starts at the window's first folder");
+    assert.deepEqual(panel.last("folderPicked"), { type: "folderPicked", cancelled: true }, "closed with nothing chosen");
+    assert.equal(last("chatdgc_set_folder"), undefined);
+    world.chosen = [{ fsPath: "/work/uploads" }];
+    panel.say({ type: "folderPick" });
+    await settle();
+    const set = last("chatdgc_set_folder");
+    assert.deepEqual({ ...set, request_id: "" }, { type: "chatdgc_set_folder", conversation_id: ID(8), folder: "/work/uploads", request_id: "" });
+    chat.onEvent({ type: "chatdgc_folder", request_id: set.request_id, conversation_id: ID(8), folder: "/work/uploads" });
+    assert.deepEqual(panel.last("folder"), { type: "folder", conversation: ID(8), folder: "/work/uploads", mine: true });
+    panel.say({ type: "folderPick" });
+    await settle();
+    assert.equal(options.defaultUri.fsPath, "/work/uploads", "choosing another starts at the chat's folder");
+    panel.say({ type: "folderSet", folder: "" });
+    const removal = last("chatdgc_set_folder");
+    assert.equal(removal.folder, "");
+    chat.onEvent({ type: "chatdgc_error", request_id: removal.request_id, conversation_id: ID(8), message: "Choose a project's folder, not the whole disk or your home folder." });
+    assert.deepEqual(panel.last("folderError"), { type: "folderError", message: "Choose a project's folder, not the whole disk or your home folder." });
+    assert.equal(panel.last("error"), undefined, "said on the chip's own line, never as a failed send");
+  } finally { vs.window.showOpenDialog = picker; delete vs.workspace.workspaceFolders; }
+});
+
+test("Continue in Work: the brief's progress, then Work opens in the folder with the brief; a failure says why", async () => {
+  const opens = [];
+  host.openWork = async (folder, brief) => { opens.push({ folder, brief }); return host.workAnswer ?? true; };
+  try {
+    const panel = folderTab(8);
+    chat.open(ID(8));                                       // its tab, brought forward
+    panel.say({ type: "workBrief" });
+    const ask = last("chatdgc_work_brief");
+    assert.deepEqual({ ...ask, request_id: "" }, { type: "chatdgc_work_brief", conversation_id: ID(8), request_id: "" });
+    // The turn slot says "compacting" with the request's id: for this request, it is the brief being written.
+    chat.onEvent({ type: "chatdgc_activity", conversation_id: ID(8), message_id: ask.request_id, kind: "compacting", text: "" });
+    assert.deepEqual(panel.last("briefing"), { type: "briefing", on: true });
+    assert.equal(panel.last("activity"), undefined, "not shown as earlier messages being summarized");
+    chat.onEvent({ type: "chatdgc_activity", conversation_id: ID(8), message_id: "cd-compact-1", kind: "compacting", text: "" });
+    assert.equal(panel.last("activity").kind, "compacting", "Compact now is still Compact now");
+    chat.onEvent({ type: "chatdgc_work_brief", request_id: ask.request_id, conversation_id: ID(8), folder: "/work/uploads",
+                   brief: "Continuing from the chat “Uploads”, about this folder. What we worked out there:\n\nMove the limit.\n\nCarry on from here." });
+    assert.deepEqual(panel.last("briefing"), { type: "briefing", on: false });
+    await settle();
+    assert.deepEqual(opens, [{ folder: "/work/uploads", brief: "Continuing from the chat “Uploads”, about this folder. What we worked out there:\n\nMove the limit.\n\nCarry on from here." }]);
+    assert.deepEqual(panel.last("workOpened"), { type: "workOpened", folder: "/work/uploads", opened: true });
+    // Said no to a folder outside the window's: nothing opened, and the chat says so.
+    host.workAnswer = false;
+    panel.say({ type: "workBrief" });
+    chat.onEvent({ type: "chatdgc_work_brief", request_id: last("chatdgc_work_brief").request_id, conversation_id: ID(8), folder: "/elsewhere", brief: "b" });
+    await settle();
+    assert.equal(panel.last("workOpened").opened, false);
+    // Refused by the backend (no folder any more, nothing sent, the model failed, Stop): why, to the tab that asked.
+    panel.say({ type: "workBrief" });
+    chat.onEvent({ type: "chatdgc_error", request_id: last("chatdgc_work_brief").request_id, conversation_id: ID(8), message: "Send a message first." });
+    assert.deepEqual(panel.last("briefing"), { type: "briefing", on: false, error: "Send a message first." });
+    // An empty brief opens nothing.
+    panel.say({ type: "workBrief" });
+    chat.onEvent({ type: "chatdgc_work_brief", request_id: last("chatdgc_work_brief").request_id, conversation_id: ID(8), folder: "/work/uploads", brief: "  " });
+    await settle();
+    assert.equal(opens.length, 2);
+    assert.match(panel.last("workOpened").message, /no brief/);
+  } finally { delete host.openWork; delete host.workAnswer; }
+});
+
+test("while another window writes to the chat, its folder can't be changed and Work can't be asked for", async () => {
+  host.chatdgcOpenHere = () => true;
+  try {
+    const panel = folderTab(8);
+    chat.onEvent({ type: "chatdgc_held", conversation_id: ID(8), state: "elsewhere" });
+    const before = sent.length;
+    panel.say({ type: "folderSet", folder: "" });
+    panel.say({ type: "workBrief" });
+    panel.say({ type: "folderPick" });
+    await settle();
+    assert.equal(sent.slice(before).filter((c) => /folder|work_brief/.test(c.type)).length, 0);
+  } finally { delete host.chatdgcOpenHere; }
 });

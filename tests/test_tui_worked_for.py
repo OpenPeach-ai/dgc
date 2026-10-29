@@ -48,6 +48,15 @@ class WorkedForTests(unittest.TestCase):
             "<user:fix the test>", "<md:Looking at the test first.>", "<tool:bash>", "<tool:edit_file>",
             "· Worked for 43s · 2 tools", "<md:Fixed: the test now waits for the server.>"])
 
+    def test_a_long_turn_says_minutes_and_hours_as_the_editor_does(self):
+        """Reported 28 Oct: an hour-long turn read "Worked for 3837s"."""
+        self.turn({"kind": "tool", "name": "bash"}, {"kind": "md", "text": "Both are fixed."}, tools=1)
+        self.tui._mark_turn_end("done", 3837.9)
+        self.assertEqual(self.lines()[2:], ["· Worked for 1h 3m · 1 tool", "<md:Both are fixed.>"])
+        self.turn({"kind": "md", "text": "4."})
+        self.tui._mark_turn_end("stopped", 95)
+        self.assertEqual(self.lines()[-1], "· stopped · 1m 35s")
+
     def test_an_answer_in_several_parts_gets_the_line_above_its_first_part(self):
         self.turn({"kind": "tool", "name": "bash"}, {"kind": "md", "text": "Part one."},
                   {"kind": "md", "text": "Part two."}, tools=1)

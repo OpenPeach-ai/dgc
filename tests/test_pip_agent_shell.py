@@ -53,6 +53,17 @@ class ShellMarkerTests(unittest.TestCase):
                              "a DGC started from a chat's shell never unmarks its children")
             self.assertEqual(sandbox.process_env(agent=False)[sandbox.AGENT_SHELL], "1")
 
+    def test_sandbox_allowlist_cannot_expose_provider_keys(self):
+        class Config:
+            def get(self, key, default=None):
+                return ["DGC_API_KEY", "DGC_FALLBACK_API_KEY_FILE", "SAFE_FIXTURE"] if key == "sandbox_env_allow" else default
+
+        with patch.dict(os.environ, {"DGC_API_KEY": "secret", "DGC_FALLBACK_API_KEY_FILE": "/private/key", "SAFE_FIXTURE": "visible"}):
+            env = sandbox.process_env(Config())
+        self.assertNotIn("DGC_API_KEY", env)
+        self.assertNotIn("DGC_FALLBACK_API_KEY_FILE", env)
+        self.assertEqual(env["SAFE_FIXTURE"], "visible")
+
 
 class AgentShellCommandTests(unittest.TestCase):
     setUp_base = fixtures.LocalPipsTests.setUp

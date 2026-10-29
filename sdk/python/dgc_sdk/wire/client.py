@@ -772,7 +772,7 @@ class DGCClient:
             return
         try:
             event = strict_json_loads(text)
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError, RecursionError, json.JSONDecodeError) as exc:
             raise DGCProtocolError("backend emitted malformed NDJSON") from exc
         problem = event_error(event)
         if problem:

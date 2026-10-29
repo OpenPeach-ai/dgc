@@ -9,7 +9,7 @@ from pathlib import Path
 from ..pane import PaneFrame, Segment
 from ..workspace import is_within
 from .model import SORTS, Entry, Listing, directory_version, human_size, matches_filter, scan
-from .ops import FileOps, OpError, Trash
+from .ops import FileOps, OpError, Trash, validate_name
 from .preview import GitStatus, directory_preview, text_preview
 
 POLL_S = 1.0
@@ -259,6 +259,7 @@ class FilesPane:
             result = run()
         except OpError as exc:
             self._say(str(exc))
+            self._rescan()
             return
         if result is not None:
             self._say(result.message)
@@ -546,9 +547,17 @@ class FilesPane:
     def _rename(self, src: Path, value: str) -> None:
         if not value.strip() or value.strip() == src.name:
             return
-        self._guarded("rename", [src, src.with_name(value.strip())], lambda: self.ops.rename(src, value))
+        try:
+            name = validate_name(value).rstrip("/")
+            if "/" in name:
+                raise OpError("a new name cannot contain '/'")
+            dest = src.with_name(name)
+        except (OpError, ValueError) as exc:
+            self._say(str(exc))
+            return
+        self._guarded("rename", [src, dest], lambda: self.ops.rename(src, name))
         if self.mode == "normal":
-            self._focus_name(value.strip())
+            self._focus_name(name)
 
     def _paste(self, *, overwrite: bool) -> None:
         if not self.clipboard:

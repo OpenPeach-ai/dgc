@@ -35,6 +35,7 @@ HELP = """Commands, inside a chat:
   /open ID          continue another chat
   /title TEXT       rename this chat
   /export [FILE]    save this chat as Markdown
+  /make TYPE TEXT   ask for TEXT as a document, slides, spreadsheet, page or dashboard
   /help             this list
   /quit             leave (Ctrl-D does too); Ctrl-C stops a reply"""
 
@@ -62,6 +63,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--temporary", action="store_true", help="a chat that's never saved or listed")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="attach a file (up to 10)")
     p.add_argument("--json", action="store_true", help="print the reply, list or export as JSON")
+    p.add_argument("--make", choices=("document", "slides", "spreadsheet", "page", "dashboard"),
+                   help="what the reply should make (DGC's Output chip); you open it with dgc artifacts open")
     return p
 
 
@@ -168,6 +171,8 @@ def _send_command(text: str, args) -> dict:
         command["search"] = args.search
     if args.file:
         command["attachments"] = [{"kind": "file", "path": str(Path(f).expanduser().resolve())} for f in args.file]
+    if getattr(args, "make", None):
+        command["output"] = args.make
     return command
 
 
@@ -209,6 +214,16 @@ class Printer:
             self.out.write("\n" + self._dim("Sources") + "\n")
             for s in sources:
                 self.out.write(f"  [{s.get('n')}] {s.get('title') or s.get('url')}  {self._dim(str(s.get('url') or ''))}\n")
+        for card in message.get("artifacts") or []:
+            if isinstance(card, dict):
+                self.out.write(f"\n{card.get('label', 'Artifact')} “{card.get('title', '')}” · version "
+                               f"{card.get('version', 1)}  " + self._dim(f"dgc artifacts open {card.get('id')}") + "\n")
+        for card in message.get("canvases") or []:
+            if isinstance(card, dict):
+                self.out.write(f"\nDocument “{card.get('title', '')}” · version {card.get('version', 1)}  "
+                               + self._dim("dgc artifacts list --type doc") + "\n")
+        if message.get("output_note"):
+            self.out.write(self._dim(str(message["output_note"])) + "\n")
         if message.get("finish") == "cancelled":
             self.out.write(self._dim("Stopped.") + "\n")
         elif message.get("finish") == "length":
@@ -220,7 +235,9 @@ def _reply_json(chat_id: str, message: dict) -> str:
     return json.dumps({"chat_id": chat_id, "message_id": message.get("id"), "text": message.get("text", ""),
                        "sources": message.get("sources") or [], "searches": message.get("searches") or [],
                        "model": message.get("model"), "finish": message.get("finish"),
-                       "usage": message.get("usage") or {}}, ensure_ascii=False)
+                       "usage": message.get("usage") or {}, "artifacts": message.get("artifacts") or [],
+                       **({"output_note": message["output_note"]} if message.get("output_note") else {})},
+                      ensure_ascii=False)
 
 
 def _list(client: ChatClient, query: str, out: TextIO, as_json: bool) -> int:
@@ -313,6 +330,17 @@ def _repl(client: ChatClient, opened: dict, args, out: TextIO, styled: bool,
                     out.write("Renamed.\n")
                 elif word == "/export":
                     _export(client, chat_id, rest or None, False, out)
+                elif word == "/make":
+                    kind, _, ask = rest.partition(" ")
+                    kinds = ("document", "slides", "spreadsheet", "page", "dashboard")
+                    if kind not in kinds or not ask.strip():
+                        out.write(f"/make {'|'.join(kinds)} TEXT\n")
+                    else:
+                        made = argparse.Namespace(**{**vars(args), "make": kind})
+                        try:
+                            _ask(client, chat_id, ask.strip(), made, out, styled)
+                        except ChatCliError as exc:
+                            out.write(f"\n{exc}\n")
                 else:
                     out.write("Unknown command; /help lists them.\n")
             except ChatCliError as exc:
@@ -343,7 +371,12 @@ def main(config, argv: list[str], *, stdin: TextIO | None = None, out: TextIO | 
             return 2
     question = " ".join(args.question).strip()
     if not question and args.list is None and not args.export and not stdin.isatty():
-        question = stdin.read().strip()               # piped text is the question
+        from .chatdgc.store import MAX_TEXT
+        piped = stdin.read(MAX_TEXT + 1)              # the service cannot accept a longer message
+        if len(piped) > MAX_TEXT:
+            print(f"dgc chat: a question may be at most {MAX_TEXT:,} characters", file=sys.stderr)
+            return 2
+        question = piped.strip()
     styled = out.isatty() and not args.json
     client = client or ChatClient(config)
     try:

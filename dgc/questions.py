@@ -16,6 +16,7 @@ import unicodedata
 MAX_QUESTIONS = 4
 MIN_OPTIONS = 2
 MAX_OPTIONS = 6
+MAX_RAW_OPTIONS = 32          # includes model-added Other rows removed during normalization
 MAX_QUESTION = 2000
 MAX_LABEL = 120
 MAX_LEGACY_OPTION = 2000
@@ -203,6 +204,8 @@ def normalize_questions(args) -> list[dict]:
     for item in raw:
         if not isinstance(item, dict) or not isinstance(item.get("options"), list):
             raise ValueError(ERR_SHAPE)
+        if len(item["options"]) > MAX_RAW_OPTIONS:
+            raise ValueError(ERR_MANY)
         question = item.get("question")
         if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION:
             raise ValueError(ERR_LENGTH if isinstance(question, str) and question.strip() else ERR_SHAPE)
@@ -276,6 +279,8 @@ def validate_response(questions: list[dict], payload) -> dict | None:
         selected = entry.get("selected", [])
         other = entry.get("other", "")
         if not isinstance(selected, list) or not isinstance(other, str) or len(other) > MAX_ANSWER:
+            return None
+        if len(selected) > len(q["options"]):
             return None
         if any(type(i) is not int or not 0 <= i < len(q["options"]) for i in selected):
             return None

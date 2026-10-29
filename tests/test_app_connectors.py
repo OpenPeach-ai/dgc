@@ -184,6 +184,7 @@ class ConnectorLifecycleTests(unittest.TestCase):
         from dgc.headless import Backend
         backend=object.__new__(Backend);backend.config=self.config
         backend.agent=Mock();backend.em=Mock();backend._emit_mcp_servers=Mock()
+        backend.agent.mcp.servers={}
         backend._editor_plugins=lambda: []
         backend._busy=lambda:False
         return backend

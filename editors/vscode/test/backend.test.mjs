@@ -669,6 +669,39 @@ function collectExits(backend) {
   return exits;
 }
 
+test("an old child's late exit leaves the new child's liveness timer running", async () => {
+  const command = executable("late-exit-liveness", `
+const readline = require("node:readline");
+${protocolFixture()}
+ready.capabilities.editor_liveness = true;
+send(ready);
+readline.createInterface({ input: process.stdin }).on("line", () => {});
+`);
+  const backend = new DgcBackend(scratch, command);
+  backend.on("event", () => {});
+  backend.start();
+  await waitFor(backend, "ready");
+  backend.completeHandshake();
+  const oldPid = backend.childPid;
+  const oldExit = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { backend.off("exit", onExit); reject(new Error("old child did not exit")); }, 5000);
+    const onExit = (_code, _signal, info) => {
+      if (info?.pid !== oldPid) return;
+      clearTimeout(timer); backend.off("exit", onExit); resolve();
+    };
+    backend.on("exit", onExit);
+  });
+  backend.dispose("restart: test");
+  backend.send({ type: "status" });
+  await waitFor(backend, "ready");
+  backend.completeHandshake();
+  const timer = backend.livenessTimer;
+  assert.ok(timer);
+  await oldExit;
+  assert.equal(backend.livenessTimer, timer);
+  backend.dispose("stop: test");
+});
+
 test("a child that closes its stdin and lingers still reports its exit", async () => {
   // The stdin 'error' handler used to null the process before the exit guard ran, so the exit was
   // swallowed: no backend.log line, no recovery, a turn spinning forever (measured 22 of 30).
