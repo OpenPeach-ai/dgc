@@ -4870,7 +4870,7 @@ class Agent(GoalLifecycle):
         """How to SHOW the user a page (~450 tokens): carried only when the artifact surface is live --
         always in the full profile with the shared server set to autostart, else for the request that
         asks to see one. A headless run with artifacts off (the benchmark) never pays for it."""
-        if self._artifacts_exposed():
+        if self._artifacts_exposed() and self.mode != "plan":
             return [
                 "# Saved Outputs: pages, dashboards, documents, slides and sheets",
                 "Use make_artifact to make a new Output that the user can reopen from Library. Its card opens "
