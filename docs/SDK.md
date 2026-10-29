@@ -9,8 +9,9 @@ answers its permission and question requests, and gets a structured result back.
 | `dgc-sdk` (Python, PyPI) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Python 3.10+ |
 | `@vibedgc/sdk` (Node, GitHub release tarball) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Node 22+ |
 
-Proven on Linux. macOS and WSL are unproven, and native Windows is experimental (custom tools need
-Unix sockets). The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
+The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
+(Ubuntu 24.04). Native Windows is experimental and was not tested (custom tools need Unix sockets).
+The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
 application attribute the model-token spend your provider bills you.
 
 - [Install](#install)

@@ -4,6 +4,9 @@
 
 Pairs with CLI 0.50.0.
 
+The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
+(Ubuntu 24.04). Native Windows remains experimental and was not covered.
+
 - Artifact `compare` returns bounded changes between saved versions. `allow_source` / `allowSource` accepts an
   expected version so a stale permission review cannot authorize a replaced dashboard source. Both additions
   check the backend's advertised capabilities.

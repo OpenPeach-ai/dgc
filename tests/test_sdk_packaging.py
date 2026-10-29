@@ -142,6 +142,7 @@ class PackageMetadataTests(unittest.TestCase):
         self.assertFalse([c for c in project["classifiers"] if c.startswith("License ::")],
                          "PEP 639: the license expression replaces license classifiers")
         self.assertIn("Operating System :: POSIX :: Linux", project["classifiers"])
+        self.assertIn("Operating System :: MacOS :: MacOS X", project["classifiers"])
         self.assertIn("Typing :: Typed", project["classifiers"])
         package = json.loads((ROOT / "sdk/typescript/package.json").read_text(encoding="utf-8"))
         self.assertEqual(package["files"], ["dist", "README.md", "LICENSE"])
