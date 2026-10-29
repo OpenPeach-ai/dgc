@@ -73,6 +73,18 @@ def request_start(body: dict) -> tuple[str, str, list[str]]:
 
 
 class StableStart(unittest.TestCase):
+    def test_interactive_card_guidance_requires_an_editor_renderer(self):
+        root = Path(tempfile.mkdtemp(prefix="dgc-genui-prompt-"))
+        config = make_config(root, mode="default", suggest=False, notes=False)
+        ui = FrontendUI()
+        agent = Agent(config, ui)
+        self.addCleanup(agent.mcp.stop_all)
+        self.addCleanup(lambda: agent.monitors.shutdown(wait=3.0))
+        self.assertNotIn("fenced `dgc-ui`", agent.system_prompt())
+        # A test UI handles missing attributes dynamically. Only an explicit True may opt in.
+        ui.generative_ui_supported = True
+        self.assertIn("fenced `dgc-ui`", agent.system_prompt())
+
     def session(self, wire: str):
         model, suffix, mode = WIRES[wire]
         replies = iter([

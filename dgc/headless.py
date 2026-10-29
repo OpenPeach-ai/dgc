@@ -1462,6 +1462,9 @@ def permission_request_fields(name: str, args: dict, call_id, preview_root) -> d
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
 
+    # The editor renders bounded dgc-ui cards; a terminal CLI has no renderer for them.
+    generative_ui_supported = True
+
     # The editor routes a typed `/todo clear` to `clear_todos` (and has Clear on its Tasks row), so
     # text that tells the user how to drop a checklist may name the command here too.
     todo_clear_hint = "/todo clear"
