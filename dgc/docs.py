@@ -2121,7 +2121,8 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
   with *writing a reply now*.
 - **One DGC writes to a session at a time, idle or not.** The window, terminal, DGC kept running
   with no window or SDK program that has a session open holds it until it lets it go; nothing else
-  writes it, even between its turns. A DGC that crashes frees it.
+  writes it, even between its turns. If you see *active turn in another DGC process*, that process
+  holds the session while its turn finishes. A DGC that crashes frees it.
 - **In a terminal**, `dgc -c` (or `--resume`, `/resume`) of a session a window holds says where it
   is open and what runs there (*This session is open in Cursor · ~/shop-api · idle 6 min. 1 monitor
   runs there.*) and offers **Open here** (it moves into the terminal, and the window shows it
@@ -2138,9 +2139,10 @@ In a terminal, `dgc ps` shows every DGC on this computer and `dgc stop` stops on
   `keepRunning` or `stop`). Closing a tab with nothing running ends it, as before.
 - **After an update**, a session still running in the older DGC is saved and stopped, and opens in
   the new one; what was running stops there, and its turn offers Continue.
-- **A window that stopped answering** for 15 minutes (an editor left running by a reload, for
+- **A window that stopped answering** for fifteen minutes (an editor left running by a reload, for
   example) no longer keeps a session to itself: the session runs on as if it had no window, under
-  the rules above, and that window, if it is still there, shows it read-only with Open here.
+  the rules above, and that window, if it is still there, shows it read-only with Open here. A
+  turn running, monitor, sub-agent or goal keeps the backend alive until that work ends.
 - **Private to you.** A window reaches the running session through a socket only your user can
   open (a 0700 directory, a 0600 socket, the other process's user checked), never a network port.
   It works on Linux and macOS, and over Remote SSH. On Windows, DGC runs in WSL, and a session
