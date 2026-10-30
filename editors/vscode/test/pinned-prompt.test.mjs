@@ -710,7 +710,7 @@ test("rows a starting turn moves out of its way keep their focus too: one claime
   }
 });
 
-test("Show less on a steered message under the pinned prompt brings it out below the prompt", () => {
+test("Show less on a steered message keeps its own pinned place", () => {
   const p = panel({ layout: {}, clock: true });
   const view = scroller(p);
   p.event({ type: "ready", capabilities: { live_steering: true } });
@@ -728,7 +728,7 @@ test("Show less on a steered message under the pinned prompt brings it out below
   const before = view.top;
   bubble.querySelector(".prompt-fold").click();
   assert.equal(bubble.dataset.fold, "folded");
-  assert.equal(view.top, before - 72, "its top, hidden under the prompt, comes out 12px below it: 180 + 12 - 120");
+  assert.equal(view.top, before, "the steered message now owns the pin, so folding it does not jump the transcript");
   assert.deepEqual(p.errors, []);
 });
 
@@ -820,6 +820,8 @@ test("the stylesheet: one box, one sticky prompt, every override winning on spec
 
   const sticky = find(".turn > .msg.user.turn-head");
   for (const want of [/position:\s*sticky/, /top:\s*0/, /z-index:\s*2/, /content-visibility:\s*visible/]) assert.match(sticky.body, want);
+  const steerSticky = find(".turn > .msg.dgc > .msg.user.turn-steer");
+  for (const want of [/position:\s*sticky/, /top:\s*0/, /z-index:\s*3/, /content-visibility:\s*visible/]) assert.match(steerSticky.body, want);
   const positioned = all.filter((rule) => /\.turn-head/.test(subject(rule.selector)) && !/::/.test(rule.selector) && declares(rule, "position"));
   assert.deepEqual(positioned.map((rule) => rule.selector), [".turn > .msg.user.turn-head", ".turn > .msg.user.turn-head.pin-off",
     '.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"])'], "only the pin and the two ways out of it place a turn's prompt");
@@ -832,12 +834,12 @@ test("the stylesheet: one box, one sticky prompt, every override winning on spec
 
   // The fold is only read, to let an open prompt scroll away; it is never styled from here.
   for (const rule of mine.filter((r) => /data-fold/.test(r.selector))) {
-    assert.match(rule.selector, /^\.turn > \.msg\.user\.turn-head:has\(> \.bubble\[data-fold="open"\]\)(::before)?$/, rule.selector);
+    assert.match(rule.selector, /^\.turn > \.msg(?:\.dgc > \.msg\.user\.turn-steer|\.user\.turn-head):has\(> \.bubble\[data-fold="open"\]\)(::before)?$/, rule.selector);
   }
   assert.doesNotMatch(section, /prompt-fold|prompt-text/, "nothing here touches the fold's own parts");
-  // The outlines are only for the turn's prompt: steered and queued bubbles look as they always have.
+  // The outlines are only for sent prompts; queued and unsent bubbles retain their normal look.
   for (const rule of mine.filter((r) => declares(r, "outline"))) {
-    assert.match(rule.selector, /\.turn > \.msg\.user\.turn-head > \.bubble$/, `${rule.selector}: an outline on turn prompts only`);
+    assert.match(rule.selector, /\.turn > \.msg(?:\.dgc > \.msg\.user\.turn-steer|\.user\.turn-head) > \.bubble$/, `${rule.selector}: an outline on sent prompts only`);
   }
   assert.ok(mine.some((r) => r.media === "@media (forced-colors: active)" && declares(r, "outline")), "forced colours get the edge too");
   assert.doesNotMatch(section, /\.bubble::after/, "never a pseudo-element on the bubble (steering-visible)");

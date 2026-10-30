@@ -175,6 +175,7 @@ test("the answer is marked once the backend has taken it", () => {
             question: QUESTION, answer: "staging-2.internal" });
   const bubble = [...p.doc.querySelectorAll(".msg.user")].at(-1);
   assert.equal(bubble.dataset.steer, "applied");
+  assert.ok(bubble.classList.contains("turn-steer"), "the accepted answer becomes a pinned sent prompt");
   assert.match(bubble.textContent, /staging-2\.internal/, "and it is still the answer's bubble");
 });
 

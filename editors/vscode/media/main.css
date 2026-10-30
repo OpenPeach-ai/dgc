@@ -2014,23 +2014,32 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-f
    (3) is outside #log. Always rendered: content-visibility's paint containment (.msg.settled) would
    clip the ground below to the row. */
 .turn > .msg.user.turn-head { position: sticky; top: 0; z-index: 2; content-visibility: visible; }
+/* A message sent during the turn, including an answer to DGC's question, takes over the same
+   rest line when it reaches it. It stays within the DGC block so the next turn pushes it away. */
+.turn > .msg.dgc > .msg.user.turn-steer { position: sticky; top: 0; z-index: 3; content-visibility: visible; }
 /* The ground: the panel's background across #log's gutters, from 16px above the row to 12px below it,
    fading over those 12px. Painted over --surface (the reference paints its panel background over the
    editor's), so a translucent sidebar colour still hides the answer passing under it. In its own place
    it lies in the empty gaps around the prompt. A pseudo-element: no layout and no hit-testing. */
-.turn > .msg.user.turn-head::before {
+.turn > .msg.user.turn-head::before,
+.turn > .msg.dgc > .msg.user.turn-steer::before {
   content: ""; position: absolute; z-index: -1; pointer-events: none;
   inset: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-3));
   background: linear-gradient(var(--bg), var(--bg)) var(--surface);
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-3)), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-3)), transparent); }
-.turn > .msg.user.turn-head > .bubble { cursor: pointer; }   /* a click goes back to where it was sent */
+.turn > .msg.user.turn-head > .bubble,
+.turn > .msg.dgc > .msg.user.turn-steer > .bubble { cursor: pointer; }   /* a click goes back to where it was sent */
 /* Not pinned: too tall for this window (main.js fitPin), or opened by Show more (long prompts) to be
    read in place -- then it scrolls away like any block, and its Show less is the one sticky thing. */
 .turn > .msg.user.turn-head.pin-off,
-.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"]) { position: relative; z-index: auto; }
+.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"]),
+.turn > .msg.dgc > .msg.user.turn-steer.pin-off,
+.turn > .msg.dgc > .msg.user.turn-steer:has(> .bubble[data-fold="open"]) { position: relative; z-index: auto; }
 .turn > .msg.user.turn-head.pin-off::before,
-.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"])::before { content: none; }
+.turn > .msg.user.turn-head:has(> .bubble[data-fold="open"])::before,
+.turn > .msg.dgc > .msg.user.turn-steer.pin-off::before,
+.turn > .msg.dgc > .msg.user.turn-steer:has(> .bubble[data-fold="open"])::before { content: none; }
 /* The first prompt sits on the log's padding, boxed or not (as for a bare .msg.user above). */
 #log > .turn:first-child > .msg.user.turn-head,
 .history-older[hidden] + .turn > .msg.user.turn-head,
@@ -2039,9 +2048,11 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble[data-f
 .msg.archived.turn-head { opacity: 1; }
 .msg.archived.turn-head > .bubble { opacity: .82; }
 /* High contrast: a hard edge 4px under the bubble instead of a fade, and an edge round turn prompts. */
-body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.turn-head::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; }
-body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.turn-head > .bubble { outline: 1px solid var(--vscode-contrastBorder, var(--border-strong)); outline-offset: -1px; }
-@media (forced-colors: active) { #log .turn > .msg.user.turn-head::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; } #log .turn > .msg.user.turn-head > .bubble { outline: 1px solid CanvasText; outline-offset: -1px; } }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.turn-head::before,
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .msg.user.turn-steer::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.user.turn-head > .bubble,
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .turn > .msg.dgc > .msg.user.turn-steer > .bubble { outline: 1px solid var(--vscode-contrastBorder, var(--border-strong)); outline-offset: -1px; }
+@media (forced-colors: active) { #log .turn > .msg.user.turn-head::before, #log .turn > .msg.dgc > .msg.user.turn-steer::before { bottom: calc(-1 * var(--sp-1)); -webkit-mask-image: none; mask-image: none; } #log .turn > .msg.user.turn-head > .bubble, #log .turn > .msg.dgc > .msg.user.turn-steer > .bubble { outline: 1px solid CanvasText; outline-offset: -1px; } }
 /* ---- end 0.47 pinned prompt -------------------------------------------------------------------- */
 
 /* ---- the prompt rail ------------------------------------------------------------------------- */

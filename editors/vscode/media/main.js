@@ -2731,6 +2731,9 @@
 
   function settleBlock(node) {
     if (!node || node.classList.contains("settled")) return;
+    // A steered user message must remain a real sticky row inside this turn. Skipping the
+    // containing DGC block with content-visibility would clip its pin while the reader scrolls.
+    if (node.classList.contains("dgc") && node.querySelector(":scope > .msg.user.turn-steer")) return;
     // A block inside another (a steering message placed in its turn before a retry below came
     // round) is part of that block: measured, pinned and skipped with it, never on its own.
     if (node.parentElement?.closest(".msg")) return;
@@ -2950,11 +2953,20 @@
   }) : null;
   window.addEventListener("resize", () => {
     const room = window.innerHeight * PIN_SHARE;
-    for (const head of log.querySelectorAll(".turn > .msg.user.turn-head")) fitPin(head, room);
+    for (const head of log.querySelectorAll(".turn > .msg.user.turn-head, .turn > .msg.dgc > .msg.user.turn-steer")) fitPin(head, room);
   });
   // Where a head is laid out: the top of its box (it is always the box's first child) plus its own
   // margin. Its rect says where it is drawn, which while it is pinned is the rest line.
   function laidOutTop(head) {
+    if (head.classList.contains("turn-steer")) {
+      // A steer lives inside the answer block rather than as its first child. Measure its
+      // natural place only when a click or focus needs it; the sticky rect is not that place.
+      const before = head.style.position;
+      head.style.position = "relative";
+      const top = head.getBoundingClientRect().top;
+      head.style.position = before;
+      return top;
+    }
     const box = head.parentElement;
     if (!box || box.firstElementChild !== head) return head.getBoundingClientRect().top;
     return box.getBoundingClientRect().top + (parseFloat(getComputedStyle(head).marginTop) || 0);
@@ -2985,9 +2997,12 @@
   // own prompt can cover it -- the end of a box pushes its prompt off before the next one begins. A
   // control in the prompt itself is where it should be.
   function clearOfPin(target) {
-    if (!target?.closest || target.closest(".turn-head")) return;
-    const head = target.closest(".turn")?.querySelector(":scope > .msg.user.turn-head");
-    if (!head || !isPinned(head)) return;
+    if (!target?.closest || target.closest(".turn-head, .turn-steer")) return;
+    const boxOf = target.closest(".turn");
+    const heads = boxOf ? [...boxOf.querySelectorAll(":scope > .msg.user.turn-head, :scope > .msg.dgc > .msg.user.turn-steer")] : [];
+    const head = heads.filter((row) => row.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .filter(isPinned).at(-1);
+    if (!head) return;
     const box = target.getBoundingClientRect();
     // Only what is under the strip. Out of view above it, a control is the browser's to bring in, or was
     // focused without scrolling, which this must not undo.
@@ -3010,7 +3025,7 @@
     pinDown = null;
     if (event.button !== 0 || event.detail !== 1 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (down && (down.selected || !down.focused)) return;
-    const bubble = event.target.closest?.(".turn > .msg.user.turn-head > .bubble");
+    const bubble = event.target.closest?.(".turn > .msg.user.turn-head > .bubble, .turn > .msg.dgc > .msg.user.turn-steer > .bubble");
     if (!bubble || event.target.closest("button, a, input, textarea, select, summary, [role=button], [tabindex]")) return;
     const head = bubble.parentElement;
     pinJump = setTimeout(() => {
@@ -9784,6 +9799,8 @@
     // when the outer one is skipped, so its fold could never be measured again.
     node.classList.remove("settled"); blockSizes?.unobserve(node); node.style.removeProperty("contain-intrinsic-size");
     appendTurnContent(node);
+    node.classList.add("turn-steer");
+    pinFit?.observe(node);
     if (!replaying) fitPromptFolds(node);   // the turn's column, not the log's: decide again
   }
   // ---- Pip reports in the chat ----

@@ -1,7 +1,7 @@
 // A pinned prompt is a layout fact, so it is checked in real Chromium: the prompt you sent stays at the
 // top of the transcript while you scroll through its answer, resting on the log's top padding over an
 // opaque ground; the next prompt pushes it off and scrolling back hands the pin back; turns nobody
-// typed keep it pinned; steered, queued and unsent messages never pin; a long prompt pins folded and an
+// typed keep it pinned; applied replies pin, while queued and unsent messages do not; a long prompt pins folded and an
 // opened one scrolls away while its own "Show less" stays in reach; a prompt too tall for the window
 // does not pin; a click on a prompt goes back to it; keyboard focus never lands under it; and live,
 // replayed and re-measured transcripts all agree. Every check reads computed style and geometry --
@@ -183,7 +183,7 @@ test("turns nobody typed keep the prompt they continue pinned; the next prompt t
   } finally { await s.page.close(); }
 });
 
-test("steered, queued and unsent messages never pin", async (t) => {
+test("an applied reply pins; queued and unsent messages stay in place", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openPage({ steering: true });
   try {
@@ -209,8 +209,55 @@ test("steered, queued and unsent messages never pin", async (t) => {
       return { roles: rows.map((row) => row.querySelector(".role").textContent), positions, drift: seen.map((set) => set.size) };
     });
     assert.deepEqual(walk.roles, ["you · steering", "you · queued", "you · not sent"]);
-    assert.deepEqual(walk.positions, ["static", "static", "static"]);
-    assert.deepEqual(walk.drift, [1, 1, 1], "each stays where it is laid out at every scroll position");
+    assert.deepEqual(walk.positions, ["sticky", "static", "static"]);
+    assert.deepEqual(walk.drift.slice(1), [1, 1], "queued and unsent messages stay where laid out");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("an answer to DGC's question takes the pinned prompt's place at narrow width", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPage({ width: 320 });
+  try {
+    await s.events(turn("earlier", "Earlier work"));
+    await s.events(turn("active", "Deploy the ERP", PROSE(0)).slice(0, 2));
+    await s.events([{ type: "ask_request", ask_id: "host", question: "Which host should I use?" }]);
+    await s.page.fill('.open-ask[data-ask-id="host"] .open-ask-input', "Use staging-2");
+    await s.page.click('.open-ask[data-ask-id="host"] .open-ask-send');
+    await s.events([{ type: "ask_resolved", ask_id: "host", outcome: "answered" },
+      { type: "text_delta", text: PROSE(1) + PROSE(2) + PROSE(3) },
+      { type: "stream_end", message_id: "active:1", phase: "answer" },
+      { type: "turn_end", turn_id: "active", reason: "completed", final_message_id: "active:1" }]);
+    await s.settle();
+    const result = await s.page.evaluate(async () => {
+      const P = window.__pin, row = P.log.querySelector(".turn-steer");
+      const natural = () => { const old = row.style.position; row.style.position = "relative";
+        const top = row.getBoundingClientRect().top; row.style.position = old; return top; };
+      const before = { role: row.querySelector(".role").textContent, question: row.querySelector(".answered-q").textContent,
+        position: getComputedStyle(row).position, at: P.rel(row) };
+      await P.scrollBy(260);
+      const rect = row.querySelector(".bubble").getBoundingClientRect();
+      const pinned = { at: P.rel(row), natural: natural() - P.log.getBoundingClientRect().top,
+        rest: P.rest() - P.log.getBoundingClientRect().top,
+        visible: document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest(".turn-steer") === row };
+      return { before, pinned };
+    });
+    assert.equal(result.before.role, "you · steering");
+    assert.equal(result.before.question, "Which host should I use?");
+    assert.equal(result.before.position, "sticky");
+    assert.ok(Math.abs(result.pinned.at - result.pinned.rest) <= 1, `reply rests at top: ${JSON.stringify(result)}`);
+    assert.ok(result.pinned.at - result.pinned.natural > 1, "reply is pinned beyond its natural place");
+    assert.equal(result.pinned.visible, true, "the answer is visible over the earlier prompt");
+    if (process.env.DGC_PIN_SCREENSHOT) await s.page.screenshot({ path: process.env.DGC_PIN_SCREENSHOT });
+    await s.events(turn("next", "Now check production"));
+    const handoff = await s.page.evaluate(async () => {
+      const P = window.__pin, row = P.log.querySelector(".turn-steer"), next = P.heads().at(-1);
+      await P.bring(next.parentElement, 10);
+      await P.scrollBy(40);
+      return { answer: P.rel(row), next: P.rel(next), rest: P.rest() - P.log.getBoundingClientRect().top };
+    });
+    assert.ok(handoff.answer < handoff.rest, "the following turn pushes the reply off the pin");
+    assert.ok(Math.abs(handoff.next - handoff.rest) <= 1, "the following prompt takes the pin");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
