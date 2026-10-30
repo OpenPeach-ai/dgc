@@ -370,11 +370,12 @@ def _validate_package(package: dict, source_package: dict, version: str) -> None
         raise ValidationError("extension/package.json: unexpected VS Code engine range")
     if package.get("capabilities", {}).get("untrustedWorkspaces", {}).get("supported") is not False:
         raise ValidationError("extension/package.json: untrusted workspaces must remain disabled")
-    # The side bar, plus the four editor tabs VS Code restores after a reload (a session tab, a ChatDGC tab, a
-    # ChatDGC widget, an artifact), each revived by its own registerWebviewPanelSerializer: nothing else wakes DGC.
+    # The side bar and editor tabs VS Code restores after a reload, plus the private Work Apps entry point.
+    # Keep this list exact so a new activation surface requires an explicit review.
     if package.get("activationEvents") != ["onView:dgc.chat", "onWebviewPanel:dgc.chatEditor",
                                            "onWebviewPanel:dgc.chatdgcEditor", "onWebviewPanel:dgc.chatdgcWidget",
-                                           "onWebviewPanel:dgc.artifactPanel"]:
+                                           "onWebviewPanel:dgc.artifactPanel", "onWebviewPanel:dgc.workApps",
+                                           "onCommand:dgc.openApps"]:
         raise ValidationError("extension/package.json: unexpected activation surface")
 
 
