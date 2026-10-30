@@ -105,6 +105,7 @@ test("when nothing is waiting, your Pips sit in a quiet row of faces; each opens
   const { page, errors } = await openHome({ pips: [pip("a", "Core", "core"), pip("c", "Gmail", "scout")] });
   try {
     await page.waitForSelector("#sessions-pips .home-pips-quiet");
+    assert.equal(await page.locator("#work-apps").count(), 0, "Apps stays out of Work while the experiment is on hold");
     const m = await page.evaluate(() => ({
       text: document.querySelector(".home-pips-quiet-text").textContent,
       faces: [...document.querySelectorAll(".home-pip-face-button")].map((b) => b.getAttribute("aria-label")),

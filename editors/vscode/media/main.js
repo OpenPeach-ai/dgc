@@ -1267,21 +1267,6 @@
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
-  // Apps live beside Work's saved Outputs; the project is easy to reopen after its chat is gone.
-  if ($("work-home") && $("sessions-status")) {
-    const appsButton = document.createElement("button");
-    appsButton.id = "work-apps";
-    appsButton.type = "button";
-    appsButton.className = "home-library";
-    appsButton.title = "Apps: reopen and check the projects you keep in DGC";
-    const mark = document.createElement("span");
-    mark.className = "codicon codicon-layers";
-    mark.setAttribute("aria-hidden", "true");
-    appsButton.appendChild(mark);
-    appsButton.appendChild(document.createTextNode("Apps"));
-    $("work-home").insertBefore(appsButton, $("sessions-status"));
-    appsButton.addEventListener("click", () => vscode.postMessage({ type: "openApps" }));
-  }
   // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
@@ -9701,6 +9686,7 @@
       face.innerHTML = plush.markup({ index: 0, name: "Core" }, "idle", "pips-nav-core", { includeStyles: false });
       plush.mount(face);
       plush.mount(log);   // the Pips' faces in the chat (report cards) breathe, blink and look at the pointer too
+      plush.mount($("agent-map")); // a Pip fixing through a specialist appears beside that agent in the map
     } catch { face.replaceChildren(); }
   })();
   $("btn-pips-back").onclick = () => closePips();
@@ -10222,6 +10208,7 @@
     if (!quiet && was !== next.state && !pipFixActive(next) && was) speak(`${next.name || "The Pip"}'s fix ${pipFixHeadline(next).toLowerCase()}`);
     syncPipFixTick();
     syncComposerRail();
+    agentMapChanged();
     if (railOpen?.kind === "pipfixes") paintPipFixesPanel();
   }
   function pipFixPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
@@ -10512,6 +10499,7 @@
     if (kind === "rewound") return;               // the same chat: its history brings each card's fix back
     pipFixes.clear(); pipFixSteps.clear();
     syncPipFixTick();
+    agentMapChanged();
     if (pipFixLive && kind === "resumed") vscode.postMessage({ type: "listPipFixes" });
   }
   // The "Pip fixes" chip on the chip line (never a row of its own): this chat's fixes that are working, or ended and
@@ -12581,19 +12569,34 @@
     parts.row.dataset.agentId = record.id;
     const face = el("span", "agent-mark am-face"); face.setAttribute("aria-hidden", "true");
     parts.row.insertBefore(face, parts.row.lastChild);
+    const pipFace = el("span", "am-pip-float"); pipFace.setAttribute("aria-hidden", "true"); pipFace.hidden = true;
+    parts.row.append(pipFace);
     const id = record.id;
     parts.row.addEventListener("click", () => amOpenCard({ kind: "agent", id }, parts.row));
     self.appendChild(parts.row);
     item.appendChild(self);
-    entry = { item, kids: null, face, ...parts };
+    entry = { item, kids: null, face, pipFace, ...parts };
     amRows.set(record.id, entry);
     return entry;
   }
   function amPaintAgentRow(entry, record) {
-    const { row, dot, desc, meta, face } = entry;
+    const { row, dot, desc, meta, face, pipFace } = entry;
     if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
     if (row.dataset.state !== record.state) row.dataset.state = record.state;
     paintAgentMark(face, record.id, AGENT_ACTIVE.has(record.state));
+    const fix = pipFixByAgent(record.id), plush = window.PipConcepts?.plush;
+    const pipType = fix && PIP_REPORT_TYPES.indexOf(String(fix.pip_type || ""));
+    if (fix && plush && pipType >= 0) {
+      const pose = AGENT_ACTIVE.has(record.state) ? "working" : "idle";
+      const name = String(fix.name || "Pip").slice(0, 120);
+      const key = `${fix.fix_id}:${pose}:${pipType}:${name}`;
+      if (pipFace.dataset.key !== key) {
+        pipFace.innerHTML = plush.markup({ index: pipType, name }, pose,
+          `agent-pip-${record.id.replace(/[^a-z0-9]/gi, "")}`, { includeStyles: false });
+        pipFace.dataset.key = key;
+      }
+      pipFace.hidden = false;
+    } else { pipFace.hidden = true; pipFace.replaceChildren(); delete pipFace.dataset.key; }
     // Work held back is why an older agent is still in view: its row says so, where "Finished" was.
     const name = agentDisplayName(record), word = amHeldBack(record) ? "Held back" : amStateWord(record);
     // A helper asked to do more keeps its row: "Continued · 2 runs" says so (agent_runs).
@@ -12602,7 +12605,9 @@
     // The word leads for every state but working, so no state rests on the dot's colour alone.
     agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
     const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
-    amLabel(entry, [name, word, ...stats].join(", "), `${name}${why ? `\n${why}` : ""}`);
+    const forPip = fix && pipType >= 0 ? `Pip fix for ${String(fix.name || "Pip").slice(0, 120)}` : "";
+    amLabel(entry, [name, word, ...stats, forPip].filter(Boolean).join(", "),
+      `${name}${forPip ? `\n${forPip}` : ""}${why ? `\n${why}` : ""}`);
   }
 
   // ---- what runs in the background ----

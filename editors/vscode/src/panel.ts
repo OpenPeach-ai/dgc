@@ -4989,9 +4989,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "workLibrary":
         if (this.home && this.chatdgc && artifactsOffer(this.lastReadyEvent?.capabilities)) this.chatdgc.openLibrary("artifacts-work");
         return;
-      case "openApps":
-        if (this.home) void vscode.commands.executeCommand("dgc.openApps");
-        return;
       case "openSessionInEditor":
         this.openSessionInEditor(String(msg.id ?? ""), String(msg.title ?? ""));
         return;
