@@ -8993,14 +8993,18 @@
     setComposerRange(start + text.length);
   }
   function setComposerText(text) { editComposer(0, composerText().length, String(text ?? "")); }
-  // A model-authored UI choice may prepare a follow-up. It never sends one or bypasses permissions.
+  // A click is the user's follow-up request. Use the normal send path and its permission checks.
   document.addEventListener("click", (event) => {
-    const button = event.target?.closest?.("button.genui-draft");
+    const button = event.target?.closest?.("button.genui-send");
     if (!button || button.closest("#pips-host")) return;
-    const draft = String(button.dataset.genuiDraft || "").slice(0, 500);
-    if (!draft) return;
-    setComposerText(draft);
-    input.focus();
+    const prompt = String(button.dataset.genuiSend || "").slice(0, 500);
+    if (!prompt) return;
+    if (attachments.length) { sysLine("Remove the composer attachments before sending a card choice.", true); return; }
+    if (cardNumberIn(prompt)) { sysLine("A card choice contains a payment card number, so DGC did not send it.", true); return; }
+    if (goalDraftArmed) { sysLine("Finish or cancel the Goal draft before sending a card choice.", true); return; }
+    if (composerLocked || !sessionReady || pendingImageFiles) { sysLine("DGC is not ready to send this choice. Try again when the composer is ready.", true); return; }
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages before sending a card choice.", true); return; }
+    resend(prompt);
   });
   function clearComposer() { recordComposerEdit(emptyComposer); }
   function emptyComposer() {

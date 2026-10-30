@@ -141,6 +141,57 @@ class AppLinkTests(unittest.TestCase):
             self.assertEqual(links.read(self.cfg, app, "MICROSOFT_SEARCH_MAIL", {"limit": 1}), '{"messages":[]}')
         self.assertEqual(read.call_args.args[:4], (self.cfg, app, "MICROSOFT_SEARCH_MAIL", {"limit": 1}))
 
+    def test_enabled_plugin_is_used_before_a_second_composio_sign_in(self):
+        from dgc import pip_plugins
+        available = {"notion": {"servers": {"notion--api": {}}},
+                     "google-workspace": {"servers": {"google-workspace--drive": {}}}}
+        with patch.object(pip_plugins, "installed", return_value=available):
+            self.assertEqual(links.enabled_plugin(self.cfg, "notion"), "notion")
+            self.assertEqual(links.enabled_plugin(self.cfg, "googledrive"), "google-workspace")
+            self.assertIsNone(links.enabled_plugin(self.cfg, "gmail"), "only selected Google apps count")
+            card = self.ask("notion", "To find my notes.")
+            result = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertIsNone(result["redirect_url"])
+        self.assertEqual(result["link"]["status"], "failed")
+        self.assertIn("already enabled through the notion plugin", result["link"]["error"])
+        self.assertEqual(self.world["calls"], [], "no Composio account was created")
+
+    def test_pip_connect_app_uses_existing_plugin_without_creating_a_card(self):
+        from dgc import pip_plugins
+        run = "run_" + "c" * 32
+        server = links.RunSocket(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"], run,
+                                 manager_factory=self.factory)
+        self.addCleanup(server.close)
+        with patch.object(pip_plugins, "installed", return_value={"notion": {"servers": {"notion--api": {}}}}):
+            said = server.call("connect_app", {"app": "notion", "why": "Read my notes."})
+        self.assertIn("Use plugin_tools", said)
+        self.assertEqual(links.listing(self.registry, self.pip["id"]), [])
+        self.assertEqual(self.world["calls"], [])
+        self.world["accounts"] = [{"id": "ca_existing", "status": "ACTIVE"}]
+        links.start(self.registry, self.cfg, self.ask("notion", "Read my notes.")["id"], "editor-user",
+                    manager_factory=self.factory)
+        with patch.object(pip_plugins, "installed", return_value={"notion": {"servers": {"notion--api": {}}}}):
+            said = server.call("connect_app", {"app": "notion", "why": "Read my notes."})
+        self.assertIn("Read it with read_app", said, "an existing Pip-specific account keeps priority")
+
+    def test_local_plugin_without_a_pip_adapter_never_starts_a_second_login(self):
+        from dgc import pip_plugins
+        spec = {"transport": "stdio", "command": "python3", "args": ["-m", "dgc.microsoft_graph", "calendar"]}
+        record = {"name": "microsoft", "registered_specs": {"microsoft--calendar": spec}}
+        with patch.object(pip_plugins, "_records", return_value=[record]), \
+             patch.object(pip_plugins, "_saved", return_value=({"microsoft--calendar": spec}, set())), \
+             patch.object(pip_plugins, "installed", return_value={}):
+            self.assertEqual(links.unavailable_native_plugin(self.cfg, "outlookcalendar"), "microsoft")
+            server = links.RunSocket(self.registry.directory, self.cfg, self.pip["id"], self.pip["workspace_id"],
+                                     "run_" + "d" * 32, manager_factory=self.factory)
+            self.addCleanup(server.close)
+            said = server.call("connect_app", {"app": "Outlook Calendar", "why": "Read my schedule."})
+            card = self.ask("Outlook Calendar", "Read my schedule.")
+            result = links.start(self.registry, self.cfg, card["id"], "editor-user", manager_factory=self.factory)
+        self.assertIn("no reviewed adapter", said)
+        self.assertIsNone(result["redirect_url"])
+        self.assertEqual(self.world["calls"], [])
+
     def test_not_now_and_disconnect(self):
         card = self.ask()
         self.assertEqual(links.decline(self.registry, card["id"], "editor-user")["link"]["status"], "declined")

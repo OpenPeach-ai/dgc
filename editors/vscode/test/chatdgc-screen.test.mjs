@@ -1522,6 +1522,26 @@ test("follow-ups: a few next messages under the last reply; one click sends it, 
   } finally { await s.page.close(); }
 });
 
+test("Generative UI choice sends once and keeps an unrelated ChatDGC draft", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const card = { version: "1", title: "ERP status", blocks: [{ type: "choices", items: [
+      { label: "Review alert", reply: "Check the ERP alert and show the evidence." }] }] };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "ERP status?" },
+      { id: M(2), role: "assistant", text: `Status ready.\n\n\`\`\`dgc-ui\n${JSON.stringify(card)}\n\`\`\``, finish: "stop" }] });
+    await s.frame();
+    await s.page.locator("#cd-input").fill("My unfinished thought");
+    await s.page.locator(".genui-send").click();
+    const sent = await s.posted("send");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].text, "Check the ERP alert and show the evidence.");
+    assert.equal(await s.page.locator("#cd-input").inputValue(), "My unfinished thought");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("attachments: picked files and pastes become chips, go with the message, and show on it", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

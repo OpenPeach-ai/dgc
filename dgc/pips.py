@@ -2548,10 +2548,12 @@ def _app_tools_note(apps_pin) -> str:
     may hold replies from before these tools existed ("I don't have a Composio connector"), and a
     model kept faith with them over its instructions (2026-10-08, a user's Test Pip)."""
     composio = apps_pin.get("composio")
-    return ("\n\nNote from DGC, current for this reply: your tools include connect_app and read_app, which reach the "
-            "user's apps through their Composio" + (" (set up in DGC)" if composio is True else
+    return ("\n\nNote from DGC, current for this reply: first use plugin_tools for an app already enabled "
+            "as one of your plugins. For other apps, connect_app and read_app reach the "
+            "user's Composio" + (" (set up in DGC)" if composio is True else
             " (not set up in DGC yet; the Connect card says how to add it)" if composio is False else "")
-            + ". Replies of yours in the earlier conversation may be from before you had them; where they say "
+            + ". Outlook Mail also uses the user's existing Microsoft plugin. Replies of yours in the earlier "
+            "conversation may be from before you had these tools; where they say "
             "otherwise, they are out of date. A Connect card exists only when connect_app made one in this reply.")
 
 
@@ -3043,14 +3045,17 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         base_instructions += '\n' + pip_borrow.missed_notice(lent)
                 if apps_pin is not None:
                     composio = apps_pin.get('composio')
-                    base_instructions += ("\nThe user's apps: they connect to you through the user's Composio"
+                    base_instructions += ("\nThe user's apps: enabled DGC plugins are listed below and use "
+                        "plugin_tools and call_plugin. Other apps connect to you through the user's Composio"
                         + (", which is set up in DGC" if composio is True else
                            " (not set up in DGC yet: connect_app still shows the card, and the card tells the user how to add it)"
                            if composio is False else "")
                         + ", so any app Composio supports can be connected (Gmail, Google Calendar, Drive, Notion, Slack, "
                         "Figma, GitHub, Linear and more). Your tools for this are connect_app and read_app. Read an app connected "
-                        "to you with read_app. When the user asks whether you can use an app, or asks you to connect, set up or "
-                        "use an app you do not have, call connect_app in this turn: that call is what shows the Connect card, and "
+                        "to you with read_app. First check the enabled plugins named below: use plugin_tools and call_plugin "
+                        "when a plugin already supplies the app. Only for an app without an enabled plugin, when the user "
+                        "asks whether you can use it or asks you to connect or set it up, call connect_app in this turn: "
+                        "that call is what shows the Connect card, and "
                         "there is no card until you make it. When the user asks about Composio itself without naming an app, say "
                         "their apps reach you through it and call connect_app for an app they already mentioned, or ask which "
                         "app, offering likely ones with offer_choices. Never say a Connect card is there unless connect_app said so. To "

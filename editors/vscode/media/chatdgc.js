@@ -38,13 +38,10 @@
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
   document.addEventListener("click", (event) => {
-    const button = event.target?.closest?.("button.genui-draft");
+    const button = event.target?.closest?.("button.genui-send");
     if (!button) return;
-    const draft = String(button.dataset.genuiDraft || "").slice(0, 500);
-    if (!draft) return;
-    input.value = draft;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.focus();
+    const prompt = String(button.dataset.genuiSend || "").slice(0, 500);
+    if (prompt) sendText(prompt);
   });
   // A formula drawn as soon as its reply is (or streams) on screen.
   let mathFrame = 0;

@@ -390,11 +390,16 @@ function waitingMarkup(){
 }
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
 document.addEventListener('click',event=>{
-  const button=event.target?.closest?.('button.genui-draft');
+  const button=event.target?.closest?.('button.genui-send');
   if(!button||!button.closest('.pip-app-root'))return;
-  const text=String(button.dataset.genuiDraft||'').slice(0,500);
+  const text=String(button.dataset.genuiSend||'').slice(0,500);
   if(!text||!S.selected)return;
-  draft.chatText=text;chatDrafts.set(S.selected,text);render();$('chatText')?.focus();
+  if(pendingImages().length||pendingFiles().length){setError('Remove attachments before sending a card choice.');return;}
+  const saved=draft.chatText;
+  draft.chatText=text;
+  void sendChat();
+  if(S.sending?.text===text){draft.chatText=saved;chatDrafts.set(S.selected,saved);rememberView();render();}
+  else draft.chatText=saved;
 });
 // Core's catalog entry is "unavailable" (it cannot be made as a background Pip), but a Personal Core is
 // the user's Primary Pip and takes messages like any Pip: battle test 4 found its chat could never send.

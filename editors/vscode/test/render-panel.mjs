@@ -79,12 +79,14 @@ if (process.argv.includes("--genui")) {
   await page.screenshot({ path: (process.argv[2] || "/tmp/dgc-genui.png").replace(/\.png$/, "-tools.png") });
   const cards = await page.locator(".genui-card").count();
   const insight = await page.locator(".genui-tool-summary").count();
+  await page.locator("#input").fill("My unfinished note");
   await page.locator(".genui-choice").first().click();
   const draft = await page.locator("#input").textContent();
-  const sent = await page.evaluate(() => window.__dgcPosts.filter((post) => post.type === "prompt" || post.type === "send").length);
+  const sent = await page.evaluate(() => window.__dgcPosts.filter((post) => post.type === "prompt" || post.type === "send").map((post) => post.text));
   console.log(JSON.stringify({ cards, insight, draft, sent, shot: process.argv[2] }, null, 2));
   await browser.close();
-  process.exit(cards === 1 && insight === 1 && draft.includes("Review the ERP role-change alert") && sent === 0 ? 0 : 1);
+  process.exit(cards === 1 && insight === 1 && draft === "My unfinished note" && sent.length === 1
+    && sent[0] === "Review the ERP role-change alert and show me the evidence." ? 0 : 1);
 }
 if (process.argv.includes("--long-prompt")) {
   // The six faces of a long prompt's fold, the ones that were approved: <out>.png at rest, -hover,

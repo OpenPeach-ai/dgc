@@ -50,9 +50,14 @@ TOOLKIT = re.compile(r"[a-z0-9][a-z0-9_]{1,39}\Z")
 ACCOUNT = re.compile(r"(?:ca|coup)_[A-Za-z0-9_-]{1,120}\Z")
 LOCAL = ("editor-user", "local-console")
 NAMES = {"gmail": "Gmail", "googlecalendar": "Google Calendar", "googledrive": "Google Drive", "googledocs": "Google Docs",
+         "googleslides": "Google Slides",
          "googlesheets": "Google Sheets", "googlecontacts": "Google Contacts", "notion": "Notion", "slack": "Slack",
-         "github": "GitHub", "outlook": "Outlook", "linear": "Linear", "todoist": "Todoist", "dropbox": "Dropbox",
+         "github": "GitHub", "outlook": "Outlook", "outlookcalendar": "Outlook Calendar", "onedrive": "OneDrive",
+         "linear": "Linear", "todoist": "Todoist", "dropbox": "Dropbox",
          "twitter": "X", "linkedin": "LinkedIn", "whatsapp": "WhatsApp", "telegram": "Telegram", "zoom": "Zoom"}
+GOOGLE_APPS = {"gmail": "gmail", "googlecalendar": "calendar", "googledrive": "drive",
+               "googledocs": "docs", "googleslides": "slides"}
+NATIVE_APPS = {"outlookcalendar": "microsoft--calendar", "onedrive": "microsoft--onedrive"}
 # Which app each read in the closed read vocabulary belongs to.
 READ_TOOLKITS = {"GMAIL_FETCH_EMAILS": "gmail", "GOOGLECALENDAR_FIND_EVENT": "googlecalendar",
                  **{tool: d["toolkit"] for tool, d in extra_reads.DESCRIPTORS.items()},
@@ -185,6 +190,42 @@ def composio_server(config):
     return None
 
 
+def enabled_plugin(config, toolkit):
+    """An app already supplied to this Pip by an enabled hosted DGC plugin, if any."""
+    from . import pip_plugins
+    available = pip_plugins.installed(config)
+    if toolkit in GOOGLE_APPS:
+        info = available.get("google-workspace")
+        if info and any(name.endswith("--" + GOOGLE_APPS[toolkit]) for name in info["servers"]):
+            return "google-workspace"
+    for name in available:
+        if name.replace("-", "").replace("_", "") == toolkit:
+            return name
+    return None
+
+
+def unavailable_native_plugin(config, toolkit):
+    """A saved non-hosted plugin the Pip cannot safely start as a plugin tool."""
+    from . import pip_plugins
+    saved, off = pip_plugins._saved(config)
+    target = NATIVE_APPS.get(toolkit)
+    for record in pip_plugins._records():
+        specs = record.get("registered_specs") or {}
+        if not isinstance(specs, dict):
+            continue
+        for server, spec in specs.items():
+            if not isinstance(server, str) or not isinstance(spec, dict):
+                continue
+            same_app = server == target or (not target and
+                        (server.rsplit("--", 1)[-1].replace("-", "") == toolkit
+                         or record["name"].replace("-", "") == toolkit))
+            if (same_app and server not in off and isinstance(saved, dict) and saved.get(server) == spec
+                    and spec.get("enabled") is not False
+                    and not pip_plugins._hosted(spec)):
+                return record["name"]
+    return None
+
+
 def _manage(config, server, toolkit, action, *, manager_factory=None):
     manager_factory = manager_factory or apps._manager
     cancel = apps.DeadlineCancellation(time.monotonic() + 45)
@@ -249,6 +290,14 @@ def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
                     "redirect_url": None, "connected": True}
         except RegistryError as exc:
             return {"link": _set(registry, link_id, status="failed", error=str(exc)[:500]), "redirect_url": None}
+    if plugin := enabled_plugin(config, row["toolkit"]):
+        return {"link": _set(registry, link_id, status="failed", error=(
+            f"{app_name(row['toolkit'])} is already enabled through the {plugin} plugin. "
+            "Ask this Pip to use that plugin's tools; no separate sign-in is needed.")[:500]), "redirect_url": None}
+    if plugin := unavailable_native_plugin(config, row["toolkit"]):
+        return {"link": _set(registry, link_id, status="failed", error=(
+            f"{app_name(row['toolkit'])} is installed through {plugin}, but this Pip has no reviewed "
+            "adapter for its local server yet. No separate Composio sign-in was started.")[:500]), "redirect_url": None}
     found = composio_server(config)
     if found is None:
         return {"link": _set(registry, link_id, status="failed",
@@ -366,7 +415,9 @@ def schemas(apps_now) -> list[dict]:
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
             "Ask the user to connect one of their apps to you. Outlook Mail uses the user's existing DGC Microsoft "
-            "plugin; other supported apps use Composio. This shows a Connect card below your reply; the user signs in "
+            "plugin; other apps use Composio only when no enabled DGC plugin already supplies that app. Check the "
+            "plugin_tools route first for an enabled plugin. A new connection shows a Connect card below your reply; "
+            "the user signs in "
             "there (or just allows an account they "
             "already connected), and you are told when it is connected. Use it whenever the user asks whether you can "
             "use an app, or asks about Composio, and the app is not connected to you yet: call it rather than saying "
@@ -487,6 +538,19 @@ class RunSocket:
                 if op == "web_search":
                     return self._search(args)
                 if op == "connect_app":
+                    toolkit = _toolkit(args.get("app"))
+                    current = next((item for item in listing(registry, self.pip_id)
+                                    if item["toolkit"] == toolkit and item["status"] == "connected"), None)
+                    if current:
+                        return f"{current['app']} is already connected ({current['label']}). Read it with read_app."
+                    if plugin := enabled_plugin(self.config, toolkit):
+                        return (f"{app_name(toolkit)} is already enabled through the {plugin} plugin. "
+                                f"Use plugin_tools with plugin={plugin!r}, then call_plugin. "
+                                "No separate Composio connection or Connect card is needed.")
+                    if plugin := unavailable_native_plugin(self.config, toolkit):
+                        return (f"{app_name(toolkit)} is installed through {plugin}, but this Pip has no reviewed "
+                                "adapter for its local server yet. Tell the user plainly; do not ask for another "
+                                "Composio login or claim a Connect card exists.")
                     link = request(registry, self.pip_id, self.workspace_id, args.get("app"), args.get("why"), self.run_id)
                     if link["status"] == "connected":
                         return f"{link['app']} is already connected ({link['label']}). Read it with read_app."

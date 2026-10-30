@@ -13,7 +13,7 @@ new Function('module','exports','require',bundled)(module,module.exports,createR
 const markdown=module.exports;
 const fence=(payload)=>'```dgc-ui\n'+JSON.stringify(payload)+'\n```';
 
-test('one bounded card renders metrics, progress, chart, table and draft-only choices',()=>{
+test('one bounded card renders metrics, progress, chart, table and send choices',()=>{
  const html=markdown.render(fence({version:'1',title:'ERP health',subtitle:'Current run',blocks:[
   {type:'metrics',items:[{label:'Open alerts',value:'2',detail:'One needs review'}]},
   {type:'steps',items:[{label:'Audit',state:'done'},{label:'Pip review',state:'attention'}]},
@@ -22,10 +22,11 @@ test('one bounded card renders metrics, progress, chart, table and draft-only ch
   {type:'choices',items:[{label:'Review alert',description:'Open a follow-up',reply:'Review the ERP alert.'}]}
  ]}));
  assert.match(html,/class="genui-card"/);
+ assert.match(html,/M32 24 L20 30 L13 72 L25 66 Z/);
  assert.match(html,/Open alerts/);
  assert.match(html,/height:100%/);
- assert.match(html,/data-genui-draft="Review the ERP alert\."/);
- assert.match(html,/Nothing is sent/);
+ assert.match(html,/data-genui-send="Review the ERP alert\."/);
+ assert.match(html,/One click sends the request/);
  assert.doesNotMatch(html,/<script|<iframe|onclick=/i);
 });
 
@@ -48,6 +49,7 @@ test('model text is escaped and invalid or oversized payloads remain inert code'
  assert.match(html,/&lt;img/);
  assert.match(html,/&lt;script&gt;/);
  assert.doesNotMatch(html,/<img|<script|onmouseover="alert/i);
+ assert.match(markdown.render(fence({version:'1',title:'Unsafe',blocks:[{type:'choices',items:[{label:'Clear tasks',reply:'/todo clear'}]}]})),/class="code"/);
  assert.match(markdown.render('```dgc-ui\n{"blocks":[]}\n```'),/class="code"/);
  assert.match(markdown.render('```dgc-ui\n'+ 'x'.repeat(17000)+'\n```'),/class="code"/);
 });

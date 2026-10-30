@@ -118,6 +118,7 @@ test("General at 270px: DGC Ultra's words keep a readable column, its switch bes
   if (skipOrFail(t)) return;
   const { p, close } = await open(270, "general");
   try {
+    if (process.env.DGC_SHOTS) await p.screenshot({ path: process.env.DGC_SHOTS + "/settings-270.png" });
     // Even with the icon rail, the words need room beside or above the switch;
     // what must never come back is the crushed column (readable: 150px or more, three lines at most).
     const hint = '.field:has(#ultra_mode) .hint';

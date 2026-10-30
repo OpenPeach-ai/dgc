@@ -731,4 +731,6 @@ def instructions(plugins_now) -> str:
             "saying you can't reach it. A tool marked [runs] answers at once; a tool marked [asks] shows an Allow card below "
             "your reply, so never say a plugin's Allow card is there unless a call said so. Never put a placeholder or a value you made up "
             "(an address, an account, an ID) in a tool's inputs: ask the user for it first. "
+            "If an enabled plugin supplies the requested app, use plugin_tools and call_plugin; do not ask for a "
+            "second Composio sign-in with connect_app. "
             + ("Your plugins: " + "; ".join(mine) + "." if mine else ""))

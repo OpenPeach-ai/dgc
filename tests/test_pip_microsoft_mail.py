@@ -64,6 +64,12 @@ class MicrosoftMailPipTests(unittest.TestCase):
         self.assertTrue(self.managers[0].closed)
         self.assertEqual(self.managers[0].calls, [("route_mail_account", {})])
 
+    def test_connect_sees_a_login_saved_after_the_pip_runner_started(self):
+        stale = Config()
+        stale.servers = {}
+        with patch.object(mail, "saved_servers", return_value={mail.SERVER: SPEC}):
+            self.assertEqual(mail.connect(stale, manager_factory=self.factory)["server"], mail.SERVER)
+
     def test_bounded_read_checks_account_and_never_calls_a_write_tool(self):
         linked = self.linked()
         text = mail.read(self.cfg, linked, "MICROSOFT_SEARCH_MAIL", {"query": "invoice", "limit": 3},

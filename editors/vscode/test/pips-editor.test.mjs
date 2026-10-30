@@ -251,6 +251,17 @@ test('unknown send outcome retries with the same key and preserves the user draf
 test('per-Pip drafts survive navigation and restore only inside their workspace',async()=>{
  const x=setup({conversation:true,jobs:[job('a'),job('b')],savedState:{workspace_id:'ws',selected:'a',overview:false,drafts:{a:'Restored text'}}});await x.drain();assert.equal(x.d.querySelector('#chatText').value,'Restored text');x.input('#chatText','Still here');x.click('[data-job=b]');await x.drain();assert.equal(x.d.querySelector('#chatText').value,'');x.input('#chatText','Other draft');x.click('[data-job=a]');await x.drain();assert.equal(x.d.querySelector('#chatText').value,'Still here');
 });
+test('a Generative UI choice sends one Pip message and preserves an existing draft',async()=>{
+ const x=setup({conversation:true,messages:[chatMessage('answer','a',{role:'assistant',text:'Choose the next check.'})]});
+ x.w.DgcMarkdown={render:()=>'<button type="button" class="genui-send" data-genui-send="Check the alert first.">Check alert</button>'};
+ await x.drain();
+ x.input('#chatText','My unfinished note');
+ x.click('.genui-send');
+ const sent=x.requests('send_pip_message');
+ assert.equal(sent.length,1);
+ assert.equal(sent[0].request.text,'Check the alert first.');
+ assert.equal(x.d.querySelector('#chatText').value,'My unfinished note');
+});
 test('late messages and unrelated conversation records cannot cross Pip identities',async()=>{
  const x=setup({conversation:true,jobs:[job('a'),job('b')]});await x.drain({list_pip_messages:req=>req.pip_id==='a'?undefined:{pip_id:'b',workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0}});const old=x.requests('list_pip_messages')[0];x.click('[data-job=b]');await x.drain();x.answer(old,{pip_id:'a',workspace_id:'ws',messages:[chatMessage('old','a',{text:'Wrong thread'})],next_before_id:null,active_run:null,history_context_omitted_count:0});await flush();assert.doesNotMatch(x.d.querySelector('.pip-conversation').textContent,/Wrong thread/);x.click('#refresh');await x.drain({list_pip_messages:()=>({pip_id:'b',workspace_id:'ws',messages:[chatMessage('bad','a')],next_before_id:null,active_run:null,history_context_omitted_count:0})});assert.match(x.d.querySelector('.pip-conversation').textContent,/invalid or unrelated message/);
 });

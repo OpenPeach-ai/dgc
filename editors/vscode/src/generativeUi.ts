@@ -27,14 +27,15 @@ function choices(block: Row): string | null {
   if (!entries) return null;
   const rows = entries.map((item) => {
     const label = word(item.label, 70), reply = word(item.reply, 500);
-    if (!label || !reply) return "";
-    return `<button type="button" class="genui-choice genui-draft" data-genui-draft="${esc(reply)}"`
-      + ` aria-label="Draft: ${esc(label)}"><strong>${esc(label)}</strong>`
+    // A choice is a message, never a slash command or an editor control.
+    if (!label || !reply || reply.startsWith("/") || /\s\/(?:goal|plan|review|init)$/i.test(reply)) return "";
+    return `<button type="button" class="genui-choice genui-send" data-genui-send="${esc(reply)}"`
+      + ` aria-label="Send: ${esc(label)}"><strong>${esc(label)}</strong>`
       + `<span>${esc(word(item.description, 180))}</span><span class="genui-choice-arrow" aria-hidden="true">↗</span></button>`;
   });
   if (rows.some((row) => !row)) return null;
   return `<section class="genui-block"><h4>${esc(word(block.label, 100) || "Choose a direction")}</h4>`
-    + `<div class="genui-choices">${rows.join("")}</div><small>Opens a draft. Nothing is sent.</small></section>`;
+    + `<div class="genui-choices">${rows.join("")}</div><small>One click sends the request. Actions still follow your permissions.</small></section>`;
 }
 
 function steps(block: Row): string | null {
@@ -107,7 +108,9 @@ export function renderGenerativeUi(source: string): string | null {
   });
   if (rendered.some((block) => block === null)) return null;
   return `<div class="genui-card" role="group" aria-label="${esc(title)}"><div class="genui-head">`
-    + `<span class="genui-mark" aria-hidden="true"><i></i><i></i><i></i></span>`
+    + `<span class="genui-mark" aria-hidden="true"><svg viewBox="0 0 90 90" fill="currentColor" focusable="false">`
+    + `<path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/>`
+    + `<path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg></span>`
     + `<span><strong>${esc(title)}</strong><small>${esc(word(data.subtitle, 180))}</small></span>`
     + `<span class="genui-tag">Interactive</span></div>${rendered.join("")}</div>`;
 }

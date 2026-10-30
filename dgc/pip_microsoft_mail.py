@@ -22,7 +22,9 @@ MAX_RESULT = 32768
 
 
 def spec(config):
-    found = (config.get("mcp_servers", {}) or {}).get(SERVER)
+    # A Pip runner can predate the user's sign-in. Read the saved connection each time, as we
+    # already do before reads, so a new Microsoft login works without restarting the runner.
+    found = saved_servers(config).get(SERVER)
     if (not isinstance(found, dict) or found.get("enabled") is False
             or not microsoft_graph.is_builtin_spec(found)
             or "mail" not in microsoft_graph.parse_args(found.get("args"))[0]):
