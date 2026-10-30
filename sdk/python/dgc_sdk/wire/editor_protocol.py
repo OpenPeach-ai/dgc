@@ -109,7 +109,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "turn_start": {"turn_id": _S(), "prompt": _S(),
                    "kind": _f("string", required=False,
                               enum=("prompt", "resume", "continue", "monitor", "wake", "pip_setup")),
-                   "request_id": _S(False)},
+                   "request_id": _S(False),
+                   "attachments": _A(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule: the last ``stream_end`` of the turn
     # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose

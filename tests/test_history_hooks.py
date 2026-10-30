@@ -2,7 +2,8 @@
 hook sits where the replay order contract (spec §1.6) says it does.
 
 The golden file was produced by the pre-hook `_history` (main 65cd0251) from `rich_transcript()` and
-`long_transcript()` below; the no-op hooks must leave both projections byte-identical.
+`long_transcript()` below, with the prompt attachment label added for 0.50 image persistence;
+the no-op hooks must leave both projections byte-identical.
 """
 import copy
 import hashlib

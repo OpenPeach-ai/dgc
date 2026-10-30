@@ -3,7 +3,7 @@
   "specVersion": "1.5",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-10-29T15:50:43Z",
+    "timestamp": "2026-10-30T22:58:19Z",
     "component": {
       "type": "library",
       "name": "dgc-sdk",
@@ -25,7 +25,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "cebc96843a2a8cbae3977bd69d59a540c608cbd39adc4c1c480232cc5b74efa9"
+          "content": "01a33e586ba5ec686d117e213ec042535d60e586917368dce23a21cb26cfdcc0"
         }
       ]
     },
@@ -103,6 +103,17 @@
         {
           "alg": "SHA-256",
           "content": "6cd5f45b5cfaa5d2499004d4002b5d70df219309ddc68709e5ad496fadb7f09b"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "sdk/python/dgc_sdk/generative_ui.py",
+      "version": "0.8.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f31b6855b0c31d62ceb9a211b1e454670428a21323fa046c8d32245503d362ba"
         }
       ]
     },
@@ -278,7 +289,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a94ced1d844bb2fe15387d61527dbca7aec999450f93a84d5c6ea092ea64416c"
+          "content": "40534a353e7f26e348b626098f381f06eb7dd8ebd7afe7c966180e58babf72f1"
         }
       ]
     },
@@ -350,12 +361,23 @@
     },
     {
       "type": "file",
+      "name": "sdk/typescript/src/generativeUi.ts",
+      "version": "0.8.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "886ab58c7d97d8b24f00dce6b68c54a9c22f0931fb8ec2d2733c0b246e2a83b6"
+        }
+      ]
+    },
+    {
+      "type": "file",
       "name": "sdk/typescript/src/index.ts",
       "version": "0.8.0",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "96107ef5495005795247182abb6a9e25f4262bd3b69a25c8d406bebdcdc56c40"
+          "content": "8a14421a44f3bcb993d720fc1db9fcdde672071908350f116a88aed08fd9a0d9"
         }
       ]
     },
@@ -619,7 +641,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c49812bafb948e10318732be4d21b79278dc9edd992247985d609e23d437233a"
+          "content": "50aaf6d6ff67e608f08eb81861c20074e4ec8b2eb47405222bf31177c5cc3204"
         }
       ]
     },

@@ -164,7 +164,8 @@
    "type": "turn_start",
    "turn_id": "h4",
    "prompt": "What is on this screen? 📷",
-   "kind": "prompt"
+   "kind": "prompt",
+   "attachments": [{"img": true, "label": "Image"}]
   },
   {
    "type": "tool_call",
