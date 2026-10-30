@@ -141,7 +141,7 @@ function measureSpacing() {
   // A pinned prompt is drawn at the top of the view, not in its own place: every prompt is measured
   // where it is laid out (0.47 pinned prompt), and pins again once the measurement is done.
   const unpin = document.createElement("style");
-  unpin.textContent = "#log .turn > .msg.user.turn-head { position: relative !important; }";
+  unpin.textContent = "#log .turn > .msg.user.turn-head, #log .turn > .msg.dgc > .msg.user.turn-steer { position: relative !important; }";
   document.head.appendChild(unpin);
   const log = document.getElementById("log");
   const box = (n) => n.getBoundingClientRect();
