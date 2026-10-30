@@ -17,7 +17,7 @@ from unittest.mock import patch
 from dgc import photos, pip_chat, pips
 from dgc.attachments import spool_root
 from dgc.image_views import parse_dimensions
-from dgc.workspace_registry import RegistryError
+from dgc.workspace_registry import RegistryError, SCHEMA_VERSION
 from tests import test_pips_local as fixtures
 
 MB = 1024 * 1024
@@ -294,7 +294,8 @@ class OlderRegistryTests(unittest.TestCase):
         sql = db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_images'").fetchone()[0]
         self.assertNotIn("2097152", sql)
         self.assertNotIn("2097152", db.execute("SELECT sql FROM sqlite_master WHERE name='pip_chat_files'").fetchone()[0])
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 46, "an older DGC still opens it")
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION,
+                         "spooling a large image must not change the registry schema version")
         messages = pip_chat.list_messages(self.store, pip["id"])["messages"]
         self.assertEqual([len(m.get("images", [])) for m in messages], [1, 6])
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
