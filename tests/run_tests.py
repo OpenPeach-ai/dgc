@@ -13783,6 +13783,74 @@ def test_resize_reflow():
           blocks[1] == {"kind": "md", "text": "**bold** reply"} and blocks[0]["kind"] == "user")
 
 
+def test_prompt_image_replay():
+    """A saved user image remains a bounded, fetchable chip after a Work session reload."""
+    from pathlib import Path
+    import tempfile
+    from dgc import sessions
+    from dgc.headless import Backend
+    from dgc.prompt_images import from_message
+    from dgc.workflows import STEERING_PREFIX, STEERING_SUFFIX
+
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    bad = {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://example.invalid/image.png"}}]}
+    rejected, refs = from_message(bad)
+    check("prompt image replay never fetches a URL or claims unavailable bytes",
+          rejected == [{"img": True, "label": "Image"}] and not refs)
+
+    def attached(text, *uris):
+        return {"role": "user", "content": [{"type": "text", "text": text},
+            *({"type": "image_url", "image_url": {"url": uri}} for uri in uris)]}
+
+    class Agent:
+        session_file = None
+        image_views = []
+        messages = [attached("Check both", png, png),
+                    {**attached(STEERING_PREFIX + "first\nsecond" + STEERING_SUFFIX, png),
+                     "_dgc_steering": ["first", "second"],
+                     "_dgc_steering_at": [None, None],
+                     "_dgc_steering_image_counts": [0, 1]},
+                    {"role": "assistant", "content": "Done."}]
+
+    class Emitter:
+        def __init__(self): self.events = []
+        def emit(self, kind, **fields): self.events.append({"type": kind, **fields})
+
+    be = Backend.__new__(Backend)
+    be.agent = Agent()
+    be.em = Emitter()
+    with tempfile.TemporaryDirectory(prefix="dgc-prompt-image-") as directory:
+        root = Path(directory)
+        path = sessions.new_path(root)
+        saved = sessions.save(path, Agent.messages, root, redact_secrets=())
+        be.agent.messages = sessions.load_record(path, root)["messages"]
+        be.agent.session_file = path
+        history = be._history()
+        check("sent image bytes survive the private session save and reload",
+              saved and be.agent.messages[0]["content"][1]["image_url"]["url"] == png)
+        starts = [event for event in history if event.get("type") == "turn_start"]
+        steering = [event for event in history if event.get("role") == "steering"]
+        image = starts[0]["attachments"][0]
+        check("two saved prompt images replay as two chips without putting bytes in history",
+              len(starts[0]["attachments"]) == 2 and all(item["ref"] == image["ref"]
+              for item in starts[0]["attachments"]) and "base64" not in str(history))
+        check("saved mid-turn image stays with the user message that carried it",
+              len(steering) == 2 and "attachments" not in steering[0]
+              and steering[1]["attachments"][0]["ref"] == image["ref"])
+        be.agent.messages[1].pop("_dgc_steering_image_counts")
+        old_steering = [event for event in be._history() if event.get("role") == "steering"]
+        check("older steered sessions attach their image to the bubble with the image marker",
+              len(old_steering) == 2 and "attachments" not in old_steering[0]
+              and old_steering[1]["attachments"][0]["ref"] == image["ref"])
+        be._serve_image("replayed", image["ref"])
+        check("get_image returns the saved prompt image after reload",
+              be.em.events[-1]["type"] == "image" and be.em.events[-1]["image"] == png)
+        be.agent.session_file = root / "different-session.json"
+        be._serve_image("stale", image["ref"])
+        check("a prompt image ref cannot read another session's image",
+              be.em.events[-1].get("reason") == "not_found")
+
+
 def test_editor_approval_gate():
     """Protocol v7: an editor approves against what the step would do — a summary and, for an
     edit, the diff it would apply — and can deny with a note the model then reads."""
@@ -20114,6 +20182,7 @@ def main():
         test_oneshot_machine_readable()
         test_paste_collapse()
         test_resize_reflow()
+        test_prompt_image_replay()
         test_editor_approval_gate()
         test_context_notes()
         test_goal_refusal_keeps_the_text()

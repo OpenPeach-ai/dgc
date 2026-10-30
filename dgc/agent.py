@@ -5100,7 +5100,6 @@ class Agent(GoalLifecycle):
             # Three envelopes, because there are three things to say. `message_task` carries the PARENT
             # MODEL's words; sending those under the user's envelope told the child a human had
             # spoken and made every frontend render them as a user bubble.
-            images = [image for item in msgs for image in item["images"]]
             for kind, prefix, suffix in (("user", STEERING_PREFIX, STEERING_SUFFIX),
                                          ("agent", AGENT_MESSAGE_PREFIX, AGENT_MESSAGE_SUFFIX),
                                          ("agent_task", AGENT_TASK_PREFIX, AGENT_TASK_SUFFIX)):
@@ -5108,6 +5107,7 @@ class Agent(GoalLifecycle):
                          if m.get("origin", "user") == kind and m["text"].strip()]
                 if not group:
                     continue
+                group_images = [image for item in group for image in item["images"]]
                 # What a user's words newly asked for (a page to see, a skill) rides on them, inside
                 # the envelope, as on a prompt, instead of reopening the system prompt mid-turn
                 # (_turn_notes). A restored chat shows the recorded words (_dgc_steering), never this.
@@ -5117,13 +5117,14 @@ class Agent(GoalLifecycle):
                            + ("\n\n" + notes if notes else "") + suffix)
                 message = {"role": "user", "content": (
                     [{"type": "text", "text": content},
-                     *({"type": "image_url", "image_url": {"url": image}} for image in images)]
-                    if images and kind == "user" else content)}
+                     *({"type": "image_url", "image_url": {"url": image}} for image in group_images)]
+                    if group_images and kind == "user" else content)}
                 if kind == "user":
                     # Where one message ends and the next begins: the model reads them joined, but
                     # each was its own bubble live, and a restored chat shows them the same way.
                     message["_dgc_steering"] = [m["text"] for m in group]
                     message["_dgc_steering_at"] = [m.get("at") for m in group]
+                    message["_dgc_steering_image_counts"] = [len(m["images"]) for m in group]
                 else:
                     # NOT a user bubble, and not the user's words for anything that reads roles.
                     message["_dgc_agent_message"] = [m["text"] for m in group]

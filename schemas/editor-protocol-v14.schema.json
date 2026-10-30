@@ -561,6 +561,9 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "attachments": {
+              "type": "array"
             }
           },
           "required": [

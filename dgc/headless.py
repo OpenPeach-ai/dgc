@@ -44,6 +44,7 @@ from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .history_stream import HistoryEmitter
 from . import shown_files
+from . import prompt_images
 from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
@@ -5351,6 +5352,7 @@ class Backend:
         # the end of this class); each one is a no-op until its lane lands.
         self._history_begin_images()
         self._history_begin_reasoning()
+        prompt_image_refs: dict[str, tuple[str, str, int, int]] = {}
         items: list = []
         calls: dict = {}                # saved tool_call id -> the name its result belongs to
         asked: dict = {}                # saved propose_options call id -> its saved arguments
@@ -5416,14 +5418,17 @@ class Backend:
             items.extend(turn.pop("pip_reports", ()))
             turn = None
 
-        def open_turn(prompt: str, kind: str) -> None:
+        def open_turn(prompt: str, kind: str, attachments: list | None = None) -> None:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
             turn = {"id": f"h{turn_n}", "n": 0, "r": 0, "final": None, "interrupted": False,
                     "at": position, "item": len(items), "written_at": None}
-            items.append({"type": "turn_start", "turn_id": turn["id"],
-                          "prompt": prompt, "kind": kind})
+            started = {"type": "turn_start", "turn_id": turn["id"],
+                       "prompt": prompt, "kind": kind}
+            if attachments:
+                started["attachments"] = attachments
+            items.append(started)
 
         def ensure_turn() -> dict:
             if turn is None:
@@ -5485,6 +5490,8 @@ class Backend:
             items.extend(self._history_before_message(index, turn))
             role = m.get("role")
             content = m.get("content")
+            image_items, image_refs = prompt_images.from_message(m) if role == "user" else ([], {})
+            prompt_image_refs.update(image_refs)
             if role == "system":
                 continue
             # What happened to the chat's monitors when it was opened again: markers between turns,
@@ -5581,11 +5588,21 @@ class Backend:
                 else:
                     sent = m.get("_dgc_steering_at")
                     sent = sent if isinstance(sent, list) and len(sent) == len(steering) else [None] * len(steering)
-                    for text, at in zip(steering, sent):
+                    counts = m.get("_dgc_steering_image_counts")
+                    if (not isinstance(counts, list) or len(counts) != len(steering)
+                            or any(type(n) is not int or n < 0 for n in counts)
+                            or sum(counts) != len(image_items)):
+                        counts = [0] * (len(steering) - 1) + [len(image_items)]
+                    image_at = 0
+                    for text, at, count in zip(steering, sent, counts):
                         at = _history_written_at({"_dgc_at": at})
                         if at is not None:
                             items.append({"role": "time", "of": "steering", "at": at})
-                        items.append({"role": "steering", "text": text})
+                        entry = {"role": "steering", "text": text}
+                        if count:
+                            entry["attachments"] = image_items[image_at:image_at + count]
+                        image_at += count
+                        items.append(entry)
                 continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",
@@ -5623,7 +5640,7 @@ class Backend:
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
-                open_turn(text, "prompt")
+                open_turn(text, "prompt", image_items)
                 sent_at = _history_written_at(m)
                 if sent_at is not None:
                     items.append({"role": "time", "of": "prompt", "at": sent_at})
@@ -5756,6 +5773,10 @@ class Backend:
                                  if not (isinstance(item, dict) and item.get("type") == "tool_call"
                                          and item.get("call_id") and item["call_id"] not in resulted
                                          and item["call_id"] not in shown)]
+        # Publish a fresh lookup in one assignment. A get_image worker may be reading the prior
+        # lookup while a history snapshot is rebuilt, and may serve it only for the same session.
+        self._prompt_image_uris = prompt_image_refs
+        self._prompt_image_session = getattr(self.agent, "session_file", None)
         if not bounded:
             return items
         # A display projection must not break the editor's bounded NDJSON transport. Session/model
@@ -8684,8 +8705,20 @@ class Backend:
     def _serve_image(self, request_id: str, ref: str) -> None:
         from .image_views import resolve
         try:
-            record = self._current_image_record(ref)
             session_file = getattr(self.agent, "session_file", None)
+            prompt = getattr(self, "_prompt_image_uris", {}).get(ref)
+            if prompt is not None and session_file == getattr(self, "_prompt_image_session", None):
+                uri, mime, width, height = prompt
+                if getattr(self.agent, "session_file", None) != session_file:
+                    self.em.emit("image", request_id=request_id, ref=ref, image="", reason="not_found")
+                    return
+                shape = {"mime": mime, "width": width, "height": height}
+                if len(uri) + 512 > int(MAX_EVENT_BYTES * 0.9):
+                    self.em.emit("image", request_id=request_id, ref=ref, image="", reason="too_large", **shape)
+                else:
+                    self.em.emit("image", request_id=request_id, ref=ref, image=uri, **shape)
+                return
+            record = self._current_image_record(ref)
             if record is None or not session_file:
                 self.em.emit("image", request_id=request_id, ref=ref, image="", reason="not_found")
                 return

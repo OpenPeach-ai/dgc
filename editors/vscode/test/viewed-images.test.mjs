@@ -249,6 +249,31 @@ test("a session change closes the viewer; a history re-render keeps the image bu
 });
 
 // ---- Phase B: images fetched by ref ----------------------------------------------------------------
+test("saved prompt and mid-turn images remain viewable after a history reload", async () => {
+  const p = panel();
+  p.event({ type: "history", items: [
+    { type: "turn_start", turn_id: "h1", prompt: "Check these 📷", kind: "prompt",
+      attachments: [{ img: true, label: "Image", ref: ref(7), mime: "image/png", width: 1, height: 1, bytes: 70 }] },
+    { role: "steering", text: "And this one 📷",
+      attachments: [{ img: true, label: "Image", ref: ref(8), mime: "image/png", width: 2, height: 2, bytes: 75 }] },
+    { type: "turn_end", turn_id: "h1", reason: "completed", token_estimate: 0, final_message_id: null },
+  ] });
+  await p.flush();
+  const chips = [...p.doc.querySelectorAll(".msg.user .prompt-atts .image-chip")];
+  assert.equal(chips.length, 2, "each saved user message keeps its own image chip");
+  const asks = p.posted.filter((m) => m.type === "getImage");
+  assert.deepEqual(asks.map((m) => m.ref), [ref(7), ref(8)]);
+  for (const ask of asks) p.event({ type: "image", request_id: ask.requestId, ref: ask.ref,
+    image: ask.ref === ref(7) ? PNG : PNG2, mime: "image/png", width: 1, height: 1 });
+  assert.deepEqual([...p.doc.querySelectorAll(".msg.user .prompt-atts .image-chip")].map((c) => c.dataset.state),
+    ["ready", "ready"]);
+  p.doc.querySelector(".msg.user .prompt-atts .image-chip").click();
+  assert.ok(p.viewer().querySelector(".iv-stage img"), "the saved image opens in the viewer");
+  assert.equal(p.viewer().querySelector(".iv-open").hidden, true,
+    "a prompt image has no separate file to open in the editor");
+  assert.deepEqual(p.errors, []);
+});
+
 test("replayed slots are fetched only for opened cards, two at a time, and fill their chips", () => {
   const p = panel({ clock: true });
   for (const id of ["h1", "h2", "h3"]) p.step(id);

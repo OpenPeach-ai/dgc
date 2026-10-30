@@ -443,6 +443,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "attachments": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "turn_end": {

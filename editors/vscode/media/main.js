@@ -3485,17 +3485,24 @@
       return chip;
     }
     if (item.img) {
+      const hasData = !!(item.data && String(item.data).startsWith("data:image/"));
+      const ref = typeof item.ref === "string" && /^img_[0-9a-f]{32}$/.test(item.ref) ? item.ref : "";
       const record = {
         name: String(item.label || "Image").replace(/^📷\s*/, "") || "Image",
         bytes: Number(item.bytes) || 0,
-        source: "view_image",
+        mime: typeof item.mime === "string" ? item.mime : "",
+        width: Number(item.width) || 0,
+        height: Number(item.height) || 0,
+        ref,
+        source: ref ? "prompt" : "view_image",
         owner: bubble,
-        state: item.data && String(item.data).startsWith("data:image/") ? "ready" : "failed",
-        src: item.data && String(item.data).startsWith("data:image/") ? item.data : "",
-        reason: item.data && String(item.data).startsWith("data:image/") ? "" : "not_found",
+        state: hasData ? "ready" : ref ? "pending" : "failed",
+        src: hasData ? item.data : "",
+        reason: hasData || ref ? "" : "not_found",
         compact: true,
       };
       images.push(record);
+      if (ref) { trackImageRef(record); queueMicrotask(() => requestImages([record])); }
       return imageChip(record, images.length - 1, images.length);
     }
     const chip = el("button", `prompt-att chip${item.skill || item.template ? " invocation-chip" : ""}${item.pasted ? " pasted-chip" : ""}`);
@@ -3627,7 +3634,7 @@
   }
   // The row that heads a turn (0.47 pinned prompt): the one this panel already drew for it, or one
   // drawn now, or null for a turn with nothing to show.
-  function echoPrompt(text, requestId = "") {
+  function echoPrompt(text, requestId = "", savedAttachments = []) {
     // The row drawn for this request -- the composer's, a goal's, an answer to a question, a queued
     // message put back after a reload -- found by its id whether or not prompt_accepted came first.
     // It used to be found only as "the last bubble", and only while still pending: turn_start comes
@@ -3637,7 +3644,7 @@
     if (own) return claimRow(own);
     const parsed = splitPromptMarks(text);
     const body = parsed.text.trim();
-    if (!body && !parsed.attachments.length) return null;
+    if (!body && !parsed.attachments.length && !savedAttachments.length) return null;
     // The composer renders what the user typed there. A turn begun anywhere else — a slash
     // command, an editor action, a queued follow-up, a retry, the terminal beside us — must
     // still show its prompt, or the transcript reads as answers to questions nobody asked.
@@ -3657,7 +3664,7 @@
     // included. (Comparing with the last bubble on the page dropped the second of two.)
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, parsed.text, parsed.attachments);
+    fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments);
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
     markPipReportsNamedIn(parsed.text);
@@ -3780,7 +3787,7 @@
     renderTurnMeta();
   }
   // `requestId`: the id turn_start carries for a prompt someone sent (its row is found by it).
-  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "") {
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = []) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -3819,7 +3826,7 @@
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
-      head = echoPrompt(prompt, requestId);
+      head = echoPrompt(prompt, requestId, savedAttachments);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
     block._turnId = String(id || "");               // a turn_files for it after it ended finds its card
@@ -7550,7 +7557,8 @@
         if (!replaying) { removeRecoveryCards(); liveTurnHint = null; agentsTurnBegin(); }
         startTurn(ev.prompt, ev.kind, ev.turn_id,
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id),
-          typeof ev.request_id === "string" ? ev.request_id : "");
+          typeof ev.request_id === "string" ? ev.request_id : "",
+          Array.isArray(ev.attachments) ? ev.attachments : []);
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         // The next message moves on from a troupe that has ended; its own wake-up turn (a monitor turn) does not.
@@ -10614,7 +10622,8 @@
       setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
       const bubble = el("div", "bubble");
-      fillUserBubble(bubble, parsed.text, parsed.attachments);
+      fillUserBubble(bubble, parsed.text,
+        Array.isArray(it.attachments) && it.attachments.length ? it.attachments : parsed.attachments);
       node.appendChild(bubble);
       if (steeringAt !== null) { stampPrompt(node, steeringAt); steeringAt = null; }
       placeSteering(node);
@@ -14197,7 +14206,7 @@
   const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   const IMAGE_HOST = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
   const IMAGE_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
-  const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", read_file: "Workspace image", mcp: "MCP image" };
+  const IMAGE_SOURCES = { browser: "Browser screenshot", view_image: "Workspace image", read_file: "Workspace image", mcp: "MCP image", prompt: "Prompt image" };
   const IMAGE_FAILURES = {
     // triangle-alert where the file itself is gone or broken; image-off where the image is fine
     // and DGC declined to draw it.
@@ -14382,7 +14391,9 @@
     const dims = imageDims(record);
     const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
     chip.setAttribute("aria-label", `Open image ${index + 1} of ${count}: ${record.name}${dims ? `, ${record.width} by ${record.height}` : ""}`);
-    chip.title = failure ? failure[2] : [record.name, dims, imageSize(record.bytes)].filter(Boolean).join(" · ");
+    chip.title = failure ? (record.source === "prompt" && record.reason === "too_large"
+      ? "This saved image exceeds the panel's preview limit." : failure[2])
+      : [record.name, dims, imageSize(record.bytes)].filter(Boolean).join(" · ");
     const kind = (String(record.src || "").match(/^data:image\/([a-z]+)/i) || [])[1];
     const caption = el("span", "image-caption");
     // A sent image's chip reads as it did in the composer: its file name when it has one.
@@ -14500,7 +14511,7 @@
     const wanted = new Set();
     for (const records of imageRefs.values()) {
       for (const record of records) {
-        const shown = record.owner?.classList.contains("open") && record.owner.isConnected;
+        const shown = record.owner?.isConnected && (record.compact || record.owner.classList.contains("open"));
         const viewing = imageViewer && imageViewer.records[imageViewer.index] === record;
         if (record.state === "pending" && (shown || viewing)) wanted.add(record);
       }
@@ -14715,7 +14726,7 @@
     const label = IMAGE_SOURCES[record.source] || "Image";
     q("#iv-title").textContent = record.name || label;
     q("#iv-meta").textContent = [imageDims(record), imageSize(record.bytes), record.host || label].filter(Boolean).join(" · ");
-    q(".iv-open").hidden = !record.ref && !record.path;
+    q(".iv-open").hidden = record.source === "prompt" || (!record.ref && !record.path);
     q(".iv-open").title = `Open ${record.name} in the editor`;
     const stage = q(".iv-stage");
     stage.textContent = "";
