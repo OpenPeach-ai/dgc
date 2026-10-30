@@ -3260,6 +3260,7 @@
   // an answered question above it always stay whole. The one place the state lives is the bubble's
   // `data-fold` ("folded" | "open", absent when the prompt fits); setPromptFold is its only writer.
   const PROMPT_FOLD_LINES = 3;    // = --prompt-fold-lines in main.css (prompt-fold.test.mjs pins both)
+  const PROMPT_ATTACH_FOLD_LINES = 3.2; // total chip + text budget, before the Show more strip
   const PROMPT_FOLD_SPARE = 1;    // fold once a line would be hidden: 4 lines fold, 3 do not
   // Prompts opened in this panel's life. A chat switch, reconnect or rewind rebuilds the transcript,
   // and a prompt being read must not fold back. Keyed by the chat tab (chat_switched/chat_slots) AND
@@ -3272,7 +3273,8 @@
   // splitPromptMarks. Same words, different whitespace.
   function promptFoldKey(bubble) {
     const text = bubble.querySelector(":scope > .prompt-text")?.textContent || "";
-    return text.slice(0, 4096).replace(/\s+/g, " ").trim().slice(0, 512);
+    const attachments = bubble.querySelector(":scope > .prompt-atts")?.textContent || "";
+    return `${attachments}\n${text}`.slice(0, 4096).replace(/\s+/g, " ").trim().slice(0, 512);
   }
   function promptRemembered(bubble) { return !!promptsOpened.get(promptChatKey())?.has(promptFoldKey(bubble)); }
   function rememberPrompt(bubble, open) {
@@ -3282,8 +3284,9 @@
   }
   function setPromptFold(bubble, state) {          // "folded" | "open" | "" (fits)
     const body = bubble.querySelector(":scope > .prompt-text");
+    const atts = bubble.querySelector(":scope > .prompt-atts");
     let toggle = bubble.querySelector(":scope > .prompt-fold");
-    if (!state || !body) {
+    if (!state || (!body && !atts)) {
       delete bubble.dataset.fold;
       if (toggle && toggle === document.activeElement && body) {
         // A keyboard user keeps their place: the text the control belonged to takes focus.
@@ -3296,8 +3299,9 @@
     bubble.dataset.fold = state;
     if (!toggle) {
       toggle = el("button", "prompt-fold"); toggle.type = "button";
-      if (!body.id) body.id = `prompt-text-${++disclosureId}`;
-      toggle.setAttribute("aria-controls", body.id);
+      if (body && !body.id) body.id = `prompt-text-${++disclosureId}`;
+      if (atts && !atts.id) atts.id = `prompt-atts-${++disclosureId}`;
+      toggle.setAttribute("aria-controls", [atts?.id, body?.id].filter(Boolean).join(" "));
       toggle.onclick = () => togglePromptFold(bubble);
       // A held key auto-repeats: one press is one toggle (Claude Code does the same).
       toggle.onkeydown = (event) => { if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault(); };
@@ -3317,7 +3321,14 @@
   // scrollHeight is the natural height folded or not, so the verdict never depends on the state.
   function measurePromptFold(bubble) {
     const body = bubble.querySelector(":scope > .prompt-text");
-    if (!body?.isConnected || !body.clientWidth) return null;
+    const atts = bubble.querySelector(":scope > .prompt-atts");
+    if (!bubble.isConnected || !(body?.clientWidth || atts?.clientWidth)) return null;
+    if (atts) {
+      const gap = body ? parseFloat(getComputedStyle(atts).marginBottom) || 0 : 0;
+      const total = atts.scrollHeight + gap + (body?.scrollHeight || 0);
+      return total > promptLine(body || bubble) * PROMPT_ATTACH_FOLD_LINES;
+    }
+    if (!body) return null;
     return body.scrollHeight > promptLine(body) * (PROMPT_FOLD_LINES + PROMPT_FOLD_SPARE - 0.5);
   }
   // `blocks`: .msg elements (or one). A block's own bubble is found too: querySelectorAll matches
@@ -3342,12 +3353,20 @@
   // lands on what nobody can see, and never opens a prompt by itself. Screen readers keep every link.
   function syncPromptLinks(bubble) {
     const body = bubble.querySelector(":scope > .prompt-text");
+    const atts = bubble.querySelector(":scope > .prompt-atts");
     const links = body ? [...body.querySelectorAll(".prompt-link")] : [];
-    if (!links.length) return;
-    const edge = bubble.dataset.fold === "folded" && body.clientHeight ? body.getBoundingClientRect().top + body.clientHeight : null;
+    const clipped = bubble.dataset.fold === "folded" && atts && bubble.clientHeight;
+    const bubbleEdge = clipped ? bubble.getBoundingClientRect().bottom - 34 : null;
+    const chipEdge = bubbleEdge === null ? null : Math.min(bubbleEdge, atts.getBoundingClientRect().bottom);
+    const bodyEdge = bubble.dataset.fold === "folded" && body?.clientHeight ? body.getBoundingClientRect().top + body.clientHeight : null;
+    const edge = bubbleEdge === null ? bodyEdge : bodyEdge === null ? bubbleEdge : Math.min(bodyEdge, bubbleEdge);
     for (const link of links) {
       if (edge !== null && link.getBoundingClientRect().bottom > edge + 1) link.tabIndex = -1;
       else link.removeAttribute("tabindex");
+    }
+    for (const chip of atts?.querySelectorAll("button") || []) {
+      if (chipEdge !== null && chip.getBoundingClientRect().bottom > chipEdge + 1) chip.tabIndex = -1;
+      else chip.removeAttribute("tabindex");
     }
   }
   function togglePromptFold(bubble) {

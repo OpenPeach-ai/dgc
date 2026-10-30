@@ -1,8 +1,8 @@
 // A long prompt folds to its first three lines until "Show more".
 //
 // A sent prompt whose text runs to 7+ lines at the current width shows 5 of them, fading, with a
-// "Show more" pill; open, it reads "Show less". Only the prompt's prose folds -- chips, image tiles
-// and the question an answer quotes stay whole -- and the decision is made from the text's real
+// "Show more" pill; open, it reads "Show less". Attachments and prose share the compact preview;
+// the question an answer quotes stays whole. The decision is made from the content's real
 // height, once it is in the transcript and again whenever the width or fonts change. Nothing is
 // guessed at build time, so a prompt drawn live and the same prompt replayed from history run the
 // same code. Opened prompts stay open per chat (tab + conversation) for the life of the panel.
@@ -130,7 +130,7 @@ test("Show more opens, Show less folds back; a held key does nothing", () => {
   assert.deepEqual(p.errors, []);
 });
 
-test("attachments and an answered question stay outside the fold", () => {
+test("attachments share the prompt fold; an answered question stays outside it", () => {
   const p = panel({ scope: "workspace" });
   p.send({ type: "session_ready", sessionId: "alpha" });
   p.event({ type: "ready", capabilities: {} });
@@ -151,6 +151,8 @@ test("attachments and an answered question stay outside the fold", () => {
   assert.ok(atts, "the chips have a row of their own");
   assert.equal(atts.nextElementSibling, text, "above the text, beside it in the bubble, never inside it");
   assert.ok(atts.querySelector(".pasted-chip") && atts.querySelector(".image-chip"));
+  assert.ok(bubble.querySelector(".prompt-fold").getAttribute("aria-controls").includes(atts.id),
+    "Show more names the attachment row it reveals");
   assert.equal(text.querySelector(".chip, .prompt-att, .image-chip"), null);
   assert.equal(text.textContent, LONG);
   atts.querySelector(".pasted-chip").click();

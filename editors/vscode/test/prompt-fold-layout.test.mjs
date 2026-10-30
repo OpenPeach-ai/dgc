@@ -83,6 +83,60 @@ const focusedName = (page) => page.evaluate(() => {
   return node?.id || node?.className || node?.tagName || "";
 });
 
+test("sent prompts share the three-line preview between image chips and text", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openPage({ width: 320, height: 720 });
+  try {
+    await s.page.evaluate(async () => {
+      const canvas = document.createElement("canvas"); canvas.width = 20; canvas.height = 20;
+      canvas.getContext("2d").fillRect(0, 0, 20, 20);
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+      const data = new DataTransfer();
+      for (let i = 1; i <= 3; i += 1) data.items.add(new File([blob], `screen-${i}.png`, { type: "image/png" }));
+      document.getElementById("input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    await s.page.waitForFunction(() => document.querySelectorAll("#attachments .image-att-chip").length === 3);
+    const prompt = "Compare these three screenshots and explain how the layout changes at narrow widths.";
+    await s.page.evaluate((text) => {
+      const input = document.getElementById("input"); input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      document.getElementById("send").click();
+    }, prompt);
+    const id = await s.page.evaluate(() => window.__posted.filter((m) => m.type === "prompt").at(-1)?.requestId);
+    assert.ok(id, "the prompt was sent");
+    await s.events([{ type: "prompt_accepted", request_id: id, state: "started" },
+      { type: "turn_start", turn_id: "with-images", request_id: id, prompt, kind: "prompt" },
+      { type: "text_delta", text: "I can compare all three screenshots." }]);
+    await s.settle();
+    const folded = await s.page.evaluate(() => {
+      const bubble = document.querySelector(".turn-head .bubble"), chips = [...bubble.querySelectorAll(".prompt-atts .image-chip")];
+      return { state: bubble.dataset.fold, height: bubble.getBoundingClientRect().height,
+        chips: chips.length, hidden: chips.filter((chip) => chip.tabIndex === -1).length,
+        rowHeight: bubble.querySelector(".prompt-atts").getBoundingClientRect().height,
+        toggleOpacity: getComputedStyle(bubble.querySelector(".prompt-fold")).opacity,
+        maxHeight: getComputedStyle(bubble).maxHeight, overflow: getComputedStyle(bubble).overflow };
+    });
+    assert.equal(folded.state, "folded");
+    assert.equal(folded.chips, 3);
+    assert.ok(folded.height <= 115, `the whole sent bubble stays compact: ${JSON.stringify(folded)}`);
+    assert.ok(folded.rowHeight <= 38, "only a complete first row of chips appears before expansion");
+    assert.equal(folded.toggleOpacity, "1", "Show more stays visible when attachments are clipped");
+    assert.equal(folded.overflow, "hidden");
+    assert.ok(folded.hidden >= 1, "chips clipped from view are skipped by Tab");
+    if (process.env.DGC_ATTACH_SCREENSHOT) await s.page.screenshot({ path: process.env.DGC_ATTACH_SCREENSHOT });
+    await s.page.click(".turn-head .prompt-fold");
+    const open = await s.page.evaluate(() => {
+      const bubble = document.querySelector(".turn-head .bubble");
+      return { state: bubble.dataset.fold, height: bubble.getBoundingClientRect().height,
+        focusable: [...bubble.querySelectorAll(".prompt-atts .image-chip")].every((chip) => chip.tabIndex !== -1) };
+    });
+    assert.equal(open.state, "open");
+    assert.ok(open.height > folded.height + 50, "all three chips and the text expand in place");
+    assert.equal(open.focusable, true, "all chips are keyboard reachable when expanded");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 for (const theme of ["dark-modern", "light-modern", "hc"]) {
   for (const width of [300, 460]) {
     test(`a long prompt shows three lines, and its pill answers hover and Tab (${theme}, ${width}px)`, async (t) => {

@@ -392,10 +392,10 @@ test("in a tall window an opened prompt short enough to pin still scrolls away, 
 
 test("a prompt whose pinned strip would take more than 30% of the window does not pin, whatever the draft does", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openPage({ width: 900, height: 500 });
+  const s = await openPage({ width: 900, height: 360 });
   try {
-    // Tall from its words, not its picture: a sent image is a small chip now. A prompt long enough to
-    // fold keeps three lines and its "Show more" under the screenshot's chip.
+    // Tall from its words, not its picture: a sent image is a small chip now. Its compact preview
+    // still yields the pin if the entire window is too short for the prompt and its Show more strip.
     const tallPrompt = "📷 What is wrong with this screenshot?\n" + Array.from({ length: 8 }, (_, i) => `Detail ${i + 1}: the filters wrap under the search box.`).join("\n");
     await s.events([...turn("t0", "Two short lines\nof prompt"), ...turn("t1", tallPrompt), ...turn("t2", "Thanks")]);
     await s.settle();
