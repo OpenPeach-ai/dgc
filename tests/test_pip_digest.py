@@ -123,6 +123,20 @@ class DigestTests(unittest.TestCase):
         self.store.finish(run_id, error={"code": "fixture_failure", "message": "The model could not be reached"})
         return run_id
 
+    def test_dismissing_a_chat_card_hides_only_that_run_from_home(self):
+        first = self.fail_run()
+        second = self.fail_run()
+        self.at("2026-10-01T10:05:00.000Z")
+        self.assertEqual(self.build()["pips"][0]["runs"]["failed"], 2)
+        self.assertEqual(digest.mark_run_seen(self.registry, first, "editor-user"),
+                         {"run_id": first, "pip_id": self.job["id"]})
+        remaining = self.build()
+        self.assertEqual(remaining["pips"][0]["runs"]["failed"], 1)
+        self.assertEqual(remaining["pips"][0]["latest_run_id"], second)
+        self.assertEqual(digest.mark_run_seen(self.registry, first, "editor-user")["run_id"], first)
+        with self.assertRaises(RegistryError):
+            digest.mark_run_seen(self.registry, second, "main-chat")
+
     def test_dismissing_one_pips_news_hides_only_its_news_until_it_does_something_new(self):
         """The Sessions home's dismiss (reported 2026-10-18: "3 Pips ran and failed ... a dismiss option")."""
         other = self.store.create(self.workspace["id"], "Second", "Inspect source evidence", "HEAD", "fixture")
@@ -329,8 +343,9 @@ class DigestMigrationTests(unittest.TestCase):
         self.registry.db.execute("DROP TABLE pip_news_seen")
         self.registry.db.execute("PRAGMA user_version=45")
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 46)
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 47)
             self.assertEqual(upgraded.db.execute("SELECT count(*) FROM pip_news_seen").fetchone()[0], 0)
+            self.assertEqual(upgraded.db.execute("SELECT count(*) FROM pip_news_run_seen").fetchone()[0], 0)
             self.assertIsNotNone(upgraded.db.execute("SELECT 1 FROM pips WHERE id=?", (pip["id"],)).fetchone(), "its Pips kept")
         with patch.object(workspace_registry, "SCHEMA_VERSION", 45), self.assertRaises(RegistryError):
             WorkspaceRegistry(self.registry.directory)

@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS pip_news_seen (
  updated_at TEXT NOT NULL
 );
 """
+RUN_SEEN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_news_run_seen (
+ run_id TEXT PRIMARY KEY REFERENCES pip_runs(id),
+ pip_id TEXT NOT NULL REFERENCES pips(id),
+ seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pip_news_run_seen_pip ON pip_news_run_seen(pip_id);
+"""
 _LOCAL_ACTORS = ("editor-user", "local-console")
 
 
@@ -238,6 +246,7 @@ def _fingerprint(registry, now):
             registry.db.execute("SELECT max(id) FROM pip_checkpoints").fetchone()[0],
             registry.db.execute("SELECT max(seq) FROM workspace_events").fetchone()[0],
             registry.db.execute("SELECT count(*), coalesce(sum(revision),0) FROM pip_news_seen").fetchone()[:],
+            registry.db.execute("SELECT count(*), max(seen_at) FROM pip_news_run_seen").fetchone()[:],
             # Held submits that expire or are lost write no event.
             registry.db.execute("SELECT count(*) FROM pip_computer_actions WHERE status='pending'").fetchone()[0])
 
@@ -294,8 +303,8 @@ def _build(registry, config=None) -> dict:
         return pips[pip_id]
 
     # A Pip whose news the user dismissed counts only what came after (pip_news_seen).
-    unseen = "LEFT JOIN pip_news_seen s ON s.pip_id=r.pip_id"
-    after = "(s.seen_until IS NULL OR r.finished_at>s.seen_until)"
+    unseen = "LEFT JOIN pip_news_seen s ON s.pip_id=r.pip_id LEFT JOIN pip_news_run_seen rs ON rs.run_id=r.id"
+    after = "(s.seen_until IS NULL OR r.finished_at>s.seen_until) AND rs.run_id IS NULL"
     for row in registry.db.execute(f"""SELECT r.pip_id,r.status,count(*) AS n FROM pip_runs r {unseen}
             WHERE r.finished_at>? AND r.finished_at<=? AND {after} AND r.status IN ('succeeded','failed','cancelled')
             GROUP BY r.pip_id,r.status""", (since_s, until_s)):
@@ -468,6 +477,22 @@ def mark_news_seen(registry, pip_ids, until, actor) -> dict:
         seen = {row["pip_id"]: row["seen_until"] for row in registry.db.execute(
             f"SELECT pip_id,seen_until FROM pip_news_seen WHERE pip_id IN ({','.join('?' * len(pip_ids))})", pip_ids)}
     return {"seen": [{"pip_id": pip_id, "seen_until": seen[pip_id]} for pip_id in pip_ids]}
+
+
+def mark_run_seen(registry, run_id, actor) -> dict:
+    """Dismiss only one report run's home news, preserving other runs from its Pip."""
+    if actor not in _LOCAL_ACTORS:
+        _fail("Pip news is dismissed on this computer only.", "local_only")
+    from .pip_report_delivery import _RUN
+    if not isinstance(run_id, str) or not _RUN.fullmatch(run_id):
+        _fail("Name the report run to dismiss.")
+    row = registry.db.execute("SELECT pip_id,finished_at FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    if row is None or row["finished_at"] is None:
+        _fail("That finished Pip run is unavailable.", "not_found")
+    with registry.transaction():
+        registry.db.execute("INSERT OR IGNORE INTO pip_news_run_seen(run_id,pip_id,seen_at) VALUES(?,?,?)",
+                            (run_id, row["pip_id"], registry.clock()))
+    return {"run_id": run_id, "pip_id": row["pip_id"]}
 
 
 # ---------------------------------------------------------------- outcomes ---

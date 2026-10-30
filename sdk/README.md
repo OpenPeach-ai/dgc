@@ -52,6 +52,7 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
 | Decisions | `on_permission` / `on_plan` / `on_question` / `on_mcp_input` | `onPermission` / `onPlan` / `onQuestion` / `onMcpInput` |
 | Tools | `define_tool(...)` then `session(tools=[...])` | `defineTool(...)` then `session({ tools })` |
 | Schema | `session.run(..., output_schema={...})` | `session.run(prompt, { outputSchema })` |
+| Interactive reply cards | `extract_generative_ui(result.final_text)` | `extractGenerativeUi(result.finalText)` |
 | Usage / cost | `DGC(..., pricing=Pricing(...), department="erp")` then `dgc.usage_report()` | `new DGC({ pricing, department })` then `dgc.usageReport(department)` |
 | Policy | `DGC(..., policy=RuntimePolicy(...))` — tool, path and network limits the runtime enforces; shell commands in the OS sandbox | `new DGC({ policy: { denyTools, allowTools, denyPathPrefixes, ... } })` — the same per-session policy |
 | Audit | `dgc.export_audit(session_id)` (redacted) | `dgc.exportAudit(sessionId)` (redacted) |

@@ -21,6 +21,7 @@ export { AppToolHandler, PipToolError, definePipTool, pipToolsWire, sign as sign
   type AppToolResponse, type PipApprovalRequested, type PipApprovalResolved, type PipCallContext, type PipTool, type PipToolKind,
   type PipToolWire, type HeaderReader, type WebRequestLike, type WebResponse } from "./pipsApp.ts";
 export { assertSupported, extractJson, validate } from "./schema.ts";
+export { extractGenerativeUi, type GenerativeUiCard, type GenerativeUiBlock } from "./generativeUi.ts";
 export {
   DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError, DGCTimeoutError,
   DGCUnsupportedError,

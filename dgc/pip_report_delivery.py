@@ -293,6 +293,9 @@ def pending(registry, session_id: str, *, exclude=(), now: datetime | None = Non
             CASE WHEN length(CAST(result AS BLOB))<=131072 THEN result END AS result,
             CASE WHEN length(CAST(error AS BLOB))<=16384 THEN error END AS error
         FROM pip_runs WHERE workspace_id=? AND status IN ('succeeded','failed') AND finished_at>=?
+          AND id NOT IN (SELECT run_id FROM pip_news_run_seen)
+          AND NOT EXISTS (SELECT 1 FROM pip_news_seen s WHERE s.pip_id=pip_runs.pip_id
+                          AND pip_runs.finished_at<=s.seen_until)
           AND (pip_id IN ({marks}) OR requested_by=?)
           {"AND id NOT IN (SELECT run_id FROM pip_report_deliveries WHERE session_id=?)" if ledger else ""}
         ORDER BY finished_at,id LIMIT ?""",

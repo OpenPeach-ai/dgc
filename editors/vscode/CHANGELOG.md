@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Generative UI across Work, ChatDGC and Pips.** DGC can show bounded metrics, steps,
+  comparisons, tables and one-click follow-up choices in a reply. Choices send immediately using
+  the normal chat permissions. Existing tool calls, agent cards, Pip fixes, widgets and Outputs keep
+  their own UI.
+- **Pip report dismissal follows the same run on home and chat replay.** Other unread runs remain.
 - **Settings keeps its navigation in narrow tabs.** The side menu becomes an icon rail with hover labels and
   keyboard navigation; full labels return when the tab is wide enough.
 

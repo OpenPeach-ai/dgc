@@ -50,7 +50,7 @@ export class PipsEditor implements vscode.Disposable {
   private desktopStream = false;
   /** /learn in a Pip's chat (ready.capabilities.learn): learn_skill drafts, save_skill writes a personal skill. */
   private learn = false;
-  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[] }>();
+  private pending = new Map<string, { client: string; command: string; at: number; surface?: string; document?: { run: string; save: boolean; generation: number }; exportFile?: { generation: number }; keptImage?: { pip: string; message: string; index: number; generation: number }; spooled?: string[]; newsDismiss?: { pipIds: string[]; until: string } }>();
   private generation = 0;
   private apiVersion = 0;
   /** The backend's image spool (ready.capabilities.image_spool_dir), where a Pip message's photos and files go from API 52. */
@@ -72,6 +72,8 @@ export class PipsEditor implements vscode.Disposable {
    *  document or sheet and its dashboards in the artifact panel. */
   private artifacts?: () => PipArtifactsHub | undefined;
   useArtifacts(hub: () => PipArtifactsHub | undefined): void { this.artifacts = hub; }
+  private newsDismissed?: (pipIds: string[], until: string) => void;
+  useNewsDismissed(notify: (pipIds: string[], until: string) => void): void { this.newsDismissed = notify; }
   constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
@@ -221,6 +223,9 @@ export class PipsEditor implements vscode.Disposable {
       return true;
     }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
+    if (owner.newsDismiss && event.type === 'pips_result' && event.ok === true) {
+      this.newsDismissed?.(owner.newsDismiss.pipIds, owner.newsDismiss.until);
+    }
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
       result: event.type === 'pips_status' ? event : event.result,
@@ -667,7 +672,11 @@ export class PipsEditor implements vscode.Disposable {
       if (Buffer.byteLength(JSON.stringify(sized), 'utf8') > maxBytes) { fail(`This request exceeds the ${maxBytes / 1024} KiB limit. Nothing was sent.`); return; }
       command = {type: 'pips_control', request: nested};
     } else { fail('Unknown Pips command.'); return; }
-    this.pending.set(requestId, {client: message.id, command: request.type, at: Date.now(), surface});
+    const newsDismiss = request.type === 'mark_pip_news_seen' && Array.isArray(request.pip_ids)
+      && request.pip_ids.every((id: unknown) => typeof id === 'string' && /^pip_[0-9a-f]{32}$/.test(id))
+      && typeof request.until === 'string' && Number.isFinite(Date.parse(request.until))
+      ? { pipIds: request.pip_ids as string[], until: request.until as string } : undefined;
+    this.pending.set(requestId, {client: message.id, command: request.type, at: Date.now(), surface, newsDismiss});
     if (!this.send(command, this.backendIdentity)) { this.pending.delete(requestId); fail('DGC couldn’t send that. Refresh to see whether it worked before trying again.'); }
   }
   dispose(): void { this.pending.clear(); this.embeddedPost = undefined; this.panel?.dispose(); for (const { panel } of [...this.computers.values()]) panel.dispose(); }

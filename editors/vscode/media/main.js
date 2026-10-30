@@ -10828,6 +10828,22 @@
       return;
     }
     if (msg.type === "sessions_show") { showSessions(); return; }
+    if (msg.type === "pipNewsRefresh") { homePips?.refresh(); return; }
+    if (msg.type === "pipReportsHidden") {
+      const ids = new Set(Array.isArray(msg.pipIds) ? msg.pipIds.filter(id => /^pip_[0-9a-f]{32}$/.test(id)) : []);
+      const until = Date.parse(String(msg.until || ""));
+      if (ids.size && Number.isFinite(until)) {
+        for (const card of log.querySelectorAll(".pip-report[data-run]")) {
+          const report = card._report;
+          const finished = Date.parse(String(report?.finished_at || ""));
+          if (!ids.has(report?.pip_id) || !Number.isFinite(finished) || finished > until) continue;
+          const group = card.parentElement?.closest(".pip-report-group");
+          card.remove();
+          if (group) paintPipReportGroup(group);
+        }
+      }
+      return;
+    }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     if (msg.type === "pipsPluginLogos") { for (const listener of pipsListeners) listener(msg); return; }

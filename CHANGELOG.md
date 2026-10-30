@@ -6,6 +6,13 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Generative UI in Work, ChatDGC and Pips.** A reply can include a bounded card with metrics,
+  steps, bars, a table or choices, while its ordinary prose stays readable. Clicking a choice sends
+  its text as a normal user message through the existing permission flow. The model cannot supply
+  HTML, script or a permission grant. The Python and TypeScript SDKs expose validated card data.
+- **A dismissed Pip report no longer counts as unread home news.** Dismissing a chat card marks only
+  that run seen, leaving any other unread run from the same Pip. Dismissing a Pip's home news also
+  leaves its saved report cards out of chat replay.
 - **Pips keep running across CLI updates.** An enabled, idle DGC-owned Linux or macOS runner is upgraded
   with the CLI. If a runner still belongs to an older install, DGC stops new work with a clear
   version message before a mismatched worker can fail the chat.

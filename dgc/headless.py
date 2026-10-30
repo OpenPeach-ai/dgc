@@ -5367,6 +5367,20 @@ class Backend:
         from .goals import RESUME_PROMPT
         from .workflows import display_prompt
         from .pip_report_delivery import history_items as pip_report_items
+        # Home dismissals and chat card dismissals share per-run news. Keep saved
+        # transcript records for audit, but omit cards already dismissed elsewhere.
+        pip_news_until: dict[str, str] = {}
+        pip_news_run_seen: set[str] = set()
+        if getattr(self, "_pip_reports_on", False):
+            try:
+                from .workspace_registry import RegistryError, WorkspaceRegistry
+                with WorkspaceRegistry() as registry:
+                    pip_news_until = {r[0]: r[1] for r in registry.db.execute(
+                        "SELECT pip_id,seen_until FROM pip_news_seen")}
+                    pip_news_run_seen = {r[0] for r in registry.db.execute(
+                        "SELECT run_id FROM pip_news_run_seen")}
+            except (OSError, sqlite3.Error, RegistryError):
+                pass
         # A client that draws finished agents' reports (watch_agent_reports) is replayed the wake turn
         # a background agent started as that turn, with its report: before that, as it always was.
         reports_on = self._agent_reports_on()
@@ -5462,6 +5476,15 @@ class Backend:
 
         def fixed(reports: list) -> list:
             nonlocal fixes
+            if not reports:
+                return reports
+            def visible(item):
+                report = item.get("report", {})
+                if report.get("run_id") in pip_news_run_seen:
+                    return False
+                until = pip_news_until.get(str(report.get("pip_id") or ""))
+                return not (until and str(report.get("finished_at") or "") <= until)
+            reports = [item for item in reports if visible(item)]
             if not reports:
                 return reports
             if fixes is None:
@@ -7808,7 +7831,12 @@ class Backend:
         elif t == "pip_report_dismiss":
             # The card goes at once in the panel; here it is marked in the transcript, and saved now
             # or, while a turn runs, when that turn ends.
-            self._pip_report_state().dismiss(self.agent, cmd.get("run_id"))
+            run_id = cmd.get("run_id")
+            if self._pip_report_state().dismiss(self.agent, run_id):
+                from .pip_digest import mark_run_seen
+                from .workspace_registry import WorkspaceRegistry
+                with WorkspaceRegistry() as registry:
+                    mark_run_seen(registry, run_id, "editor-user")
             with self._turn_state_lock():
                 idle = not self._busy()
             if idle:

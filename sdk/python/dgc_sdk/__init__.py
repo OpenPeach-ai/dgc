@@ -15,6 +15,7 @@ from .pips_app import (AppToolHandler, PipApprovalRequested, PipApprovalResolved
                        define_pip_tool)
 from .pips_templates import PipTemplate
 from .retry import RetryPolicy
+from .generative_ui import extract_generative_ui
 from .usage import Pricing, cost_usd
 from .errors import (
     DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError,
@@ -50,5 +51,5 @@ __all__ = [
     "RunResult", "RunStatus", "SandboxPolicy", "SandboxRequirement", "SandboxStatus", "Session",
     "SessionInfo",
     "SkillInfo", "TaskItem", "TaskStatus", "ToolRecord", "ToolSpec", "UnhandledPolicy",
-    "VerificationResult", "define_tool",
+    "VerificationResult", "define_tool", "extract_generative_ui",
 ]

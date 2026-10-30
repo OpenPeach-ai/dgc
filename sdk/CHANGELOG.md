@@ -4,6 +4,10 @@
 
 Pairs with CLI 0.50.0.
 
+- `extract_generative_ui(reply)` in Python and `extractGenerativeUi(reply)` in TypeScript return bounded,
+  validated `dgc-ui` v1 cards from Work, ChatDGC or Pip replies. Hosts render the data in their own UI; a
+  choice's reply goes through the ordinary send method and existing permissions. No model HTML or script runs.
+
 The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
 (Ubuntu 24.04). Native Windows remains experimental and was not covered.
 

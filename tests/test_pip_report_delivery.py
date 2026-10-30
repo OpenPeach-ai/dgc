@@ -23,6 +23,7 @@ from unittest.mock import patch
 
 from dgc import editor_protocol as ep
 from dgc import pip_report_delivery as delivery
+from dgc import pip_digest
 from dgc import pips
 from dgc.headless import Backend
 from dgc.llm import LLMClient
@@ -437,7 +438,17 @@ class BackendTests(Scene):
         backend.dispatch({"type": "pip_report_dismiss", "run_id": run})
         self.assertEqual([i for i in backend._history() if i.get("role") == "pip_report"], [])
         self.assertIs(self.saved(backend)[-1][delivery.KEY][0]["dismissed"], True)
+        self.assertEqual(self.registry.db.execute("SELECT run_id FROM pip_news_run_seen").fetchone()[0], run,
+                         "the home no longer counts this exact run")
         self.assertIsNone(ep.command_error({"type": "pip_report_dismiss", "run_id": run}))
+
+    def test_home_dismiss_removes_saved_chat_card_on_replay(self):
+        backend = self.make()
+        run = self.finished(findings=[finding("Seen from home")])
+        backend._look_for_pip_reports(force=True)
+        self.assertEqual([i["report"]["run_id"] for i in backend._history() if i.get("role") == "pip_report"], [run])
+        pip_digest.mark_news_seen(self.registry, [self.pip["id"]], self.now, "editor-user")
+        self.assertEqual([i for i in backend._history() if i.get("role") == "pip_report"], [])
 
     def test_a_card_dismissed_before_it_is_written_is_written_dismissed(self):
         backend = self.make()

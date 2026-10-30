@@ -560,6 +560,45 @@ Chips need an extension new enough to render them; DGC negotiates this at startu
 and simply omits them for an older panel rather than sending something it cannot
 draw. Update the extension to get them back.
 """ ),
+    ("Generative UI", "bounded interactive answers in Work, ChatDGC and Pips", """
+# Generative UI
+
+When a small comparison or progress report is easier to scan than prose, DGC can add a
+**Generative UI** card to its answer. The normal text answer remains readable on its own.
+The card uses DGC components in your editor theme; the model supplies only bounded data.
+It cannot send HTML, JavaScript, a custom component, or a new permission rule.
+
+## In Work
+
+Ask for a project status, test summary, comparison, or next steps. A card can show metrics,
+progress steps, bars and tables beside the existing tool calls, specialist agents, agent map,
+Pip fix cards and Outputs. Tool activity remains in the usual tool cards. When a verified test
+runner result includes counts, its tool card can show a small pass/fail track.
+
+## In ChatDGC
+
+Ask for a comparison or a short decision with clear options. A choice card sends its reply as a
+new chat message when clicked. It does not run a connected app or grant permission by itself.
+Widgets and saved Outputs still open in their own editor tabs and Library.
+
+## In Pips
+
+A Pip can use the same cards in its own conversation to summarize an audit or offer next
+requests. A click sends a message to that Pip through its existing chat path. Pip schedules,
+proposals, approvals, reports and background work retain their own controls.
+
+## What a card can contain
+
+Version 1 supports **metrics** (up to 8), **steps** (up to 8), **bars** (up to 12), a **table**
+(up to 5 columns and 8 rows), and **choices** (up to 4). At most six blocks fit in a card.
+Malformed or oversized data stays visible as code instead of becoming a partial card. Clicking
+a choice sends its text immediately, as if you sent a prompt; DGC's ordinary permissions still
+apply to any action it requests. The card never silently verifies a claim or executes a tool.
+
+In an SDK host, use `extract_generative_ui` (Python) or `extractGenerativeUi` (TypeScript) to
+read validated cards from a Work, ChatDGC or Pip reply. Render the returned data in your app;
+route a choice through your usual SDK send method. See the SDK guide for an example.
+""".strip()),
     ("Artifacts", "documents, decks, sheets, dashboards and pages DGC makes and keeps", """
 # Artifacts
 

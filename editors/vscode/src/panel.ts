@@ -5495,6 +5495,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // has already removed it; the backend saves that with the chat.
         if (this.lastReadyEvent?.capabilities?.pip_reports === 1 && /^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) {
           be.send({ type: "pip_report_dismiss", run_id: String(msg.run_id) });
+          // The home strip asks for a fresh digest after the same backend records this run.
+          const home = this.tab?.host || this;
+          setTimeout(() => home.post({ type: "pipNewsRefresh" }), 350);
         }
         break;
       // Ask DGC to fix in the background (ready.capabilities.pip_fix): the card is the fix's status.
@@ -7275,6 +7278,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
+      this.pipsEditor.useNewsDismissed((pipIds, until) => {
+        for (const tab of this.tabProviders) tab.post({ type: "pipReportsHidden", pipIds, until });
+        this.post({ type: "pipReportsHidden", pipIds, until });
+      });
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;

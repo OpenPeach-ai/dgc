@@ -422,6 +422,25 @@ result's `made_artifacts` holds what the run made. `AsyncSession.artifacts` is `
 awaited. TypeScript: `session.artifacts.list({ type })`, `.update(id, content, { baseVersion })`,
 `.compare(id, before, after?)`, `.allowSource(id, source, allowed, baseVersion?)`, and `output` in run options.
 
+Generative UI is an optional presentation format in a reply. `extract_generative_ui` is the Python
+reader and `extractGenerativeUi` is its TypeScript counterpart. Work, ChatDGC and Pips may include a
+bounded `dgc-ui` v1 JSON fence alongside ordinary prose. The SDK exposes validated card data without
+rendering model HTML or running a choice:
+
+```python
+from dgc_sdk import extract_generative_ui
+
+for card in extract_generative_ui(result.final_text):
+    print(card["title"], [block["type"] for block in card["blocks"]])
+    # Render in your own app. Send a choice's reply via session.run() only after a user click.
+```
+
+TypeScript: `import { extractGenerativeUi } from "@vibedgc/sdk";` then
+`extractGenerativeUi(result.finalText)`. The same helper accepts text returned from a ChatDGC or
+Pip conversation. Cards contain metrics, steps, bars, tables and up to four reply choices. The
+normal SDK session, ChatDGC or Pip send method keeps all existing permission decisions; parsing a
+card never grants one. Malformed, unknown and oversized card data is ignored.
+
 Mods (CLI 0.50+, `capabilities["mods"]`; without it `session.mods` raises `DGCUnsupportedError`): small programs that
 add panels, status lines, commands and guards to DGC, each in its own sandbox, each able only to watch a step, ask the
 user first or stop it, never to approve one. `session(mods=[folder, ...])` runs the folders named (each holds a
