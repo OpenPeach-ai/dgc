@@ -7029,7 +7029,6 @@
     if (kind === "troupe" && !troupesOpen) { toggleTroupes(); railOpen.unfolded.push(() => { if (troupesOpen) toggleTroupes(); }); }
     if (kind === "tasks" && !tasksOpen()) { toggleTasks(); railOpen.unfolded.push(() => { if (tasksOpen()) toggleTasks(); }); }
     $("rail-pop-title").textContent = RAIL_POP_TITLES[kind] || "";
-    if (kind === "pipfixes") for (const fix of pipFixes.values()) if (!pipFixActive(fix)) fix._seen = true;
     railLinksSig = "";
     paintRailPopLinks(kind);
     railPop.dataset.kind = kind;
@@ -7052,6 +7051,9 @@
     unfolded.forEach((fold) => fold());
     if (bar === pipRunningPanel) bar.remove();   // the running Pips list is the popover's own too
     else if (bar === pipFixesPanel) {
+      // The panel is an inbox for this batch, not the whole fix archive. Dismissing it
+      // acknowledges only finished fixes; active work stays visible until its result arrives.
+      for (const fix of pipFixesForChip()) if (!pipFixActive(fix)) fix._seen = true;
       bar.remove();                    // the Pip fixes list is the popover's own, never a rail row
       setTimeout(syncComposerRail, 0); // the fixes it showed are seen now: an ended one leaves the chip
     } else {
@@ -10584,7 +10586,7 @@
   function paintPipFixesPanel() {
     if (!pipFixesPanel) { pipFixesPanel = el("section", "pip-fixes-panel"); pipFixesPanel.setAttribute("aria-label", "Pip fixes"); }
     const list = el("ul", "pip-fixes-list");
-    for (const fix of [...pipFixes.values()].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)).slice(0, 12)) {
+    for (const fix of pipFixesForChip()) {
       const li = el("li");
       const go = el("button", "rail-main pip-fixes-row"); go.type = "button";
       go.title = `Show ${fix.name || "this Pip"}'s report in the chat`;

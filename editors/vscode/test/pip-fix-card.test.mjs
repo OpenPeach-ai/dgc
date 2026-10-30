@@ -306,6 +306,30 @@ test("the Pip fixes chip is on the existing chip line, never a row, and lists on
   assert.deepEqual(s.errors, []);
 });
 
+test("the Pip fixes pill shows only fixes since its last dismissal", () => {
+  const s = panel();
+  const item = (c, name) => fix({ fix_id: `fix_${c.repeat(32)}`, run_id: `run_${c.repeat(32)}`,
+    name, state: "unchanged", created_at: now() + c.charCodeAt(0) });
+  const rows = () => [...s.doc.querySelectorAll("#rail-pop .pip-fixes-row .pip-fixes-name")].map((n) => n.textContent);
+  const chip = () => s.doc.querySelector('#rail-chips .rail-chip[data-kind="pipfixes"]');
+  s.event({ type: "pip_fixes", items: [item("1", "Old fix")] });
+  assert.equal(chip(), null, "saved history is already acknowledged");
+  s.event({ type: "pip_fix", fix: item("2", "New fix A") });
+  s.event({ type: "pip_fix", fix: item("3", "New fix B") });
+  assert.ok(chip());
+  chip().click();
+  assert.deepEqual(rows(), ["New fix B", "New fix A"], "old fixes stay out of this batch");
+  s.event({ type: "pip_fix", fix: item("4", "New fix C") });
+  assert.deepEqual(rows(), ["New fix C", "New fix B", "New fix A"], "the batch grows while open");
+  s.doc.getElementById("rail-pop-close").click();
+  s.event({ type: "pip_fixes", items: [item("1", "Old fix")] });
+  assert.equal(chip(), null, "closing acknowledges the whole batch");
+  s.event({ type: "pip_fix", fix: item("5", "Later fix") });
+  chip().click();
+  assert.deepEqual(rows(), ["Later fix"], "the next batch starts fresh");
+  assert.deepEqual(s.errors, []);
+});
+
 test("a card with a fix leaves a folded group of reports: a running fix is never out of sight", () => {
   const s = panel();
   const other = (c) => ({ ...REPORT, run_id: "run_" + c.repeat(32), pip_id: PIP, name: `Pip ${c}` });
