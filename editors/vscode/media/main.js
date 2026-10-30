@@ -2733,7 +2733,10 @@
     if (!node || node.classList.contains("settled")) return;
     // A steered user message must remain a real sticky row inside this turn. Skipping the
     // containing DGC block with content-visibility would clip its pin while the reader scrolls.
-    if (node.classList.contains("dgc") && node.querySelector(":scope > .msg.user.turn-steer")) return;
+    if (node.classList.contains("dgc") && node.querySelector(":scope > .msg.user.turn-steer")) {
+      fitPromptFolds(node); // history lands after replay; its long reply still needs its fold
+      return;
+    }
     // A block inside another (a steering message placed in its turn before a retry below came
     // round) is part of that block: measured, pinned and skipped with it, never on its own.
     if (node.parentElement?.closest(".msg")) return;
@@ -3350,7 +3353,7 @@
   function togglePromptFold(bubble) {
     const open = bubble.dataset.fold !== "open";
     const row = bubble.parentElement;
-    const head = row?.matches(".turn > .msg.user.turn-head") ? row : null;
+    const head = row?.matches(".turn > .msg.user.turn-head, .turn > .msg.dgc > .msg.user.turn-steer") ? row : null;
     // A pinned prompt opens in its own place, not grown down over its answer from the top of the view
     // (0.47 pinned prompt): back to where it was sent first. Open, it does not pin (main.css).
     if (open && head && isPinned(head)) goToPrompt(head);
@@ -3367,7 +3370,7 @@
       const pinnedBy = head ? head.getBoundingClientRect().top - laidOutTop(head) : 0;
       const above = bubble.getBoundingClientRect().top - pinnedBy - log.getBoundingClientRect().top;
       if (above < 0) log.scrollTop += above - 16;
-      // A prompt inside a turn whose own prompt is pinned (a steer) comes back below that prompt.
+      // A non-pinning user bubble inside a turn comes back below the turn's pinned prompt.
       if (!head) clearOfPin(row);
     }
     renderToLatest();   // the Latest pill while away; following again once back at the end
