@@ -563,7 +563,10 @@ def _load_data(path, project_root) -> dict:
     with _lock_for(p):
         _reclaim_stale_temporary(p)
         data = json.loads(p.read_text())
-    return validate_record(data, p, project_root)
+    record = validate_record(data, p, project_root)
+    from .redaction import repair_unusable_images
+    repair_unusable_images(record["messages"])
+    return record
 
 
 def validate_record(data, path: Path, project_root) -> dict:

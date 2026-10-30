@@ -436,14 +436,77 @@ def provider_continuation_has_secret(value, secrets: Iterable[str] = (), *,
     return False
 
 
+_IMAGE_DATA_URI = re.compile(
+    r"data:image/(?:png|jpeg|gif|webp|bmp|heic|heif);base64,([A-Za-z0-9+/]+={0,2})\Z",
+    re.IGNORECASE,
+)
+
+
+def _valid_image_data_uri(uri: str) -> bool:
+    match = _IMAGE_DATA_URI.fullmatch(uri)
+    return match is not None and len(match.group(1)) % 4 == 0
+
+
+def repair_unusable_images(messages) -> None:
+    """Replace already-corrupted saved image parts before a resumed turn sends them again."""
+    if not isinstance(messages, list):
+        return
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for index, part in enumerate(content):
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                continue
+            image = part.get("image_url")
+            uri = image.get("url") if isinstance(image, dict) else None
+            if (isinstance(uri, str) and uri.startswith("data:image/")
+                    and ";base64," in uri[:80] and not _valid_image_data_uri(uri)):
+                content[index] = {"type": "text", "text": "[Image unavailable; attach it again]"}
+
+
+def _redact_message_content(content, secrets: Iterable[str]):
+    """Scrub text in multimodal messages while keeping valid image bytes replayable.
+
+    Shape-based credential patterns can occur by chance inside base64. Replacing one such run
+    corrupts the whole attachment on the next session resume. An exact saved credential still
+    causes the image to be withheld instead of retaining that credential in the session.
+    """
+    if not isinstance(content, list):
+        return redact_value(content, secrets)
+    cleaned = []
+    for part in content:
+        if not isinstance(part, dict) or part.get("type") != "image_url":
+            cleaned.append(redact_value(part, secrets))
+            continue
+        image = part.get("image_url")
+        uri = image.get("url") if isinstance(image, dict) else None
+        if not isinstance(uri, str):
+            cleaned.append(redact_value(part, secrets))
+            continue
+        if _valid_image_data_uri(uri):
+            if redact_known_text(uri, secrets) != uri:
+                cleaned.append({"type": "text", "text": "[Image withheld because it matched a saved secret]"})
+                continue
+            safe = redact_value(part, secrets)
+            safe["image_url"]["url"] = uri
+            cleaned.append(safe)
+        elif uri.startswith("data:image/") and ";base64," in uri[:80]:
+            cleaned.append({"type": "text", "text": "[Image unavailable; attach it again]"})
+        else:
+            cleaned.append(redact_value(part, secrets))
+    return cleaned
+
+
 def redact_message(message, secrets: Iterable[str] = ()):
-    """Redact one transcript message without corrupting opaque provider continuation fields."""
+    """Redact one transcript message without corrupting images or provider continuation fields."""
     if not isinstance(message, dict):
         return redact_value(message, secrets)
     return {
         (redact_text(key, secrets) if isinstance(key, str) else key):
         (redact_provider_value(value, secrets)
          if key in ("_responses_output", "_provider_message")
+         else _redact_message_content(value, secrets) if key == "content"
          else redact_value(value, secrets))
         for key, value in message.items()
     }

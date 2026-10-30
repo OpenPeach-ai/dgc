@@ -1426,6 +1426,41 @@ class BytesCrossTheWireIntactTests(unittest.TestCase):
         base64.b64decode(body, validate=True)
         return "data:image/png;base64," + body
 
+    def test_two_attached_images_survive_a_redacted_session_save(self):
+        from dgc.redaction import redact_messages, redact_text
+        first, second = uri_of(png(2, 2)), self.uri()
+        secret = "sk-live-hunter2-0123456789abcdef"
+        self.assertNotEqual(redact_text(second), second, "plain text redaction collides with image base64")
+        message = {"role": "user", "content": [
+            {"type": "text", "text": f"Compare both images; {secret}"},
+            {"type": "image_url", "image_url": {"url": first}},
+            {"type": "image_url", "image_url": {"url": second}},
+        ]}
+        with tempfile.TemporaryDirectory(prefix="dgc-image-session-") as directory:
+            root = Path(directory)
+            path = sessions.new_path(root)
+            self.assertTrue(sessions.save(path, [message], root, redact_secrets=(secret,)))
+            [saved] = sessions.load_record(path, root)["messages"]
+            broken = second.replace(self.RUN, "[REDACTED]")
+            disk = json.loads(path.read_text())
+            disk["messages"][0]["content"][2]["image_url"]["url"] = broken
+            path.write_text(json.dumps(disk))
+            [resumed] = sessions.load_record(path, root)["messages"]
+            self.assertEqual(resumed["content"][2],
+                             {"type": "text", "text": "[Image unavailable; attach it again]"})
+        self.assertEqual(saved["content"][1]["image_url"]["url"], first)
+        self.assertEqual(saved["content"][2]["image_url"]["url"], second)
+        self.assertEqual(saved["content"][0]["text"], "Compare both images; [REDACTED]")
+        self.assertEqual(message["content"][0]["text"], f"Compare both images; {secret}")
+        [recovered] = redact_messages([{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": broken}},
+        ]}])
+        self.assertEqual(recovered["content"], [{"type": "text", "text": "[Image unavailable; attach it again]"}])
+        [withheld] = redact_messages([message], (self.RUN,))
+        self.assertEqual(withheld["content"][2],
+                         {"type": "text", "text": "[Image withheld because it matched a saved secret]"})
+        self.assertNotIn(self.RUN, json.dumps(withheld))
+
     def test_a_step_s_images_a_fetched_image_and_a_pip_screen_pass_intact(self):
         from dgc.headless import sanitize_event
         from dgc.redaction import redact_text
