@@ -72,6 +72,11 @@ test("the image zoom percentage describes real rendered pixels, including fit an
   try {
     const width = () => s.page.locator(".iv-stage img").evaluate(n => n.getBoundingClientRect().width);
     const percent = () => s.page.locator(".iv-level").innerText();
+    await s.page.waitForFunction(() => {
+      const img = document.querySelector(".iv-stage img");
+      const level = document.querySelector(".iv-level");
+      return !!img && !!level && level.textContent?.trim() === `${Math.round(img.getBoundingClientRect().width / 1600 * 100)}%`;
+    });
     assert.equal(await percent(), `${Math.round(await width() / 1600 * 100)}%`);
     await s.page.getByRole("button", { name: "Zoom in", exact: true }).click();
     const explicit = Number.parseInt(await percent(), 10);

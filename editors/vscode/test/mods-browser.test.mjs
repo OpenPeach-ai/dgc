@@ -235,7 +235,7 @@ test("Settings -> Plugins -> Mods: the same list, the same words and actions, sa
   const { page } = await openSettings(browser, { unsupported: true });
   try {
     await page.click("[data-lane=mods]");
-    await page.waitForSelector("#mods-list .note");
+    await page.getByText("This DGC has no mods yet").waitFor();
     assert.match(await page.$eval("#mods-list", (n) => n.textContent), /This DGC has no mods yet/);
   } finally { await page.close(); }
 });
