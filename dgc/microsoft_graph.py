@@ -35,6 +35,7 @@ import re
 import sys
 import threading
 import time
+from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit
@@ -156,6 +157,8 @@ class Graph:
         self.auth, self.session, self.note = auth, session, note
         self.base = (base or GRAPH).rstrip("/")
         self.sign_in_words = sign_in_words
+        self._page_links: OrderedDict[str, str] = OrderedDict()
+        self._page_lock = threading.Lock()
 
     # the sign-in --------------------------------------------------------------------------------------------------
     def _ended(self) -> str:
@@ -274,15 +277,26 @@ class Graph:
             return f"Microsoft's service had a problem (HTTP {status}). Try again in a moment."
         return f"Microsoft answered HTTP {status}.{said}"
 
-    def page(self, path: str, params: dict, next_page: str, *, what: str, cancelled, headers=None) -> tuple[list, str]:
-        """One page of a Graph collection and the address of the next (``@odata.nextLink``), checked to be Graph's."""
+    def page(self, path: str, params: dict, next_page: str, *, what: str, cancelled, headers=None,
+             scope: str = "") -> tuple[list, str]:
+        """One page of a Graph collection. A continuation must be a link this connection issued for that scope."""
         if next_page:
+            with self._page_lock:
+                if self._page_links.get(next_page) != scope:
+                    raise GraphError("That next_page isn't one this listing gave DGC; list again without it.")
             value = self.json("GET", self.url(next_page), what=what, cancelled=cancelled, headers=headers)
         else:
             value = self.json("GET", path, params=params, what=what, cancelled=cancelled, headers=headers)
         items = [item for item in (value.get("value") or []) if isinstance(item, dict)]
         following = value.get("@odata.nextLink")
-        following = following if isinstance(following, str) and following.startswith(self.base + "/") else ""
+        following = (following if isinstance(following, str) and following.startswith(self.base + "/")
+                     and _allowed(following) else "")
+        if following:
+            with self._page_lock:
+                self._page_links[following] = scope
+                self._page_links.move_to_end(following)
+                if len(self._page_links) > 256:
+                    self._page_links.popitem(last=False)
         return items, following
 
     def download(self, url: str, sink, limit: int, *, cancelled) -> int:
@@ -742,7 +756,7 @@ class GraphServer:
             if unread:
                 params["$filter"] = "isRead eq false"
         items, following = self.graph.page(path, params, _text(arguments.get("next_page"), "next_page", 4000),
-                                           what="mail folder", cancelled=cancelled)
+                                           what="mail folder", cancelled=cancelled, scope="mail")
         messages = [_message(m) for m in items if not (query and unread and m.get("isRead"))]
         answer = {"folder": shown or ("all mail" if query else "inbox"), "messages": messages}
         if following:
@@ -936,7 +950,7 @@ class GraphServer:
             "startDateTime": _utc(start), "endDateTime": _utc(end), "$top": limit, "$orderby": "start/dateTime",
             "$select": "id,subject,start,end,isAllDay,location,organizer,attendees,showAs,isCancelled,onlineMeeting,"
                        "responseStatus"}, _text(arguments.get("next_page"), "next_page", 4000), what="calendar",
-            cancelled=cancelled, headers={"Prefer": f'outlook.timezone="{zone_name}"'})
+            cancelled=cancelled, headers={"Prefer": f'outlook.timezone="{zone_name}"'}, scope="calendar")
         answer = {"from": start.isoformat(timespec="minutes"), "to": end.isoformat(timespec="minutes"),
                   "time_zone": zone_name, "events": [_event(e) for e in items]}
         if following:
@@ -1081,7 +1095,8 @@ class GraphServer:
         else:
             path, params = f"{base}/children", {"$top": limit, "$select": self._ITEM}
         items, following = self.graph.page(path, params, _text(arguments.get("next_page"), "next_page", 4000),
-                                           what="folder" if folder else "file", cancelled=cancelled)
+                                           what="folder" if folder else "file", cancelled=cancelled,
+                                           scope="onedrive")
         answer = {"items": [_drive_item(i) for i in items]}
         if following:
             answer["next_page"] = following

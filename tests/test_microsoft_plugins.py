@@ -805,7 +805,16 @@ class ToolTests(Fixture):
         bad = self.call(self.mgr, "mail", "next_page_forged", {})
         self.assertIn("There's no tool", bad)
         forged = self.call(self.mgr, "mail", "search_mail", {"next_page": "https://evil.example/v1.0/me/messages"})
-        self.assertIn("isn't one Microsoft Graph gave DGC", forged)
+        self.assertIn("next_page isn't one", forged)
+        before = len(self.ms.graph_calls)
+        same_origin = self.call(self.mgr, "mail", "search_mail", {
+            "next_page": self.ms.base + "/v1.0/me/drive/root/children"})
+        self.assertIn("next_page isn't one", same_origin)
+        self.assertEqual(len(self.ms.graph_calls), before, "a forged Graph URL must never receive the mail token")
+        drive = self.json_call(self.mgr, "onedrive", "search_files", {"folder": "Documents", "limit": 1})
+        self.assertIn("next_page", drive)
+        wrong_app = self.call(self.mgr, "mail", "search_mail", {"next_page": drive["next_page"]})
+        self.assertIn("next_page isn't one", wrong_app)
 
     def test_drafts_sending_replies_and_moving(self):
         draft = self.json_call(self.mgr, "mail", "create_draft", {"to": ["bo@example.com"], "subject": "Hello",
