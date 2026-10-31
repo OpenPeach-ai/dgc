@@ -18,6 +18,7 @@ import unittest
 import zipfile
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 from xml.dom import minidom
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -230,6 +231,25 @@ class Normalize(unittest.TestCase):
         with self.assertRaisesRegex(SlidesError, r"Edit 1 \(insert\): Slide 2's image: /etc/x\.png is outside"):
             slides.apply_edits(ok, [{"op": "insert", "at": 2, "slide": {"layout": "image", "image": "/etc/x.png"}}],
                                resolve=resolve)
+
+    def test_picture_parent_swapped_after_resolution_is_refused(self):
+        folder = self.folder / "pictures"
+        folder.mkdir()
+        (folder / "inside.png").write_bytes(_png())
+        outside = Path(tempfile.mkdtemp(prefix="dgc-slides-outside-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        (outside / "inside.png").write_bytes(_png(rgb=(10, 20, 30)))
+        original = slides.read_regular_bytes
+
+        def swap(path, *, maximum):
+            folder.rename(self.folder / "old-pictures")
+            folder.symlink_to(outside)
+            return original(path, maximum=maximum)
+
+        with patch.object(slides, "read_regular_bytes", side_effect=swap):
+            with self.assertRaisesRegex(SlidesError, "can't be read"):
+                slides.normalize({"slides": [{"layout": "image", "image": "pictures/inside.png"}]},
+                                 base=self.folder)
 
     def test_a_theme_of_your_own_gets_series_colours_that_stand_apart_from_its_accent(self):
         palette = slides._palette_for("2DD4BF")

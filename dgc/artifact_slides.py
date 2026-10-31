@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .chatdgc import made
+from .workspace import WorkspaceBoundaryError, read_regular_bytes
 
 LAYOUTS = ("title", "section", "bullets", "two_columns", "image", "chart", "quote", "table", "closing")
 THEMES = ("paper", "dusk", "bold", "plain")
@@ -615,10 +616,9 @@ def _image_bytes(src: str, where: str, base, resolve=None) -> tuple[bytes, str]:
         if path.stat().st_size > MAX_IMAGE_BYTES:
             raise SlidesError(f"{where} is {path.stat().st_size / 1048576:.1f} MB; a slide's picture can be at most "
                               f"{MAX_IMAGE_BYTES // 1048576} MB. Use a smaller copy.")
-        with path.open("rb") as picture:
-            data = picture.read(MAX_IMAGE_BYTES + 1)
-    except OSError as error:
-        raise SlidesError(f'{where}: "{src[:120]}" can\'t be read ({error.strerror or error}).') from None
+        data = read_regular_bytes(path, maximum=MAX_IMAGE_BYTES)[0]
+    except (OSError, WorkspaceBoundaryError) as error:
+        raise SlidesError(f'{where}: "{src[:120]}" can\'t be read ({getattr(error, "strerror", None) or error}).') from None
     mime = _sniff(data)
     if mime is None or (mime != IMAGE_TYPES[suffix] and not (suffix in (".jpg", ".jpeg") and mime == "image/jpeg")):
         raise SlidesError(f'{where}: "{path.name[:60]}" isn\'t the {suffix[1:].upper()} picture its name says.')
