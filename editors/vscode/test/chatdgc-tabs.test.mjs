@@ -1891,3 +1891,19 @@ test("while another window writes to the chat, its folder can't be changed and W
     assert.equal(sent.slice(before).filter((c) => /folder|work_brief/.test(c.type)).length, 0);
   } finally { delete host.chatdgcOpenHere; }
 });
+
+test("a read-only ChatDGC tab cannot run a mod in the other window's chat", async () => {
+  const requests = [];
+  host.chatdgcModsSend = (message) => { requests.push(message); return true; };
+  try {
+    const panel = folderTab(8);
+    chat.onEvent({ type: "chatdgc_held", conversation_id: ID(8), state: "elsewhere" });
+    panel.say({ type: "mods", op: "command", name: "tally", request_id: "chatdgc-mods-test" });
+    await settle();
+    assert.equal(requests.length, 0);
+    assert.match(panel.last("error").message, /Open here before running a mod/);
+    panel.say({ type: "mods", op: "list", request_id: "chatdgc-mods-list" });
+    await settle();
+    assert.equal(requests.length, 1, "a read-only tab can still inspect its mods");
+  } finally { delete host.chatdgcModsSend; }
+});

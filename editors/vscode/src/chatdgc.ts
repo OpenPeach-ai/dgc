@@ -1559,6 +1559,10 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
       }
       case "mods":
         // A request of ChatDGC's mods from this page: the extension host checks it and sends it with surface "chat".
+        if (tab.elsewhere && !["list", "watch"].includes(message.op)) {
+          this.post(tab, { type: "error", message: "This chat is open in another window. Use Open here before running a mod." });
+          return;
+        }
         this.host?.chatdgcModsSend?.(message, (ev) => this.post(tab, { type: "modsEvent", event: ev }));
         return;
       case "folderPick":

@@ -2726,7 +2726,7 @@
   function submit(spoken = false) {
     const text = input.value;
     // /mods, or a running mod's own "/name args": run here at once, never sent to the model.
-    if (!spoken && !state.pending.length && mods?.intercept(text)) {
+    if (!spoken && !readOnly() && !state.unavailable && !state.pending.length && mods?.intercept(text)) {
       edit(() => { input.value = ""; });
       grow(); saveDraft();
       return;
