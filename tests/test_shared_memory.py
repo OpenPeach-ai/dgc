@@ -9,6 +9,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from dgc import shared_memory
 from dgc.chatdgc.engine import MAX_MEMORY_PER_REPLY, ChatEngine
@@ -81,6 +82,19 @@ class StoreTests(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(len(self.memory.facts()), 40, "no write lost to another")
+
+    def test_private_fact_copy_is_owner_only_before_replacement(self):
+        original_replace = shared_memory.os.replace
+        modes = []
+
+        def inspect_copy(source, destination):
+            if Path(destination) == self.memory.path:
+                modes.append(Path(source).stat().st_mode & 0o777)
+            return original_replace(source, destination)
+
+        with patch.object(shared_memory.os, "replace", side_effect=inspect_copy):
+            self.memory.add("Likes tea")
+        self.assertEqual(modes, [0o600])
 
     def test_projects_come_from_the_session_index(self):
         sessions = self.root / "sessions"

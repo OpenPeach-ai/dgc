@@ -15211,8 +15211,9 @@ def test_add_skill_url():
     old_fetch = _T._fetch_public_text
     _C.USER_SKILLS = _S.USER_SKILLS = _P(_tf.mkdtemp()) / "skills"   # patch both bindings
     _fetch_limits = []
+    _fetched_urls = []
     _T._fetch_public_text = lambda url, **kwargs: (
-        _fetch_limits.append(kwargs.get("max_bytes")) or (url, body))
+        _fetch_limits.append(kwargs.get("max_bytes")) or _fetched_urls.append(url) or (url, body))
     try:
         ctx = SimpleNamespace(skills={}, project_root=_P(_tf.mkdtemp()))
         res = _T.add_skill({"url": "https://example.com/pirate/SKILL.md"}, ctx)
@@ -15222,6 +15223,13 @@ def test_add_skill_url():
               and (_installed_path.stat().st_mode & 0o777) == 0o600
               and _fetch_limits == [_S.MAX_SKILL_FILE_BYTES])
         check("add_skill refreshes the live skill set", "pirate" in ctx.skills)
+        _T.add_skill({"url": "https://github.com/OpenPeach-ai/dgc/blob/main/SKILL.md"}, ctx)
+        _T.add_skill({"url": "https://github.com.evil.example/OpenPeach-ai/dgc/blob/main/SKILL.md"}, ctx)
+        check("add_skill rewrites only an exact GitHub blob host",
+              _fetched_urls[-2:] == [
+                  "https://raw.githubusercontent.com/OpenPeach-ai/dgc/main/SKILL.md",
+                  "https://github.com.evil.example/OpenPeach-ai/dgc/blob/main/SKILL.md",
+              ])
         _renamed = _T.add_skill({"url": "https://example.com/pirate/SKILL.md",
                                  "name": "Captain Voice"}, ctx)
         check("an explicit installed-skill name is canonical in storage and live discovery",

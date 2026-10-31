@@ -27,7 +27,7 @@ import tempfile
 import threading as _threading
 import time
 from collections import deque
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from pathlib import Path
 
 import requests
@@ -4753,9 +4753,16 @@ def add_skill(args: dict, ctx) -> str:
     url = str(args.get("url", "")).strip()
     if not url:
         return "error: a url is required"
-    raw = url                                    # normalise a GitHub blob link to its raw form
-    if "github.com" in raw and "/blob/" in raw:
-        raw = raw.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+    raw = url                                    # normalise an exact GitHub blob host, never a lookalike
+    try:
+        parsed = urlsplit(raw)
+    except ValueError as e:
+        return f"error fetching the skill: {e}"
+    if parsed.scheme == "https" and parsed.netloc == "github.com":
+        owner, repo, marker, *rest = parsed.path.lstrip("/").split("/")
+        if owner and repo and marker == "blob" and len(rest) >= 2:
+            raw = urlunsplit(("https", "raw.githubusercontent.com",
+                              "/" + "/".join((owner, repo, *rest)), parsed.query, ""))
     try:
         raw, content = _fetch_public_text(raw, max_bytes=MAX_SKILL_FILE_BYTES)
     except (requests.RequestException, ValueError) as e:

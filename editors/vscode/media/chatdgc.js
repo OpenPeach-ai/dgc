@@ -56,7 +56,7 @@
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
-                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: {}, cardEdit: {}, draftEdit: {}, outline: null,
+                  projects: [], projectChats: null, projectChatsAsked: "", cardBusy: Object.create(null), cardEdit: Object.create(null), draftEdit: {}, outline: null,
                   elsewhere: null, output: "auto", folderOn: false, folder: "", folderBusy: false, briefing: false };
   // Another window's DGC writes to this chat (Open here there, or it was open there first): it shows as last saved,
   // read-only, with Open here, as Work's session does. {state: "elsewhere" | "moved", conversation}.
@@ -3624,7 +3624,7 @@
         const summarizing = state.compacting;      // Compact now failed: what you queued meanwhile comes back
         if (state.compacting) { state.compacting = false; render(); }
         if (Object.keys(state.cardBusy).length) {        // a card's choice that was refused: its buttons come back
-          const busy = Object.keys(state.cardBusy); state.cardBusy = {};
+          const busy = Object.keys(state.cardBusy); state.cardBusy = Object.create(null);
           for (const m of state.messages) if ((m.actions || []).some((c) => busy.includes(c.id))) update(m.id);
         }
         for (const [k, edit] of Object.entries(state.draftEdit)) {      // a draft's save refused: back to editing it

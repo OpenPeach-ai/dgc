@@ -416,7 +416,7 @@
     const main = $("art-main");
     main.replaceChildren();
     main.dataset.type = state.view.type;
-    const make = editors[state.view.type];
+    const make = Object.hasOwn(editors, state.view.type) ? editors[state.view.type] : null;
     state.editor = make ? make() : null;
     if (!state.editor) { main.append(el("p", "art-empty", `DGC can't show a ${state.view.type} here yet.`)); return; }
     state.editor.mount(main, { state, util });

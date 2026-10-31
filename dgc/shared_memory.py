@@ -25,6 +25,7 @@ import json
 import os
 import re
 import secrets as _secrets
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -162,10 +163,18 @@ class SharedMemory:
 
     def _write(self, data: dict) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_name(f".facts.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.chmod(temp, 0o600)
-        os.replace(temp, self.path)
+        temp = None
+        try:
+            # Create owner-only from the first byte; chmod after writing leaves a window
+            # where another local user could read a newly created temporary file.
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".facts.",
+                                             suffix=".tmp", dir=self.root, delete=False) as stream:
+                temp = Path(stream.name)
+                json.dump(data, stream, ensure_ascii=False, indent=1)
+            os.replace(temp, self.path)
+        finally:
+            if temp is not None:
+                temp.unlink(missing_ok=True)
 
     # -- reading
 

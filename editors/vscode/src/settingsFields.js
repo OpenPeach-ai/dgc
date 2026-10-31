@@ -339,5 +339,8 @@ export function renderFields(section, main, config, providers, ui) {
         if (!c.search_settable) { const web = main.querySelector("#chatdgc_web"); if (web) web.disabled = true; }
         wire(main);
     }
-    ({ general: renderGeneral, models: renderModels, agents: renderAgents, web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity })[section](main);
+    const renderers = { general: renderGeneral, models: renderModels, agents: renderAgents,
+        web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity };
+    if (!Object.hasOwn(renderers, section)) return;
+    renderers[section](main);
 }
