@@ -19,7 +19,10 @@
     if (kind === "number" || kind === "currency" || kind === "percent") {
       const plain = raw.replace(/[,\s]/g, "").replace(/^[^\d\-.]{1,4}/, "");
       if (kind === "percent" && /^-?\d+(\.\d+)?%$/.test(plain)) return Number(plain.slice(0, -1)) / 100;
-      if (/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(plain)) return Number(plain);
+      if (/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(plain)) {
+        const value = Number(plain);
+        if (Number.isFinite(value)) return value;
+      }
       return raw;
     }
     if (kind === "bool") {

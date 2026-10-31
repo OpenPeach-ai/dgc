@@ -6,13 +6,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { pickPython } from "./support/panel-live.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
 const refs = createRequire(import.meta.url)(join(here, "..", "media", "sheetRefs.js"));
+
+test("numeric sheet input never stores infinity as a cell", () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(here, "..", "media", "artifactSheet.js"), "utf8"), context);
+  const typed = context.window.DgcArtifact.sheet.typed;
+  assert.equal(typed("1e999", { type: "number" }), "1e999");
+  assert.equal(typed("-1e999", { type: "currency" }), "-1e999");
+  assert.equal(typed("1e3", { type: "number" }), 1000);
+});
 
 const book = () => ({ sheets: [
   { name: "Budget", columns: [{ name: "Item", type: "text" }, { name: "Planned", type: "number" }, { name: "Actual", type: "number" }, { name: "Gap", type: "number" }],
