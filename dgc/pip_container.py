@@ -634,7 +634,17 @@ class ContainerDesktop:
         return Path("/vm") / self.computer.name       # a marker: the browser draws on the VM's own screen
 
     def running(self) -> bool:
-        return self._up and self.computer.running()
+        return self._up and self.computer.running() and self._vnc_ready()
+
+    def _vnc_ready(self) -> bool:
+        """A published socket can accept before the desktop sends an RFB greeting."""
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(0.25)
+                conn.connect(str(self.vnc_socket))
+                return conn.recv(4) == b"RFB "
+        except (OSError, TimeoutError):
+            return False
 
     def start(self, launch=lambda start: start()) -> None:
         if self.running():
@@ -649,9 +659,9 @@ class ContainerDesktop:
         result = subprocess.run(self.computer.exec_argv(["sh", "/run/dgc/conf/desktop.sh"], detach=True, env=env),
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
         deadline = time.monotonic() + START_SECONDS
-        while time.monotonic() < deadline and not self.computer._connectable("vnc"):
+        while time.monotonic() < deadline and not self._vnc_ready():
             time.sleep(0.2)
-        if result.returncode != 0 or not self.computer._connectable("vnc"):
+        if result.returncode != 0 or not self._vnc_ready():
             raise RegistryError("desktop_unavailable", "The computer's screen did not start. See its desktop logs.")
         self._up = True
 

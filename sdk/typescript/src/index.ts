@@ -1,4 +1,4 @@
-/** DGC SDK for Node (@vibedgc/sdk). Protocol v14; pair with DGC CLI 0.41.6. */
+/** DGC SDK for Node (@vibedgc/sdk). Protocol v14; pair with DGC CLI 0.50.0. */
 export { VERSION, PROTOCOL, REQUIRES_CLI } from "./types.ts";
 export type {
   AbortSignalLike, AgentInfo, Artifact, ArtifactInfo, ArtifactOutput, ArtifactVersion, Checkpoint, ClientOptions, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo, McpInputRequest,

@@ -123,7 +123,6 @@ export function artifactInfo(row: unknown): ArtifactInfo {
 
 type ArtifactRequest = (command: Frame, answer: string) => Promise<Record<string, unknown>>;
 
-/** `session.artifacts`: the store every part of DGC shares. Each call is one request to the CLI. */
 /** `session.mods`: the mods this session runs (CLI 0.50+): the user's allowed ones and those named with
  *  `session({ mods: [...] })`. */
 export class Mods {
@@ -146,6 +145,7 @@ export class Mods {
   }
 }
 
+/** `session.artifacts`: the store every part of DGC shares. Each call is one request to the CLI. */
 export class Artifacts {
   private readonly ask: ArtifactRequest;
   private readonly capabilities: Record<string, unknown>;
@@ -704,8 +704,6 @@ export class Session {
     return rowsToSessions(event.items);
   }
 
-  /** Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each with
-   *  every version. Needs `capabilities.artifacts`. */
   /** The mods this session runs (CLI 0.50+). Needs `capabilities.mods`. */
   get mods(): Mods {
     if (!(this.capabilities.mods && typeof this.capabilities.mods === "object")) {
@@ -714,6 +712,8 @@ export class Session {
     return new Mods((command, answer) => this.request(command, answer));
   }
 
+  /** Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each with
+   *  every version. Needs `capabilities.artifacts`. */
   get artifacts(): Artifacts {
     if (!(this.capabilities.artifacts && typeof this.capabilities.artifacts === "object")) {
       throw new DGCUnsupportedError("This DGC CLI has no artifacts; update it (dgc update).");
