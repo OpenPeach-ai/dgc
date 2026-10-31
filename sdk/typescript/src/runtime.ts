@@ -71,11 +71,13 @@ export function pythonRuntime(python: string, env: Env = process.env): string[] 
  */
 export function defaultRuntime(env: Env = process.env): string[] {
   if (env.DGC_PYTHON) return pythonRuntime(env.DGC_PYTHON, env);
-  const checkoutPython = join(REPO_ROOT, ".venv/bin/python");
+  const checkoutPython = process.platform === "win32"
+    ? join(REPO_ROOT, ".venv", "Scripts", "python.exe")
+    : join(REPO_ROOT, ".venv", "bin", "python");
   if (isCheckout() && existsSync(checkoutPython)) return pythonRuntime(checkoutPython, env);
   const launcher = installedLauncher(env);
   if (launcher) return [launcher, "serve"];
-  return pythonRuntime("python3", env);
+  return pythonRuntime(process.platform === "win32" ? "python" : "python3", env);
 }
 
 /** Host variables every runtime child receives: program lookup, locale, terminal, time zone,
@@ -124,6 +126,7 @@ export function isolatedEnv(
   }
   env.PYTHONUNBUFFERED = "1";
   env.PYTHONDONTWRITEBYTECODE = "1";
+  env.PYTHONIOENCODING = "utf-8";
   if (!inherit) {
     for (const key of SECRET_ENV) delete env[key];
     const home = privateDir(join(stateDir, "home"));

@@ -23,6 +23,7 @@ import shutil
 import site
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,9 +120,13 @@ def _probe(python: str, pythonpath: Sequence[str]) -> tuple[int, str, tuple[int,
     if pythonpath:
         env["PYTHONPATH"] = os.pathsep.join(pythonpath)
     try:
-        done = subprocess.run(
-            [python, "-c", _PROBE], env=env, cwd=str(Path(python).resolve().parent),
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=_PROBE_TIMEOUT_S)
+        # Windows Python needs USERPROFILE even to import modules that call Path.home().
+        # Give the read-only probe a disposable profile instead of exposing the host profile.
+        with tempfile.TemporaryDirectory(prefix="dgc-sdk-probe-") as profile:
+            env["HOME"] = env["USERPROFILE"] = env["DGC_HOME"] = profile
+            done = subprocess.run(
+                [python, "-c", _PROBE], env=env, cwd=str(Path(python).resolve().parent),
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=_PROBE_TIMEOUT_S)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         return f"could not run it ({exc})"
     if done.returncode != 0:
@@ -360,6 +365,8 @@ def isolated_env(state_dir: Path, *, extra: Mapping[str, str] | None = None,
                     env[name] = source[name]
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # The wire protocol is UTF-8 on every host; Windows' console code page is not.
+    env["PYTHONIOENCODING"] = "utf-8"
     if not inherit_user_state:
         if inherit_env is True:
             for key in _SECRET_ENV:

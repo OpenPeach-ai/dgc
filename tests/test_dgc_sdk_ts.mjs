@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DGC, defineTool, extractJson, validate, assertSupported } from "../sdk/typescript/src/index.ts";
@@ -13,6 +14,22 @@ import { prepareStateDir, writeSessionConfig } from "../sdk/typescript/src/state
 import { AuditLog } from "../sdk/typescript/src/audit.ts";
 import { ToolHub } from "../sdk/typescript/src/tools.ts";
 import { unifiedHunks } from "../sdk/typescript/src/changes.ts";
+import { defaultRuntime, isolatedEnv } from "../sdk/typescript/src/runtime.ts";
+
+test("runtime child uses UTF-8 on every host", () => {
+  const state = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-encoding-"));
+  try {
+    assert.equal(isolatedEnv(state).PYTHONIOENCODING, "utf-8");
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test("native Windows checkout selects its Scripts interpreter", () => {
+  if (process.platform !== "win32") return;
+  const runtime = defaultRuntime({ ...process.env, DGC_PYTHON: "" });
+  assert.equal(runtime[0], join(fileURLToPath(new URL("..", import.meta.url)), ".venv", "Scripts", "python.exe"));
+});
 
 test("changes: a long low-edit diff does not exceed the argument limit", () => {
   const before = Array.from({ length: 200_000 }, (_, i) => `${i.toString(36).padStart(4, "0")}\n`);
@@ -23,7 +40,7 @@ test("changes: a long low-edit diff does not exceed the argument limit", () => {
   assert.equal(hunks.join("").includes("+0000\n"), true);
 });
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function sse(delta, finish = null) {
   return "data: " + JSON.stringify({
@@ -823,7 +840,7 @@ test("policy: compiles to the same session policy as the Python SDK", async (t) 
     t.skip("no Python that can import sdk/python");
     return;
   }
-  const { Policy, compileSession } = await import(join(SRC, "policy.ts"));
+  const { Policy, compileSession } = await import(pathToFileURL(join(SRC, "policy.ts")).href);
   const tmp = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-cmp-"));
   try {
     mkdirSync(join(tmp, "secrets"));
@@ -1294,7 +1311,7 @@ test("steer: the steered turn is part of the run (regression guard: 0.5.2 alread
 // ---- result.changes and verification ------------------------------------------------------------
 
 test("changes: dot-dirs, home/, locks/ and lockfiles are reported with git-applyable diffs", async () => {
-  const { snapshotWorkspace, diffWorkspace } = await import(join(SRC, "changes.ts"));
+  const { snapshotWorkspace, diffWorkspace } = await import(pathToFileURL(join(SRC, "changes.ts")).href);
   const root = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-changes-"));
   const original = mkdtempSync(join(tmpdir(), "dgc-sdk-ts-orig-"));
   try {
@@ -1430,7 +1447,7 @@ function bareSession(options) {
 }
 
 async function newRun() {
-  const { Run } = await import(join(SRC, "session.ts"));
+  const { Run } = await import(pathToFileURL(join(SRC, "session.ts")).href);
   return new Run({ sessionId: "s", runId: "r", status: "running", reason: "", finalText: "", usage: {},
     tools: [], artifacts: [], documents: [] }, "req");
 }
@@ -1585,8 +1602,8 @@ print(json.dumps({"events": sorted(EVENT_FIELDS), "display": DISPLAY}))
     return;
   }
   const runtimeTables = JSON.parse(probe.stdout);
-  const { KNOWN_EVENTS } = await import(join(SRC, "transport.ts"));
-  const { DISPLAY } = await import(join(SRC, "policy.ts"));
+  const { KNOWN_EVENTS } = await import(pathToFileURL(join(SRC, "transport.ts")).href);
+  const { DISPLAY } = await import(pathToFileURL(join(SRC, "policy.ts")).href);
   assert.deepEqual([...KNOWN_EVENTS].sort(), runtimeTables.events);
   const expected = { ...runtimeTables.display };
   delete expected.external_directory;
@@ -1750,7 +1767,7 @@ test("hardening: the screened shell screens the python tool for network calls an
 });
 
 test("hardening: denyTools and allowTools accept display names", async () => {
-  const { Policy } = await import(join(SRC, "policy.ts"));
+  const { Policy } = await import(pathToFileURL(join(SRC, "policy.ts")).href);
   const policy = new Policy({ denyTools: ["Bash", "write_file", "WebFetch"], allowTools: ["Read", "grep", "mcp__app__lookup"] });
   assert.deepEqual([...policy.denyTools], ["bash", "write_file", "web_fetch"]);
   assert.deepEqual([...policy.allowTools], ["read_file", "grep", "mcp__app__lookup"]);
@@ -1792,7 +1809,7 @@ test("hardening: reading a workspace path that is a FIFO does not block", { skip
     const fifo = join(tmp, "pipe");
     assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
     const probe = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e",
-      `const m = await import(${JSON.stringify(join(SRC, "changes.ts"))}); console.log(String(m.readRegular(${JSON.stringify(fifo)})));`],
+      `const m = await import(${JSON.stringify(pathToFileURL(join(SRC, "changes.ts")).href)}); console.log(String(m.readRegular(${JSON.stringify(fifo)})));`],
     { encoding: "utf8", timeout: 10_000 });
     assert.equal(probe.error, undefined, "reading a FIFO blocked");
     assert.equal(probe.status, 0, probe.stderr);

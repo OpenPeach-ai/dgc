@@ -13,11 +13,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PKG = join(ROOT, "sdk", "typescript");
 const TSC = join(PKG, "node_modules", "typescript", "bin", "tsc");
 const REQUIRED = process.env.DGC_REQUIRE_TS_PACKAGE === "1";

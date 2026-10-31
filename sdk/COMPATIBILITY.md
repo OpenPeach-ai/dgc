@@ -20,7 +20,9 @@
 
 These host proofs are release dry runs with isolated CLI 0.50.0 installs, package builds,
 121 Python SDK tests and 69 Node SDK tests. They do not cover every macOS or WSL version.
-Native Windows is experimental and was not tested: custom tools need Unix sockets.
+Native Windows is experimental. Focused Python and TypeScript checks, plus an isolated
+read-only runtime start, passed on Windows 11. The full native suite is outside the host
+proof: custom tools require Unix sockets and the native CLI has no OS sandbox for auto mode.
 
 The SDK launches `dgc serve` from a DGC CLI install: the `runtime=` you pass, the Python named by
 `DGC_PYTHON`, its own interpreter when that can import `dgc`, or the installed CLI (`dgc` on

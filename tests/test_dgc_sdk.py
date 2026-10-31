@@ -1021,6 +1021,25 @@ class SdkTests(unittest.TestCase):
 
 
 class PolicyUnitTests(unittest.TestCase):
+    def test_runtime_probe_uses_disposable_windows_profile(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dgc_sdk import runtime as sdk_runtime
+
+        result = SimpleNamespace(returncode=0, stdout="14 0.50.0 3 13", stderr="")
+        with patch.object(sdk_runtime.subprocess, "run", return_value=result) as run:
+            self.assertEqual(sdk_runtime._probe(sys.executable, ()), (14, "0.50.0", (3, 13)))
+        profile = run.call_args.kwargs["env"]["USERPROFILE"]
+        self.assertEqual(run.call_args.kwargs["env"]["HOME"], profile)
+        self.assertEqual(run.call_args.kwargs["env"]["DGC_HOME"], profile)
+        self.assertFalse(Path(profile).exists())
+
+    def test_runtime_child_forces_utf8_wire_on_windows(self):
+        from dgc_sdk import runtime as sdk_runtime
+        with tempfile.TemporaryDirectory() as state:
+            env = sdk_runtime.isolated_env(Path(state))
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+
     def test_deny_and_allow_tools_accept_display_and_internal_names(self):
         # Minor: both "Bash" and "bash" (and MCP routes) are accepted and normalised to the
         # internal name, instead of the display spelling raising.
