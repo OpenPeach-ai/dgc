@@ -11,4 +11,9 @@ test('SDK reads a bounded card as data', () => {
   assert.deepEqual(extractGenerativeUi('```dgc-ui\n' + JSON.stringify({ ...card, blocks: [
     { type: 'choices', items: [{ label: 'Run', reply: '/init' }] },
   ] }) + '\n```'), []);
+  for (const type of ['toString', 'constructor', '__proto__']) {
+    assert.deepEqual(extractGenerativeUi('```dgc-ui\n' + JSON.stringify({ ...card, blocks: [
+      { type, items: [{ label: 'Review', reply: 'Review the alert' }] },
+    ] }) + '\n```'), [], `${type} must not be accepted as a card block`);
+  }
 });

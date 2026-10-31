@@ -7,7 +7,8 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 const word = (value: unknown, limit: number): value is string => typeof value === "string" && !!value.trim() && value.length <= limit;
 
 function validBlock(value: unknown): value is GenerativeUiBlock {
-  if (!object(value) || typeof value.type !== "string" || !(value.type in limits)) return false;
+  if (!object(value) || typeof value.type !== "string"
+      || !Object.prototype.hasOwnProperty.call(limits, value.type)) return false;
   const kind = value.type as GenerativeUiBlock["type"];
   if (kind === "table") {
     const columns = value.columns, rows = value.rows;
