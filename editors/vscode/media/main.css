@@ -1649,6 +1649,9 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
 @media (max-width: 320px) {
   .context-picker { display: none; }
   #cfooter .fbtn { min-width: 26px; }
+  /* A 300px sidebar has two fewer pixels after Queue and Stop become visible.
+     Keep the model icon in its own hit area rather than letting it cross Queue. */
+  .model-control { width: 26px; max-width: 26px !important; }
 }
 
 /* settings and feature-management overlays */
