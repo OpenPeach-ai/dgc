@@ -146,6 +146,17 @@ class Index(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(S.listing()), 2, "the second pass, inside the interval, adds nothing")
 
+    def test_another_sdk_state_dir_indexes_without_waiting_for_the_first(self):
+        chat = self.seed_chat()
+        self.assertEqual(artifact_index.index(store=self.store, chats=self.chats, force=True), 2)
+        other_store = artifact_store.Store(self.tmp / "other-artifacts")
+        other_chats = ChatStore(self.tmp / "other-chat")
+        other_chat = other_chats.create()
+        other_chat["messages"] = chat["messages"]
+        other_chats.save(other_chat)
+        self.assertEqual(artifact_index.index(store=other_store, chats=other_chats), 1)
+        self.assertEqual([art.title for art in other_store.list(type="page")], ["Tip calculator"])
+
 
 if __name__ == "__main__":
     unittest.main()

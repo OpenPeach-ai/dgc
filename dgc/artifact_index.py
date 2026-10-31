@@ -18,6 +18,7 @@ from . import artifact_store
 
 INTERVAL = 30.0
 _last = 0.0
+_last_root: Path | None = None
 _guard = threading.Lock()
 
 
@@ -117,12 +118,13 @@ def _sheets(st, chats, known) -> int:
 def index(*, store: artifact_store.Store | None = None, chats=None, force: bool = False) -> int:
     """Bring in whatever isn't in the store yet; how many came in. Nothing here fails a listing: a part that can't
     be read is skipped, and tried again next time."""
-    global _last
+    global _last, _last_root
+    st = store or artifact_store.store()
     with _guard:
-        if not force and time.monotonic() - _last < INTERVAL:
+        if not force and st.root == _last_root and time.monotonic() - _last < INTERVAL:
             return 0
         _last = time.monotonic()
-    st = store or artifact_store.store()
+        _last_root = st.root
     try:
         import fcntl
     except ImportError:
