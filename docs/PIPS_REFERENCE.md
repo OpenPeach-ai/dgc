@@ -7,11 +7,11 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | Component | Version |
 | --- | --- |
 | DGC CLI | 0.50.0 |
-| VS Code extension | 0.34.0 |
+| VS Code extension | 0.34.x |
 | SDK (Python and TypeScript) | 0.8.0 |
-| Pips API | 67 |
+| Pips API | 68 |
 | Editor protocol | v14 |
-| Pips registry schema | 46 |
+| Pips registry schema | 47 |
 
 ## Security model
 
@@ -2165,7 +2165,7 @@ ask need `--yes` there.
 | Runner | `enable`, `serve [--enable] [--server]`, `status`, `health [--json]`, `stop [--yes]`, `resume`, `execution` |
 | Linux service | `service preview\|install [--server]`, `service status\|start\|stop\|enable\|disable\|uninstall` |
 | Workspaces | `workspaces`, `workspace show\|sessions\|backfill\|rebind\|migrate-session`, `activity` |
-| Pips | `types`, `models`, `list`, `create`, `show`, `pause`, `resume-job`, `archive`, `restore`, `starters`, `starter` |
+| Pips | `types`, `models`, `list`, `create`, `show`, `pause`, `resume-job`, `archive`, `restore`, `delete-archived`, `starters`, `starter` |
 | Digest | `digest [--keep]`, `notify PIP [--min-severity] [--alerts]`, `outcomes PIP` |
 | Setup cards | `setup list\|show\|accept\|reject` |
 | Changes | `propose`, `schedule`, `trigger`, `verification-plan`, `adaptation`, `adaptations`, `accept`, `reject`, `approvals`, `versions` |

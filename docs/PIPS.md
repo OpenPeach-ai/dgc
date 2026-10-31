@@ -10,7 +10,7 @@ to a file fix or an email, is a proposal that you review first. The model drafts
 you approve.
 
 Pips ship in DGC CLI 0.50.0 (`dgc pips …` and the main chat's Pips tools), the VS
-Code extension 0.34.0 (the Pips view, setup cards and review dialogs) and SDK 0.8.0
+Code extension 0.34.x (the Pips view, setup cards and review dialogs) and SDK 0.8.0
 (`session.pips`). For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
@@ -1683,8 +1683,8 @@ Configured secrets are redacted from reports and previews. Saved artifact files
   with `--confirm-name`, `--expected-version`, and `--expected-lifecycle-revision`.
   This erases its private DGC chat, runs, audit receipts, references in other
   Pips' saved history, computer, exclusive saved sign-ins, and Pip-created Outputs.
-  Shared sign-ins, copies you exported,
-  and project files it changed remain. This cannot be undone.
+  Shared sign-ins, copies you exported, and project files it changed remain.
+  This cannot be undone.
 - **Turn Pips off:** choose **Disable local Pips…** in the Pips view, which first
   stops all Pips work. Or set `pips_enabled` to `false` (`/set pips_enabled false`
   in the terminal, or in `.dgc/config.json` in your home directory). With Pips off, the main chat has no

@@ -100,7 +100,7 @@ setup for an app you create for DGC in your own account (Zoom's needs no secret)
 sign in once. It is listed once Google approves that app; until then only accounts DGC has added can
 sign in (they install it by name, `dgc plugin install google-workspace`), and Google signs them out
 every 7 days. Microsoft Outlook and OneDrive (Outlook mail, the Outlook calendar
-and OneDrive) runs DGC's own server on Microsoft Graph: choose the apps and a personal or work
+and OneDrive) run DGC's own server on Microsoft Graph: choose the apps and a personal or work
 account, then sign in once. A company's admin approves DGC once before anyone there can sign in.
 Microsoft Work IQ is Microsoft's own server for Microsoft 365 Copilot (work accounts with a Copilot
 licence, an admin's one-time approval, in preview). Figma, Vercel, Canva and Dropbox are not offered
