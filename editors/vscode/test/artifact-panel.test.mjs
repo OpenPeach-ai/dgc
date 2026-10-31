@@ -4,7 +4,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { fixtures, framesLoaded, openPanel } from "./support/artifact-scene.mjs";
+import { fixtures, framesLoaded, openPanel, panelPage } from "./support/artifact-scene.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -25,6 +25,29 @@ after(async () => { await browser?.close(); });
 
 const text = (page, selector) => page.evaluate((s) => document.querySelector(s)?.textContent ?? null, selector);
 const texts = (page, selector) => page.evaluate((s) => [...document.querySelectorAll(s)].map((n) => n.textContent), selector);
+
+test("a dashboard tab accepts the editor's same-origin relay window", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<iframe title="artifact webview"></iframe><iframe title="editor relay"></iframe>');
+    const [child, relay] = page.frames().filter((frame) => frame !== page.mainFrame());
+    const panel = panelPage();
+    await child.setContent(panel.html);
+    await child.evaluate((code) => {
+      window.__posted = [];
+      window.acquireVsCodeApi = () => ({ postMessage: (value) => window.__posted.push(value), getState: () => null, setState() {} });
+      eval(code);
+    }, panel.js);
+    assert.deepEqual(await child.evaluate(() => window.__posted.filter((m) => m.type === "ready")), [{ type: "ready" }]);
+    await relay.evaluate((detail) => parent.document.querySelector('iframe[title="artifact webview"]').contentWindow.postMessage(detail, "*"), {
+      type: "detail", artifact: data.dashboard.view, content: data.dashboard.content,
+      state: data.dashboard.state, offer: { exports: { dashboard: ["html", "pdf"] } },
+    });
+    await child.getByRole("heading", { name: data.dashboard.view.title }).waitFor();
+    assert.notEqual(await child.locator("#art-main").textContent(), "Loading…");
+  } finally { await page.close(); }
+});
 
 test("Page and Dashboard expose a working Copy text action", async (t) => {
   if (skipOrFail(t)) return;

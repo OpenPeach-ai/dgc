@@ -11,7 +11,7 @@ app declares its Pips in code and keeps them as declared on each deploy ([Pips i
 from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`), and from API 66
 `list_pip_models` says each model's context window and the Pips default model.
 
-It pairs with DGC CLI 0.50.0, which advertises **Pips API 67** over editor protocol
+It pairs with DGC CLI 0.50.0, which advertises **Pips API 68** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -148,6 +148,7 @@ job with `create_pip` and a reviewed update.
 | 14 | Exceptions: `get_pip_exception_source`, `list_pip_memories`, `record_pip_exception`, `revoke_pip_exception` |
 | 15 | `action.specialists` on a handoff |
 | 16 | `archive_pip`, `restore_pip`; `expected_lifecycle_revision` on `pause_pip` and `resume_pip` |
+| 68 | `delete_archived_pip`: local human control to erase an archived Pip and its private data permanently |
 | 17 | Command receipts: `list_workspace_execution_receipts`, `get_workspace_execution_receipt`, `record_workspace_execution_context` |
 | 18 | The `session_turn_completed` event |
 | 19 | Claims and preferences: `get_pip_statement_anchor`, `list_pip_statements`, `record_pip_statement`, `revoke_pip_statement` |
@@ -235,6 +236,7 @@ R = read, M = mutation. Optional fields are marked `?`.
 | `create_pip` | M | `workspace_id`, `name`, `goal`, `pip_type`, `source_ref`, `model_choice?` |
 | `pause_pip`, `resume_pip` | M | `pip_id`, `expected_lifecycle_revision?` (required to resume a Pip that was ever archived) |
 | `archive_pip`, `restore_pip` | M | `pip_id`, `expected_version`, `expected_lifecycle_revision`, `request_key`, `reason` |
+| `delete_archived_pip` | M, local only | `pip_id`, `expected_name`, `expected_version`, `expected_lifecycle_revision` |
 | `stop_pips` | M | none. Emergency stop: pauses every Pip and cancels queued and running work. |
 
 Saved logins (Pips API 56): `list_pip_logins` (R, `pip_id?`) answers `{logins: [{id, site, hosts, username,
@@ -255,6 +257,12 @@ listed model may carry `context_window` (tokens) and the list says the Pips defa
 Archiving keeps all history and refuses while a run or review is unfinished;
 restoring leaves the Pip paused. An exact retry with the same `request_key`
 returns the original receipt without applying it again.
+`delete_archived_pip` requires an archived, idle Pip and its exact name and current
+version/revision. It removes the Pip's private DGC chat, runs, receipts, linked
+history in other Pips, computer,
+exclusive saved logins, and Pip-owned Outputs. Shared sign-ins used by other Pips,
+user exports, and files changed in project directories remain. The operation is
+irreversible and is refused over a paired remote SDK connection.
 
 ### Changing a Pip
 

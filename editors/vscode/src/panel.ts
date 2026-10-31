@@ -644,6 +644,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    *  Undefined until a CLI that offers it answers; `window` 0 when DGC sizes the window itself. */
   private serverWindow?: { model: string; window: number; server: string; trained: number };
   private pipsEditor?: PipsEditor;
+  /** A Pip opened from a Work editor tab gets its own editor tab, leaving Work in place. */
+  private pipsTab?: PipsEditor;
   private pipsDocumentId = randomBytes(16).toString("hex");
   private pendingSignIn?: McpBrowserRequest;
   private pendingSignInServer = "";
@@ -1279,8 +1281,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     incoming.saved = undefined;
     this.activeSlotId = incoming.id;
     this.applyChatFields(saved);
-    if (this.sessionReady && this.backend) this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
-    else this.pipsEditor?.offline();
+    if (this.sessionReady && this.backend) { this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend); this.pipsTab?.ready(this.lastReadyEvent?.capabilities, this.backend); }
+    else { this.pipsEditor?.offline(); this.pipsTab?.offline(); }
     incoming.unread = 0;
     incoming.needsYou = this.openDecisions.size > 0;   // still true; you are just looking at it now
     incoming.announced = false;
@@ -1394,7 +1396,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const fresh: Record<string, unknown> = {};
     for (const field of PER_CHAT_FIELDS) { fresh[field] = this.cloneChatValue(this.pristineChatState[field]); }
     this.applyChatFields(fresh);
-    this.pipsEditor?.offline();
+    this.pipsEditor?.offline(); this.pipsTab?.offline();
     this.sessionRestoreCandidate = sessionId;        // a new chat resumes nothing -- unless opened ON a session
     this.sessionRestoreSaved = true;
     this.sessionRestoreSuppressed = true;            // …and ensureBackend must not re-add one
@@ -1864,6 +1866,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.scheduleWorkspaceChanges(0);
     if (this.settingsEditor) this.refreshEditorSettings();   // new backend, same page the user is on
     this.pipsEditor?.ready(this.lastReadyEvent?.capabilities, this.backend);
+    this.pipsTab?.ready(this.lastReadyEvent?.capabilities, this.backend);
     this.startPipsAttention();
     // A reattached chat's turn did not stop: it is still running, or it finished with no window.
     if (!reattached) { void this.resumeInterruptedWork(be); }
@@ -2852,7 +2855,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const command = this.stateCommand("restore-session", { type: "resume_session", path: `${previous}.json` });
     this.sessionRestoreRequestId = command.request_id;
-    void be.request(command, "session", 10000, true)
+    // A large saved conversation can take longer than ten seconds to validate and redact before
+    // the backend emits its session acknowledgement. Killing it at that deadline strands the
+    // user's tab in an unrecoverable loop despite an intact session file.
+    void be.request(command, "session", 90000, true)
       .then(() => {
         if (this.backend !== be || generation !== this.sessionHandshakeGeneration) { return; }
         this.sessionRestoreFinished = true;
@@ -3759,7 +3765,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       if (owner && owner.backend === this.backend && owner.session === this.currentSessionId && owner.generation === this.sessionHandshakeGeneration) this.post({type:"event",event:ev});
       return;
     }
-    if (this.pipsEditor?.event(ev)) return;
+    // Both views correlate their own request IDs. A reply can belong to either.
+    const sidebarPips = this.pipsEditor?.event(ev) ?? false;
+    const editorPips = this.pipsTab?.event(ev) ?? false;
+    if (sidebarPips || editorPips) return;
     if (["pips_result", "pips_status"].includes(ev.type)) return;
     // A session that keeps running with no window (dgc/serve_detach.py): the panel's own business.
     if (ev.type === "session_live") return;          // ready.capabilities.attached has already said it
@@ -4615,7 +4624,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (["backend_exit", "cleared"].includes(msg?.type)) {
       this.settleGoalEdit("The backend stopped before confirming the goal edit. Check the saved goal before trying again.");
     }
-    if (["backend_exit", "cleared"].includes(msg?.type)) this.pipsEditor?.offline();
+    if (["backend_exit", "cleared"].includes(msg?.type)) { this.pipsEditor?.offline(); this.pipsTab?.offline(); }
     // A settings-side MCP write reports its progress to the settings tab, not into the chat. The
     // counter alone could not say WHICH webview started the command, and it is held across a
     // request that may take three minutes -- so a /mcp the user typed in chat during that window
@@ -5289,7 +5298,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "setContextSize":
         await this.setContextSize(Number(msg.size));
         break;
-      case "openPips": this.openPips(); return;
+      case "openPips": {
+        const nav = msg.navigation;
+        const valid = nav && typeof nav === "object" && /^pip_[0-9a-f]{32}$/.test(String(nav.pip || ""))
+          && [undefined, "chat", "runs"].includes(nav.section)
+          && (nav.run === undefined || /^run_[0-9a-f]{32}$/.test(String(nav.run)));
+        if (this.tab) this.tab.host.openPipsEditor(valid ? { pip: nav.pip, section: nav.section, run: nav.run } : undefined);
+        else this.openPips();
+        return;
+      }
       case "openSettings":
         // The header gear. It opens the standalone Settings tab beside the chat.
         this.openSettings(typeof msg.section === "string" ? msg.section : "general");
@@ -7287,9 +7304,32 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.pipsEditor;
   }
   openPips(): void {
-    if (this.tab) { this.tab.host.openPips(); return; }      // the Pips live in the side bar
+    if (this.tab) { this.tab.host.openPipsEditor(); return; }
     this.ensurePipsBridge();
     this.inVisiblePanel(() => this.post({ type: "pipsOpen" }));
+  }
+
+  /** A Work tab opens Pips alongside it. The side bar keeps its own Pips bridge. */
+  private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string }): void {
+    if (!this.pipsTab) {
+      this.pipsTab = new PipsEditor(this.context.extensionUri,
+        (message, owner) => {
+          const be = owner as ChatBackend | undefined;
+          return !!be && this.sessionReady && this.backend === be && be.send(message);
+        }, () => {
+          this.ensureBackend();
+          if (this.sessionReady) this.pipsTab?.ready(this.lastReadyEvent?.capabilities, this.backend);
+        }, true);
+      this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
+      this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
+      this.pipsTab.useArtifacts(() => this.artifacts);
+      this.pipsTab.useNewsDismissed((pipIds, until) => {
+        for (const tab of this.tabProviders) tab.post({ type: "pipReportsHidden", pipIds, until });
+        this.post({ type: "pipReportsHidden", pipIds, until });
+      });
+    }
+    if (this.sessionReady) this.pipsTab.ready(this.lastReadyEvent?.capabilities, this.backend);
+    this.pipsTab.open(navigation);
   }
 
   openSettings(section = "general", usageRange?: string): void {
@@ -8559,6 +8599,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
     this.pipsEditor?.dispose();
+    this.pipsTab?.dispose();
     // A chat parked in the background still holds a live `dgc serve`. Closing the window must take
     // every one of them with it, or a child outlives the editor that owns it. Chats opened on a
     // process go first: closing one is a command to its process, and a process already stopped

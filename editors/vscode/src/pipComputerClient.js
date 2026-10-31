@@ -70,7 +70,7 @@ function screenMode(){return S.screenCapable&&S.apiVersion>=43&&S.desktop?.avail
 function using(){return screenMode()?S.desktop?.using===true:S.view?.watching===true;}
 function headerMarkup(){
  const waiting=(S.computer?.actions||[]).filter(a=>a.status==='pending').length;
- const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
+ const status=!S.connected?'Connecting…':!S.computer?'Loading…':!S.computer.granted?'No computer yet':!S.computer.available?'Setup needed':using()?`${S.pip.name} is using its computer`:waiting?`${waiting} waiting for you`:'Idle';
  return `<header class="pc-header"><span class="pc-face" aria-hidden="true">${plushFace(using()?'working':waiting?'waiting_approval':'idle')}</span><div class="pc-title"><h1>${esc(S.pip?.name||'Pip')} · Computer</h1><p class="pc-status" role="status">${esc(status)}</p></div><button type="button" id="pc-stop" class="pc-quiet"${S.busy||!S.computer?.granted?' disabled':''}>Stop computer</button></header>`;
 }
 // A desktop like Grok's bots' computers: a wallpaper, a dock with three apps, apps in windows.
@@ -102,7 +102,7 @@ function waitingMarkup(){
 }
 function browserMarkup(){
  const v=S.view;
- return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">${cursorMarkup()}`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
+ return `<section class="pc-pane pc-browser" aria-label="Browser"><form id="pc-go" class="pc-bar"><button type="button" id="pc-back" class="pc-quiet" aria-label="Back">←</button><input id="pc-url" aria-label="Address" placeholder="Search or type a web address" autocomplete="off" value="${esc(S.address??(v?.ok?v.url:''))}"><button type="submit">Go</button></form><div class="pc-screen${S.viewError.startsWith('The browser is closed.')?' pc-screen-closed':''}" tabindex="0" aria-label="The Pip's browser. Click to click there; type to type into the page.">${v?.ok?`<img id="pc-screen" alt="" src="${v.image}" data-width="${v.width}" data-height="${v.height}">${cursorMarkup()}`:`<p class="pc-muted">${esc(S.viewError||'Opening the browser…')}</p>${S.viewError.startsWith('The browser is closed.')?'<button type="button" id="pc-reopen-browser">Open browser</button>':''}`}</div><p class="pc-muted pc-hint">${using()?'The Pip is using its browser. You can watch; it is yours again when it stops.':'You are driving. What you submit here is sent; the Pip\'s own submits wait for you.'}</p></section>`;
 }
 function filesMarkup(){
  const f=S.files,crumbs=['Files',...(f.path?f.path.split('/'):[])];
@@ -177,12 +177,14 @@ function renderScreen(){
  cleanupFace=window.PipConcepts?.plush?.mount?.($('pc-top'));
  placeCursor();
 }
-// The first time a computer opens, DGC downloads its desktop and Google Chrome itself (no password,
-// nothing installed on the system) and the tab shows how far it has got; the screen opens when done.
+// When DGC can download the desktop itself, show progress. An OS sandbox denial needs the
+// machine's own setup; keep its exact reason visible instead of showing a permanent spinner.
 function installMarkup(){
- const d=S.desktop;if(!S.screenCapable||!d||d.available)return '';
+ const d=S.desktop;
+ if(!S.screenCapable||!d)return S.computer?.available===false&&S.computer.reason?`<p class="pc-notice pc-install" role="status">${esc(S.computer.reason)}</p>`:'';
+ if(d.available)return '';
  const s=d.setup;
- if(s&&(s.state==='running'||s.state==='none'&&!d.install)){
+ if(s&&!d.install&&(s.state==='running'||s.state==='none'&&d.reason.startsWith('Setting up this computer'))){
   // Plain words, no package names or megabytes (reported: "just show it as Setting up your Pip").
   // Downloading is most of the wait; unpacking finishes the bar.
   const share=s.total>0?(s.step==='Unpacking'?90+Math.round(s.done/s.total*10):Math.round(s.done/s.total*90)):null;
@@ -190,16 +192,16 @@ function installMarkup(){
    +(share!==null?`<span class="pc-setup-bar" role="progressbar" aria-label="Setting up your Pip" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100,share)}"><span style="width:${Math.min(100,share)}%"></span></span>`:'')
    +`<small>Getting its computer ready. This happens once.</small></div>`;
  }
- if(!d.install)return '';
- return `<p class="pc-notice pc-install" role="status">${esc(d.reason)} <code>${esc(d.install)}</code></p>`;
+ if(!d.reason&&!d.install)return '';
+ return `<p class="pc-notice pc-install" role="status">${esc(d.reason)}${d.install?` <code>${esc(d.install)}</code>`:''}</p>`;
 }
 function render(){
  if(screenMode()){renderScreen();return;}
  const app=document.getElementById('app');
- const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
+ const pane=!S.computer?'':!S.computer.granted?`<section class="pc-window pc-note"><p>${esc(S.pip?.name||'This Pip')} has no computer yet. Give it one with the computer button at the top of its chat.</p></section>`:!S.computer.available?`<section class="pc-window pc-note"><p>This Pip’s computer cannot start on this machine yet. Follow the setup shown above, then reopen this tab.</p></section>`:!S.app?'':windowMarkup(S.app,S.app==='files'?filesMarkup():S.app==='terminal'?terminalMarkup():browserMarkup());
  const focus=document.activeElement?.id,caret=document.activeElement?.selectionStart;
  cleanupFace?.();
- app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted?dockMarkup():''}</div>`;
+ app.innerHTML=`${headerMarkup()}${S.error?`<p class="pc-error" role="alert">${esc(S.error)}</p>`:''}${S.notice?`<p class="pc-notice" role="status">${esc(S.notice)}</p>`:''}${installMarkup()}${appsMarkup()}${waitingMarkup()}<div class="pc-desktop">${pane}${S.computer?.granted&&S.computer.available?dockMarkup():''}</div>`;
  cleanupFace=window.PipConcepts?.plush?.mount?.(app);
  if(focus&&$(focus)){$(focus).focus();if(caret!=null&&$(focus).setSelectionRange)try{$(focus).setSelectionRange(caret,caret);}catch{}}
  const log=$('pc-log');if(log)log.scrollTop=log.scrollHeight;
@@ -233,8 +235,8 @@ async function frame(op='frame',fields={},opening=false){
  try{
   if(opening)await send('open_pip_computer',{pip_id:S.pip.id});
   const reply=pipComputerView((await send('use_pip_computer_view',{pip_id:S.pip.id,op,...fields})).view);
-  if(reply.ok){S.view=reply;S.viewError='';notePointer(reply.pointer);}else{S.viewError=reply.error;}
- }catch(error){S.viewError=errorText(error);}
+  if(reply.ok){S.view=reply;S.viewError='';notePointer(reply.pointer);}else{S.view=null;S.viewError=reply.error;}
+ }catch(error){S.view=null;S.viewError=errorText(error);}
  finally{
   frameBusy=false;
   // The Pip started using its browser while you were elsewhere: bring its window up to watch.
@@ -289,19 +291,20 @@ function schedule(){
  frameTimer=setInterval(()=>void frame(),S.app==='browser'?800:4000);
  if(S.app==='terminal')terminalTimer=setInterval(()=>void loadTerminal(),2500);
 }
-function show(app){
+function show(app,explicit=false){
  S.app=app;if(!S.open.includes(app))S.open=[...S.open,app];render();
- if(app==='browser')void frame('frame',{},true);if(app==='files')void loadFiles();if(app==='terminal')void loadTerminal();
+ if(app==='browser')void frame(explicit?'reopen':'frame',{},true);if(app==='files')void loadFiles();if(app==='terminal')void loadTerminal();
  schedule();vscode.setState({app});
 }
 
 document.addEventListener('click',event=>{
  const t=event.target.closest('button,[data-crumb],img');if(!t)return;
  if(t.dataset.apps)void answerApps(t.dataset.apps);
- else if(t.dataset.app)show(t.dataset.app);
+ else if(t.dataset.app)show(t.dataset.app,true);
  else if(t.dataset.minimize){S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.dataset.close){S.open=S.open.filter(a=>a!==t.dataset.close);S.app='';render();schedule();vscode.setState({app:''});}
  else if(t.id==='pc-reconnect'){S.screen={state:'off',reason:''};startScreen();}
+ else if(t.id==='pc-reopen-browser')void frame('reopen',{},true);
  else if(t.id==='pc-stop')void send('stop_pip_computer',{pip_id:S.pip.id}).then(()=>{S.notice='Stopped. Its sign-ins are kept.';S.view=null;return loadComputer();},error=>{S.error=errorText(error);render();});
  else if(t.id==='pc-back')void frame('back');
  else if(t.id==='pc-screen'){const p=screenPoint(event);if(p&&!using())void frame('click',p);}

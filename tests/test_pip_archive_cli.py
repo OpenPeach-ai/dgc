@@ -46,5 +46,14 @@ class ArchiveCLITests(unittest.TestCase):
             self.assertEqual(value['expected_lifecycle_revision'], 9)
             self.assertNotIn('expected_version', value)
 
+    def test_permanent_delete_requires_exact_name_and_both_versions(self):
+        value=self.request('delete-archived','--confirm-name','Old Pip',
+            '--expected-version','3','--expected-lifecycle-revision','7')
+        value.pop('request_id')
+        self.assertEqual(value,{'type':'delete_archived_pip','pip_id':'pip_a',
+            'expected_name':'Old Pip','expected_version':3,'expected_lifecycle_revision':7})
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.request('delete-archived','--expected-version','3','--expected-lifecycle-revision','7')
+
 
 if __name__ == '__main__': unittest.main()

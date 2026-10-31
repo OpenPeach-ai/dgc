@@ -108,7 +108,7 @@ PipMutationCommand = Literal[
     'revise_pip_setup',
     'accept_pip_setup', 'reject_pip_setup',
     'record_pip_statement', 'revoke_pip_statement',
-    'archive_pip', 'restore_pip',
+    'archive_pip', 'restore_pip', 'delete_archived_pip',
     'record_pip_exception', 'revoke_pip_exception',
     'mark_pip_notification_read',
     'propose_workspace_session_outcome',
@@ -364,6 +364,8 @@ API67_READS = frozenset({'get_pip_artifacts'})
 API67_MUTATIONS = frozenset({'set_pip_artifacts'})
 READ_COMMANDS |= API67_READS
 MUTATION_COMMANDS |= API67_MUTATIONS
+API68_MUTATIONS = frozenset({'delete_archived_pip'})
+MUTATION_COMMANDS |= API68_MUTATIONS
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -512,6 +514,7 @@ COMMAND_FIELDS = {
     'record_workspace_execution_context': frozenset({'workspace_id', 'attempt_id', 'expected_attempt_digest', 'expected_final_digest', 'expected_view_digest', 'expected_context_revision'}),
     'archive_pip': frozenset({'pip_id', 'expected_version', 'expected_lifecycle_revision', 'request_key', 'reason'}),
     'restore_pip': frozenset({'pip_id', 'expected_version', 'expected_lifecycle_revision', 'request_key', 'reason'}),
+    'delete_archived_pip': frozenset({'pip_id', 'expected_name', 'expected_version', 'expected_lifecycle_revision'}),
     'get_pip_exception_source': frozenset({'pip_id', 'run_id', 'finding_index'}),
     'list_pip_memories': frozenset({'pip_id', 'before_id', 'limit'}),
     'record_pip_exception': frozenset({'pip_id', 'run_id', 'finding_index', 'expected_source_digest', 'reason', 'expires_at', 'request_key'}),
@@ -775,7 +778,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API67_READS | API67_MUTATIONS:
+        if command in API68_MUTATIONS:
+            minimum = 68
+        elif command in API67_READS | API67_MUTATIONS:
             minimum = 67
         elif command in API65_READS:
             minimum = 65

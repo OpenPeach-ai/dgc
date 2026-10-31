@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Delete archived Pips permanently.** An explicit confirmation requires the Pip's exact name before DGC erases its private history, computer and Pip-created Outputs. The Pip disappears from the Archived list after deletion.
+- **Question replies keep their styling after a session reload.** The question appears as a
+  separate quoted line in the user's answer bubble instead of literal `>` text.
+- **Pips opened from Work stay in their own editor tab.** A running Pip or report can be opened
+  without replacing the Work conversation. Completed connector requests leave the Pip chat after
+  sign-in; the account remains available in Apps and Settings. Reopening a large Work conversation
+  allows enough time for its saved history to load.
+- **Pip computers distinguish setup from a blocked sandbox.** The computer tab shows the missing
+  Ubuntu AppArmor step and disables the unusable dock instead of staying on “Setting up your Pip…”.
+  After a Pip closes its browser, the viewer keeps it closed until you reopen it.
 - **Generative UI across Work, ChatDGC and Pips.** DGC can show bounded metrics, steps,
   comparisons, tables and one-click follow-up choices in a reply. Choices send immediately using
   the normal chat permissions. Existing tool calls, agent cards, Pip fixes, widgets and Outputs keep

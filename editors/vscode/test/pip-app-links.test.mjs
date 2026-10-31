@@ -63,7 +63,7 @@ test('the Pip asks; the card says what for, Connect goes to DGC by card, and Not
  assert.equal(x.d.body.innerHTML.includes('https://'),false,'no sign-in link in the page');
 });
 
-test('while the browser is open the card looks by itself, and turns into connected; the Pip is asked to carry on',async()=>{
+test('while the browser is open the card checks itself, then closes when connected; the Pip is asked to carry on',async()=>{
  const x=setup({links:[link({status:'authorizing'})]});await openChat(x);
  x.click(`[data-app-link-start="${LINK}"]`);x.answer(x.requests('start_pip_app_link')[0],{link:link({status:'authorizing'}),opened:true,sign_in_host:'connect.composio.dev'});await flush();
  const look=x.timers.filter(t=>t.ms===4000).at(-1);assert.ok(look,'a look in four seconds');look.fn();await flush();
@@ -71,10 +71,15 @@ test('while the browser is open the card looks by itself, and turns into connect
  x.answer(check,{link:link({status:'authorizing'}),connected:false});await flush();
  x.click(`[data-app-link-check="${LINK}"]`);
  const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'}),connected:true});await x.drain();
- const done=x.d.querySelector(`[data-app-link="${LINK}"]`);
- assert.match(done.textContent,/Gmail connected.*me@example\.com/);assert.equal(done.querySelectorAll('button').length,0);
+ assert.equal(x.d.querySelector(`[data-app-link="${LINK}"]`),null,'the completed request no longer occupies the composer area');
  assert.match(x.d.body.textContent,/Gmail is connected to Gmail\./);
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');
+});
+
+test('a connected Outlook account never recreates its request card after opening the Pip again',async()=>{
+ const x=setup({links:[link({toolkit:'outlook',app:'Outlook',status:'connected',label:'me@example.com',server:'microsoft_mail',account:'ca_done'})]});
+ await openChat(x);
+ assert.equal(x.d.querySelector(`[data-app-link="${LINK}"]`),null);
 });
 
 test('without Composio the card says how to add it, and Not now declines',async()=>{

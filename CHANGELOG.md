@@ -6,6 +6,17 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## Unreleased
 
+- **Archived Pips can be permanently deleted.** The local editor and CLI require the exact Pip name and current lifecycle revision. Deletion clears its private chat, runs, computer, Pip-created Outputs, exclusive saved sign-ins and retained receipts. Shared sign-ins and user exports remain.
+- **Answered questions keep their shape when a Work session reopens.** A saved reply to a model
+  question shows the question as a quiet quoted line above the user's answer again. The full
+  question and answer stay in the model's transcript.
+- **Large saved sessions keep their names in the Sessions list.** A conversation whose checkpoints
+  make its file large still shows its saved title and message count, so separate sessions are easier
+  to tell apart. New Pip computers use the selected Graphite wallpaper.
+- **A Pip computer checks its sandbox before offering desktop setup.** On an Ubuntu host where
+  bubblewrap lacks its packaged AppArmor profile, DGC reports the one-time admin step instead of
+  claiming the desktop is downloading indefinitely. A Pip can now close its whole browser with a
+  verified tool step; the desktop and saved sign-ins remain available.
 - **Generative UI in Work, ChatDGC and Pips.** A reply can include a bounded card with metrics,
   steps, bars, a table or choices, while its ordinary prose stays readable. Clicking a choice sends
   its text as a normal user message through the existing permission flow. The model cannot supply

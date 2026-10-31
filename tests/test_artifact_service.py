@@ -139,6 +139,19 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual([v["summary"] for v in S.view(page["id"], store=self.store)["versions"]],
                          ["Made", "Changed", "Restored version 1"])
 
+    def test_a_page_file_marker_does_not_replace_saved_html(self):
+        marker = "@@FILE: /tmp/missing-page.html"
+        with self.assertRaisesRegex(S.ArtifactUseError, "file reference"):
+            S.make("page", "Bad", {"html": marker}, origin=self.chat, store=self.store)
+        self.assertEqual(self.store.list(), [])
+        page = S.make("page", "Good", {"html": "<h1>Saved</h1>"}, origin=self.chat, store=self.store)
+        with self.assertRaisesRegex(S.ArtifactUseError, "file reference"):
+            S.edit(page["id"], content={"html": marker}, store=self.store)
+        with self.assertRaisesRegex(S.ArtifactUseError, "file reference"):
+            S.edit(page["id"], content={"files": {"index.html": marker}}, store=self.store)
+        self.assertEqual(S.view(page["id"], store=self.store)["version"], 1)
+        self.assertEqual(self.store.read_file(page["id"], "index.html"), b"<h1>Saved</h1>")
+
     def test_listing_filters_by_type_and_where_it_was_made(self):
         S.make("doc", "A", "a\n", origin=self.chat, store=self.store)
         S.make("slides", "B", DECK, origin={"surface": "work", "project": "/p"}, store=self.store)

@@ -7,6 +7,8 @@ Pairs with CLI 0.50.0.
 - `extract_generative_ui(reply)` in Python and `extractGenerativeUi(reply)` in TypeScript return bounded,
   validated `dgc-ui` v1 cards from Work, ChatDGC or Pip replies. Hosts render the data in their own UI; a
   choice's reply goes through the ordinary send method and existing permissions. No model HTML or script runs.
+- The vendored editor protocol accepts `turn_start.answer_question` when a saved Work session replays
+  a reply to a model question. SDK clients still receive the user's answer as the turn prompt.
 
 The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
 (Ubuntu 24.04). Native Windows remains experimental and was not covered.
@@ -23,6 +25,7 @@ The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 1
 - Mods: `session(mods=[...])` runs the named mod folders in the session beside the user's allowed ones, and
   `session.mods` lists them and runs their commands (needs `capabilities["mods"]`, CLI 0.50+). Authoring libraries:
   `dgc_sdk.mods` (Python) and `@vibedgc/sdk/mods` (TypeScript).
+- Pips API 68: `delete_archived_pip` is an explicit local control with the exact name and lifecycle pins; it permanently removes the archived Pip's private DGC state. Paired remote SDK sessions cannot call it.
 - Pips API 67: `get_pip_artifacts {pip_id}` reads where a Pip's reports are kept (`report_as`: chat, doc or sheet;
   the document's and sheet's id, title and version) and the dashboards it refreshes; `set_pip_artifacts {pip_id,
   report_as?, dashboards?}` changes them. Local only.

@@ -444,6 +444,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "answer_question": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "attachments": {
       "types": [
         "array"

@@ -92,6 +92,10 @@ def _page_files(spec) -> tuple[dict, str]:
         if not isinstance(html, str) or not html.strip():
             raise ArtifactUseError("A page needs its HTML in html.")
         files = {"index.html": html}
+    if any(isinstance(value, str) and value.lstrip().startswith('@@FILE:')
+           for name, value in files.items() if str(name).lower().endswith(('.html', '.htm'))):
+        raise ArtifactUseError("A file reference was sent instead of Page HTML. Read the file and send its full contents; "
+                               "to change an existing Page, retry edit_artifact with the same id.")
     try:
         files = Store._encode("page", files)
     except ArtifactError as exc:

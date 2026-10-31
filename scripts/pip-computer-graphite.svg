@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<defs><radialGradient id="light" cx="80%" cy="10%" r="78%"><stop stop-color="#343047"/><stop offset="1" stop-color="#171820" stop-opacity="0"/></radialGradient>
+<pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#b2a2ff" opacity=".07"/></pattern></defs>
+<rect width="1600" height="1000" fill="#171820"/><rect width="1600" height="1000" fill="url(#light)"/><path d="M0 790 H1600" stroke="#b8abfa" stroke-width="1" opacity=".12"/>
+<rect width="1600" height="1000" fill="url(#dots)"/><g transform="translate(1190 350) scale(4.2)" opacity=".2" fill="#b2a2ff"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></g></svg>

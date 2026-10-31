@@ -3270,7 +3270,9 @@ self-hosted model, never your Claude Code or Codex plan.
 Every new Personal Pip gets its own computer: a browser and files in a sandbox, apart from yours,
 on Linux, in WSL 2 and on Apple-silicon Macs with macOS 26 or later. A Pip whose model can see uses
 the whole desktop on Linux (browser, Files, Terminal, an image editor, Documents and a PDF viewer); on
-a Mac it works in its browser.
+a Mac it works in its browser. DGC checks that the Linux sandbox can actually start before calling
+the computer ready. On Ubuntu, the tab shows the one-time AppArmor setup command if the packaged
+bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
 
 - **How much it asks.** Each Personal Pip has a level you set on its page: **Ask** (every submit and
   send waits for you), **Approve for me** (routine steps such as a search, adding to a cart or saving a

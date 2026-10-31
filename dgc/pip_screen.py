@@ -77,6 +77,14 @@ def availability() -> dict:
         return {"available": False, "reason": "The desktop runs on Linux and macOS for now.", "install": ""}
     if not shutil.which("bwrap"):
         return {"available": False, "reason": "Install bubblewrap to give Pips a computer.", "install": "sudo apt install bubblewrap"}
+    from .pip_computer_box import UBUNTU_BWRAP_PROFILE, box_refused_reason, box_runs
+    works, said = box_runs()
+    if not works:
+        from .browser_setup import in_container, userns_restricted
+        if userns_restricted() and not in_container():
+            return {"available": False, "install": UBUNTU_BWRAP_PROFILE,
+                    "reason": "Ubuntu needs its packaged AppArmor profile for bubblewrap before this Pip computer can start."}
+        return {"available": False, "install": "", "reason": box_refused_reason(said)}
     parts = components()
     if parts["missing"]:
         from . import pip_screen_setup
@@ -164,7 +172,7 @@ def write_config(conf: Path, name: str, apps_shown=()) -> None:
     desktop = conf / "pcmanfm" / "dgc"
     desktop.mkdir(parents=True, exist_ok=True)
     _write(desktop / "desktop-items-0.conf", "[*]\nwallpaper_mode=crop\nwallpaper_common=1\n"
-           "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#140c33\ndesktop_fg=#ffffff\n"
+           "wallpaper=/run/dgc/conf/wallpaper.jpg\ndesktop_bg=#171820\ndesktop_fg=#ffffff\n"
            "desktop_shadow=#000000\nshow_wm_menu=0\nshow_documents=0\nshow_trash=0\nshow_mounts=0\n")
     _write(desktop / "pcmanfm.conf", "[config]\nbm_open_method=0\n[ui]\nalways_show_tabs=0\nshow_hidden=0\n")
     _write(conf / "desktop.sh", f"""

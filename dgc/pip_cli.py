@@ -300,6 +300,12 @@ def parser():
         item.add_argument("--expected-lifecycle-revision", type=int, required=True)
         item.add_argument("--request-key", required=True, help="reuse only for this exact lifecycle decision")
         item.add_argument("--reason", required=True)
+    permanent = command('delete-archived', 'permanently erase an archived Pip and its private data')
+    job(permanent)
+    permanent.add_argument('--confirm-name', dest='expected_name', required=True,
+                           help='type the exact current Pip name to confirm irreversible deletion')
+    permanent.add_argument('--expected-version', type=int, required=True)
+    permanent.add_argument('--expected-lifecycle-revision', type=int, required=True)
 
     propose = command("propose", "propose a versioned job change without applying it")
     job(propose); propose.add_argument("--expected-version", type=int, required=True)
@@ -679,6 +685,9 @@ def _request(args):
         request["type"] = {"list": "list_pip_setups", "show": "get_pip_setup",
                            "accept": "accept_pip_setup", "reject": "reject_pip_setup"}[args.setup_action]
         keys = ("workspace_id", "setup_id", "expected_digest")
+    elif name == 'delete-archived':
+        request['type'] = 'delete_archived_pip'
+        keys = ('pip_id', 'expected_name', 'expected_version', 'expected_lifecycle_revision')
     elif name in ("archive", "restore"):
         request["type"] = "archive_pip" if name == "archive" else "restore_pip"
         keys = ("pip_id", "expected_version", "expected_lifecycle_revision", "request_key", "reason")
@@ -1072,6 +1081,8 @@ def _format(value):
                 + ("Original decision returned; no new transition was performed.\n" if value.get("replayed") else "")
                 + f'Current state: {pip["status"]} · lifecycle revision {pip["lifecycle_revision"]}.\n'
                 + "History is retained. Restore returns the Pip to paused; a separate resume is required.")
+    if value.get('deleted') is True and 'pip_id' in value:
+        return f'{value["pip_id"]} and its private DGC data were permanently deleted.'
     if "source" in value and "digest" in value and "pip_id" in value and "finding_index" in value["source"]:
         return ("Review this exact finding source before recording an exception.\n"
                 + json.dumps(value["source"], ensure_ascii=False, indent=2)

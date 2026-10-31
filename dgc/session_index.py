@@ -19,6 +19,7 @@ from pathlib import Path
 INDEX_NAME = ".index.sqlite"
 MAX_BODY = 262144              # characters of a session kept for search
 MAX_INDEX_FILE_BYTES = 32 * 1024 * 1024
+INDEX_VERSION = 2                 # v2 keeps listing fields for oversized checkpoint sessions
 SNIPPET = 160
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS meta(path TEXT PRIMARY KEY, mtime_ns INTEGER NOT NULL, size INTEGER NOT NULL,"
@@ -74,23 +75,71 @@ def _read(path: Path):
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise ValueError("Session index requires a regular file")
-        if info.st_size > MAX_INDEX_FILE_BYTES:
-            # Keep a large session in the picker while leaving its contents unindexed.
-            return info.st_mtime, "Large session — open to view", 0, "", ""
         raw = stream.read(MAX_INDEX_FILE_BYTES + 1)
-        if len(raw) > MAX_INDEX_FILE_BYTES:
-            return info.st_mtime, "Large session — open to view", 0, "", ""
-    data = json.loads(raw)
+        if info.st_size > MAX_INDEX_FILE_BYTES or len(raw) > MAX_INDEX_FILE_BYTES:
+            # Checkpoint snapshots can dwarf the conversation. The writer stores the listing
+            # fields before checkpoints, so decode complete top-level fields from this bounded
+            # prefix and stop as soon as those fields are present. Never parse the snapshot tail.
+            try:
+                data = _large_prefix(raw[:MAX_INDEX_FILE_BYTES])
+            except (UnicodeError, ValueError, TypeError):
+                return info.st_mtime, "Large session — open to view", 0, "", ""
+        else:
+            data = json.loads(raw)
     msgs = data.get("messages", [])
     if not isinstance(msgs, list):
         msgs = []
     first = next((m.get("content", "") for m in msgs if isinstance(m, dict) and m.get("role") == "user"), "")
-    preview = re.sub(r"\s+", " ", str(strip_turn_clock(_text_of(first)))).strip()
+    preview = re.sub(r"\s+", " ", str(strip_turn_clock(_text_of(first)))).strip()[:56]
     name = str(data.get("name") or "")
     said = [_text_of(m.get("content")) for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
     text = " \n".join(t for t in said if t)[:MAX_BODY]
     updated = float(data.get("updated", info.st_mtime))
     return updated, preview, len(msgs), name, text
+
+
+def _large_prefix(raw: bytes) -> dict:
+    """Decode listing fields from a large JSON file without reading its checkpoint tail."""
+    try:
+        source = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # The bounded read may end inside one multibyte character in a later snapshot.
+        # Accept that incomplete tail only; malformed text in a listing field still fails.
+        if exc.end != len(raw):
+            raise
+        source = raw[:exc.start].decode("utf-8")
+    decoder = json.JSONDecoder()
+    fields: dict = {}
+    at = 0
+
+    def spaces(position: int) -> int:
+        while position < len(source) and source[position] in " \r\n\t":
+            position += 1
+        return position
+
+    at = spaces(at)
+    if at >= len(source) or source[at] != "{":
+        raise ValueError("session is not an object")
+    at += 1
+    while at < len(source):
+        at = spaces(at)
+        key, at = decoder.raw_decode(source, at)
+        if not isinstance(key, str):
+            raise ValueError("session key is not text")
+        at = spaces(at)
+        if at >= len(source) or source[at] != ":":
+            raise ValueError("session key has no value")
+        at = spaces(at + 1)
+        value, at = decoder.raw_decode(source, at)
+        if key in ("updated", "messages", "name"):
+            fields[key] = value
+        if all(key in fields for key in ("updated", "messages", "name")):
+            return fields
+        at = spaces(at)
+        if at >= len(source) or source[at] != ",":
+            break
+        at += 1
+    raise ValueError("listing fields are outside the bounded prefix")
 
 
 def sync(directory: Path):
@@ -104,9 +153,11 @@ def sync(directory: Path):
                     stat = entry.stat(follow_symlinks=False)
                     seen[entry.path] = (stat.st_mtime_ns, stat.st_size)
         known = {row["path"]: (row["mtime_ns"], row["size"]) for row in db.execute("SELECT path,mtime_ns,size FROM meta")}
-        changed = [p for p, stamp in seen.items() if known.get(p) != stamp]
+        old_index = int(db.execute("PRAGMA user_version").fetchone()[0]) < INDEX_VERSION
+        changed = [p for p, stamp in seen.items()
+                   if known.get(p) != stamp or (old_index and stamp[1] > MAX_INDEX_FILE_BYTES)]
         gone = [p for p in known if p not in seen]
-        if changed or gone:
+        if changed or gone or old_index:
             db.execute("BEGIN IMMEDIATE")
             for path in gone:
                 db.execute("DELETE FROM meta WHERE path=?", (path,))
@@ -120,6 +171,8 @@ def sync(directory: Path):
                 db.execute("INSERT OR REPLACE INTO meta VALUES(?,?,?,?,?,?,?)", (path, mtime_ns, size, updated, preview, count, name))
                 if db.execute("UPDATE body SET text=? WHERE path=?", (text, path)).rowcount == 0:
                     db.execute("INSERT INTO body(path,text) VALUES(?,?)", (path, text))
+            if old_index:
+                db.execute(f"PRAGMA user_version={INDEX_VERSION}")
             db.execute("COMMIT")
         return db, fts
     except BaseException:

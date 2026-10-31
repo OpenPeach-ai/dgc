@@ -37,7 +37,7 @@ CONTROL_COMMANDS = frozenset({
     "list_pip_connections", "inspect_pip_connection", "list_pip_accounts",
     "list_pip_setups", "get_pip_setup", "accept_pip_setup", "reject_pip_setup", "revise_pip_setup",
     "list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context",
-    "archive_pip", "restore_pip",
+    "archive_pip", "restore_pip", "delete_archived_pip",
     "list_workspaces", "list_pips", "list_pip_types", "list_pip_models", "list_pip_messages", "send_pip_message", "introduce_pip", "get_pip_message_image", "create_pip", "get_pip", "propose_pip_update",
     "accept_pip_update", "pause_pip", "resume_pip", "run_pip", "list_pip_runs",
     "get_pip_run", "cancel_pip_run", "list_workspace_activity", "list_pip_run_activity",
@@ -175,6 +175,7 @@ _COMMAND_ARGS = {
     "record_workspace_execution_context": {"workspace_id", "attempt_id", "expected_attempt_digest", "expected_final_digest", "expected_view_digest", "expected_context_revision"},
     "archive_pip": {"pip_id", "expected_version", "expected_lifecycle_revision", "request_key", "reason"},
     "restore_pip": {"pip_id", "expected_version", "expected_lifecycle_revision", "request_key", "reason"},
+    "delete_archived_pip": {"pip_id", "expected_name", "expected_version", "expected_lifecycle_revision"},
     "get_pip_exception_source": {"pip_id", "run_id", "finding_index"},
     "record_pip_exception": {"pip_id", "run_id", "finding_index", "expected_source_digest", "reason", "expires_at", "request_key"},
     "revoke_pip_exception": {"pip_id", "memory_id", "expected_revision", "reason"},
@@ -4796,6 +4797,8 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             from .pip_models import resolve_model_choice
             resolve_model_choice(config.clone_for_root(config.project_root), choice)
         with WorkspaceRegistry() as registry:
+            from .pip_purge import recover as recover_pip_deletions
+            recover_pip_deletions(registry)
             store = PipStore(registry)
             # Global stop/status must remain usable if the launch directory was
             # moved or removed. They do not require any workspace binding.
@@ -4804,7 +4807,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -5544,6 +5547,11 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     request.get("expected_revision"), actor, request.get("reason"))}
             elif command == "list_pip_versions":
                 result = store.versions(pip_id, request.get("before_version"), request.get("limit", 10))
+            elif command == "delete_archived_pip":
+                from .pip_purge import delete
+                result = delete(store, pip_id, expected_name=request.get("expected_name"),
+                    expected_version=request.get("expected_version"),
+                    expected_lifecycle_revision=request.get("expected_lifecycle_revision"), actor=actor)
             elif command in ("archive_pip", "restore_pip"):
                 from .pip_archive import transition
                 result = transition(store, pip_id, archived=command == "archive_pip",

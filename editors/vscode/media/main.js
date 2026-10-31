@@ -859,7 +859,7 @@
       pipSetupCards = window.DgcPips.mountSetupCards({
         document,
         postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
-        onOpenRun: navigation => { showPips(); pipsApp?.navigate?.(navigation); },
+        onOpenRun: navigation => openPipsAt(navigation),
         // A waiting Pip docks where questions dock (the maintainers chose it over a card in the reply).
         // A question docked first keeps the place; the Pip docks again when it is answered.
         dock: { show: dockPipCard, hide: undockPipCard },
@@ -910,7 +910,7 @@
       pipDigestBar = window.DgcPips.mountDigestBar({
         document,
         postMessage: message => vscode.postMessage({...message, documentId:document.documentElement.dataset.pipsDocumentId}),
-        onOpen: navigation => { showPips(); if (navigation) pipsApp?.navigate?.(navigation); },
+        onOpen: navigation => openPipsAt(navigation),
         onChange: () => syncComposerRail(),
       });
     }
@@ -968,6 +968,14 @@
   // own -- "Open in Editor", a double-click or Enter -- and so does New session. In a session's tab
   // the page is the chat, without the Pips (they stay in the side bar), its + opening another tab.
   const chatPlace = document.documentElement.dataset.chatPlace || "chat";
+  function openPipsAt(navigation = null) {
+    if (chatPlace === "tab") {
+      vscode.postMessage({ type: "openPips", ...(navigation ? { navigation } : {}) });
+      return;
+    }
+    showPips();
+    if (navigation) pipsApp?.navigate?.(navigation);
+  }
   let sessionsOpen = false, homePips = null;
   function showSessions() {
     if (chatPlace !== "home") return;
@@ -3634,7 +3642,7 @@
   }
   // The row that heads a turn (0.47 pinned prompt): the one this panel already drew for it, or one
   // drawn now, or null for a turn with nothing to show.
-  function echoPrompt(text, requestId = "", savedAttachments = []) {
+  function echoPrompt(text, requestId = "", savedAttachments = [], answerQuestion = "") {
     // The row drawn for this request -- the composer's, a goal's, an answer to a question, a queued
     // message put back after a reload -- found by its id whether or not prompt_accepted came first.
     // It used to be found only as "the last bubble", and only while still pending: turn_start comes
@@ -3665,6 +3673,7 @@
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments);
+    if (answerQuestion) bubble.prepend(el("p", "answered-q", esc(answerQuestion)));
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
     markPipReportsNamedIn(parsed.text);
@@ -3787,7 +3796,7 @@
     renderTurnMeta();
   }
   // `requestId`: the id turn_start carries for a prompt someone sent (its row is found by it).
-  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = []) {
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "") {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -3826,7 +3835,7 @@
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
-      head = echoPrompt(prompt, requestId, savedAttachments);
+      head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
     block._turnId = String(id || "");               // a turn_files for it after it ended finds its card
@@ -7558,7 +7567,8 @@
         startTurn(ev.prompt, ev.kind, ev.turn_id,
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id),
           typeof ev.request_id === "string" ? ev.request_id : "",
-          Array.isArray(ev.attachments) ? ev.attachments : []);
+          Array.isArray(ev.attachments) ? ev.attachments : [],
+          typeof ev.answer_question === "string" ? ev.answer_question : "");
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         // The next message moves on from a troupe that has ended; its own wake-up turn (a monitor turn) does not.
@@ -9709,7 +9719,7 @@
       homePips = window.DgcPips.mountHomePips({
         document, root: $("sessions-pips"),
         postMessage: (message) => vscode.postMessage({ ...message, documentId: document.documentElement.dataset.pipsDocumentId }),
-        onOpen: (navigation) => { showPips(); if (navigation) pipsApp?.navigate?.(navigation); },
+        onOpen: (navigation) => openPipsAt(navigation),
       });
     }
     showSessions();
@@ -10041,7 +10051,7 @@
     const fixTitle = pipFixLive
       ? "DGC fixes it in the background, in a copy of the project, while you keep working. It never changes live data or services; Undo puts your files back."
       : "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
-    const openReport = () => { showPips(); pipsApp?.navigate?.({ pip: r.pip_id, section: "runs", run: r.run_id }); };
+    const openReport = () => openPipsAt({ pip: r.pip_id, section: "runs", run: r.run_id });
     const dismiss = () => {
       const group = card.parentElement?.closest(".pip-report-group");
       const next = card.nextElementSibling || group?.nextElementSibling;
@@ -10553,8 +10563,7 @@
   }
   function openRunningPip(run) {
     if (railOpen) closeRailPop({ restore: false });
-    showPips();
-    pipsApp?.navigate?.({ pip: run.pip_id, section: "chat", run: run.run_id });
+    openPipsAt({ pip: run.pip_id, section: "chat", run: run.run_id });
   }
   let pipRunningPanel = null;
   function paintPipRunningPanel() {
@@ -10624,6 +10633,8 @@
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text,
         Array.isArray(it.attachments) && it.attachments.length ? it.attachments : parsed.attachments);
+      if (typeof it.answer_question === "string" && it.answer_question)
+        bubble.prepend(el("p", "answered-q", esc(it.answer_question)));
       node.appendChild(bubble);
       if (steeringAt !== null) { stampPrompt(node, steeringAt); steeringAt = null; }
       placeSteering(node);
@@ -10809,7 +10820,7 @@
       finishFileThumb(String(msg.requestId || ""), typeof msg.src === "string" && msg.src.startsWith("data:image/") ? msg.src : "");
       return;
     }
-    if (msg.type === "pipsOpen") { showPips(); return; }
+    if (msg.type === "pipsOpen") { openPipsAt(); return; }
     if (msg.type === "pipAskDgc") { queuePipAsk(msg.report); return; }
     if (msg.type === "pipShowFix") { if (/^run_[0-9a-f]{32}$/.test(String(msg.run_id || ""))) showPipFix(String(msg.run_id)); return; }
     if (msg.type === "sessions_list") { if (chatPlace === "home") renderSessions(msg); return; }

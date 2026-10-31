@@ -5,7 +5,6 @@
 const STATUSES = ['requested', 'authorizing', 'connected', 'declined', 'failed'];
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
 const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
-const RECENT_MS = 30 * 60 * 1000;
 
 export function appLink(value, pip) {
   const fail = () => { throw new Error('This card didn’t load. Refresh to try again.'); };
@@ -32,10 +31,9 @@ export function appLinkResult(value, pip, id) {
     connected: value.connected === true, error: typeof value.error === 'string' ? value.error.slice(0, 600) : '' };
 }
 
-/** The cards worth showing in the chat: waiting ones, and a connection made in the last half hour. */
-export function shownAppLinks(links, now = Date.now()) {
-  return (links || []).filter(l => l.status === 'requested' || l.status === 'authorizing' || l.status === 'failed'
-    || l.status === 'connected' && now - Date.parse(l.updated_at) < RECENT_MS);
+/** Connection requests live by the composer only while they need the user's attention. */
+export function shownAppLinks(links) {
+  return (links || []).filter(l => l.status === 'requested' || l.status === 'authorizing' || l.status === 'failed');
 }
 
 export function appLinkMarkup(link, { esc, busy = false, composio = true, host = '', pipName = 'This Pip' }) {

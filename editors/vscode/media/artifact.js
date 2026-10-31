@@ -429,8 +429,10 @@
   });
 
   window.addEventListener("message", (event) => {
-    // A Page runs in a child frame. Only the extension host may drive this panel's actions.
-    if (event.source && event.source !== window) return;
+    // VS Code relays host messages from another Window with this webview's origin.
+    // A Page or dashboard frame has a different origin; it must not drive editor actions.
+    // Local previews dispatch source-less messages, which are safe within the test page.
+    if (event.source && event.source !== window && event.origin !== location.origin) return;
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {

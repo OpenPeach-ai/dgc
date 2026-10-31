@@ -195,7 +195,8 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(setup.due())
 
     def test_the_desktop_uses_dgcs_own_copy_and_says_it_is_setting_up_until_then(self):
-        with patch("shutil.which", side_effect=lambda name: None if name in pip_screen.PROGRAMS.values() else "/usr/bin/" + name):
+        with patch("shutil.which", side_effect=lambda name: None if name in pip_screen.PROGRAMS.values() else "/usr/bin/" + name), \
+                patch("dgc.pip_computer_box.box_runs", return_value=(True, "")):
             shown = pip_screen.availability()
             self.assertFalse(shown["available"])
             self.assertEqual((shown["install"], shown["reason"]), ("", "Setting up this computer's desktop."),
@@ -210,7 +211,8 @@ class SetupTests(unittest.TestCase):
     def test_a_failed_setup_falls_back_to_the_install_command(self):
         (self.state / "fail-update").write_text("1")
         self.run_setup(setup.DESKTOP_PACKAGES.values())
-        with patch("shutil.which", side_effect=lambda name: None if name in pip_screen.PROGRAMS.values() else "/usr/bin/" + name):
+        with patch("shutil.which", side_effect=lambda name: None if name in pip_screen.PROGRAMS.values() else "/usr/bin/" + name), \
+                patch("dgc.pip_computer_box.box_runs", return_value=(True, "")):
             shown = pip_screen.availability()
         self.assertEqual(shown["install"], pip_screen.INSTALL)
         self.assertIn("Updating package lists failed", shown["reason"])

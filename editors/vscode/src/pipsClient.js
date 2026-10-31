@@ -149,7 +149,7 @@ let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,comma
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
 // The Source section's Excluded folders (safe_source_v2, API 50), its size check and one run's left-out record.
 let sourceExcludeList=[],sourceExcludeProblem='',sourceCheckState={pip:'',value:null,loading:false,error:''},runSourceState={run:'',value:null,error:''};
-const draft = {sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 // The face-and-dropdown pickers (pipPicker.js): New Pip's job or character, and a Personal Pip's face on its page. A pick
 // redraws what it changes, the big face and what follows it, and gives the dropdown's button the focus back.
 const picker=createPicker({root:document,onPick(id,value){
@@ -1306,7 +1306,29 @@ function projectSourceMarkup(){
 function lifecycleMarkup(){
  if(S.apiVersion<16)return archived()?'<p class="muted">Update DGC to restore this archived Pip.</p>':'';
  if(!canLifecycle())return '<p class="notice">Refresh, then try again.</p>';
- return `<details data-details="pip-lifecycle"${archived()?' open':''}><summary>${archived()?'Restore archived Pip':'Archive Pip'}</summary><p class="muted">${archived()?'Restore brings it back paused. Nothing runs until you resume it.':'Archiving keeps its chat, reports and history. Work in progress must finish or be stopped first, and handoffs waiting for you must be answered; nothing is cancelled for you.'}</p>${personalPip()?'':`<p class="muted">Version ${S.pip.current_version}</p>`}${button(archived()?'restore-pip':'archive-pip',archived()?'Restore…':'Archive…',S.busy||!usable())}</details>`;
+ return `<details data-details="pip-lifecycle"${archived()?' open':''}><summary>${archived()?'Restore archived Pip':'Archive Pip'}</summary><p class="muted">${archived()?'Restore brings it back paused. Nothing runs until you resume it.':'Archiving keeps its chat, reports and history. Work in progress must finish or be stopped first, and handoffs waiting for you must be answered; nothing is cancelled for you.'}</p>${personalPip()?'':`<p class="muted">Version ${S.pip.current_version}</p>`}${button(archived()?'restore-pip':'archive-pip',archived()?'Restore…':'Archive…',S.busy||!usable())}${archived()&&S.apiVersion>=68?`<p class="muted">Permanently delete this Pip and its saved data.</p>${button('delete-archived-pip','Delete permanently…',S.busy||!usable(),'danger-text')}`:''}</details>`;
+}
+function reviewPermanentDelete(){
+ if(!usable()||!archived()||S.apiVersion<68||!canLifecycle())return;
+ draft.deletePipName='';
+ openReview({title:`Delete ${S.pip.name} permanently?`,description:'This erases its chat, runs, computer files, saved sign-ins used only by this Pip, Pip-created Outputs and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone.',
+  body:'<p class="muted">Copies you exported or changes made in project files are outside this Pip’s private data.</p>',
+  confirm:'Delete permanently',danger:true,permanentPip:true,
+  request:{type:'delete_archived_pip',pip_id:S.selected,expected_version:S.pip.current_version,expected_lifecycle_revision:S.pip.lifecycle_revision}});
+}
+async function confirmPermanentDelete(review){
+ const pip=S.pip,token=scope();
+ if(!pip||draft.deletePipName!==pip.name){review.error='Type the exact Pip name to confirm deletion.';renderReview();$('deletePipName')?.focus();return;}
+ if(S.busy||!usable())return;
+ S.busy=true;review.error='';renderReview();
+ try{
+  const result=await broker.request({...review.request,expected_name:draft.deletePipName});
+  if(token!==scope())return;
+  if(result?.deleted!==true||result.pip_id!==pip.id)throw Error('Deletion was not confirmed by DGC. Refresh before trying again.');
+  S.jobs=S.jobs.filter(p=>p.id!==pip.id);draft.deletePipName='';
+  clearSelection();S.selected='';S.overview=true;S.tab='';S.notice=`${pip.name} and its private data were deleted permanently.`;rememberView();render();
+ }catch(error){if(token===scope()&&S.review){review.error=errorText(error);renderReview();}}
+ finally{S.busy=false;render();if(S.review)renderReview();}
 }
 function reviewLifecycle(restore){
  if(!usable()||!canLifecycle()||restore!==archived())return;draft.findingReviewReason='';
@@ -2889,7 +2911,7 @@ function pipPageMenu(){
  return `<button type="button" data-tab="runs">${historyName('Results')}</button>${S.apiVersion>=14&&!(S.apiVersion>=44&&personalPip())?'<button type="button" data-tab="memory">Memory</button>':''}<hr>`
   +'<button type="button" data-copy-pip-id>Copy ID</button>'
   +(archived()?'':`<button type="button" id="toggle-pip"${off||S.apiVersion>=16&&!canLifecycle()?' disabled':''}>${p.status==='paused'?'Resume':'Pause'}</button>`)
-  +(S.apiVersion>=16&&canLifecycle()?(archived()?`<button type="button" id="restore-pip"${off?' disabled':''}>Restore…</button>`:`<button type="button" id="archive-pip" class="danger-text"${off?' disabled':''}>Archive…</button>`):'');
+  +(S.apiVersion>=16&&canLifecycle()?(archived()?`<button type="button" id="restore-pip"${off?' disabled':''}>Restore…</button>${S.apiVersion>=68?`<button type="button" id="delete-archived-pip-menu" class="danger-text"${off?' disabled':''}>Delete permanently…</button>`:''}`:`<button type="button" id="archive-pip" class="danger-text"${off?' disabled':''}>Archive…</button>`):'');
 }
 // Settings for all your Pips (from the Pips home): their computers, and the apps they use.
 async function loadPipsSettings(){
@@ -3199,7 +3221,7 @@ function renderReview() {
   const r=S.review;if(!r)return;
   $('app').inert=true;
   if(r.loginForm){renderLoginForm(r);return;}
-  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.reasonRequired&&r.note?`<label>${esc(r.note)}<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
+  $('review-root').innerHTML=`<div class="overlay"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="review-title"><h2 id="review-title" tabindex="-1">${esc(r.title)}</h2><p>${esc(r.description)}</p>${r.body||''}${r.permanentPip?`<label>Type ${esc(S.pip?.name||'the Pip name')} to confirm<input id="deletePipName" data-draft="deletePipName" value="${esc(draft.deletePipName)}" autocomplete="off"${S.busy?' disabled':''}></label>`:''}${r.reasonRequired&&r.note?`<label>${esc(r.note)}<textarea id="findingReviewReason" data-draft="findingReviewReason"${S.busy?' disabled':''}>${esc(draft.findingReviewReason)}</textarea></label>`:''}${r.memoryRecord?`<label>Optional expiry, with time zone<input id="memoryExpiry" data-draft="memoryExpiry" value="${esc(draft.memoryExpiry)}" placeholder="2026-12-01T09:00:00Z"${S.busy?' disabled':''}></label><p class="muted">Leave empty for no automatic expiry. The source and job scope stay explicit.</p>`:''}${errorMarkup(r.error)}<div class="actions">${r.secondary?button(r.secondary.id,r.secondary.label,S.busy||!usable(),'secondary-action'):''}${button('review-cancel',r.readOnly?'Close':'Cancel',S.busy)}${r.always&&!r.readOnly&&S.apiVersion>=41?button('review-always','Always allow',S.busy||!usable()||reviewBlocked(r)):''}${r.readOnly?'':button('review-confirm',S.busy?'Applying…':r.confirm,S.busy||!usable()||reviewBlocked(r),r.danger?'danger':'primary')}</div></section></div>`;
   if(r.connectorSummary)mountConnectorSummary($('connector-review-values'),r.connectorSummary);
   if(r.connectorForm){
     const form=r.connectorForm,select=$('connector-tool');select.value=String(form.selected);select.disabled=S.busy;
@@ -3836,6 +3858,8 @@ document.addEventListener('click',event=>{
     case 'toggle-pip':if(archived())break;if(S.apiVersion>=16&&!canLifecycle()){setError('Refresh, then try again.');break;}void mutate({type:S.pip.status==='paused'?'resume_pip':'pause_pip',pip_id:S.selected,...(S.apiVersion>=16?{expected_lifecycle_revision:S.pip.lifecycle_revision}:{})});break;
     case 'archive-pip':reviewLifecycle(false);break;
     case 'restore-pip':reviewLifecycle(true);break;
+    case 'delete-archived-pip':reviewPermanentDelete();break;
+    case 'delete-archived-pip-menu':reviewPermanentDelete();break;
     case 'show-archived':S.showArchived=!S.showArchived;render();break;
     case 'pips-more':void loadMorePips();break;
     case 'cancel-run':openReview({title:personalPip()?'Stop this?':'Cancel this run?',description:personalPip()?`${S.pip?.name||'It'} stops what it’s doing. It can take a moment.`:'It stops what it’s doing. It can take a moment.',body:'',confirm:personalPip()?'Stop':'Cancel run',danger:true,request:{type:'cancel_pip_run',run_id:S.runId}});break;
@@ -3918,6 +3942,7 @@ document.addEventListener('click',event=>{
       if(review.starterForm){prepareStarter(review);return;}
       if(review.setup){void resolveSetup(review);return;}
       if(reviewBlocked(review)){review.error='This expired or was changed. Refresh and try again.';renderReview();return;}
+      if(review.permanentPip){void confirmPermanentDelete(review);return;}
       if(review.rejectFirst?.length){void rejectWaitingThenConfirm(review);return;}
       let reason;if(review.reasonRequired){reason=(review.note&&draft.findingReviewReason.trim())||review.autoReason||'Decided in the Pips view.';if(new TextEncoder().encode(reason).length>1000){review.error='That note is too long. Keep it under 1,000 characters (fewer with emoji or non-English text).';renderReview();$('findingReviewReason')?.focus();return;}}
       let memoryArgs={};if(review.lifecycle){const body=JSON.stringify({reason});if(review.lifecycleRetry?.body!==body)review.lifecycleRetry={body,key:window.crypto.randomUUID()};memoryArgs={request_key:review.lifecycleRetry.key};}
@@ -4046,5 +4071,6 @@ return {async navigate(value){if(!S.workspace||!usable()){options.navigation=val
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};
 if(typeof window!=='undefined'&&typeof acquireVsCodeApi==='function'&&!window.document.getElementById('pips-host')){
   const api=acquireVsCodeApi();
-  mountPips({root:window.document,postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});
+  const app=mountPips({root:window.document,postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});
+  window.addEventListener('message',event=>{if(event.data?.type==='pipsNavigate')void app.navigate(event.data.navigation);});
 }

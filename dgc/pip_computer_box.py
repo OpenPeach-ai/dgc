@@ -994,6 +994,12 @@ class BoxedBrowser(BrowserSession):
         self._ws = None
         self.dialog = self.chooser = None          # they went with the pages
         self._tab_names, self._next_tab = {}, 1   # a restarted browser's first tab is t1 again
+        self._attached.clear()
+        self._pages.clear()
+        self._kinds.clear()
+        self._parents.clear()
+        self._openers.clear()
+        self._orphaned = ""
         if self._box is not None:
             self._box.stop()
             self._box = None

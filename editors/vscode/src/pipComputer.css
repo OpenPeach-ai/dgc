@@ -19,6 +19,7 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-pane{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px;overflow:auto}
 .pc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.pc-bar input{flex:1}
 .pc-screen{position:relative;flex:1;min-height:200px;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:#0b0b0d;overflow:hidden}
+.pc-screen-closed{display:flex;flex-direction:column;justify-content:center;gap:12px}
 .pc-screen img{display:block;max-width:100%;max-height:100%;cursor:crosshair}
 .pc-muted{color:var(--muted);margin:0}.pc-hint{font-size:12px}
 .pc-error{margin:8px 16px 0;color:var(--vscode-errorForeground,#f14c4c)}.pc-pane .pc-error{margin:0}
@@ -42,10 +43,10 @@ input{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-
 .pc-log .pc-muted{font-family:var(--vscode-font-family,system-ui)}
 .pc-run{display:grid;gap:4px}.pc-prompt{margin:0}.pc-who{color:#b8a6ff}.pc-run pre{background:transparent;border:0;padding:0;color:inherit}.pc-exit{margin:0;color:#ff8a80}
 #pc-run input{font-family:var(--mono)}
-/* The desktop: DGC's own wallpaper (a violet night, aurora light, a silk wave and the DGC mark; the
+/* The desktop: DGC's Graphite wallpaper (quiet dark surface and the DGC mark; the
    same picture the full desktop shows, dgc/desktop_assets/wallpaper.jpg), apps in windows, a dock. */
 .pc-desktop{position:relative;flex:1;min-height:0;overflow:hidden;
- background:#140c33 url("../media/pips/computer-wallpaper.jpg") 78% 40%/cover no-repeat}   /* a narrow tab keeps the mark */
+ background:#171820 url("../media/pips/computer-wallpaper.jpg") 78% 40%/cover no-repeat}   /* a narrow tab keeps the mark */
 .pc-window{position:absolute;inset:14px 14px 72px;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;
  background:var(--vscode-editor-background);border:1px solid rgba(0,0,0,.25);box-shadow:0 14px 44px rgba(0,0,0,.38),0 2px 8px rgba(0,0,0,.2)}
 .pc-window.pc-note{inset:auto 14px 72px;padding:14px 16px}

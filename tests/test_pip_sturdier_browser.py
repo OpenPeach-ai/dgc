@@ -224,6 +224,19 @@ class SturdierBrowserTests(unittest.TestCase):
     def act(self, op, **args):
         return self.host.act(op, args)["text"]
 
+    def test_close_browser_stops_process_and_can_reopen(self):
+        self.act("open", url=self.url + "/")
+        self.assertTrue(self.host.browser.alive())
+        self.assertIn("browser is closed and its process has stopped", self.act("close_browser"))
+        self.assertFalse(self.host.browser.alive())
+        self.assertIn("already closed", self.act("close_browser"))
+        self.assertTrue(self.host.browser_closed_by_request)
+        self.assertIn("browser is closed", self.act("status"))
+        self.assertIn("no open tabs", self.act("tabs"))
+        self.assertFalse(self.host.browser.alive(), "status and tabs must not reopen the browser")
+        self.assertIn('heading level=1 "Desk"', self.act("open", url=self.url + "/"))
+        self.assertTrue(self.host.browser.alive())
+
     def test_a_link_that_opens_a_new_tab_moves_the_pip_there_and_tabs_go_back(self):
         page = self.act("open", url=self.url + "/")
         said = self.act("click", ref=ref(page, "link", "Spec sheet"))
@@ -412,6 +425,9 @@ class SturdierBrowserTests(unittest.TestCase):
     def test_careful_mode_asks_before_a_new_tab_on_a_new_site(self):
         self.host.end()
         self.host.begin(self.run_row["id"], self.frames, careful=True, sites=())
+        # The first model step may start the desktop and move an existing headless tab into
+        # its window. Settle that transition before comparing target IDs across the held step.
+        self.host.ensure_desktop()
         before = {tab["target"] for tab in self.host.browser.tab_list()}
         said = self.act("tabs", action="open", url=self.url + "/spec")
         self.assertIn(f"Held: {TEST_HOST} is new for this user", said)

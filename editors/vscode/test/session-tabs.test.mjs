@@ -360,16 +360,17 @@ test("the side bar's own chat starts empty, and its messages open sessions in ta
   assert.equal(tabs.openSessions().has("20261006-091200-b2"), true);
 });
 
-test("in a tab, Settings and the Pips open the side bar's, and + opens another tab", async () => {
+test("in a Work tab, Settings stays separate and Pips opens its own editor tab", async () => {
   const { sidebar, tabs, made } = windowWith();
   const opened = [];
   sidebar.openSettings = (section) => { opened.push(["settings", section]); };
-  sidebar.openPips = () => { opened.push(["pips"]); };
+  sidebar.openPipsEditor = (navigation) => { opened.push(["pips-tab", navigation]); };
   tabs.open("");
   const [tab] = made;
   await tab.onMessage({ type: "openSettings", section: "general" });
-  await tab.onMessage({ type: "openPips" });
-  assert.deepEqual(opened, [["settings", "general"], ["pips"]]);
+  const navigation = {pip:'pip_'+'a'.repeat(32),section:'chat',run:'run_'+'b'.repeat(32)};
+  await tab.onMessage({ type: "openPips", navigation });
+  assert.deepEqual(opened, [["settings", "general"], ["pips-tab", navigation]]);
   await tab.onMessage({ type: "newChat" });
   assert.equal(world.panels.length, 2, "+ in a tab is a new session in a new tab");
   assert.equal(tab.slots.length <= 1, true, "not a second chat inside the tab");

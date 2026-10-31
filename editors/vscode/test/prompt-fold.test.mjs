@@ -58,6 +58,27 @@ test("without layout nothing folds, which is why every other webview test sees t
   assert.deepEqual(errors, []);
 });
 
+test("reopened question answers keep the styled question above the user's words", () => {
+  const p = panel();
+  p.event({type:"history",complete:true,items:[
+    {type:"turn_start",turn_id:"h1",prompt:"Check the invoice",kind:"prompt"},
+    {role:"steering",text:"Draft 272",answer_question:"Which invoice should I check?"},
+    {type:"text_delta",text:"I checked it."},
+    {type:"stream_end",message_id:"h1:1",phase:"answer"},
+    {type:"turn_end",turn_id:"h1",reason:"completed",token_estimate:0,final_message_id:"h1:1"},
+    {type:"turn_start",turn_id:"h2",prompt:"Draft 273",kind:"prompt",answer_question:"And the next invoice?"},
+    {type:"text_delta",text:"I checked that too."},
+    {type:"stream_end",message_id:"h2:1",phase:"answer"},
+    {type:"turn_end",turn_id:"h2",reason:"completed",token_estimate:0,final_message_id:"h2:1"},
+  ]});
+  const answers=[...p.doc.querySelectorAll('.history-pages .msg.user .bubble')].filter(b=>b.querySelector('.answered-q'));
+  assert.equal(answers.length,2);
+  assert.deepEqual(answers.map(b=>[b.querySelector('.answered-q').textContent,b.querySelector('.prompt-text').textContent]),
+    [["Which invoice should I check?","Draft 272"],["And the next invoice?","Draft 273"]]);
+  assert.ok(answers.every(b=>!b.querySelector('.prompt-text').textContent.startsWith('> ')));
+  assert.deepEqual(p.errors,[]);
+});
+
 test("a short prompt is drawn exactly as before", () => {
   const p = panel();
   const bubble = p.submit("fix the login bug");

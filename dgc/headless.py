@@ -373,7 +373,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 67: get_pip_artifacts and set_pip_artifacts (artifact_pips): a Pip's report_as ("chat", "doc", "sheet": each
 # finished review also kept as the newest version of its own document or sheet) and the dashboards it refreshes after
 # each run it finishes (a Pulse keeps one current on its schedule).
-PIPS_API_VERSION = 67
+PIPS_API_VERSION = 68
 
 
 def _pips_platform_supported() -> bool:
@@ -5356,6 +5356,7 @@ class Backend:
         items: list = []
         calls: dict = {}                # saved tool_call id -> the name its result belongs to
         asked: dict = {}                # saved propose_options call id -> its saved arguments
+        open_ask_questions: set[str] = set()  # saved ask_user text can identify a quoted answer on replay
         turn_n = 0
         turn: dict | None = None
         # Compaction rewrites the transcript as a user message carrying the summary followed by an
@@ -5432,7 +5433,8 @@ class Backend:
             items.extend(turn.pop("pip_reports", ()))
             turn = None
 
-        def open_turn(prompt: str, kind: str, attachments: list | None = None) -> None:
+        def open_turn(prompt: str, kind: str, attachments: list | None = None,
+                      answer_question: str = "") -> None:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
@@ -5442,7 +5444,20 @@ class Backend:
                        "prompt": prompt, "kind": kind}
             if attachments:
                 started["attachments"] = attachments
+            if answer_question:
+                started["answer_question"] = answer_question
             items.append(started)
+
+        def answered_question(text: str) -> tuple[str, str]:
+            """Split only a quote of a question this session actually asked with ask_user."""
+            if not text.startswith("> "):
+                return "", text
+            quoted, gap, answer = text.partition("\n\n")
+            question = quoted[2:]
+            if not gap or not answer.strip() or question not in open_ask_questions:
+                return "", text
+            open_ask_questions.discard(question)
+            return question, answer
 
         def ensure_turn() -> dict:
             if turn is None:
@@ -5621,7 +5636,10 @@ class Backend:
                         at = _history_written_at({"_dgc_at": at})
                         if at is not None:
                             items.append({"role": "time", "of": "steering", "at": at})
-                        entry = {"role": "steering", "text": text}
+                        question, answer = answered_question(text)
+                        entry = {"role": "steering", "text": answer}
+                        if question:
+                            entry["answer_question"] = question
                         if count:
                             entry["attachments"] = image_items[image_at:image_at + count]
                         image_at += count
@@ -5663,7 +5681,8 @@ class Backend:
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
-                open_turn(text, "prompt", image_items)
+                question, answer = answered_question(text)
+                open_turn(answer, "prompt", image_items, question)
                 sent_at = _history_written_at(m)
                 if sent_at is not None:
                     items.append({"role": "time", "of": "prompt", "at": sent_at})
@@ -5696,6 +5715,12 @@ class Backend:
                     name = str(function.get("name") or "tool")[:128]
                     saved = _history_saved_args(function.get("arguments"))
                     args = _history_args(saved)
+                    if name == "ask_user" and isinstance(saved, dict):
+                        question = saved.get("question")
+                        if isinstance(question, str) and question.strip():
+                            if len(open_ask_questions) >= 128:
+                                open_ask_questions.pop()
+                            open_ask_questions.add(question)
                     call_id = str(tc.get("id") or "") or None
                     # The summary is read from the whole arguments, as live: a bound must not change it.
                     # A message to a sub-agent names that agent, as its live row did.

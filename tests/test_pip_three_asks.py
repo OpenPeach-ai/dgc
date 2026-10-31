@@ -75,7 +75,7 @@ class Instructions(unittest.TestCase):
                     "you can still type into them by their ref"):
             self.assertNotIn(old, said, "the old flow asked for the card in chat")
         # "I can't tell you a card is waiting below. Should I press Pay again?" -- above the held payment's card.
-        self.assertIn("DGC shows it as a card below your reply, so never say there is no card or offer to press it again", said)
+        self.assertIn("When a tool says one is there, it is: never say there is no card or that the user must allow it elsewhere", said)
         # "I can't put an Allow card here myself -- that permission has to come from DGC's side" (2026-10-20).
         self.assertIn("DGC also shows its own cards there, without you making them: a new site to allow, and anything your "
                       "computer holds.", said)

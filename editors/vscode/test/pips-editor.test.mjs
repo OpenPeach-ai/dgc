@@ -81,6 +81,12 @@ function bridge(){
  return{editor,posted,sent,receive:m=>receive(m),backend,caps,panel,created,revealed,documents,shown,saved};
 }
 test('host correlates direct results and never forwards unowned replies',()=>{const x=bridge();x.receive({type:'pipsRequest',id:'one',request:{type:'get_pip_runner'}});const wire=x.sent[0];assert.equal(wire.type,'pips_control');assert.notEqual(wire.request.request_id,'one');const count=x.posted.length;x.editor.event({type:'pips_result',request_id:'unowned',command:'get_pip_runner',ok:true,result:{runner}});assert.equal(x.posted.length,count);x.editor.event({type:'pips_result',request_id:wire.request.request_id,command:'get_pip_runner',ok:true,result:{runner}});assert.equal(x.posted.at(-1).id,'one');assert.equal(x.posted.at(-1).ok,true);});
+test('a Pip editor tab receives the selected run after its document is ready',()=>{
+ const x=bridge(),navigation={pip:'pip_'+'a'.repeat(32),section:'chat',run:'run_'+'b'.repeat(32)};
+ x.editor.open(navigation);x.receive({type:'pipsReady'});
+ assert.deepEqual(x.posted.at(-1),{type:'pipsNavigate',navigation});
+ assert.equal(x.created.length,1,'the existing Pip editor tab is reused');
+});
 test('host refuses reviewed execution controls on Pips API v6 until the CLI is upgraded',()=>{const x=bridge();x.editor.ready({...x.caps,pips_api_version:6},{});assert.equal(x.posted.at(-1).supported,false);x.receive({type:'pipsRequest',id:'schedule',request:{type:'propose_pip_update',pip_id:'a',expected_version:1,changes:{schedule:null},reason:'Manual'}});assert.equal(x.sent.length,0);assert.match(x.posted.at(-1).error.message,/Pips aren’t available\. Update DGC/);});
 test('host command rejection maps to the pending caller and remains outside chat',()=>{const x=bridge();x.receive({type:'pipsRequest',id:'one',request:{type:'get_pip_runner'}});assert.equal(x.editor.event({type:'command_rejected',command:'pips_control',request_id:x.sent[0].request.request_id,message:'Editor queue is full.'}),true);assert.equal(x.posted.at(-1).id,'one');assert.equal(x.posted.at(-1).ok,false);assert.match(x.posted.at(-1).error.message,/queue is full/);});
 test('same-backend reveal preserves opt-in and pending mutation ownership',()=>{const x=bridge();x.receive({type:'pipsRequest',id:'enable',request:{type:'pips_enable',enabled:true}});x.editor.event({type:'pips_status',request_id:x.sent[0].request_id,enabled:true});x.receive({type:'pipsRequest',id:'run',request:{type:'run_pip',pip_id:'a',idempotency_key:'key'}});const pending=x.sent[1].request.request_id;x.editor.open();x.receive({type:'pipsReady'});assert.equal(x.posted.at(-1).enabled,true);x.editor.event({type:'pips_result',request_id:pending,command:'run_pip',ok:true,result:{run:run()}});assert.equal(x.posted.at(-1).id,'run');});
@@ -978,6 +984,17 @@ const lifecycleJob=(extra={})=>job(memoryPip,{workspace_id:memoryWorkspace,lifec
 const lifecycleRequest=(extra={})=>({type:'archive_pip',pip_id:memoryPip,expected_version:1,expected_lifecycle_revision:2,reason:'Retire this old job.',...extra});
 const lifecycleResponse=(extra={})=>({pip:lifecycleJob({status:'archived',lifecycle_revision:3}),receipt:{id:'archive_'+'4'.repeat(32),operation:'archive',pip_id:memoryPip,workspace_id:memoryWorkspace,job_version:1,lifecycle_revision_before:2,lifecycle_revision_after:3,status_before:'active',status_after:'archived',reason:'Retire this old job.',actor:'user',created_at:'2026-10-02T02:00:00.000Z'},replayed:false,...extra});
 const lifecycleSetup=(extra={})=>setup({apiVersion:16,workspaceValue:{id:memoryWorkspace,name:'Lifecycle project'},jobs:[lifecycleJob()],contextValue:{workspace_id:memoryWorkspace,revision:0,entries:[]},runs:[],...extra});
+test('archived Pip deletion requires its exact name and removes it from the home list',async()=>{
+ const pip=lifecycleJob({status:'archived',lifecycle_revision:3});
+ const x=lifecycleSetup({apiVersion:68,jobs:[pip],autoSelect:false});await x.drain();
+ x.click('#show-archived');x.click('[data-job]');await x.drain();x.click('[data-tab=job]');
+ x.click('#delete-archived-pip');assert.match(x.d.querySelector('[role=dialog]').textContent,/cannot be undone/i);
+ x.click('#review-confirm');assert.equal(x.requests('delete_archived_pip').length,0);
+ x.input('#deletePipName',pip.name);x.click('#review-confirm');
+ const pending=x.requests('delete_archived_pip')[0];assert.deepEqual(JSON.parse(JSON.stringify(pending.request)),{type:'delete_archived_pip',pip_id:pip.id,expected_version:1,expected_lifecycle_revision:3,expected_name:pip.name});
+ x.answer(pending,{deleted:true,pip_id:pip.id});await x.drain();
+ assert.equal(x.d.querySelector('[data-job]'),null);assert.doesNotMatch(x.d.body.textContent,/Delete .* permanently\?/);
+});
 test('archival receipt binds exact job/lifecycle while replay returns current later state honestly',()=>{
  const v=lifecycleResponse(),req=lifecycleRequest();assert.equal(model.exports.archivalResult(v,req,memoryWorkspace),v);
  for(const bad of [{...v,pip:{...v.pip,status:'active'}},{...v,receipt:{...v.receipt,lifecycle_revision_after:4}},{...v,receipt:{...v.receipt,status_before:'archived'}},{...v,receipt:{...v.receipt,reason:'Different reason'}},{...v,receipt:{...v.receipt,operation:'restore'}},{...v,receipt:{...v.receipt,created_at:'2026-10-02T02:00:00Z'}},{...v,pip:{...v.pip,lifecycle_revision:2}}])assert.throws(()=>model.exports.archivalResult(bad,req,memoryWorkspace));

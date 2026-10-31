@@ -12,9 +12,9 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,22 @@ const workspacePath = join(scratch, "workspace");
 const userDataDir = join(scratch, "user-data");
 const resultPath = join(scratch, "result.json");
 const wrapperPath = join(scratch, "dgc-real");
-const python = process.env.DGC_TEST_PYTHON || "python3";
+function pickPython() {
+  const candidates = [process.env.DGC_TEST_PYTHON, join(repoRoot, ".venv", "bin", "python")];
+  for (const dir of String(process.env.PATH || "").split(delimiter)) {
+    const launcher = join(dir, "dgc");
+    if (!dir || !existsSync(launcher)) continue;
+    const first = readFileSync(launcher, "utf8").split("\n", 1)[0];
+    if (first.startsWith("#!") && /python/.test(first)) candidates.push(first.slice(2).trim().split(/\s+/)[0]);
+    break;
+  }
+  candidates.push("python3");
+  for (const candidate of candidates.filter(Boolean)) {
+    if (spawnSync(candidate, ["-c", "import requests, prompt_toolkit, rich"], { stdio: "ignore" }).status === 0) return candidate;
+  }
+  throw new Error("no Python with DGC's dependencies: set DGC_TEST_PYTHON");
+}
+const python = pickPython();
 const testToken = randomUUID();
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 

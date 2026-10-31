@@ -172,6 +172,7 @@ class DesktopBoxTests(unittest.TestCase):
         with patch.object(pip_screen, "components", return_value={"found": {}, "missing": ["Xtigervnc", "tint2"], "prefix": None}), \
                 patch.object(pip_screen.shutil, "which", return_value="/usr/bin/bwrap"), \
                 patch.object(pip_screen.sys, "platform", "linux"), \
+                patch("dgc.pip_computer_box.box_runs", return_value=(True, "")), \
                 patch.object(pip_screen_setup, "status", return_value={"state": "running", "error": ""}):
             shown = pip_screen.availability()
         self.assertFalse(shown["available"])
@@ -182,11 +183,27 @@ class DesktopBoxTests(unittest.TestCase):
         with patch.object(pip_screen, "components", return_value={"found": {}, "missing": ["Xtigervnc", "tint2"], "prefix": None}), \
                 patch.object(pip_screen.shutil, "which", return_value="/usr/bin/bwrap"), \
                 patch.object(pip_screen.sys, "platform", "linux"), \
+                patch("dgc.pip_computer_box.box_runs", return_value=(True, "")), \
                 patch.object(pip_screen_setup, "status", return_value={"state": "unsupported", "error": ""}):
             shown = pip_screen.availability()
         self.assertFalse(shown["available"])
         self.assertIn("Xtigervnc, tint2", shown["reason"])
         self.assertEqual(shown["install"], pip_screen.INSTALL)
+
+    def test_desktop_reports_sandbox_denial_before_offering_automatic_download(self):
+        from dgc import browser_setup, pip_computer_box
+        with patch.object(pip_screen, "components", return_value={"found": {}, "missing": ["Xtigervnc"], "prefix": None}) as components, \
+                patch.object(pip_screen.shutil, "which", return_value="/usr/bin/bwrap"), \
+                patch.object(pip_screen.sys, "platform", "linux"), \
+                patch.object(pip_computer_box, "box_runs", return_value=(False, "loopback denied")), \
+                patch.object(pip_computer_box, "box_refused_reason", return_value="bubblewrap cannot start"), \
+                patch.object(browser_setup, "userns_restricted", return_value=True), \
+                patch.object(browser_setup, "in_container", return_value=False):
+            shown = pip_screen.availability()
+        self.assertFalse(shown["available"])
+        self.assertIn("AppArmor profile", shown["reason"])
+        self.assertIn("apparmor_parser", shown["install"])
+        components.assert_not_called()
 
 
 class WhoseSubmitTests(unittest.TestCase):

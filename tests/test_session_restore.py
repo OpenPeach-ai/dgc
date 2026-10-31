@@ -123,6 +123,45 @@ class SessionRestoreTests(unittest.TestCase):
             if item.get("type"):
                 self.assertIsNone(event_error({"seq": 0, **item}), item)
 
+    def test_answered_question_replays_as_a_quote_and_answer(self):
+        from dgc.workflows import STEERING_PREFIX, STEERING_SUFFIX
+        question = "Which invoice should I check?"
+        reply = "Draft 272"
+        quoted = f"> {question}\n\n{reply}"
+        asked = {"id": "ask-one", "function": {"name": "ask_user",
+                 "arguments": json.dumps({"question": question, "context": "", "suggestions": []})}}
+        self.agent.messages = [
+            {"role": "user", "content": "Check the invoice"},
+            {"role": "assistant", "content": "", "tool_calls": [asked]},
+            {"role": "tool", "tool_call_id": "ask-one", "content": "Question shown"},
+            {"role": "user", "content": STEERING_PREFIX + quoted + STEERING_SUFFIX,
+             "_dgc_steering": [quoted]},
+            {"role": "assistant", "content": "I checked it."},
+        ]
+        items = self.backend._history()
+        steering = next(item for item in items if item.get("role") == "steering")
+        self.assertEqual((steering["answer_question"], steering["text"]), (question, reply))
+        self.assertEqual(self.agent.messages[3]["_dgc_steering"], [quoted], "the model context stays intact")
+
+    def test_answer_after_question_turn_ends_replays_with_the_same_quote(self):
+        question, reply = "Which invoice?", "Draft 272"
+        quoted = f"> {question}\n\n{reply}"
+        asked = {"id": "ask-two", "function": {"name": "ask_user",
+                 "arguments": json.dumps({"question": question})}}
+        self.agent.messages = [
+            {"role": "user", "content": "Check the invoice"},
+            {"role": "assistant", "content": "", "tool_calls": [asked]},
+            {"role": "tool", "tool_call_id": "ask-two", "content": "Question shown"},
+            {"role": "assistant", "content": "Waiting for your answer."},
+            {"role": "user", "content": quoted},
+            {"role": "assistant", "content": "I checked it."},
+            {"role": "user", "content": "> An unrelated quote\n\nKeep working"},
+        ]
+        starts = [item for item in self.backend._history() if item.get("type") == "turn_start"]
+        self.assertEqual((starts[1]["answer_question"], starts[1]["prompt"]), (question, reply))
+        self.assertEqual(starts[2]["prompt"], "> An unrelated quote\n\nKeep working")
+        self.assertNotIn("answer_question", starts[2])
+
     def test_compacted_history_replays_spawn_cards_after_the_summary(self):
         from dgc.agent import _COMPACT_PREFIX
         self.agent.messages = [

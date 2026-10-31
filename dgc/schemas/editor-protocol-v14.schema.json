@@ -562,6 +562,9 @@
             "request_id": {
               "type": "string"
             },
+            "answer_question": {
+              "type": "string"
+            },
             "attachments": {
               "type": "array"
             }

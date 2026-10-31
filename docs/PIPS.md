@@ -1427,7 +1427,9 @@ with a dock at the bottom holding **Browser** (Google Chrome), **Files** (a file
 **Terminal**, and its image editor, **Documents** and PDF viewer when this computer has them. It opens
 with nothing open. Click, type and move windows as on any computer. While a
 Pip run is using it you watch, and your keyboard and mouse wait until it is done. The browser is the
-Pip's own: closing its window and clicking Browser in the dock brings it back.
+Pip's own: when you ask the Pip to close the browser, its `close_browser` step stops the browser
+process and confirms that it stopped. Its desktop and saved sign-ins remain. Click Browser in the
+dock to bring it back. In the simpler browser view, use **Open browser** after a close.
 
 **Setting it up takes nothing from you.** The first time you open a computer, DGC fetches what this
 machine lacks (the desktop's programs and Google Chrome, about 135 MB on an Ubuntu machine with none
@@ -1480,7 +1482,10 @@ The terminal has the same steps: `dgc pips computer status PIP`, `pending PIP`,
 `give`, `remove` and `approve` ask once; add `--yes` in a script.
 
 On Linux a computer needs bubblewrap (`bwrap`); DGC fetches the desktop's programs and Google
-Chrome itself the first time ("Setting up your Pip…"), with no admin password.
+Chrome itself the first time ("Setting up your Pip…"), with no admin password. On Ubuntu releases
+that restrict user namespaces, bubblewrap also needs Ubuntu's packaged AppArmor profile. DGC checks
+that the sandbox actually starts before it marks the computer ready; the computer tab shows the
+one-time admin command when the profile is missing. DGC never falls back to an unsandboxed browser.
 
 On a Mac (Apple silicon, macOS 26 or later) each computer is a small Linux VM made with Apple's
 `container` tool, which you install once from
@@ -1673,6 +1678,13 @@ Configured secrets are redacted from reports and previews. Saved artifact files
 - **Pause one Pip:** `dgc pips pause PIP_ID`. A paused Pip can still chat.
 - **Archive a Pip** you no longer need: `dgc pips archive` keeps its history and
   stops it from running. `dgc pips restore` brings it back, paused.
+- **Delete an archived Pip permanently:** choose **Delete permanently…** in its
+  Settings and type its exact name, or run `dgc pips delete-archived PIP_ID`
+  with `--confirm-name`, `--expected-version`, and `--expected-lifecycle-revision`.
+  This erases its private DGC chat, runs, audit receipts, references in other
+  Pips' saved history, computer, exclusive saved sign-ins, and Pip-created Outputs.
+  Shared sign-ins, copies you exported,
+  and project files it changed remain. This cannot be undone.
 - **Turn Pips off:** choose **Disable local Pips…** in the Pips view, which first
   stops all Pips work. Or set `pips_enabled` to `false` (`/set pips_enabled false`
   in the terminal, or in `.dgc/config.json` in your home directory). With Pips off, the main chat has no

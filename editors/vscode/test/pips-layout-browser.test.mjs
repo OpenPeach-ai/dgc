@@ -34,7 +34,7 @@ const hostFor = (opts = {}) => `(${function (PIP, opts) {
     description: "Reads", available: true, unavailable_reason: null, default_name: id, default_goal: "Help",
     engine: id === "patch" ? "patch" : id === "pulse" ? "test" : id === "quill" ? "documentation_draft" : "source_audit" }));
   const pip = { id: PIP, workspace_id: PW, pip_type: "core", name: "Core", goal: "Help with what I ask in this chat.", source_policy: { mode: "personal" },
-    source_ref: "HEAD", status: "active", current_version: 1, lifecycle_revision: 0, policy: "read_only", trigger: "manual", schedule: null,
+    source_ref: "HEAD", status: opts.archived ? "archived" : "active", current_version: 1, lifecycle_revision: opts.archived ? 1 : 0, policy: "read_only", trigger: "manual", schedule: null,
     proposals: [], pending_review_count: 0, created_at: "2026-10-17T09:00:00Z", updated_at: "2026-10-17T09:00:00Z" };
   const controls = { version: 1, mode: "read_only", options: { context_size: 8192, thinking: "off" }, options_source: "last_message",
     inherited_context_size: 1048576, effective_context_size: 8192, context_min: 2048, context_max: 32768,
@@ -61,9 +61,10 @@ const hostFor = (opts = {}) => `(${function (PIP, opts) {
     const make = m?.type === "pipsRequest" && answers[m.request.type];
     if (make) setTimeout(() => window.postMessage({ type: "pipsReply", id: m.id, ok: true, result: make() }, "*"), 1);
   } });
-  setTimeout(() => window.postMessage({ type: "pipsConnection", apiVersion: 44, generation: 1, connected: true, supported: true, enabled: true }, "*"), 5);
+  setTimeout(() => window.postMessage({ type: "pipsConnection", apiVersion: opts.archived ? 68 : 44, generation: 1, connected: true, supported: true, enabled: true }, "*"), 5);
 }})(${JSON.stringify(PIP)}, ${JSON.stringify(opts)});`;
-const pageFor = (opts) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body><main id="app"></main><div id="review-root"></div>`
+const vscodeTheme = ':root{--vscode-editor-background:#181818;--vscode-foreground:#e2e2e2;--vscode-descriptionForeground:#a3a3a3;--vscode-input-background:#242424;--vscode-input-foreground:#e2e2e2;--vscode-panel-border:#363636;--vscode-focusBorder:#7c5cff;--vscode-button-secondaryBackground:#303030;--vscode-button-secondaryForeground:#e2e2e2}';
+const pageFor = (opts) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${vscodeTheme}${css}</style></head><body><main id="app"></main><div id="review-root"></div>`
   + `<script>${hostFor(opts)}</script><script>${js.replace(/<\/script/g, "<\\/script")}</script></body></html>`;
 
 async function open(width, opts = {}) {
@@ -72,8 +73,30 @@ async function open(width, opts = {}) {
   const p = await context.newPage();
   await p.route("https://pips.test/**", (r) => r.fulfill({ body: html, contentType: "text/html" }));
   await p.goto("https://pips.test/view");
+  if (opts.archived) { await p.waitForSelector('#show-archived'); await p.click('#show-archived'); }
   await p.waitForSelector(`[data-job="${PIP}"]`);
   return { p, close: () => context.close() };
+}
+for (const width of [320, 600]) {
+  test(`archived Pip permanent deletion review fits at ${width}px`, async t => {
+    if (skipOrFail(t)) return;
+    const { p, close } = await open(width, { archived: true });
+    try {
+      await p.click(`[data-job="${PIP}"]`);
+      await p.click('details[data-details="pip-menu"] > summary');
+      await p.click('[data-tab="job"]');
+      await p.locator('#delete-archived-pip:visible').click();
+      await p.waitForSelector('#deletePipName');
+      const review = await p.evaluate(() => {
+        const box = document.querySelector('.dialog').getBoundingClientRect();
+        const field = document.querySelector('#deletePipName').getBoundingClientRect();
+        return { dialog: [box.left, box.right], field: [field.left, field.right], vw: innerWidth };
+      });
+      assert.ok(review.dialog[0] >= -1 && review.dialog[1] <= width + 1);
+      assert.ok(review.field[0] >= review.dialog[0] && review.field[1] <= review.dialog[1]);
+      if (process.env.DGC_SHOTS) await p.screenshot({ path: `${process.env.DGC_SHOTS}/pip-delete-${width}.png` });
+    } finally { await close(); }
+  });
 }
 // Lines a text node takes, and their average width: crushed text is many narrow lines.
 const lines = (p, selector) => p.evaluate((sel) => {

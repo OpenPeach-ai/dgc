@@ -72,6 +72,20 @@ test('a busy page\'s full-size screen shows (an inbox frame is often over 100 KB
  assert.equal(x.d.querySelector('#pc-screen').getAttribute('src'),big);
 });
 
+test('a Pip-closed browser stays closed in the viewer until the user reopens it',async()=>{
+ const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain();
+ const closed={view:{ok:false,closed:true,error:'The browser is closed. Open it again when you need it.'}};
+ await x.tick({use_pip_computer_view:r=>r.op==='frame'?closed:{view:{ok:true,watching:false,url:'about:blank',width:1280,height:800,image:JPEG}}});
+ assert.equal(x.d.querySelector('#pc-screen'),null,'the previous page image is removed');
+ assert.match(x.d.querySelector('.pc-screen').textContent,/browser is closed/);
+ assert.ok(x.d.querySelector('#pc-reopen-browser'));
+ await x.tick({use_pip_computer_view:()=>closed});
+ assert.equal(x.d.querySelector('#pc-screen'),null,'background refresh does not reopen it');
+ x.click('#pc-reopen-browser');await x.drain();
+ assert.ok(x.requests('use_pip_computer_view').some(m=>m.request.op==='reopen'));
+ assert.ok(x.d.querySelector('#pc-screen'));
+});
+
 test('minimise or close a window to see the desktop; the browser comes back when the Pip starts using it',async()=>{
  const x=setup();await x.drain();x.click('[data-app=browser]');await x.drain();
  x.click('[data-minimize=browser]');assert.equal(x.d.querySelector('.pc-window'),null,'the bare desktop');
@@ -310,6 +324,18 @@ test('a failed setup says why, offers the install command, and an invalid setup 
  assert.match(x.d.querySelector('.pc-install').textContent,/Updating package lists failed.*sudo apt install tigervnc-standalone-server/s);
  const y=setup({screen:true,viewer:Viewer,desktop:{available:false,reason:'x',install:'',setup:{state:'downloading',step:'',done:0,total:0,error:''}}});await y.drain();
  assert.equal(y.d.querySelector('.pc-setup'),null,'an unknown state is refused, not half-shown');
+});
+
+test('an OS sandbox denial shows its setup step instead of a computer or an endless setup spinner',async()=>{
+ const x=setup({screen:true,status:computer({available:false,reason:'Ubuntu needs an AppArmor profile.'}),
+  desktop:{available:false,reason:'Ubuntu needs its packaged AppArmor profile for bubblewrap.',
+   install:'sudo apt install apparmor-profiles',setup:{state:'none',step:'',done:0,total:0,error:''}}});
+ await x.drain();
+ assert.match(x.d.querySelector('.pc-status').textContent,/Setup needed/);
+ assert.equal(x.d.querySelector('.pc-setup'),null);
+ assert.match(x.d.querySelector('.pc-install').textContent,/AppArmor profile.*sudo apt install apparmor-profiles/s);
+ assert.match(x.d.querySelector('.pc-note').textContent,/cannot start on this machine/);
+ assert.equal(x.d.querySelector('.pc-dock'),null,'the unusable dock is not offered as a working computer');
 });
 
 test('while the Pip uses its computer the screen says so; without the desktop it says what to install',async()=>{

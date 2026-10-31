@@ -1,6 +1,7 @@
 """The Sessions list holds thousands and searches them: a per-project index (session_index)."""
 import json
 import os
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -24,6 +25,26 @@ class SessionIndexTests(unittest.TestCase):
         [row] = session_index.page(self.dir)
         self.assertEqual(row[0], path)
         self.assertIn("Large session", row[2])
+
+    def test_large_checkpoint_session_keeps_its_real_name_and_message_count(self):
+        path = self.dir / "large-conversation.json"
+        path.write_text(json.dumps({
+            "updated": 17.0,
+            "messages": [{"role": "user", "content": "Review the ERP"},
+                         {"role": "assistant", "content": "The sales report is ready."}],
+            "name": "ERP review",
+            "checkpoints": {"snapshots": "x" * 2048},
+        }))
+        with patch.object(session_index, "MAX_INDEX_FILE_BYTES", 512):
+            [row] = session_index.page(self.dir)
+            self.assertEqual((row[2], row[3], row[4]), ("Review the ERP", 2, "ERP review"))
+            self.assertEqual(session_index.page(self.dir, query="sales")[0][0], path)
+            # A pre-fix index saved the anonymous large-file row under this same file stamp.
+            with sqlite3.connect(self.dir / session_index.INDEX_NAME) as db:
+                db.execute("UPDATE meta SET preview='Large session — open to view', count=0, name='' WHERE path=?", (str(path),))
+                db.execute("PRAGMA user_version=1")
+            [repaired] = session_index.page(self.dir)
+            self.assertEqual((repaired[2], repaired[3], repaired[4]), ("Review the ERP", 2, "ERP review"))
 
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())

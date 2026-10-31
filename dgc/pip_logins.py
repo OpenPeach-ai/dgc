@@ -276,7 +276,7 @@ class Store:
             with contextlib.suppress(OSError):
                 tmp.unlink()
 
-    def read(self) -> dict:
+    def read(self, *, strict: bool = False) -> dict:
         """{"version", "logins"}: an empty store when there is no file, or none this key can open."""
         path = self.root / SEALED
         try:
@@ -291,7 +291,9 @@ class Store:
                 raise LoginError("The saved logins key is missing.", "unreadable")
             value = json.loads(unseal(path.read_bytes(), key).decode("utf-8"))
             logins = [item for item in value.get("logins", [])[:MAX_LOGINS] if _valid_login(item)]
-        except (LoginError, ValueError, AttributeError):
+        except (LoginError, ValueError, AttributeError) as error:
+            if strict:
+                raise LoginError("The saved logins file must be repaired before Pip deletion can finish.", "unreadable") from error
             # Said once, never with the file's contents; the next save replaces it.
             if str(path) not in _WARNED:
                 _WARNED.add(str(path))
