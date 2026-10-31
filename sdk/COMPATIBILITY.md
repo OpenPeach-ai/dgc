@@ -19,7 +19,7 @@
 | 0.5.2 | v14 | 0.41.5 | ≥ 3.10 | ≥ 22 (source only, strip-types) | Linux |
 
 These host proofs are release dry runs with isolated CLI 0.50.0 installs, package builds,
-121 Python SDK tests and 69 Node SDK tests. They do not cover every macOS or WSL version.
+the full Python and Node SDK suites. They do not cover every macOS or WSL version.
 Native Windows is experimental. Focused Python and TypeScript checks, plus an isolated
 read-only runtime start, passed on Windows 11. The full native suite is outside the host
 proof: custom tools require Unix sockets and the native CLI has no OS sandbox for auto mode.
