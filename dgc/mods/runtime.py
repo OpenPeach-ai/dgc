@@ -177,6 +177,11 @@ class ModProcess:
 
     def _fail(self, why: str) -> None:
         self.state, self.error = "crashed", why
+        # A refusal before Popen succeeds has no reader thread to call _finish.
+        # Release the scratch folder here instead of leaving one on every start.
+        if self._proc is None and self._scratch is not None:
+            shutil.rmtree(self._scratch, ignore_errors=True)
+            self._scratch = None
 
     def _finish(self, state: str, error: str) -> None:
         with self._lock:

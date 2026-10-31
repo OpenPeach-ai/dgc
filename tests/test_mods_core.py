@@ -14,6 +14,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -234,6 +235,18 @@ class RuntimeTests(Home):
         child = proc._proc
         child.stdin.close()                       # DGC gone: its end of the pipe closes
         self.assertEqual(child.wait(timeout=10), 0)
+
+    def test_failed_mod_start_removes_its_scratch_folder(self):
+        from dgc.mods.runtime import ModProcess
+        scratch = self.tmp / "failed-start-scratch"
+        proc = ModProcess(catalog.find("recorder", (str(self.rec),)), on_request=lambda *a: {},
+                          sandboxed=True)
+        with patch("dgc.mods.runtime.tempfile.mkdtemp", side_effect=lambda **_kwargs: str(scratch)), \
+             patch("dgc.mods.runtime.sandboxed_argv", return_value=None):
+            scratch.mkdir()
+            proc.start()
+        self.assertEqual(proc.state, "crashed")
+        self.assertFalse(scratch.exists())
 
     def test_a_mod_that_hangs_only_watched_and_a_mod_that_crashes_is_said_to_have(self):
         crasher = write_mod(self.src, "crasher", "raise SystemExit('boom: missing key')", {"events": ["tool.call"]})
