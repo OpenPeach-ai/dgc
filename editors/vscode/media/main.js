@@ -4155,11 +4155,14 @@
   // actually read as bare, unclassified text.
   function showToolProgress(card, ev) {
     const numeric = Number.isFinite(ev.progress);
-    const hasTotal = numeric && Number.isFinite(ev.total) && ev.total !== 0;
+    const hasTotal = numeric && Number.isFinite(ev.total) && ev.total > 0;
+    card._progressMessage = String(ev.message || "").trim().slice(0, 160);
+    card._progressFraction = hasTotal ? Math.max(0, Math.min(1, ev.progress / ev.total)) : null;
     setToolOutput(card, String(ev.message || "").slice(0, 500));
     card.querySelector(".badge").textContent = hasTotal
       ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
       : (numeric ? String(ev.progress) : "");
+    if (turn?.liveStep && card.closest(".tool-group") === turn.toolGroup) paintLiveStep(turn);
   }
   // A background sub-task outlives the turn that started it, and so does the step it is in the
   // middle of: its result arrives later, on the same card. Stopping that card drew a command still
@@ -5265,6 +5268,20 @@
     // The thinking that led to the steps rides on them as marks; the line adds it up: "· thought 13s".
     const thought = thoughtWords(group);
     if (thought) summary.appendChild(el("span", "tg-thought")).textContent = ` · ${thought}`;
+    // Each mark represents a call that actually arrived. Reuse six mounted slots as calls finish.
+    let sequence = group.querySelector(":scope > summary > .tool-sequence");
+    if (!sequence) {
+      sequence = el("span", "tool-sequence");
+      sequence.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 6; i++) sequence.appendChild(el("span", "tool-sequence-mark"));
+      group.querySelector(":scope > summary")?.appendChild(sequence);
+    }
+    const recent = cards.slice(-6);
+    for (const [index, mark] of [...sequence.children].entries()) {
+      const card = recent[index];
+      mark.hidden = !card;
+      if (card) mark.dataset.state = card.dataset.status || "running";
+    }
     // The icon tracks what is happening NOW: running cards while any is running, then everything
     // that actually ran. "No tools ran" keeps the denied steps' own mark — a refused `rm -rf dist`
     // is still a command, and saying so is strictly more useful than a shrug.
@@ -5395,7 +5412,9 @@
     if (!live) {
       live = owner.liveStep = el("div", "tg-live");
       live.innerHTML = '<span class="tg-live-spin codicon codicon-loading" aria-hidden="true"></span>'
-        + '<span class="tg-live-verb"></span> <span class="tg-live-arg"></span> <span class="tg-live-time"></span>';
+        + '<span class="tg-live-verb"></span> <span class="tg-live-arg"></span>'
+        + '<span class="tg-live-progress" aria-hidden="true" hidden><span></span></span>'
+        + '<span class="tg-live-percent" hidden></span> <span class="tg-live-time"></span>';
     }
     if (group.nextElementSibling !== live) group.after(live);
     paintLiveStep(owner);
@@ -5423,7 +5442,7 @@
       const card = runningCard || last;
       state = runningCard ? "running" : "done";
       verb = card.querySelector(".verb")?.textContent || "";
-      arg = card.querySelector(".arg")?.textContent || "";
+      arg = runningCard?._progressMessage || card.querySelector(".arg")?.textContent || "";
       time = card.querySelector(".tool-time")?.textContent || "";
     } else if (reason) verb = reasonLabel(reason);
     else if (last) verb = (last.querySelector(".thought-label")?.textContent || "").trim();
@@ -5431,6 +5450,15 @@
     for (const [selector, text] of [[".tg-live-verb", verb], [".tg-live-arg", arg], [".tg-live-time", time]]) {
       const node = live.querySelector(selector);
       if (node.textContent !== text) node.textContent = text;
+    }
+    const fraction = runningCard?._progressFraction;
+    const hasProgress = Number.isFinite(fraction);
+    const track = live.querySelector(".tg-live-progress");
+    const percent = live.querySelector(".tg-live-percent");
+    track.hidden = percent.hidden = !hasProgress;
+    if (hasProgress) {
+      track.firstElementChild.style.width = `${Math.round(fraction * 100)}%`;
+      percent.textContent = `${Math.round(fraction * 100)}%`;
     }
     paintLiveRunInBackground(live, runningCard);
   }

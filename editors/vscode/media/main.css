@@ -898,6 +898,19 @@ body.vscode-light, body.vscode-high-contrast-light {
 }
 
 .thinking .verb, .cd-wave .verb { color: var(--muted); }
+/* The label gets one quiet light pass while that step is genuinely active. Completed work,
+   approvals and the changing progress text stay still and readable. */
+@keyframes dgc-activity-shimmer { to { background-position: -180% 0; } }
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .thinking:not(.done):not(.waiting-input) .verb, .cd-wave .verb,
+  .tg-live:is([data-state="running"], [data-state="thinking"]) .tg-live-verb,
+  .tool-group[open] .tool[data-status="running"] .verb {
+    background: linear-gradient(105deg, var(--muted) 20%, var(--text-strong) 50%, var(--muted) 80%);
+    background-size: 260% 100%; background-position: 100% 0;
+    background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    animation: dgc-activity-shimmer 2.4s linear infinite;
+  }
+}
 .thinking .meta { color: var(--faint); }
 .thinking.done { color: var(--faint); font-size: var(--t-xs); }
 /* A finished turn's work folds into its "Worked for 43s" row (main.js foldTurnWork). The row is a
@@ -935,6 +948,14 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool-group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-group > summary > .tg-icon { display: flex; flex: none; }
 .tool-group.running > summary > .tg-icon { color: var(--accent); animation: icon-pulse 1.4s ease-in-out infinite; }
+.tool-sequence { display: flex; align-items: center; gap: 3px; flex: none; margin-left: auto; }
+.tool-sequence-mark { display: block; width: 5px; height: 11px; border-radius: var(--r-full);
+  background: var(--muted); opacity: .65; transition: background-color .18s ease, opacity .18s ease; }
+.tool-sequence-mark[hidden] { display: none; }
+.tool-sequence-mark[data-state="running"] { background: var(--accent); opacity: 1; animation: pulse 1.2s ease-in-out infinite; }
+.tool-sequence-mark:is([data-state="failed"], [data-state="denied"], [data-state="stopped"]) { background: var(--err); opacity: 1; }
+.tool-sequence-mark:is([data-state="blocked"], [data-state="moved"]) { background: var(--faint); opacity: .8; }
+@media (prefers-reduced-motion: reduce) { .tool-sequence-mark { animation: none !important; transition: none; } }
 .tool-group > .diff { margin: var(--sp-1) 0 var(--sp-2); }
 @media (prefers-reduced-motion: reduce) { .tool-group.running > summary > .tg-icon { animation: none; } }
 /* One line per stretch of work: the line adds up the thinking on its steps ("· thought 13s"), and while
@@ -952,6 +973,11 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 .tg-live[data-state="done"] .tg-live-verb { color: var(--muted); }
 .tg-live-arg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--text); }
 .tg-live-time { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.tg-live-progress { flex: none; width: 42px; height: 4px; overflow: hidden; border-radius: var(--r-full); background: var(--border-strong); }
+.tg-live-progress > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .18s ease; }
+.tg-live-percent { flex: none; font-size: var(--t-xs); color: var(--accent-text); font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { .tg-live-progress, .tg-live-percent { display: none; } }
+@media (prefers-reduced-motion: reduce) { .tg-live-progress > span { transition: none; } }
 @keyframes tg-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tg-live-spin { animation: none; } }
 .tool { border: 1px solid transparent; border-radius: var(--r-md); background: transparent; overflow: hidden; }

@@ -21,6 +21,32 @@ const rows = (turn) => [...turn.children].filter((n) => !n.matches(".role"))
     : n.matches(".reasoning") ? "body" : n.matches(".text") ? "text" : n.matches(".thinking") ? "act"
     : n.matches(".answer") ? "answer" : n.matches(".card") ? "card" : n.className);
 
+test("the observed-call trace and reported progress change in place, without inventing a total", () => {
+  const { event, doc } = panel();
+  event({ type: "turn_start", turn_id: "t1", prompt: "Check the build", kind: "prompt" });
+  event({ type: "tool_call", call_id: "a", name: "read_file", args: { path: "package.json" }, summary: "package.json" });
+  const group = doc.querySelector(".tool-group");
+  const firstMark = group.querySelector(".tool-sequence-mark");
+  assert.equal(firstMark.dataset.state, "running");
+  event({ type: "tool_result", call_id: "a", name: "read_file", output: "{}", is_error: false });
+  assert.equal(firstMark.dataset.state, "completed");
+  event({ type: "tool_call", call_id: "b", name: "bash", args: { command: "npm test" }, summary: "npm test" });
+  const live = doc.querySelector(".tg-live");
+  const track = live.querySelector(".tg-live-progress");
+  assert.equal(track.hidden, true);
+  event({ type: "tool_progress", call_id: "b", name: "bash", message: "Running 36 of 42 tests", progress: 36, total: 42 });
+  assert.equal(doc.querySelector(".tg-live"), live);
+  assert.equal(group.querySelector(".tool-sequence-mark"), firstMark);
+  assert.equal(live.querySelector(".tg-live-arg").textContent, "Running 36 of 42 tests");
+  assert.equal(track.hidden, false);
+  assert.equal(live.querySelector(".tg-live-percent").textContent, "86%");
+  event({ type: "tool_progress", call_id: "b", name: "bash", message: "Checking the last suite" });
+  assert.equal(track.hidden, true, "a progress message without a known total has no percentage");
+  event({ type: "tool_result", call_id: "b", name: "bash", output: "1 test failed", is_error: true });
+  assert.equal([...group.querySelectorAll(".tool-sequence-mark:not([hidden])")][1].dataset.state, "failed");
+  assert.match(group.querySelector(".tool-group-label").textContent, /1 issue/);
+});
+
 test("a user's six think-and-run pairs between two sentences are one line, six steps, a thought mark on each", () => {
   const { event, doc, turn, errors } = panel();
   for (const frame of founderTurn()) event(frame);

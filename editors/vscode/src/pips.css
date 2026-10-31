@@ -547,6 +547,10 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
 .pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
+@keyframes pip-working-shimmer{to{background-position:-180% 0}}
+@media(prefers-reduced-motion:no-preference) and (forced-colors:none){
+  .pip-working-verb{background:linear-gradient(105deg,var(--vscode-descriptionForeground,#aaa6b1) 20%,var(--vscode-foreground,#eeeaf8) 50%,var(--vscode-descriptionForeground,#aaa6b1) 80%);background-size:260% 100%;background-position:100% 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:pip-working-shimmer 2.4s linear infinite}
+}
 .reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 /* Thousands of Pips: a search over names and titles, and how many are shown. */
 .pip-search{display:flex;align-items:center;gap:10px;margin:0 0 12px}

@@ -163,6 +163,7 @@ for (const width of [300, 460]) {
           visible: live.checkVisibility(), height: box.height, gap: box.top - line.bottom,
           wordsAligned: Math.abs(live.querySelector(".tg-live-verb").getBoundingClientRect().left - label.left) <= 2,
           spinning: getComputedStyle(live.querySelector(".tg-live-spin")).animationName,
+          shimmer: getComputedStyle(live.querySelector(".tg-live-verb")).animationName,
           overflow: Math.max(document.getElementById("log").scrollWidth - document.getElementById("log").clientWidth, 0) };
       });
       let live = await read();
@@ -172,11 +173,13 @@ for (const width of [300, 460]) {
       assert.ok(live.gap >= -1 && live.gap <= 6, `right under the line (${live.gap}px)`);
       assert.ok(live.wordsAligned, "its words start where the line's do");
       assert.equal(live.spinning, "tg-spin");
+      assert.equal(live.shimmer, "dgc-activity-shimmer");
       assert.equal(live.overflow, 0);
       await send(page, frames.slice(6, 8));
       live = await read();
       assert.equal(live.state, "thinking");
       assert.equal(live.text, "Thinking…");
+      assert.equal(live.shimmer, "dgc-activity-shimmer");
       assert.equal(live.seen, 2, "the same row, updated in place");
       await send(page, frames.slice(8, 10));
       live = await read();
@@ -185,6 +188,8 @@ for (const width of [300, 460]) {
       // Opened, the group shows the running step itself; the live row steps aside.
       await page.click(".tool-group > summary");
       assert.equal((await read()).visible, false);
+      assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.tool[data-status="running"] .verb')).animationName),
+        "dgc-activity-shimmer", "the running call shimmers when its group is open");
       await page.click(".tool-group > summary");
       await send(page, [frames[10], { type: "text_delta", text: "The export drops cess." }]);
       assert.equal(await read(), null, "the stretch is over: its live row goes");
@@ -195,12 +200,13 @@ for (const width of [300, 460]) {
   });
 }
 
-test("reduced motion stops the live row's spinner", async (t) => {
+test("reduced motion stops the live row's spinner and text shimmer", async (t) => {
   if (skipOrFail(t)) return;
   const page = await open({ width: 460, events: founderTurn("t1", { answer: false }).slice(0, 6) });
   try {
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tg-live-spin")).animationName), "none");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tg-live-verb")).animationName), "none");
   } finally {
     await page.close();
   }
