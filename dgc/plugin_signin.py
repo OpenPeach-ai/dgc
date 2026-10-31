@@ -173,7 +173,10 @@ def forget(name: str, *, session=None) -> dict:
         return {**nothing, "deleted": deleted}
     # The service by name where the sign-in kept one (Google, for the one sign-in of its apps), else by address.
     provider = saved.get("provider") if isinstance(saved.get("provider"), str) else ""
-    host = provider[:40] or urlsplit(url).hostname or "the service"
+    try:
+        host = provider[:40] or urlsplit(url).hostname or "the service"
+    except ValueError:  # A damaged saved URL must not turn a completed deletion into an error.
+        host = "the service"
     if not tokens:
         message = ""
     elif revoked is True:

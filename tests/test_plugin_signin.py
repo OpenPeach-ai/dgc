@@ -234,6 +234,12 @@ class PluginSigninTests(unittest.TestCase):
         self.assertTrue(theirs.exists(), "another app's sign-in for the same server stays")
         self.assertNotIn("cursor-refresh", json.dumps(vendor.revoked))
 
+    def test_damaged_saved_url_still_deletes_the_signin(self):
+        self.signed_in("damaged", "https://[broken", server={"no_revocation": True})
+        result = plugin_signin.forget("damaged")
+        self.assertTrue(result["deleted"])
+        self.assertIn("the service", result["message"])
+
     def test_nothing_to_forget_says_nothing(self):
         self.assertEqual(plugin_signin.forget("never-added")["message"], "")
         with plugin_credentials.locked("added"):                # connected once, never signed in
