@@ -1017,6 +1017,8 @@
     const list = $("sessions-list"), status = $("sessions-status");
     const items = Array.isArray(msg.items) ? msg.items : [];
     const focused = document.activeElement?.closest?.(".session-row")?.dataset.id;
+    const before = new Map([...list.querySelectorAll(".session-row[data-id]")]
+      .map((row) => [row.dataset.id, row.dataset.motionState]));
     list.replaceChildren();
     // Thousands of sessions: a search over names, first messages and everything said, and Load more.
     const search = $("sessions-search"), more = $("sessions-more"), query = String(msg.query || "");
@@ -1033,6 +1035,8 @@
       const title = sessionTitle(item);
       const row = el("li", "session-row");
       row.tabIndex = 0; row.dataset.id = item.id;
+      row.dataset.motionState = item.windowless ? "working" : item.open ? "open" : "idle";
+      if (before.has(item.id) && before.get(item.id) !== row.dataset.motionState) row.classList.add("motion-state-change");
       const main = el("div", "session-main");
       const name = el("span", "session-name"); name.textContent = title; name.title = title;
       const meta = el("span", "session-meta");
@@ -1314,8 +1318,14 @@
   function homeCount(name, found, more) {
     const badge = $(`home-tab-${name}-count`);
     if (!badge) return;
+    const previous = badge.textContent;
     badge.hidden = found === null;
     badge.textContent = found === null ? "" : `${found}${more ? "+" : ""}`;
+    if (previous && previous !== badge.textContent && !badge.hidden) {
+      badge.classList.remove("motion-count-change");
+      void badge.offsetWidth;
+      badge.classList.add("motion-count-change");
+    }
     $(`home-tab-${name}`)?.setAttribute("aria-label", found === null ? (name === "chat" ? "Chat" : "Work")
       : `${name === "chat" ? "Chat" : "Work"}: ${found}${more ? " or more" : ""} found`);
   }
@@ -3838,6 +3848,7 @@
       head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
+    if (!replaying) block.classList.add("motion-arrive");
     block._turnId = String(id || "");               // a turn_files for it after it ended finds its card
     block.appendChild(el("div", "role dgc", "DGC"));
     // The verb starts empty and is written only by renderTurnMeta, from what the backend says the
@@ -4130,10 +4141,18 @@
     const detail = narrow ? "" : full;
     const shortened = narrow && !waiting && !turn.handoff ? `${activity.label} · ${full}` : "";
     if ((turn.act.getAttribute("title") || "") !== shortened) hoverTip.retitle(turn.act, shortened);
-    verb.textContent = waiting ? "waiting for your input"
+    const nextVerb = waiting ? "waiting for your input"
       : turn.handoff ? "generating handoff…"
         : activity ? activity.label + (detail ? ` · ${detail}` : "")
           : "Working";
+    if (verb.textContent !== nextVerb) {
+      verb.textContent = nextVerb;
+      // Codex starts a fresh sweep when the status wording changes, not on each clock tick.
+      if (!replaying && !waiting) {
+        verb.style.animation = "none"; void verb.offsetWidth; verb.style.removeProperty("animation");
+        if (!verb.style.length) verb.removeAttribute("style");
+      }
+    }
     if (turn.t0 == null) { meta.textContent = ""; return; }   // a replayed turn has no clock
     const now = Date.now();
     const total = Math.floor((now - turn.t0) / 1000);
@@ -4383,6 +4402,10 @@
     turn.act.textContent = took == null || reason === "moved" ? outcome : `${outcome} for ${elapsedWords(took)}`;
     const start = turn.t0 != null ? turn.t0 : took != null ? turn.promptAt : null;
     if (answer && reason === "completed") foldTurnWork(turn.block, turn.act, took == null ? null : { start, end: start + took });
+    // Arrival and resolution are live moments, not part of the saved transcript's shape.
+    turn.block.classList.remove("motion-arrive");
+    turn.block.querySelectorAll(".motion-arrive, .motion-resolved")
+      .forEach((node) => node.classList.remove("motion-arrive", "motion-resolved"));
     const finished = turn.block;
     pipSetupCards?.finish(finished);
     pipDigestBar?.refresh();
@@ -5083,6 +5106,7 @@
     let card = [...turn.block.querySelectorAll(".artifact-card")].find((c) => c.dataset.artifactRef === a.id);
     if (!card) {
       card = el("div", "artifact artifact-card");
+      if (!replaying) card.classList.add("motion-arrive");
       card.dataset.artifactRef = a.id;
       card.setAttribute("role", "group");
       appendTurnContent(card); breakText();
@@ -5108,7 +5132,10 @@
   // Keep the live activity row at the visual edge of the active turn. New response text,
   // tool cards, diffs and decisions are inserted immediately before it, so a user following
   // the stream always sees that DGC is still running beneath the newest content.
-  function appendTurnContent(node) { turn.block.insertBefore(node, turn.act); return node; }
+  function appendTurnContent(node) {
+    if (!replaying && node.matches?.(".card, .artifact")) node.classList.add("motion-arrive");
+    turn.block.insertBefore(node, turn.act); return node;
+  }
   function appendConversationContent(node) {
     if (turn) return appendTurnContent(node);
     log.appendChild(node); return node;
@@ -5264,24 +5291,44 @@
     if (!running.length && failures.length && !saidFailed) {
       sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
     }
-    summary.textContent = sentence;
+    let sentenceNode = summary.querySelector(":scope > .tg-label-text");
+    if (!sentenceNode) { sentenceNode = el("span", "tg-label-text"); summary.replaceChildren(sentenceNode); }
+    if (sentenceNode.textContent !== sentence) {
+      sentenceNode.textContent = sentence;
+      if (!replaying && group.classList.contains("running")) {
+        sentenceNode.style.animation = "none"; void sentenceNode.offsetWidth; sentenceNode.style.removeProperty("animation");
+        if (!sentenceNode.style.length) sentenceNode.removeAttribute("style");
+      }
+    }
     // The thinking that led to the steps rides on them as marks; the line adds it up: "· thought 13s".
     const thought = thoughtWords(group);
-    if (thought) summary.appendChild(el("span", "tg-thought")).textContent = ` · ${thought}`;
-    // Each mark represents a call that actually arrived. Reuse six mounted slots as calls finish.
+    let thoughtNode = summary.querySelector(":scope > .tg-thought");
+    if (thought) {
+      if (!thoughtNode) { thoughtNode = el("span", "tg-thought"); summary.appendChild(thoughtNode); }
+      if (thoughtNode.textContent !== ` · ${thought}`) thoughtNode.textContent = ` · ${thought}`;
+    } else thoughtNode?.remove();
+    // One mark per observed call through ten; if there are more, name how many older calls
+    // are hidden. The old six-slot trace silently showed six marks for ten calls.
     let sequence = group.querySelector(":scope > summary > .tool-sequence");
     if (!sequence) {
       sequence = el("span", "tool-sequence");
       sequence.setAttribute("aria-hidden", "true");
-      for (let i = 0; i < 6; i++) sequence.appendChild(el("span", "tool-sequence-mark"));
       group.querySelector(":scope > summary")?.appendChild(sequence);
     }
-    const recent = cards.slice(-6);
-    for (const [index, mark] of [...sequence.children].entries()) {
-      const card = recent[index];
-      mark.hidden = !card;
-      if (card) mark.dataset.state = card.dataset.status || "running";
+    const recent = cards.slice(-10), extra = cards.length - recent.length;
+    const marks = [...sequence.querySelectorAll(":scope > .tool-sequence-mark")];
+    while (marks.length < recent.length) {
+      const mark = el("span", "tool-sequence-mark");
+      sequence.appendChild(mark); marks.push(mark);
     }
+    while (marks.length > recent.length) marks.pop().remove();
+    for (const [index, mark] of marks.entries()) mark.dataset.state = recent[index].dataset.status || "running";
+    let more = sequence.querySelector(":scope > .tool-sequence-more");
+    if (extra) {
+      if (!more) { more = el("span", "tool-sequence-more"); sequence.appendChild(more); }
+      more.textContent = `+${extra}`;
+    } else more?.remove();
+    sequence.title = extra ? `${cards.length} tool calls · latest ten shown` : `${cards.length} tool ${cards.length === 1 ? "call" : "calls"}`;
     // The icon tracks what is happening NOW: running cards while any is running, then everything
     // that actually ran. "No tools ran" keeps the denied steps' own mark — a refused `rm -rf dist`
     // is still a command, and saying so is strictly more useful than a shrug.
@@ -5449,7 +5496,13 @@
     if (live.dataset.state !== state) live.dataset.state = state;
     for (const [selector, text] of [[".tg-live-verb", verb], [".tg-live-arg", arg], [".tg-live-time", time]]) {
       const node = live.querySelector(selector);
-      if (node.textContent !== text) node.textContent = text;
+      if (node.textContent !== text) {
+        node.textContent = text;
+        if (selector === ".tg-live-verb" && ["running", "thinking"].includes(state)) {
+          node.style.animation = "none"; void node.offsetWidth; node.style.removeProperty("animation");
+          if (!node.style.length) node.removeAttribute("style");
+        }
+      }
     }
     const fraction = runningCard?._progressFraction;
     const hasProgress = Number.isFinite(fraction);
@@ -5989,7 +6042,9 @@
   // its question, so one answered "Allow once" read like one still waiting.
   function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
-    c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
+    c.classList.add("resolved");
+    if (!replaying) c.classList.add("motion-resolved");
+    c.setAttribute("aria-disabled", "true");
     c.querySelectorAll("button, input, select, textarea")
       .forEach((control) => { control.disabled = true; });
     if (decision) {
@@ -12645,10 +12700,25 @@
   }
   function amPaintAgentRow(entry, record) {
     const { row, dot, desc, meta, face, pipFace } = entry;
+    const previousFix = row.dataset.pipFix || "";
+    const previousState = row.dataset.state || "";
     if (dot.dataset.state !== record.state) dot.dataset.state = record.state;
     if (row.dataset.state !== record.state) row.dataset.state = record.state;
     paintAgentMark(face, record.id, AGENT_ACTIVE.has(record.state));
     const fix = pipFixByAgent(record.id), plush = window.PipConcepts?.plush;
+    const fixId = String(fix?.fix_id || "");
+    if (row.dataset.motionSeen === "1" && fixId && fixId !== previousFix && AGENT_ACTIVE.has(record.state)) {
+      row.classList.remove("motion-pip-handoff");
+      void row.offsetWidth;
+      row.classList.add("motion-pip-handoff");
+    } else if (row.dataset.motionSeen === "1" && previousState && AGENT_ACTIVE.has(previousState)
+      && !AGENT_ACTIVE.has(record.state) && fixId) {
+      row.classList.remove("motion-pip-settle");
+      void row.offsetWidth;
+      row.classList.add("motion-pip-settle");
+    }
+    row.dataset.motionSeen = "1";
+    row.dataset.pipFix = fixId;
     const pipType = fix && PIP_REPORT_TYPES.indexOf(String(fix.pip_type || ""));
     if (fix && plush && pipType >= 0) {
       const pose = AGENT_ACTIVE.has(record.state) ? "working" : "idle";

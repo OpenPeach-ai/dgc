@@ -74,6 +74,32 @@ for (const width of [460, 900]) {
 }
 
 for (const width of [300, 460]) {
+  test(`twelve observed calls keep ten bars and +2 without widening a ${width}px editor`, async (t) => {
+    if (skipOrFail(t)) return;
+    const events = [{ type: "turn_start", turn_id: "trace", prompt: "Check the build", kind: "prompt" }];
+    for (let i = 0; i < 12; i++) events.push(
+      { type: "tool_call", call_id: `trace-${i}`, name: "bash", args: { command: `echo ${i}` }, summary: `echo ${i}` },
+      { type: "tool_result", call_id: `trace-${i}`, name: "bash", output: `result ${i}` });
+    events.push({ type: "turn_end", turn_id: "trace", reason: "completed", token_estimate: 0 });
+    const page = await open({ width, events });
+    try {
+      const view = await page.evaluate(() => {
+        const group = document.querySelector(".tool-group");
+        const row = group.querySelector("summary");
+        return { bars: group.querySelectorAll(".tool-sequence-mark").length,
+          older: group.querySelector(".tool-sequence-more")?.textContent,
+          height: row.getBoundingClientRect().height,
+          overflow: Math.max(document.getElementById("log").scrollWidth - document.getElementById("log").clientWidth, 0) };
+      });
+      assert.equal(view.bars, 10);
+      assert.equal(view.older, "+2");
+      assert.equal(view.overflow, 0);
+      assert.ok(view.height <= 30, `the summary remains one line (${view.height}px)`);
+    } finally { await page.close(); }
+  });
+}
+
+for (const width of [300, 460]) {
   test(`opened at ${width}px: six rows, each with its thought mark on the row, readable, the thought one click away`, async (t) => {
     if (skipOrFail(t)) return;
     const page = await open({ width, events: founderTurn() });
@@ -174,6 +200,14 @@ for (const width of [300, 460]) {
       assert.ok(live.wordsAligned, "its words start where the line's do");
       assert.equal(live.spinning, "tg-spin");
       assert.equal(live.shimmer, "dgc-activity-shimmer");
+      const cadence = await page.evaluate(() => {
+        const label = getComputedStyle(document.querySelector(".tool-group.running .tg-label-text"));
+        const step = getComputedStyle(document.querySelector(".tg-live[data-state=running] .tg-live-verb"));
+        return { label: [label.animationName, label.animationDuration, label.animationDelay],
+          step: [step.animationName, step.animationDuration, step.animationDelay] };
+      });
+      assert.deepEqual(cadence.label, ["dgc-activity-shimmer", "4s", "0.6s"]);
+      assert.deepEqual(cadence.step, cadence.label, "the visible tool row and its live step share Codex's cadence");
       assert.equal(live.overflow, 0);
       await send(page, frames.slice(6, 8));
       live = await read();
@@ -207,6 +241,7 @@ test("reduced motion stops the live row's spinner and text shimmer", async (t) =
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tg-live-spin")).animationName), "none");
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tg-live-verb")).animationName), "none");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".tool-group .tg-label-text")).animationName), "none");
   } finally {
     await page.close();
   }

@@ -547,9 +547,25 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-ctx-pct{font-size:11px;font-variant-numeric:tabular-nums}
 /* DGC's working row: (time · ↓ tokens) after what the Pip is doing; and what each reply took. */
 .pip-working-meta{margin-left:-4px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted)}
-@keyframes pip-working-shimmer{to{background-position:-180% 0}}
+@keyframes pip-working-shimmer{0%{background-position:120% 0}25%,100%{background-position:-20% 0}}
 @media(prefers-reduced-motion:no-preference) and (forced-colors:none){
-  .pip-working-verb{background:linear-gradient(105deg,var(--vscode-descriptionForeground,#aaa6b1) 20%,var(--vscode-foreground,#eeeaf8) 50%,var(--vscode-descriptionForeground,#aaa6b1) 80%);background-size:260% 100%;background-position:100% 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:pip-working-shimmer 2.4s linear infinite}
+  .pip-working-verb{--shimmer-base:color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 50%,var(--vscode-editor-background,#171719));background:linear-gradient(90deg,var(--shimmer-base) 45%,color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 75%,var(--shimmer-base)) 47.5%,var(--vscode-foreground,#eeeaf8) 50%,color-mix(in srgb,var(--vscode-foreground,#eeeaf8) 75%,var(--shimmer-base)) 52.5%,var(--shimmer-base) 55%);background-size:200% 100%;background-position:120% 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:pip-working-shimmer 4s linear var(--shimmer-delay,.6s) infinite}
+}
+/* One reaction to an observed Pip state or new finding. Frequent chat redraws create fresh
+   row elements, so pipsClient adds these classes only when the preceding state differs. */
+.pip-row{position:relative}
+.pip-row:is([data-state="working"],[data-state="waiting_approval"]){padding-right:25px}
+.pip-row[data-state="working"]::after,.pip-row[data-state="waiting_approval"]::after{
+  content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;border-radius:50%;
+  background:var(--vscode-textLink-foreground,#a78bfa);transform:translateY(-50%);pointer-events:none}
+.pip-row[data-state="waiting_approval"]::after{background:var(--vscode-editorWarning-foreground,#c9a054)}
+@media(prefers-reduced-motion:no-preference) and (forced-colors:none){
+  @keyframes pip-motion-enter{from{opacity:.55;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pip-motion-state{from{background:color-mix(in srgb,var(--vscode-textLink-foreground,#a78bfa) 14%,transparent)}to{background:transparent}}
+  @keyframes pip-motion-news{from{box-shadow:inset 0 0 0 1px var(--vscode-editorWarning-foreground,#c9a054)}to{box-shadow:inset 0 0 0 1px transparent}}
+  .pip-motion-arrive{animation:pip-motion-enter .18s ease-out both}
+  :is(.pip-row,.job).pip-motion-state{animation:pip-motion-state .55s ease-out both}
+  :is(.pip-row,.job).pip-motion-news{animation:pip-motion-news .85s ease-out both}
 }
 .reply-stats{margin-left:6px;font:500 11px/1.2 var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 /* Thousands of Pips: a search over names and titles, and how many are shown. */

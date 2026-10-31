@@ -406,12 +406,16 @@ document.addEventListener('click',event=>{
 function takesMessages(){return !!(pipType(S.pip,S.types)?.available||personalPip()&&S.pip?.pip_type==='core');}
 // The working row, as DGC's: who, what it is doing ("Thinking", "Loading the model", a tool's verb,
 // "Writing"), then (time · ↓ tokens). The clock ticks in place (workingClock), without a render.
+let workingVerbKey='',workingVerbAt=0;
 function workingWords(sending){
   const name=esc(S.pip.name),run=S.chatActiveRun,act=S.stream?.runId===run?.id?S.stream?.activity:null;
   if(!S.runner?.online)return `<span>${name} will answer when your Pips are running</span>`;
   if(sending||run?.status==='queued'||!run)return `<span>${name} is getting ready</span>`;
   const since=Date.parse(run.started_at||run.created_at),chars=S.stream?.runId===run.id?S.stream.text.length:0;
-  return `<span class="pip-working-verb">${name} · ${esc(act?act.label:'Working')}</span>${Number.isFinite(since)?`<span class="pip-working-meta" data-since="${since}" data-chars="${chars}">${workingMeta(since,chars)}</span>`:''}`;
+  const label=act?act.label:'Working',key=`${S.pip.id}:${run.id}:${label}`;
+  if(key!==workingVerbKey){workingVerbKey=key;workingVerbAt=Date.now();}
+  const delay=600-(Date.now()-workingVerbAt);
+  return `<span class="pip-working-verb" style="--shimmer-delay:${Math.round(delay)}ms">${name} · ${esc(label)}</span>${Number.isFinite(since)?`<span class="pip-working-meta" data-since="${since}" data-chars="${chars}">${workingMeta(since,chars)}</span>`:''}`;
 }
 function workingMeta(since,chars){return `(${Math.max(0,Math.floor((Date.now()-since)/1000))}s · ↓ ${Math.round(chars/4)} tok)`;}
 const workingClock=window.setInterval(()=>{for(const el of document.querySelectorAll('.pip-working-meta'))el.textContent=workingMeta(Number(el.dataset.since),Number(el.dataset.chars));
@@ -2363,7 +2367,7 @@ function projectFirstMarkup(){
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
  const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0);
-  return `<button type="button" class="pip-row" data-job="${esc(p.id)}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
+  return `<button type="button" class="pip-row" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
  const project=projectHome();
  return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
@@ -2559,6 +2563,10 @@ function render() {
   noticeFades();syncNewPipModel();
   const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const selection=focus&&typeof focus.selectionStart==='number'?[focus.selectionStart,focus.selectionEnd]:null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,atEnd=!oldLog||oldHeight-oldScroll-oldLog.clientHeight<32,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
+  const oldPipId=shell.dataset.motionPip||'',oldMessageRows=[...(oldLog?.querySelectorAll('[data-message]')||[])];
+  const oldMessages=new Set(oldMessageRows.map(e=>e.dataset.message));
+  const oldLatest=oldMessageRows.at(-1)?.dataset.message||'';
+  const oldJobs=new Map([...document.querySelectorAll('[data-job][data-state]')].map(e=>[e.dataset.job,{state:e.dataset.state,waiting:Number(e.dataset.waiting)||0}]));
   const opened=new Set([...document.querySelectorAll('details[open][data-details]')].map(e=>e.dataset.details));
   const intro=welcome(),chatView=!intro&&!S.create&&!S.overview&&!!S.pip&&S.tab==='chat';
   shell.classList.toggle('sidebar-pinned',S.sidebarPinned);
@@ -2571,6 +2579,16 @@ function render() {
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
   $('app').innerHTML=markup;
+  shell.dataset.motionPip=S.selected||'';
+  for(const row of document.querySelectorAll('[data-job][data-state]')){
+    const previous=oldJobs.get(row.dataset.job);
+    if(previous&&previous.state!==row.dataset.state)row.classList.add('pip-motion-state');
+    if(previous&&Number(row.dataset.waiting)>previous.waiting)row.classList.add('pip-motion-news');
+  }
+  if(oldPipId===S.selected&&S.messagesLoaded&&oldMessages.size){
+    const last=[...document.querySelectorAll('.conversation-log [data-message]')].at(-1);
+    if(last&&!oldMessages.has(last.dataset.message)&&last.dataset.message!==oldLatest)last.classList.add('pip-motion-arrive');
+  }
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}

@@ -183,7 +183,7 @@ test("with no click, the thinking is collapsed while it thinks, as the answer st
 // thinking box out of the page and putting it back, so the pointer's hover over the label came and went with each part,
 // and the working line's pulse started over with each one. Now nothing a part doesn't change is touched, and the label
 // is Work's status line: DGC's slashes lighting in turn, beside words that hold still.
-test("while it thinks, no streamed part redraws 'Thinking' or the working line, and both are Work's wave: slashes lighting in turn, words still", async (t) => {
+test("while it thinks, streaming preserves the working line and its slow status shimmer", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
   try {
@@ -216,15 +216,17 @@ test("while it thinks, no streamed part redraws 'Thinking' or the working line, 
     assert.equal(await s.page.evaluate(() => window.__label.isConnected && document.querySelector(".cd-thinking-label") === window.__label
                                           && document.querySelector(".cd-working") === window.__doing), true, "the same nodes");
     assert.match(await s.page.locator(".cd-thought").textContent(), /^First the beaches\. Part 0\. .*Part 19\. $/, "the words kept up");
-    // Work's wave: the three slashes light in turn (Work's own keyframes), and the words beside them hold still.
+    // Work's wave: the three slashes light in turn; the text keeps one slow shimmer.
     const look = await s.page.evaluate(() => [".cd-thinking-label", ".cd-working"].map((sel) => {
       const line = document.querySelector(sel), marks = [...line.querySelectorAll(".cd-wave .tmark path")];
       return { marks: marks.map((p) => getComputedStyle(p).animationName), still: getComputedStyle(line.querySelector(".verb")).animationName,
+               duration: getComputedStyle(line.querySelector(".verb")).animationDuration,
                line: getComputedStyle(line).animationName, kept: marks[0].getAnimations().map((a) => a.id), hidden: line.querySelector(".tmark").getAttribute("aria-hidden") };
     }));
     for (const one of look) {
       assert.deepEqual(one.marks, ["dgc-mark1", "dgc-mark2", "dgc-mark3"], "Work's slashes, lit in turn");
-      assert.equal(one.still, "none"); assert.equal(one.line, "none", "no pulse: the words hold still");
+      assert.equal(one.still, "dgc-activity-shimmer"); assert.equal(one.duration, "4s");
+      assert.equal(one.line, "none", "the whole row does not pulse");
       assert.deepEqual(one.kept, ["first"], "the wave ran on through every part: never started over");
       assert.equal(one.hidden, "true", "the slashes are drawing; the words are what a screen reader says");
     }

@@ -47,6 +47,43 @@ test("the observed-call trace and reported progress change in place, without inv
   assert.match(group.querySelector(".tool-group-label").textContent, /1 issue/);
 });
 
+test("the trace counts ten calls exactly and names earlier calls once space is capped", () => {
+  const { event, doc } = panel();
+  event({ type: "turn_start", turn_id: "t1", prompt: "Audit the build", kind: "prompt" });
+  for (let i = 0; i < 12; i++) {
+    const command = i < 5;
+    event({ type: "tool_call", call_id: `c${i}`, name: command ? "bash" : "read_file",
+      args: command ? { command: `echo ${i}` } : { path: `file-${i}.txt` }, summary: `step ${i}` });
+    event({ type: "tool_result", call_id: `c${i}`, name: command ? "bash" : "read_file",
+      output: `result ${i}`, is_error: i === 7 });
+    if (i === 9) {
+      assert.equal(doc.querySelectorAll(".tool-sequence-mark").length, 10, "ten calls have ten bars");
+      assert.equal(doc.querySelector(".tool-sequence-more"), null, "nothing is hidden yet");
+      assert.equal(doc.querySelectorAll('.tool-sequence-mark[data-state="failed"]').length, 1);
+    }
+  }
+  const sequence = doc.querySelector(".tool-sequence");
+  assert.equal(sequence.querySelectorAll(".tool-sequence-mark").length, 10);
+  assert.equal(sequence.querySelector(".tool-sequence-more").textContent, "+2");
+  assert.match(sequence.title, /12 tool calls · latest ten shown/);
+  assert.equal(sequence.querySelectorAll('.tool-sequence-mark[data-state="failed"]').length, 1);
+});
+
+test("the model can speak between tool stretches; its next call gets a new line", () => {
+  const { event, doc } = panel();
+  event({ type: "turn_start", turn_id: "t1", prompt: "Investigate", kind: "prompt" });
+  event({ type: "tool_call", call_id: "first", name: "bash", args: { command: "ls" }, summary: "ls" });
+  event({ type: "tool_result", call_id: "first", name: "bash", output: "files" });
+  event({ type: "text_delta", text: "I found the config. I will check its settings next." });
+  event({ type: "stream_end", message_id: "t1:1", phase: "commentary" });
+  event({ type: "tool_call", call_id: "second", name: "read_file", args: { path: "config.json" }, summary: "config.json" });
+  const block = doc.querySelector("#log .msg.dgc");
+  const groups = [...block.querySelectorAll(":scope > .tool-group")];
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].nextElementSibling?.classList.contains("text"), true);
+  assert.equal(groups[1].previousElementSibling?.textContent.includes("I found the config"), true);
+});
+
 test("a user's six think-and-run pairs between two sentences are one line, six steps, a thought mark on each", () => {
   const { event, doc, turn, errors } = panel();
   for (const frame of founderTurn()) event(frame);

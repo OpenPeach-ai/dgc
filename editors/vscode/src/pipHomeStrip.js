@@ -85,6 +85,8 @@ export function mountHomePips(options) {
  }
  function paint() {
   if (disposed) return;
+  const before = new Map([...root.querySelectorAll('.home-pip-item[data-pip-id]')]
+   .map(item => [item.dataset.pipId, item.dataset.news]));
   cleanup?.(); cleanup = null;
   root.replaceChildren();
   if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); return; }
@@ -106,6 +108,9 @@ export function mountHomePips(options) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
    for (const [index, {pip, line, dismissible: canDismiss}] of rows.slice(0, SHOWN).entries()) {
     const item = node('li', 'home-pip-item'), row = node('button', 'home-pip-row'); row.type = 'button';
+    item.dataset.pipId = pip.id;
+    item.dataset.news = line;
+    if (before.has(pip.id) && before.get(pip.id) !== line) item.classList.add('motion-pip-news');
     row.title = `Open ${pip.name} in Pips`;
     const copy = node('span', 'home-pip-copy');
     copy.append(node('strong', '', pip.name), node('small', '', line));

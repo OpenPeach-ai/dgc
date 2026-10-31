@@ -76,8 +76,8 @@ test("the open question Send button keeps white text readable", () => {
 });
 
 test("forced-colors hands links back to the system", () => {
-  const forced = /@media \(forced-colors: active\) \{([\s\S]*?)\n  \}/.exec(mainCss);
-  assert.ok(forced, "the forced-colors block should exist");
+  const forced = /@media \(forced-colors: active\) \{\s*:root \{([^}]*)\}/.exec(mainCss);
+  assert.ok(forced, "the forced-colors root tokens should exist");
   assert.match(forced[1], /--link\s*:\s*LinkText/,
     "in high contrast the user's own LinkText wins over any hex we picked");
 });
@@ -151,8 +151,8 @@ test("every file-kind hue is legible on the light panel", () => {
 });
 
 test("forced colours hands the marks back to the system", () => {
-  const forced = /@media \(forced-colors: active\) \{([\s\S]*?)\n  \}/.exec(mainCss);
-  assert.ok(forced, "the forced-colors block should exist");
+  const forced = /@media \(forced-colors: active\) \{\s*:root \{([^}]*)\}/.exec(mainCss);
+  assert.ok(forced, "the forced-colors root tokens should exist");
   for (const hue of HUES) {
     assert.match(forced[1], new RegExp(`--fk-${hue}\\s*:\\s*CanvasText`),
       `--fk-${hue} must yield to the user's palette in high contrast`);

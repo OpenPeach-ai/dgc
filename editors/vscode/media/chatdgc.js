@@ -2505,6 +2505,7 @@
         const typing = old && old.contains(document.activeElement) ? document.activeElement : null;
         const key = typing?.dataset?.keep;
         const caret = key && typeof typing.selectionStart === "number" ? [typing.selectionStart, typing.selectionEnd] : null;
+        if (!old) fresh.classList.add("cd-motion-arrive");
         const shown = old ? redrawIn(old, fresh) : (log.append(fresh), fresh);
         const twin = key ? shown.querySelector(`[data-keep="${CSS.escape(key)}"]`) : null;
         if (twin) { if (twin !== document.activeElement) twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
@@ -2524,6 +2525,11 @@
    *  A node taken out and put back loses its hover and restarts its animation: "Thinking" flickered with every part. */
   function redrawIn(old, fresh) {
     const keep = new Map();                         // a fresh node -> the one on screen that stands for it
+    const knownCards = new Set([...old.querySelectorAll(":scope > .cd-widget[data-ref], :scope > .cd-artifact[data-artifact]")]
+      .map((card) => card.dataset.ref || card.dataset.artifact));
+    for (const card of fresh.querySelectorAll(":scope > .cd-widget[data-ref], :scope > .cd-artifact[data-artifact]")) {
+      if (!knownCards.has(card.dataset.ref || card.dataset.artifact)) card.classList.add("cd-motion-arrive");
+    }
     const was = old.querySelector(":scope > details.cd-thinking"), now = fresh.querySelector(":scope > details.cd-thinking");
     if (was && now) {
       // The same thinking box, its words and label brought up to date.

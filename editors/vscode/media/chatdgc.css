@@ -918,6 +918,11 @@ path.cd-chart-mark, rect.cd-chart-mark { stroke: none; }
 .cd-widget { max-width: 560px; }
 .cd-widget-badge { background: color-mix(in srgb, var(--accent) 45%, #0f766e); font-size: 16px; }
 .cd-widget pre.code { margin: 6px 0 0; max-height: 360px; overflow: auto; }
+/* New replies and newly made widgets/Outputs appear once. Reopened history stays still. */
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  @keyframes cd-motion-arrive { from { opacity:.55; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  #cd-log .cd-motion-arrive { animation:cd-motion-arrive .18s ease-out both; }
+}
 
 /* Maths (KaTeX): a display formula on its own line, centred, scrolled sideways when wider than the reply. */
 .md-math-display { display: block; margin: var(--sp-2) 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
