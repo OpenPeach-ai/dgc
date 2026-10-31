@@ -1328,7 +1328,7 @@ async function confirmPermanentDelete(review){
   S.jobs=S.jobs.filter(p=>p.id!==pip.id);draft.deletePipName='';
   clearSelection();S.selected='';S.overview=true;S.tab='';S.notice=`${pip.name} and its private data were deleted permanently.`;rememberView();render();
  }catch(error){if(token===scope()&&S.review){review.error=errorText(error);renderReview();}}
- finally{S.busy=false;render();if(S.review)renderReview();}
+ finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
 function reviewLifecycle(restore){
  if(!usable()||!canLifecycle()||restore!==archived())return;draft.findingReviewReason='';
