@@ -4759,10 +4759,10 @@ def add_skill(args: dict, ctx) -> str:
     except ValueError as e:
         return f"error fetching the skill: {e}"
     if parsed.scheme == "https" and parsed.netloc == "github.com":
-        owner, repo, marker, *rest = parsed.path.lstrip("/").split("/")
-        if owner and repo and marker == "blob" and len(rest) >= 2:
+        parts = parsed.path.lstrip("/").split("/")
+        if len(parts) >= 5 and parts[2] == "blob" and all(parts[i] for i in (0, 1, 3, 4)):
             raw = urlunsplit(("https", "raw.githubusercontent.com",
-                              "/" + "/".join((owner, repo, *rest)), parsed.query, ""))
+                              "/" + "/".join((parts[0], parts[1], *parts[3:])), parsed.query, ""))
     try:
         raw, content = _fetch_public_text(raw, max_bytes=MAX_SKILL_FILE_BYTES)
     except (requests.RequestException, ValueError) as e:

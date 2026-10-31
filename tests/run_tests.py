@@ -15225,10 +15225,14 @@ def test_add_skill_url():
         check("add_skill refreshes the live skill set", "pirate" in ctx.skills)
         _T.add_skill({"url": "https://github.com/OpenPeach-ai/dgc/blob/main/SKILL.md"}, ctx)
         _T.add_skill({"url": "https://github.com.evil.example/OpenPeach-ai/dgc/blob/main/SKILL.md"}, ctx)
+        _T.add_skill({"url": "https://github.com/"}, ctx)
+        _T.add_skill({"url": "https://github.com/OpenPeach-ai"}, ctx)
         check("add_skill rewrites only an exact GitHub blob host",
-              _fetched_urls[-2:] == [
+              _fetched_urls[-4:] == [
                   "https://raw.githubusercontent.com/OpenPeach-ai/dgc/main/SKILL.md",
                   "https://github.com.evil.example/OpenPeach-ai/dgc/blob/main/SKILL.md",
+                  "https://github.com/",
+                  "https://github.com/OpenPeach-ai",
               ])
         _renamed = _T.add_skill({"url": "https://example.com/pirate/SKILL.md",
                                  "name": "Captain Voice"}, ctx)
