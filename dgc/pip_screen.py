@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -24,8 +25,9 @@ from pathlib import Path
 
 from .workspace_registry import RegistryError
 
-PROGRAMS = {"vnc": "Xtigervnc", "wm": "openbox", "dock": "tint2", "files": "pcmanfm", "terminal": "xterm"}
-INSTALL = "sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm"
+PROGRAMS = {"vnc": "Xtigervnc", "wm": "openbox", "dock": "tint2", "files": "pcmanfm", "terminal": "xterm",
+            "keyboard": "xkbcomp"}
+INSTALL = "sudo apt install tigervnc-standalone-server openbox tint2 xterm pcmanfm x11-xkb-utils"
 WIDTH, HEIGHT = 1280, 800
 DISPLAY = ":1"
 ASSETS = Path(__file__).with_name("desktop_assets")
@@ -102,6 +104,32 @@ def _inside(path: Path, prefix: Path | None) -> str:
     if prefix is not None and path.is_relative_to(prefix):
         return "/opt/desk/" + str(path.relative_to(prefix)).lstrip("/")
     return str(path)
+
+
+def _desktop_bin_overlay(runtime: Path, prefix: Path | None, host_bin: Path = Path("/usr/bin")) -> Path | None:
+    """Expose bundled xkbcomp at the path hard-coded into Xtigervnc.
+
+    Xorg does not search PATH for its keyboard compiler. A downloaded desktop must
+    work even when the host has no x11-xkb-utils package. Keep the host /usr read-only
+    and overlay only /usr/bin with links back to the original, also read-only, bin.
+    """
+    if prefix is None or (host_bin / "xkbcomp").exists():
+        return None
+    compiler = prefix / "usr/bin/xkbcomp"
+    if not compiler.is_file():
+        raise RegistryError("desktop_unavailable", "The desktop bundle is missing its keyboard compiler.")
+    overlay = runtime / "host-bin-overlay"
+    overlay.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for entry in host_bin.iterdir():
+        if entry.name == "xkbcomp":
+            continue
+        link = overlay / entry.name
+        if not link.is_symlink():
+            link.symlink_to(f"/opt/host-bin/{entry.name}")
+    compiler_link = overlay / "xkbcomp"
+    if not compiler_link.is_symlink():
+        compiler_link.symlink_to("/opt/desk/usr/bin/xkbcomp")
+    return overlay
 
 
 def _write(path: Path, text: str, mode: int = 0o600) -> None:
@@ -215,6 +243,7 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
         raise RegistryError("desktop_unavailable", availability()["reason"])
     prefix = parts["prefix"]
     found = parts["found"]
+    bin_overlay = _desktop_bin_overlay(runtime, prefix)
     env = {"DESK_VNC": _inside(found["vnc"], prefix), "DESK_WM": _inside(found["wm"], prefix),
            "DESK_DOCK": _inside(found["dock"], prefix), "DESK_FILES": _inside(found["files"], prefix),
            "DESK_BIN": "/opt/desk/usr/bin" if prefix else "", "DESK_LIB": (
@@ -238,6 +267,9 @@ def desktop_argv(runtime: Path, files: Path, name: str, egress: Path | None = No
              "--bind", str(runtime / "log"), "/run/dgc/log"]
     if prefix is not None:
         argv += ["--ro-bind", str(prefix), "/opt/desk"]
+    if bin_overlay is not None:
+        argv += ["--ro-bind", "/usr/bin", "/opt/host-bin",
+                 "--ro-bind", str(bin_overlay), "/usr/bin"]
     if egress is not None:
         from .pip_computer_box import BOX_PROXY_PORT
         url = f"http://127.0.0.1:{BOX_PROXY_PORT}"
@@ -276,7 +308,18 @@ class Desktop:
         return self.runtime / "x11"
 
     def running(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None and self.vnc_socket.exists()
+        return self.proc is not None and self.proc.poll() is None and self._vnc_ready()
+
+    def _vnc_ready(self) -> bool:
+        if not self.vnc_socket.exists():
+            return False
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(0.25)
+                conn.connect(str(self.vnc_socket))
+                return conn.recv(4) == b"RFB "
+        except (OSError, TimeoutError):
+            return False
 
     def start(self, launch=lambda start: start()) -> None:
         """Start the desktop box (through ``launch``, so it dies with the thread that owns it)."""
@@ -308,11 +351,11 @@ class Desktop:
                                          env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
         launch(begin)
         deadline = time.monotonic() + START_SECONDS
-        while time.monotonic() < deadline and not self.vnc_socket.exists():
+        while time.monotonic() < deadline and not self._vnc_ready():
             if self.proc.poll() is not None:
                 break
             time.sleep(0.1)
-        if not self.vnc_socket.exists():
+        if not self._vnc_ready():
             self.stop()
             raise RegistryError("desktop_unavailable", "The computer's screen did not start. See its desktop logs.")
         # The dock reserves the bottom of the screen; a window maximised before it is up covers it.

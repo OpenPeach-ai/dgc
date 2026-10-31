@@ -149,6 +149,31 @@ class DesktopBoxTests(unittest.TestCase):
         self.assertFalse(any(src == str(Path.home()) for src, _ in binds), "never the user's own home")
         self.assertNotIn("/run/dgc/egress.sock", argv, "no way online without the computer's egress socket")
 
+    def test_downloaded_keyboard_compiler_is_visible_at_xorgs_fixed_path(self):
+        host_bin = self.base / "host-bin"
+        host_bin.mkdir()
+        (host_bin / "sh").write_text("", encoding="utf-8")
+        prefix = self.base / "bundle"
+        compiler = prefix / "usr/bin/xkbcomp"
+        compiler.parent.mkdir(parents=True)
+        compiler.write_text("", encoding="utf-8")
+        overlay = pip_screen._desktop_bin_overlay(self.base / "runtime", prefix, host_bin)
+        self.assertEqual((overlay / "xkbcomp").readlink(), Path("/opt/desk/usr/bin/xkbcomp"))
+        self.assertEqual((overlay / "sh").readlink(), Path("/opt/host-bin/sh"))
+        self.assertIsNone(pip_screen._desktop_bin_overlay(self.base / "runtime", None, host_bin))
+        (host_bin / "xkbcomp").write_text("", encoding="utf-8")
+        self.assertIsNone(pip_screen._desktop_bin_overlay(self.base / "runtime", prefix, host_bin))
+
+    def test_stale_vnc_socket_is_not_a_running_screen(self):
+        runtime = self.base / "runtime"
+        (runtime / "sock").mkdir(parents=True)
+        desktop = pip_screen.Desktop(runtime, self.base / "Files", "Pip")
+        desktop.proc = types.SimpleNamespace(poll=lambda: None)
+        stale = socket.socket(socket.AF_UNIX)
+        stale.bind(str(desktop.vnc_socket))
+        stale.close()
+        self.assertFalse(desktop.running())
+
     def test_the_desktop_terminal_is_online_only_through_the_computers_egress(self):
         # Like Grok's: the desktop's Terminal app reaches public sites through DGC's egress proxy, the
         # same way out as the browser; the box itself still has no network.

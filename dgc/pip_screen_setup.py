@@ -31,7 +31,7 @@ import urllib.request
 from pathlib import Path
 
 DESKTOP_PACKAGES = {"vnc": "tigervnc-standalone-server", "wm": "openbox", "dock": "tint2",
-                    "files": "pcmanfm", "terminal": "xterm"}
+                    "files": "pcmanfm", "terminal": "xterm", "keyboard": "x11-xkb-utils"}
 CHROME_PACKAGE = "google-chrome-stable"
 GOOGLE_KEY_URL = "https://dl.google.com/linux/linux_signing_key.pub"
 # Google Inc. (Linux Packages Signing Authority). Its signing subkeys rotate; this primary key does not.

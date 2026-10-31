@@ -55,7 +55,8 @@ FAKE_TOOL = textwrap.dedent('''\
         if pkg == "google-chrome-stable":
             target = root / "opt/google/chrome/chrome"
         else:
-            target = root / "usr/bin" / {"tigervnc-standalone-server": "Xtigervnc"}.get(pkg, pkg)
+            target = root / "usr/bin" / {"tigervnc-standalone-server": "Xtigervnc",
+                                         "x11-xkb-utils": "xkbcomp"}.get(pkg, pkg)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"\\x7fELF" + deb.name.encode())
         target.chmod(0o755)
