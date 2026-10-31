@@ -116,6 +116,22 @@ class PluginMods(unittest.TestCase):
         self.assertFalse((catalog.installed_root() / "tally2").exists())
         self.assertEqual(plugins._installed(), [])
 
+    def test_a_mod_changed_during_package_copy_is_refused_before_consent(self):
+        reviewed = self.review()
+        copy_tree = plugins.sources.copy_tree
+        def changed_copy(source, dest):
+            copy_tree(source, dest)
+            manifest = dest / "mods" / "tally2" / "dgc-mod.json"
+            value = json.loads(manifest.read_text())
+            value["capabilities"]["events"] = ["tool.call"]
+            manifest.write_text(json.dumps(value))
+        with patch.object(plugins.sources, "copy_tree", side_effect=changed_copy):
+            with self.assertRaisesRegex(plugins.PluginError, "changed since you reviewed them"):
+                self.install(reviewed)
+        self.assertFalse((catalog.installed_root() / "tally2").exists())
+        self.assertIsNone(consent.record("tally2"))
+        self.assertEqual(plugins._installed(), [])
+
     def test_uninstalling_the_plugin_removes_its_mods_and_only_its_own(self):
         self.install()
         result = plugins.uninstall("fixture", config=self.config)

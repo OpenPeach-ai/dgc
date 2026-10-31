@@ -367,6 +367,9 @@ def _install_mods(package: Path, plugin: str, title: str, review: list[dict], be
     names, replaced, made = [], [], []
     root = mod_catalog.installed_root()
     mods = _plugin_mods(package)
+    approved = {r['name']: set(r['grants']) for r in review}
+    if {m.name: set(m.grants()) for m in mods} != approved:
+        raise PluginError("This plugin's mods changed since you reviewed them. Review it again before installing it.")
     prior_consent = {m.name: mod_consent.record(m.name) for m in mods}
 
     def restore_consent():
