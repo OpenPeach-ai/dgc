@@ -10,6 +10,7 @@ import os
 import secrets
 import stat
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -261,6 +262,54 @@ def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
     if maximum is not None and len(data) > maximum:
         raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
     return data, _version(opened)
+
+
+@contextmanager
+def create_regular_file_stream(path: Path | str):
+    """Create and stream into a new file through a held, no-follow parent directory.
+
+    This is for bounded downloads too large to keep in memory. The final name is
+    exclusive, and a failed transfer removes only the inode this call created.
+    Platforms without descriptor-relative no-follow opens refuse the operation.
+    """
+    target = _absolute_frozen(path)
+    if not _dirfd_supported():
+        raise WorkspaceBoundaryError("safe streamed file creation is unavailable on this computer")
+    parent_fd = _open_parent_fd(target, create=True)
+    try:
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                 | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+        fd = os.open(target.name, flags, 0o600, dir_fd=parent_fd)
+        created = os.fstat(fd)
+        complete = False
+        try:
+            try:
+                handle = os.fdopen(fd, "wb")
+            except BaseException:
+                os.close(fd)
+                raise
+            with handle:
+                yield handle
+                handle.flush()
+                os.fsync(handle.fileno())
+            current = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (created.st_dev, created.st_ino):
+                raise WorkspaceBoundaryError("download target changed while it was being written")
+            complete = True
+            try:
+                os.fsync(parent_fd)
+            except OSError:
+                pass
+        finally:
+            if not complete:
+                try:
+                    current = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino):
+                        os.unlink(target.name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+    finally:
+        os.close(parent_fd)
 
 
 def stat_entry(path: Path | str, *, missing_ok: bool = False) -> os.stat_result | None:

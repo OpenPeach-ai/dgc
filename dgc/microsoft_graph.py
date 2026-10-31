@@ -1115,6 +1115,7 @@ class GraphServer:
                 "text": _cut(data.decode("utf-8", errors="replace"))}
 
     def download_file(self, arguments: dict, cancelled):
+        from .workspace import WorkspaceBoundaryError, create_regular_file_stream
         item = self._file(arguments, cancelled)
         name = str(item.get("name") or "download")
         if int(item.get("size") or 0) > MAX_TRANSFER:
@@ -1122,18 +1123,14 @@ class GraphServer:
         target = _in_project(self.root, arguments.get("save_to") or name, "save_to")
         if target.exists() or target.is_symlink():
             raise GraphError(f"{target} already exists; choose another save_to.")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _in_project(self.root, str(target), "save_to")   # again, now the folders exist: no link led outside
-        written = 0
-        with open(target, "xb") as handle:
-            try:
+        try:
+            with create_regular_file_stream(target) as handle:
                 written = self.graph.download(item.get("@microsoft.graph.downloadUrl"), handle.write, MAX_TRANSFER,
                                               cancelled=cancelled)
-            except BaseException:
-                handle.close()
-                with contextlib.suppress(OSError):
-                    target.unlink()
-                raise
+        except FileExistsError:
+            raise GraphError(f"{target} already exists; choose another save_to.") from None
+        except (OSError, WorkspaceBoundaryError):
+            raise GraphError("The download could not be saved safely inside the project.") from None
         return {"saved": str(target.relative_to(self.root.resolve(strict=False))), "bytes": written,
                 "name": name, "id": item.get("id")}
 
@@ -1142,6 +1139,7 @@ class GraphServer:
         if arguments.get("from_path") and arguments.get("content") is not None:
             raise GraphError("Give from_path or content, not both.")
         if arguments.get("from_path"):
+            from .workspace import read_regular_bytes
             source = _in_project(self.root, arguments.get("from_path"), "from_path")
             # Never a .env, a key, a credential file or anything in a dot folder, as a deck's picture never is
             # (artifacts._private_rel): a sentence in an email the model read must not be able to send one to the cloud.
@@ -1150,11 +1148,17 @@ class GraphServer:
             if _private_rel(rel):
                 raise GraphError(f"{rel} is private (a key, a credential, a .env or a dot folder) and never goes to "
                                  "OneDrive.")
-            if not source.is_file():
-                raise GraphError(f"{arguments.get('from_path')} isn't a file in the project.")
-            if source.stat().st_size > MAX_TRANSFER:
-                raise GraphError(f"{source.name} is larger than DGC uploads ({MAX_TRANSFER // (1024 * 1024)} MB).")
-            return source.read_bytes(), source.name
+            try:
+                if not source.is_file():
+                    raise GraphError(f"{arguments.get('from_path')} isn't a file in the project.")
+                if source.stat().st_size > MAX_TRANSFER:
+                    raise GraphError(f"{source.name} is larger than DGC uploads ({MAX_TRANSFER // (1024 * 1024)} MB).")
+                raw, _version = read_regular_bytes(source, maximum=MAX_TRANSFER)
+            except GraphError:
+                raise
+            except (OSError, ValueError):
+                raise GraphError(f"{source.name} changed or could not be read safely inside the project.") from None
+            return raw, source.name
         if arguments.get("content") is None:
             raise GraphError("Give from_path (a file in the project) or content (text).")
         text = _text(arguments.get("content"), "content", 10_000_000)

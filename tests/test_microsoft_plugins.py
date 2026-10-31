@@ -927,6 +927,43 @@ class ToolTests(Fixture):
         for headers in self.ms.download_headers:
             self.assertNotIn("Authorization", headers, "the upload address never gets the sign-in")
 
+    def test_onedrive_upload_refuses_a_file_swapped_to_an_outside_symlink(self):
+        public = self.root / "project" / "report.txt"
+        public.write_text("public report")
+        secret = self.root / "outside-secret.txt"
+        secret.write_text("PRIVATE-NOT-FOR-ONEDRIVE")
+        original = microsoft_graph._in_project
+
+        def swap_after_validation(root, value, name):
+            target = original(root, value, name)
+            if name == "from_path":
+                public.unlink()
+                public.symlink_to(secret)
+            return target
+
+        with patch.object(microsoft_graph, "_in_project", side_effect=swap_after_validation):
+            refused = self.call(self.mgr, "onedrive", "upload_file", {"from_path": "report.txt"})
+        self.assertIn("safely", refused)
+        self.assertFalse(any(file.get("content") == secret.read_bytes() for file in self.ms.files.values()))
+
+    def test_streamed_download_refuses_a_late_parent_link_and_cleans_a_failed_transfer(self):
+        from dgc.workspace import WorkspaceBoundaryError, create_regular_file_stream
+        outside = self.root / "outside-folder"
+        outside.mkdir()
+        linked = self.root / "project" / "linked-folder"
+        linked.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises((OSError, WorkspaceBoundaryError)):
+            with create_regular_file_stream(linked / "download.txt") as handle:
+                handle.write(b"must stay inside")
+        self.assertFalse((outside / "download.txt").exists())
+
+        cancelled = self.root / "project" / "cancelled.txt"
+        with self.assertRaisesRegex(RuntimeError, "stop"):
+            with create_regular_file_stream(cancelled) as handle:
+                handle.write(b"partial")
+                raise RuntimeError("stop")
+        self.assertFalse(cancelled.exists())
+
     def test_throttling_waits_for_retry_after_then_says_so(self):
         self.ms.throttle = {"/me/calendars": 2}
         answer = self.json_call(self.mgr, "calendar", "list_calendars")
