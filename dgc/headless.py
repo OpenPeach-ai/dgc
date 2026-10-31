@@ -2733,8 +2733,14 @@ class Backend:
         self._emit_config()
         self._publish_model_capabilities()
         self._start_pip_report_watch()
-        # The user's mods (dgc/mods), started beside the chat: ready never waits for them.
-        threading.Thread(target=self._start_mods, daemon=True, name="dgc-mods").start()
+        # A mod explicitly named by an SDK session is part of that session's requested
+        # capabilities. Start it before the command reader begins, so an immediate mods_list
+        # cannot observe the published host while its process is still stopped. Ordinary
+        # installed mods remain asynchronous to keep the editor's ready path responsive.
+        if os.environ.get("DGC_MODS_EXTRA", "").strip():
+            self._start_mods()
+        else:
+            threading.Thread(target=self._start_mods, daemon=True, name="dgc-mods").start()
 
     # ---- the user's mods (dgc/mods): mods, mod_ui, mod_toast, mod_result; mods_list, mod_set, mod_command ------
     def _start_mods(self):
