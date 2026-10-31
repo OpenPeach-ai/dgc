@@ -71,20 +71,24 @@ class FolderTools(unittest.TestCase):
         nxt = int(first.rsplit("start_line ", 1)[1].rstrip("."))
         self.assertIn(f"line {nxt}\n", F.call(self.root, "folder_read", {"path": "long.txt", "start_line": nxt}) + "\n")
 
-    def test_a_file_replaced_after_size_check_is_not_read(self):
-        selected = self.root / "selected.txt"
-        replacement = self.root / "replacement.txt"
+    def test_a_folder_swapped_to_an_outside_link_before_open_is_not_read(self):
+        docs = self.root / "docs"
+        docs.mkdir()
+        selected = docs / "selected.txt"
+        outside = self.base / "outside-dir"
+        outside.mkdir()
+        replacement = outside / "selected.txt"
         selected.write_text("chosen", encoding="utf-8")
         replacement.write_text("unexpected", encoding="utf-8")
-        original_open = os.open
+        original_read = F.read_regular_bytes
 
-        def replace_before_open(path, flags):
-            selected.rename(self.root / "old.txt")
-            replacement.rename(selected)
-            return original_open(path, flags)
+        def replace_before_open(path, *, maximum):
+            docs.rename(self.root / "old-docs")
+            docs.symlink_to(outside)
+            return original_read(path, maximum=maximum)
 
-        with patch.object(F.os, "open", side_effect=replace_before_open):
-            got = F.call(self.root, "folder_read", {"path": "selected.txt"})
+        with patch.object(F, "read_regular_bytes", side_effect=replace_before_open):
+            got = F.call(self.root, "folder_read", {"path": "docs/selected.txt"})
         self.assertTrue(got.startswith("error:"), got)
         self.assertNotIn("unexpected", got)
 

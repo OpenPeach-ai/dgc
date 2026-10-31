@@ -9,10 +9,10 @@ from __future__ import annotations
 import fnmatch
 import heapq
 import os
-import stat
 from pathlib import Path
 
 from .. import artifacts
+from ..workspace import WorkspaceBoundaryError, read_regular_bytes
 
 MAX_CALLS = 20               # folder calls in one reply
 MAX_LIST = 300               # entries in one listing
@@ -136,30 +136,11 @@ def list_dir(root: Path, rel: str = "") -> str:
 
 
 def _read_regular(path: Path, limit: int) -> bytes:
-    """Read one unchanged regular file, with a hard byte limit even if it grows."""
-    before = os.stat(path)
-    if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-        raise OSError("file is not a readable regular file within the size limit")
-    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-             | getattr(os, "O_BINARY", 0))
-    fd = os.open(path, flags)
+    """Read through a pinned parent and file descriptor; a late link cannot redirect it."""
     try:
-        opened = os.fstat(fd)
-        if (not stat.S_ISREG(opened.st_mode) or opened.st_size > limit
-                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
-            raise OSError("file changed while opening")
-        with os.fdopen(fd, "rb") as source:
-            fd = -1
-            raw = source.read(limit + 1)
-        if len(raw) > limit:
-            raise OSError("file grew beyond the size limit")
-        after = os.stat(path)
-        if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
-            raise OSError("file changed while reading")
-        return raw
-    finally:
-        if fd >= 0:
-            os.close(fd)
+        return read_regular_bytes(path, maximum=limit)[0]
+    except WorkspaceBoundaryError as error:
+        raise OSError(str(error)) from None
 
 
 def read(root: Path, rel: str, start_line: int = 1) -> str:
