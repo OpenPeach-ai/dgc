@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.34.2 — 2026-11-01
 
 - **Delete archived Pips permanently.** An explicit confirmation requires the Pip's exact name before DGC erases its private history, computer and Pip-created Outputs. The Pip disappears from the Archived list after deletion.
 - **Question replies keep their styling after a session reload.** The question appears as a
