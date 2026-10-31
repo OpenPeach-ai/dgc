@@ -146,7 +146,8 @@ class WindowTests(unittest.TestCase):
 
     def test_a_long_chat_is_summarized_before_it_overflows_and_says_so(self):
         chat = self.engine.open()
-        long = "word " * 1200            # ~1,500 tokens each way
+        # Leave room for the tool schemas: two turns fit, and the third forces rolling compaction.
+        long = "word " * 1100
         for i in range(2):
             self.talk(chat, f"question {i}: {long}", f"answer {i}: {long}")
         self.assertEqual(self.world["summaries"], [], "under 75% of 8k: nothing summarized")
@@ -307,7 +308,7 @@ class WindowTests(unittest.TestCase):
 
     def test_a_summary_that_cant_be_written_doesnt_stop_the_reply(self):
         chat = self.engine.open()
-        long = "word " * 1200
+        long = "word " * 1100
         for i in range(2):
             self.talk(chat, f"q{i} {long}", f"a{i} {long}")
         self.world["summary_fails"] = True

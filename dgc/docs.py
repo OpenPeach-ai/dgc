@@ -2843,19 +2843,18 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-Current release: **dgc-sdk 0.8.0** on [PyPI](https://pypi.org/project/dgc-sdk/) and the Node
-package `@vibedgc/sdk` 0.8.0, both tagged [`sdk-v0.8.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.8.0)
-(not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.50.0** over editor protocol
-v14. The SDK 0.8.0 release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11
-through WSL 2 (Ubuntu 24.04). Native Windows remains experimental; only focused SDK checks were run
-there. The full
-guide and API reference is
-[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.8.0/docs/SDK.md).
+The **dgc-sdk 0.8.0** release candidate pairs with CLI **0.50.0** over editor protocol v14.
+Its release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
+(Ubuntu 24.04). Native Windows remains experimental; focused SDK checks passed there, but the full
+suite was not run natively. The guide and API reference are in
+[docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
+[PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)
+for the published version before installing.
 
 ## Install
 
 ```
-python3 -m pip install dgc-sdk==0.8.0
+python3 -m pip install dgc-sdk
 ```
 
 That installs `import dgc_sdk`. Do **not** run `pip install dgc`: PyPI's package named `dgc` is a
