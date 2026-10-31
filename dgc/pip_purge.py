@@ -172,11 +172,10 @@ def _artifact_owned(folder, pip_id):
     try:
         meta = json.loads(raw)
     except ValueError as exc:
-        # A damaged record may still be this Pip's Output. Keep the purge
-        # journal so a later repair can finish instead of reporting success.
-        if pip_id.encode() in raw:
-            raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
-        return False
+        # Ownership cannot be established from a damaged record. Keep the
+        # journal pending instead of claiming that all of this Pip's data was
+        # removed while an unknown Output remains in the Library.
+        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
     if not isinstance(meta, dict):
         return False
     return any(isinstance(meta.get(key), dict) and meta[key].get('pip') == pip_id
@@ -290,7 +289,7 @@ def delete(store, pip_id, *, expected_name, expected_version, expected_lifecycle
         store.db.execute('PRAGMA defer_foreign_keys=ON')
         selected = _selected_rows(store.db, pip_id, run_ids)
         _delete_rows(store.db, selected)
-        store.db.execute('DELETE FROM metadata WHERE instr(key,?)>0', (pip_id,))
+        store.db.execute('DELETE FROM metadata WHERE instr(key,?)>0 OR instr(value,?)>0', (pip_id, pip_id))
         if store.db.execute('SELECT 1 FROM pips WHERE id=?', (pip_id,)).fetchone():
             raise RegistryError('unsafe_state', 'The Pip remained in the registry.')
     recover(store.registry)
