@@ -248,6 +248,40 @@ class MacSwitchTests(unittest.TestCase):
         self.assertEqual(self.spec["path"].read_bytes(), changed)
         self.assertEqual([c[0] for c in self.calls if c[0] in ("bootout", "bootstrap")], [])
 
+    def test_pruned_previous_release_agent_refreshes_only_when_exact(self):
+        source = self.home.parent / "old-release"
+        (source / "dgc").mkdir(parents=True)
+        (source / "dgc" / "__init__.py").write_text('')
+        (source / "dgc" / "cli.py").write_text('')
+        old = keep._agent_spec(self.home.resolve(), package_root=source, **self.options)
+        self.spec["path"].parent.mkdir()
+        self.spec["path"].write_bytes(old["content"])
+        self.spec["path"].chmod(0o644)
+        (source / "dgc" / "cli.py").unlink()
+        (source / "dgc" / "__init__.py").unlink()
+        (source / "dgc").rmdir()
+        source.rmdir()
+        self.loaded = True
+        self.assertTrue(keep._mac_status(self.spec)["outdated"])
+        keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+
+    def test_edited_pruned_previous_release_agent_is_rejected(self):
+        source = self.home.parent / "old-release"
+        (source / "dgc").mkdir(parents=True)
+        (source / "dgc" / "__init__.py").write_text('')
+        (source / "dgc" / "cli.py").write_text('')
+        old = keep._agent_spec(self.home.resolve(), package_root=source, **self.options)
+        self.spec["path"].parent.mkdir()
+        self.spec["path"].write_bytes(old["content"].replace(b"ThrottleInterval", b"ThrottleIntervaX"))
+        self.spec["path"].chmod(0o644)
+        (source / "dgc" / "cli.py").unlink()
+        (source / "dgc" / "__init__.py").unlink()
+        (source / "dgc").rmdir()
+        source.rmdir()
+        with self.assertRaisesRegex(RegistryError, "differs"):
+            keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+
     def test_a_link_at_the_agent_path_is_never_followed(self):
         self.spec["path"].parent.mkdir(parents=True)
         target = self.spec["path"].parent / "unrelated.plist"

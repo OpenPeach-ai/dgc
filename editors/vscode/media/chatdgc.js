@@ -2629,6 +2629,12 @@
   input.addEventListener("compositionend", () => history?.compositionend());
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+    else if (e.key === "Enter" && e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      const next = window.DgcNumberedList?.continuation(input.value, input.selectionStart, input.selectionEnd) || "\n";
+      edit(() => input.setRangeText(next, input.selectionStart, input.selectionEnd, "end"), "insert");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); e.stopPropagation(); micCancel(); }
     else if (e.key === "Escape" && state.busy) { e.preventDefault(); stopReply(); }
     else if (e.key === "ArrowUp" && !input.value && !state.pending.length && queued().length && !e.isComposing) {

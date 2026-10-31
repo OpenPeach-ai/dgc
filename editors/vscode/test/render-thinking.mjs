@@ -131,27 +131,29 @@ function loadAssets() {
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readFileSync(here + "/../media/main.css", "utf8");
   const mainJs = readFileSync(here + "/../media/main.js", "utf8");
+  const numberedListJs = readFileSync(here + "/../media/numbered-list.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])
     .find((candidate) => candidate.includes('id="input"')).replace(/\$\{[^}]*\}/g, "");
-  assets = { html: skeleton.replace("</head>", `<style>${css}</style></head>`), mainJs, markdownJs };
+  assets = { html: skeleton.replace("</head>", `<style>${css}</style></head>`), mainJs, numberedListJs, markdownJs };
   return assets;
 }
 
 export async function openThinkingPage(browser, { width = 460, height = 760, theme = "dark-modern",
   events = SCENARIOS.labels, config = {} } = {}) {
-  const { html, mainJs, markdownJs } = loadAssets();
+  const { html, mainJs, numberedListJs, markdownJs } = loadAssets();
   const page = await browser.newPage({ viewport: { width, height } });
   await page.setContent(html, { waitUntil: "load" });
   if (THEMES[theme]) await page.addStyleTag({ content: `:root { ${THEMES[theme]} }` });
   await page.evaluate((t) => document.body.classList.add(
     t.startsWith("light") ? "vscode-light" : t === "hc" ? "vscode-high-contrast" : "vscode-dark"), theme);
-  await page.evaluate(([mjs, mdjs]) => {
+  await page.evaluate(([mjs, nljs, mdjs]) => {
     window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+    eval(nljs);
     eval(mjs);
-  }, [mainJs, markdownJs]);
+  }, [mainJs, numberedListJs, markdownJs]);
   await page.evaluate(([list, extra]) => {
     const send = (event) => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event } }));
     send({ type: "config", model: "claude-opus-4-8", mode: "default", think: "high", base_url: "https://api.anthropic.com/v1",

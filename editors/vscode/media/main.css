@@ -1012,9 +1012,12 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 .tool[data-status="running"] .glyph { color: var(--accent); }
 .tool .verb { color: var(--text); font-weight: var(--w-semi); white-space: nowrap; }
 .tool .arg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.tool .badge { color: var(--faint); font-size: var(--t-xs); flex: none; }
+.tool .badge { color: var(--faint); font-size: var(--t-xs); flex: 0 0 42px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tool .tool-time { color: var(--faint); font-size: var(--t-xs); text-align: right; flex: none; font-variant-numeric: tabular-nums; }
-.tool .tool-time:not(:empty) { min-width: 30px; }
+/* A group with a timed step reserves the same clock column for every step, including
+   one that finished in under a second. Otherwise the thought marks jump left and right. */
+.tool .tool-time:empty { display: none; }
+.tool-group:has(.tool-time:not(:empty)) .tool .tool-time { display: inline; width: 40px; }
 .tool .dot { width: 6px; height: 6px; border-radius: var(--r-full); flex: none; background: var(--faint); }
 .tool .dot.run { background: var(--accent); animation: pulse 1s infinite; }
 /* The shared reduced-motion block above names this selector too, but at the same specificity and
@@ -3444,6 +3447,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
   vertical-align:1px;background:var(--accent);}
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   @keyframes dgc-motion-arrive { from { opacity:.55; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes dgc-motion-arrive-turn { from { opacity:.55; } to { opacity:1; } }
   @keyframes dgc-motion-status { from { background:color-mix(in srgb,var(--accent) 13%,transparent); } to { background:transparent; } }
   @keyframes dgc-motion-count { 50% { transform:scale(1.1); color:var(--accent-text,var(--accent)); } }
   @keyframes dgc-motion-news { from { box-shadow:inset 0 0 0 1px var(--accent); } to { box-shadow:inset 0 0 0 1px transparent; } }
@@ -3451,6 +3455,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .mod-bar-part { outl
   @keyframes dgc-motion-handoff { 0% { opacity:0; transform:translate(7px,-50%); } 45% { opacity:1; } 100% { opacity:0; transform:translate(-7px,-50%); } }
   @keyframes dgc-motion-settle { 50% { transform:translateY(calc(-50% - 2px)); } }
   #log .motion-arrive { animation:dgc-motion-arrive .18s ease-out both; }
+  #log .msg.dgc.motion-arrive { animation:dgc-motion-arrive-turn .18s ease-out both; }
   #log .card.motion-resolved { animation:dgc-motion-resolved .65s ease-out both; }
   #sessions-host .session-row.motion-state-change { animation:dgc-motion-status .7s ease-out both; }
   #sessions-host .motion-count-change { animation:dgc-motion-count .32s ease-out 1; }

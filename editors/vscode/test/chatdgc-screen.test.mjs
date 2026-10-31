@@ -107,6 +107,21 @@ test("a new chat: the question and the box together, and a message goes out with
   } finally { await s.page.close(); }
 });
 
+test("ChatDGC Shift+Enter continues numbered prompts without sending", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
+    const input = s.page.locator("#cd-input");
+    await input.fill("1. First point");
+    await input.press("End");
+    await input.press("Shift+Enter");
+    assert.equal(await input.inputValue(), "1. First point\n2. ");
+    assert.equal((await s.posted("send")).length, 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a click opens the thinking while it still thinks, even when a delta redraws the reply between press and release", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

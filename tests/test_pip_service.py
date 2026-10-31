@@ -117,6 +117,40 @@ class ServiceTests(unittest.TestCase):
         self.assertCode("service_conflict", service.install, self.home, upgrade=True, **self.options)
         self.assertIn("# changed", self.file.read_text())
 
+    def test_pruned_previous_release_unit_is_still_exactly_verified_for_upgrade(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"])
+        self.file.chmod(0o600)
+        (old_source / "dgc" / "cli.py").unlink()
+        (old_source / "dgc" / "__init__.py").unlink()
+        (old_source / "dgc").rmdir()
+        old_source.rmdir()
+        self.active, self.enabled = "active", "enabled"
+        self.assertTrue(service.status(self.home, **self.options)["outdated"])
+        self.assertTrue(service.install(self.home, upgrade=True, **self.options)["changed"])
+        self.assertEqual(self.file.read_text(), self.spec["content"])
+
+    def test_edited_pruned_release_unit_remains_a_conflict(self):
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        old = service.preview(self.home, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"].replace("RestartSec=30", "RestartSec=1"))
+        self.file.chmod(0o600)
+        (old_source / "dgc" / "cli.py").unlink()
+        (old_source / "dgc" / "__init__.py").unlink()
+        (old_source / "dgc").rmdir()
+        old_source.rmdir()
+        self.assertCode("service_conflict", service.install, self.home, upgrade=True, **self.options)
+        self.assertIn("RestartSec=1", self.file.read_text())
+
     def test_failed_replacement_keeps_previous_service_unit(self):
         old_source = self.base / "old-release"
         (old_source / "dgc").mkdir(parents=True)

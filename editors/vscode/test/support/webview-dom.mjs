@@ -14,6 +14,7 @@ export const mainJs = readFileSync(dir + "../media/main.js", "utf8");
 export const breakdownJs = readFileSync(dir + "../media/breakdown.js", "utf8");   // the panel loads it before main.js
 export const msgTimeJs = readFileSync(dir + "../media/msgtime.js", "utf8");     // a message's time (DgcTime), also before
 export const promptRailJs = readFileSync(dir + "../media/promptrail.js", "utf8");   // the prompt rail (DgcPromptRail), also before
+export const numberedListJs = readFileSync(dir + "../media/numbered-list.js", "utf8");
 export const modsJs = readFileSync(dir + "../media/mods.js", "utf8");               // the user's mods (DgcMods), also before
 export const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
@@ -158,6 +159,7 @@ export function makeDom(options = {}) {
   dom.window.eval(breakdownJs);
   dom.window.eval(msgTimeJs);
   dom.window.eval(promptRailJs);
+  dom.window.eval(numberedListJs);
   dom.window.eval(modsJs);
   dom.window.eval(options.script ?? mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));

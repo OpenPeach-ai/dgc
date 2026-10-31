@@ -7,7 +7,7 @@ import { buildSync } from "esbuild";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
-const output = resolve(process.argv[2] || "/home/fungigb10/dgc-work/genui-tool-preview");
+const output = resolve(process.argv[2] || resolve(root, "shots-tool-sequence"));
 mkdirSync(output, { recursive: true });
 const panelSource = readFileSync(resolve(root, "src/panel.ts"), "utf8");
 const skeleton = [...panelSource.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)]
@@ -21,6 +21,7 @@ const codicon = readFileSync(resolve(root, "media/codicon.css"), "utf8")
   .replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(resolve(root, "media/codicon.ttf")).toString("base64")}")`);
 const main = readFileSync(resolve(root, "media/main.js"), "utf8");
+const numberedList = readFileSync(resolve(root, "media/numbered-list.js"), "utf8");
 const markdown = buildSync({ entryPoints: [resolve(root, "src/markdown.ts")], bundle: true,
   format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
 const boot = `<script>
@@ -31,6 +32,7 @@ window.addEventListener("load", () => {
   });
   const decode = (encoded) => new TextDecoder().decode(Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0)));
   eval(decode(${JSON.stringify(Buffer.from(markdown + "\nglobalThis.DgcMarkdown = DgcMarkdown;", "utf8").toString("base64"))}));
+  eval(decode(${JSON.stringify(Buffer.from(numberedList, "utf8").toString("base64"))}));
   eval(decode(${JSON.stringify(Buffer.from(main, "utf8").toString("base64"))}));
   const send = (event) => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event } }));
   send({ type: "ready", capabilities: {}, model: "deepseek-v4.1-flash:cloud", mode: "default",

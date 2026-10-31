@@ -10,6 +10,7 @@ import '../media/voicebar.css';
 import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as main DGC and ChatDGC play it
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
+import '../media/numbered-list.js';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
 import {latestActivity,activityEnded,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
@@ -4045,7 +4046,14 @@ document.addEventListener('keydown',event=>{
   if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.closest?.('.composer-model-options')){event.preventDefault();const items=[...document.querySelectorAll('[data-chat-model]:not(:disabled)')],at=items.indexOf(event.target);items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}}
   if(event.key==='Escape'&&voiceMode?.active){event.preventDefault();voiceMode.end();return;}
   if(event.key==='Escape'&&(S.mic==='recording'||S.mic==='starting')){event.preventDefault();micCancel();return;}
-  if(!S.review&&event.target.id==='chatText'&&event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();void sendChat();return;}
+  if(!S.review&&event.target.id==='chatText'&&event.key==='Enter'&&!event.isComposing){
+    event.preventDefault();
+    if(!event.shiftKey){void sendChat();return;}
+    const box=event.target,next=window.DgcNumberedList?.continuation(box.value,box.selectionStart,box.selectionEnd)||'\n';
+    chatEdit(()=>box.setRangeText(next,box.selectionStart,box.selectionEnd,'end'));
+    box.dispatchEvent(new Event('input',{bubbles:true}));
+    fitChatInput();return;
+  }
   if(!S.review)return;
   if(event.key==='Escape'&&!S.busy){event.preventDefault();closeReview();return;}
   if(event.key==='Tab'){

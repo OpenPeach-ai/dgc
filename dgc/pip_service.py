@@ -261,11 +261,36 @@ def _older_release(value, spec):
                 or (len(argv) == 18) != spec["server"]
                 or (len(argv) == 18 and argv[17] != "--server")):
             return False
-        old = preview(spec["dgc_home"], unit_directory=Path(spec["unit_path"]).parent,
-                      python_executable=argv[8], package_root=argv[13], server=len(argv) == 18)
+        source = _path(argv[13], "Previous DGC package root")
+        python = _path(argv[8], "Previous Python executable")
+        if source.exists():
+            # Keep the stronger source and interpreter checks whenever the prior
+            # installation is still on disk. Only a fully pruned source needs the
+            # exact-byte reconstruction below.
+            old = preview(spec["dgc_home"], unit_directory=Path(spec["unit_path"]).parent,
+                          python_executable=argv[8], package_root=argv[13], server=len(argv) == 18)
+            return old["content"].encode() == value and old["sha256"] != spec["sha256"]
+        # An installer may have pruned the previous version before this refresh ran.
+        # Verify every byte against the current template with only its two pinned paths
+        # substituted. Requiring the old package to exist made an exact DGC-owned unit
+        # look like an unrelated service, leaving Pips running from a deleted path.
+        _safe_chain(source, missing=True)
+        if python.exists() or python.is_symlink():
+            _executable(python)
+        else:
+            _safe_chain(python.parent, missing=True)
+        previous = list(spec["argv"])
+        previous[8], previous[13] = str(python), str(source)
+        if previous != argv:
+            return False
+        new_line = "ExecStart=" + " ".join(_quote(part) for part in spec["argv"])
+        old_line = "ExecStart=" + " ".join(_quote(part) for part in previous)
+        if spec["content"].count(new_line) != 1:
+            return False
+        expected = spec["content"].replace(new_line, old_line, 1)
     except (ValueError, OSError, RegistryError):
         return False
-    return old["content"].encode() == value and old["sha256"] != spec["sha256"]
+    return expected.encode() == value and expected != spec["content"]
 
 
 def _check_file(spec, *, required=True, upgrade=False, other=None):

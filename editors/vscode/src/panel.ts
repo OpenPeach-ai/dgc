@@ -8673,6 +8673,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const msgTimeJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "msgtime.js"));
     // The prompt rail beside the transcript, the same as ChatDGC's.
     const promptRailJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "promptrail.js"));
+    const numberedListJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "numbered-list.js"));
     // The user's mods, drawn the same way here and in ChatDGC (window.DgcMods).
     const modsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mods.js"));
     // `https:` in img-src is what lets a favicon load beside a link the user typed, and it is
@@ -8937,6 +8938,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
+<script nonce="${nonce}" src="${numberedListJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>

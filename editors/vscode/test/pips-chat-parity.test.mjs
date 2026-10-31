@@ -73,6 +73,14 @@ function setup({api=65,host,online=true,answering=true}={}){
   return {w,d:shadow,$,sent,drain,open,requests:t=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===t)};
 }
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim()||'';
+
+test('Pips Shift+Enter continues numbered prompts without sending',async()=>{
+  const x=setup({answering:false});await x.open('personal',PLANNER);
+  const box=x.$('#chatText');box.value='1. First point';box.focus();box.setSelectionRange(box.value.length,box.value.length);
+  box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}));
+  assert.equal(x.$('#chatText').value,'1. First point\n2. ');
+  assert.equal(x.requests('send_pip_message').length,0);
+});
 // What a chat draws, by its pieces, with the Pip's name taken out: the same for both kinds means the same chat.
 function shape(x,name){
   const c=x.$('.pip-conversation'),log=x.$('.conversation-log'),live=c.querySelector('.provisional');

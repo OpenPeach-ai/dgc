@@ -148,6 +148,45 @@ for (const width of [300, 460]) {
   });
 }
 
+for (const width of [300, 460, 900]) {
+  test(`mixed tool rows align thought marks and status at ${width}px`, async (t) => {
+    if (skipOrFail(t)) return;
+    const events = [{ type: "turn_start", turn_id: "align", prompt: "Check the files and Pips", kind: "prompt" }];
+    for (const [i, name] of ["read_file", "pips_context", "bash", "read_file", "bash"].entries()) {
+      const summary = name === "bash" ? `echo check-${i}` : `reports/check-${i}.txt`;
+      events.push(
+        { type: "thinking_delta", block: `align:think${i}`, source: "raw", text: `Check ${i}` },
+        { type: "thinking_end", block: `align:think${i}`, source: "raw", placement: "collapsed", seconds: i + 1 },
+        { type: "tool_call", call_id: `align-${i}`, name, summary,
+          args: name === "bash" ? { command: summary } : { path: summary } },
+        { type: "tool_result", call_id: `align-${i}`, name, output: Array(i * 4 + 1).fill("ok").join("\n") });
+    }
+    events.push({ type: "turn_end", turn_id: "align", reason: "completed", token_estimate: 0 });
+    const page = await open({ width, events });
+    try {
+      await page.click(".tool-group > summary");
+      const measure = () => page.evaluate(() => {
+        const rows = [...document.querySelectorAll(".tool-group > .tool")];
+        return { marks: rows.map((row) => row.querySelector(".thought-mark").getBoundingClientRect().right),
+          badgeEdges: rows.map((row) => row.querySelector(".badge").getBoundingClientRect().right),
+          heights: rows.map((row) => row.querySelector(".head").getBoundingClientRect().height),
+          overflow: Math.max(document.getElementById("log").scrollWidth - document.getElementById("log").clientWidth, 0) };
+      });
+      for (const timed of [false, true]) {
+        if (timed) await page.evaluate(() => { document.querySelectorAll(".tool-time")[2].textContent = "12.4s"; });
+        const view = await measure();
+        assert.equal(view.marks.length, 5);
+        assert.ok(Math.max(...view.marks) - Math.min(...view.marks) <= 1,
+          `thought marks share one right edge (${view.marks.join(", ")})`);
+        assert.ok(Math.max(...view.badgeEdges) - Math.min(...view.badgeEdges) <= 1,
+          `status counts share one right edge (${view.badgeEdges.join(", ")})`);
+        assert.ok(view.heights.every((height) => height <= 30), `each tool stays one line (${view.heights.join(", ")})`);
+        assert.equal(view.overflow, 0);
+      }
+    } finally { await page.close(); }
+  });
+}
+
 test("the line is a button: Enter opens it, Space closes it, and Tab reaches each thought mark", async (t) => {
   if (skipOrFail(t)) return;
   const page = await open({ width: 460, events: founderTurn() });
@@ -158,8 +197,10 @@ test("the line is a button: Enter opens it, Space closes it, and Tab reaches eac
     await page.keyboard.press("Space");
     assert.equal(await page.evaluate(() => document.querySelector(".tool-group").open), false);
     await page.keyboard.press("Enter");
-    // Tab from the line: the first step's toggle, then its thought mark.
+    // Tab follows the visual row: toggle, command action, then thought mark.
     await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    assert.match(await page.evaluate(() => document.activeElement.className), /tool-copy-cmd/);
     await page.keyboard.press("Tab");
     const focused = await page.evaluate(() => document.activeElement.className);
     assert.match(focused, /thought-mark/);

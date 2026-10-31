@@ -212,16 +212,33 @@ def _agent_old(spec):
                 or argv[6:] != ["pips", "serve", "--service"]):
             return False
         source = pip_service._path(argv[5], "DGC package root")
-        pip_service._safe_chain(source)
-        for entry in (source / "dgc" / "__init__.py", source / "dgc" / "cli.py"):
-            info = entry.lstat()
-            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
-                return False
-        old = _agent_spec(spec["home"], agent_directory=spec["directory"],
-                          python_executable=argv[0], package_root=source)
+        if source.exists():
+            pip_service._safe_chain(source)
+            for entry in (source / "dgc" / "__init__.py", source / "dgc" / "cli.py"):
+                info = entry.lstat()
+                if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
+                    return False
+            old = _agent_spec(spec["home"], agent_directory=spec["directory"],
+                              python_executable=argv[0], package_root=source)
+            return old["content"] == raw
+        # The old release may already have been pruned. Reconstruct the exact
+        # LaunchAgent bytes from the current template with only its pinned paths
+        # changed; no similarly named or edited agent is accepted.
+        python = pip_service._path(argv[0], "Previous Python executable")
+        pip_service._safe_chain(source, missing=True)
+        if python.exists() or python.is_symlink():
+            pip_service._executable(python)
+        else:
+            pip_service._safe_chain(python.parent, missing=True)
+        expected = plistlib.loads(spec["content"])
+        previous = list(expected["ProgramArguments"])
+        previous[0], previous[5] = str(python), str(source)
+        if previous != argv:
+            return False
+        expected["ProgramArguments"] = previous
     except (ValueError, TypeError, OSError, RegistryError, plistlib.InvalidFileException):
         return False
-    return old["content"] == raw
+    return plistlib.dumps(expected, sort_keys=True) == raw
 
 
 def _agent_disabled(spec):

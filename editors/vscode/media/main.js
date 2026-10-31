@@ -5383,13 +5383,15 @@
   // streaming keeps streaming into it.
   function markThoughts(card, nodes) {
     const head = card.querySelector(":scope > .head");
-    let at = head?.querySelector(":scope > .tool-toggle");
-    if (!at) return;
+    // Keep the mark beside the status columns. File/command actions differ by tool;
+    // placing a mark before them made its right edge wander from row to row.
+    const status = head?.querySelector(":scope > .dot");
+    if (!status) return;
     let below = head;
     for (const node of nodes) {
       if (node.matches(".reasoning")) { below.after(node); below = node; continue; }
       node.classList.add("thought-mark");
-      at.after(node); at = node;
+      status.before(node);
       if (node._reason) paintReasonGroup(node._reason);
       else {
         const label = node.querySelector(".thought-label");
@@ -5702,7 +5704,8 @@
     card.querySelector(".genui-tool-insight")?.remove();
     const compact = el("span", "genui-tool-summary", `${counts.passed}/${counts.total} passed`);
     if (counts.failed) compact.classList.add("failed");
-    card.querySelector(".head")?.appendChild(compact);
+    const head = card.querySelector(".head");
+    head?.insertBefore(compact, head.querySelector(":scope > .thought-mark, :scope > .dot"));
     const panel = el("div", "genui-tool-insight");
     const heading = el("div", "genui-tool-insight-head");
     heading.appendChild(el("strong", "", counts.failed ? "Tests need attention" : "Test run complete"));
@@ -9245,7 +9248,12 @@
     // the rest of the line in a <div>, which the serializer would have to unpick -- so insert the
     // break explicitly and keep the host a flat run of text and <br>.
     // It is typing, so it joins the run it interrupts rather than being a step of its own.
-    else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); recordComposerEdit(() => insertComposerText("\n"), "insert"); }
+    else if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      const [start, end] = composerSelection();
+      const next = window.DgcNumberedList?.continuation(composerText(), start, end) || "\n";
+      recordComposerEdit(() => insertComposerText(next), "insert");
+    }
     else if (e.key === "Escape" && (micState === "recording" || micState === "starting")) { e.preventDefault(); micCancel(); }
     else if (e.key === "Escape" && streaming) doStop();
   });
