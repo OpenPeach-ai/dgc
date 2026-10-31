@@ -425,10 +425,23 @@ let unflash: ReturnType<typeof setTimeout> | undefined;
 // paragraph mid-word in the live run. Before a key is handled, the browser's selection, if it differs, is taken.
 const caret = new Plugin({
   props: {
-    handleKeyDown(view) {
+    handleKeyDown(view, event) {
       const dom = view.dom.ownerDocument.getSelection();
       if (!dom?.anchorNode || !dom.focusNode || !view.dom.contains(dom.anchorNode) || !view.dom.contains(dom.focusNode)) return false;
       if (view.state.selection instanceof NodeSelection) return false;
+      // Chromium applies End's native selection change after keydown. Under a busy
+      // extension host, the next Enter can arrive before selectionchange tells
+      // ProseMirror about that move. Apply the browser's line-boundary move now
+      // and commit it before another key can split the old position.
+      if (event.key === "End" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        try {
+          dom.modify("move", "forward", "lineboundary");
+          const pos = view.posAtDOM(dom.anchorNode!, dom.anchorOffset);
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+          event.preventDefault();
+          return true;
+        } catch { /* let the browser handle an unusual selection */ }
+      }
       try {
         const anchor = view.posAtDOM(dom.anchorNode, dom.anchorOffset), head = view.posAtDOM(dom.focusNode, dom.focusOffset);
         const now = view.state.selection;
