@@ -115,6 +115,37 @@ test("a page is framed at its own address, as the window's browser reaches it", 
   assert.deepEqual(panel.last("frame"), { type: "frame", url: "http://forwarded.example:45012/", version: 3 });
 });
 
+test("an older preview reply cannot replace the latest page at the same version", async () => {
+  hub.open(ID, { type: "page", title: "Tips" });
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  hub.onEvent({ type: "artifact_detail", artifact: { ...VIEW, type: "page", exports: ["html", "zip"] }, request_id: last("artifact_get").request_id });
+  const older = last("artifact_open");
+  panel.say({ type: "preview" });
+  const newer = last("artifact_open");
+  assert.notEqual(older.request_id, newer.request_id);
+  hub.onEvent({ type: "artifact_served", id: ID, url: "http://127.0.0.1:45013/", request_id: newer.request_id });
+  await tick(); await tick();
+  hub.onEvent({ type: "artifact_served", id: ID, url: "http://127.0.0.1:45012/", request_id: older.request_id });
+  await tick(); await tick();
+  assert.deepEqual(panel.webview.posted.filter((message) => message.type === "frame"), [
+    { type: "frame", url: "http://forwarded.example:45013/", version: 3 },
+  ]);
+});
+
+test("an older detail reply cannot replace a newer reload", () => {
+  hub.open(ID, { type: "page", title: "Tips" });
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  const older = last("artifact_get");
+  panel.say({ type: "reload" });
+  const newer = last("artifact_get");
+  hub.onEvent({ type: "artifact_detail", artifact: { ...VIEW, title: "Latest", version: 4, type: "page" }, request_id: newer.request_id });
+  hub.onEvent({ type: "artifact_detail", artifact: { ...VIEW, title: "Old", type: "page" }, request_id: older.request_id });
+  assert.equal(panel.title, "Latest");
+  assert.equal(panel.last("detail").artifact.title, "Latest");
+});
+
 test("Save sends the whole content from the version it started at; a conflict comes back as one", () => {
   hub.open(ID, { type: "slides" });
   const [panel] = world.panels;

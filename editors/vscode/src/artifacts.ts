@@ -150,6 +150,8 @@ class ArtifactPanel {
   private queue: Record<string, unknown>[] = [];
   private servedFor = 0;           // the version the last render was asked for
   private servedUrl = "";
+  private serveSeq = 0;
+  private loadSeq = 0;
 
   constructor(private readonly hub: Artifacts, readonly id: string, readonly panel: vscode.WebviewPanel) {
     panel.webview.onDidReceiveMessage((message) => { void this.fromPage(message); });
@@ -163,17 +165,19 @@ class ArtifactPanel {
 
   /** The artifact as it is now, with its content for the editor; then what shows it. */
   load(): void {
+    const seq = ++this.loadSeq;
     this.hub.ask({ type: "artifact_get", id: this.id, content: true }, {
       ok: (ev) => {
+        if (seq !== this.loadSeq) return;
         const view = artifactView(ev.artifact);
-        if (!view) return;
+        if (!view || (this.view && view.version < this.view.version)) return;
         this.view = view;
         this.panel.title = view.title;
         this.post({ type: "detail", artifact: view, content: ev.content ?? null, state: ev.state && typeof ev.state === "object" ? ev.state : null,
                     offer: this.hub.offers() ?? null });
         if (view.type !== "doc") this.serve();
       },
-      fail: (reason, message) => this.post({ type: "rejected", what: "load", reason, message }),
+      fail: (reason, message) => { if (seq === this.loadSeq) this.post({ type: "rejected", what: "load", reason, message }); },
     });
   }
 
@@ -181,27 +185,31 @@ class ArtifactPanel {
    *  and handed to the page as text, so no webview needs to reach the address. */
   serve(): void {
     const version = this.view?.version ?? 0;
+    const seq = ++this.serveSeq;
+    const current = () => seq === this.serveSeq && this.view?.version === version;
     this.servedFor = version;
     this.servedUrl = "";
     this.hub.ask({ type: "artifact_open", id: this.id }, {
       ok: async (ev) => {
+        if (!current()) return;
         const url = String(ev.url || "");
         if (!/^https?:\/\//i.test(url)) return;
         if (this.view?.type === "page") {
-          this.servedUrl = url;
           let shown = url;
           try { shown = (await vscode.env.asExternalUri(vscode.Uri.parse(url, true))).toString(true); } catch { /* as it is */ }
+          if (!current()) return;
+          this.servedUrl = url;
           this.post({ type: "frame", url: shown, version });
           return;
         }
         try {
           const html = await fetchPage(url);
-          if (version === this.servedFor) this.post({ type: "render", html, version });
+          if (current()) this.post({ type: "render", html, version });
         } catch (err: any) {
-          this.post({ type: "render", error: `DGC's view of it didn't load: ${String(err?.message || err)}`, version });
+          if (current()) this.post({ type: "render", error: `DGC's view of it didn't load: ${String(err?.message || err)}`, version });
         }
       },
-      fail: (reason, message) => this.post({ type: "render", error: message || reason, version }),
+      fail: (reason, message) => { if (current()) this.post({ type: "render", error: message || reason, version }); },
     });
   }
 
