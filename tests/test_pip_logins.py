@@ -109,6 +109,13 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(pip_logins.LoginError):
             pip_logins.unseal(b"DGC-LOGINS-SEALED-1\n" + b"x" * 60, b"k" * 32)
 
+    def test_strict_read_names_damaged_login_structure_for_deletion(self):
+        self.save()
+        with patch.object(pip_logins, "unseal", return_value=b'{"logins":null}'):
+            with self.assertRaises(pip_logins.LoginError) as caught:
+                self.store.read(strict=True)
+        self.assertEqual(caught.exception.code, "unreadable")
+
     def test_the_same_account_saved_again_replaces_its_password_and_who_may_use_it_widens(self):
         first = self.save()
         other = "pip_" + "b" * 32
