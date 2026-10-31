@@ -74,6 +74,25 @@ class Store(unittest.TestCase):
         with self.assertRaises(chat_canvas.CanvasError):
             self.canvases.get(CHAT, view["id"], text=True)
 
+    def test_legacy_migration_skips_linked_and_malformed_versions(self):
+        self.canvases._store = chat_canvas.Store(self.canvases.root.parent / "isolated-artifacts")
+        canvas_id = "cv_" + "b" * 16
+        folder = self.canvases._dir(CHAT, canvas_id)
+        versions = folder / ".versions"
+        versions.mkdir(parents=True)
+        (folder / "Plan.md").write_text("safe", encoding="utf-8")
+        outside = self.canvases.root.parent / "private.txt"
+        outside.write_text("secret", encoding="utf-8")
+        (versions / "v1.md").symlink_to(outside)
+        (folder / "meta.json").write_text(json.dumps({
+            "id": canvas_id, "title": "Plan", "kind": "document", "language": "markdown",
+            "ext": "md", "file": "Plan.md", "created_at": "2026-10-31T00:00:00Z",
+            "versions": [{"n": 1, "by": "model"}, {"n": "../../private.txt", "by": "model"}],
+        }), encoding="utf-8")
+        result = self.canvases.get(CHAT, canvas_id, text=True)
+        self.assertEqual(result["text"], "safe")
+        self.assertEqual(self.canvases.store.source(result["artifact"]), "safe")
+
     def test_the_users_own_edits_are_a_version_before_the_models_and_any_version_comes_back(self):
         view = self.canvases.create(CHAT, title="Plan", kind="document", language="", content=PLAN)
         Path(view["path"]).write_text(PLAN.replace("Beach", "Calangute beach"))           # typed in the editor

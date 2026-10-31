@@ -25,6 +25,7 @@ from pathlib import Path
 
 from .. import artifact_store
 from ..artifact_store import ArtifactError, Store
+from ..workspace import read_regular_bytes, WorkspaceBoundaryError
 
 CANVAS_ID = re.compile(r"cv_[a-f0-9]{16}\Z")
 CHAT_ID = re.compile(r"chat_[a-f0-9]{32}\Z")
@@ -125,18 +126,25 @@ class Canvases:
     def _into_store(self, chat_id: str, meta: dict) -> dict:
         """A canvas from before the store, or one whose artifact is gone: its history (or its text now) goes in."""
         history = []
-        for v in meta.get("versions") or []:
+        versions = meta.get("versions")
+        for v in versions[:MAX_VERSIONS] if isinstance(versions, list) else []:
+            if not isinstance(v, dict) or type(v.get("n")) is not int or not 1 <= v["n"] <= 100_000:
+                continue
             try:
-                text = (self._dir(chat_id, meta["id"]) / ".versions" / f"v{v['n']}.{meta['ext']}").read_text(
-                    encoding="utf-8")
-            except (OSError, KeyError):
+                path = self._dir(chat_id, meta["id"]) / ".versions" / f"v{v['n']}.{meta['ext']}"
+                payload = read_regular_bytes(path, maximum=MAX_CHARS * 4)
+                text = payload[0].decode("utf-8")
+                if len(text) > MAX_CHARS:
+                    continue
+            except (OSError, KeyError, UnicodeError, WorkspaceBoundaryError):
                 continue
             history.append(({artifact_store.SOURCE_FILE["doc"]: text.encode("utf-8")},
                              _author(v.get("by")), v.get("at"), v.get("note") or ""))
         if not history:
             try:
-                text = (self._dir(chat_id, meta["id"]) / meta["file"]).read_text(encoding="utf-8", errors="replace")
-            except (OSError, KeyError):
+                payload = read_regular_bytes(self.path(chat_id, meta["id"], meta), maximum=MAX_CHARS * 4)
+                text = payload[0].decode("utf-8", errors="replace")[:MAX_CHARS]
+            except (OSError, KeyError, CanvasError, WorkspaceBoundaryError):
                 text = ""
             history.append(({artifact_store.SOURCE_FILE["doc"]: text.encode("utf-8")}, "DGC", meta.get("created_at"),
                             "Created"))
@@ -179,8 +187,12 @@ class Canvases:
     def _version_path(self, chat_id: str, meta: dict, n: int) -> Path:
         """Version n as a file for the editor's compare view: a copy of the store's, made when missing."""
         path = self._dir(chat_id, meta["id"]) / ".versions" / f"v{n}.{meta['ext']}"
-        if path.parent.is_symlink() or path.is_symlink():
+        if path.parent.is_symlink():
             raise CanvasError("That canvas version can't be a link.")
+        if path.is_symlink():
+            # This is only a disposable compare-view cache. Replace a damaged link
+            # with the trusted store copy instead of breaking the whole canvas.
+            path.unlink()
         if not path.exists():
             try:
                 self._write(path, self.store.source(meta["artifact"], n))
