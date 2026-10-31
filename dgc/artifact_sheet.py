@@ -52,6 +52,7 @@ from pathlib import Path
 
 from .chatdgc import data as tabledata
 from .chatdgc import made
+from .workspace import WorkspaceBoundaryError, read_regular_bytes
 
 TYPES = ("text", "number", "currency", "percent", "date", "bool")
 FUNCTIONS = ("SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "ROUND", "IF", "ABS", "CONCAT")
@@ -334,7 +335,10 @@ class _Parser:
         if tok is None:
             raise _Bad("it ends too early" + (f", after {self._before()}" if self.t else ""))
         if tok.kind == "num":
-            return ("n", float(tok.text))
+            number = float(tok.text)
+            if not math.isfinite(number):
+                raise _Bad("a number is too large; use a finite value")
+            return ("n", number)
         if tok.kind == "str":
             return ("s", tok.text[1:-1].replace('""', '"'))
         if tok.kind == "err":
@@ -2078,12 +2082,9 @@ def from_table_file(path) -> dict:
     if not tabledata.tabular(p.name):
         raise SheetError(f"{p.name} isn't a table file DGC reads into a sheet: give a .csv, .tsv or .xlsx file.")
     try:
-        if p.stat().st_size > MAX_FILE_BYTES:
-            raise SheetError(f"{p.name} is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB; a sheet holds at most "
-                             f"{MAX_CELLS:,} cells.")
-        raw = p.read_bytes()
-    except OSError as error:
-        raise SheetError(f"{p.name} couldn't be read ({error.strerror or type(error).__name__}).") from None
+        raw = read_regular_bytes(p, maximum=MAX_FILE_BYTES)[0]
+    except (OSError, WorkspaceBoundaryError) as error:
+        raise SheetError(f"{p.name} couldn't be read safely ({error}).") from None
     try:
         tables = tabledata._xlsx_sheets(raw) if p.suffix.lower() == ".xlsx" else [(p.stem, tabledata._csv_rows(raw,
                                                                                                           p.name))]

@@ -92,6 +92,9 @@ class Formulas(unittest.TestCase):
         self.assertEqual(_one("=ROUND(2.675, 2)", rows), 2.68, "half away from zero, as a spreadsheet rounds")
         self.assertEqual(_one("=ROUND(-2.5, 0)", rows), -3)
         self.assertEqual(_one("=ROUND(1234.5, -2)", rows), 1200)
+        with self.assertRaisesRegex(SheetError, "number is too large"):
+            S.normalize({"sheets": [{"name": "S", "columns": ["a"],
+                                     "rows": [["=ROUND(1,1e999)"]]}]})
         self.assertEqual(_one("=ABS(-7.5)", rows), 7.5)
         self.assertEqual(_one("=CONCAT(\"Total: \", SUM(A2:A3), \"!\")", rows), "Total: 10!")
         self.assertEqual(_one("=IF(A4=0, \"none\", 1/A4)", rows), "none", "IF only computes the branch it takes")
@@ -437,6 +440,16 @@ class Files(unittest.TestCase):
         self.assertEqual(sheet["rows"][0], ["2026-10-02", "Landlord", 42000, 0.18, "007", True,
                                             "'=HYPERLINK(\"x\")"], "text that starts with = stays text")
         self.assertEqual(S.compute(book)[0]["rows"][0][6], "=HYPERLINK(\"x\")")
+
+    def test_table_file_does_not_follow_a_symlink(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            outside = root / "private.csv"
+            outside.write_text("secret\nvalue\n", encoding="utf-8")
+            link = root / "approved.csv"
+            link.symlink_to(outside)
+            with self.assertRaisesRegex(SheetError, "couldn't be read safely"):
+                S.from_table_file(link)
 
 
 class Page(unittest.TestCase):
