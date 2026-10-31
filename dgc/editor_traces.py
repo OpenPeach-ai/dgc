@@ -693,7 +693,7 @@ def tracked_folders(repo: Path, head: str | None, project: Path, *, ask: bool = 
         result = _git_bytes(["ls-tree", "-r", "-d", "--name-only", "-z", head, "--", spec], repo)
         if result.returncode != 0:
             return None
-        relative = _nul_paths(result)
+        relative = _nul_paths(result, limit=20000)
     except Exception:                          # noqa: BLE001
         return None
     folders = [str(repo / name) for name in sorted(relative, key=lambda name: (name.count("/"), name))[:20000]]

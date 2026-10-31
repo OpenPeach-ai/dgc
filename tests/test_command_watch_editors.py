@@ -638,6 +638,14 @@ class TracesTests(unittest.TestCase):
             self.assertEqual(self.later().editor_of(self.file), "vim", "a live vim with unsaved changes")
             self.assertEqual(self.et.owner(os.getpid()), "dgc")
 
+    def test_tracked_folder_listing_uses_its_own_limit(self):
+        from dgc import worktree
+        paths = b"\0".join(f"dir{n:05d}".encode() for n in range(4097)) + b"\0"
+        result = subprocess.CompletedProcess([], 0, paths, b"")
+        with patch.object(worktree, "_git_bytes", return_value=result):
+            folders = self.et.tracked_folders(self.root, "test-head-4097", Path("."), ask=True)
+        self.assertEqual(len(folders), 4097)
+
 
 class OverheadTests(EditorSavesCase):
     def test_the_listener_stays_inside_its_budget(self):
