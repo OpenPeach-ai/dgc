@@ -162,13 +162,14 @@ def _remove_private(path, root):
 
 
 def _artifact_owned(folder, pip_id):
+    from .artifact_store import Artifact, ArtifactError
     record = folder / 'artifact.json'
     if folder.is_symlink() or record.is_symlink():
         raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.')
     try:
         raw = record.read_bytes()
-    except FileNotFoundError:
-        return False
+    except OSError as exc:
+        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
     try:
         meta = json.loads(raw)
     except ValueError as exc:
@@ -176,10 +177,14 @@ def _artifact_owned(folder, pip_id):
         # journal pending instead of claiming that all of this Pip's data was
         # removed while an unknown Output remains in the Library.
         raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
-    if not isinstance(meta, dict):
-        return False
-    return any(isinstance(meta.get(key), dict) and meta[key].get('pip') == pip_id
-               for key in ('origin', 'legacy'))
+    try:
+        art = Artifact.from_json(meta)
+    except ArtifactError as exc:
+        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
+    if art.id != folder.name[:19] or (art.origin.get('surface') == 'pip'
+                                     and not isinstance(art.origin.get('pip'), str)):
+        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.')
+    return art.origin.get('pip') == pip_id or art.legacy.get('pip') == pip_id
 
 
 def _cleanup(registry, pip_id, run_ids):

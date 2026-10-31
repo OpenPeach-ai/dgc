@@ -164,6 +164,34 @@ class PipPurgeTests(unittest.TestCase):
         pip_purge.recover(self.registry)
         self.assertFalse((arts.root/owned.id).exists())
 
+    def test_non_object_output_record_keeps_recovery_pending(self):
+        self.setup_source(); archived=self.archive(self.source)
+        arts=artifact_store.Store(Path(self.registry.directory).parent/'artifacts')
+        owned=arts.create('doc','Pip report','private',origin={'surface':'pip','pip':archived['id']})
+        record=arts.root/owned.id/'artifact.json'
+        intact=record.read_bytes()
+        record.write_bytes(b'[]')
+        with self.assertRaisesRegex(RegistryError,'saved Output needs repair'):
+            self.delete(archived)
+        self.assertTrue(pip_purge._journal_path(self.registry.directory,archived['id']).exists())
+        record.write_bytes(intact)
+        pip_purge.recover(self.registry)
+        self.assertFalse((arts.root/owned.id).exists())
+
+    def test_missing_output_record_keeps_recovery_pending(self):
+        self.setup_source(); archived=self.archive(self.source)
+        arts=artifact_store.Store(Path(self.registry.directory).parent/'artifacts')
+        owned=arts.create('doc','Pip report','private',origin={'surface':'pip','pip':archived['id']})
+        record=arts.root/owned.id/'artifact.json'
+        intact=record.read_bytes()
+        record.unlink()
+        with self.assertRaisesRegex(RegistryError,'saved Output needs repair'):
+            self.delete(archived)
+        self.assertTrue(pip_purge._journal_path(self.registry.directory,archived['id']).exists())
+        record.write_bytes(intact)
+        pip_purge.recover(self.registry)
+        self.assertFalse((arts.root/owned.id).exists())
+
     def test_linked_state_parent_cannot_redirect_file_cleanup(self):
         self.setup_source(); archived=self.archive(self.source)
         root=Path(self.registry.directory)
