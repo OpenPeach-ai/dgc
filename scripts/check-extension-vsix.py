@@ -26,8 +26,6 @@ STATIC_MEMBERS = {
     "extension/media/walkthrough.md": "media/walkthrough.md",
     "extension/media/main.js": "media/main.js",
     "extension/media/main.css": "media/main.css",
-    "extension/media/apps.js": "media/apps.js",
-    "extension/media/apps.css": "media/apps.css",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
     "extension/media/dgc.svg": "media/dgc.svg",
