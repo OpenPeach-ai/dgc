@@ -502,19 +502,25 @@ function encode(raw, outputDir, rawSeconds, manifestUpdate = null) {
 
 async function commandPalette(page, command) {
   const input = page.locator(".quick-input-widget:visible input");
-  // F1 pressed while a webview is still taking the focus can go nowhere (its key forwarding is not there yet: the
-  // palette stayed shut in 4 of 5 runs for 0.33.1): pressed again, a few times, before giving up.
-  for (let attempt = 1; ; attempt += 1) {
-    await page.keyboard.press("F1");
+  const result = page.locator(".quick-input-widget:visible .monaco-list-row")
+    .filter({ hasText: command }).first();
+  // A webview can reclaim focus just after the palette appears. Retry opening, typing and selecting
+  // as one operation; a visibility check alone does not mean the command is ready to submit.
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
+      await page.keyboard.press("Control+Shift+P");
       await input.waitFor({ state: "visible", timeout: 5_000 });
-      break;
+      await input.fill(`>${command}`, { timeout: 5_000 });
+      await result.waitFor({ state: "visible", timeout: 5_000 });
+      await page.waitForTimeout(350);
+      await page.keyboard.press("Enter");
+      return;
     } catch (error) {
       if (attempt >= 4) throw error;
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(300);
     }
   }
-  await input.fill(`>${command}`);
-  await page.keyboard.press("Enter");
 }
 
 async function dismissNotifications(page) {
