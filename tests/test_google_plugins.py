@@ -409,6 +409,23 @@ class SignInTests(Fixture):
         manager = self.connect(self.install("gmail"))
         self.assertIn("names another app", manager.failures["google-workspace--gmail"])
 
+    def test_maintainer_client_file_refuses_links_and_nonregular_files(self):
+        if os.name != "posix":
+            self.skipTest("POSIX file checks")
+        target = self.root / "client.json"
+        target.write_text(json.dumps({"client_id": APP_ID, "client_secret": APP_SECRET}))
+        target.chmod(0o600)
+        link = self.root / "linked-client.json"
+        link.symlink_to(target)
+        with self.assertRaises(mcp_remote.RemoteError):
+            mcp_remote.RemoteAuth._client_file(str(link))
+        pipe = self.root / "client.pipe"
+        os.mkfifo(pipe, 0o600)
+        began = time.monotonic()
+        with self.assertRaises(mcp_remote.RemoteError):
+            mcp_remote.RemoteAuth._client_file(str(pipe))
+        self.assertLess(time.monotonic() - began, 1, "a named pipe must not block sign-in")
+
     def test_choosing_another_app_later_asks_google_for_its_permissions(self):
         self.connect(self.install("gmail"))
         self.assertEqual(len(self.browsers), 1)

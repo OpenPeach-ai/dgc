@@ -751,12 +751,16 @@ class RemoteAuth:
     def _client_file(path: str) -> tuple[str, str]:
         """The maintainers' local app file: a regular file only its owner can read, holding the app."""
         try:
-            info = os.lstat(path)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CLIENT_INFO:
+            if not hasattr(os, "O_NOFOLLOW") and os.path.islink(path):
                 raise RemoteError(f"{CLIENT_FILE_ENV} must name a small regular file")
-            if os.name == "posix" and info.st_mode & 0o077:
-                raise RemoteError(f"{CLIENT_FILE_ENV} names a file others can read; make it owner-only (chmod 600)")
-            with open(path, encoding="utf-8") as handle:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+                         | getattr(os, "O_NONBLOCK", 0))
+            with os.fdopen(fd, "rb") as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CLIENT_INFO:
+                    raise RemoteError(f"{CLIENT_FILE_ENV} must name a small regular file")
+                if os.name == "posix" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+                    raise RemoteError(f"{CLIENT_FILE_ENV} names a file others can read; make it owner-only (chmod 600)")
                 value = json.loads(handle.read(MAX_CLIENT_INFO + 1))
         except OSError:
             raise RemoteError(f"DGC couldn't read the file {CLIENT_FILE_ENV} names") from None
