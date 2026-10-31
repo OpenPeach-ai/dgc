@@ -41,7 +41,7 @@ ROLE = {
               "there are any.",
 }
 
-# A verifier's role when it has its read-only shell (dgc/checker_box.py; reported 2026-10-18.
+# A verifier's role when it has its read-only shell (dgc/checker_box.py; reported 2026-10-18).
 VERIFIER_SHELL = (
     "You are a verifier: try to prove the claim given to you wrong. You have a read-only shell (bash) in a sealed "
     "box: the project is at /mnt and read only, the only place you can write is a private /tmp, credential files "

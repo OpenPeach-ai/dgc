@@ -138,7 +138,10 @@ def _alive(pid: int) -> bool:
 def _heartbeat(value) -> float | None:
     if type(value) not in (int, float):
         return None
-    stamp = float(value)
+    try:
+        stamp = float(value)
+    except OverflowError:
+        return None
     return stamp if math.isfinite(stamp) else None
 
 

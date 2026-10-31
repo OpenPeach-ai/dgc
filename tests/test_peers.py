@@ -83,6 +83,9 @@ class PeerRegistryTest(unittest.TestCase):
     def test_this_process_is_live(self):
         self.assertEqual(peers.liveness(self.note()), "live")
 
+    def test_oversized_heartbeat_is_not_a_live_peer(self):
+        self.assertEqual(peers.liveness(self.note(heartbeat=10 ** 1000)), "gone")
+
     def test_a_recycled_pid_is_not_the_process_that_wrote_the_note(self):
         # The whole reason proc_start is recorded. Without it, a stale note whose pid has been
         # handed to an unrelated program reads as a live DGC and its "work" is respected.
