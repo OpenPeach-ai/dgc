@@ -25,6 +25,7 @@ STATIC_MEMBERS = {
     "extension/changelog.md": "CHANGELOG.md",
     "extension/media/walkthrough.md": "media/walkthrough.md",
     "extension/media/main.js": "media/main.js",
+    "extension/media/numbered-list.js": "media/numbered-list.js",
     "extension/media/main.css": "media/main.css",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
