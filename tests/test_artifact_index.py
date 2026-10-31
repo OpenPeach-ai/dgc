@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -79,6 +80,12 @@ class Index(unittest.TestCase):
         self.store.remove(pages[0].id)
         old.store_id = ""                         # even an entry that forgot its page isn't brought back
         self.assertEqual(self.run_index(), 0)
+        self.assertEqual(self.store.list(), [])
+
+    def test_implicit_chat_import_stays_inside_the_artifact_stores_home(self):
+        self.seed_chat()  # A foreign ChatDGC store has a widget and a made sheet.
+        with patch("dgc.chatdgc.store.default_root", return_value=self.chats.root):
+            self.assertEqual(artifact_index.index(store=self.store, force=True), 0)
         self.assertEqual(self.store.list(), [])
 
     def test_a_widget_becomes_a_page_of_its_own_html_and_a_removed_one_does_not(self):

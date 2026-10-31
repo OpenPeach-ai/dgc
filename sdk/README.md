@@ -2,8 +2,9 @@
 
 Embed the DGC coding agent in an application or a CI job. **0.8.0**, editor protocol **v14**,
 pairs with CLI **0.50.0**. The release dry run passed on Linux, macOS 26.5.1 (Apple silicon),
-and Windows 11 through WSL 2 (Ubuntu 24.04). Native Windows remains experimental; it was not
-covered by these runs. Release tag **`sdk-v0.8.0`** (not `v0.5.x`, which are historical CLI tags).
+and Windows 11 through WSL 2 (Ubuntu 24.04). Native Windows remains experimental; focused Python
+and TypeScript SDK checks passed there, while its full suite was not run. Release tag **`sdk-v0.8.0`**
+(not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
 | --- | --- |

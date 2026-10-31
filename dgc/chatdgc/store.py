@@ -69,8 +69,8 @@ class ChatStoreError(Exception):
 
 
 def default_root() -> Path:
-    from ..config import USER_HOME
-    return USER_HOME / "chat"
+    from ..config import dgc_home
+    return dgc_home() / "chat"
 
 
 def now() -> str:

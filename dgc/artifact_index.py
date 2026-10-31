@@ -141,7 +141,9 @@ def index(*, store: artifact_store.Store | None = None, chats=None, force: bool 
         known = _known(st)
         if chats is None:
             from .chatdgc.store import ChatStore
-            chats = ChatStore()
+            # Index only the chats that belong to this artifact store. An isolated SDK
+            # home must never import widgets or files from the host account's ChatDGC.
+            chats = ChatStore(st.root.parent / "chat")
         for part in (lambda: _pages(st, known), lambda: _widgets(st, chats, known), lambda: _sheets(st, chats, known)):
             try:
                 total += part()

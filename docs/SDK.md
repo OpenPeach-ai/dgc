@@ -10,7 +10,8 @@ answers its permission and question requests, and gets a structured result back.
 | `@vibedgc/sdk` (Node, GitHub release tarball) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Node 22+ |
 
 The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
-(Ubuntu 24.04). Native Windows is experimental and was not tested (custom tools need Unix sockets).
+(Ubuntu 24.04). Native Windows is experimental: focused Python and TypeScript SDK checks passed,
+but the full SDK suite was not run there (custom tools need Unix sockets).
 The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
 application attribute the model-token spend your provider bills you.
 
