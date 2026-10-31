@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
-from ..config import USER_HOME
+from ..config import dgc_home
 from ..workspace import capture_file_state, restore_file_state
 
 MAX_TREE_ENTRIES = 5000
@@ -22,7 +22,6 @@ MAX_TREE_BYTES = 512 * 1024 * 1024
 MAX_UNDO_SNAPSHOT_BYTES = 8 * 1024 * 1024
 MAX_UNDO = 32
 TRASH_RETENTION_S = 30 * 24 * 3600
-DGC_TRASH = USER_HOME / "trash"
 
 
 class OpError(Exception):
@@ -114,7 +113,7 @@ class Trash:
 
     def __init__(self, mode: str = "dgc", *, dgc_dir: Path | None = None, home: Path | None = None):
         self.mode = "os" if str(mode).lower() == "os" else "dgc"
-        self.dgc_dir = Path(dgc_dir) if dgc_dir else DGC_TRASH
+        self.dgc_dir = Path(dgc_dir) if dgc_dir else dgc_home() / "trash"
         self.home = Path(home) if home else Path.home()
 
     def _os_trash_dir(self) -> tuple[Path, Path] | None:

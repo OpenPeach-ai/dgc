@@ -112,6 +112,11 @@ class FileOpsTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_default_trash_follows_sdk_home_at_construction(self):
+        with patch.dict(os.environ, {"DGC_HOME": str(self.root / "sdk-home")}):
+            trash = Trash("dgc")
+        self.assertEqual(trash.dgc_dir, self.root / "sdk-home" / ".dgc" / "trash")
+
     def test_copy_refuses_an_oversized_later_source_before_copying_earlier_files(self):
         first = self.root / "work" / "note.txt"
         second = self.root / "work" / "large.txt"
