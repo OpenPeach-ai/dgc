@@ -1074,6 +1074,7 @@ def _snapshot(art: Artifact) -> dict[str, bytes] | None:
     """The files the page reaches, as they are now, by the same rules the server serves them by: what one
     version of it keeps. None when there is nothing to keep, or more than one version may hold."""
     from . import artifact_store
+    from .workspace import WorkspaceBoundaryError, read_regular_bytes
     entry = art.entry or "index.html"
     names = set(linked_files(Path(art.directory), entry, True)) | {entry}
     files, total = {}, 0
@@ -1082,9 +1083,9 @@ def _snapshot(art: Artifact) -> dict[str, bytes] | None:
         if target is None:
             continue
         try:
-            data = target.read_bytes()
-        except OSError:
-            continue
+            data, _version = read_regular_bytes(target, maximum=artifact_store.MAX_VERSION_BYTES - total)
+        except (OSError, WorkspaceBoundaryError):
+            return None  # A partial snapshot would pretend to be a complete saved version.
         total += len(data)
         if total > artifact_store.MAX_VERSION_BYTES or len(files) >= artifact_store.MAX_FILES:
             return None
@@ -1432,14 +1433,16 @@ def _make_page_handler(server: "_Server", art: Artifact):
                 self._text(status, why)
                 return
             try:
+                from .workspace import WorkspaceBoundaryError, read_regular_bytes
                 download = (server is _PLAN_SRV and getattr(art, "_document_source", False)
                             and sub == "document.md")
-                self._send(200, target.read_bytes(),
+                data, _version = read_regular_bytes(target)
+                self._send(200, data,
                            "text/markdown; charset=utf-8" if download else _guess_type(target),
                            csp=_page_csp(server, server.file_csp),
                            headers={"Content-Disposition": 'attachment; filename="document.md"'}
                            if download else None)
-            except OSError:
+            except (OSError, WorkspaceBoundaryError):
                 self._text(500, b"read error")
 
         do_HEAD = do_GET

@@ -179,7 +179,7 @@ def keep_report(pip_id: str, pip_name: str, kind: str, when: str, findings, *, w
         return ""
 
 
-def after_run(db, run: dict, *, status: str, result=None, workspace_root=None) -> dict:
+def after_run(db, run: dict, *, status: str, result=None, workspace_root=None, config=None) -> dict:
     """From PipStore.finish: a finished review kept as the Pip's document or sheet, and its dashboards refreshed.
     Never fails the run; says what it did ({report: id, refreshed: [ids]}) for the tests and the log."""
     done = {"report": "", "refreshed": []}
@@ -199,7 +199,21 @@ def after_run(db, run: dict, *, status: str, result=None, workspace_root=None) -
         for aid in chosen["dashboards"]:
             try:
                 origin = (service.view(aid, versions=False).get("origin") or {})
-                service.refresh(aid, project_root=origin.get("project") or workspace_root)
+                source = store().source(aid)
+                uses_plugin = any(isinstance(item, dict) and item.get("kind") == "plugin"
+                                  for item in source.get("sources") or [])
+                call = is_read_only = close = None
+                if uses_plugin:
+                    if config is None:
+                        continue
+                    from .artifact_plugins import hooks
+                    call, is_read_only, close = hooks(config)
+                try:
+                    service.refresh(aid, project_root=origin.get("project") or workspace_root,
+                                    call=call, is_read_only=is_read_only)
+                finally:
+                    if close is not None:
+                        close()
                 done["refreshed"].append(aid)
             except Exception:                            # noqa: BLE001 -- a dashboard that can't refresh now waits
                 continue

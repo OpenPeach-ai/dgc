@@ -143,6 +143,30 @@ class PipReports(unittest.TestCase):
         self.run_done(kind="test")
         self.assertIn("3", json.dumps(S.state(dash["id"])["results"]))
 
+    def test_a_pip_refresh_uses_the_plugin_read_only_hooks_and_closes_them(self):
+        from dgc import artifact_plugins
+        dash = S.make("dashboard", "Issues", {
+            "sources": [{"id": "gh", "kind": "plugin", "server": "github"}],
+            "widgets": [{"id": "n", "kind": "number", "title": "Open issues", "source": "gh",
+                         "query": {"tool": "search_issues", "args": {"q": "is:open"}, "path": "total_count"}}]},
+            origin={"surface": "work"})
+        S.allow_source(dash["id"], "gh")
+        self.control("set_pip_artifacts", pip_id=self.pip["id"], dashboards=[dash["id"]])
+        calls, closed = [], []
+
+        def hooks(config):
+            self.assertIs(config, self.cfg)
+            return (lambda server, tool, args: calls.append((server, tool, args)) or {"total_count": 3},
+                    lambda server, tool: tool == "search_issues", lambda: closed.append(True))
+
+        run = {"pip_id": self.pip["id"], "workspace_id": self.pip["workspace_id"],
+               "manifest": {"run_kind": "test"}}
+        with patch.object(artifact_plugins, "hooks", side_effect=hooks):
+            done = artifact_pips.after_run(self.registry.db, run, status="succeeded", result={}, config=self.cfg)
+        self.assertEqual(done["refreshed"], [dash["id"]])
+        self.assertEqual(calls, [("github", "search_issues", {"q": "is:open"})])
+        self.assertEqual(closed, [True])
+
 
     def test_a_deleted_dashboard_drops_out_of_the_list_instead_of_blocking_every_change(self):
         """Reported with the Pip page: once a dashboard a Pip refreshed was deleted, every later save of its list was

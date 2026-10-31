@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import os as _os, sys as _sys                             # noqa: E402
@@ -187,6 +188,29 @@ class ArtifactServerSecurity(unittest.TestCase):
             self.assertNotEqual(status, 200, rel)
             self.assertNotIn(ENV_SECRET, body)
             self.assertNotIn(b"SECRET_SOURCE", body)
+
+    def test_page_file_changed_to_symlink_after_resolution_is_not_served(self):
+        if not self.symlinks:
+            self.skipTest("symlinks unavailable")
+        style = self.proj / "style.css"
+        original_bytes = style.read_bytes()
+        original_resolve = A.resolve_request
+
+        def swap_after_validation(art, rel):
+            result = original_resolve(art, rel)
+            if art.id == self.root_art.id and rel == "style.css" and result[0] is not None:
+                style.unlink()
+                style.symlink_to(self.proj / ".env")
+            return result
+
+        try:
+            with patch.object(A, "resolve_request", side_effect=swap_after_validation):
+                status, _, body = request(self.root_art.port, "GET", "/style.css")
+            self.assertNotEqual(status, 200)
+            self.assertNotIn(ENV_SECRET, body)
+        finally:
+            style.unlink()
+            style.write_bytes(original_bytes)
 
     def test_workspace_root_artifact_serves_only_its_page_and_linked_assets(self):
         self.assertTrue(self.root_art.scoped)

@@ -2847,7 +2847,8 @@ Current release: **dgc-sdk 0.8.0** on [PyPI](https://pypi.org/project/dgc-sdk/) 
 package `@vibedgc/sdk` 0.8.0, both tagged [`sdk-v0.8.0`](https://github.com/OpenPeach-ai/dgc/releases/tag/sdk-v0.8.0)
 (not `v0.5.x`, which are historical CLI tags). They pair with CLI **0.50.0** over editor protocol
 v14. The SDK 0.8.0 release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11
-through WSL 2 (Ubuntu 24.04). Native Windows remains experimental and was not tested. The full
+through WSL 2 (Ubuntu 24.04). Native Windows remains experimental; only focused SDK checks were run
+there. The full
 guide and API reference is
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/sdk-v0.8.0/docs/SDK.md).
 

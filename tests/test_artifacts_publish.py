@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -80,6 +81,23 @@ class PublishKeepsVersions(unittest.TestCase):
         kept = artifact_store.store().files(art.store_id)
         self.assertEqual(sorted(kept), ["app.js", "index.html"])
         self.assertNotIn(b"sk-never-kept", b"".join(kept.values()))
+
+    def test_a_late_symlink_swap_cannot_enter_a_saved_page_version(self):
+        page = _write(self.proj / "report" / "index.html", '<link rel="stylesheet" href="style.css">')
+        style = _write(page.parent / "style.css", "body{color:red}")
+        original = A.resolve_request
+
+        def swap_after_validation(art, rel):
+            result = original(art, rel)
+            if rel == "style.css" and result[0] is not None:
+                style.unlink()
+                style.symlink_to(self.proj / ".env")
+            return result
+
+        with patch.object(A, "resolve_request", side_effect=swap_after_validation):
+            art, why = A.publish("report", self.proj, "Report", preferred_port=5101)
+        self.assertFalse(art.store_id)
+        self.assertIn("not versioned", why)
 
     def test_the_store_link_survives_a_restart(self):
         _write(self.proj / "report" / "index.html", "<h1>x</h1>")

@@ -1845,7 +1845,7 @@ class PipStore:
                                 secrets=self._saved_secrets())
         # Its review as its own document or sheet, and the dashboards it keeps current (artifact_pips).
         from . import artifact_pips
-        artifact_pips.after_run(self.db, run, status=status, result=result)
+        artifact_pips.after_run(self.db, run, status=status, result=result, config=getattr(self, "config", None))
         return self._transition_view(run_id)
 
     def _saved_secrets(self):
