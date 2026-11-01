@@ -523,7 +523,8 @@ class EachArtifactItsOwnOrigin(unittest.TestCase):
         # Playwright's headless shell answers --dump-dom at once; a full Chrome's --headless=new can sit on it.
         # The suite's own HOME has no browser cache, so PLAYWRIGHT_BROWSERS_PATH says where it is.
         cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
-        shells = sorted(cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"))
+        shells = sorted([*cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"),
+                         *cache.glob("chromium_headless_shell-*/chrome-headless-shell-mac-*/chrome-headless-shell")])
         try:
             chrome = shells[-1] if shells else browser.discover_browser()
         except Exception:

@@ -318,6 +318,8 @@ class NanoSavesTests(EditorSavesCase):
         return worker
 
     def test_a_save_in_nano_with_locking_is_the_persons(self):
+        if NANO and Path(NANO).resolve().name == "pico":
+            self.skipTest("macOS supplies pico as nano; pico has no nano --locking swap file")
         h = self.repo()
         root = h.root.resolve()
         nano = self.nano(root, "--locking")
@@ -419,8 +421,10 @@ def swap_block(pid: int, name: str, *, dirty=False, wrote=0, version=b"VIM 9.1",
     block[12:16] = (4096).to_bytes(4, "little")
     block[16:20] = int(wrote).to_bytes(4, "little")
     block[24:28] = int(pid).to_bytes(4, "little")
-    user_bytes = (user if user is not None else getpass.getuser()).encode()
-    host_bytes = (host if host is not None else socket.gethostname()).encode()
+    # Vim's fields are 40 bytes each. CI Mac hostnames can exceed that; a test fixture
+    # must not overwrite the following filename field when constructing a swap block.
+    user_bytes = (user if user is not None else getpass.getuser()).encode()[:39]
+    host_bytes = (host if host is not None else socket.gethostname()).encode()[:39]
     block[28:28 + len(user_bytes)] = user_bytes
     block[68:68 + len(host_bytes)] = host_bytes
     block[108:108 + len(name)] = name.encode()
@@ -451,6 +455,10 @@ class TracesTests(unittest.TestCase):
     def traces(self, start=None, end=None, events=None, command=""):
         now = time.time()
         return self.et.Traces(now - 5 if start is None else start, now + 1 if end is None else end, events, command)
+
+    def test_a_long_hostname_does_not_overwrite_the_swap_filename(self):
+        block = self.et.parse_block0(swap_block(os.getpid(), "a.py", host="long-host-" * 7))
+        self.assertEqual(block["name"], "a.py")
 
     @unittest.skipUnless(VIM, "vim is not installed")
     def test_a_real_vim_swap_is_read(self):

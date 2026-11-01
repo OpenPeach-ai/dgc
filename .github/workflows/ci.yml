@@ -43,7 +43,23 @@ jobs:
       - run: python -m pip check
       - run: python -m compileall -q dgc tests/run_tests.py
       - run: python -m py_compile scripts/edit_micro.py scripts/gen_edit_corpus.py scripts/generate-sbom.py
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.os == 'macos-latest'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Install the headless browser for macOS artifact isolation tests
+        if: matrix.os == 'macos-latest'
+        working-directory: editors/vscode
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dgc-ms-playwright
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install chromium-headless-shell
       - run: python tests/run_tests.py
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dgc-ms-playwright
 
   windows-smoke:
     name: Windows import and CLI smoke
