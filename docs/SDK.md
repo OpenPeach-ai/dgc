@@ -27,12 +27,12 @@ application attribute the model-token spend your provider bills you.
 
 ## Install
 
-### Pips (SDK 0.7.0)
+### Pips (SDK 0.8.0)
 
-SDK 0.7.0 adds `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
+SDK 0.7.0 introduced `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
 managing the Pips of an existing DGC profile: standing agents that review, test and
-draft beside the main chat. It pairs with DGC CLI 0.48.0, which advertises Pips API
-64; each control checks the minimum Pips API it needs before sending anything. See
+draft beside the main chat. SDK 0.8.0 pairs with DGC CLI 0.50.0, which advertises Pips API
+69; each control checks the minimum Pips API it needs before sending anything. See
 [sdk/PIPS.md](../sdk/PIPS.md) for the full command list and capability gates.
 
 | API | Purpose |
@@ -41,6 +41,7 @@ draft beside the main chat. It pairs with DGC CLI 0.48.0, which advertises Pips 
 | `mutate(command, params, *, approved=False)` | Run one mutation. Refused unless the host passes `approved=True` (TypeScript: `{ approved: true }`) for that call; retries need it again. |
 | `list(workspace_id)`, `get(pip_id)`, `runs(pip_id)`, `get_run(run_id)` | Shortcuts for common reads (`getRun` in TypeScript). |
 | `run_posts(pip_id, *, before_id=None, limit=None)` | What the Pip's runs posted in its own chat, oldest first, paged by `before_id` (`runPosts` in TypeScript). Needs Pips API 51. |
+| `unread(workspace_id)`, `mark_read(pip_id, *, message_id=None, post_id=None, approved=False)` | Read unread Pip reply and run-result counts, then mark only IDs already displayed as read (`unread`, `markRead` in TypeScript). Marking requires explicit host approval; later arrivals remain unread. Needs Pips API 69. |
 | `run_fixes(pip_id)` | What Ask DGC to fix did for each of a Pip's runs: the latest fix of each run, newest first, with its `state` (working, or how it ended: `applied`, `partial`, `unchanged`, `failed`, `undone` and so on), the files it changed and the Work chat it ran in, where its Review and Undo are. A Personal Pip has none (`runFixes` in TypeScript). Needs Pips API 65. |
 | `register_app(name, *, url, tools, approved)`, `update_app`, `accept_app_update`, `list_apps()` | Your own app's tools for Personal Pips (`registerApp`, `updateApp`, `acceptAppUpdate`, `listApps` in TypeScript). `register_app` answers the app's signing secret, shown that once. Needs Pips API 61; see [Your own app's tools](../sdk/PIPS.md#your-own-apps-tools-api-61). |
 | `pending(app=None)`, `decide(action_id, decision, *, expected_digest, approved)` | Approvals in your app: the changes on your own apps that wait for a person, with their digests, and your app's own `"accept"` or `"reject"`, exactly once (`pending`, `decide(actionId, decision, expectedDigest, { approved })` in TypeScript). Needs Pips API 62; see [Approvals in your app](../sdk/PIPS.md#approvals-in-your-app-api-62). |

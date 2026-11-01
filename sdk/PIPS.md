@@ -9,7 +9,10 @@ your app can show and decide their changes ([Approvals in your app](#approvals-i
 your app's own events start Pips' routines ([Events from your app](#events-from-your-app-api-63)), from API 64 your
 app declares its Pips in code and keeps them as declared on each deploy ([Pips in code](#pips-in-code-api-64)), and
 from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`), and from API 66
-`list_pip_models` says each model's context window and the Pips default model.
+`list_pip_models` says each model's context window and the Pips default model. API 69 adds
+`pips.unread(workspace_id)` and `pips.mark_read(pip_id, message_id=..., post_id=..., approved=True)`;
+TypeScript calls these `unread(workspaceId)` and `markRead(pipId, cursors, { approved: true })`.
+Mark only the message and run-result IDs the user actually saw, so later arrivals stay unread.
 
 It pairs with DGC CLI 0.50.0, which advertises **Pips API 69** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for

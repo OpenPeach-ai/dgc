@@ -545,7 +545,9 @@ class NestedWireTests(unittest.TestCase):
             workspace = root / 'workspace'; workspace.mkdir()
             (home / '.dgc').mkdir(mode=0o700)
             cfg = home / '.dgc' / 'config.json'
-            cfg.write_text(json.dumps({'model': 'fixture', 'base_url': 'http://127.0.0.1:1/v1',
+            # A loopback URL invokes DGC's Windows-to-WSL model bridge probe during startup.
+            # This controller test never calls a model and deliberately forbids all network calls.
+            cfg.write_text(json.dumps({'model': 'fixture', 'base_url': 'https://example.invalid/v1',
                 'pips_enabled': True, 'sandbox': False, 'mcp_servers': {}, 'hooks': {},
                 'artifact_autostart': False, 'notify': 'off', 'suggest': False}))
             cfg.chmod(0o600); original = cfg.read_bytes()
