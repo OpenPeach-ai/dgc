@@ -80,6 +80,23 @@ def _request(port, method, path, host="default", headers=None, body=None, addres
 
 
 class ArtifactServerSecurity(unittest.TestCase):
+    def test_response_headers_reject_control_bytes_before_sending(self):
+        class Fake:
+            frame_options = None
+            command = "HEAD"
+            sent = False
+
+            def send_response(self, *_):
+                self.sent = True
+
+        for kwargs in ({"csp": "default-src 'none'\r\nX-Evil: yes"},
+                       {"headers": {"Location": "http://localhost/\nX-Evil: yes"}},
+                       {"headers": {"X-Evil\r\nInjected": "yes"}}):
+            fake = Fake()
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, "unsafe artifact response header"):
+                A._Handler._send(fake, 302, b"", **kwargs)
+            self.assertFalse(fake.sent)
+
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory(prefix="dgc-artsec-")

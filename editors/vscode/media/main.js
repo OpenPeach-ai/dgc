@@ -4691,7 +4691,12 @@
     if (!pre.parentNode) return;
     const figure = el("figure", "mermaid-figure");
     const art = el("div", "mermaid-art");
-    art.innerHTML = svg;                       // mermaid sanitises at securityLevel "strict"
+    // Treat the renderer's SVG as an image. Even if a future Mermaid version misses a
+    // sanitisation edge case, markup in an <img> cannot run as page DOM.
+    const diagram = el("img", "mermaid-image");
+    diagram.alt = "Diagram";
+    diagram.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    art.appendChild(diagram);
     const bar = el("figcaption", "mermaid-bar");
     const toggle = el("button", "fold", "Show source");
     toggle.type = "button";

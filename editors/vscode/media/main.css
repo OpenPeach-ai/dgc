@@ -1088,7 +1088,7 @@ body.hide-reasoning .tool-group-label .tg-thought { display: none; }
 /* A diagram is capped the way a long fence is: one of them must not push the answer it
    illustrates off the screen. Past the cap it scrolls in place rather than being cut. */
 .mermaid-art { overflow: auto; max-height: 60vh; text-align: center; }
-.mermaid-art svg { max-width: 100%; height: auto; }
+.mermaid-art .mermaid-image { max-width: 100%; height: auto; }
 .mermaid-bar { display: flex; justify-content: flex-end; margin-top: var(--sp-2); }
 .mermaid-figure pre.code { margin: var(--sp-2) 0 0; }
 

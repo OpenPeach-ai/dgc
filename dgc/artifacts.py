@@ -1296,6 +1296,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send(self, code, body: bytes, ctype="text/html; charset=utf-8", csp: str = _PLAIN_CSP,
               headers: dict | None = None):
+        # The artifact shell can reflect a validated request host into CSP and Location.
+        # Check again at the HTTP boundary before sending any part of a response.
+        for name, value in (("Content-Type", ctype), ("Content-Security-Policy", csp),
+                            *((headers or {}).items())):
+            if (not isinstance(name, str) or not isinstance(value, str)
+                    or any(ord(char) < 0x20 or ord(char) == 0x7f for char in name + value)
+                    or ":" in name):
+                raise ValueError("unsafe artifact response header")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

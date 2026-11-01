@@ -109,7 +109,9 @@ test('a Project Pip’s chat draws the Personal Pip’s pieces: the Pip at work,
   assert.ok(x.$('.pip-app-root').classList.contains('simple-pips'),'a Project Pip opens in the same page');
   assert.ok(x.$('.pip-topbar .pip-menu [data-tab=runs]'),'History is still there, in its menu');
   const project=shape(x,'Billing audit');
-  assert.deepEqual(project,personal,'the same chat');
+  assert.deepEqual({...project,controls:personal.controls},personal,'the same chat apart from personal routines');
+  assert.ok(personal.controls.includes('Routines: 0 on'),'only a Personal Pip can set independent routines');
+  assert.ok(!project.controls.includes('Routines: 0 on'),'project Pips retain their reviewed trigger setup');
   // And what that chat is, spelled out.
   assert.equal(project.chatStyle,true);
   assert.equal(project.working,'NAME · Thinking(Ns · ↓ N tok)','the working row: who, what, its clock and tokens');

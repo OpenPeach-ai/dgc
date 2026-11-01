@@ -743,14 +743,14 @@ if (process.argv.includes("--mermaid")) {
     return {
       fences: fences.length,
       states: fences.map((f) => f.dataset.mermaid),
-      svgs: document.querySelectorAll(".mermaid-figure svg").length,
-      nodeText: [...document.querySelectorAll(".mermaid-figure svg text")].map((t) => t.textContent).slice(0, 8),
+      svgs: document.querySelectorAll(".mermaid-figure img.mermaid-image").length,
+      imageLoaded: [...document.querySelectorAll(".mermaid-figure img.mermaid-image")].every((img) => img.complete && img.naturalWidth > 0),
       sourceKept: fences.every((f) => /flowchart|not a diagram/.test(f.textContent)),
       toggles: document.querySelectorAll(".mermaid-bar .fold").length,
     };
   });
   console.log(JSON.stringify(r, null, 1));
-  const ok = r.svgs === 1 && r.states.includes("done") && r.states.includes("failed") && r.sourceKept;
+  const ok = r.svgs === 1 && r.imageLoaded && r.states.includes("done") && r.states.includes("failed") && r.sourceKept;
   await page.screenshot({ path: out, fullPage: false });
   console.log("shot:", out, ok ? "PASS" : "FAIL");
   await browser.close(); process.exit(ok ? 0 : 1);

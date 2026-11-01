@@ -93,7 +93,7 @@ test('a row opens its Pip at the card: the chat scrolls to the Connect card; a h
  x.click(`[data-attention="app_link:${LINK}"]`);await x.drain();
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);assert.ok(card,'Ava’s chat is open with the card');
  assert.ok(card.classList.contains('attention-flash'),'the card is shown to you');
- assert.equal(x.d.activeElement?.textContent,'Connect Gmail','its first button takes focus');
+ assert.equal(x.d.activeElement?.textContent,'Link Gmail','its first button takes focus');
  x.click('#simple-back');await x.drain();
  x.click(`[data-attention="computer_action:${HELD}"]`);await x.drain();
  assert.ok(x.sent.some(m=>m.type==='pipsOpenComputer'&&m.pip.id===PIP),'its computer opens, where the held submit waits');
