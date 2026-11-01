@@ -21,8 +21,8 @@ function fixture(capabilities = caps, changes = {}) {
   return { calls, wire, session: new Session(wire, { capabilities }, { ...init, ...changes }) };
 }
 
-test('send allowlist adds only chat_options, images and files and never changes list request fields', () => {
-  assert.deepEqual([...COMMAND_FIELDS.send_pip_message].sort(), ['chat_options','files','idempotency_key','images','pip_id','text']);
+test('send allowlist includes chat controls and attachment spool fields without changing list requests', () => {
+  assert.deepEqual([...COMMAND_FIELDS.send_pip_message].sort(), ['chat_options','files','idempotency_key','images','pip_id','spooled_files','spooled_images','text']);
   assert.equal(COMMAND_FIELDS.list_pip_messages.includes('chat_options'), false);
 });
 

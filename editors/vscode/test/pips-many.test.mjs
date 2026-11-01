@@ -73,7 +73,10 @@ test('a thousand Pips: the most recent hundred, how many there are, Load more an
  const searched=x.requests('list_pips').at(-1);assert.equal(searched.request.query,'helper 012');assert.equal(searched.request.offset,undefined);
  assert.equal(x.d.querySelectorAll('.pip-row').length,10);assert.match(x.d.querySelector('.pip-search-count').textContent,/10 found/);
  assert.equal(x.d.querySelector('.core-offer'),null,'no "Meet Core" while searching');
- const again=x.d.getElementById('pip-search');again.value='nobody';again.dispatchEvent(new x.w.Event('input',{bubbles:true}));await new Promise(r=>setTimeout(r,300));await x.drain();
+ const again=x.d.getElementById('pip-search');again.value='nobody';again.dispatchEvent(new x.w.Event('input',{bubbles:true}));
+ const started=Date.now();
+ while(x.requests('list_pips').at(-1)?.request.query!=='nobody'&&Date.now()-started<5000){await new Promise(r=>setTimeout(r,25));await x.drain();}
+ await x.drain();
  assert.match(x.d.body.textContent,/No Pip matches “nobody” in its name, instructions or chat\./);
 });
 test('a Pip found by its chat says so, with the words around it',async()=>{
