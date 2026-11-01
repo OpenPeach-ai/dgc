@@ -416,7 +416,11 @@ def schemas(apps_now) -> list[dict]:
         {"type": "function", "function": {"name": "connect_app", "description": (
             "Ask the user to connect one of their apps to you. Outlook Mail uses the user's existing DGC Microsoft "
             "plugin; other apps use Composio only when no enabled DGC plugin already supplies that app. Check the "
-            "plugin_tools route first for an enabled plugin. A new connection shows a Connect card below your reply; "
+            "plugin_tools route first for an enabled plugin. If you can already read the app through a plugin, a "
+            "time-scheduled routine can use that plugin on every run: do not claim it needs another app link. "
+            "Email-trigger and calendar-trigger routines do need their own app links so DGC can check for new events "
+            "between runs. "
+            "A new connection shows a Connect card below your reply; "
             "the user signs in "
             "there (or just allows an account they "
             "already connected), and you are told when it is connected. For Gmail email-trigger routines, a Composio "
