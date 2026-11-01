@@ -54,8 +54,53 @@ const PREFIX_TOKEN = new RegExp(
   + "(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{12,}|npm_[A-Za-z0-9]{30,}|hf_[A-Za-z0-9]{30,}|"
   + "pypi-[A-Za-z0-9_-]{30,})\\b", "gi");
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
-const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY(?: BLOCK)?-----/g;
 const MARKER = "\u0000DGC-SDK-REDACTED\u0000";
+
+function privateKeyLabel(label: string): boolean {
+  const suffix = label.endsWith("PRIVATE KEY BLOCK") ? "PRIVATE KEY BLOCK" : "PRIVATE KEY";
+  if (!label.endsWith(suffix)) return false;
+  const prefix = label.slice(0, -suffix.length);
+  if (prefix && !prefix.endsWith(" ")) return false;
+  for (const char of prefix) {
+    if (!((char >= "A" && char <= "Z") || (char >= "0" && char <= "9") || char === " ")) return false;
+  }
+  return true;
+}
+
+/** Scan PEM boundaries once; a regex with a lazy body rescans long malformed input for each BEGIN. */
+function redactPrivateKeys(text: string): string {
+  const beginMark = "-----BEGIN ";
+  const endMark = "-----END ";
+  let cursor = 0;
+  let copied = 0;
+  let result = "";
+  while (true) {
+    const begin = text.indexOf(beginMark, cursor);
+    if (begin < 0) break;
+    const headerEnd = text.indexOf("-----", begin + beginMark.length);
+    if (headerEnd < 0) break;
+    if (!privateKeyLabel(text.slice(begin + beginMark.length, headerEnd))) {
+      cursor = headerEnd + 5;
+      continue;
+    }
+    let end = text.indexOf(endMark, headerEnd + 5);
+    let closing = -1;
+    while (end >= 0) {
+      const labelEnd = text.indexOf("-----", end + endMark.length);
+      if (labelEnd < 0) break;
+      if (privateKeyLabel(text.slice(end + endMark.length, labelEnd))) {
+        closing = labelEnd + 5;
+        break;
+      }
+      end = text.indexOf(endMark, labelEnd + 5);
+    }
+    if (closing < 0) break;
+    result += text.slice(copied, begin) + MARKER;
+    copied = closing;
+    cursor = closing;
+  }
+  return result ? result + text.slice(copied) : text;
+}
 
 const EXTRA_SECRETS = new Set<string>();
 let ENV_SECRETS: string[] | null = null;
@@ -105,7 +150,7 @@ export function redactText(value: unknown, secrets: Iterable<string> = []): stri
     const usable = usableSecret(secret);
     if (usable) text = text.split(usable).join(MARKER);
   }
-  text = text.replace(PRIVATE_KEY, MARKER);
+  text = redactPrivateKeys(text);
   text = text.replace(URL_CREDENTIAL, (_m, scheme: string) => scheme + MARKER + "@");
   text = text.replace(AUTH_HEADER, (_m, head: string) => head + MARKER);
   text = text.replace(BEARER, (_m, head: string) => head + MARKER);

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DGC, defineTool, extractJson, validate, assertSupported } from "../sdk/typescript/src/index.ts";
+import { DGC, defineTool, extractJson, validate, assertSupported, redactText } from "../sdk/typescript/src/index.ts";
 import { engineDenyRules, looksLikeWrite, policyDecision } from "../sdk/typescript/src/policy.ts";
 import { prepareStateDir, writeSessionConfig } from "../sdk/typescript/src/state.ts";
 import { AuditLog } from "../sdk/typescript/src/audit.ts";
@@ -23,6 +23,13 @@ test("runtime child uses UTF-8 on every host", () => {
   } finally {
     rmSync(state, { recursive: true, force: true });
   }
+});
+
+test("redaction scans many incomplete PEM boundaries without hiding unrelated text", () => {
+  const incomplete = ("-----BEGIN PRIVATE KEY-----\nnot-a-complete-key\n").repeat(2_000);
+  assert.equal(redactText(incomplete), incomplete);
+  assert.equal(redactText("before -----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY----- after"),
+    "before [redacted] after");
 });
 
 test("native Windows checkout selects its Scripts interpreter", () => {

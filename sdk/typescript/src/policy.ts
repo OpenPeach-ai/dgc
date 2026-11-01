@@ -208,7 +208,7 @@ export function complementPatterns(allowed: Iterable<string>): string[] {
 }
 
 function appRoute(name: string): string {
-  const safe = String(name).replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "unnamed";
+  const safe = String(name).replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+/, "").replace(/_+$/, "") || "unnamed";
   return `mcp__${APP_SERVER}__${safe}`;
 }
 

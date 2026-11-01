@@ -9,7 +9,6 @@ const ALLOWED = new Set([
 const TYPES = new Set(["object", "array", "string", "integer", "number", "boolean", "null"]);
 const COUNTS = ["minLength", "maxLength", "minItems", "maxItems"];
 const LIMITS = ["minimum", "maximum"];
-const JSON_FENCE = /```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```/;
 
 export function assertSupported(schema: unknown): void {
   if (!schema || typeof schema !== "object" || Array.isArray(schema) || !Object.keys(schema).length) {
@@ -99,9 +98,19 @@ function isJsonValue(value: unknown, ancestors: Set<object>, depth: number): boo
 export function extractJson(text: string): unknown {
   let raw = (text || "").trim();
   if (!raw) throw new Error("final text is empty");
-  const fenced = JSON_FENCE.exec(raw);
-  if (fenced) raw = fenced[1];
-  else {
+  const fenceStart = raw.indexOf("```");
+  let fenced = false;
+  if (fenceStart >= 0) {
+    let bodyStart = fenceStart + 3;
+    if (raw.slice(bodyStart, bodyStart + 4).toLowerCase() === "json") bodyStart += 4;
+    while (bodyStart < raw.length && /\s/.test(raw[bodyStart])) bodyStart++;
+    const fenceEnd = raw.indexOf("```", bodyStart);
+    if (fenceEnd >= 0 && (raw[bodyStart] === "{" || raw[bodyStart] === "[")) {
+      raw = raw.slice(bodyStart, fenceEnd).trim();
+      fenced = true;
+    }
+  }
+  if (!fenced) {
     const obj = raw.indexOf("{");
     const arr = raw.indexOf("[");
     const starts = [obj, arr].filter((index) => index >= 0);
