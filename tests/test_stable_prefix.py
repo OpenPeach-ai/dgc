@@ -144,12 +144,12 @@ class StableStart(unittest.TestCase):
                    and clock.CLOCK_OPEN in str(m.get("content", ""))]
         by_words = {display_prompt(str(m["content"])): str(m["content"]) for m in prompts}
         self.assertEqual(set(by_words), set(PROMPTS), "the person sees only what they typed")
-        self.assertIn("# Saved Outputs", by_words["make a dashboard preview of the results"])
+        self.assertIn("# Saved Artifacts", by_words["make a dashboard preview of the results"])
         self.assertIn(clock.NOTES_OPEN, by_words["make a dashboard preview of the results"])
         self.assertIn("# Checklist cleared", by_words["carry on"])
         self.assertNotIn(clock.NOTES_OPEN, by_words["thanks"], "a turn that asked for nothing carries nothing")
         system = agent.messages[0]["content"]
-        for absent in ("# Saved Outputs", "# Artifacts", "# Checklist cleared", "# Approved plan"):
+        for absent in ("# Saved Artifacts", "# Artifacts", "# Checklist cleared", "# Approved plan"):
             self.assertNotIn(absent, system)
         self.assertIn("use repo_map to locate", system, "navigation guidance no longer depends on wording")
         self.assertIn("<dgc-turn-notes>", system, "the model is told what the notes are")

@@ -114,7 +114,7 @@ class OutputChipTest(unittest.TestCase):
         agent._turn_output = ""
         guidance = "\n".join(agent._artifact_guidance())
         self.assertIn("edit_artifact", guidance)
-        self.assertIn("even if the Output chip is Auto", guidance)
+        self.assertIn("even if the Artifact chip is Auto", guidance)
         self.assertNotIn("call the `artifact` tool", guidance)
         plan = self.agent(mode="plan", tool_profile="full", artifact_in_plan=True)
         self.assertNotIn("make_artifact", "\n".join(plan._artifact_guidance()))

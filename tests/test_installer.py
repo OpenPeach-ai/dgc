@@ -64,6 +64,14 @@ def _installer_python(path: str) -> str | None:
     """The Python install.sh builds with on PATH=path: the first of its own candidates (its `for candidate in`
     line, read from install.sh) that is 3.10 or later. On a Mac the first `python3` is often Apple's 3.9, which
     install.sh passes over for a python3.13 later on PATH; the wheelhouse built for that 3.9 had no click 8.5."""
+    # A Mac with a uv-managed Python may have no supported interpreter on the
+    # intentionally restricted scenario PATH. The installer supports an explicit
+    # DGC_PYTHON, so exercise that same route when the suite was given one.
+    explicit = os.environ.get("DGC_PYTHON")
+    if explicit and subprocess.run(
+            [explicit, "-c", "import sys; sys.exit(sys.version_info < (3, 10))"],
+            capture_output=True, stdin=subprocess.DEVNULL, timeout=60).returncode == 0:
+        return explicit
     found = re.search(r"for candidate in ((?:[^;\\]|\\\n)+); do", (PROJECT / "install.sh").read_text())
     if found is None:
         raise RuntimeError("install.sh no longer lists the Pythons it looks for")
@@ -251,6 +259,8 @@ def clean_env(home: Path, **extra: str) -> dict[str, str]:
         "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": str(WHEELS),
         "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PIP_NO_CACHE_DIR": "1",
     })
+    if os.environ.get("DGC_PYTHON"):
+        env["DGC_PYTHON"] = os.environ["DGC_PYTHON"]
     env.update(extra)
     return env
 

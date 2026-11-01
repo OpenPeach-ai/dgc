@@ -4877,7 +4877,7 @@ class Agent(GoalLifecycle):
         if self._artifacts_exposed() and self.mode != "plan":
             return [
                 "# Saved Artifacts: pages, dashboards, documents, slides and sheets",
-                "Use make_artifact to make a new Output that the user can reopen from Library. Its card opens "
+                "Use make_artifact to make a new Artifact that the user can reopen from Library. Its card opens "
                 "in the editor and DGC keeps its versions. Use edit_artifact with the existing ar_… id when "
                 "the user asks to fix or change an Artifact made earlier, even if the Artifact chip is Auto or "
                 "not selected this turn. Read it first with edit_artifact(id=…) if its current content is "

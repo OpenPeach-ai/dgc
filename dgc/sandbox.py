@@ -501,7 +501,14 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             # Granting only the first still failed, on the second's -- that is the whole bug.
             reachable = [path for path in (root, shared_git) if path is not None]
         writable = ([] if read_only else [root]) + [Path("/tmp"), Path("/private/tmp")]
+        # The shared temp allowance also covers a caller's temporary HOME and a
+        # workspace rooted under /private/tmp. Seatbelt uses the last matching
+        # rule: hide every ambient home from writes, then give back only this
+        # workspace when writes are permitted. A read-only workspace keeps its
+        # narrower deny even when it lives inside writable temp.
+        rules = [f"(deny file-write* {seatbelt.subpath(home)})" for home in hidden]
+        rules.append(f"({'deny' if read_only else 'allow'} file-write* {seatbelt.subpath(root)})")
         profile = seatbelt.profile(writable=writable, hidden=hidden, readable=readable,
-                                   reachable=reachable, network=network)
+                                   reachable=reachable, network=network, rules=rules)
         return [str(executable), "-p", profile, "/bin/bash", "-o", "pipefail", "-c", command]
     return None
