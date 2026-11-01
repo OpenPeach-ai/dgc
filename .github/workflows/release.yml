@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ["v[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing immutable CLI source tag, for example v0.50.0"
+        required: true
+        type: string
 
 permissions: {}
 
@@ -19,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -28,7 +36,23 @@ jobs:
       - run: python -m pip check
       - run: python -m compileall -q dgc tests/run_tests.py
       - run: python -m py_compile scripts/edit_micro.py scripts/gen_edit_corpus.py scripts/generate-sbom.py
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.os == 'macos-latest'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Install the headless browser for macOS artifact isolation tests
+        if: matrix.os == 'macos-latest'
+        working-directory: editors/vscode
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dgc-ms-playwright
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install chromium-headless-shell
       - run: python tests/run_tests.py
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dgc-ms-playwright
 
   release:
     needs: source-python
@@ -40,6 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -52,11 +77,14 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
       - name: Verify public tag identity
         shell: bash
+        env:
+          DGC_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           git fetch --quiet origin main
           version=$(sed -n 's/^__version__ = "\([^"]*\)"$/\1/p' dgc/__init__.py)
-          test "$GITHUB_REF_NAME" = "v$version"
-          git merge-base --is-ancestor "${GITHUB_REF_NAME}^{commit}" origin/main
+          test "$DGC_RELEASE_TAG" = "v$version"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$DGC_RELEASE_TAG^{commit}")"
+          git merge-base --is-ancestor "refs/tags/$DGC_RELEASE_TAG^{commit}" origin/main
       - run: python -m pip install -r sdk/scripts/requirements-release.txt
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
@@ -73,8 +101,9 @@ jobs:
             dist/*.tar.gz
       - env:
           GH_TOKEN: ${{ github.token }}
+          DGC_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: >-
-          gh release create "${GITHUB_REF_NAME}"
+          gh release create "${DGC_RELEASE_TAG}"
           dist/release/dgc.tar.gz
           dist/release/dgc.tar.gz.sha256
           dist/release/version.json
@@ -82,4 +111,4 @@ jobs:
           dist/release/dgc.cdx.json
           dist/*.whl
           dist/dgc-*.tar.gz
-          --verify-tag --generate-notes --title "DGC ${GITHUB_REF_NAME}"
+          --verify-tag --generate-notes --title "DGC ${DGC_RELEASE_TAG}"

@@ -77,6 +77,12 @@ version. Ensure required CI and CodeQL checks are green and the source branch is
    though CycloneDX supports optional extensions—and size-bounds and credential-scans every sidecar.
    The installer archive must never include maintainer scripts, internal tests, benchmark material,
    CI configuration, website source, or internal documentation.
+
+   If a hosted runner's release environment needs a correction after the immutable tag is public,
+   review a release-infrastructure-only change on `main`, then dispatch the same `Release` workflow with the
+   existing `vX.Y.Z` tag. The workflow checks out that tag for every test and build job and verifies
+   that it remains on public `main`; the workflow change cannot alter the product source or move the
+   tag. The workflow still creates the GitHub Release after its full source matrix passes.
 4. The local promotion binding deliberately permits an unpublished tagged source commit; deployment
    and tagged-release gates additionally require that source on public `origin/main`. Deployment is a
    separate final action: `DGC_ENV_FILE=/path/to/private.env scripts/deploy-site.sh`. The script
