@@ -54,6 +54,14 @@ with patch.object(LLMClient,"chat",chat), patch("requests.sessions.Session.reque
 
 
 class PipCliTests(unittest.TestCase):
+    def test_terminal_messages_keep_prose_without_editor_card_json(self):
+        answer = 'Services are healthy.\n\n```dgc-ui\n{"version":"1","title":"Health","blocks":[]}\n```\n'
+        result = {"messages": [{"role": "assistant", "status": "succeeded", "model": "m", "text": answer}]}
+        shown = pip_cli._format(result)
+        self.assertIn("Services are healthy.", shown)
+        self.assertNotIn("dgc-ui", shown)
+        self.assertNotIn('"blocks"', shown)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="dgc-pip-cli-")
         self.addCleanup(temporary.cleanup)

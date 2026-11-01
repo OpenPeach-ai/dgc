@@ -3243,6 +3243,28 @@ test("a new chat excludes pre-existing workspace changes and rejects stale chat 
   assert.deepEqual(errors, []);
 });
 
+test("workspace change counts remain text in the review surface", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "session_ready", sessionId: "review-text" });
+  send({ type: "workspace_changes", total: "<img src=x onerror=alert(1)>", additions: "<svg onload=alert(1)>", deletions: 0, files: [] });
+  doc.getElementById("workspace-changes").click();
+  const summary = doc.getElementById("changes-review-summary");
+  assert.match(summary.textContent, /<img src=x onerror=alert\(1\)>/);
+  assert.equal(summary.querySelector("img,svg"), null);
+  assert.deepEqual(errors, []);
+});
+
+test("unknown model effort cannot become model menu markup", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "state", state: { model: "Example", mode: "default", think: '<img src=x onerror=alert(1)>' } });
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["Example"], current: "Example" });
+  const menu = doc.getElementById("modelmenu");
+  assert.equal(menu.querySelector("img"), null);
+  assert.match(menu.querySelector(".model-summary-label").textContent, /Off/);
+  assert.deepEqual(errors, []);
+});
+
 test("a finished turn summarises what it changed and offers Undo and Review", () => {
   const { errors, posted, send, doc } = makeDom();
   const prompt = "Fix the clamp bounds and prove it with a test";

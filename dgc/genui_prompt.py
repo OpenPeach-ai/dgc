@@ -1,4 +1,15 @@
-"""Temporary contract for the private Generative UI experiment; no executable model markup."""
+"""Optional bounded card guidance for hosts that can render DGC interactive answers."""
+
+import re
+
+
+_CARD_FENCE = re.compile(r"^```dgc-ui[ \t]*\n.*?^```[ \t]*(?:\n|$)", re.MULTILINE | re.DOTALL)
+
+
+def plain_text(reply: str) -> str:
+    """Keep a readable answer when exporting to a surface without a card renderer."""
+    return _CARD_FENCE.sub("", reply).strip()
+
 
 GUIDANCE = (
     "\n# Optional DGC interactive answer\n"

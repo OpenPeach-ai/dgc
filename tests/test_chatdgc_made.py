@@ -291,6 +291,14 @@ class MadeInChat(unittest.TestCase):
     def told(self, n=-1):
         return [m["content"] for m in self.world["read"][n]["messages"] if m["role"] == "tool"]
 
+    def test_markdown_export_omits_editor_only_interactive_card(self):
+        chat, _ = self.say("Status?", {"parts": ["Healthy.\n\n```dgc-ui\n{\"version\":\"1\",\"title\":\"Status\",\"blocks\":[]}\n```"]})
+        markdown = self.engine.export(chat["id"], "markdown")
+        self.assertIn("Healthy.", markdown)
+        self.assertNotIn("dgc-ui", markdown)
+        self.assertNotIn('"blocks"', markdown)
+        self.assertIn("dgc-ui", self.engine.export(chat["id"], "json"), "machine export preserves the actual reply")
+
     def test_a_file_is_made_shown_kept_and_read_back(self):
         live = []
         chat, reply = self.say("Write me a one-page brief on the LRS as a Word file.",

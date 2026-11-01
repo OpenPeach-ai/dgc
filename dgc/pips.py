@@ -1458,6 +1458,9 @@ class PipStore:
                 if conversation_request is not None:
                     manifest["conversation"] = pip_chat.prepare(self, latest, conversation_request,
                         context_size=model["context_size"], secrets=secret_values(frozen_config))
+                    # Only the editor has a renderer for interactive answer cards. Terminal and SDK
+                    # conversations keep the ordinary reply without card instructions or raw JSON.
+                    manifest["generative_ui_supported"] = actor == "editor-user"
                     if personal:
                         from .pip_chat_setup import pin as pin_chat_setup
                         manifest['chat_setup'] = pin_chat_setup(latest)
@@ -2462,8 +2465,9 @@ class _WorkerUI:
 
 
 class _ConversationUI(_WorkerUI):
-    def __init__(self, emit, config):
+    def __init__(self, emit, config, *, generative_ui_supported=False):
         super().__init__(emit)
+        self.generative_ui_supported = generative_ui_supported is True
         from .redaction import StreamingRedactor, secret_values
         self.redactor = StreamingRedactor(lambda: secret_values(config))
         self.stream_bytes = 0
@@ -3404,7 +3408,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             raise RegistryError("invalid_source_changes", "Source-change references belong only to an audit's pinned checkpoint.")
         from .pip_source_changes import validate_for_source
         changes_since_checkpoint = validate_for_source(manifest["changes_since_checkpoint"], source, checkpoint)
-    ui = _ConversationUI(emit, config) if conversation is not None else _WorkerUI(emit)
+    ui = (_ConversationUI(emit, config, generative_ui_supported=manifest.get("generative_ui_supported") is True)
+          if conversation is not None else _WorkerUI(emit))
     mcp = MCPManager(snapshot)
     agent = ReadOnlyAuditor(config, ui, mcp=mcp)
     if specialist_budget is not None:

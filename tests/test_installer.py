@@ -39,6 +39,16 @@ sys.path.insert(0, str(PROJECT))
 from dgc import install_layout as L  # noqa: E402
 
 
+class VersionValidation(unittest.TestCase):
+    def test_release_versions_accept_named_suffixes_without_ambiguous_repetition(self):
+        for version in ("0.50", "0.50.0", "0.50.0rc1", "0.50.0-rc1", "1.2.3.4+build5"):
+            with self.subTest(version=version):
+                self.assertTrue(L.valid_version(version))
+        for version in ("1.2-", "1.2..3", "1.2+bad+", "1.2" + "a" * 64):
+            with self.subTest(version=version):
+                self.assertFalse(L.valid_version(version))
+
+
 # ------------------------------------------------------------------ fixtures ---
 
 def _installer_path() -> str:

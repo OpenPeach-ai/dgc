@@ -1168,7 +1168,9 @@ def _format(value):
             lines.append("Earlier checkpoints: repeat with --before-id " + str(value["next_before_id"]))
         return "\n\n".join(lines) or "No audit checkpoint yet. Complete a new read-only audit to record one."
     if "messages" in value:
-        lines = [f'{item["role"]} · {item["status"]} · {item["model"]}\n{item["text"]}' for item in value["messages"]]
+        from .genui_prompt import plain_text
+        lines = [f'{item["role"]} · {item["status"]} · {item["model"]}\n{plain_text(item["text"])}'
+                 for item in value["messages"]]
         continuity = value.get('continuity')
         if continuity and continuity.get('summary'):
             lines.append('Conversation continuity · ' + str(continuity['summarized_messages'])

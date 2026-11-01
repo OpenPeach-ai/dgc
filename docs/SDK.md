@@ -418,7 +418,7 @@ everything DGC made that the user keeps, in every part of DGC, each with every v
 
 `ArtifactInfo`: `id`, `type`, `title`, `version`, `label`, `created`, `updated`, `origin`, `exports`, `file` (the file a
 document is edited in), `versions` (`ArtifactVersion`: `n`, `author`, `at`, `summary`, `size`). `run()` and `stream()`
-take `output` (`"document"`, `"slides"`, `"spreadsheet"`, `"page"` or `"dashboard"`, as DGC's Output chip): the
+take `output` (`"document"`, `"slides"`, `"spreadsheet"`, `"page"` or `"dashboard"`, as DGC's Artifact chip): the
 result's `made_artifacts` holds what the run made. `AsyncSession.artifacts` is `AsyncArtifacts`, the same calls
 awaited. TypeScript: `session.artifacts.list({ type })`, `.update(id, content, { baseVersion })`,
 `.compare(id, before, after?)`, `.allowSource(id, source, allowed, baseVersion?)`, and `output` in run options.

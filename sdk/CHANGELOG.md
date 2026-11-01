@@ -1,6 +1,6 @@
 # DGC SDK changelog
 
-## 0.8.0
+## 0.8.0 — 2026-11-01
 
 Pairs with CLI 0.50.0.
 
@@ -20,7 +20,7 @@ The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 1
   (a new version by "you", refused with reason `conflict` when the artifact moved on since `base_version`),
   `restore`, `export` (returns the file's path) and `open` (serves it at an address of its own; returns the URL).
   `run(…, output="slides")` and `stream(…, output=…)` on a session, and `send(…, output=…)` on a chat, ask the reply
-  to make that kind of artifact, as DGC's Output chip does: document, slides, spreadsheet, page or dashboard (a run's
+  to make that kind of artifact, as DGC's Artifact chip does: document, slides, spreadsheet, page or dashboard (a run's
   `made_artifacts` and a chat reply's `artifacts` hold what it made; `output_note` says when it wasn't made).
 - Mods: `session(mods=[...])` runs the named mod folders in the session beside the user's allowed ones, and
   `session.mods` lists them and runs their commands (needs `capabilities["mods"]`, CLI 0.50+). Authoring libraries:

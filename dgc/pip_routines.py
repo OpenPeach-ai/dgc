@@ -380,7 +380,8 @@ def schema(own_apps=()) -> dict:
         "when: {kind:'schedule', schedule:{type:'daily', time:'HH:MM', timezone:'Area/City'} or "
         "{type:'cron', cron:'MM HH * * 1-5', timezone:'Area/City'} for weekdays, or {type:'interval', minutes:N} "
         "or {type:'once', at:ISO time with offset}} | {kind:'email', query:'a Gmail search', every_minutes:5-60} "
-        "(needs Gmail connected to you) | {kind:'calendar', lead_minutes:5-120} (needs Google Calendar)" + events + ". When "
+        "(needs Gmail linked to this Pip with connect_app; a one-time read through plugin_tools does not feed the email trigger, but connect_app can reuse that signed-in Composio account) "
+        "| {kind:'calendar', lead_minutes:5-120} (needs Google Calendar linked to this Pip)" + events + ". When "
         "the user wants mail caught as it comes in (\"catch my mails\", \"when an email from my boss arrives\"), use kind "
         "'email' with a search for those mails, not a daily schedule."),
         "parameters": {"type": "object", "additionalProperties": False, "required": ["title", "prompt", "when"],
@@ -523,9 +524,8 @@ def read_arguments(trigger, now: datetime) -> dict:
 
 def _record(registry, row, **fields) -> bool:
     """Save a check's outcome, only if nobody changed the routine meanwhile. A check isn't a change to the routine:
-    updated_at moves only when its status does (a one-time routine done). It used to move on every check, so the chat's
-    "Routine added" card (shown while updated_at is recent, pipRoutines.shownRoutineCards) never went away for a routine
-    checked every few minutes, such as an email one."""
+    updated_at moves only when its status does (a one-time routine done). Routine checks update their health fields
+    without making the routine look newly edited."""
     if "status" in fields and fields["status"] != row["status"]:
         fields["updated_at"] = stamp(_now(registry))
     with registry.transaction():

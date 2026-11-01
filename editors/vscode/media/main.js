@@ -1578,18 +1578,18 @@
     button.classList.toggle("on", on);
     button.setAttribute("aria-pressed", String(on));
     $("output-icon").className = `codicon codicon-${on ? choice[3] : "output"}`;
-    // "Output: Slides"; a narrow panel shows the kind's icon and keeps the choice in the accessible label.
-    const prefix = el("span", "output-prefix", "Output: "), name = el("span", "output-name", choice[1]);
-    $("output-label").replaceChildren(...(on ? [prefix, name] : [el("span", "output-name", "Output")]));
-    button.setAttribute("aria-label", `Output: ${choice[1]}. ${on ? `This message makes ${choice[1].toLowerCase() === "slides" ? "slides" : `a ${choice[1].toLowerCase()}`}` : "The model picks"}`);
-    button.title = on ? `Output: ${choice[1]} for the next message (then Auto again)` : "Output: what the next message should make. Auto lets the model pick";
+    // "Artifact: Slides"; a narrow panel shows the kind's icon and keeps the choice in the accessible label.
+    const prefix = el("span", "output-prefix", "Artifact: "), name = el("span", "output-name", choice[1]);
+    $("output-label").replaceChildren(...(on ? [prefix, name] : [el("span", "output-name", "Artifact")]));
+    button.setAttribute("aria-label", `Artifact: ${choice[1]}. ${on ? `This message makes ${choice[1].toLowerCase() === "slides" ? "slides" : `a ${choice[1].toLowerCase()}`}` : "The model picks"}`);
+    button.title = on ? `Artifact: ${choice[1]} for the next message (then Auto again)` : "Artifact: what the next message should make. Auto lets the model pick";
   }
   function hideOutputMenu() { $("outputmenu").hidden = true; $("btn-output").setAttribute("aria-expanded", "false"); }
   function toggleOutputMenu() {
     const menu = $("outputmenu");
     if (!menu.hidden) { hideOutputMenu(); return; }
     hideModeMenu(); hideModelMenu(); hideContextMenu(); hideAgentsMenu();
-    menu.innerHTML = `<div role="group" aria-label="Output"><div class="mhead" role="presentation"><span>Make, with the next message</span></div>`
+    menu.innerHTML = `<div role="group" aria-label="Artifact"><div class="mhead" role="presentation"><span>Make, with the next message</span></div>`
       + offeredOutputs().map(([value, label, desc, glyph]) => `<button type="button" role="menuitemradio" aria-checked="${value === outputPick}" class="mrow${value === outputPick ? " sel" : ""}" data-output="${value}"><span class="mi codicon codicon-${glyph}" aria-hidden="true"></span><span>${label}</span><span class="md">${desc}</span></button>`).join("")
       + `</div>`;
     menu.querySelectorAll("[data-output]").forEach((row) => { row.onclick = () => { setOutput(row.dataset.output); hideOutputMenu(); $("btn-output").focus(); }; });
@@ -1848,14 +1848,15 @@
     $("ctx-compact").focus();
   }
   function effortLabel(value, subscription = curSubscription) {
-    return ({ off: subscription ? "Default" : "Off", low: "Low", medium: "Medium",
-      high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" })[value] || value;
+    const labels = { off: subscription ? "Default" : "Off", low: "Low", medium: "Medium",
+      high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" };
+    return Object.hasOwn(labels, value) ? labels[value] : labels.off;
   }
   function profileMenu(subscription, supportsEffort) {
     const levels = subscription && supportsEffort === false ? ["off"]
       : subscription && curSubscription !== "codex" ? [...THINK, "max"] : THINK;
     const profiles = [...levels, "ultra"];
-    const selected = curUltra ? "ultra" : curThink;
+    const selected = curUltra ? "ultra" : profiles.includes(curThink) ? curThink : profiles[0];
     const index = Math.max(0, profiles.indexOf(selected));
     return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div><p class="reasoning-note clamped">${esc(subscription ? "Uses the selected CLI’s supported effort. Ultra adds DGC orchestration guidance." : reasoningNote())}</p><button type="button" class="reasoning-more" aria-expanded="false" hidden>Show more</button></section>`;
   }
@@ -2537,6 +2538,7 @@
   DgcMarkdown.setFavicons?.(document.body.dataset.linkFavicons !== "off");
   const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+  function textEl(tag, cls, value) { const e = el(tag, cls); e.textContent = String(value); return e; }
   // ---- hover labels ----
   // The panel relied on the browser's `title` tooltip: about a second of delay, operating-system
   // chrome that matches nothing else on screen, and nothing at all for a keyboard user. This is
@@ -6602,9 +6604,9 @@
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     const floor = reviewScope === "chat" && changeState.total && changeState.notices?.length ? "At least " : "";
     summary.replaceChildren(
-      el("span", "", `${floor}${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`),
-      el("span", "change-add", `+${changeState.additions}`),
-      el("span", "change-del", `−${changeState.deletions}`),
+      textEl("span", "", `${floor}${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`),
+      textEl("span", "change-add", `+${changeState.additions}`),
+      textEl("span", "change-del", `−${changeState.deletions}`),
     );
     list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
       `<button type="button" class="change-row" data-change="${index}" title="${esc(item.error || (item.staged ? "Includes staged changes" : "Review change"))}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">${item.counted === false || item.binary ? "—" : "+" + Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">${item.counted === false || item.binary ? "—" : "−" + Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")

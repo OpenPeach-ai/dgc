@@ -105,7 +105,7 @@ test("no dashboards yet says how to make one; all of them chosen, or the most, s
   const none = await openPipSettings(browser, { kind: "scout", dashboards: [] });
   try {
     await none.page.waitForSelector("#pipDashboardsLabel");
-    assert.match(await none.page.locator(".pip-artifacts-section").last().textContent(), /You have no dashboards yet\. Ask for one in a chat: choose Output, then Dashboard\./);
+    assert.match(await none.page.locator(".pip-artifacts-section").last().textContent(), /You have no dashboards yet\. Ask for one in a chat: choose Artifact, then Dashboard\./);
     assert.equal(await none.page.locator("#pipDashboardAdd").count(), 0);
   } finally { await none.close(); }
   const eight = Array.from({ length: 9 }, (_, i) => ({ id: DASH(String(i)), title: `Board ${i}`, version: 1 }));

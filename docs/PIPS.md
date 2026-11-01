@@ -1682,7 +1682,7 @@ Configured secrets are redacted from reports and previews. Saved artifact files
   Settings and type its exact name, or run `dgc pips delete-archived PIP_ID`
   with `--confirm-name`, `--expected-version`, and `--expected-lifecycle-revision`.
   This erases its private DGC chat, runs, audit receipts, references in other
-  Pips' saved history, computer, exclusive saved sign-ins, and Pip-created Outputs.
+  Pips' saved history, computer, exclusive saved sign-ins, and Pip-created Artifacts.
   Shared sign-ins, copies you exported, and project files it changed remain.
   This cannot be undone.
 - **Turn Pips off:** choose **Disable local Pips…** in the Pips view, which first

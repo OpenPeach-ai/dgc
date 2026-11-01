@@ -2,7 +2,7 @@
 
 ## 0.34.2 — 2026-11-01
 
-- **Delete archived Pips permanently.** An explicit confirmation requires the Pip's exact name before DGC erases its private history, computer and Pip-created Outputs. The Pip disappears from the Archived list after deletion.
+- **Delete archived Pips permanently.** An explicit confirmation requires the Pip's exact name before DGC erases its private history, computer and Pip-created artifacts. The Pip disappears from the Archived list after deletion.
 - **Question replies keep their styling after a session reload.** The question appears as a
   separate quoted line in the user's answer bubble instead of literal `>` text.
 - **Pips opened from Work stay in their own editor tab.** A running Pip or report can be opened
@@ -14,7 +14,7 @@
   After a Pip closes its browser, the viewer keeps it closed until you reopen it.
 - **Generative UI across Work, ChatDGC and Pips.** DGC can show bounded metrics, steps,
   comparisons, tables and one-click follow-up choices in a reply. Choices send immediately using
-  the normal chat permissions. Existing tool calls, agent cards, Pip fixes, widgets and Outputs keep
+  the normal chat permissions. Existing tool calls, agent cards, Pip fixes, widgets and artifacts keep
   their own UI.
 - **Pip report dismissal follows the same run on home and chat replay.** Other unread runs remain.
 - **Settings keeps its navigation in narrow tabs.** The side menu becomes an icon rail with hover labels and
@@ -46,7 +46,7 @@
 - **Google Workspace's setup, ready for when Google approves DGC's app.** Once it appears in Settings → Plugins you
   choose Gmail, Google Calendar, Drive, Docs or Slides, see under each what it lets DGC do, and sign in with Google once
   for all of them.
-- **Artifacts in VS Code.** The Output chip under the prompt, in Work and in Chat, chooses what the reply makes:
+- **Artifacts in VS Code.** The Artifact chip under the prompt, in Work and in Chat, chooses what the reply makes:
   Auto, Document, Slides, Spreadsheet, Page or Dashboard (a choice is a promise; it goes back to Auto after the
   reply). What DGC makes arrives as a card in the reply with its type, title and version, and opens beside the chat
   in its own editor: a document to edit, slides to rearrange and present, a sheet to sort and filter, a dashboard to

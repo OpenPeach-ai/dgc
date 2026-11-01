@@ -5,7 +5,6 @@
 
 const STATUSES = ['suggested', 'on', 'off'];
 const WEEKDAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
-const RECENT_MS = 30 * 60 * 1000;
 const APP = /^[a-z0-9-]{1,40}$/, EVENT = /^[a-z0-9_.-]{1,64}$/;
 /** "shop" is "the shop app", as DGC names it in a sentence. */
 const appPhrase = name => `the ${String(name || '').replace(/-/g, ' ').trim() || 'your'} app`;
@@ -131,10 +130,9 @@ export function routineFromDraft(d, now = Date.now()) {
   return { title, prompt, trigger };
 }
 
-/** The cards worth showing in its chat: suggestions waiting for you, and one you just added. */
-export function shownRoutineCards(routines, now = Date.now()) {
-  return (routines || []).filter(r => r.created_by === 'pip' && (r.status === 'suggested'
-    || r.status === 'on' && now - Date.parse(r.updated_at) < RECENT_MS && Date.parse(r.updated_at) > Date.parse(r.created_at)));
+/** Only suggestions awaiting a decision belong in the chat. Accepted routines live in Settings. */
+export function shownRoutineCards(routines) {
+  return (routines || []).filter(r => r.created_by === 'pip' && r.status === 'suggested');
 }
 
 const mark = '<span class="app-link-mark routine-mark" aria-hidden="true"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v2.8h-2.8"/><path d="M8 5v3.2l2 1.3"/></svg></span>';
@@ -152,12 +150,13 @@ export function routineCardMarkup(r, { esc, busy = false, formatDate }) {
 }
 
 /** Its routines in Settings: one row each with an on/off switch, then Add routine. */
-export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '' }) {
+export function routinesMarkup(routines, { esc, busy = false, editing = '', form = '', formatDate, pipName = 'It', schedule = '', gmail = false, calendar = false }) {
   const off = busy ? ' disabled' : '';
   const shown = (routines || []).filter(r => r.status !== 'suggested');
   const rows = shown.map(r => editing === r.id ? form : `<li class="routine-row" data-state="${esc(r.status)}">`
     + `<button type="button" class="routine-open" data-routine-edit="${esc(r.id)}"${off}>${mark}<span class="routine-words"><strong>${esc(r.title)}</strong>`
     + `<small>${esc(routineWhen(r.trigger, formatDate))}${r.status === 'on' && r.next_due_at && r.trigger.kind === 'schedule' && r.trigger.schedule.type !== 'once' ? ` · next ${esc(shortDate(r.next_due_at))}` : ''}</small>`
+    + `${r.status === 'on' && !r.last_error && ((r.trigger.kind === 'email' && !gmail) || (r.trigger.kind === 'calendar' && !calendar)) ? `<small class="routine-error">Waiting for ${r.trigger.kind === 'email' ? 'Gmail' : 'Google Calendar'} to be linked to this Pip.</small>` : ''}`
     + `${r.troupe ? `<small class="routine-troupe">Troupe · ${esc([r.troupe.plan, r.troupe.project].filter(Boolean).join(' · '))}</small>` : ''}`
     + `${r.last_error ? `<small class="routine-error">${esc(r.last_error)}</small>` : ''}</span></button>`
     + `<label class="switch" title="${r.status === 'on' ? 'On' : 'Off'}"><input type="checkbox" role="switch" data-routine-toggle="${esc(r.id)}"${r.status === 'on' ? ' checked' : ''}${off} aria-label="${esc(r.title)} ${r.status === 'on' ? 'on' : 'off'}"><span aria-hidden="true"></span></label></li>`).join('');

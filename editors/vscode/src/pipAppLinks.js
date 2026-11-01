@@ -49,7 +49,7 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-check="${id}"${off}>${busy ? 'Checking…' : 'I’ve signed in'}</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Open sign-in again</button>${no}</div>`;
   } else if (!composio && link.toolkit !== 'outlook') {
-    body = head(`Connect ${app}`, esc(link.reason))
+    body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
       + `<p class="app-link-note">To connect apps, first turn on Composio in Settings → Plugins (once). Then choose Connect here.</p>`
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Settings</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Connect ${app}</button>${no}</div>`;
@@ -62,8 +62,9 @@ export function appLinkMarkup(link, { esc, busy = false, composio = true, host =
       + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-settings="${id}">Open Plugins</button>`
       + `<button type="button" class="quiet" data-app-link-start="${id}"${off}>Try again</button>${no}</div>`;
   } else {
-    body = head(`Connect ${app}`, esc(link.reason))
-      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : `Connect ${app}`}</button>${no}</div>`;
+    body = head(link.toolkit === 'gmail' ? `Link Gmail to ${esc(pipName)}` : `Connect ${app}`, esc(link.reason))
+      + (link.toolkit === 'gmail' ? '<p class="app-link-note">Linking Gmail to this Pip also lets its email-trigger routines run. DGC can reuse an active Gmail account in Composio; this does not require the Google Workspace plugin.</p>' : '')
+      + `<div class="app-link-actions"><button type="button" class="primary" data-app-link-start="${id}"${off}>${busy ? 'Opening…' : link.toolkit === 'gmail' ? 'Link Gmail' : `Connect ${app}`}</button>${no}</div>`;
   }
   return `<div class="app-link" data-app-link="${id}" data-state="${esc(link.status)}" role="group" aria-label="${link.status === 'connected' ? `${app} connected` : link.known_label !== undefined && link.status === 'requested' ? `Use ${app}` : `Connect ${app}`}">${body}</div>`;
 }

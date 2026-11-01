@@ -64,7 +64,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="attach a file (up to 10)")
     p.add_argument("--json", action="store_true", help="print the reply, list or export as JSON")
     p.add_argument("--make", choices=("document", "slides", "spreadsheet", "page", "dashboard"),
-                   help="what the reply should make (DGC's Output chip); you open it with dgc artifacts open")
+                   help="what the reply should make (DGC's Artifact chip); you open it with dgc artifacts open")
     return p
 
 

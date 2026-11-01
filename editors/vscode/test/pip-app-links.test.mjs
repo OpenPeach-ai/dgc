@@ -51,8 +51,9 @@ async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await 
 test('the Pip asks; the card says what for, Connect goes to DGC by card, and Not now says no',async()=>{
  const x=setup();await openChat(x);
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);assert.ok(card,'the Connect card is in the chat');
- assert.match(card.textContent,/Connect Gmail.*To read your new mail each morning\./);
- assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Connect Gmail','Not now']);
+ assert.match(card.textContent,/Link Gmail to .*To read your new mail each morning\./);
+ assert.match(card.textContent,/Linking Gmail to this Pip also lets its email-trigger routines run.*reuse an active Gmail account in Composio/);
+ assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Link Gmail','Not now']);
  x.click(`[data-app-link-start="${LINK}"]`);
  const start=x.requests('start_pip_app_link')[0];assert.deepEqual(JSON.parse(JSON.stringify(start.request)),{type:'start_pip_app_link',pip_id:PIP,link_id:LINK});
  assert.match(x.d.querySelector(`[data-app-link="${LINK}"]`).textContent,/Opening…/);

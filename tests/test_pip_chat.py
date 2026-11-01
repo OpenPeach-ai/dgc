@@ -94,6 +94,14 @@ class PipChatTests(unittest.TestCase):
         self.assertTrue(all(m["status"] == "succeeded" and m["pip_id"] == self.job["id"] for m in page["messages"]))
         self.assertEqual(self.send()["run"]["status"], "succeeded")
 
+    def test_interactive_card_guidance_is_pinned_only_for_editor_chat(self):
+        self.setup_job()
+        terminal = self.send(actor="local-console")
+        self.assertIs(self.raw(terminal)["generative_ui_supported"], False)
+        self.finish(terminal)
+        editor = self.send(text="Show status", key="editor-message", actor="editor-user")
+        self.assertIs(self.raw(editor)["generative_ui_supported"], True)
+
     def test_one_pending_reply_and_failed_cancelled_never_save_assistant(self):
         self.setup_job()
         for index, status in enumerate(("failed", "cancelled", "recovered")):

@@ -9861,7 +9861,7 @@ class Host:
         with self._chats_lock:
             if self._chatdgc is None:
                 from .chatdgc.service import ChatService
-                self._chatdgc = ChatService(self.core.emit, self.default.config)
+                self._chatdgc = ChatService(self.core.emit, self.default.config, generative_ui_supported=True)
                 # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running
                 # sessions name the chats it is answering, and a backend with no window is kept for them.
                 self._chatdgc.on_turns_changed = self.announce_peers

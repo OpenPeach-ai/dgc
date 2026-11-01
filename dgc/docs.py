@@ -565,6 +565,8 @@ draw. Update the extension to get them back.
 
 When a small comparison or progress report is easier to scan than prose, DGC can add a
 **Generative UI** card to its answer. The normal text answer remains readable on its own.
+In 0.50, this is on by default for editor conversations. Terminal ChatDGC does not ask for
+cards, and Markdown exports leave the card data out while keeping the answer's prose.
 The card uses DGC components in your editor theme; the model supplies only bounded data.
 It cannot send HTML, JavaScript, a custom component, or a new permission rule.
 
@@ -572,14 +574,14 @@ It cannot send HTML, JavaScript, a custom component, or a new permission rule.
 
 Ask for a project status, test summary, comparison, or next steps. A card can show metrics,
 progress steps, bars and tables beside the existing tool calls, specialist agents, agent map,
-Pip fix cards and Outputs. Tool activity remains in the usual tool cards. When a verified test
+Pip fix cards and artifacts. Tool activity remains in the usual tool cards. When a verified test
 runner result includes counts, its tool card can show a small pass/fail track.
 
 ## In ChatDGC
 
 Ask for a comparison or a short decision with clear options. A choice card sends its reply as a
 new chat message when clicked. It does not run a connected app or grant permission by itself.
-Widgets and saved Outputs still open in their own editor tabs and Library.
+Widgets and saved artifacts still open in their own editor tabs and Library.
 
 ## In Pips
 
@@ -607,9 +609,9 @@ An artifact is something DGC makes that you keep: a **Document**, **Slides**, a 
 reports in one. Every artifact lives on this computer, in `~/.dgc/artifacts/`, whichever part of
 DGC made it, and nothing is hosted anywhere: exporting is how you share one.
 
-Open **Library → Artifacts** in Chat to find Outputs made in Chat, Work or Pips. **Work → Library**
+Open **Library → Artifacts** in Chat to find artifacts made in Chat, Work or Pips. **Work → Library**
 opens that same saved collection filtered to Work. From either place, reopen, export or remove an
-Output; removal moves its versions to DGC's trash. A Page or Dashboard has a **Copy text** button
+artifact; removal moves its versions to DGC's trash. A Page or Dashboard has a **Copy text** button
 in its editor panel, so its readable text can be copied even when the embedded preview does not
 offer a working copy command.
 
@@ -633,11 +635,11 @@ edits before charting them.
 
 ## Asking for one
 
-The **Output** chip under the prompt (in Chat and in Work) chooses what the reply makes: Auto (the
+The **Artifact** chip under the prompt (in Chat and in Work) chooses what the reply makes: Auto (the
 model decides), Document, Slides, Spreadsheet, Page or Dashboard. **A choice is a promise**: choose
 Slides and you get slides, or a plain line saying why not. After the reply it goes back to Auto.
-To revise an Output from the same conversation, name it or refer to its card: DGC should edit
-that saved Output as a new version even when you do not choose an Output again. If several could
+To revise an artifact from the same conversation, name it or refer to its card: DGC should edit
+that saved artifact as a new version even when you do not choose an artifact type again. If several could
 match, tell it which one you mean.
 
 In the terminal: `dgc chat --make slides "A 6-slide pitch for the tea shop"`, `/make slides TEXT`

@@ -68,9 +68,7 @@ test('the Pip asks: "Let Ava use Airtable?" with what for, and Allow goes to DGC
  const allow=x.requests('allow_pip_plugin')[0];assert.deepEqual(clean(allow.request),{type:'allow_pip_plugin',pip_id:PIP,grant_id:CARD});
  assert.match(x.d.querySelector(`[data-plugin-card="${CARD}"]`).textContent,/Allowing…/);
  x.setPlugins([card({status:'allowed'})]);x.answer(allow,{plugin:card({status:'allowed'})});await x.drain();
- const done=x.d.querySelector(`[data-plugin-card="${CARD}"]`);
- assert.match(done.textContent,/Ava can use Airtable.*What its maker marks read-only runs at once\. Anything else waits for your Allow\./);
- assert.equal(done.querySelectorAll('button').length,0);
+ assert.equal(x.d.querySelector(`[data-plugin-card="${CARD}"]`),null,'the accepted request leaves the chat');
  assert.match(x.d.body.textContent,/Ava can use Airtable now\./);
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');
 });
@@ -129,15 +127,15 @@ test('a plugin that can move money asks every time: no Always allow on its card'
  assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t']);
 });
 
-test('the allowed card goes once the Pip has replied after it',async()=>{
+test('an allowed plugin card stays out of the chat after a reload and a later reply',async()=>{
  const reply={id:'a9',pip_id:PIP,workspace_id:PW,role:'assistant',text:'The rate is 4.13%.',run_id:'run_'+'9'.repeat(32),status:'succeeded',model:'m',created_at:new Date(Date.now()+60000).toISOString()};
  const x=setup({plugins:[card({status:'allowed'})]});await openChat(x);
- assert.ok(x.d.querySelector(`[data-plugin-card="${CARD}"]`),'just allowed: shown');
+ assert.equal(x.d.querySelector(`[data-plugin-card="${CARD}"]`),null,'just allowed: already resolved');
  const y=setup({plugins:[card({status:'allowed'})],messages:[reply]});await openChat(y);
  assert.match(y.d.body.textContent,/The rate is 4\.13%\./);
- assert.equal(y.d.querySelector(`[data-plugin-card="${CARD}"]`),null,'its reply follows; the card is gone');
+ assert.equal(y.d.querySelector(`[data-plugin-card="${CARD}"]`),null,'its reply follows; no resolved card returns');
  const z=setup({plugins:[aave({status:'allowed'})]});await openChat(z);
- assert.match(z.d.querySelector(`[data-plugin-card="${MONEY}"]`).textContent,/Aave can move money, so Ava asks you before every action\./);
+ assert.equal(z.d.querySelector(`[data-plugin-card="${MONEY}"]`),null,'money-moving access is listed in Settings, not left in chat');
 });
 
 // Pips API 45 took the per-Pip plugin cards away (every plugin turned on is every Pip's), and with them the only

@@ -421,12 +421,13 @@ class _Live:
 
 
 class ChatService:
-    def __init__(self, emit, config, engine: ChatEngine | None = None):
+    def __init__(self, emit, config, engine: ChatEngine | None = None, *, generative_ui_supported: bool = False):
         # Every event goes through _out: a chat another window took mid-reply has its events sent down that window's
         # link instead of this wire (Open here).
         self._wire = emit
         self.emit = self._out
         self.engine = engine or ChatEngine(config)
+        self.engine.generative_ui_supported = generative_ui_supported is True
         # An artifact a reply made or changed: every screen hears it (the chat's card, the Library).
         self.engine.on_artifact = lambda view, op, chat_id: self.emit(
             "artifact_changed", artifact=view, op=op, surface="chat", conversation_id=chat_id)

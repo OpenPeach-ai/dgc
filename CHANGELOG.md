@@ -6,7 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.50.0 — 2026-11-01
 
-- **Archived Pips can be permanently deleted.** The local editor and CLI require the exact Pip name and current lifecycle revision. Deletion clears its private chat, runs, computer, Pip-created Outputs, exclusive saved sign-ins and retained receipts. Shared sign-ins and user exports remain.
+- **Archived Pips can be permanently deleted.** The local editor and CLI require the exact Pip name and current lifecycle revision. Deletion clears its private chat, runs, computer, Pip-created artifacts, exclusive saved sign-ins and retained receipts. Shared sign-ins and user exports remain.
 - **Answered questions keep their shape when a Work session reopens.** A saved reply to a model
   question shows the question as a quiet quoted line above the user's answer again. The full
   question and answer stay in the model's transcript.
@@ -20,7 +20,9 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - **Generative UI in Work, ChatDGC and Pips.** A reply can include a bounded card with metrics,
   steps, bars, a table or choices, while its ordinary prose stays readable. Clicking a choice sends
   its text as a normal user message through the existing permission flow. The model cannot supply
-  HTML, script or a permission grant. The Python and TypeScript SDKs expose validated card data.
+  HTML, script or a permission grant. Editor conversations enable cards by default; terminal ChatDGC
+  keeps plain text, and terminal Pip messages omit card JSON. The Python and TypeScript SDKs expose
+  validated card data.
 - **A dismissed Pip report no longer counts as unread home news.** Dismissing a chat card marks only
   that run seen, leaving any other unread run from the same Pip. Dismissing a Pip's home news also
   leaves its saved report cards out of chat replay.

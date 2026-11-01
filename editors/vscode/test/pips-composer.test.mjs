@@ -160,6 +160,31 @@ test('since API 47 the prompt box\'s context and thinking are the Pip\'s own, sa
  assert.equal(x.requests('propose_pip_update').length,0,'never a job change');
 });
 
+test('the thinking control uses this Pip’s face at every effort stop',async(t)=>{
+ const personal=job('a',{name:'Microsoft',source_policy:{mode:'personal'},profile:{body:'core',color:'purple'}});
+ const x=setup({api:47,jobs:[personal]});await x.select('a');
+ x.click('#chat-model');await x.drain();
+ const face=x.d.querySelector('.composer-effort-face .avatar');
+ assert.ok(face,'the existing Pip avatar replaces the plain range dot');
+ assert.equal(x.d.querySelector('#chat-thinking').value,'0');
+ const browser=await launchOrSkip(t);if(!browser)return;
+ try{
+  const page=await browser.newPage({viewport:{width:390,height:420}});
+  const css=readFileSync(new URL('../src/pips.css',import.meta.url),'utf8').replace(/^@import[^;]+;/gm,'');
+  const plush=x.d.querySelector('#pips-plush-styles')?.textContent||'';
+  const sprite=`data:image/webp;base64,${readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url)).toString('base64')}`;
+  const control=x.d.querySelector('.composer-effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);
+  await page.setContent(`<style>${plush}\n${css}</style><main class="pip-app-root" style="width:330px;padding:12px"><div class="composer-model-menu" style="position:relative;bottom:auto">${control}</div></main>`);
+  await page.locator('.composer-effort-face image').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
+  for(const step of [0,2,4]){
+   await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.style.setProperty('--effort',`${value*25}%`);control.style.setProperty('--face-offset',`${18-value*9}px`);},step);
+   const bounds=await page.evaluate(()=>{const a=document.querySelector('.composer-effort-face').getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect();return{face:a.x+a.width/2,trackLeft:s.x,trackRight:s.right};});
+   assert.ok(bounds.face>=bounds.trackLeft&&bounds.face<=bounds.trackRight,`Pip face remains on the slider at ${step}`);
+   if(process.env.DGC_VISUAL_CAPTURE&&step===4)await page.screenshot({path:process.env.DGC_VISUAL_CAPTURE});
+  }
+ }finally{await browser.close();}
+});
+
 test('a window the main chat set shows in the prompt box at its next read, and the next message keeps it',async()=>{
  // Pips API 66: the main chat changes a Pip's context window (pips_propose context_window) while its page may be
  // open. The view had remembered the window it first read, showed that, and sent it with the next message, which

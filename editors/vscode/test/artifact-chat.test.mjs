@@ -33,21 +33,21 @@ test("the Output chip: hidden without the capability, chosen by keyboard, sent o
     assert.equal(await s.page.locator("#cd-output-wrap").isHidden(), true, "no capability, no chip");
     await s.send({ type: "artifacts", offered: OFFER });
     assert.equal(await s.page.locator("#cd-output").isVisible(), true);
-    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Output");
+    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Artifact");
     await s.page.focus("#cd-output");
     await s.page.keyboard.press("Enter");
     assert.deepEqual(await s.page.locator("#cd-output-menu [data-output]").evaluateAll((r) => r.map((n) => n.dataset.output)),
       ["auto", "document", "slides", "spreadsheet", "page", "dashboard"]);
     await s.page.keyboard.press("End");
     await s.page.keyboard.press("Enter");
-    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Output: Dashboard");
+    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Artifact: Dashboard");
     assert.equal(await s.page.locator("#cd-output").getAttribute("aria-pressed"), "true");
     assert.equal(await s.page.evaluate(() => document.activeElement?.id), "cd-output");
     await s.page.fill("#cd-input", "Chart my store's sales");
     await s.page.keyboard.press("Enter");
     const [send] = await s.posted("send");
     assert.equal(send.output, "dashboard");
-    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Output", "Auto again, as Deep research turns off");
+    assert.equal(await s.page.locator("#cd-output-label").textContent(), "Artifact", "Auto again, as Deep research turns off");
     await s.send({ type: "turn", state: "started", replyId: M(2) });
     await s.send({ type: "message", message: reply() });
     await s.send({ type: "turn", state: "ended" });

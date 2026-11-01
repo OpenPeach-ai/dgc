@@ -80,7 +80,7 @@ function parts(state, {esc, busy, pipName, dashboards, dashboardsError}) {
   if (dashboardsError) note = dashboardsError;
   else if (!dashboards) note = 'Loading your dashboards…';
   else if (state.dashboards.length >= MAX_DASHBOARDS) note = `That’s the most a Pip refreshes: ${MAX_DASHBOARDS}. Remove one to add another.`;
-  else if (!dashboards.length) note = 'You have no dashboards yet. Ask for one in a chat: choose Output, then Dashboard.';
+  else if (!dashboards.length) note = 'You have no dashboards yet. Ask for one in a chat: choose Artifact, then Dashboard.';
   else if (!addable.length) note = 'It refreshes every dashboard you have.';
   else {
     add = `<select id="pipDashboardAdd" aria-label="Add a dashboard for ${esc(pipName)} to refresh"${off}><option value="" selected>Add a dashboard…</option>`

@@ -154,7 +154,7 @@ def _instructions(about: str, style: str) -> str:
 
 def system_prompt(*, now: datetime | None = None, timezone_name: str = "", search: str = "off", about: str = "",
                   style: str = "", personality: str = "default", ask: bool = True, memory: str | None = None,
-                  study: bool = False, voice: bool = False) -> str:
+                  study: bool = False, voice: bool = False, generative_ui: bool = False) -> str:
     """``memory``: None when memory is off (or a temporary chat); otherwise what's remembered ("" for nothing yet)."""
     other = ("you don't see other chats; what you know about the user from them is your memory, below"
              if memory is not None else "remember other chats")
@@ -177,7 +177,7 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         + "- Write plain text: no emoji or decorative symbols anywhere, not in headings, list markers, praise or "
         "sign-offs, unless the user asks for them (a caption \"with emojis\").\n"
         + (ASK + CANVAS + WIDGETS + ARTIFACTS if ask and not voice else "")
-        + (GENUI_GUIDANCE if not voice else "")
+        + (GENUI_GUIDANCE if generative_ui and not voice else "")
         + ((f"- You can't browse the web or read files unless what you need is in this conversation, and {other}. "
             "Say so when a question needs it.\n") if search == "off" else
            ((SEARCH_ALWAYS if search == "on" else SEARCH_AUTO) + SEARCH_CITING

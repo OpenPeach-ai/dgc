@@ -4876,12 +4876,12 @@ class Agent(GoalLifecycle):
         asks to see one. A headless run with artifacts off (the benchmark) never pays for it."""
         if self._artifacts_exposed() and self.mode != "plan":
             return [
-                "# Saved Outputs: pages, dashboards, documents, slides and sheets",
+                "# Saved Artifacts: pages, dashboards, documents, slides and sheets",
                 "Use make_artifact to make a new Output that the user can reopen from Library. Its card opens "
                 "in the editor and DGC keeps its versions. Use edit_artifact with the existing ar_… id when "
-                "the user asks to fix or change an Output made earlier, even if the Output chip is Auto or "
+                "the user asks to fix or change an Artifact made earlier, even if the Artifact chip is Auto or "
                 "not selected this turn. Read it first with edit_artifact(id=…) if its current content is "
-                "uncertain. If several Outputs could match and you cannot identify the right id from the "
+                "uncertain. If several Artifacts could match and you cannot identify the right id from the "
                 "conversation, ask which one. Do not create a replacement or hand the user a raw localhost "
                 "link for a revision. For a chart in an HTML Page, give percentage-height bars a definite "
                 "height on their parent and check the rendered result before claiming it is fixed.",

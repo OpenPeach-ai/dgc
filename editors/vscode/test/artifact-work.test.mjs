@@ -60,8 +60,8 @@ test("the Output chip shows only for a CLI that offers artifacts", async (t) => 
   const s = await openWork();
   try {
     assert.equal(await s.page.locator("#btn-output").isVisible(), true);
-    assert.equal(await s.page.locator("#output-label").textContent(), "Output");
-    assert.equal(await s.page.locator("#btn-output").getAttribute("aria-label"), "Output: Auto. The model picks");
+    assert.equal(await s.page.locator("#output-label").textContent(), "Artifact");
+    assert.equal(await s.page.locator("#btn-output").getAttribute("aria-label"), "Artifact: Auto. The model picks");
     await s.send({ type: "ready", capabilities: {}, commands: [], custom_commands: [] });
     assert.equal(await s.page.locator("#output-picker").isHidden(), true, "a backend without it, after a restart: gone again");
   } finally { await s.page.close(); }
@@ -92,7 +92,7 @@ test("chosen by keyboard, the chip says so, goes with the next message only, and
     await s.page.keyboard.press("ArrowDown");
     await s.page.keyboard.press("Enter");
     assert.equal(await s.page.locator("#outputmenu").isHidden(), true);
-    assert.equal(await s.page.locator("#output-label").textContent(), "Output: Slides");
+    assert.equal(await s.page.locator("#output-label").textContent(), "Artifact: Slides");
     assert.equal(await s.page.locator("#btn-output").getAttribute("aria-pressed"), "true");
     assert.equal(await s.page.evaluate(() => document.activeElement?.id), "btn-output", "focus back on the chip");
     const on = await s.page.locator("#btn-output").evaluate((n) => getComputedStyle(n).backgroundColor);
@@ -104,7 +104,7 @@ test("chosen by keyboard, the chip says so, goes with the next message only, and
     assert.equal(sent.length, 1);
     assert.equal(sent[0].output, "slides");
     assert.equal(sent[0].text, "Make a deck of the Q3 plan");
-    assert.equal(await s.page.locator("#output-label").textContent(), "Output", "back to Auto after sending");
+    assert.equal(await s.page.locator("#output-label").textContent(), "Artifact", "back to Auto after sending");
     assert.equal(await s.page.locator("#btn-output").getAttribute("aria-pressed"), "false");
     await s.page.evaluate(() => { window.__posted = []; });
     await s.send({ type: "turn_end", turn_id: "x" });
@@ -211,7 +211,7 @@ test("at 360px the chosen Output stays inside the composer with its choice acces
     const box = await s.page.locator("#cbox").boundingBox();
     assert.ok(chip.x + chip.width <= box.x + box.width + 0.5, `inside the composer (${chip.x + chip.width} ≤ ${box.x + box.width})`);
     assert.equal(await s.page.locator("#output-label").evaluate((node) => getComputedStyle(node).display), "none", "the label gives the narrow footer room");
-    assert.match(await s.page.locator("#btn-output").getAttribute("aria-label"), /^Output: Spreadsheet\./);
+    assert.match(await s.page.locator("#btn-output").getAttribute("aria-label"), /^Artifact: Spreadsheet\./);
     assert.equal(await s.page.evaluate(() => document.documentElement.scrollWidth), 360);
   } finally { await s.page.close(); }
 });

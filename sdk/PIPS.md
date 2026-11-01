@@ -260,7 +260,7 @@ returns the original receipt without applying it again.
 `delete_archived_pip` requires an archived, idle Pip and its exact name and current
 version/revision. It removes the Pip's private DGC chat, runs, receipts, linked
 history in other Pips, computer,
-exclusive saved logins, and Pip-owned Outputs. Shared sign-ins used by other Pips,
+exclusive saved logins, and Pip-owned Artifacts. Shared sign-ins used by other Pips,
 user exports, and files changed in project directories remain. The operation is
 irreversible and is refused over a paired remote SDK connection.
 

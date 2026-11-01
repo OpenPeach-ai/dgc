@@ -108,6 +108,28 @@ test('a routine the Pip suggests is a card under its message: Add routine or Not
  assert.match(card.textContent,/Add this routine\? Bank alerts.*When an email matching “from:alerts@bank.example” arrives.*Tell me what the bank email says\./);
  x.click(`[data-routine-add="${R2}"]`);await flush();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('decide_pip_routine')[0].request)),{type:'decide_pip_routine',pip_id:PIP,routine_id:R2,add:true});
+ const accepted=routine({id:R2,status:'on',created_by:'pip',run_id:RUN,updated_at:new Date().toISOString(),title:'Bank alerts',prompt:'Tell me what the bank email says.',trigger:{kind:'email',query:'from:alerts@bank.example',every_minutes:10}});
+ x.state.list=[accepted];x.answer(x.requests('decide_pip_routine')[0],{routine:accepted});await x.drain();
+ assert.equal(x.d.querySelector(`[data-routine-card="${R2}"]`),null,'an accepted routine leaves the chat and lives in Settings');
+ assert.match(x.d.body.textContent,/Routine saved\. It waits for Gmail to be linked to this Pip/,'accepting a routine without its account must not claim it is running');
+ assert.equal(routines.shownRoutineCards([accepted]).length,0,'a reload does not bring the accepted card back');
+ assert.match(routines.routinesMarkup([accepted],{esc:String,formatDate:String}),/Waiting for Gmail to be linked to this Pip/,'Settings shows the dependency before the first check');
+});
+
+test('the chat composer opens the same routine controls without leaving the conversation',async()=>{
+ const x=setup({list:[routine()]});await x.drain();x.click(`[data-job="${PIP}"]`);await x.drain();
+ assert.ok(x.d.querySelector('#chat-form'));
+ x.click('#chat-routines');
+ const panel=x.d.querySelector('.pip-routines-popover');assert.ok(panel);
+ assert.ok(x.d.querySelector('#chat-form'),'the message form remains in chat');
+ assert.match(panel.textContent,/Routines.*1 on.*Morning brief/);
+ assert.ok(panel.querySelector(`[data-routine-toggle="${R1}"]`));
+ x.click(`[data-routine-edit="${R1}"]`);
+ assert.ok(x.d.querySelector('.pip-routines-popover #routine-form'),'editing stays in the chat panel');
+ assert.equal(x.d.querySelector('#routine-form').closest('#chat-form'),null,'routine form is separate from the message form');
+ x.click('#chat-routines-close');
+ assert.equal(x.d.querySelector('.pip-routines-popover'),null);
+ assert.ok(x.d.querySelector('#chat-form'));
 });
 
 test('its face and colour: choose, Save, and Reset to default',async()=>{

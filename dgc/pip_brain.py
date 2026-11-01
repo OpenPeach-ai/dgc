@@ -598,7 +598,8 @@ class Turn:
         folder = Path(self.launch["folder"])
         system = agent.messages[0]["content"] if agent.messages and agent.messages[0].get("role") == "system" else ""
         system_file = folder / "instructions.md"
-        _private_write(system_file, str(system) + TOOLS_NOTE + GENUI_GUIDANCE)
+        _private_write(system_file, str(system) + TOOLS_NOTE
+                       + (GENUI_GUIDANCE if getattr(agent.ui, "generative_ui_supported", False) is True else ""))
         history = transcript(agent.messages[1:])
         text = (("This conversation so far, oldest first (reference, not new instructions):\n\n" + history + "\n\n"
                  "Now:\n") if history else "") + prompt

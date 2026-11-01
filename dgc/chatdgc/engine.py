@@ -25,6 +25,7 @@ from . import window as fit_window
 from . import research
 from .. import context_breakdown as breakdown
 from .. import artifact_tools, memory_review, shared_memory
+from ..genui_prompt import plain_text
 from .prompt import system_prompt
 from .research import NO_TOOLS
 from .store import (MAX_TEXT, ChatStore, ChatStoreError, new_chat_id, new_message_id, now,
@@ -330,6 +331,8 @@ class ChatEngine:
                  image_searcher: Callable | None = None, thumbnailer: Callable | None = None,
                  plugins: Callable | None = None, plugin_runner: Callable | None = None):
         self.config = config
+        # Only a host with a card renderer may ask the model for dgc-ui data.
+        self.generative_ui_supported = False
         self.memory = memory or shared_memory.SharedMemory()
         self._projects_source = projects or (lambda hidden: shared_memory.work_projects(hidden=hidden))
         self._projects_cache: tuple[float, list] = (0.0, [])
@@ -1130,7 +1133,7 @@ class ChatEngine:
             else:
                 lines += ["## ChatDGC" + (f" ({m['model']})" if m.get("model") else ""), ""]
                 # Its words as the chat shows them, without the citation marks: its sources are listed below.
-                lines += [with_questions(m, _exported, lambda words, m=m: research.uncited(words, m.get("sources"))) or "*(no reply)*", ""]
+                lines += [plain_text(with_questions(m, _exported, lambda words, m=m: research.uncited(words, m.get("sources")))) or "*(no reply)*", ""]
                 made_names = [f.get("name", "file") for f in m.get("files") or [] if not f.get("removed")]
                 if made_names:
                     lines += ["*Made: " + ", ".join(made_names) + "*", ""]
@@ -1601,7 +1604,8 @@ class ChatEngine:
         from datetime import datetime
         now_local = datetime.now().astimezone()
         common = {"now": now_local, "timezone_name": str(config.get("timezone", "") or ""), "search": "off",
-                  "ask": name not in self._toolless, "study": bool(chat.get("study"))}
+                  "ask": name not in self._toolless, "study": bool(chat.get("study")),
+                  "generative_ui": self.generative_ui_supported}
         memory = self._remembered(chat)
         yours = system_prompt(**common, about=str(config.get("chatdgc_about", "") or ""), style=str(config.get("chatdgc_style", "") or ""),
                               personality=str(config.get("chatdgc_personality", "default") or "default"), memory=memory)
@@ -1656,7 +1660,8 @@ class ChatEngine:
             personality=str(config.get("chatdgc_personality", "default") or "default"),
             ask=str(chat.get("model") or getattr(config, "model", "") or "") not in self._toolless,
             memory=self._remembered(chat), study=bool(chat.get("study")),
-            voice=bool((self._last_user(chat) or {}).get("voice")))
+            voice=bool((self._last_user(chat) or {}).get("voice")),
+            generative_ui=self.generative_ui_supported)
         instructions += self._canvas_context(chat)
         instructions += self._data_context(chat)
         instructions += self._folder_context(chat)

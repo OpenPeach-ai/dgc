@@ -1741,9 +1741,9 @@
     outputButton.setAttribute("aria-pressed", String(on));
     $("cd-output-icon").className = `codicon codicon-${on ? choice[3] : "output"}`;
     const label = $("cd-output-label");
-    label.replaceChildren(...(on ? [el("span", "cd-output-prefix", "Output: "), el("span", "", choice[1])] : [el("span", "", "Output")]));
-    outputButton.setAttribute("aria-label", on ? `Output: ${choice[1]}, for the next reply` : "Output: Auto. The model picks");
-    outputButton.title = on ? `Output: ${choice[1]} for the next reply (then Auto again)` : "Output: what the next reply should make. Auto lets the model pick";
+    label.replaceChildren(...(on ? [el("span", "cd-output-prefix", "Artifact: "), el("span", "", choice[1])] : [el("span", "", "Artifact")]));
+    outputButton.setAttribute("aria-label", on ? `Artifact: ${choice[1]}, for the next reply` : "Artifact: Auto. The model picks");
+    outputButton.title = on ? `Artifact: ${choice[1]} for the next reply (then Auto again)` : "Artifact: what the next reply should make. Auto lets the model pick";
   }
   function closeOutputMenu(focus) {
     if (outputMenu.hidden) return;

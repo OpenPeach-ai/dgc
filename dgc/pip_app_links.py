@@ -419,7 +419,9 @@ def schemas(apps_now) -> list[dict]:
             "plugin_tools route first for an enabled plugin. A new connection shows a Connect card below your reply; "
             "the user signs in "
             "there (or just allows an account they "
-            "already connected), and you are told when it is connected. Use it whenever the user asks whether you can "
+            "already connected), and you are told when it is connected. For Gmail email-trigger routines, a Composio "
+            "read alone does not link the account to your routine checker; connect_app can reuse that same signed-in "
+            "Composio account without asking for a second sign-in. Explain that difference plainly. Use it whenever the user asks whether you can "
             "use an app, or asks about Composio, and the app is not connected to you yet: call it rather than saying "
             "you have no tools. Never paste sign-in links or describe OAuth steps. " + connected_line),
             "parameters": {"type": "object", "properties": {
@@ -559,11 +561,12 @@ class RunSocket:
                     if link["toolkit"] == "outlook":
                         return ("A Connect Outlook card is below your reply. It uses the user's Microsoft Mail plugin "
                                 "from DGC Settings → Plugins; tell the user to choose Connect on the card.")
+                    card_name = "Link Gmail" if toolkit == "gmail" else f"Connect {link['app']}"
                     if composio_server(self.config) is None:
-                        return (f"A Connect {link['app']} card is below your reply, but Composio is not set up in DGC yet. "
-                                "Tell the user in one sentence to add Composio in Settings → Plugins, then choose Connect on the card.")
-                    return (f"A Connect {link['app']} card is now below your reply. Tell the user in one sentence to choose "
-                            f"Connect {link['app']} there; you will be told when it is connected. Do not paste links.")
+                        return (f"A {card_name} card is below your reply, but Composio is not set up in DGC yet. "
+                                "Tell the user in one sentence to add Composio in Settings → Plugins, then choose the card.")
+                    return (f"A {card_name} card is now below your reply. Tell the user in one sentence to choose "
+                            f"{card_name} there; an existing Composio sign-in can be reused. You will be told when it is linked. Do not paste links.")
                 if op == "read_app":
                     toolkit = _toolkit(args.get("app"))
                     app = next((a for a in connected(registry, self.pip_id) if a["toolkit"] == toolkit), None)

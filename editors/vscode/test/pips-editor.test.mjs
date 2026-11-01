@@ -316,6 +316,16 @@ test('a saved model change that differs from the choice is never accepted',async
 test('real stream deltas stay provisional and disappear on cancelled conversation without saving a reply',async()=>{
  const activeRun={id:'chat-run',status:'running'},messages=[chatMessage('pending','a',{status:'running'})],x=setup({conversation:true,chatActive:activeRun,messages});await x.drain();const request=x.requests('list_pip_run_activity')[0];x.answer(request,{...activityPage([activityEvent(1,{run_id:'chat-run',payload:{kind:'text_delta',text:'Reading the real result…'}})]),run_id:'chat-run'});await flush();assert.match(x.d.querySelector('[aria-label="Live reply preview"]').textContent,/Reading the real result/);assert.match(x.d.querySelector('[aria-label="Live reply preview"]').textContent,/Still writing…/);x.click('#chat-stop');assert.equal(x.requests('cancel_pip_run')[0].request.run_id,'chat-run');x.answer(x.requests('cancel_pip_run')[0],{run:run('chat-run','a',{status:'cancelled'})});messages[0].status='cancelled';await x.drain({list_pip_messages:()=>({pip_id:'a',workspace_id:'ws',messages,next_before_id:null,active_run:null,history_context_omitted_count:0})});assert.equal(x.d.querySelector('[aria-label="Live reply preview"]'),null);assert.equal(x.d.querySelectorAll('.pip-message.assistant').length,0);assert.match(x.d.querySelector('.message-status').textContent,/Stopped · No reply/);
 });
+test('a previous Pip reply keeps its action row during the next live stream',async()=>{
+ const prior=chatMessage('prior','a',{role:'assistant',run_id:'run_'+'a'.repeat(32),text:'Finished earlier.'});
+ const pending=chatMessage('pending','a',{status:'running'});
+ const x=setup({conversation:true,chatActive:{id:'chat-run',status:'running'},messages:[prior,pending]});await x.drain();
+ const row=x.d.querySelector('[data-message="prior"] .response-actions');assert.ok(row);
+ const request=x.requests('list_pip_run_activity')[0];assert.ok(request);
+ x.answer(request,{...activityPage([activityEvent(1,{run_id:'chat-run',payload:{kind:'text_delta',text:'Reading the new result…'}})]),run_id:'chat-run'});await flush();
+ assert.match(x.d.querySelector('[aria-label="Live reply preview"]').textContent,/Reading the new result/);
+ assert.strictEqual(x.d.querySelector('[data-message="prior"] .response-actions'),row,'stream updates preserve completed reply controls');
+});
 test('conversation runs never enter the audit report validator or finding acceptance flow',async()=>{
  const x=setup({runs:[run('conversation','a',{manifest:{run_kind:'conversation'},result:{text:'A normal reply.'}})]});await x.drain();assert.equal(x.d.querySelector('[data-run=conversation]'),null);assert.doesNotMatch(x.d.body.textContent,/without a readable report/);assert.equal(x.d.querySelector('[data-finding]'),null);assert.match(x.d.body.textContent,/Chat replies stay in Chat/);
 });

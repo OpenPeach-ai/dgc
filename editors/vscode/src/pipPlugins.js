@@ -9,7 +9,6 @@ const STATUSES = ['requested', 'allowed', 'declined'];
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
 const text = (v, max) => typeof v === 'string' && (v.length <= max || [...v].length <= max);
 const SERVER = /^[A-Za-z0-9_.-]{1,80}$/;
-const RECENT_MS = 30 * 60 * 1000;
 
 export function pluginCard(value, pip) {
   const fail = () => { throw new Error('This card didn’t load. Refresh to try again.'); };
@@ -42,11 +41,9 @@ export function pluginResult(value, pip, id) {
   return card;
 }
 
-/** The cards worth showing in the chat: what it asks for, and a plugin just allowed, until the Pip
- *  has replied since (then its reply is what follows, and the card would sit under it). */
-export function shownPluginCards(cards, now = Date.now(), lastReply = 0) {
-  return (cards || []).filter(c => c.status === 'requested'
-    || c.status === 'allowed' && now - Date.parse(c.updated_at) < RECENT_MS && Date.parse(c.updated_at) > lastReply);
+/** Only unanswered requests belong in the chat. Allowed plugins remain on the Pip's settings page. */
+export function shownPluginCards(cards) {
+  return (cards || []).filter(c => c.status === 'requested');
 }
 
 /** The allowed plugin a draft's server belongs to, if any. */

@@ -43,7 +43,7 @@ LAYOUT = 1
 KEEP_OTHER_VERSIONS = 2
 #: An unfinished build older than this, with no live process in it, is swept by retention.
 STALE_BUILD_SECONDS = 3600
-_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[.+-]?[0-9A-Za-z]+)*$")
+_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[A-Za-z][0-9A-Za-z]*)?(?:[.+-][0-9A-Za-z]+)*$")
 
 
 # ------------------------------------------------------------------ paths ---

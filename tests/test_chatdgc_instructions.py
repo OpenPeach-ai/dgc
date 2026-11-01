@@ -60,6 +60,9 @@ class PromptTests(unittest.TestCase):
         plain = system_prompt()
         self.assertNotIn("Personality:", plain)
         self.assertNotIn("The user's own instructions", plain)
+        self.assertNotIn("fenced `dgc-ui`", plain, "a terminal chat has no card renderer")
+        self.assertIn("fenced `dgc-ui`", system_prompt(generative_ui=True), "the editor can opt in")
+        self.assertNotIn("fenced `dgc-ui`", system_prompt(generative_ui=True, voice=True))
 
     def test_no_emoji_unless_asked_as_in_main_dgc_whatever_the_personality(self):
         for personality in PERSONALITIES:
