@@ -102,9 +102,8 @@ sign in (they install it by name, `dgc plugin install google-workspace`), and Go
 every 7 days. Microsoft Outlook and OneDrive (Outlook mail, the Outlook calendar
 and OneDrive) run DGC's own server on Microsoft Graph: choose the apps and a personal or work
 account, then sign in once. A company's admin approves DGC once before anyone there can sign in.
-Microsoft Work IQ is Microsoft's own server for Microsoft 365 Copilot (work accounts with a Copilot
-licence, an admin's one-time approval, in preview). Figma, Vercel, Canva and Dropbox are not offered
-here yet; Composio reaches several of them through its own approved apps.
+Figma, Vercel, Canva and Dropbox are not offered here yet; Composio reaches several of them through
+its own approved apps.
 
 ## Requirements
 

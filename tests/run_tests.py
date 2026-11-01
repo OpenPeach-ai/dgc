@@ -11047,7 +11047,6 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/docs.png",
         "extension/media/plugin-logos/slides.png",
         "extension/media/plugin-logos/microsoft.png",
-        "extension/media/plugin-logos/work-iq.png",
         "extension/media/plugin-logos/outlook.png",
         "extension/media/plugin-logos/onedrive.png",
         "extension/media/artifact.js",

@@ -1,4 +1,4 @@
-"""Microsoft Outlook and OneDrive, through DGC's own Microsoft Graph server, and Microsoft's Work IQ.
+"""Microsoft Outlook and OneDrive, through DGC's own Microsoft Graph server.
 
 A stand-in Microsoft on 127.0.0.1 plays both parts. Its identity platform behaves as Microsoft's documents and as a
 real sign-in with DGC's app did on 28 Oct 2026: a public client (no secret, ever), loopback redirects on any port with
@@ -1111,11 +1111,10 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("Not tested", self.entry["verification"])
 
     def test_no_other_product_is_named(self):
-        for name in ("microsoft", "work-iq"):
-            text = json.dumps(the_entry(name))
-            for product in ("Codex", "ChatGPT", "Claude", "Cursor", "OpenAI", "Copilot CLI"):
-                with self.subTest(entry=name, product=product):
-                    self.assertNotIn(product, text)
+        text = json.dumps(the_entry("microsoft"))
+        for product in ("Codex", "ChatGPT", "Claude", "Cursor", "OpenAI", "Copilot CLI"):
+            with self.subTest(product=product):
+                self.assertNotIn(product, text)
 
     def test_the_terminal_chooses_apps_and_the_kind_of_account(self):
         self.assertEqual(plugins._chosen_apps(self.entry, ["install", "microsoft", "--apps", "mail,onedrive"]),
@@ -1124,28 +1123,16 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(plugins.PluginError):
             plugins._chosen_account(["install", "microsoft", "--account"])
 
-    def test_work_iq_runs_microsofts_pinned_package_with_its_terms_said(self):
-        entry = the_entry("work-iq")
-        self.assertEqual(entry["mcp_presets"], {"work-iq": {"command": "npx",
-                                                            "args": ["-y", "@microsoft/workiq@1.0.1", "mcp"]}})
-        spec = plugins._read_server_specs(None, entry)["work-iq"]
-        self.assertEqual((spec["transport"], spec["command"]), ("stdio", "npx"))
-        self.assertEqual((entry["install"], entry["developer"]), ("accept", "Microsoft"))
-        self.assertNotIn("sign_in", entry, "Work IQ signs in with Microsoft's own app, never DGC's")
-        self.assertNotIn(CLIENT, json.dumps(entry))
-        for words in ("Microsoft 365 Copilot licence", "admin approves Work IQ once", "public preview",
-                      "adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87"):
-            self.assertIn(words, entry["requirements"])
-        self.assertIn("pre-release licence terms", entry["license_note"])
-        self.assertNotEqual(entry["license"], "MIT")
-        self.assertNotEqual(entry["license"], "Proprietary", "a named licence stays offered; Proprietary is blocked")
-
-    def test_both_are_offered_in_the_editor_with_their_logos(self):
+    def test_only_the_reviewed_microsoft_plugin_is_offered_with_its_logos(self):
         rows = {r["name"]: r for r in plugins.catalog_for_editor()}
         self.assertEqual(rows["microsoft"]["sign_in_provider"], "Microsoft")
-        self.assertEqual(rows["work-iq"]["install"], "accept")
+        self.assertNotIn("work-iq", rows)
+        self.assertNotIn("google-workspace", rows, "Google stays unlisted pending its approval")
+        names = {r["name"] for r in plugins.load_catalog()["plugins"]}
+        self.assertNotIn("work-iq", names)
+        self.assertIn("google-workspace", names)
         logos = Path(plugins.__file__).resolve().parents[1] / "editors" / "vscode" / "media" / "plugin-logos"
-        for name in ("microsoft.png", "work-iq.png", "outlook.png", "onedrive.png"):
+        for name in ("microsoft.png", "outlook.png", "onedrive.png"):
             with self.subTest(logo=name):
                 self.assertTrue((logos / name).is_file())
         sources = (logos / "SOURCES.md").read_text()

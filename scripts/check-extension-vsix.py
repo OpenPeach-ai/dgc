@@ -126,7 +126,6 @@ STATIC_MEMBERS = {
     "extension/media/plugin-logos/docs.png": "media/plugin-logos/docs.png",
     "extension/media/plugin-logos/slides.png": "media/plugin-logos/slides.png",
     "extension/media/plugin-logos/microsoft.png": "media/plugin-logos/microsoft.png",
-    "extension/media/plugin-logos/work-iq.png": "media/plugin-logos/work-iq.png",
     "extension/media/plugin-logos/outlook.png": "media/plugin-logos/outlook.png",
     "extension/media/plugin-logos/onedrive.png": "media/plugin-logos/onedrive.png",
     "extension/media/seti.woff": "media/seti.woff",

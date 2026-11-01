@@ -45,9 +45,6 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   shows a code to enter on any device instead. DGC's Microsoft app isn't verified by Microsoft yet: a personal account
   can still approve it, and in a company an admin approves it once; when that is what stops you, DGC says so and
   gives you the link for your admin. In a terminal: `dgc plugin install microsoft --apps mail,calendar --account work`.
-- **Microsoft Work IQ, for work accounts with Microsoft 365 Copilot.** Microsoft's own server: ask about your work
-  email, meetings, documents and Teams chats. It needs a Copilot licence and your admin's one-time approval (the
-  plugin gives the link), uses Microsoft's own sign-in, and is in preview.
 - **Google Workspace is ready and waiting for Google.** Gmail, Calendar, Drive, Docs and Slides, through Google's own
   MCP servers, with one Google sign-in for the apps you choose and nothing to set up at Google. It appears in
   Settings → Plugins once Google approves DGC's app; until then only accounts DGC has added can sign in. The old

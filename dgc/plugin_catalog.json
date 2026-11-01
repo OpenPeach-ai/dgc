@@ -761,51 +761,6 @@
    "verification": "29 Oct 2026, against a stand-in Microsoft (tests/test_microsoft_plugins.py): DGC's own Graph server with every tool, paging, 429 with Retry-After, a 401 that refreshes once, one sign-in for the chosen apps in the browser (http://localhost on any port) and with a code, refresh at the account's own sign-in server, the admin-approval message and sign-out. 28 Oct 2026, against Microsoft: a personal account approved DGC's unverified app with a code at the consumers sign-in server, every permission was granted and Graph /me answered. Not tested: a refresh, a browser sign-in and one real call per app against Microsoft, and a work account (no tenant to try in)."
   },
   {
-   "name": "work-iq",
-   "display_name": "Microsoft Work IQ",
-   "summary": "Microsoft's own Work IQ: ask about your work email, meetings, files and Teams chats in Microsoft 365. For work accounts with a Microsoft 365 Copilot licence; an admin approves it once for the company. In preview.",
-   "source_kind": "preset",
-   "upstream": "https://github.com/microsoft/work-iq",
-   "license": "Microsoft Work IQ CLI terms",
-   "license_url": "https://www.npmjs.com/package/@microsoft/workiq/v/1.0.1",
-   "license_note": "The npm package @microsoft/workiq runs Microsoft's own Work IQ program under Microsoft's pre-release licence terms (in the package's EULA folder; npm lists 'SEE EULA'). The MIT licence of github.com/microsoft/work-iq covers that repository's plugins and documents, not the program.",
-   "install": "accept",
-   "auth": "none",
-   "developer": "Microsoft",
-   "category": "Productivity",
-   "requirements": "A work or school Microsoft 365 account with a Microsoft 365 Copilot licence, and Node.js (DGC runs Microsoft's package with npx). An admin approves Work IQ once for your organization, with https://login.microsoftonline.com/organizations/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87 (Microsoft's admin guide has the details). Work IQ signs you in itself, with Microsoft's own app, the first time it is used. It is in public preview.",
-   "cloud_execution": true,
-   "compatibility_url": "https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md",
-   "terms_url": "https://www.npmjs.com/package/@microsoft/workiq/v/1.0.1",
-   "privacy_url": "https://privacy.microsoft.com/privacystatement",
-   "metadata": {
-    "display_name": "Microsoft Work IQ",
-    "developer": "Microsoft",
-    "category": "Productivity",
-    "long_summary": "Work IQ is Microsoft's own MCP server for Microsoft 365 Copilot. DGC runs Microsoft's package (@microsoft/workiq 1.0.1) on this computer; it signs in with Microsoft's own app, not DGC's, and answers from your organization's Microsoft 365: email, meetings, documents, Teams and people. It needs a Microsoft 365 Copilot licence, and your admin's one-time approval.",
-    "apps": [],
-    "mcps": [
-     {
-      "name": "work-iq",
-      "command": "npx",
-      "transport": "stdio"
-     }
-    ]
-   },
-   "mcp_presets": {
-    "work-iq": {
-     "command": "npx",
-     "args": [
-      "-y",
-      "@microsoft/workiq@1.0.1",
-      "mcp"
-     ]
-    }
-   },
-   "audited_on": "2026-10-29",
-   "verification": "29 Oct 2026: @microsoft/workiq 1.0.1 is on npm (published 24 Sep 2026, the latest; its tarball's sha1 matches npm's). It ships Microsoft's signed Work IQ program for Windows, macOS and Linux (x64 and arm64) under Microsoft's pre-release licence terms, not MIT. Microsoft's admin guide gives the consent link for its app ba081686-5d24-4bc6-a0d6-d034ecffed87. Not run here: it needs a work account with a Copilot licence in a tenant whose admin approved it. Microsoft's own Work IQ plugin now points at a hosted server (workiq.svc.cloud.microsoft/mcp); this entry runs the local package."
-  },
-  {
    "name": "zapier",
    "display_name": "Zapier",
    "summary": "Use the apps and actions connected to your own Zapier account.",

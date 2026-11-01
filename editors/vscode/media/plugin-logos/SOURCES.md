@@ -93,10 +93,10 @@ only to identify the service; no partnership implied. Bundled locally.
 # Microsoft marks
 
 Downloaded on 29 October 2026 from Microsoft's own sites, without recolouring, redrawing or resizing. Used only to
-identify Microsoft's services in the Microsoft plugin (DGC's own server for Outlook and OneDrive) and Microsoft's Work
-IQ plugin; no partnership or endorsement implied. Bundled locally, so the Settings page makes no image requests.
+identify Microsoft's services in the Microsoft plugin (DGC's own server for Outlook and OneDrive); no partnership or
+endorsement implied. Bundled locally, so the Settings page makes no image requests.
 
-- Microsoft (microsoft.png, and work-iq.png, the same file): the 128×128 image in https://www.microsoft.com/favicon.ico,
+- Microsoft (microsoft.png): the 128×128 image in https://www.microsoft.com/favicon.ico,
   Microsoft's four-square symbol, taken out of the icon file as it is.
 - Outlook (outlook.png, for Outlook Mail and Outlook Calendar): Microsoft's Fluent product icon,
   https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/outlook_96x1.png

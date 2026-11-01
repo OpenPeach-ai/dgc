@@ -42,7 +42,6 @@
   under each what it lets DGC do, choose a personal or a work or school account, and sign in with Microsoft once. The
   dialog says up front that DGC's Microsoft app isn't verified by Microsoft yet: a personal account can approve it, and
   in a company an admin approves it once. The plugin's page shows which kind of account it signs in with.
-- **Microsoft Work IQ in Settings → Plugins**, Microsoft's own server for work accounts with Microsoft 365 Copilot.
 - **Google Workspace's setup, ready for when Google approves DGC's app.** Once it appears in Settings → Plugins you
   choose Gmail, Google Calendar, Drive, Docs or Slides, see under each what it lets DGC do, and sign in with Google once
   for all of them.

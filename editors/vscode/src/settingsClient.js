@@ -936,7 +936,6 @@ function cloudNotice(row) {
     // It is a banner, and it is driven by a catalog flag rather than by whoever wrote the prose.
     if (!row.cloud_execution) { return ''; }
     if (row.name === 'microsoft') return '<div class="banner"><p><strong>Runs on this computer and connects to Microsoft Graph.</strong> The apps you enable send requests and data to Microsoft. DGC keeps your sign-in in your system keychain, including when your model runs locally.</p></div>';
-    if (row.name === 'work-iq') return '<div class="banner"><p><strong>Microsoft’s Work IQ program runs on this computer.</strong> It connects to Microsoft 365 using its own sign-in. Queries and relevant data are processed by Microsoft, including when your model runs locally.</p></div>';
     if (row.name === 'google-workspace') return '<div class="banner"><p><strong>Runs on this computer and connects to Google APIs.</strong> The apps you enable send requests and data to Google. DGC keeps your sign-in in your system keychain, including when your model runs locally.</p></div>';
     return `<div class="banner"><p><strong>Runs in ${esc(row.display_name || row.name)}'s cloud.</strong> `
         + `Your requests and their data are sent to this service and processed there, including when `

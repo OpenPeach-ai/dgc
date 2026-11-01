@@ -806,6 +806,24 @@ A pasted connector token is kept in the editor's secret storage under DGC's own 
 and bound to the exact URL it was given for, never written to the config file. A URL carrying
 credentials, a query or a fragment is refused outright.
 
+Two consequences, and DGC now states both rather than leaving you to discover them:
+
+- **The work happens in their cloud.** A connector holds the app's credentials and runs the app
+  request on its own servers — including when your model is running locally on this machine. Their
+  terms govern that part, not DGC's.
+- **A connected connector may reach a service that has no plugin of its own here.** The roster the
+  model reads used to report per-plugin connectivity and nothing else. It read
+  `Figma: MCP not connected` as *Figma is unreachable* — with a connected Composio one line below
+  holding the very Figma account it needed — wrote that premise into its own sub-agent's brief, and
+  offered to work from screenshots sent by hand. A connected connector now says that it brokers the
+  accounts you authorized in its own service, and the model is told to search it with `mcp_search`
+  before telling you a service needs credentials, or a screenshot it cannot obtain. A connector
+  whose server is down advertises none of this.
+
+A rate-limited call from one of these servers now says it was rate-limited. It used to arrive as the
+same opaque payload as a missing credential, which is the other half of why a busy service read as a
+locked one.
+
 ## Asana, Docusign and Zoom: your own app
 
 Asana's, Docusign's and Zoom's MCP servers admit only apps registered with them; Asana and Docusign also need a
@@ -901,34 +919,6 @@ itself out, so uninstalling deletes the sign-in from this computer and tells you
 
 The same server also runs on its own for any MCP client on this computer, with the sign-in the plugin keeps:
 `python -m dgc.microsoft_graph mail calendar onedrive`. It can't sign in by itself.
-
-## Microsoft Work IQ
-
-**Microsoft Work IQ** is Microsoft's own MCP server for Microsoft 365 Copilot, for work accounts: it answers from your
-organization's email, meetings, documents, Teams chats and people. DGC runs Microsoft's package
-(`npx -y @microsoft/workiq@1.0.1 mcp`, so Node.js is needed), and Work IQ signs you in itself with Microsoft's own app,
-not DGC's. It needs a Microsoft 365 Copilot licence and your admin's one-time approval
-(`https://login.microsoftonline.com/organizations/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87`;
-Microsoft's admin guide is at github.com/microsoft/work-iq). It is in public preview, and its program is under
-Microsoft's pre-release licence terms, which you accept when you install it.
-
-Two consequences, and DGC now states both rather than leaving you to discover them:
-
-- **The work happens in their cloud.** A connector holds the app's credentials and runs the app
-  request on its own servers — including when your model is running locally on this machine. Their
-  terms govern that part, not DGC's.
-- **A connected connector may reach a service that has no plugin of its own here.** The roster the
-  model reads used to report per-plugin connectivity and nothing else. It read
-  `Figma: MCP not connected` as *Figma is unreachable* — with a connected Composio one line below
-  holding the very Figma account it needed — wrote that premise into its own sub-agent's brief, and
-  offered to work from screenshots sent by hand. A connected connector now says that it brokers the
-  accounts you authorized in its own service, and the model is told to search it with `mcp_search`
-  before telling you a service needs credentials, or a screenshot it cannot obtain. A connector
-  whose server is down advertises none of this.
-
-A rate-limited call from one of these servers now says it was rate-limited. It used to arrive as the
-same opaque payload as a missing credential, which is the other half of why a busy service read as a
-locked one.
 
 ## Uninstalling
 
