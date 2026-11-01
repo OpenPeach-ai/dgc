@@ -2,6 +2,7 @@
 
 ## 0.34.2 — 2026-11-01
 
+- **Unread Pip messages are visible.** The Work Pips strip shows the latest two unread updates; Pip rows and Personal / Project tabs show counts. Reading the chat clears only what was shown, including scheduled all-clear results.
 - **Delete archived Pips permanently.** An explicit confirmation requires the Pip's exact name before DGC erases its private history, computer and Pip-created artifacts. The Pip disappears from the Archived list after deletion.
 - **Question replies keep their styling after a session reload.** The question appears as a
   separate quoted line in the user's answer bubble instead of literal `>` text.

@@ -232,6 +232,10 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-copy{display:grid;gap:2px;min-width:0}
 .pip-row-copy strong{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
 .pip-row-copy small{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pip-row-unread{grid-template-columns:44px minmax(0,1fr) auto}
+.pip-row-unread-count,.pip-tab-unread{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.pip-row-unread-count{justify-self:end}
+.pip-tab-unread{min-width:16px;height:16px;padding:0 4px;font-size:10px}
 .primary-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#F5A524;color:#1b1b1b;font-size:10px;line-height:1}
 .pip-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px;flex:none}
 .topbar-icon{width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;border:1px solid var(--pip-edge);background:transparent;display:inline-flex;align-items:center;justify-content:center;color:var(--vscode-foreground);cursor:pointer;list-style:none}

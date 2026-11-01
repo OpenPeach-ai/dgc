@@ -26,6 +26,7 @@ function harness(t,state,{api=48}={}){
  const answers={list_workspaces:()=>({workspaces:[{id:P,name:'Your Pips',kind:'personal'},{id:Q,name:'demo',kind:'project'}],current_workspace_id:Q}),
   list_pips:r=>({pips:r.workspace_id===P?state.list:[],total:r.workspace_id===P?state.list.length:0,next_offset:null}),
   get_pip_digest:()=>({digest:state.digest}),
+  list_pip_unread:r=>({workspace_id:r.workspace_id,pips:r.workspace_id===P?(state.unread||[]):[],total:r.workspace_id===P?(state.unread||[]).reduce((n,p)=>n+p.count,0):0}),
   list_pip_attention:()=>state.attention||{total:0,items:[],truncated:false,counts:{},by_pip:{}}};
  let strip;
  const reply=(m,ok,result)=>strip.receive({type:'pipsReply',id:m.id,ok,...(ok?{result}:{error:{message:result}})});
@@ -42,6 +43,18 @@ function harness(t,state,{api=48}={}){
  const poll=async()=>{timers[0]();await flush();};
  return {w,d,strip,sent,opened,held,rows,requests,connect,poll,reply,more:()=>d.querySelector('.home-pips-more')?.textContent??null};
 }
+
+test('latest unread routine results appear with the existing row geometry, even with no findings',async t=>{
+ const state={list:[pip(1,'Daily check'),pip(2,'Mail watch')],digest:digest([]),unread:[
+  {pip_id:id(2),workspace_id:P,name:'Mail watch',pip_type:'scout',count:2,latest:'No new mail since the last check.',latest_at:'2026-11-01T10:00:00Z'},
+  {pip_id:id(1),workspace_id:P,name:'Daily check',pip_type:'scout',count:1,latest:'Everything passed.',latest_at:'2026-11-01T09:00:00Z'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 3 unread');
+ assert.deepEqual(x.rows().map(r=>r.slice(0,2)),[['Mail watch','No new mail since the last check.'],['Daily check','Everything passed.']]);
+ assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
+ x.d.querySelector('.home-pips-unread .home-pip-row').click();
+ assert.equal(x.opened[0]?.pip,id(2));
+});
 
 test('a dismiss is on news rows only, says what it dismisses, and needs Pips API 48',async t=>{
  const state={list:[pip(1,'ERP daily audit',{pending_review_count:2}),pip(2,'GST watchdog'),pip(3,'Morning review')],

@@ -78,6 +78,38 @@ const vscode = {postMessage:options.postMessage};
 const broker = requestBroker(message => vscode.postMessage({...message,generation:S.generation}));
 const $ = id => document.getElementById(id);
 const S = {posts:[],postsCursor:null,postsPip:'',postsLoaded:false,postsLoading:false,postsError:'',apiVersion:0,connected:false,supported:false,enabled:false,epoch:0,workspace:null,jobs:[],selected:'',pip:null,runs:[],run:null,runId:'',context:null,runner:null,tab:'chat',versions:[],cursor:null,historyLoaded:false,create:false,loading:false,refreshing:false,busy:false,error:'',notice:'',review:null,visible:true,generation:null,activity:null,activityLoading:false,activityError:'',approvals:[],approvalCursor:null,approvalsLoaded:false,approvalsLoading:false,approvalsError:'',scheduleDirty:false,scheduleDraftVersion:null};
+const unreadByPip=new Map(),unreadTotals=new Map(),readFingerprints=new Map();
+let lastUnreadAt=0,unreadLoading=false,markingRead=false;
+async function loadUnread(force=false){
+  if(remoteHost||S.apiVersion<69||!usable()||!S.workspaces?.length||unreadLoading||!force&&Date.now()-lastUnreadAt<15000)return;
+  unreadLoading=true;const token=scope();
+  try{const spaces=openableSpaces();const pages=await Promise.all(spaces.map(w=>send('list_pip_unread',{workspace_id:w.id})));
+    if(token!==scope())return;unreadByPip.clear();unreadTotals.clear();
+    for(const page of pages){if(!record(page)||!Array.isArray(page.pips)||!spaces.some(w=>w.id===page.workspace_id))continue;
+      unreadTotals.set(page.workspace_id,Number.isSafeInteger(page.total)?page.total:0);
+      for(const item of page.pips)if(record(item)&&typeof item.pip_id==='string'&&Number.isSafeInteger(item.count)&&item.count>0&&typeof item.latest==='string')unreadByPip.set(item.pip_id,item);}
+    lastUnreadAt=Date.now();render();maybeMarkRead();
+  }catch{}finally{unreadLoading=false;}
+}
+function maybeMarkRead(){
+  if(markingRead||remoteHost||S.apiVersion<69||!S.selected||S.overview||S.tab!=='chat'||!S.visible||document.hidden||
+      !S.messagesLoaded||postsShown()&&!S.postsLoaded||S.messagesLoading||S.postsLoading)return;
+  const log=root.querySelector('.conversation-log');if(!log||log.scrollHeight-log.scrollTop-log.clientHeight>40)return;
+  const current=unreadByPip.get(S.selected);if(!current)return;
+  const message=S.messages.some(m=>m.role==='assistant'&&m.id===current.latest_message_id)?current.latest_message_id:null;
+  const post=S.posts.some(p=>p.run_id===current.latest_post_id)?current.latest_post_id:null;
+  if(!message&&!post)return;
+  const pip=S.selected,token=scope(),fingerprint=`${message||''}|${post||''}`;
+  if(readFingerprints.get(pip)===fingerprint)return;
+  markingRead=true;
+  void send('mark_pip_read',{pip_id:pip,...(message?{message_id:message}:{}),...(post?{post_id:post}:{})})
+    .then(()=>{if(token===scope()&&S.selected===pip){readFingerprints.set(pip,fingerprint);lastUnreadAt=0;void loadUnread(true);}})
+    .catch(()=>{})
+    .finally(()=>{markingRead=false;});
+}
+const onConversationScroll=event=>{if(event.target?.classList?.contains('conversation-log'))maybeMarkRead();};
+root.addEventListener('scroll',onConversationScroll,true);
+disposers.push(()=>root.removeEventListener('scroll',onConversationScroll,true));
 S.connectorDrafts=[];S.connectorDraftError="";let connectorDraftSeq=0;
 // Dictation: 'idle' | 'starting' | 'recording' | 'writing'. The voice bar's controller keeps the waveform; it looks in
 // this box's root (a shadow root in the side bar) for the bar each render draws.
@@ -625,7 +657,7 @@ async function loadPosts(more=false){
     S.posts=mergePosts(S.postsPip===id?S.posts:[],page.posts);S.postsPip=id;
     if(more||!S.postsLoaded)S.postsCursor=page.next_before_id;S.postsLoaded=true;S.postsError='';
   }catch(error){if(token===scope()&&sequence===postsSeq)S.postsError=errorText(error);}
-  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();void loadFixes();}}
+  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();}}
 }
 // Open full report: the run, under History, at its report.
 function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();render();void loadRun(runId).then(()=>document.querySelector('section[aria-label="Run report"],section[aria-label="Pulse command receipt"],section[aria-label="Documentation draft"]')?.scrollIntoView?.({block:'start'}));}
@@ -673,7 +705,7 @@ async function loadMessages(more=false){
     if(page.active_run)void loadChatStream();
     if(!more)void loadReplyStats();
   }catch(error){if(token===scope()&&sequence===messageSeq)S.messagesError=errorText(error);}
-  finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();}}
+  finally{if(token===scope()&&sequence===messageSeq){S.messagesLoading=false;render();maybeMarkRead();}}
 }
 // What each reply took (list_pip_reply_stats, API 44): read once per finished reply, kept for the view.
 const replyStats=new Map();let replyStatsSeq=0;
@@ -2015,8 +2047,8 @@ function openableSpaces(){return scopeTabs()?[personalSpace(),projectSpace()].fi
 function scopeTabsMarkup(){
  if(!scopeTabs())return '';
  const chosen=scopeTab(),project=projectSpace();
- const tab=(key,label,title)=>`<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(title)}">${label}</button>`;
- return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder')}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips')}</div>`;
+ const tab=(key,label,title,workspace)=>`<button type="button" role="tab" id="pips-tab-${key}" class="pips-tab" data-pips-tab="${key}" aria-controls="pips-tabpanel" aria-selected="${chosen===key}"${chosen===key?'':' tabindex="-1"'} title="${esc(title)}">${label}${workspace&&unreadTotals.get(workspace.id)?` <span class="pip-tab-unread" aria-label="${unreadTotals.get(workspace.id)} unread">${unreadTotals.get(workspace.id)}</span>`:''}</button>`;
+ return `<div class="pips-tabs" role="tablist" aria-label="Your Pips, or this project’s Pips">${tab('personal','Personal','Your Pips: the same in every folder',personalSpace())}${tab('project','Project',project?`${project.name}: this project’s Pips`:'Open a project folder to see its Pips',project)}</div>`;
 }
 // What the chosen tab shows is its panel (the list, or a Pip open in it).
 function scopePanelAttrs(){return scopeTabs()?` id="pips-tabpanel" role="tabpanel" aria-labelledby="pips-tab-${scopeTab()}"${S.switching?' aria-busy="true"':''}`:'';}
@@ -2372,8 +2404,8 @@ function projectFirstMarkup(){
 }
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0);
-  return `<button type="button" class="pip-row" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you`:esc(pose.label)}</small></span></button>`;};
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'?null:unreadByPip.get(p.id);
+  return `<button type="button" class="pip-row${unread?' pip-row-unread':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+esc(unread.latest):''}`:unread?esc(unread.latest):esc(pose.label)}</small></span>${unread?`<span class="pip-row-unread-count" aria-label="${unread.count} unread">${unread.count}</span>`:''}</button>`;};
  const project=projectHome();
  return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
@@ -3314,7 +3346,7 @@ function refresh(includeContext=false) {
   return flight.promise;
 }
 async function refreshNow(includeContext=false) {
-  if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();void loadAttention();
+  if(!usable()||!S.workspace)return;const token=scope(),epoch=S.epoch,sequence=++refreshSeq;S.refreshing=true;void loadSetups();void loadAttention();void loadUnread();
   try {
     const paged=pipsPaged();
     const results=await Promise.allSettled([send('list_pips',{workspace_id:S.workspace.id,...(paged?{order:'recent',limit:100,...(S.pipSearch?{query:S.pipSearch}:{})}:{})}),send('get_pip_runner'),...(includeContext?[send('get_workspace_context',{workspace_id:S.workspace.id})]:[])]);

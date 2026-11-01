@@ -373,7 +373,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 67: get_pip_artifacts and set_pip_artifacts (artifact_pips): a Pip's report_as ("chat", "doc", "sheet": each
 # finished review also kept as the newest version of its own document or sheet) and the dashboards it refreshes after
 # each run it finishes (a Pulse keeps one current on its schedule).
-PIPS_API_VERSION = 68
+PIPS_API_VERSION = 69
 
 
 def _pips_platform_supported() -> bool:

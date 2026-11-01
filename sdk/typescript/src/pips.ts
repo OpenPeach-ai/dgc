@@ -43,6 +43,7 @@ export type PipReadParams = {
   check_pip_source: { pip_id: string; source_policy?: Record<string, unknown> };
   get_pip_run_source: { run_id: string };
   list_pip_run_posts: { pip_id: string; before_id?: string; limit?: number };
+  list_pip_unread: { workspace_id: string };
   get_pips_limit: Record<string, never>;
   list_pip_reply_stats: { pip_id: string; run_ids: string[] };
   list_pip_routines: { pip_id: string; app_events?: boolean };
@@ -117,6 +118,7 @@ export type PipReadParams = {
   list_workspaces: { [key: string]: never };
 };
 export type PipMutationParams = {
+  mark_pip_read: { pip_id: string; message_id?: string; post_id?: string };
   ensure_pip_template: { template: PipTemplate | PipTemplateInput | PipTemplateWire; accept_widening?: boolean; overwrite_user_changes?: boolean };
   prune_pip_templates: { keep: string[] };
   decide_pip_template_change: { change_id: string; decision: "accept" | "reject"; expected_digest: string };
@@ -286,6 +288,8 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   check_pip_source: ["pip_id", "source_policy"],
   get_pip_run_source: ["run_id"],
   list_pip_run_posts: ["pip_id", "before_id", "limit"],
+  list_pip_unread: ["workspace_id"],
+  mark_pip_read: ["pip_id", "message_id", "post_id"],
   list_pip_reply_stats: ["pip_id", "run_ids"],
   get_pips_limit: [],
   set_pips_limit: ["max_pips"],
@@ -802,6 +806,10 @@ for (const command of API67_READS) READS.add(command);
 for (const command of API67_MUTATIONS) MUTATIONS.add(command);
 const API68_MUTATIONS = new Set(["delete_archived_pip"]);
 for (const command of API68_MUTATIONS) MUTATIONS.add(command);
+const API69_READS = new Set(["list_pip_unread"]);
+const API69_MUTATIONS = new Set(["mark_pip_read"]);
+for (const command of API69_READS) READS.add(command);
+for (const command of API69_MUTATIONS) MUTATIONS.add(command);
 const MAX_EVENT_PAYLOAD = 32768;
 /** What an app sends with an event: plain JSON of at most 32 KB, outside the 32 KiB request budget (the runtime checks
  *  it again). */
@@ -950,7 +958,7 @@ export class Pips {
     if (this.restricted) throw new DGCUnsupportedError("Pips cannot inherit this session's RuntimePolicy or sandbox; use a separate unrestricted, explicitly authorized control session");
     if (mutation && this.plan) throw new DGCUnsupportedError("Pip mutations are unavailable in plan mode");
     if (appEvent && this.plan) throw new DGCUnsupportedError("Sending your app's events to Pips is unavailable in plan mode");
-    const minimum = API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
+    const minimum = API69_READS.has(command) || API69_MUTATIONS.has(command) ? 69 : API68_MUTATIONS.has(command) ? 68 : API67_READS.has(command) || API67_MUTATIONS.has(command) ? 67 : API65_READS.has(command) ? 65 : API64_READS.has(command) || API64_MUTATIONS.has(command) ? 64 : API63_READS.has(command) || API63_EVENTS.has(command) ? 63 : API62_READS.has(command) || API62_MUTATIONS.has(command) ? 62 : API61_READS.has(command) || API61_MUTATIONS.has(command) ? 61 : API59_READS.has(command) || API59_MUTATIONS.has(command) ? 59 : API58_READS.has(command) || API58_MUTATIONS.has(command) ? 58 : API57_READS.has(command) || API57_MUTATIONS.has(command) ? 57 : API56_READS.has(command) || API56_MUTATIONS.has(command) ? 56 : API54_READS.has(command) || API54_MUTATIONS.has(command) ? 54 : API53_READS.has(command) || API53_MUTATIONS.has(command) ? 53 : API51_READS.has(command) ? 51 : API50_READS.has(command) ? 50 : API48_MUTATIONS.has(command) ? 48 : API47_MUTATIONS.has(command) ? 47 :API45_MUTATIONS.has(command) ? 45 : API44_MUTATIONS.has(command) || API44_READS.has(command) ? 44 : API43_MUTATIONS.has(command) || API43_READS.has(command) ? 43 : API42_READS.has(command) || API42_MUTATIONS.has(command) ? 42 : API41_READS.has(command) || API41_MUTATIONS.has(command) ? 41 : API37_READS.has(command) || API37_MUTATIONS.has(command) ? 37 : API36_READS.has(command) || API36_MUTATIONS.has(command) ? 36 : API35_READS.has(command) || API35_MUTATIONS.has(command) ? 35 : API34_READS.has(command) || API34_MUTATIONS.has(command) ? 34 : API32_READS.has(command) || API32_MUTATIONS.has(command) ? 32 : API31_READS.has(command) || API31_MUTATIONS.has(command) ? 31 : command === "propose_pip_personal_handoff" ? 30 : command === "list_pip_accounts" ? 29 : API28_READS.has(command) ? 28 : API25_MUTATIONS.has(command) ? 25 : API23_COMMANDS.has(command) ? 23 : API19_COMMANDS.has(command) ? 19 : API17_COMMANDS.has(command) ? 17 : API16_COMMANDS.has(command) ? 16 : API14_COMMANDS.has(command) ? 14 : API13_COMMANDS.has(command) ? 13 : API12_COMMANDS.has(command) ? 12 : ["get_pip_proposal", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "list_pip_adaptations"].includes(command) ? 10 : (command === "accept_pip_execution_context" ? 9 : 8);
     if (this.caps.pips_supported !== true || !Number.isSafeInteger(this.caps.pips_api_version)
       || (this.caps.pips_api_version as number) < minimum) {
       throw new DGCUnsupportedError(`This control requires a runtime advertising Pips API ${minimum} or newer`);
@@ -1340,6 +1348,14 @@ export class Pips {
     return this.read("list_pip_run_posts", { pip_id: pipId,
       ...(options.beforeId !== undefined ? { before_id: options.beforeId } : {}),
       ...(options.limit !== undefined ? { limit: options.limit } : {}) });
+  }
+  /** Unread replies and scheduled results in one workspace (Pips API 69). */
+  unread(workspaceId: string): Promise<PipResult> { return this.read("list_pip_unread", { workspace_id: workspaceId }); }
+  /** Advance only to the chat items a person actually saw; newer items remain unread. */
+  markRead(pipId: string, cursors: { messageId?: string; postId?: string }, approval: { approved: boolean } = { approved: false }): Promise<PipResult> {
+    return this.mutate("mark_pip_read", { pip_id: pipId,
+      ...(cursors.messageId !== undefined ? { message_id: cursors.messageId } : {}),
+      ...(cursors.postId !== undefined ? { post_id: cursors.postId } : {}) }, approval);
   }
   /** What Ask DGC to fix did for this Pip's runs (Pips API 65): {pip_id, workspace_id, fixes}, the latest fix of each
    *  run, newest first, each with its state (queued, preparing, running or applying while it works; applied, partial,

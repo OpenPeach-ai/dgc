@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.50.0 — 2026-11-01
 
+- **Unread Pip updates appear in Work and Pips.** Work shows the latest two unread replies or run results with short previews; Personal and Project tabs and Pip rows show counts. Even an all-clear routine is counted. Opening a Pip chat at the newest messages marks only the replies and results actually shown, so a later arrival stays unread.
 - **Archived Pips can be permanently deleted.** The local editor and CLI require the exact Pip name and current lifecycle revision. Deletion clears its private chat, runs, computer, Pip-created artifacts, exclusive saved sign-ins and retained receipts. Shared sign-ins and user exports remain.
 - **Answered questions keep their shape when a Work session reopens.** A saved reply to a model
   question shows the question as a quiet quoted line above the user's answer again. The full

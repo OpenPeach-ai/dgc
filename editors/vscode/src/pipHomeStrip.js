@@ -19,7 +19,7 @@ export function mountHomePips(options) {
  if (!root) return quiet;
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
- let pips = null, digest = null, attention = null, apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
+ let pips = null, digest = null, attention = null, unread = [], apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
  const node = (tag, cls, value) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (value !== undefined) e.textContent = value; return e; };
@@ -103,6 +103,8 @@ export function mountHomePips(options) {
   const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
   all.onclick = () => options.onOpen?.(null);
   actions.append(all); head.append(actions);
+  const unreadCount = unread.reduce((n, item) => n + item.count, 0);
+  if (unreadCount) head.querySelector('h2').textContent = `Pips · ${unreadCount} unread`;
   root.append(head);
   if (rows.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
@@ -135,7 +137,25 @@ export function mountHomePips(options) {
     rest.onclick = openAll;
     root.append(rest);
    }
-  } else {
+  }
+  const unreadRows = unread.filter(item => pips.some(pip => pip.id === item.pip_id)).slice(0, 2);
+  if (unreadRows.length) {
+   const list = node('ul', 'home-pips-list home-pips-unread'); list.setAttribute('aria-label', 'Latest unread Pip messages');
+   for (const item of unreadRows) {
+    const pip = pips.find(p => p.id === item.pip_id), li = node('li', 'home-pip-item');
+    const row = node('button', 'home-pip-row'); row.type = 'button'; row.title = `Read ${pip.name} in Pips`;
+    const copy = node('span', 'home-pip-copy'); copy.append(node('strong', '', pip.name), node('small', '', item.latest));
+    row.append(face(pip, 'idle', 'row'), copy);
+    const badge = node('span', 'home-pip-badge', String(item.count)); badge.setAttribute('aria-label', `${item.count} unread`);
+    row.append(badge); row.onclick = () => options.onOpen?.({pip: pip.id}); li.append(row); list.append(li);
+   }
+   root.append(list);
+   if (unread.length > 2) {
+    const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
+    more.onclick = () => options.onOpen?.(null); root.append(more);
+   }
+  }
+  if (!rows.length && !unreadRows.length) {
    const row = node('div', 'home-pips-quiet');
    const faces = node('span', 'home-pips-faces');
    for (const pip of pips.slice(0, 6)) {
@@ -173,10 +193,13 @@ export function mountHomePips(options) {
    const asked = sequence + 1;
    try { value = pipDigest((await request('get_pip_digest')).digest); } catch { value = null; }
    if (apiVersion >= 44) { try { waiting = attentionPage(await request('list_pip_attention', {limit: 100})); } catch { waiting = null; } }
+   const unseen = apiVersion >= 69 ? await Promise.all(wanted.map(w => request('list_pip_unread', {workspace_id: w.id}).catch(() => ({pips: []})))) : [];
    if (token !== epoch) return;
    // A Pip past list_pips' first 100 that has news or a card waiting still gets its row, by its name there.
    const scope = new Set(wanted.map(w => w.id));
-   for (const raw of [...(value?.pips || []).map(d => ({id: d.pip_id, name: d.name, pip_type: d.pip_type, status: d.status, workspace_id: d.workspace_id})),
+   unread = unseen.flatMap(page => Array.isArray(page?.pips) ? page.pips : []).filter(item => item && typeof item.pip_id === 'string' && Number.isSafeInteger(item.count) && item.count > 0 && typeof item.latest === 'string').sort((a,b) => String(b.latest_at).localeCompare(String(a.latest_at)));
+   for (const raw of [...unread.map(item => ({id: item.pip_id, name: item.name, pip_type: item.pip_type, workspace_id: item.workspace_id})),
+    ...(value?.pips || []).map(d => ({id: d.pip_id, name: d.name, pip_type: d.pip_type, status: d.status, workspace_id: d.workspace_id})),
     ...(waiting?.items || []).map(i => ({id: i.pip_id, name: i.pip_name, pip_type: i.pip_type, workspace_id: i.workspace_id}))]) {
     const pip = scope.has(raw.workspace_id) ? checkedPip(raw) : null;
     if (pip && !seen.has(pip.id)) { seen.add(pip.id); found.push(pip); }

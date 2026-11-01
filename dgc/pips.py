@@ -77,7 +77,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_working_notes", "set_pip_working_notes", "list_pip_daily_log",
     "set_plugin_permission",
     "check_pip_source", "get_pip_run_source",
-    "list_pip_run_posts", "list_pip_run_fixes",
+    "list_pip_run_posts", "list_pip_run_fixes", "list_pip_unread", "mark_pip_read",
     "get_pip_eyes", "set_pip_eyes",
     "get_pip_artifacts", "set_pip_artifacts",
     "get_pip_computer_apps", "set_pip_computer_apps",
@@ -225,6 +225,7 @@ _COMMAND_ARGS = {
     "get_pip_run": {"run_id"}, "cancel_pip_run": {"run_id"},
     "check_pip_source": {"pip_id", "source_policy"}, "get_pip_run_source": {"run_id"},
     "list_pip_run_posts": {"pip_id", "before_id", "limit"},
+    "list_pip_unread": {"workspace_id"}, "mark_pip_read": {"pip_id", "message_id", "post_id"},
     # API 65: what Ask DGC to fix did for a Pip's runs (pip_fix.for_pip).
     "list_pip_run_fixes": {"pip_id"},
     "list_workspace_activity": {"workspace_id", "after"},
@@ -5404,6 +5405,14 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
             elif command == "list_pip_messages":
                 from .pip_chat import list_messages
                 result = list_messages(store, pip_id, request.get("before_id"), request.get("limit", 20), config=config)
+            elif command == "list_pip_unread":
+                from .pip_unread import list_unread
+                result = list_unread(store, workspace_id)
+            elif command == "mark_pip_read":
+                if actor not in ("editor-user", "local-console"):
+                    raise RegistryError("local_only", "Only the local Pip chat marks messages read.")
+                from .pip_unread import mark_read
+                result = mark_read(store, pip_id, request.get("message_id"), request.get("post_id"))
             elif command == "list_pip_run_posts":
                 # API 51: what its runs posted in its own chat, a page at a time (pip_run_posts).
                 from .pip_run_posts import page as run_posts

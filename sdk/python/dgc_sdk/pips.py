@@ -31,6 +31,7 @@ PipReadCommand = Literal[
     "get_pip_computer_apps",
     "get_pip_eyes",
     "list_pip_run_posts",
+    "list_pip_unread",
     "check_pip_source", "get_pip_run_source",
     "list_pip_plugins", "list_pip_plugin_uses", "list_pip_attention", "list_pip_notes", "list_pip_sites", "get_pip_chat_context", "list_pip_reply_stats", "get_pips_limit",
     "list_pip_routines", "list_pip_shared", "get_pip_computers", "list_pip_apps",
@@ -93,6 +94,7 @@ PipMutationCommand = Literal[
     "set_pip_computer_apps",
     "set_pip_eyes",
     "mark_pip_news_seen",
+    "mark_pip_read",
     "set_pip_chat_options",
     "set_plugin_permission",
     "allow_pip_plugin", "decline_pip_plugin", "set_pips_limit", "add_pip_note", "forget_pip_note", "set_pip_careful", "forget_pip_site",
@@ -366,6 +368,10 @@ READ_COMMANDS |= API67_READS
 MUTATION_COMMANDS |= API67_MUTATIONS
 API68_MUTATIONS = frozenset({'delete_archived_pip'})
 MUTATION_COMMANDS |= API68_MUTATIONS
+API69_READS = frozenset({'list_pip_unread'})
+API69_MUTATIONS = frozenset({'mark_pip_read'})
+READ_COMMANDS |= API69_READS
+MUTATION_COMMANDS |= API69_MUTATIONS
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
@@ -404,6 +410,8 @@ COMMAND_FIELDS = {
     'get_pip_eyes': frozenset({'pip_id'}),
     'set_pip_eyes': frozenset({'pip_id', 'choice'}),
     'list_pip_run_posts': frozenset({'pip_id', 'before_id', 'limit'}),
+    'list_pip_unread': frozenset({'workspace_id'}),
+    'mark_pip_read': frozenset({'pip_id', 'message_id', 'post_id'}),
     'check_pip_source': frozenset({'pip_id', 'source_policy'}),
     'get_pip_run_source': frozenset({'run_id'}),
     'list_pip_plugins': frozenset({'pip_id'}),
@@ -778,7 +786,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API68_MUTATIONS:
+        if command in API69_READS | API69_MUTATIONS:
+            minimum = 69
+        elif command in API68_MUTATIONS:
             minimum = 68
         elif command in API67_READS | API67_MUTATIONS:
             minimum = 67
@@ -1217,6 +1227,20 @@ class Pips:
         if limit is not None:
             params["limit"] = limit
         return self.read("list_pip_run_posts", params)
+
+    def unread(self, workspace_id: str) -> dict[str, Any]:
+        """Unread Pip replies and run results in a workspace (Pips API 69)."""
+        return self.read("list_pip_unread", {"workspace_id": workspace_id})
+
+    def mark_read(self, pip_id: str, *, message_id: str | None = None, post_id: str | None = None,
+                  approved: bool = False) -> dict[str, Any]:
+        """Mark only the IDs the caller displayed; later arrivals stay unread."""
+        params = {"pip_id": pip_id}
+        if message_id is not None:
+            params["message_id"] = message_id
+        if post_id is not None:
+            params["post_id"] = post_id
+        return self.mutate("mark_pip_read", params, approved=approved)
 
     def run_fixes(self, pip_id: str) -> dict[str, Any]:
         """What Ask DGC to fix did for this Pip's runs (Pips API 65): ``{"pip_id", "workspace_id", "fixes": [...]}``,

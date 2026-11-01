@@ -4,6 +4,7 @@
 
 Pairs with CLI 0.50.0.
 
+- Pips API 69: `unread(workspace_id)` / `unread(workspaceId)` reads per-Pip unread reply and scheduled result counts. `mark_read` / `markRead` advances only to the supplied observed message and run-post IDs; it requires explicit host approval.
 - `extract_generative_ui(reply)` in Python and `extractGenerativeUi(reply)` in TypeScript return bounded,
   validated `dgc-ui` v1 cards from Work, ChatDGC or Pip replies. Hosts render the data in their own UI; a
   choice's reply goes through the ordinary send method and existing permissions. No model HTML or script runs.

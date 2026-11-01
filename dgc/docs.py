@@ -3194,6 +3194,11 @@ researches a question, Rook reviews, Lock looks for security issues, Quill draft
 Patch prepares a fix in a private copy, Pulse runs the exact commands you reviewed. A **Personal
 Pip** belongs to your DGC profile and helps with errands, plans and replies.
 
+Work shows the latest unread messages from your Pips, including all-clear routine results. The
+Personal and Project tabs show unread counts, and each Pip's row previews its latest unread note.
+Opening its chat at the newest messages marks the replies and run results you saw as read; a later
+arrival stays unread. Approvals and findings remain separate from ordinary messages.
+
 Open the Pips view with the Pips button in the DGC chat view's title bar, or ask the main chat:
 "Review committed changes in this project every weekday at 9:00, and run once now." In the terminal,
 `dgc pips` does the same (`dgc pips create`, `list`, `run`, `stop`, ...).

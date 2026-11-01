@@ -46,6 +46,20 @@ def session(wire=None, caps=None, **kwargs):
 
 
 class PipsSDKTests(unittest.TestCase):
+    def test_api69_unread_requires_capability_and_exact_host_approval(self):
+        wire = Wire()
+        old = session(wire, caps={**CAPS, 'pips_api_version': 68})
+        with self.assertRaises(DGCUnsupportedError):
+            old.pips.unread('ws_a')
+        with self.assertRaises(DGCUnsupportedError):
+            old.pips.mark_read('pip_a', post_id='run_a', approved=True)
+        self.assertFalse(wire.calls)
+        current = session(wire, caps={**CAPS, 'pips_api_version': 69})
+        self.assertEqual(current.pips.unread('ws_a')['request']['workspace_id'], 'ws_a')
+        with self.assertRaises(DGCConfigError):
+            current.pips.mark_read('pip_a', post_id='run_a')
+        self.assertEqual(current.pips.mark_read('pip_a', post_id='run_a', approved=True)['request']['post_id'], 'run_a')
+
     def test_api46_a_pip_s_notes_in_the_shared_memory_require_new_runtime(self):
         wire=Wire();old=session(wire,caps={**CAPS,'pips_api_version':45})
         with self.assertRaisesRegex(DGCUnsupportedError,'API 46'):old.pips.read('list_pip_notes',{'pip_id':'pip_test','shared':True})

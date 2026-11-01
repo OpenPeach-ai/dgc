@@ -277,6 +277,9 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
   cursor:pointer; padding:var(--sp-1); border-radius:var(--r-sm); }
 #sessions-host .home-pips-dismiss-all:hover { color:var(--text); text-decoration:underline; }
 #sessions-host .home-pips-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+#sessions-host .home-pips-unread { margin-top:var(--sp-1); }
+#sessions-host .home-pips-unread .home-pip-row { min-height:36px; }
+#sessions-host .home-pips-unread .home-pip-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* A row and, for news, its dismiss beside it (never over the name): the ✕ keeps its room and shows on
    hover or focus; it is always in the tab order. */
 #sessions-host .home-pip-item { display:flex; align-items:center; gap:2px; min-width:0; border-radius:var(--r-sm); }

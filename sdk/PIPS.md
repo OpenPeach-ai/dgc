@@ -11,7 +11,7 @@ app declares its Pips in code and keeps them as declared on each deploy ([Pips i
 from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.run_fixes()`), and from API 66
 `list_pip_models` says each model's context window and the Pips default model.
 
-It pairs with DGC CLI 0.50.0, which advertises **Pips API 68** over editor protocol
+It pairs with DGC CLI 0.50.0, which advertises **Pips API 69** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -133,7 +133,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.50.0 is API 68; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.50.0 is API 69; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
