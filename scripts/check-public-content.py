@@ -167,13 +167,14 @@ def check_history(root: Path) -> list[str]:
     return errors
 
 
-# The address a new commit is published under. A personal address on a public commit cannot be taken back,
-# so what is about to be published (the commits not yet on origin/main) must carry a GitHub noreply address.
-_NOREPLY = re.compile(r'^(?:\d+\+)?[A-Za-z0-9-]+(?:\[bot\])?@users\.noreply\.github\.com$|^noreply@github\.com$', re.I)
+# A release commit must carry the project's own GitHub identity. A generic noreply address can belong
+# to another account (including github itself), and public commit attribution cannot be taken back.
+_RELEASE_ADDRESS = '309020411+OpenPeach-ai@users.noreply.github.com'
 
 
-def check_identity(root: Path, published: str = 'refs/remotes/origin/main') -> list[str]:
-    """Refuse a commit about to be published under an address that is not a GitHub noreply one."""
+def check_identity(root: Path, published: str = 'refs/remotes/origin/main',
+                   expected: str = _RELEASE_ADDRESS) -> list[str]:
+    """Refuse a release commit attributed to any account other than this project's GitHub identity."""
     known = subprocess.run(['git', 'rev-parse', '-q', '--verify', published], cwd=root,
                            capture_output=True, text=True).returncode == 0
     span = ['HEAD', '^' + published] if known else ['HEAD']
@@ -184,10 +185,10 @@ def check_identity(root: Path, published: str = 'refs/remotes/origin/main') -> l
     errors = []
     for line in log.stdout.splitlines():
         sha, author, committer = (line.split() + ['', '', ''])[:3]
-        bad = sorted({a for a in (author, committer) if not _NOREPLY.match(a)})
+        bad = sorted({a for a in (author, committer) if a.casefold() != expected.casefold()})
         if bad:
-            errors.append(f'{sha}: not published under a GitHub noreply address ({", ".join(bad)}); '
-                          'set user.email to <id>+<login>@users.noreply.github.com and re-author it')
+            errors.append(f'{sha}: not published under the release identity ({", ".join(bad)}); '
+                          f'set user.email to {expected} and re-author it')
     return errors
 
 
