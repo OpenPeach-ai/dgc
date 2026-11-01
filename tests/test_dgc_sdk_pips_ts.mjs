@@ -474,7 +474,7 @@ test('explicit inherited controller reads the actual backend without network, co
   const home = join(directory, 'home'), workspace = join(directory, 'workspace');
   mkdirSync(join(home, '.dgc'), { recursive: true, mode: 0o700 }); mkdirSync(workspace);
   const configPath = join(home, '.dgc/config.json'), marker = join(directory, 'unexpected-network');
-  const original = JSON.stringify({ model: 'fixture', base_url: 'http://127.0.0.1:1/v1', pips_enabled: true,
+  const original = JSON.stringify({ model: 'fixture', base_url: 'https://example.invalid/v1', pips_enabled: true,
     sandbox: false, mcp_servers: {}, hooks: {}, artifact_autostart: false, notify: 'off', suggest: false });
   writeFileSync(configPath, original, { mode: 0o600 });
   const root = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
