@@ -67,15 +67,22 @@ def _install_roots(argv0: str) -> list[Path]:
         candidates = [Path(sys.prefix), Path(sys.base_prefix), Path(sys.exec_prefix), exe.parent.parent]
     else:
         candidates = [exe.parent.parent]
-    for c in candidates:
+    for candidate in candidates:
         try:
-            c = c.resolve()
+            resolved = candidate.resolve()
         except OSError:
             continue
-        if account is not None and (c == account or c in account.parents):
-            continue  # e.g. ~/bin/node must not expose the account's entire home
-        if c != Path("/") and c not in roots:
-            roots.append(c)
+        if resolved == Path("/") or (account is not None and
+                                     (resolved == account or resolved in account.parents)):
+            continue
+        # Seatbelt checks the spelling used while following a virtualenv symlink as well as its
+        # final target. Keeping only the resolved prefix made macOS refuse to exec Python from a
+        # venv whose base prefix is an alias (including uv's version alias).
+        for c in (resolved, candidate) if sys.platform == "darwin" else (resolved,):
+            if account is not None and (c == account or c in account.parents):
+                continue  # e.g. ~/bin/node must not expose the account's entire home
+            if c != Path("/") and c not in roots:
+                roots.append(c)
     return roots
 
 
@@ -103,9 +110,12 @@ def sandboxed_argv(m: Manifest, argv: list[str], scratch: Path) -> list[str] | N
         return out + argv
     if kind == "sandbox-exec":
         from .. import seatbelt
-        system = [Path(p) for p in ("/System", "/usr/lib", "/usr/share", "/bin", "/sbin", "/dev")]
-        readable = [p for p in [*system, *shown, scratch] if p.exists()]
-        profile = seatbelt.profile(writable=[scratch], hidden=[Path("/")], readable=readable,
+        system = [Path(p) for p in ("/System/Library", "/System/Cryptexes", "/usr/lib", "/usr/share", "/bin", "/sbin", "/dev")]
+        readable = list(dict.fromkeys(q for p in [*system, *shown, scratch] if p.exists()
+                                      for q in (p, p.resolve())))
+        # A read deny on / itself aborts sandboxed processes on newer macOS. Hide each
+        # top-level entry instead, then expose only the interpreter, mod and scratch.
+        profile = seatbelt.profile(writable=[scratch, scratch.resolve()], hidden=list(Path("/").iterdir()), readable=readable,
                                    reachable=readable, network=False)
         return [str(executable), "-p", profile] + argv
     return None
