@@ -123,7 +123,10 @@ def upgrade_after_install():
             return ""
         def refresh():
             updated = pip_service.install(home, upgrade=True)
-            if updated["changed"] and current.get("active_state") == "active":
+            # A runner from the older package may already be in systemd's restart loop
+            # after the new CLI migrated its database. Restart the updated unit in that
+            # case too; leave a deliberately stopped (inactive) service alone.
+            if updated["changed"] and current.get("active_state") in ("active", "activating", "failed"):
                 pip_service.restart(home)
     else:
         return ""

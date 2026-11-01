@@ -100,6 +100,24 @@ class LinuxSwitchTests(unittest.TestCase):
             install.assert_called_once_with(self.home, upgrade=True)
             restart.assert_called_once_with(self.home)
 
+    def test_install_reconcile_recovers_old_runner_in_restart_loop(self):
+        status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "activating"}
+        registry = MagicMock()
+        registry.db.execute.return_value.fetchone.return_value = None
+        context = MagicMock()
+        context.__enter__.return_value = registry
+        with patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
+             patch.object(keep, "_home", return_value=self.home), patch.object(service, "status", return_value=status), \
+             patch("dgc.workspace_registry.WorkspaceRegistry", return_value=context), \
+             patch.object(service, "install", return_value={"changed": True}), \
+             patch.object(service, "restart") as restart:
+            self.assertIn("Updated", keep.upgrade_after_install())
+            restart.assert_called_once_with(self.home)
+            restart.reset_mock()
+            status["active_state"] = "inactive"
+            self.assertIn("Updated", keep.upgrade_after_install())
+            restart.assert_not_called()
+
     def test_a_runner_already_running_is_not_started_twice(self):
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
         self.assertNotIn(["start", self.spec["unit_name"]], self.calls)
