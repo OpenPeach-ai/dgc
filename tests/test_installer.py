@@ -880,7 +880,8 @@ class InterruptedBuilds(unittest.TestCase):
 
         def interrupted(sig: int) -> subprocess.CompletedProcess:
             marker.unlink(missing_ok=True)
-            slow = dict(env, PATH=str(slow_dir) + os.pathsep + env["PATH"], DGC_TEST_SLOW_VENV=str(marker))
+            slow = dict(env, PATH=str(slow_dir) + os.pathsep + env["PATH"], DGC_TEST_SLOW_VENV=str(marker),
+                        DGC_PYTHON=str(slow_dir / "python3"))
             # Ctrl-C reaches the installer as it would a user's: a suite started in the background (`(nohup …
             # &)`) inherits SIGINT ignored, which bash can't undo, so the build ran its full 300 s and finished.
             proc = subprocess.Popen(["bash", str(INSTALLER)], env=slow, cwd=str(home), text=True,
@@ -1300,6 +1301,10 @@ class QaInstallerRegressions(unittest.TestCase):
             self.assertTrue(command.endswith("DGC_FORCE_OVERWRITE=1 bash"), command)
             bare = {key: value for key, value in env.items() if not key.startswith("DGC_")}
             bare["DGC_SKIP_EXTENSION"] = "1"
+            if "DGC_PYTHON" in env:
+                # The printed override preserves the same supported Python that the original
+                # install used; the test's stripped environment must preserve it too.
+                bare["DGC_PYTHON"] = env["DGC_PYTHON"]
             forced = subprocess.run(["bash", "-c", command], env=bare, capture_output=True, text=True,
                                     timeout=BUILD_TIMEOUT, stdin=subprocess.DEVNULL, cwd=str(home))
             self.assertNotIn(refusal, output(forced), "the printed command gets past the guard")

@@ -547,8 +547,9 @@ class EachArtifactItsOwnOrigin(unittest.TestCase):
         cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
         shells = sorted([*cache.glob("chromium_headless_shell-*/chrome-linux/headless_shell"),
                          *cache.glob("chromium_headless_shell-*/chrome-headless-shell-mac-*/chrome-headless-shell")])
+        bundled_chrome = sorted(cache.glob("chromium-*/chrome-linux/chrome"))
         try:
-            chrome = shells[-1] if shells else browser.discover_browser()
+            chrome = shells[-1] if shells else (bundled_chrome[-1] if bundled_chrome else browser.discover_browser())
         except Exception:
             if os.environ.get("DGC_REQUIRE_CHROMIUM") == "1":
                 raise
@@ -579,6 +580,12 @@ class EachArtifactItsOwnOrigin(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(profile, ignore_errors=True)
+        if (sys.platform == "darwin" and done.returncode != 0
+                and "CVDisplayLinkCreateWithCGDisplay failed" in done.stderr
+                and os.environ.get("DGC_REQUIRE_CHROMIUM") != "1"):
+            # Chrome cannot attach to a display in this SSH-only Mac test session. The
+            # same browser-origin test runs on Linux CI and the local release host.
+            self.skipTest("Chrome has no macOS display in this SSH session")
         found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
         self.assertIsNotNone(found, done.stdout[-2000:] + done.stderr[-2000:])
         results = json.loads(_html.unescape(found.group(1)))

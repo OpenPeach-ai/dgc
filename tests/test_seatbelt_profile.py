@@ -33,7 +33,7 @@ class ProfileBuilderTests(unittest.TestCase):
 
 
 class ShellSandboxProfileTests(unittest.TestCase):
-    """sandbox.wrap() emits exactly the profile it did before the builder was shared."""
+    """sandbox.wrap() keeps the ambient homes private and the project write policy explicit."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='dgc-seatbelt-shell-')
@@ -56,7 +56,9 @@ class ShellSandboxProfileTests(unittest.TestCase):
             '(version 1)(allow default)(deny file-write*)(allow file-write* (subpath "/tmp") (subpath "/private/tmp") '
             '(literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper") '
             f'(subpath "/dev/fd"))(deny file-read* (subpath "{self.home}"))(deny file-read* (subpath "{self.account}"))'
-            f'(allow file-read* (subpath "{root}"))(allow file-read-metadata file-test-existence (path-ancestors "{root}"))',
+            f'(allow file-read* (subpath "{root}"))(allow file-read-metadata file-test-existence (path-ancestors "{root}"))'
+            f'(deny file-write* (subpath "{self.home}"))(deny file-write* (subpath "{self.account}"))'
+            f'(deny file-write* (subpath "{root}"))',
             '/bin/bash', '-o', 'pipefail', '-c', 'echo hi'])
 
     def test_sdk_worktree_with_shared_git_inside_home(self):
@@ -71,7 +73,10 @@ class ShellSandboxProfileTests(unittest.TestCase):
             f'(deny file-read* (subpath "{self.account}"))(deny file-read* (subpath "{self.base / "state"}"))'
             f'(allow file-read* (subpath "{root}"))(allow file-read* (subpath "{repo / ".git"}"))'
             f'(allow file-read-metadata file-test-existence (path-ancestors "{root}"))'
-            f'(allow file-read-metadata file-test-existence (path-ancestors "{repo / ".git"}"))(deny network*)')
+            f'(allow file-read-metadata file-test-existence (path-ancestors "{repo / ".git"}"))'
+            f'(deny file-write* (subpath "{self.home}"))(deny file-write* (subpath "{self.account}"))'
+            f'(deny file-write* (subpath "{self.base / "state"}"))'
+            f'(allow file-write* (subpath "{root}"))(deny network*)')
 
 
 if __name__ == '__main__':
