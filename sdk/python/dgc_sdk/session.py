@@ -371,8 +371,8 @@ class Artifacts:
     def __init__(self, session: "Session"):
         self._session = session
 
-    def _ask(self, command: dict[str, Any], answer: str) -> dict[str, Any]:
-        return self._session._request({**command, "request_id": _new_id("art")}, answer)
+    def _ask(self, command: dict[str, Any], answer: str, *, timeout: float | None = None) -> dict[str, Any]:
+        return self._session._request({**command, "request_id": _new_id("art")}, answer, timeout=timeout)
 
     def list(self, *, type: str | None = None, surface: str | None = None) -> list[ArtifactInfo]:
         """Newest first; ``type`` is doc|slides|sheet|dashboard|page, ``surface`` chat|work|pip|sdk|cli."""
@@ -428,7 +428,8 @@ class Artifacts:
 
     def open(self, artifact_id: str) -> str:
         """Serve it at an address of its own on this computer; returns the URL."""
-        return str(self._ask({"type": "artifact_open", "id": artifact_id}, "artifact_served")["url"])
+        # Starting the first local HTTP listener can be slow on a heavily loaded host.
+        return str(self._ask({"type": "artifact_open", "id": artifact_id}, "artifact_served", timeout=60)["url"])
 
     def remove(self, artifact_id: str) -> None:
         """Out of the list, into DGC's trash (where it can be put back)."""

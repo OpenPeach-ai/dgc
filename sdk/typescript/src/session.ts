@@ -121,7 +121,7 @@ export function artifactInfo(row: unknown): ArtifactInfo {
            ...(r.file ? { file: String(r.file) } : {}), versions };
 }
 
-type ArtifactRequest = (command: Frame, answer: string) => Promise<Record<string, unknown>>;
+type ArtifactRequest = (command: Frame, answer: string, timeoutMs?: number) => Promise<Record<string, unknown>>;
 
 /** `session.mods`: the mods this session runs (CLI 0.50+): the user's allowed ones and those named with
  *  `session({ mods: [...] })`. */
@@ -155,8 +155,8 @@ export class Artifacts {
     this.capabilities = capabilities;
   }
 
-  private send(command: Frame, answer: string): Promise<Record<string, unknown>> {
-    return this.ask({ ...command, request_id: newId("art") }, answer);
+  private send(command: Frame, answer: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+    return this.ask({ ...command, request_id: newId("art") }, answer, timeoutMs);
   }
 
   /** Newest first; `type` is doc|slides|sheet|dashboard|page, `surface` chat|work|pip|sdk|cli. */
@@ -207,7 +207,7 @@ export class Artifacts {
 
   /** Serve it at an address of its own on this computer; returns the URL. */
   async open(id: string): Promise<string> {
-    return String((await this.send({ type: "artifact_open", id }, "artifact_served")).url || "");
+    return String((await this.send({ type: "artifact_open", id }, "artifact_served", 60_000)).url || "");
   }
 
   /** Into DGC's trash, where it can be put back. */
@@ -718,7 +718,7 @@ export class Session {
     if (!(this.capabilities.artifacts && typeof this.capabilities.artifacts === "object")) {
       throw new DGCUnsupportedError("This DGC CLI has no artifacts; update it (dgc update).");
     }
-    return new Artifacts((command, answer) => this.request(command, answer), mapping(this.capabilities.artifacts));
+    return new Artifacts((command, answer, timeoutMs) => this.request(command, answer, { timeoutMs }), mapping(this.capabilities.artifacts));
   }
 
   /** What fills this session's context window, part by part, as DGC's meter shows it: messages, tool results, the

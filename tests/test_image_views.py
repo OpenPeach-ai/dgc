@@ -3,12 +3,14 @@ view_image, MCP images, headless frames, get_image and history replay."""
 import base64
 import copy
 import hashlib
+import gc
 import http.server
 import io
 import json
 import os
 from pathlib import Path
 import tempfile
+import statistics
 import threading
 import time
 import types
@@ -1403,13 +1405,24 @@ class HistoryScaleTests(unittest.TestCase):
         # inflates perf_counter by however long it waited, which has nothing to do with the
         # algorithm under test. process_time only advances while this process is on a CPU, so a
         # quadratic lookup still shows up and a busy machine does not.
-        started = time.process_time()
-        Backend._history(backend)
-        with_images = time.process_time() - started
-        backend.agent = types.SimpleNamespace(messages=messages, image_views=[])
-        started = time.process_time()
-        Backend._history(backend)
-        without = time.process_time() - started
+        # A single CPython GC cycle can land in either half of this timing comparison
+        # on a shared macOS runner. Warm both paths and compare medians with GC paused;
+        # the assertion still catches an index that scans all records for every message.
+        def sample(views):
+            backend.agent = types.SimpleNamespace(messages=messages, image_views=views)
+            started = time.process_time()
+            Backend._history(backend)
+            return time.process_time() - started
+        sample(records)
+        sample([])
+        was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with_images = statistics.median(sample(records) for _ in range(3))
+            without = statistics.median(sample([]) for _ in range(3))
+        finally:
+            if was_enabled:
+                gc.enable()
         self.assertLess(with_images, without * 3 + 0.05, (with_images, without))
 
 
