@@ -3503,7 +3503,7 @@
       return chip;
     }
     if (item.img) {
-      const hasData = !!(item.data && String(item.data).startsWith("data:image/"));
+      const hasData = typeof item.data === "string" && IMAGE_DATA.test(item.data);
       const ref = typeof item.ref === "string" && /^img_[0-9a-f]{32}$/.test(item.ref) ? item.ref : "";
       const record = {
         name: String(item.label || "Image").replace(/^📷\s*/, "") || "Image",
@@ -14520,6 +14520,10 @@
     requestImages(records);
   }
   function imageChip(record, index, count) {
+    if (record.state === "ready" && !IMAGE_DATA.test(record.src)) {
+      record.state = "failed";
+      record.reason = "unreadable";
+    }
     // `compact`: an image the user sent, drawn in their prompt as the chip it was in the composer -- a
     // small tile beside its type and size. The full tile made the prompt too tall to stay pinned.
     const chip = el("button", record.compact ? "image-chip prompt-att chip" : "image-chip");

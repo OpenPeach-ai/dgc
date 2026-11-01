@@ -171,7 +171,7 @@ def split_host(value) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip().lower()
-    if not value or any(c in value for c in "/\\@ \t,;?#") or not value.isascii():
+    if not value or any(ord(c) < 0x20 or ord(c) == 0x7f or c in "/\\@ ,;?#" for c in value) or not value.isascii():
         return None
     if value.startswith("["):
         end = value.find("]")

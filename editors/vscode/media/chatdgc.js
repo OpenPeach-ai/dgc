@@ -6,6 +6,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
+  const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   const md = (text) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || "")) : null);
   window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
   // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
@@ -826,7 +827,7 @@
     button.append(picture);
     button.addEventListener("click", () => button.classList.toggle("cd-thumb-big"));
     const known = images.get(item.id);
-    if (known?.data) picture.src = known.data;
+    if (known?.data && IMAGE_DATA.test(known.data)) picture.src = known.data;
     else if (known?.error) button.replaceChildren(el("span", "cd-thumb-missing", item.name || "Image"));
     else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
     return button;
@@ -837,7 +838,7 @@
     const picture = el("img");
     picture.alt = item.title || `Image from ${item.site || "the web"}`; picture.dataset.att = item.id; picture.decoding = "async";
     const known = images.get(item.id);
-    if (known?.data) picture.src = known.data;
+    if (known?.data && IMAGE_DATA.test(known.data)) picture.src = known.data;
     else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
     return picture;
   }
@@ -3712,10 +3713,10 @@
         return;
       case "image": {
         if (!/^att_[a-f0-9]{32}$/.test(String(msg.id || ""))) return;
-        const ok = typeof msg.data === "string" && /^data:image\/(png|jpeg|gif|webp);base64,/.test(msg.data);
+        const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data);
         images.set(msg.id, ok ? { data: msg.data } : { error: String(msg.error || "") });
         for (const picture of document.querySelectorAll(`img[data-att="${CSS.escape(msg.id)}"]`)) {
-          if (ok) picture.src = msg.data;
+          if (ok && IMAGE_DATA.test(msg.data)) picture.src = msg.data;
           else if (picture.closest(".cd-picture-item")) {
             // Gone from the strip, and the strip says so: the next redraw keeps it rather than drawing it again.
             const strip = picture.closest(".cd-pictures");

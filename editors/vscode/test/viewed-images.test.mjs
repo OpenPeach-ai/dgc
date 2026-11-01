@@ -249,6 +249,18 @@ test("a session change closes the viewer; a history re-render keeps the image bu
 });
 
 // ---- Phase B: images fetched by ref ----------------------------------------------------------------
+test("a replayed prompt cannot display a non-image data URL", () => {
+  const p = panel();
+  p.event({ type: "history", items: [
+    { type: "turn_start", turn_id: "bad-image", prompt: "Check this", kind: "prompt",
+      attachments: [{ img: true, label: "Image", data: "data:image/svg+xml,<svg onload=alert(1)></svg>" }] },
+  ] });
+  const chip = p.doc.querySelector(".msg.user .prompt-atts .image-chip");
+  assert.equal(chip?.dataset.state, "failed");
+  assert.equal(chip?.querySelector("img"), null);
+  assert.deepEqual(p.errors, []);
+});
+
 test("saved prompt and mid-turn images remain viewable after a history reload", async () => {
   const p = panel();
   p.event({ type: "history", items: [

@@ -660,7 +660,29 @@ def _sniff(data: bytes):
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     head = data[:4096].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
-    if re.match(rb"(<\?xml[^>]*>\s*)?(<!--.*?-->\s*)*(<!doctype svg[^>]*>\s*)?<svg[\s>]", head, re.S):
+    pos = 0
+    if head.startswith(b"<?xml"):
+        end = head.find(b">", pos)
+        if end < 0:
+            return None
+        pos = end + 1
+    while True:
+        while pos < len(head) and head[pos] in b" \t\r\n\f\v":
+            pos += 1
+        if not head.startswith(b"<!--", pos):
+            break
+        end = head.find(b"-->", pos + 4)
+        if end < 0:
+            return None
+        pos = end + 3
+    if head.startswith(b"<!doctype svg", pos):
+        end = head.find(b">", pos)
+        if end < 0:
+            return None
+        pos = end + 1
+        while pos < len(head) and head[pos] in b" \t\r\n\f\v":
+            pos += 1
+    if head.startswith(b"<svg", pos) and head[pos + 4:pos + 5] in (b">", b" ", b"\t", b"\r", b"\n", b"\f", b"\v"):
         return "image/svg+xml"
     return None
 

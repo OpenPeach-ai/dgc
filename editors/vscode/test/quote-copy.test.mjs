@@ -23,6 +23,17 @@ const copied = (html) => {
   return m ? decodeURIComponent(m[1]) : null;
 };
 
+test("a copied table escapes backslashes before cell separators", () => {
+  const html = render(String.raw`| Path | Note |
+| --- | --- |
+| C:\tools | first \| second |`);
+  const match = /aria-label="Copy table"[^>]*data-c="([^"]*)"|data-c="([^"]*)"[^>]*aria-label="Copy table"/.exec(html);
+  assert.ok(match);
+  const text = decodeURIComponent(match[1] || match[2]);
+  assert.match(text, /C:\\\\tools/);
+  assert.match(text, /first \\\| second/);
+});
+
 test("a quoted block carries a copy button", () => {
   const html = render("> Hello there,\n>\n> Please ship it.\n");
   assert.match(html, /<blockquote>\s*<button type="button" class="copy"/);

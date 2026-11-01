@@ -233,12 +233,15 @@ function tableSource(tokens: any[], index: number): string {
   const rows: string[][] = [];
   let row: string[] = [];
   let headerRows = 0;
+  let inHeader = false;
   for (let i = index; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type === "table_close") break;
+    if (token.type === "thead_open") inHeader = true;
+    else if (token.type === "thead_close") inHeader = false;
     if (token.type === "tr_open") row = [];
-    else if (token.type === "tr_close") { rows.push(row); if (token.level === 2) headerRows = rows.length; }
-    else if (token.type === "inline") row.push(String(token.content || "").replace(/\|/g, "\\|"));
+    else if (token.type === "tr_close") { rows.push(row); if (inHeader) headerRows = rows.length; }
+    else if (token.type === "inline") row.push(String(token.content || "").replaceAll("\\", "\\\\").replaceAll("|", "\\|"));
   }
   if (!rows.length) return "";
   const width = rows.reduce((largest, cells) => Math.max(largest, cells.length), 0);

@@ -9,6 +9,7 @@
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const icon = (name) => { const g = el("span", `codicon codicon-${name}`); g.setAttribute("aria-hidden", "true"); return g; };
+  const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   const KINDS = [["", "All"], ["image", "Images"], ["pdf", "PDFs"], ["document", "Documents"], ["spreadsheet", "Spreadsheets"],
                  ["presentation", "Presentations"], ["code", "Code"], ["text", "Pasted text"]];
   const TYPE_NAME = { image: "Image", pdf: "PDF", document: "Document", spreadsheet: "Spreadsheet", presentation: "Presentation", code: "Code", text: "Pasted text" };
@@ -152,7 +153,7 @@
       const img = el("img");
       img.alt = ""; img.dataset.att = file.id;
       const known = images.get(file.id);
-      if (known?.data) img.src = known.data;
+      if (known?.data && IMAGE_DATA.test(known.data)) img.src = known.data;
       else if (!known) { images.set(file.id, "asked"); vscode.postMessage({ type: "image", file }); }
       if (!known?.error) { box.append(img); return box; }
     }
@@ -350,10 +351,10 @@
     } else if (msg.type === "refresh") {
       ask();                                        // the list stays on screen until the new one comes
     } else if (msg.type === "image") {
-      const ok = typeof msg.data === "string" && /^data:image\/(png|jpeg|gif|webp);base64,/.test(msg.data);
+      const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data);
       images.set(msg.id, ok ? { data: msg.data } : { error: true });
       for (const img of document.querySelectorAll(`img[data-att="${CSS.escape(String(msg.id || ""))}"]`)) {
-        if (ok) img.src = msg.data; else img.replaceWith(icon("file-media"));
+        if (ok && IMAGE_DATA.test(msg.data)) img.src = msg.data; else img.replaceWith(icon("file-media"));
       }
     } else if (msg.type === "changed") {
       state.files = []; ask();

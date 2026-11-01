@@ -30,6 +30,14 @@ from dgc.artifact_store import Store
 from dgc.chatdgc import made
 
 
+class ImageSniff(unittest.TestCase):
+    def test_svg_prologue_and_repeated_comments_are_bounded(self):
+        valid = b'<?xml version="1.0"?>\n' + b'<!--ok-->\n' * 200 + b'<!DOCTYPE svg>\n<svg xmlns="http://www.w3.org/2000/svg"/>'
+        self.assertEqual(slides._sniff(valid), "image/svg+xml")
+        self.assertIsNone(slides._sniff(b'<!--ok-->' * 400 + b'<script>alert(1)</script>'))
+        self.assertIsNone(slides._sniff(b'<!--broken' + b'--><!----' * 400 + b'<svg/>'))
+
+
 def _png(width: int = 40, height: int = 20, rgb=(200, 80, 40)) -> bytes:
     raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
 

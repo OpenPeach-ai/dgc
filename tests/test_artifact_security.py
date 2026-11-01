@@ -161,6 +161,11 @@ class ArtifactServerSecurity(unittest.TestCase):
                                host=f"evil.example.com:{self.plan_port}")
         self.assertEqual(status, 421, "plan pages share the Host allowlist")
 
+    def test_host_parser_rejects_embedded_control_characters(self):
+        for host in ("localhost\rX-Injected: yes", "localhost\nX-Injected: yes", "localhost\x7f", "local\x00host"):
+            with self.subTest(host=repr(host)):
+                self.assertIsNone(A.split_host(host))
+
     def test_loopback_hosts_are_served_on_any_forwarded_port(self):
         for host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}", f"[::1]:{self.port}",
                      "localhost", "LOCALHOST:9000", "127.0.0.1:64000"):
