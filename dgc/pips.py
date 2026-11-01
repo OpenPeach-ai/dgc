@@ -3065,8 +3065,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                         "their apps reach you through it and call connect_app for an app they already mentioned, or ask which "
                         "app, offering likely ones with offer_choices. Never say a Connect card is there unless connect_app said so. To "
                         "send or change anything in an app, prepare a draft; it waits for the user's Allow. "
-                        + ("Connected to you now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + ". "
-                           if apps_pin['apps'] else "No app is connected to you yet. ")
+                        + ("Direct app links to you now: " + ", ".join(a['app'] + ' (' + str(a['label']) + ')' for a in apps_pin['apps']) + ". "
+                           if apps_pin['apps'] else "No direct app links to you yet; enabled plugins may still provide app access. ")
                         # A chat that began before these tools existed holds replies denying them, and a
                         # model keeps faith with its own words (2026-10-08: "I don't have a Composio
                         # connector", twice, after the tools were there).

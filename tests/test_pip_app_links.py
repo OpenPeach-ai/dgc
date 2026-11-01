@@ -253,7 +253,7 @@ class AppLinkTests(unittest.TestCase):
         self.assertIn("exists only when connect_app made one", note)
         self.assertIn("not set up in DGC yet", pips._app_tools_note({"composio": False}))
         described = links.schemas([])[0]["function"]["description"]
-        self.assertIn("No app is connected to you yet", described)
+        self.assertIn("No direct app links to you yet; enabled plugins may still provide app access", described)
         self.assertNotIn("Nothing is connected yet", described)
         self.assertIn("Composio", described)
 

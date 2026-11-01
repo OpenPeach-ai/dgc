@@ -409,14 +409,15 @@ def _search_settings(config) -> tuple[str, str, str]:
 def schemas(apps_now) -> list[dict]:
     # "Nothing is connected yet" read as "Composio is not connected", and a Pip told the user Composio
     # was out of its reach. Only this Pip's own apps are meant.
-    connected_line = ("Connected to you now: " + ", ".join(f"{a['app']} ({a['label']})" for a in apps_now) + ". "
-                      if apps_now else "No app is connected to you yet. ")
+    connected_line = ("Direct app links to you now: " + ", ".join(f"{a['app']} ({a['label']})" for a in apps_now) + ". "
+                      if apps_now else "No direct app links to you yet; enabled plugins may still provide app access. ")
     reads = ", ".join(sorted(f"{t} ({app_name(k)})" for t, k in READ_TOOLKITS.items()))
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
             "Ask the user to connect one of their apps to you. Outlook Mail uses the user's existing DGC Microsoft "
             "plugin; other apps use Composio only when no enabled DGC plugin already supplies that app. Check the "
-            "plugin_tools route first for an enabled plugin. If you can already read the app through a plugin, a "
+            "plugin_tools route first for an enabled plugin. Do not call connect_app merely because the list of "
+            "direct app links is empty. If you can already read the app through a plugin, a "
             "time-scheduled routine can use that plugin on every run: do not claim it needs another app link. "
             "Email-trigger and calendar-trigger routines do need their own app links so DGC can check for new events "
             "between runs. "
