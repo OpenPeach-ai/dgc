@@ -222,7 +222,7 @@ class SessionExecutionRecordTests(unittest.TestCase):
         self.assertEqual(replay['context']['entries'], []); self.assertEqual(self.state(), before)
 
     def test_schema_seventeen_is_interpretation_only_and_preserves_old_rows_and_snapshot(self):
-        from dgc import session_turn_events, pip_memory_statements
+        from dgc import session_turn_events, pip_memory_statements, pip_unread
         from tests.pip_test_migrations import drop_session_turn_schema
         self.ready()
         hub = context.ContextStore(self.registry)
@@ -240,6 +240,8 @@ class SessionExecutionRecordTests(unittest.TestCase):
              patch.object(pip_computer, 'SCHEMA', ''), \
              patch.object(pip_chat, 'IMAGES_SCHEMA', ''), \
              patch.object(pip_chat, 'FILES_SCHEMA', ''), \
+             patch.object(pip_unread, 'SCHEMA', ''), \
+             patch.object(pip_unread, 'migrate', return_value=None), \
              patch.object(session_turn_events, 'SCHEMA', ''), \
              patch.object(pip_memory_statements, 'SCHEMA', ''), \
              patch.object(pip_commit_paths, 'SCHEMA_V22', ''), \
