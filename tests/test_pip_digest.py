@@ -343,7 +343,7 @@ class DigestMigrationTests(unittest.TestCase):
         self.registry.db.execute("DROP TABLE pip_news_seen")
         self.registry.db.execute("PRAGMA user_version=45")
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 47)
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], workspace_registry.SCHEMA_VERSION)
             self.assertEqual(upgraded.db.execute("SELECT count(*) FROM pip_news_seen").fetchone()[0], 0)
             self.assertEqual(upgraded.db.execute("SELECT count(*) FROM pip_news_run_seen").fetchone()[0], 0)
             self.assertIsNotNone(upgraded.db.execute("SELECT 1 FROM pips WHERE id=?", (pip["id"],)).fetchone(), "its Pips kept")
