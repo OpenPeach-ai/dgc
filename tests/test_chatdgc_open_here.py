@@ -15,6 +15,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -22,7 +23,7 @@ from test_session_detach import (POSIX_SOCKETS, ChatModel, Serve, World, alive, 
                                  wait_until)
 
 from dgc import editor_protocol as ep  # noqa: E402
-from dgc.chatdgc.service import _writes  # noqa: E402
+from dgc.chatdgc.service import ChatService, _writes  # noqa: E402
 
 HELD = "open in another window"
 
@@ -51,6 +52,36 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNotNone(ep.event_error({"type": "chatdgc_held", "seq": 3, "conversation_id": chat, "state": "gone"}))
         self.assertIsNone(ep.command_error({"type": "chatdgc_shown", "conversation_ids": [chat]}))
         self.assertIsNone(ep.command_error({"type": "chatdgc_open_here", "request_id": "r", "conversation_id": chat}))
+
+
+class HolderDiscoveryTests(unittest.TestCase):
+    def test_waits_for_the_note_when_a_busy_lock_is_not_named_yet(self):
+        service = object.__new__(ChatService)
+        service._holders = mock.Mock(side_effect=[[], [], [{"pid": 42}]])
+        service._locks = mock.Mock()
+        service._locks.take.return_value = False
+        with mock.patch("dgc.chatdgc.service.time.sleep"):
+            self.assertEqual(service._holder_or_claim("chat_" + "a" * 32), ([{"pid": 42}], False))
+        self.assertEqual(service._locks.take.call_count, 2)
+
+    def test_claims_a_chat_if_the_previous_holder_exits_before_its_note(self):
+        service = object.__new__(ChatService)
+        service._holders = mock.Mock(return_value=[])
+        service._locks = mock.Mock()
+        service._locks.take.side_effect = [False, True]
+        with mock.patch("dgc.chatdgc.service.time.sleep"):
+            self.assertEqual(service._holder_or_claim("chat_" + "a" * 32), ([], True))
+        self.assertEqual(service._locks.take.call_count, 2)
+
+    def test_stops_waiting_if_no_holder_note_or_free_lock_appears(self):
+        service = object.__new__(ChatService)
+        service._holders = mock.Mock(return_value=[])
+        service._locks = mock.Mock()
+        service._locks.take.return_value = False
+        with mock.patch("dgc.chatdgc.service.time.monotonic", side_effect=[0.0, 1.0, 9.0]), \
+                mock.patch("dgc.chatdgc.service.time.sleep"):
+            self.assertEqual(service._holder_or_claim("chat_" + "a" * 32), ([], False))
+        self.assertEqual(service._locks.take.call_count, 2)
 
 
 @unittest.skipUnless(POSIX_SOCKETS, "a backend lets a chat go over its socket on Linux and macOS")
@@ -117,7 +148,7 @@ class ChatDGCOpenHereIntegrationTests(unittest.TestCase):
         self.assertFalse(opened["busy"])
         self.assertEqual(chat_lines(opened["messages"][-1]["text"]), ["1", "2", "3"])
         elsewhere = b.wait(lambda e: held(e, "elsewhere", chat), 30)
-        self.assertEqual(elsewhere["pid"], a.proc.pid)
+        self.assertIn(elsewhere.get("pid"), (None, a.proc.pid), "the lock may arrive before the holder's note")
         self.assertGreater(elsewhere["seq"], opened["seq"], "the chat first, then what holds it")
         self.assertFalse(self.holds(world, b.proc.pid, chat), "B holds nothing it only shows")
         self.send(b, "s2", chat, "CHAT_COUNT 2")
@@ -127,7 +158,12 @@ class ChatDGCOpenHereIntegrationTests(unittest.TestCase):
 
         # Open here in B: A lets it go and goes read-only; B opens it from disk and writes to it.
         b.send({"type": "chatdgc_open_here", "request_id": "h1", "conversation_id": chat})
-        here = b.wait(lambda e: held(e, "here", chat) and e.get("request_id") == "h1", 40)
+        try:
+            here = b.wait(lambda e: held(e, "here", chat) and e.get("request_id") == "h1", 40)
+        except AssertionError as exc:
+            errors = [e.get("message") for e in b.events if e.get("type") == "chatdgc_error"
+                      and e.get("request_id") == "h1"]
+            raise AssertionError(f"{exc}\nOpen here errors: {errors[-3:]}") from exc
         taken = b.wait(lambda e: e.get("type") == "chatdgc_opened" and e.get("request_id") == "h1", 30)
         self.assertGreater(taken["seq"], here["seq"])
         self.assertFalse(taken["busy"])

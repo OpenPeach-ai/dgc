@@ -47,6 +47,7 @@ AWAY_CHECK_S = 3.0            # how often a chat another window holds is looked 
 GIVEN_GRACE_S = 15.0          # a chat just let go stays read-only here this long while its new holder's note is written
 LINK_LINE_BYTES = 12 * 1024 * 1024    # one event on a link: a frame is at most 4 MiB on the wire, escaped here
 TAKE_LOCK_S = 2.0             # how long a window taking a chat tries for its lock while the holder drops it
+TAKE_DISCOVERY_S = 8.0        # a lock can precede its holder's note; let that note arrive before giving up
 HELD_ELSEWHERE = "This chat is open in another window. Use Open here to carry on with it in this window."
 BEATEN = "Another window took this chat at the same moment. Use Open here again to carry on with it in this window."
 MAX_HELD_COMMANDS = 32
@@ -875,6 +876,23 @@ class ChatService:
             self._error(f"This chat couldn't be opened here: {' '.join(str(exc).split())[:300] or type(exc).__name__}",
                         request_id, conversation_id)
 
+    def _holder_or_claim(self, conversation_id: str) -> tuple[list[dict], bool]:
+        """Find the process named by a busy lock, or claim a chat whose previous holder has gone.
+
+        The lock becomes visible before its owner's peer note. A single note lookup followed by a
+        short lock attempt can therefore reject Open here even while the owning window is healthy.
+        """
+        deadline = time.monotonic() + TAKE_DISCOVERY_S
+        while True:
+            holders = self._holders(conversation_id)
+            if holders:
+                return holders, False
+            if self._locks.take(conversation_id) is not False:
+                return [], True
+            if time.monotonic() >= deadline:
+                return [], False
+            time.sleep(0.1)
+
     def _take_now(self, conversation_id: str, request_id: str) -> None:
         with self._lock:
             mine = conversation_id in self._turns
@@ -887,8 +905,10 @@ class ChatService:
             link.send({"k": "end", "reason": "taken"})
             self._link_lost(conversation_id, link)
         refused = ""
+        claimed = False
         if not mine:
-            for holder in self._holders(conversation_id):
+            holders, claimed = self._holder_or_claim(conversation_id)
+            for holder in holders:
                 outcome, sock, answer = self._ask(holder, conversation_id, request_id)
                 if outcome == "linked":
                     return self._follow_from(sock, conversation_id, holder.get("pid"), request_id)
@@ -904,7 +924,7 @@ class ChatService:
                            "that reply finishes.",
                 "busy": "This chat is busy in another window (a summary, or a card being sent). Try again in a moment.",
             }.get(refused, "The other window didn't let this chat go. Try again in a moment."), request_id, conversation_id)
-        if not mine and self._locks.take_within(conversation_id, TAKE_LOCK_S) is False:
+        if not mine and not claimed and self._locks.take_within(conversation_id, TAKE_LOCK_S) is False:
             return self._beaten(conversation_id, request_id)
         with self._hold_lock:
             self._away.pop(conversation_id, None)
