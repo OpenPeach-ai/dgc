@@ -20,9 +20,6 @@ def _spawned_id(output: str) -> str:
 
 
 class BackgroundTaskTests(HarnessCase):
-    # How long the scripted child takes; the timing assertions key off it.
-    CHILD_SECONDS = 1.2
-
     def _go(self, h, prompt, routes):
         if isinstance(h.ui, HeadlessUI):
             h.ui.turn_id = "t1"
@@ -33,6 +30,19 @@ class BackgroundTaskTests(HarnessCase):
         h = self.make(git=True, mode="auto")
         notices = []
         h.agent.on_detached_ended = notices.append
+        child_waiting = threading.Event()
+        release_child = threading.Event()
+        parent_done = threading.Event()
+        parent_errors = []
+        child_reply = child("Auth is in pkg/auth.py.\nFILES: pkg/auth.py")
+
+        def paused_child(messages, results, cancel):
+            if not results:
+                child_waiting.set()
+                if not release_child.wait(10):
+                    raise AssertionError("the test did not release the background child")
+            return child_reply(messages, results, cancel)
+
         routes = [
             ("parent: background map", calls_then([
                 ToolCall("t1", "task", {
@@ -42,22 +52,30 @@ class BackgroundTaskTests(HarnessCase):
                     "background": True,
                 }),
             ], final="spawned and done speaking")),
-            # The parent is only "not waiting" relative to how long the child takes, so the two
-            # numbers belong together: a parent that waited would take at least this long.
-            ("look at pkg/auth.py", child("Auth is in pkg/auth.py.\nFILES: pkg/auth.py",
-                                          sleep=self.CHILD_SECONDS)),
+            ("look at pkg/auth.py", paused_child),
         ]
+
+        def run_parent():
+            try:
+                self._go(h, "parent: background map", routes)
+            except BaseException as exc:
+                parent_errors.append(exc)
+            finally:
+                parent_done.set()
+
         with patch.object(LLMClient, "chat", Script(routes)), \
                 patch.object(Config, "clone_for_root", clone_fixture):
-            started = time.monotonic()
-            self._go(h, "parent: background map", routes)
-            elapsed = time.monotonic() - started
-            # The real property, and it needs no clock: the child had not reported yet.
-            self.assertFalse(notices, "the parent turn returned only after the child finished")
-            # A hard bound of 0.8s against a 1.2s child left 0.4s of slack and failed CI on a
-            # loaded runner. A parent that actually waited cannot come in under the child's own
-            # sleep, so that is the bound worth asserting.
-            self.assertLess(elapsed, self.CHILD_SECONDS, "the parent turn must not wait for the child")
+            parent = threading.Thread(target=run_parent)
+            parent.start()
+            try:
+                self.assertTrue(child_waiting.wait(10), "the background child did not start")
+                self.assertTrue(parent_done.wait(5), "the parent turn waited for the background child")
+                self.assertFalse(parent_errors, parent_errors)
+                self.assertFalse(notices, "the parent turn returned only after the child finished")
+            finally:
+                release_child.set()
+                parent.join(10)
+            self.assertFalse(parent.is_alive(), "the parent turn did not stop")
             started_frame = h.of("agent_started")[-1]
             self.assertTrue(started_frame.get("background"))
             self.assertIn("running in the background", h.of("tool_result")[-1]["output"])
