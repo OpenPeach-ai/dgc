@@ -1217,16 +1217,21 @@ class QaInstallerRegressions(unittest.TestCase):
         checkout = home / "src" / "dgc"
         (checkout / ".git").mkdir(parents=True)
         (checkout / ".venv").mkdir()
-        location = L.locate(env={}, prefix=str(checkout / ".venv"), argv0="")
-        self.assertEqual(location.kind, "checkout")
-        from dgc import update
-        printed = io.StringIO()
-        with mock.patch.object(L, "locate", return_value=location), \
-                mock.patch.object(update, "_download_installer", side_effect=AssertionError("downloaded")), \
-                mock.patch.dict(os.environ, {"DGC_FORCE_OVERWRITE": "", "COLUMNS": "60"}), \
-                contextlib.redirect_stdout(printed):
-            listed = update.run_update(["--list"])
-            refused = update.run_update([])
+        # The checkout test must use its own install record and versions directory. A maintainer's
+        # existing DGC install otherwise changes --list's output on the Mac test host.
+        with mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home),
+                                       "XDG_DATA_HOME": str(home / ".local" / "share"),
+                                       "DGC_DATA_DIR": "", "DGC_DIR": "", "DGC_BIN": "",
+                                       "DGC_FORCE_OVERWRITE": "", "COLUMNS": "60"}):
+            location = L.locate(env={}, prefix=str(checkout / ".venv"), argv0="")
+            self.assertEqual(location.kind, "checkout")
+            from dgc import update
+            printed = io.StringIO()
+            with mock.patch.object(L, "locate", return_value=location), \
+                    mock.patch.object(update, "_download_installer", side_effect=AssertionError("downloaded")), \
+                    contextlib.redirect_stdout(printed):
+                listed = update.run_update(["--list"])
+                refused = update.run_update([])
         self.assertEqual(listed, 0, printed.getvalue())
         self.assertIn("no versioned DGC installs in", printed.getvalue())
         self.assertEqual(refused, 1)
