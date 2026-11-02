@@ -42,6 +42,9 @@ const hostFor = (kind) => `(${function (PIP, kind) {
   const run = "run_" + "5".repeat(32);
   const messages = [{ id: "u1", pip_id: PIP, workspace_id: W, role: "user", text: "Is the discount one serious?", run_id: run, status: "succeeded", model: "m", created_at: "2026-10-17T08:59:30.000Z" },
     { id: "a1", pip_id: PIP, workspace_id: W, role: "assistant", text: "Yes. A 10% discount takes the whole total off.\n\nAny order with a discount is charged the wrong amount.", run_id: run, status: "succeeded", model: "m", created_at: "2026-10-17T09:00:00.000Z" }];
+  window.__pipMessages = messages;
+  const nativeInterval = window.setInterval.bind(window);
+  window.setInterval = (fn, ms, ...args) => { if (ms === 4000) window.__pipPoll = fn; return nativeInterval(fn, ms, ...args); };
   const answers = {
     list_workspaces: () => ({ workspaces: [{ id: W, name: personal ? "Personal" : "shop", kind: personal ? "personal" : "git" }], current_workspace_id: W }),
     list_pip_types: () => ({ types }), list_pip_setups: () => ({ setups: [] }), list_pip_starters: () => ({ starters: [] }),
@@ -111,4 +114,35 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.equal(project.whatItDid.display, "none", "What it did is one click away, in the reply's details");
   assert.equal(project.box.borderTopLeftRadius, "22px");
   assert.equal(project.hint.display, "none");
+});
+
+test("a Personal Pip's reply, selected text and face stay mounted during a live poll", async (t) => {
+  if (skipOrFail(t)) return;
+  const context = await browser.newContext({ viewport: { width: 640, height: 800 } });
+  const page = await context.newPage();
+  try {
+    await page.route("https://pips.test/**", (r) => r.fulfill({ body: pageFor("personal"), contentType: "text/html" }));
+    await page.goto("https://pips.test/view");
+    await page.locator(`[data-job="${PIP}"]`).click();
+    await page.waitForSelector('[data-message="a1"] .chat-text');
+    await page.evaluate(() => {
+      window.__oldFace = document.querySelector('.pip-topbar [data-avatar-key]');
+      window.__oldReply = document.querySelector('[data-message="a1"]');
+      window.__oldActions = window.__oldReply.querySelector('.response-actions');
+      const range = document.createRange();
+      range.selectNodeContents(window.__oldReply.querySelector('.chat-text'));
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      window.__selectedText = getSelection().toString();
+      window.__pipMessages.push({ ...window.__pipMessages.at(-1), id: 'a2', text: 'A new status arrived.' });
+      window.__pipPoll();
+    });
+    await page.waitForSelector('[data-message="a2"]');
+    const stable = await page.evaluate(() => ({
+      face: document.querySelector('.pip-topbar [data-avatar-key]') === window.__oldFace,
+      reply: document.querySelector('[data-message="a1"]') === window.__oldReply,
+      actions: window.__oldReply.querySelector('.response-actions') === window.__oldActions,
+      selection: getSelection().toString() === window.__selectedText,
+    }));
+    assert.deepEqual(stable, { face: true, reply: true, actions: true, selection: true });
+  } finally { await context.close(); }
 });
