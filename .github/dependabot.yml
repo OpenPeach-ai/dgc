@@ -4,7 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    groups:
+      weekly-pip:
+        applies-to: version-updates
+        patterns: ["*"]
     ignore:
       # `[build-system] requires` is a FLOOR, not a version to track: pip already
       # resolves the newest setuptools under `>=68`. Raising it only shrinks the set
@@ -14,7 +18,9 @@ updates:
       - dependency-name: "setuptools"
         update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
-    directory: /editors/vscode
+    directories:
+      - /editors/vscode
+      - /sdk/typescript
     schedule:
       interval: weekly
     # Never rewrite a declared range. The default `increase` strategy edits
@@ -26,23 +32,22 @@ updates:
     # AbortSignal.timeout, all present there. Typing against a newer Node buys
     # nothing and lets future code compile against APIs absent at runtime.
     versioning-strategy: lockfile-only
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    groups:
+      weekly-npm:
+        applies-to: version-updates
+        patterns: ["*"]
     ignore:
       # Tracks the editor API floor declared in engines.vscode, not npm latest.
       # Raising it drops every older VS Code and Cursor, which is a product
       # decision — and check-extension-vsix.py asserts the floor in two places.
       - dependency-name: "@types/vscode"
-  # The PUBLISHED TypeScript SDK. Its own npm tree was watched by nothing, although it ships to
-  # users from GitHub release tarballs exactly as the extension ships to the Marketplace.
-  # lockfile-only for the same reason as the extension: never rewrite a declared range.
-  - package-ecosystem: npm
-    directory: /sdk/typescript
-    schedule:
-      interval: weekly
-    versioning-strategy: lockfile-only
-    open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    groups:
+      weekly-actions:
+        applies-to: version-updates
+        patterns: ["*"]
