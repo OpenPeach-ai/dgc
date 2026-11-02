@@ -368,6 +368,18 @@ class Choices(PluginChat):
 
 
 class OnTheWire(PluginChat):
+    def test_sent_card_without_prior_reply_text_still_reaches_the_model(self):
+        chat, reply = self.say("Send the invite", {"calls": [("call_plugin", {"plugin": "gcal",
+            "tool": "create_event", "arguments": {"title": "Lunch"}})]}, {"parts": []})
+        self.assertFalse(reply["text"])
+        card = reply["actions"][0]
+        self.world["answers"]["create_event"] = '{"id":"evt_1"}'
+        self.engine.act(chat["id"], reply["id"], card["id"], "run")
+        self.world["script"].append({"parts": ["The invite was created."]})
+        continued = self.engine.continue_action(chat["id"], reply["id"], card["id"])
+        self.assertIn("The invite was created.", continued["text"])
+        self.assertIn("evt_1", str(self.world["read"][-1]["messages"]))
+
     def setUp(self):
         super().setUp()
         from dgc.chatdgc.service import ChatService

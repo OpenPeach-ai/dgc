@@ -1742,7 +1742,9 @@ class ChatEngine:
                             "and quote it, or choose a larger window in Settings.]")
                     else:
                         content += "\n\n" + attached.frame(meta, found[0], words)
-            if not content and not pictures:
+            has_reply_parts = m.get("role") == "assistant" and any(m.get(key) for key in (
+                "actions", "files", "widgets", "queries", "canvases", "draft_edited", "images", "sources"))
+            if not content and not pictures and not has_reply_parts:
                 continue
             for card in m.get("actions") or [] if m["role"] == "assistant" else []:
                 content += "\n\n" + _card_note(card)
