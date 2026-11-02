@@ -9475,6 +9475,10 @@ class Host:
         self.chats: dict[str, Backend] = {}
         self._chat_ids = itertools.count()
         self._chats_lock = threading.Lock()
+        # Peer notes are snapshots assembled on several threads (the wire, turn completion,
+        # and the heartbeat). Keep snapshot and replace in one order: an older snapshot must
+        # never land after a newer handoff and claim that this process still holds a chat.
+        self._peer_announce_lock = threading.RLock()
         self._opening: set[str] = set()      # minted, still being built off the stdin thread
         self._closing: set[str] = set()      # still emitting their last events
         self._retired_secrets: set[str] = set()
@@ -10003,33 +10007,34 @@ class Host:
     def announce_peers(self) -> None:
         """The process's note: the first chat's fields, and every chat in `sessions`."""
         try:
-            from . import peers as _peers
-            places = []
-            for chat in list(self.chats.values()):
-                agent = getattr(chat, "agent", None)
-                root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
-                places.append({
-                    "session": str(getattr(agent, "session_file", "") or ""),
-                    "name": str(getattr(agent, "session_name", "") or "")[:200],
-                    "cwd": root, "project_root": root,
-                    "git_common_dir": (agent._git_common_dir() if agent is not None
-                                       and hasattr(agent, "_git_common_dir") else ""),
-                    "status": "working" if _safe_busy(chat) else "idle"})
-            first = places[0] if places else {}
-            board = self.switchboard
-            extra = board.note_fields() if board is not None else {}
-            extra["name"] = first.get("name", "")
-            # Where this process's chats are open and what runs in each (dgc/holder_note.py): another window's DGC
-            # says it beside Open here, and the terminal on resuming one of them.
-            from . import holder_note
-            extra[holder_note.NOTE_KEY] = holder_note.note_block(self, self.editor_app)
-            _peers.announce(kind="serve", takeover=True, session=first.get("session", ""),
-                            cwd=first.get("cwd", ""), project_root=first.get("project_root", ""),
-                            git_common_dir=first.get("git_common_dir", ""),
-                            status="working" if any(p["status"] == "working" for p in places)
-                            else "idle",
-                            sessions=places if len(places) > 1 else None, extra=extra,
-                            directory=_peers.note_dir(self))
+            with self._peer_announce_lock:
+                from . import peers as _peers
+                places = []
+                for chat in list(self.chats.values()):
+                    agent = getattr(chat, "agent", None)
+                    root = str(getattr(getattr(chat, "config", None), "project_root", "") or "")
+                    places.append({
+                        "session": str(getattr(agent, "session_file", "") or ""),
+                        "name": str(getattr(agent, "session_name", "") or "")[:200],
+                        "cwd": root, "project_root": root,
+                        "git_common_dir": (agent._git_common_dir() if agent is not None
+                                           and hasattr(agent, "_git_common_dir") else ""),
+                        "status": "working" if _safe_busy(chat) else "idle"})
+                first = places[0] if places else {}
+                board = self.switchboard
+                extra = board.note_fields() if board is not None else {}
+                extra["name"] = first.get("name", "")
+                # Where this process's chats are open and what runs in each (dgc/holder_note.py): another window's
+                # DGC says it beside Open here, and the terminal on resuming one of them.
+                from . import holder_note
+                extra[holder_note.NOTE_KEY] = holder_note.note_block(self, self.editor_app)
+                _peers.announce(kind="serve", takeover=True, session=first.get("session", ""),
+                                cwd=first.get("cwd", ""), project_root=first.get("project_root", ""),
+                                git_common_dir=first.get("git_common_dir", ""),
+                                status="working" if any(p["status"] == "working" for p in places)
+                                else "idle",
+                                sessions=places if len(places) > 1 else None, extra=extra,
+                                directory=_peers.note_dir(self))
         except Exception:
             pass
 
