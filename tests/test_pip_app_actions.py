@@ -89,10 +89,11 @@ class AppActionTests(unittest.TestCase):
         with self.assertRaises(RegistryError):self.propose(message={**self.message,'body':'Changed'})
 
     def test_approval_sends_exact_message_once_and_persists_receipt(self):
-        saved=self.propose();result=self.accept(saved)
+        account='gmail_A1b2C3d4E5f6G7h8'
+        saved=self.propose(account=account);result=self.accept(saved)
         self.assertEqual(result['status'],'succeeded');self.assertEqual(result['receipt']['message_id'],'gmail_123')
         self.assertEqual(len(self.sends()),1)
-        sent=self.sends()[0];self.assertEqual(sent['tools'],[{'tool_slug':sends.TOOL,'account':'ca_test','arguments':sends.arguments(self.message)}])
+        sent=self.sends()[0];self.assertEqual(sent['tools'],[{'tool_slug':sends.TOOL,'account':account,'arguments':sends.arguments(self.message)}])
         self.assertFalse(sent['sync_response_to_workbench']);self.assertTrue(self.manager.closed)
         with patch.object(sends,'route',side_effect=AssertionError('Retry cannot reconnect')):
             self.assertEqual(self.accept(saved),result)

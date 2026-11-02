@@ -5,6 +5,9 @@
 - Auto mode confirmation applies to the current Work chat. New editor sessions start in Default if 0.50.0 saved Auto globally.
 - Approval cards from parallel helpers name the helper and its requested step.
 - Pip model menus omit embedding and reranking models reported by the DGC connection.
+- Pip chats keep messages, selected text and face animations steady while replies and status updates arrive.
+- Personal and Project tabs keep the Chat and Work tab alignment in wide editor views.
+- Composio's current connected-account IDs work in Pip account selection and reviewed send flows.
 
 ## 0.34.2 — 2026-11-01
 

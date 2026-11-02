@@ -52,13 +52,20 @@ class AccountDiscoveryTests(unittest.TestCase):
         self.assertTrue(self.manager.closed)
     def test_only_exact_search_called_no_data_reads_or_management(self):
         self.discover()
-        self.assertEqual(len(self.manager.calls), 1)
-        name, args, options = self.manager.calls[0]
-        self.assertEqual(name, 'search')
-        self.assertEqual(args, {'queries': [{'use_case': 'fetch Gmail emails'},
-            {'use_case': 'find Google Calendar events'}, {'use_case': 'search Google Drive file names'},
-            {'use_case': 'search Notion page titles'}, {'use_case': 'search saved Google Contacts'}], 'session': {'generate_id': True}})
-        self.assertEqual(options['input_handler']('sign in now'), {'action': 'cancel'})
+        self.assertEqual(len(self.manager.calls), 5)
+        self.assertEqual([args['queries'][0]['use_case'] for _, args, _ in self.manager.calls],
+            ['fetch Gmail emails', 'find Google Calendar events', 'search Google Drive file names',
+             'search Notion page titles', 'search saved Google Contacts'])
+        for name, args, options in self.manager.calls:
+            self.assertEqual(name, 'search')
+            self.assertEqual(len(args['queries']), 1)
+            self.assertEqual(args['session'], {'generate_id': True})
+            self.assertEqual(options['input_handler']('sign in now'), {'action': 'cancel'})
+    def test_current_toolkit_prefixed_account_id_is_accepted_only_for_its_toolkit(self):
+        self.manager.result = json.dumps(response([{'id': 'gmail_A1b2C3d4E5f6G7h8', 'status': 'ACTIVE'}]))
+        self.assertEqual(self.discover()['accounts'][0]['id'], 'gmail_A1b2C3d4E5f6G7h8')
+        self.manager.result = json.dumps(response([{'id': 'notion_A1b2C3d4E5f6G7h8', 'status': 'ACTIVE'}]))
+        with self.assertRaises(RegistryError): self.discover()
     def test_old_endpoint_is_explicitly_unsupported_not_alias_fallback(self):
         value = response();record = value['data']['toolkit_connection_statuses'][0]
         record.pop('accounts');record['connection_details'] = {'id': 'ca_guessed'}

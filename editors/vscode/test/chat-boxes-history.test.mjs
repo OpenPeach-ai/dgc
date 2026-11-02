@@ -171,10 +171,11 @@ async function openPip(platform) {
   await page.locator("#chatText").click();
   return page;
 }
-// The page redraws: the runner's state changes, as it does while a Pip works, and the box is a new element.
+// The page refreshes when the runner's state changes. The chat box stays mounted.
 async function redraw(page) {
   await page.evaluate(() => { window.__oldBox = document.getElementById("host").shadowRoot.getElementById("chatText"); window.__replies += 1; window.__pipPoll?.(); });
-  await page.waitForFunction(() => document.getElementById("host").shadowRoot.getElementById("chatText") !== window.__oldBox);
+  await page.waitForFunction(() => document.getElementById("host").shadowRoot.querySelector('.runner-menu')?.textContent.includes(`${window.__replies} waiting to start`));
+  assert.equal(await page.evaluate(() => document.getElementById("host").shadowRoot.getElementById("chatText") === window.__oldBox), true);
 }
 
 for (const { name, mod, platform } of PLATFORMS) {
@@ -193,7 +194,7 @@ for (const { name, mod, platform } of PLATFORMS) {
       assert.equal(await pipValue(page), "Check the release notes for typos", "the redraw keeps the draft");
       await undo(page);
       assert.equal(await pipValue(page), "Check the release notes",
-        "the redrawn textarea's own history was empty, so the key did nothing at all");
+        "the mounted textarea keeps its undo history after a refresh");
       await redo(page);
       assert.equal(await pipValue(page), "Check the release notes for typos");
     } finally { await page.close(); }

@@ -13,13 +13,14 @@ import unicodedata
 from contextlib import contextmanager
 
 from . import pip_app_access as apps
+from .pip_account_ids import ACCOUNT_ID
 from .workspace_registry import RegistryError
 
 TOOL = 'GMAIL_SEND_EMAIL'
 MAX_BODY = 12000
 MAX_RESPONSE = 32768
 HASH = re.compile(r'[a-f0-9]{64}\Z')
-ACCOUNT = re.compile(r'(?:ca|coup)_[A-Za-z0-9_-]{1,120}\Z')
+ACCOUNT = ACCOUNT_ID
 ARGS = {'recipient_email', 'subject', 'body', 'user_id', 'is_html', 'cc', 'bcc', 'extra_recipients'}
 ACCEPTED = 'Provider accepted the message; delivery to the recipient is not confirmed.'
 

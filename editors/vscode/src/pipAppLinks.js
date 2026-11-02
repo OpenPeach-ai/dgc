@@ -1,6 +1,7 @@
 // A Personal Pip's own apps, connected from its chat like Grok's connectors (pip_app_links). The Pip
 // asks with connect_app; this card is the user's side: Connect (the host opens the sign-in page from
 // the backend's reply, never a link from here), then "I've signed in", or Not now.
+import {validAccountId} from './pipAccountId.js';
 
 const STATUSES = ['requested', 'authorizing', 'connected', 'declined', 'failed'];
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
@@ -13,7 +14,7 @@ export function appLink(value, pip) {
     || !text(value.app, 80) || !value.app || !text(value.reason, 600) || !STATUSES.includes(value.status)
     || !(value.label === null || text(value.label, 320)) || !(value.error === null || text(value.error, 600))
     || !Number.isFinite(Date.parse(value.updated_at)) || !(value.known_label === undefined || text(value.known_label, 320))) fail();
-  if (value.status === 'connected' && (!/^[A-Za-z0-9_.-]{1,80}$/.test(value.server || '') || !/^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(value.account || ''))) fail();
+  if (value.status === 'connected' && (!/^[A-Za-z0-9_.-]{1,80}$/.test(value.server || '') || !validAccountId(value.account, value.toolkit))) fail();
   return value;
 }
 

@@ -231,7 +231,7 @@ test('embedded mount uses one injected bridge and isolates styles, events and mo
  w.HTMLCanvasElement.prototype.getContext=()=>null;
  w.TextEncoder=TextEncoder;w.setInterval=()=>77;w.clearInterval=id=>{assert.equal(id,77);cleared=true;};w.acquireVsCodeApi=()=>{acquires++;throw new Error('second VSCode API acquisition');};w.eval(code);assert.equal(acquires,0);let mounts=0;const cleaned=[];w.PipConcepts.plush={...w.PipConcepts.plush,mount:root=>{assert.equal(root.ownerDocument,w.document);const n=++mounts;return()=>cleaned.push(n);}};const shadow=w.document.querySelector('#pips-host').attachShadow({mode:'open'}),sent=[];
  const mounted=w.DgcPips.mount({root:shadow,stylesheetUri:'vscode-webview://test/pips.css',postMessage:m=>sent.push(m),onMessage:fn=>{listener=fn;return()=>{unsubscribed=true;};},getState:()=>({}),setState:()=>{},close:()=>{}});assert.equal(sent[0].type,'pipsReady');listener({type:'pipsConnection',connected:true,supported:true,enabled:false});assert.equal(shadow.querySelector('#return-main'),null);assert.equal(shadow.querySelector('header h1'),null);assert.ok(shadow.querySelector('.embedded-header'));assert.ok(shadow.querySelector('.runner-controls #refresh'));assert.ok(shadow.querySelector('.runner-controls #stop-all'));assert.equal(shadow.querySelectorAll('#disable').length,1);w.document.querySelector('#enable').click();assert.equal(sent.length,1);shadow.querySelector('#enable').click();assert.equal(sent.at(-1).request.type,'pips_enable');
- mounted.setVisible(false);assert.ok(shadow.querySelector('.pip-app-root').classList.contains('motion-paused'));assert.equal(w.document.body.classList.contains('motion-paused'),false);assert.equal(w.document.querySelector('#normal-chat').textContent,'Keep this chat');assert.equal(shadow.querySelectorAll('#pips-plush-styles').length,1);assert.equal(w.document.querySelectorAll('#pips-plush-styles').length,0);assert.ok(mounts>1);assert.deepEqual(cleaned,Array.from({length:mounts-1},(_,i)=>i+1));mounted.dispose();assert.deepEqual(cleaned,Array.from({length:mounts},(_,i)=>i+1));mounted.dispose();assert.deepEqual(cleaned,Array.from({length:mounts},(_,i)=>i+1));assert.equal(unsubscribed,true);assert.equal(cleared,true);await flush();
+ mounted.setVisible(false);assert.ok(shadow.querySelector('.pip-app-root').classList.contains('motion-paused'));assert.equal(w.document.body.classList.contains('motion-paused'),false);assert.equal(w.document.querySelector('#normal-chat').textContent,'Keep this chat');assert.equal(shadow.querySelectorAll('#pips-plush-styles').length,1);assert.equal(w.document.querySelectorAll('#pips-plush-styles').length,0);assert.equal(mounts,1,'Pip faces keep their motion subscription across redraws');assert.deepEqual(cleaned,[]);mounted.dispose();assert.deepEqual(cleaned,[1]);mounted.dispose();assert.deepEqual(cleaned,[1]);assert.equal(unsubscribed,true);assert.equal(cleared,true);await flush();
 });
 const chatMessage=(id='m1',pip='a',extra={})=>({id,pip_id:pip,workspace_id:'ws',role:'user',text:'Inspect the source boundary.',run_id:'chat-run',status:'succeeded',model:'model-a',created_at:'2026-10-01T10:00:00Z',...extra});
 test('a failed turn says why under the message, and a malformed reason is refused',async()=>{
@@ -247,6 +247,33 @@ test('a failed turn says why under the message, and a malformed reason is refuse
 });
 test('opening a Pip enters its saved conversation while overview remains an explicit choice',async()=>{
  const x=setup({conversation:true,autoSelect:false,messages:[chatMessage(),chatMessage('m2','a',{role:'assistant',text:'The boundary is in src/main.py.'})]});await x.drain();assert.ok(x.d.querySelector('.layout.overview'));assert.equal(x.requests('list_pip_messages').length,0);x.click('[data-job=a]');await x.drain();assert.equal(x.d.querySelector('[data-tab=chat]').getAttribute('aria-pressed'),'true');assert.equal(x.d.querySelector('[aria-label="Run report"]'),null);assert.match(x.d.querySelector('[aria-label="Pip conversation"]').textContent,/The boundary is in src\/main.py/);x.click('#back-pips');assert.ok(x.d.querySelector('.layout.overview'));
+});
+test('chat polling keeps the Pip face, message actions and selected text mounted',async()=>{
+ const messages=[chatMessage('m1','a',{role:'assistant',text:'Keep this text selected while another message arrives.'})];
+ const x=setup({conversation:true,messages,observe:true,workspaceValue:{...ws,kind:'personal'},apiVersion:61,
+  jobs:[job('a',{source_policy:{mode:'personal'},pip_type:'rook'})]});
+ const controls={version:1,mode:'read_only',options:{context_size:8192,thinking:'off'},options_source:'last_message',
+  inherited_context_size:1048576,effective_context_size:8192,context_min:2048,context_max:32768,
+  thinking_levels:['off','low','medium','high','xhigh'],reasoning_control:'provider_dependent',reasoning_note:'n',context_note:'n'};
+ const reply={list_pip_messages:r=>({pip_id:r.pip_id,workspace_id:'ws',messages,next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls})};
+ await x.drain(reply);
+ const face=x.d.querySelector('.pip-topbar [data-avatar-key]');
+ const message=x.d.querySelector('.pip-message.assistant');
+ assert.ok(message,'the saved reply loaded');
+ const actions=message.querySelector('.response-actions');
+ const text=message.querySelector('.chat-text');
+ const node=[...text.childNodes].find(n=>n.nodeType===3)||text.querySelector('*')?.firstChild;
+ assert.ok(face&&node,'the saved reply and Pip face are visible');
+ x.observers.at(-1).callback([{target:face,isIntersecting:true}]);
+ assert.equal(face.classList.contains('motion-offscreen'),false);
+ const selection=x.w.getSelection(),range=x.d.createRange();range.selectNodeContents(node);selection.addRange(range);
+ messages.push(chatMessage('m2','a',{role:'user',text:'A new question.'}));
+ x.poll();await x.drain(reply);
+ assert.equal(x.d.querySelector('.pip-topbar [data-avatar-key]'),face,'the idle animation keeps its node');
+ assert.equal(face.classList.contains('motion-offscreen'),false,'polling does not pause a visible Pip face');
+ assert.equal(x.d.querySelector('.pip-message.assistant'),message,'the earlier reply keeps its node');
+ if(actions)assert.equal(message.querySelector('.response-actions'),actions,'the action row keeps its node');
+ assert.equal(x.w.getSelection().toString(),node.textContent,'selected reply text is retained');
 });
 test('sending chat saves the exact request and never fabricates an assistant reply',async()=>{
  const messages=[],x=setup({conversation:true,messages});await x.drain();x.input('#chatText','What reads this value?');x.submit('#chat-form');const req=x.requests('send_pip_message')[0];assert.equal(req.request.pip_id,'a');assert.equal(req.request.text,'What reads this value?');assert.match(req.request.idempotency_key,/^pip-chat-/);assert.equal(x.d.querySelectorAll('.pip-message.assistant').length,0);const saved=chatMessage('saved','a',{text:req.request.text,status:'queued'});messages.push(saved);x.answer(req,{message:saved,run:run('chat-run','a',{status:'queued',manifest:{run_kind:'conversation'}})});await x.drain();assert.equal(x.d.querySelector('#chatText').value,'');assert.match(x.d.querySelector('.message-status').textContent,/Queued/);assert.equal(x.d.querySelectorAll('.pip-message.assistant').length,0);saved.status='succeeded';messages.push(chatMessage('answer','a',{role:'assistant',text:'Only the loader reads it.'}));x.poll();await x.drain();assert.match(x.d.querySelector('.pip-message.assistant').textContent,/Only the loader reads it/);

@@ -89,10 +89,11 @@ class AppLinkTests(unittest.TestCase):
         self.assertTrue(all(m.closed for m in self.managers), "every Composio session is closed")
 
     def test_an_account_composio_already_has_is_used_without_a_second_sign_in(self):
-        self.world["accounts"] = [{"id": "ca_work", "status": "ACTIVE", "user_info": {"email": "me@example.com"}}]
+        self.world["accounts"] = [{"id": "gmail_A1b2C3d4E5f6G7h8", "status": "ACTIVE", "user_info": {"email": "me@example.com"}}]
         started = links.start(self.registry, self.cfg, self.ask()["id"], "editor-user", manager_factory=self.factory)
         self.assertEqual((started["link"]["status"], started["link"]["label"], started["redirect_url"]),
                          ("connected", "me@example.com", None))
+        self.assertEqual(started["link"]["account"], "gmail_A1b2C3d4E5f6G7h8")
         self.assertEqual(self.world["calls"], [{"name": "gmail", "action": "list"}], "no new auth link")
 
     def test_check_waits_for_the_browser_then_connects_and_notices_a_changed_connection(self):

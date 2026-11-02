@@ -103,14 +103,12 @@
 
 /* Personal | Project: the Sessions home's Chat | Work (main.css .home-tabs), the same box, type, colours and keys, so the
    two pages read as one. main.css's tokens are spelled out with their fallbacks: this sheet also draws the Pips editor
-   tab, which has no main.css, and its :host gives --surface and --muted other values. In a wide view the pair keeps a
-   side bar's width rather than stretching across it. */
+   tab, which has no main.css, and its :host gives --surface and --muted other values. */
 .pips-tabs{display:flex;flex:none;gap:2px;padding:2px;margin:8px 8px 0;border:1px solid var(--vscode-panel-border,var(--vscode-widget-border,#303032));border-radius:8px;background:var(--vscode-editor-background,#202021)}
 .pips-tabs>.pips-tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:20px;margin:0;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#B2B2B6);font:600 12px/1 var(--vscode-font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);white-space:nowrap;cursor:pointer}
 .pips-tabs>.pips-tab:hover{background:transparent;color:var(--vscode-foreground,#D7D7DA)}
 .pips-tabs>.pips-tab[aria-selected=true]{border-color:var(--vscode-input-border,var(--vscode-widget-border,#3A3A3D));background:var(--vscode-input-background,var(--vscode-dropdown-background,#29292B));color:var(--vscode-editor-foreground,var(--vscode-foreground,#F5F5F6))}
 .pips-tabs>.pips-tab:focus-visible{outline:1px solid var(--vscode-focusBorder,#7C5CFF);outline-offset:1px}
-@container(min-width:701px){.pips-tabs{width:100%;max-width:420px;align-self:flex-start}}
 @media(forced-colors:active){.pips-tabs{border-color:CanvasText;background:Canvas}.pips-tabs>.pips-tab{color:CanvasText}.pips-tabs>.pips-tab[aria-selected=true]{border-color:CanvasText;background:ButtonFace}}
 /* The project's bar is as tall as the Personal one above the tabs, so switching never moves them. */
 .extension-pips .embedded-header.scoped{padding:8px 12px 6px}

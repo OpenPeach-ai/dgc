@@ -8,17 +8,16 @@ executed. The user guide is docs/PIPS.md.
 from __future__ import annotations
 
 import json
-import re
 import time
 import unicodedata
 
 from . import pip_app_access as apps
+from .pip_account_ids import valid_account_id
 from .workspace_registry import RegistryError
 
 TOOLKITS = ('gmail', 'googlecalendar', 'googledrive', 'notion', 'googlecontacts')
 MAX_RESPONSE = 256 * 1024  # Acceptance limit; the MCP transport owns allocation.
 MAX_ACCOUNTS = 64
-ACCOUNT_ID = re.compile(r'(?:ca|coup)_[A-Za-z0-9_-]{1,120}\Z')
 
 
 def _field(value, *path):
@@ -76,7 +75,7 @@ def parse_accounts(raw):
             if not isinstance(row, dict):
                 raise RegistryError('account_discovery_failed', 'Composio returned an invalid account record.')
             identity = row.get('id')
-            if not isinstance(identity, str) or not ACCOUNT_ID.fullmatch(identity):
+            if not valid_account_id(identity, toolkit):
                 raise RegistryError('account_identity_missing', 'This Composio endpoint did not return stable connected-account IDs. No account was selected.')
             key = (toolkit, identity)
             if key in seen:
@@ -101,7 +100,7 @@ def parse_accounts(raw):
 
 
 def discover(config, name, *, manager_factory=apps._manager, clock=time.monotonic):
-    """Use the existing MCP connection for one closed, read-only search call."""
+    """Use the existing MCP connection for bounded, read-only toolkit searches."""
     spec, fingerprint = apps.connection(config, name)
     if not apps.supported(spec):
         raise RegistryError('unsupported_connector', 'This connector has no supported Pip account-discovery adapter.')
@@ -129,17 +128,38 @@ def discover(config, name, *, manager_factory=apps._manager, clock=time.monotoni
             raise RegistryError('account_discovery_unsupported', 'This connection does not expose the supported read-only account search. Use Connect Apps in Composio.')
         if cancel.is_set():
             raise RegistryError('cancelled', 'Account discovery reached its deadline.')
-        raw = manager.call(matches[0], {'queries': [
-            {'use_case': 'fetch Gmail emails'},
-            {'use_case': 'find Google Calendar events'},
-            {'use_case': 'search Google Drive file names'},
-            {'use_case': 'search Notion page titles'},
-            {'use_case': 'search saved Google Contacts'}], 'session': {'generate_id': True}},
-            cancel=cancel, input_handler=lambda *a, **kw: {'action': 'cancel'})
+        # One atomic query per call, as Composio documents. Five queries in
+        # one search can exceed the MCP transport's output limit and leave a
+        # truncated JSON response even when the provider completed its work.
+        queries = (('gmail', 'fetch Gmail emails'),
+                   ('googlecalendar', 'find Google Calendar events'),
+                   ('googledrive', 'search Google Drive file names'),
+                   ('notion', 'search Notion page titles'),
+                   ('googlecontacts', 'search saved Google Contacts'))
+        found, states, seen = [], {}, set()
+        for toolkit, use_case in queries:
+            if cancel.is_set():
+                raise RegistryError('cancelled', 'Account discovery reached its deadline.')
+            raw = manager.call(matches[0], {'queries': [{'use_case': use_case}], 'session': {'generate_id': True}},
+                               cancel=cancel, input_handler=lambda *a, **kw: {'action': 'cancel'})
+            page = parse_accounts(raw)
+            states[toolkit] = next(item['state'] for item in page['toolkits'] if item['toolkit'] == toolkit)
+            for account in page['accounts']:
+                if account['toolkit'] != toolkit:
+                    continue
+                identity = (toolkit, account['id'])
+                if identity in seen:
+                    raise RegistryError('account_discovery_failed', 'Composio returned a duplicate account identity. Refresh account discovery.')
+                seen.add(identity)
+                found.append(account)
+                if len(found) > MAX_ACCOUNTS:
+                    raise RegistryError('account_discovery_limit', 'Account discovery returned too many accounts.')
         if cancel.is_set():
             raise RegistryError('cancelled', 'Account discovery reached its deadline.')
         if apps.connection(config, name)[1] != fingerprint:
             raise RegistryError('connection_changed', 'The connection changed while accounts were loading. Refresh and review it again.')
-        return {'server': name, 'connection_digest': fingerprint, **parse_accounts(raw)}
+        return {'server': name, 'connection_digest': fingerprint, 'accounts': found,
+                'toolkits': [{'toolkit': toolkit, 'state': states[toolkit]} for toolkit in TOOLKITS],
+                'notice': 'Choose an account explicitly. This lists connection identities only; it does not read email, events, or grant a Pip access.'}
     finally:
         manager.stop_all()

@@ -1,7 +1,7 @@
 // Controller responses are data, never provider plans or tool instructions.
 import {ownAppReadWords} from './pipOwnApps.js';
+import {validAccountId} from './pipAccountId.js';
 const digest = value => typeof value==='string' && /^[a-f0-9]{64}$/.test(value);
-const accountId = value => typeof value==='string' && /^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(value);
 export const appLabels={gmail:'Gmail',googlecalendar:'Google Calendar',googledrive:'Google Drive',notion:'Notion',googlecontacts:'Google Contacts'};
 const toolkits={gmail:'GMAIL_FETCH_EMAILS',googlecalendar:'GOOGLECALENDAR_FIND_EVENT',googledrive:'GOOGLEDRIVE_FIND_FILE',notion:'NOTION_SEARCH_NOTION_PAGE',googlecontacts:'GOOGLECONTACTS_SEARCH_CONTACTS'};
 const driveFields='files(id,name,mimeType,modifiedTime,webViewLink),nextPageToken,incompleteSearch';
@@ -36,7 +36,7 @@ export function combineReadPlans(existing,next){
 }
 export function accountChoices(server, discovery, inspection){
  if(!discovery||!inspection||discovery.server!==server||inspection.server!==server||!digest(discovery.connection_digest)||discovery.connection_digest!==inspection.connection_digest||!Array.isArray(discovery.accounts)||discovery.accounts.length>64||!Array.isArray(inspection.tools)||inspection.tools.length>8)throw Error('The account list and connection inspection no longer match. Refresh account selection.');
- const seen=new Set();return discovery.accounts.map(a=>{if(!a||!Object.hasOwn(toolkits,a.toolkit)||!accountId(a.id)||typeof a.label!=='string'||!a.label.trim()||a.label.length>160||/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(a.label))throw Error('The connection returned an invalid account identity.');const key=a.toolkit+':'+a.id;if(seen.has(key))throw Error('The connection returned duplicate accounts.');seen.add(key);const tool=inspection.tools.find(t=>t.tool===toolkits[a.toolkit]);if(!tool||tool.account_required!==true||!digest(tool.schema_digest))return null;return {id:a.id,label:a.label,toolkit:a.toolkit,tool:tool.tool,schema_digest:tool.schema_digest};}).filter(Boolean);
+ const seen=new Set();return discovery.accounts.map(a=>{if(!a||!Object.hasOwn(toolkits,a.toolkit)||!validAccountId(a.id,a.toolkit)||typeof a.label!=='string'||!a.label.trim()||a.label.length>160||/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(a.label))throw Error('The connection returned an invalid account identity.');const key=a.toolkit+':'+a.id;if(seen.has(key))throw Error('The connection returned duplicate accounts.');seen.add(key);const tool=inspection.tools.find(t=>t.tool===toolkits[a.toolkit]);if(!tool||tool.account_required!==true||!digest(tool.schema_digest))return null;return {id:a.id,label:a.label,toolkit:a.toolkit,tool:tool.tool,schema_digest:tool.schema_digest};}).filter(Boolean);
 }
 export function accountReadPlan(server, fingerprint, choices, selection, draft){
  if(!/^[A-Za-z0-9_.-]{1,80}$/.test(server)||!digest(fingerprint)||typeof selection!=='string'||!/^\d{1,2}$/.test(selection)||!choices[Number(selection)])throw Error('Choose a connected account. Nothing is selected automatically.');

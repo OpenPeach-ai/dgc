@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import pip_app_access as apps, pip_app_read_adapters as extra_reads, pip_microsoft_mail as microsoft_mail
+from .pip_account_ids import valid_account_id
 from .workspace_registry import RegistryError, WorkspaceRegistry, utc_now
 
 SCHEMA = """
@@ -47,7 +48,6 @@ CREATE INDEX IF NOT EXISTS pip_app_links_pip ON pip_app_links(pip_id, toolkit, u
 """
 
 TOOLKIT = re.compile(r"[a-z0-9][a-z0-9_]{1,39}\Z")
-ACCOUNT = re.compile(r"(?:ca|coup)_[A-Za-z0-9_-]{1,120}\Z")
 LOCAL = ("editor-user", "local-console")
 NAMES = {"gmail": "Gmail", "googlecalendar": "Google Calendar", "googledrive": "Google Drive", "googledocs": "Google Docs",
          "googleslides": "Google Slides",
@@ -254,7 +254,7 @@ def _manage(config, server, toolkit, action, *, manager_factory=None):
         raise RegistryError("connect_failed", f"Composio could not {'list' if action == 'list' else 'start'} the {app_name(toolkit)} connection. Try again, or use Connect Apps in Composio.") from exc
 
 
-def _active(result):
+def _active(result, toolkit):
     """The first ACTIVE account in a COMPOSIO_MANAGE_CONNECTIONS reply: (id, label), or None."""
     accounts = result.get("accounts")
     if not isinstance(accounts, list):
@@ -263,7 +263,7 @@ def _active(result):
         if not isinstance(account, dict) or str(account.get("status", "")).upper() != "ACTIVE":
             continue
         identity = account.get("id") or account.get("account_id") or account.get("connected_account_id")
-        if not isinstance(identity, str) or not ACCOUNT.fullmatch(identity):
+        if not valid_account_id(identity, toolkit):
             continue
         info = account.get("user_info") if isinstance(account.get("user_info"), dict) else {}
         label = next((v for v in (info.get("email"), account.get("email"), account.get("alias"), info.get("name"))
@@ -305,7 +305,7 @@ def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
     server, fingerprint = found
     try:
         listed = _manage(config, server, row["toolkit"], "list", manager_factory=manager_factory)
-        active = _active(listed)
+        active = _active(listed, row["toolkit"])
         if active:
             return {"link": _set(registry, link_id, status="connected", server=server, connection_digest=fingerprint,
                                  account=active[0], label=active[1], error=None), "redirect_url": None, "connected": True}
@@ -313,7 +313,7 @@ def start(registry, config, link_id, actor, *, manager_factory=None) -> dict:
         url = added.get("redirect_url") or added.get("redirectUrl")
         parts = urlsplit(url) if isinstance(url, str) and len(url) <= 4096 else None
         if not parts or parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
-            active = _active(added)
+            active = _active(added, row["toolkit"])
             if active:
                 return {"link": _set(registry, link_id, status="connected", server=server, connection_digest=fingerprint,
                                      account=active[0], label=active[1], error=None), "redirect_url": None, "connected": True}
@@ -335,7 +335,7 @@ def check(registry, config, link_id, actor, *, manager_factory=None) -> dict:
         return {"link": _set(registry, link_id, status="failed", error="Your Composio connection changed in Settings. Choose Connect again."),
                 "connected": False}
     try:
-        active = _active(_manage(config, row["server"], row["toolkit"], "list", manager_factory=manager_factory))
+        active = _active(_manage(config, row["server"], row["toolkit"], "list", manager_factory=manager_factory), row["toolkit"])
     except RegistryError as exc:
         return {"link": projection(row), "connected": False, "error": str(exc)}
     if not active:

@@ -71,7 +71,7 @@ test('while the browser is open the card checks itself, then closes when connect
  const check=x.requests('check_pip_app_link').at(-1);assert.equal(check.request.link_id,LINK);
  x.answer(check,{link:link({status:'authorizing'}),connected:false});await flush();
  x.click(`[data-app-link-check="${LINK}"]`);
- const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com',server:'composio',account:'ca_done'}),connected:true});await x.drain();
+ const now=x.requests('check_pip_app_link').at(-1);x.setLinks([link({status:'connected',label:'me@example.com',server:'composio',account:'gmail_A1b2C3d4E5f6G7h8'})]);x.answer(now,{link:link({status:'connected',label:'me@example.com',server:'composio',account:'gmail_A1b2C3d4E5f6G7h8'}),connected:true});await x.drain();
  assert.equal(x.d.querySelector(`[data-app-link="${LINK}"]`),null,'the completed request no longer occupies the composer area');
  assert.match(x.d.body.textContent,/Gmail is connected to Gmail\./);
  assert.ok(x.requests('list_pip_messages').length>=2,'the chat reloads: the Pip carries on');

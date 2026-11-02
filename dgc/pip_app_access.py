@@ -131,7 +131,8 @@ def validate(plan):
             raise RegistryError('unsupported_app_action','Only supported, bounded app reads can be granted. Generic execute, send and connection-management tools are not supported.')
         if call['tool'] in extra_reads.TOOLS and (plan['schema_version']!=3 or 'account' not in call):
             raise RegistryError('invalid_app_plan','Additional app reads require version 3 and an explicitly reviewed account.')
-        if 'account' in call and (not isinstance(call['account'],str) or not re.fullmatch(r'(?:ca|coup)_[A-Za-z0-9_-]{1,120}',call['account'])):
+        from .pip_account_ids import valid_account_id
+        if 'account' in call and not valid_account_id(call['account']):
             raise RegistryError('invalid_account','Choose a connected account ID, not a mutable account alias.')
         if 'window' in call:
             if plan['schema_version'] not in (2,3) or call['tool']!='GOOGLECALENDAR_FIND_EVENT' or any(k in call['arguments'] for k in ('time_min','time_max')):

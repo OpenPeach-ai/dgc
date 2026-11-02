@@ -1,5 +1,5 @@
 // Personal | Project in real Chromium: the side bar's real page (panel.ts, main.css, main.js) with the real Pips view
-// in its shadow root, at 300 and 460 px, dark and light. The tabs are the Sessions home's Chat | Work over again (the
+// in its shadow root, at narrow and wide editor widths, dark and light. The tabs are the Sessions home's Chat | Work over again (the
 // reported 2026-10-21: "tabs would look better"), so the two pages read as one: the same box, type and colours, read
 // from computed style; they fit; their words clear 4.5:1; and switching tabs never moves them.
 import { after, before, test } from "node:test";
@@ -108,12 +108,15 @@ const click = (page, id) => page.evaluate((id) => document.getElementById("pips-
 const pipsText = (page) => page.evaluate(() => document.getElementById("pips-host").shadowRoot.querySelector(".pip-app-root").textContent.replace(/\s+/g, " "));
 
 for (const theme of ["dark-modern", "light-modern"]) {
-  for (const width of [300, 460]) {
+  for (const width of [300, 460, 900, 1468]) {
     test(`${theme} at ${width}px: Personal | Project are the Sessions home's tabs, they fit and read, and switching never moves them`, async (t) => {
       if (skipOrFail(t)) return;
       const { page, home, errors, close } = await openPage({ width, theme });
       try {
         const personal = await styles(page, "pips");
+        if (process.env.DGC_SHOTS && width === 1468 && theme === "dark-modern") {
+          await page.screenshot({ path: `${process.env.DGC_SHOTS}/pips-tabs-wide.png` });
+        }
         assert.deepEqual([personal.chosen.text, personal.other.text], ["Personal", "Project"]);
         assert.deepEqual([home.chosen.text, home.other.text], ["Chat", "Work"], "measured against the home's own tabs");
         // The same box, type and colours as the home's tabs, property by property.

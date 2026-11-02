@@ -12,6 +12,7 @@ import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, a
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import '../media/numbered-list.js';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
+import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
 import {latestActivity,activityEnded,startedWords,routineStartedWords,elapsed} from './pipRunActivity.js';
 import {mountSetupCards} from './pipSetupCards.js';
@@ -192,7 +193,7 @@ const picker=createPicker({root:document,onPick(id,value){
  $(id)?.focus({preventScroll:true});
 }});
 let adaptationSeq=0,handoffSeq=0,handoffDetailSeq=0,checkpointSeq=0,refreshSeq=0,selectionSeq=0,detailSeq=0,historySeq=0,activitySeq=0,approvalSeq=0,polling=false,dialogReturn=null,lastMarkup='';
-let messageRenderMarkup=new Map();
+const observedAvatars=new WeakSet();
 const send = (type,args={}) => broker.request({type,...args});
 const usable = () => S.connected && S.supported && S.enabled;
 const archived=()=>S.pip?.status==='archived';
@@ -206,12 +207,14 @@ function avatar(state='idle',type={id:'rook',character_index:4,name:'Rook'},key=
   return `<span class="avatar" data-avatar-key="${esc(key)}" data-character="${esc(type?.id||'unsupported')}" data-pose="${esc(state)}"${tint?` data-tint="${esc(tint)}"`:''} aria-hidden="true">${type?window.PipConcepts.plush.markup({index:type.character_index,name:type.name},state,id,{includeStyles:false}):'<span class="unknown-avatar">?</span>'}</span>`;
 }
 function observeAvatars() {
-  characterCleanup?.();
-  characterCleanup=window.PipConcepts.plush.mount?.(document);
-  avatarObserver?.disconnect();avatarObserver=null;
+  if(!characterCleanup)characterCleanup=window.PipConcepts.plush.mount?.(document);
   if(typeof IntersectionObserver!=='function')return;
-  avatarObserver=new IntersectionObserver(entries=>{for(const e of entries)e.target.classList.toggle('motion-offscreen',!e.isIntersecting);},{threshold:0});
-  for(const node of document.querySelectorAll('.avatar')){node.classList.add('motion-offscreen');avatarObserver.observe(node);}
+  if(!avatarObserver)avatarObserver=new IntersectionObserver(entries=>{for(const e of entries)e.target.classList.toggle('motion-offscreen',!e.isIntersecting);},{threshold:0});
+  avatarObserver.disconnect();
+  for(const node of document.querySelectorAll('.avatar')){
+    if(!observedAvatars.has(node)){node.classList.add('motion-offscreen');observedAvatars.add(node);}
+    avatarObserver.observe(node);
+  }
 }
 const field = (key,label,textarea=false) => `<label>${esc(label)}${textarea?`<textarea data-draft="${key}" id="${key}">${esc(draft[key])}</textarea>`:`<input data-draft="${key}" id="${key}" value="${esc(draft[key])}" autocomplete="off">`}</label>`;
 const errorMarkup = value => value ? `<p class="notice error" role="alert">${esc(value)}</p>` : '';
@@ -2616,18 +2619,11 @@ function render() {
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
-  $('app').innerHTML=markup;
-  // Stream and runner polls redraw the surrounding chat every few hundred milliseconds. Keep
-  // completed message nodes whose rendered content is identical, so their action row, selection,
-  // and focus do not repeatedly disappear and reappear while the next reply is being written.
-  const nextMessageMarkup=new Map(),oldMessageNodes=new Map(oldMessageRows.map(node=>[node.dataset.message,node]));
-  for(const node of document.querySelectorAll('.conversation-log [data-message]')){
-    const id=node.dataset.message,rendered=node.outerHTML;
-    nextMessageMarkup.set(id,rendered);
-    const old=oldPipId===S.selected?oldMessageNodes.get(id):null;
-    if(old&&messageRenderMarkup.get(id)===rendered)node.replaceWith(old);
-  }
-  messageRenderMarkup=nextMessageMarkup;
+  if(chatView&&oldLog&&oldPipId===S.selected){
+    const next=owner.createElement('template');next.innerHTML=markup;
+    patchChildren($('app'),next.content);
+  }else $('app').innerHTML=markup;
+  // The keyed chat patch above retains message nodes and their selection.
   shell.dataset.motionPip=S.selected||'';
   for(const row of document.querySelectorAll('[data-job][data-state]')){
     const previous=oldJobs.get(row.dataset.job);

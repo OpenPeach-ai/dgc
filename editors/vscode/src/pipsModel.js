@@ -1,4 +1,5 @@
 import {extraReadTools,validateExtraRead} from './pipsAppPicker.js';
+import {validAccountId} from './pipAccountId.js';
 // Pure presentation boundaries shared by the editor and deterministic tests.
 export const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1054,7 +1055,7 @@ export function appReadPlan(value){
  for(const call of value.calls){
   if(!record(call)||!['arguments,schema_digest,tool','account,arguments,schema_digest,tool','account,arguments,schema_digest,tool,window'].includes(Object.keys(call).sort().join())||!['GMAIL_FETCH_EMAILS','GOOGLECALENDAR_FIND_EVENT',...extraReadTools].includes(call.tool)||!/^([a-f0-9]{64})$/.test(call.schema_digest)||!record(call.arguments)||new TextEncoder().encode(JSON.stringify(call.arguments)).length>4096)fail();
   if(extraReadTools.includes(call.tool)){if(value.schema_version!==3||!Object.hasOwn(call,'account')||Object.hasOwn(call,'window'))fail();validateExtraRead(call.tool,call.arguments);}else if(!Number.isInteger(call.arguments.max_results)||call.arguments.max_results<1||call.arguments.max_results>20)fail();
-  if(Object.hasOwn(call,'account')&&(typeof call.account!=='string'||!/^(?:ca|coup)_[A-Za-z0-9_-]{1,120}$/.test(call.account)))fail();
+  if(Object.hasOwn(call,'account')&&(typeof call.account!=='string'||!validAccountId(call.account)))fail();
   if(Object.hasOwn(call,'window')){const w=call.window;if(![2,3].includes(value.schema_version)||call.tool!=='GOOGLECALENDAR_FIND_EVENT'||Object.hasOwn(call.arguments,'time_min')||Object.hasOwn(call.arguments,'time_max')||!record(w)||Object.keys(w).sort().join()!=='days,kind,start_day,timezone'||w.kind!=='calendar_days'||!Number.isInteger(w.start_day)||w.start_day<0||w.start_day>30||!Number.isInteger(w.days)||w.days<1||w.days>31||typeof w.timezone!=='string'||!w.timezone||w.timezone.length>100)fail();try{new Intl.DateTimeFormat('en',{timeZone:w.timezone});}catch{fail();}}
  }return value;
 }
