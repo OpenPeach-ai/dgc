@@ -10796,7 +10796,8 @@ def test_installer_never_overwrites_a_checkout():
         keep.write_text("# uncommitted work\n")
         refused = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
-            env={**os.environ, "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1",
+            env={**os.environ, "DGC_PYTHON": sys.executable,
+                 "DGC_DIR": str(checkout), "DGC_SKIP_EXTENSION": "1",
                  "DGC_BIN": str(pathlib.Path(tmp) / "bin")})
         out = refused.stdout + refused.stderr
         check("installing over a git checkout is refused", refused.returncode != 0, out[-400:])
@@ -10813,7 +10814,8 @@ def test_installer_never_overwrites_a_checkout():
         plain.mkdir()
         proceeded = subprocess.run(
             ["bash", str(installer)], cwd=tmp, capture_output=True, text=True, timeout=120,
-            env={**os.environ, "DGC_DIR": str(plain), "DGC_SKIP_EXTENSION": "1",
+            env={**os.environ, "DGC_PYTHON": sys.executable,
+                 "DGC_DIR": str(plain), "DGC_SKIP_EXTENSION": "1",
                  "DGC_BIN": str(pathlib.Path(tmp) / "bin"), "DGC_BASE_URL": "https://127.0.0.1:9"})
         moved_on = proceeded.stdout + proceeded.stderr
         check("a normal install directory is not caught by the checkout guard",
