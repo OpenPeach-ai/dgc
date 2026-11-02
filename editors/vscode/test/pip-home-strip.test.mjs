@@ -33,6 +33,7 @@ function harness(t,state,{api=48}={}){
  strip=w.Strip.mountHomePips({document:w.document,root:w.document.getElementById('sessions-pips'),
   postMessage:m=>{sent.push(m);if(m.type!=='pipsRequest')return;
    if(m.request.type==='mark_pip_news_seen'){if(state.hold)held.push(m);else queueMicrotask(()=>reply(m,state.refuse!==true,state.refuse?'Refused':{seen:m.request.pip_ids.map(pip_id=>({pip_id,seen_until:m.request.until}))}));return;}
+   if(m.request.type==='list_pip_unread'&&state.unreadFail){queueMicrotask(()=>reply(m,false,'Unread updates unavailable.'));return;}
    const make=answers[m.request.type];if(make)queueMicrotask(()=>reply(m,true,make(m.request)));},
   onOpen:v=>opened.push(v),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
  t.after(()=>{strip.dispose();w.close();});
@@ -56,6 +57,16 @@ test('latest unread routine results appear with the existing row geometry, even 
  assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
  x.d.querySelector('.home-pips-unread .home-pip-row').click();
  assert.equal(x.opened.at(-1)?.pip,id(2));
+});
+test('an unread request failure never claims all quiet, and Retry recovers the count',async t=>{
+ const state={list:[pip(1,'Mail watch')],digest:digest([]),unreadFail:true,unread:[
+  {pip_id:id(1),workspace_id:P,name:'Mail watch',pip_type:'scout',count:1,latest:'New mail arrived.',latest_at:'2026-11-02T07:40:00Z'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
+ assert.match(x.d.querySelector('.home-pips-error').textContent,/Couldn’t check for new Pip messages/);
+ state.unreadFail=false;x.d.querySelector('.home-pips-error button').click();await flush();
+ assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 1 unread');
+ assert.equal(x.d.querySelector('.home-pips-error'),null);
 });
 
 test('a dismiss is on news rows only, says what it dismisses, and needs Pips API 48',async t=>{

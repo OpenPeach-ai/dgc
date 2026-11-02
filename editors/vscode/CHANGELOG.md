@@ -7,7 +7,7 @@
 - Pip model menus omit embedding and reranking models reported by the DGC connection.
 - Pip chats keep messages, selected text and face animations steady while replies and status updates arrive.
 - Personal and Project tabs keep the Chat and Work tab alignment in wide editor views.
-- Sessions home now receives unread Pip counts and message previews. Open Pips goes to the Pip list; selecting an unread row opens that conversation.
+- Sessions home now receives unread Pip counts and message previews, with a visible retry if the count cannot load. Open Pips goes to the Pip list; selecting an unread row opens that conversation.
 - Composio's current connected-account IDs work in Pip account selection and reviewed send flows.
 
 ## 0.34.2 — 2026-11-01

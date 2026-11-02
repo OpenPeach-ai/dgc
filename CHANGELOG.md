@@ -13,7 +13,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - Mods now start from macOS virtual environments whose Python interpreter uses a version alias, while the sandbox still blocks unrelated home files.
 - Composio account selection uses smaller discovery requests and accepts the stable account IDs returned by current Gmail connections. Sending still requires a separate review and approval.
 - Pip chat refreshes preserve selected text, message actions and running face animations. The Personal and Project tabs fill the same width as Chat and Work at wide editor sizes.
-- Unread Pip replies now reach Sessions home through the editor bridge. Open Pips shows the list, while an unread row opens its Pip chat.
+- Unread Pip replies now reach Sessions home through the editor bridge, with a retry when they cannot be checked. Open Pips shows the list, while an unread row opens its Pip chat.
 
 ## 0.50.0 — 2026-11-01
 
