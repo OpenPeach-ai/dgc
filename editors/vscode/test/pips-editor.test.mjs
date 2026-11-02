@@ -255,6 +255,16 @@ test('Open Pips from Sessions returns to the Pip list even when a chat was last 
  assert.ok(x.d.querySelector('.layout.overview'));
  x.controller.dispose();
 });
+test('opening the Pip list does not consume a reply from the previously selected chat',async()=>{
+ const x=setup({conversation:true,manualMount:true,apiVersion:69,messages:[chatMessage('m2','a',{role:'assistant',text:'A new reply.'})]});await x.drain();
+ const unread=x.requests('list_pip_unread').at(-1);assert.ok(unread);
+ const navigation=x.controller.navigate({overview:true});await navigation;
+ x.answer(unread,{workspace_id:'ws',pips:[{pip_id:'a',count:1,latest:'A new reply.',latest_message_id:'m2',latest_post_id:null}],total:1});await flush();
+ assert.ok(x.d.querySelector('[data-job=a]'));
+ assert.equal(x.d.querySelector('[aria-label="Pip conversation"]'),null);
+ assert.equal(x.requests('mark_pip_read').length,0);
+ x.controller.dispose();
+});
 test('chat polling keeps the Pip face, message actions and selected text mounted',async()=>{
  const messages=[chatMessage('m1','a',{role:'assistant',text:'Keep this text selected while another message arrives.'})];
  const x=setup({conversation:true,messages,observe:true,workspaceValue:{...ws,kind:'personal'},apiVersion:61,

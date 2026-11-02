@@ -983,6 +983,7 @@
     sessionsOpen = true;
     document.body.classList.add("sessions-active");
     $("sessions-host").hidden = false;
+    homePips?.refresh();
   }
   function hideSessions() {
     sessionsOpen = false;
