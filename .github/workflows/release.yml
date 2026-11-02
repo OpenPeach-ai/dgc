@@ -50,7 +50,11 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npx playwright install chromium-headless-shell
-      - run: python tests/run_tests.py
+      - run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export DGC_PYTHON="$(command -v python)"
+          fi
+          python tests/run_tests.py
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/dgc-ms-playwright
 
