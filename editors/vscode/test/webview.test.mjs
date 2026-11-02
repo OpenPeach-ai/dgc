@@ -1078,10 +1078,10 @@ test("stream batching flushes final text and partial changes stay explicit", () 
 
 test("goal review exposes saved evidence, bounded editing, and keyboard focus", () => {
   const { dom, errors, posted, send, doc } = makeDom();
-  send({ type: "event", event: { type: "goal_changed", goal: "Finish the task", status: "completed",
+  send({ type: "event", event: { type: "goal_changed", goal: "Verify the task", status: "active",
     elapsed_seconds: 125, details: { cycles: 3, tokens_used: 520, token_budget: 2000,
-      running: false, reason: "Finished after verification", evidence: ["<script>private()</script>", "Build passed"],
-      history: [{ status: "active", reason: "Goal started" }, { status: "completed", reason: "Build passed" }] } } });
+      running: false, reason: "Checking the build", evidence: ["<script>private()</script>", "Build passed"],
+      history: [{ status: "active", reason: "Goal started" }, { status: "active", reason: "Build passed" }] } } });
   doc.getElementById("goal-review-button").click();
   assert.equal(doc.getElementById("goal-review").hidden, false);
   assert.equal(posted.at(-1).type, "reviewGoal");
