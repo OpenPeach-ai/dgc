@@ -52,7 +52,7 @@ class FindTests(unittest.TestCase):
     def test_each_platform_looks_in_its_own_folders(self):
         for platform, expected in (("darwin", "Library/Application Support/Google/Chrome"), ("linux", ".config/google-chrome"),
                                    ("win32", "Google/Chrome/User Data")):
-            with patch.object(browser_user.sys, "platform", platform), patch.dict(os.environ, {"XDG_CONFIG_HOME": ""}):
+            with patch.object(browser_user.sys, "platform", platform), patch.object(browser_user.wsl, "version", return_value=0), patch.dict(os.environ, {"XDG_CONFIG_HOME": ""}):
                 first = browser_user.profile_folders()[0]
             self.assertEqual(first[0], "Google Chrome")
             self.assertIn(expected, first[1].as_posix(), platform)

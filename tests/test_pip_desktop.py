@@ -118,7 +118,7 @@ class DeliveryTests(unittest.TestCase):
         def fake(argv, **kwargs):
             calls.append((argv, kwargs["env"]))
             return type("Done", (), {"returncode": code})()
-        with patch.object(sys, "platform", platform), patch("subprocess.run", side_effect=fake), \
+        with patch.object(sys, "platform", platform), patch("dgc.wsl.version", return_value=0), patch("subprocess.run", side_effect=fake), \
                 patch.object(desktop, "_which", return_value="/usr/bin/notify-send"):
             shown = desktop.deliver("DGC Pips", 'Rook said "hi"\x1b[31m\nand left')
         return shown, calls

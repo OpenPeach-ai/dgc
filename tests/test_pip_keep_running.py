@@ -26,6 +26,9 @@ class Done:
 class LinuxSwitchTests(unittest.TestCase):
     def setUp(self):
         trust_host_python(self)
+        native_linux = patch.object(keep.wsl, "version", return_value=0)
+        native_linux.start()
+        self.addCleanup(native_linux.stop)
         temp = tempfile.TemporaryDirectory(prefix="dgc-keep-")
         self.addCleanup(temp.cleanup)
         base = Path(temp.name)

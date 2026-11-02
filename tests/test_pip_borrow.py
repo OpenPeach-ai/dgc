@@ -452,6 +452,7 @@ CHAT_WORKER = r'''
 from unittest.mock import patch
 from dgc.llm import LLMClient, ChatResult, ToolCall
 from dgc.pips import _worker_main
+from dgc import wsl
 def chat(self, messages, tools=None, on_text=None, **kwargs):
     names = [t["function"]["name"] for t in (tools or [])]
     results = [m for m in messages if m.get("role") == "tool"]
@@ -471,7 +472,7 @@ def chat(self, messages, tools=None, on_text=None, **kwargs):
         return ChatResult(tool_calls=[ToolCall("b2", "borrowed_chrome", {"op": "done"})])
     assert "gave the user's Chrome back" in str(results[-1]["content"]), results[-1]
     return ChatResult(content="Your order 1001 was 2 mugs, 18.00.")
-with patch.object(LLMClient, "chat", chat):
+with patch.object(LLMClient, "chat", chat), patch.object(wsl, "version", return_value=0):
     raise SystemExit(_worker_main())
 '''
 
@@ -508,7 +509,10 @@ class RunTests(Borrow):
         self.assertEqual((card["status"], card["sites"], card["why"]), ("requested", ["shop.example"], "Read your order history"))
         self.assertEqual(fake.connections, 0, "asking connects to nothing")
         self.control("allow_pip_borrow", pip_id=self.pip["id"], borrow_id=card["id"])
-        lent = self.turn()
+        # This fixture creates a Linux profile even when the suite runs under WSL;
+        # the product correctly prefers the real Windows profile on WSL.
+        with patch.object(browser_user, "profile_folders", return_value=[("Google Chrome", folder)]):
+            lent = self.turn()
         self.assertEqual(lent["status"], "succeeded", lent.get("error"))
         self.assertEqual(lent["result"]["text"], "Your order 1001 was 2 mugs, 18.00.")
         self.assertEqual(fake.asked, 1)
