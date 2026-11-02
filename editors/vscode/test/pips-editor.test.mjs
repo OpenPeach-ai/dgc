@@ -265,6 +265,15 @@ test('opening the Pip list does not consume a reply from the previously selected
  assert.equal(x.requests('mark_pip_read').length,0);
  x.controller.dispose();
 });
+test('opening the Pip list on first mount skips restoring the last selected chat',async()=>{
+ const x=setup({conversation:true,manualMount:true,autoSelect:false,apiVersion:69,
+  savedState:{workspace_id:'ws',selected:'a',overview:false,drafts:{a:'Kept draft'}}});
+ const navigation=x.controller.navigate({overview:true});await x.drain();await navigation;
+ assert.ok(x.d.querySelector('[data-job=a]'));
+ assert.equal(x.requests('list_pip_messages').length,0);
+ assert.equal(x.requests('mark_pip_read').length,0);
+ x.controller.dispose();
+});
 test('chat polling keeps the Pip face, message actions and selected text mounted',async()=>{
  const messages=[chatMessage('m1','a',{role:'assistant',text:'Keep this text selected while another message arrives.'})];
  const x=setup({conversation:true,messages,observe:true,workspaceValue:{...ws,kind:'personal'},apiVersion:61,
