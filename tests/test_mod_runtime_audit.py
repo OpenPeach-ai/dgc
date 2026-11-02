@@ -9,9 +9,21 @@ import unittest
 from pathlib import Path
 
 from dgc.mods.manifest import parse
-from dgc.mods.runtime import ModProcess, sandboxed_argv, _interpreter
+from dgc.mods.runtime import ModProcess, sandboxed_argv, _interpreter, _hidden_siblings
 
 class ModRuntimeAuditTests(unittest.TestCase):
+    def test_hidden_siblings_never_hide_an_allowed_ancestor(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            allowed = root / 'project' / 'venv'
+            allowed.mkdir(parents=True)
+            (root / 'project' / 'secret').mkdir()
+            (root / 'other').mkdir()
+            hidden = _hidden_siblings([allowed], root)
+            self.assertIn(root / 'project' / 'secret', hidden)
+            self.assertIn(root / 'other', hidden)
+            self.assertTrue(all(not (path == allowed or path in allowed.parents) for path in hidden))
+
     def process(self, code, on_request=None):
         folder=tempfile.TemporaryDirectory(prefix='dgc-mod-audit-')
         self.addCleanup(folder.cleanup)
@@ -73,6 +85,22 @@ class ModRuntimeAuditTests(unittest.TestCase):
             result=subprocess.run(argv,capture_output=True,text=True,timeout=15)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(result.stdout.strip(),'blocked')
+
+    def test_sandbox_cannot_read_an_unrelated_home_file(self):
+        with tempfile.TemporaryDirectory(prefix='dgc-mod-private-', dir=Path.home()) as private, \
+             tempfile.TemporaryDirectory(prefix='dgc-mod-audit-') as folder, \
+             tempfile.TemporaryDirectory() as scratch:
+            marker = Path(private) / 'marker'
+            marker.write_text('synthetic private marker')
+            root = Path(folder)
+            (root / 'main.py').write_text('from pathlib import Path\ntry:\n print(Path('+repr(str(marker))+').read_text())\nexcept OSError:\n print("blocked")\n')
+            m = parse({'name':'audit','version':'1.0.0','entry':'main.py'}, root)
+            argv = sandboxed_argv(m, _interpreter(m), Path(scratch))
+            if argv is None:
+                self.skipTest('No OS sandbox available')
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'blocked')
 
     def test_invalid_response_id_stops_the_mod_without_stranding_its_reader(self):
         with tempfile.TemporaryDirectory(prefix='dgc-mod-audit-') as folder:

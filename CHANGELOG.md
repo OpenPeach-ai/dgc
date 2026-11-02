@@ -10,6 +10,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - A fresh DGC home starts owner-only, so Pips Controls can use it immediately.
 - Pip model menus omit embedding and reranking models identified by their names or Ollama families.
 - An approved batch of helpers can run together in Default and acceptEdits modes. Their live approval cards appear one at a time and name the helper asking. A waiting helper uses an Always allow rule once it has been saved.
+- Mods now start from macOS virtual environments whose Python interpreter uses a version alias, while the sandbox still blocks unrelated home files.
 
 ## 0.50.0 — 2026-11-01
 

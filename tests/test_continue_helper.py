@@ -328,7 +328,9 @@ class TheIsolationRulesStillApplyTest(Case):
         own = system_root(context)
         system = str(context[0]["content"])
         self.assertIn(f"This is your own copy of the user's project: {own}.", system)
-        self.assertIn(f"The user's checkout, {h.root.resolve()}, is not yours to change", system)
+        # The instruction names the user's opened path. macOS may spell its
+        # canonical temp path /private/var while the opened path is /var.
+        self.assertIn(f"The user's checkout, {h.root}, is not yours to change", system)
         refusal = helper.results["[Continued"][0]
         self.assertTrue(refusal.startswith("error:"), refusal)
         self.assertIn(str(own / "billing.py"), refusal)

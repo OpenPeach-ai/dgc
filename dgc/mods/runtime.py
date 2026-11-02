@@ -65,6 +65,12 @@ def _install_roots(argv0: str) -> list[Path]:
     exe = Path(argv0).resolve()
     if "python" in exe.name:
         candidates = [Path(sys.prefix), Path(sys.base_prefix), Path(sys.exec_prefix), exe.parent.parent]
+        # Virtual environments made by uv may start through an unversioned alias while
+        # sys.base_prefix and Path.resolve() name the versioned target. Seatbelt checks
+        # both paths when following the interpreter symlink.
+        base_executable = getattr(sys, "_base_executable", "")
+        if base_executable:
+            candidates.append(Path(base_executable).parent.parent)
     else:
         candidates = [exe.parent.parent]
     for candidate in candidates:
@@ -113,12 +119,46 @@ def sandboxed_argv(m: Manifest, argv: list[str], scratch: Path) -> list[str] | N
         system = [Path(p) for p in ("/System/Library", "/System/Cryptexes", "/usr/lib", "/usr/share", "/bin", "/sbin", "/dev")]
         readable = list(dict.fromkeys(q for p in [*system, *shown, scratch] if p.exists()
                                       for q in (p, p.resolve())))
-        # A read deny on / itself aborts sandboxed processes on newer macOS. Hide each
-        # top-level entry instead, then expose only the interpreter, mod and scratch.
-        profile = seatbelt.profile(writable=[scratch, scratch.resolve()], hidden=list(Path("/").iterdir()), readable=readable,
+        # The interpreter may start through a venv and uv symlink inside the account.
+        # A read deny on /Users itself prevents that exec, despite later narrow allows.
+        # Split only the account branch into hidden siblings; Seatbelt can re-expose
+        # children of the other top-level denies (including /private and /var). This
+        # avoids enumerating a crowded temporary directory into a giant profile.
+        top = list(Path("/").iterdir())
+        account = sandbox._account_home()
+        home_top = next((p for p in top if account is not None and
+                         (p == account or p in account.parents)), None)
+        hidden = [p for p in top if p != home_top]
+        if home_top is not None:
+            hidden.extend(_hidden_siblings([p for p in readable if p == home_top or home_top in p.parents], home_top))
+        profile = seatbelt.profile(writable=[scratch, scratch.resolve()], hidden=hidden, readable=readable,
                                    reachable=readable, network=False)
         return [str(executable), "-p", profile] + argv
     return None
+
+
+def _hidden_siblings(readable: list[Path], root: Path = Path("/")) -> list[Path]:
+    """Paths outside the allowed trees, with no deny on an allowed ancestor.
+
+    A parent-level read deny beats a later narrow allow during macOS process
+    startup. List only the ancestors of allowed trees; never descend into an
+    allowed tree.
+    """
+    allowed = set(readable)
+    if root in allowed:
+        return []
+    pending = [root]
+    hidden: list[Path] = []
+    while pending:
+        parent = pending.pop()
+        for child in parent.iterdir():
+            if child in allowed:
+                continue
+            if any(child in root.parents for root in allowed):
+                pending.append(child)
+            else:
+                hidden.append(child)
+    return hidden
 
 
 class ModProcess:
