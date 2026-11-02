@@ -248,6 +248,13 @@ test('a failed turn says why under the message, and a malformed reason is refuse
 test('opening a Pip enters its saved conversation while overview remains an explicit choice',async()=>{
  const x=setup({conversation:true,autoSelect:false,messages:[chatMessage(),chatMessage('m2','a',{role:'assistant',text:'The boundary is in src/main.py.'})]});await x.drain();assert.ok(x.d.querySelector('.layout.overview'));assert.equal(x.requests('list_pip_messages').length,0);x.click('[data-job=a]');await x.drain();assert.equal(x.d.querySelector('[data-tab=chat]').getAttribute('aria-pressed'),'true');assert.equal(x.d.querySelector('[aria-label="Run report"]'),null);assert.match(x.d.querySelector('[aria-label="Pip conversation"]').textContent,/The boundary is in src\/main.py/);x.click('#back-pips');assert.ok(x.d.querySelector('.layout.overview'));
 });
+test('Open Pips from Sessions returns to the Pip list even when a chat was last selected',async()=>{
+ const x=setup({conversation:true,manualMount:true,autoSelect:false});await x.drain();
+ x.click('[data-job=a]');await x.drain();assert.ok(x.d.querySelector('[aria-label="Pip conversation"]'));
+ const navigation=x.controller.navigate({overview:true});await x.drain();await navigation;
+ assert.ok(x.d.querySelector('.layout.overview'));
+ x.controller.dispose();
+});
 test('chat polling keeps the Pip face, message actions and selected text mounted',async()=>{
  const messages=[chatMessage('m1','a',{role:'assistant',text:'Keep this text selected while another message arrives.'})];
  const x=setup({conversation:true,messages,observe:true,workspaceValue:{...ws,kind:'personal'},apiVersion:61,

@@ -3371,6 +3371,7 @@ async function initialize() {
 }
 async function navigateFromHost(value) {
   if(!record(value))return;
+  if(value.overview===true){if(S.selected)chatDrafts.set(S.selected,draft.chatText);S.overview=true;S.tab='chat';rememberView();render();return;}
   S.projectEmpty=false;   // whatever it opens is shown under its own tab
   if(value.attention===true||typeof value.setup==='string'){await navigateAttention(value);return;}
   if(['context','notifications'].includes(value.section)&&!value.pip){clearSelection();S.selected='';S.tab=value.section;S.overview=false;rememberView();render();if(S.tab==='notifications'){await loadNotifications();return;}if(S.apiVersion>=12){void loadOutcomeSessions();void loadOutcomes();if(value.reviewKind==='session_outcome'&&typeof value.review==='string'&&value.review)await openOutcome(value.review);}return;}

@@ -215,6 +215,21 @@ function host(api=43){
  return {editor,panels,main,sent,saved,generation:()=>main.filter(m=>m.type==='pipsConnection').at(-1).generation};
 }
 
+test('the home and chat can read and acknowledge unread Pip messages through the editor host',()=>{
+ const h=host(69), workspace='ws_'+'a'.repeat(32), pip=PIP.id, message='msg_'+'b'.repeat(32);
+ h.editor.receive({type:'pipsRequest',id:'home-unread',generation:h.generation(),request:{type:'list_pip_unread',workspace_id:workspace}});
+ h.editor.receive({type:'pipsRequest',id:'chat-read',generation:h.generation(),request:{type:'mark_pip_read',pip_id:pip,message_id:message}});
+ const calls=h.sent.filter(m=>m.type==='pips_control');
+ assert.deepEqual(calls.map(m=>m.request.type),['list_pip_unread','mark_pip_read']);
+ assert.equal(calls[0].request.workspace_id,workspace);
+ assert.equal(calls[1].request.message_id,message);
+ for(const [index,call] of calls.entries())h.editor.event({type:'pips_result',request_id:call.request.request_id,command:call.request.type,ok:true,result:{total:index?0:1,pips:[]}});
+ assert.deepEqual(h.main.filter(m=>m.type==='pipsReply').map(m=>[m.id,m.ok]),[['home-unread',true],['chat-read',true]]);
+ const old=host(68);old.editor.receive({type:'pipsRequest',id:'old-unread',generation:old.generation(),request:{type:'list_pip_unread',workspace_id:workspace}});
+ assert.equal(old.sent.length,0);
+ assert.equal(old.main.at(-1).ok,false);
+});
+
 test('the host opens one "Shopper · Computer" tab per Pip, and only on an API 43 CLI',()=>{
  const old=host(42);old.editor.receive({type:'pipsOpenComputer',pip:PIP});assert.equal(old.panels.length,0);
  const h=host();

@@ -50,10 +50,12 @@ test('latest unread routine results appear with the existing row geometry, even 
   {pip_id:id(1),workspace_id:P,name:'Daily check',pip_type:'scout',count:1,latest:'Everything passed.',latest_at:'2026-11-01T09:00:00Z'}]};
  const x=harness(t,state,{api:69});await x.connect();
  assert.equal(x.d.querySelector('.home-pips-head h2').textContent,'Pips · 3 unread');
+ x.d.querySelector('.home-pips-open').click();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{overview:true},'Open Pips leads to the list, not the last selected chat');
  assert.deepEqual(x.rows().map(r=>r.slice(0,2)),[['Mail watch','No new mail since the last check.'],['Daily check','Everything passed.']]);
  assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
  x.d.querySelector('.home-pips-unread .home-pip-row').click();
- assert.equal(x.opened[0]?.pip,id(2));
+ assert.equal(x.opened.at(-1)?.pip,id(2));
 });
 
 test('a dismiss is on news rows only, says what it dismisses, and needs Pips API 48',async t=>{

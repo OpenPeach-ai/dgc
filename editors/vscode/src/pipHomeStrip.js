@@ -67,7 +67,7 @@ export function mountHomePips(options) {
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.
  function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
  // Show all: the Pips view's home at Needs attention, open in full; your Pips are listed under it.
- function openAll() { options.onOpen?.(apiVersion >= 44 && personal ? {attention: true, all: true, workspace: personal} : null); }
+ function openAll() { options.onOpen?.(apiVersion >= 44 && personal ? {attention: true, all: true, workspace: personal} : {overview: true}); }
  async function dismiss(rows, index) {
   if (!digest || !rows.length) return;
   const until = digest.until, ids = rows.map(r => r.pip.id), token = epoch;
@@ -101,7 +101,7 @@ export function mountHomePips(options) {
    actions.append(clear);
   }
   const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
-  all.onclick = () => options.onOpen?.(null);
+  all.onclick = () => options.onOpen?.({overview: true});
   actions.append(all); head.append(actions);
   const unreadCount = unread.reduce((n, item) => n + item.count, 0);
   if (unreadCount) head.querySelector('h2').textContent = `Pips · ${unreadCount} unread`;
@@ -152,7 +152,7 @@ export function mountHomePips(options) {
    root.append(list);
    if (unread.length > 2) {
     const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
-    more.onclick = () => options.onOpen?.(null); root.append(more);
+    more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
    }
   }
   if (!rows.length && !unreadRows.length) {
