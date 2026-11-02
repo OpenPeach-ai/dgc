@@ -371,6 +371,8 @@ test("in a Work tab, Settings stays separate and Pips opens its own editor tab",
   const navigation = {pip:'pip_'+'a'.repeat(32),section:'chat',run:'run_'+'b'.repeat(32)};
   await tab.onMessage({ type: "openPips", navigation });
   assert.deepEqual(opened, [["settings", "general"], ["pips-tab", navigation]]);
+  await tab.onMessage({ type: "openPips", navigation: { overview: true } });
+  assert.deepEqual(opened.at(-1), ["pips-tab", { overview: true }], "the home doorway opens the Pip list, not a saved chat");
   await tab.onMessage({ type: "newChat" });
   assert.equal(world.panels.length, 2, "+ in a tab is a new session in a new tab");
   assert.equal(tab.slots.length <= 1, true, "not a second chat inside the tab");

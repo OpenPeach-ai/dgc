@@ -44,7 +44,7 @@ type ComputerPip = { id: string; name: string; pip_type: string };
 /** Local Pips control bridge. Request correlation is owned by the extension host. */
 export class PipsEditor implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
-  private panelNavigation?: { pip: string; section?: 'chat' | 'runs'; run?: string };
+  private panelNavigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true };
   private embeddedPost?: (message: any) => void;
   private computers = new Map<string, { panel: vscode.WebviewPanel; pip: ComputerPip }>();
   /** The CLI streams a Pip computer's full screen (ready.capabilities.pips_desktop). */
@@ -131,7 +131,7 @@ export class PipsEditor implements vscode.Disposable {
       this.post({ type: 'pipComputerSaved', ok: false, error: error instanceof Error ? error.message : 'Not saved.' }, surface);
     }
   }
-  open(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string }): void {
+  open(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true }): void {
     this.embeddedPost = undefined;
     this.panelNavigation = navigation;
     if (this.panel) {

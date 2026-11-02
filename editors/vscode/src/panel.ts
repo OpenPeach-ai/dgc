@@ -5303,7 +5303,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const valid = nav && typeof nav === "object" && /^pip_[0-9a-f]{32}$/.test(String(nav.pip || ""))
           && [undefined, "chat", "runs"].includes(nav.section)
           && (nav.run === undefined || /^run_[0-9a-f]{32}$/.test(String(nav.run)));
-        if (this.tab) this.tab.host.openPipsEditor(valid ? { pip: nav.pip, section: nav.section, run: nav.run } : undefined);
+        if (this.tab) this.tab.host.openPipsEditor(valid ? { pip: nav.pip, section: nav.section, run: nav.run } : { overview: true });
         else this.openPips();
         return;
       }
@@ -7304,13 +7304,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return this.pipsEditor;
   }
   openPips(): void {
-    if (this.tab) { this.tab.host.openPipsEditor(); return; }
+    if (this.tab) { this.tab.host.openPipsEditor({ overview: true }); return; }
     this.ensurePipsBridge();
     this.inVisiblePanel(() => this.post({ type: "pipsOpen" }));
   }
 
   /** A Work tab opens Pips alongside it. The side bar keeps its own Pips bridge. */
-  private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string }): void {
+  private openPipsEditor(navigation?: { pip: string; section?: 'chat' | 'runs'; run?: string } | { overview: true }): void {
     if (!this.pipsTab) {
       this.pipsTab = new PipsEditor(this.context.extensionUri,
         (message, owner) => {
