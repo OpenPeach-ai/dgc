@@ -1511,6 +1511,40 @@ test("plugins in chat: a card for each change, Send it now as edited, Hand it to
   } finally { await s.page.close(); }
 });
 
+test("Composio batch card names inner actions without plumbing and wears Composio's logo in both themes", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const s = await openScreen({ theme });
+    try {
+      const args = { session_id: "s1", sync_response_to_workbench: false, current_step: "EXECUTE",
+        tools: [{ tool_slug: "GMAIL_SEND_EMAIL", account: "ca_test", arguments: { to: "a@example.com", subject: "Hello" } }] };
+      const card = { id: "act_" + "a".repeat(32), plugin: "composio", plugin_name: "Composio",
+        tool: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: args, status: "waiting", at: 0 };
+      await s.send({ type: "opened", conversation: conversation({ title: "Gmail" }), earlier: 0, busy: false,
+        messages: [{ id: M(1), role: "user", text: "Send the note" },
+          { id: M(2), role: "assistant", text: "Please review.", finish: "stop", actions: [card] }] });
+      await s.frame();
+      const box = s.page.locator(".cd-card");
+      assert.match(await box.textContent(), /Gmail · Send email · through Composio/);
+      assert.doesNotMatch(await box.textContent(), /session_id|sync_response_to_workbench|current_step|ca_test/);
+      assert.deepEqual((await s.posted("pluginLogos")).map(m => m.plugins), [["composio"]]);
+      const svg = readFileSync(join(root, "media/plugin-logos/composio.svg")).toString("base64");
+      await s.send({ type: "pluginLogos", logos: { composio: `data:image/svg+xml;base64,${svg}` } });
+      await s.frame();
+      assert.equal(await box.locator(".cd-card-mark img").count(), 1, `${theme}: the card uses the plugin's logo`);
+      if (process.env.DGC_SHOTS) await box.screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-composio-card-${theme}.png`) });
+      await box.getByRole("button", { name: "Edit" }).click();
+      await s.frame();
+      assert.deepEqual(await box.locator(".cd-field-label").allTextContents(), ["Actions (JSON)"]);
+      await box.locator("textarea").fill(JSON.stringify([{ ...args.tools[0], arguments: { to: "b@example.com" } }]));
+      await box.getByRole("button", { name: "Send it now" }).click();
+      assert.deepEqual((await s.posted("actionRun"))[0].arguments,
+        { ...args, tools: [{ ...args.tools[0], arguments: { to: "b@example.com" } }] },
+        `${theme}: editing preserves the real server arguments`);
+    } finally { await s.page.close(); }
+  }
+});
+
 test("follow-ups: a few next messages under the last reply; one click sends it, and the box keeps what you were typing", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

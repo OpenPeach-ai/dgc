@@ -14,6 +14,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - Composio account selection uses smaller discovery requests and accepts the stable account IDs returned by current Gmail connections. Sending still requires a separate review and approval.
 - Pip chat refreshes preserve selected text, message actions and running face animations. The Personal and Project tabs fill the same width as Chat and Work at wide editor sizes.
 - Unread Pip replies now reach Sessions home through the editor bridge, with a retry when they cannot be checked. Open Pips shows the list, while an unread row opens its Pip chat.
+- ChatDGC and Pips now recognize Composio batches containing only DGC's reviewed read actions, so a Gmail read can answer directly. Mixed, unknown and sending batches still require approval. After a ChatDGC action is sent, its bounded result returns to the same reply for a final response; Stop can cancel that continuation.
 
 ## 0.50.0 — 2026-11-01
 

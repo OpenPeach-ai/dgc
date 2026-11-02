@@ -1567,8 +1567,8 @@ class ChatService:
         self._changed(conversation_id, None)
 
     def _action(self, cmd: dict) -> None:
-        """Send it now (as edited), don't, or hand it to a Pip. Sending holds the chat's turn slot, so no reply starts
-        meanwhile (its save would overwrite the card's outcome) and Stop has nothing to cut short."""
+        """Send it now (as edited), don't, or hand it to a Pip. Sending holds the chat's turn slot;
+        a sent card's answer then continues the same reply while Stop can cancel that continuation."""
         conversation_id, request_id, op = cmd["conversation_id"], cmd["request_id"], cmd["op"]
         message_id, action_id = cmd["message_id"], cmd["action_id"]
         chat = self.engine.open(conversation_id)
@@ -1590,7 +1590,8 @@ class ChatService:
             if conversation_id in self._turns:
                 raise ChatEngineError("Let the reply finish first.")
             self._hold_to_write(conversation_id, chat)
-            slot = self._turns[conversation_id] = {"cancel": threading.Event(), "reply_id": None, "thread": None}
+            slot = self._turns[conversation_id] = {"cancel": threading.Event(), "reply_id": None, "thread": None,
+                                                   "live": _Live(self.emit), "title": chat.get("title")}
 
         def run():
             try:
@@ -1601,6 +1602,13 @@ class ChatService:
                 self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=done,
                           request_id=request_id)
                 self._changed(conversation_id, None)
+                if op == "run" and done.get("status") in ("done", "failed"):
+                    self._reviews.started(conversation_id)
+                    def continue_run(cancel, on_start, stream_for, activity):
+                        return self.engine.continue_action(conversation_id, message_id, action_id,
+                                                           on_start=on_start, on_activity=activity,
+                                                           cancel=cancel, **stream_for())
+                    self._turn(conversation_id, request_id, slot["cancel"], continue_run, slot)
             except (ChatEngineError, ChatStoreError) as exc:
                 self._error(str(exc), request_id, conversation_id)
             except Exception as exc:                  # noqa: BLE001 -- said, never lost

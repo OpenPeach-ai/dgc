@@ -1543,8 +1543,8 @@
   // ---- plugins: a card under a reply for what the model would do in one of your plugins (ChatGPT's confirmation).
   // Nothing goes until you choose: Send it now (with your edits), Hand it to a Pip (first for something recurring),
   // or Don't. Its inputs are the model's: text only, and editable here.
-  function cardFields(args) {
-    const keys = Object.keys(args || {});
+  function cardFields(args, composio = false) {
+    const keys = composio && Array.isArray(args?.tools) ? ["tools"] : Object.keys(args || {});
     if (keys.length > 20) return [{ key: null, kind: "json", value: JSON.stringify(args, null, 2) }];
     return keys.map((key) => {
       const v = args[key], kind = typeof v === "string" ? "text" : typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "json";
@@ -1552,9 +1552,9 @@
     });
   }
   /** The inputs as the user left them; says which one to fix when one won't read. */
-  function editedArgs(args, values) {
+  function editedArgs(args, values, composio = false) {
     const out = [];
-    for (const [i, f] of cardFields(args).entries()) {
+    for (const [i, f] of cardFields(args, composio).entries()) {
       const raw = String(values[i] ?? "");
       if (f.kind === "text") { out.push([f.key, raw]); continue; }
       if (f.kind === "number") {
@@ -1575,9 +1575,23 @@
       }
       out.push([f.key, parsed]);
     }
-    return Object.fromEntries(out);
+    return composio ? { ...args, ...Object.fromEntries(out) } : Object.fromEntries(out);
   }
   const shown = (v) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t.length > 400 ? `${t.slice(0, 399)}…` : t; };
+  function composioAction(call) {
+    const slug = typeof call?.tool_slug === "string" ? call.tool_slug : "";
+    const [prefix, ...rest] = slug.split("_");
+    const app = ({ GMAIL: "Gmail", GOOGLECALENDAR: "Google Calendar", GOOGLEDRIVE: "Google Drive",
+      GOOGLECONTACTS: "Google Contacts", OUTLOOK: "Outlook", NOTION: "Notion", FIGMA: "Figma" })[prefix] ||
+      (prefix ? prefix[0] + prefix.slice(1).toLowerCase() : "App");
+    const action = rest.length ? rest.map(s => s.toLowerCase()).join(" ").replace(/^./, c => c.toUpperCase()) : "Action";
+    const args = call?.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments) ? call.arguments : {};
+    const count = Number.isSafeInteger(args.max_results) && args.max_results > 0 ? args.max_results : null;
+    const labels = Array.isArray(args.label_ids) ? args.label_ids.filter(s => typeof s === "string" && s.length < 40) : [];
+    const detail = slug === "GMAIL_FETCH_EMAILS" && count ? `${count} from ${labels.length === 1 ? labels[0][0] + labels[0].slice(1).toLowerCase() : "mail"}`
+      : count ? `up to ${count} results` : "";
+    return [app, action, detail, "through Composio"].filter(Boolean).join(" · ");
+  }
   // A file the reply made (made.py), as ChatGPT hands you report.docx: what it is, Open, and Save a copy….
   const MADE = { docx: ["Word document", "DOCX"], pdf: ["PDF", "PDF"], xlsx: ["Excel workbook", "XLSX"],
                  pptx: ["PowerPoint presentation", "PPTX"], csv: ["CSV", "CSV"], md: ["Markdown", "MD"] };
@@ -1942,21 +1956,34 @@
     box.dataset.action = card.id; box.dataset.status = card.status || "waiting";
     box.setAttribute("role", "group");
     const waiting = card.status === "waiting", plugin = card.plugin_name || card.plugin || "the plugin";
-    box.setAttribute("aria-label", `${card.tool} in ${plugin}`);
+    const composio = card.plugin === "composio" && card.tool === "COMPOSIO_MULTI_EXECUTE_TOOL";
+    const calls = composio && Array.isArray((card.sent_arguments || card.arguments || {}).tools)
+      ? (card.sent_arguments || card.arguments).tools.filter(c => c && typeof c === "object") : [];
+    box.setAttribute("aria-label", composio ? (calls.length === 1 ? composioAction(calls[0])
+      : `${calls.length || 1} actions through Composio`) : `${card.tool} in ${plugin}`);
     const head = el("div", "cd-card-head");
-    head.append(el("span", "cd-card-mark", plugin.slice(0, 1).toUpperCase()));
+    const mark = el("span", "cd-card-mark", plugin.slice(0, 1).toUpperCase());
+    if (PLUGIN_ID.test(card.plugin || "")) {
+      mark.dataset.pluginMark = card.plugin;
+      wantLogo(card.plugin);
+      const src = pluginLogos.get(card.plugin);
+      if (src) mark.replaceChildren(logoImage(src));
+    }
+    head.append(mark);
     const words = el("div", "cd-card-words");
-    words.append(el("strong", "", waiting ? `Do this in ${plugin}?` : `${card.tool} in ${plugin}`));
-    if (waiting) words.append(el("small", "", card.money ? `${card.tool} · ${plugin} can move money, so it always asks.`
-                                                         : `${card.tool} · nothing happens until you choose.`));
+    words.append(el("strong", "", composio ? (calls.length === 1 ? composioAction(calls[0]) : `${calls.length || 1} actions through Composio`)
+      : waiting ? `Do this in ${plugin}?` : `${card.tool} in ${plugin}`));
+    if (waiting) words.append(el("small", "", composio ? "Nothing happens until you choose."
+      : card.money ? `${card.tool} · ${plugin} can move money, so it always asks.`
+                   : `${card.tool} · nothing happens until you choose.`));
     head.append(words);
     box.append(head);
     const args = card.sent_arguments || card.arguments || {};
     const editing = waiting ? state.cardEdit[card.id] : null;
     if (editing) {
       const form = el("div", "cd-card-fields");
-      cardFields(card.arguments).forEach((f, i) => {
-        const label = el("label", "cd-field-label", f.key === null ? "Inputs (JSON)" : f.key + (f.kind === "json" ? " (JSON)" : ""));
+      cardFields(card.arguments, composio).forEach((f, i) => {
+        const label = el("label", "cd-field-label", composio && f.key === "tools" ? "Actions (JSON)" : f.key === null ? "Inputs (JSON)" : f.key + (f.kind === "json" ? " (JSON)" : ""));
         const long = f.kind === "json" || f.kind === "text" && (f.value.length > 80 || f.value.includes("\n"));
         const input = changes(el(long ? "textarea" : "input", "cd-field"));
         input.id = `cd-card-${card.id}-${i}`; label.htmlFor = input.id;
@@ -1970,7 +1997,14 @@
       box.append(form);
     } else {
       const keys = Object.keys(args);
-      if (keys.length) {
+      if (composio) {
+        if (calls.length !== 1) {
+          const list = el("ul", "cd-card-actions-list");
+          for (const call of calls.slice(0, 20)) list.append(el("li", "", composioAction(call)));
+          if (!calls.length) list.append(el("li", "", "Review this Composio action before sending."));
+          box.append(list);
+        }
+      } else if (keys.length) {
         const list = el("dl", "cd-card-inputs");
         for (const key of keys.slice(0, 12)) list.append(el("dt", "", key), el("dd", "", shown(args[key])));
         box.append(list);
@@ -1984,7 +2018,7 @@
       send.addEventListener("click", () => {
         let edited;
         if (state.cardEdit[card.id]) {
-          try { edited = editedArgs(card.arguments, state.cardEdit[card.id].values); }
+          try { edited = editedArgs(card.arguments, state.cardEdit[card.id].values, composio); }
           catch (e) { state.cardEdit[card.id].error = e.message; update(message.id); return; }
         }
         state.cardBusy[card.id] = "sending"; update(message.id);
@@ -2000,7 +2034,7 @@
       edit.type = "button";
       edit.addEventListener("click", () => {
         if (state.cardEdit[card.id]) delete state.cardEdit[card.id];
-        else state.cardEdit[card.id] = { values: cardFields(card.arguments).map((f) => f.value), error: "" };
+        else state.cardEdit[card.id] = { values: cardFields(card.arguments, composio).map((f) => f.value), error: "" };
         update(message.id);
       });
       const no = el("button", "cd-edit-cancel", "Don't"); no.type = "button";
@@ -3687,7 +3721,7 @@
         for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
           if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))) continue;
           pluginLogos.set(id, src);
-          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
+          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"], .cd-card-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
         }
         return;
       case "favicons":

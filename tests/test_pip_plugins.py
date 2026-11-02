@@ -168,6 +168,36 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
         self.assertIn("Weekend plan", said)
         self.assertEqual(Vendor.made[0].calls, [("airtable__list_records", {"table": "Plans"})])
 
+    def test_composio_batch_is_a_pip_read_only_when_every_inner_action_is_reviewed(self):
+        from types import SimpleNamespace
+        spec = {"transport": "remote", "url": "https://mcp.composio.dev/mcp"}
+        info = {"plugin": "composio", "display_name": "Composio", "money": False, "reads": (),
+                "servers": {"composio": spec}}
+        row = {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "annotations": {}}
+        seen = []
+        manager = SimpleNamespace(call=lambda route, args, **kw: seen.append(args) or '{"emails":["first"]}')
+        tools = {row["name"]: ("composio", row, {"_route": "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL",
+                                               "schema_digest": "a" * 64}, manager)}
+        fetch = {"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": 5}}
+        send = {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"to": "a@example.com"}}
+        read = {"tools": [fetch]}
+        answer = self.session._call(self.registry, info, tools, {"tool": row["name"], "arguments": read})
+        self.assertIn("Untrusted data", answer)
+        self.assertIn("first", answer)
+        self.assertEqual(seen, [read])
+        for calls in ([send], [fetch, send], [{"tool_slug": "UNKNOWN_READ", "arguments": {}}],
+                      [{**fetch, "extra_action": "send"}], []):
+            with self.subTest(calls=calls):
+                args = {"tools": calls}
+                self.assertFalse(pip_plugins.read_only(row, info, args))
+                self.assertTrue(pip_plugins.asks("composio", info, row, unattended=False, arguments=args))
+                pending = self.session._call(self.registry, info, tools, {"tool": row["name"], "arguments": args})
+                self.assertIsInstance(pending, dict)
+                self.assertIn("Allow card", pending["text"])
+                self.assertEqual(len(seen), 1)
+        self.assertFalse(pip_plugins.read_only({**row, "annotations": {"readOnlyHint": True}}, info,
+                                               {"tools": [send]}), "a vendor hint cannot turn an inner send into a read")
+
     def test_the_reply_records_each_plugin_it_read_once_never_a_failed_read_or_a_card(self):
         # "Used Airtable" under the reply: what the controller saw it read, in order, each once.
         self.use("call_plugin", plugin="airtable", tool="list_records", arguments={"table": "Plans"})

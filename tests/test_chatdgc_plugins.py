@@ -120,6 +120,32 @@ class PluginChat(unittest.TestCase):
 
 
 class ReadsAndCards(PluginChat):
+    def test_composio_batch_of_reviewed_reads_runs_now_but_mixed_or_sending_batches_wait(self):
+        spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
+        tool = {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute tool calls.",
+                "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}
+        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+                                               "money": False, "reads": (), "servers": {"composio": spec}}
+        self.world["tools"]["composio"] = [tool]
+        self.world["answers"]["COMPOSIO_MULTI_EXECUTE_TOOL"] = json.dumps({"emails": ["first", "second"]})
+        fetch = {"tool_slug": "GMAIL_FETCH_EMAILS", "account": "ca_test",
+                 "arguments": {"max_results": 5, "label_ids": ["INBOX"], "user_id": "me"}}
+        send = {"tool_slug": "GMAIL_SEND_EMAIL", "account": "ca_test", "arguments": {"to": "a@example.com"}}
+        def call(calls):
+            return ("call_plugin", {"plugin": "composio", "tool": "COMPOSIO_MULTI_EXECUTE_TOOL",
+                                    "arguments": {"tools": calls, "session_id": "s1"}})
+        chat, reply = self.say("Summarise five emails", {"calls": [call([fetch])]}, {"parts": ["Here is the summary."]})
+        self.assertNotIn("actions", reply)
+        self.assertIn("first", self.told()[0])
+        self.assertIn("Untrusted data", self.told()[0])
+        self.assertEqual(len(self.world["calls"]), 1)
+        for calls in ([send], [fetch, send], [{"tool_slug": "UNKNOWN_READ", "arguments": {}}], []):
+            with self.subTest(calls=calls):
+                before = len(self.world["calls"])
+                _, reply = self.say("Do this", {"calls": [call(calls)]}, {"parts": ["Review the card."]}, chat=chat)
+                self.assertEqual(len(reply["actions"]), 1)
+                self.assertEqual(len(self.world["calls"]), before, "a mixed or unknown batch never runs immediately")
+
     def test_a_read_runs_at_once_and_its_answer_is_untrusted_data(self):
         self.world["answers"]["list_events"] = json.dumps({"events": [{"title": "Dentist", "at": "10:00"}]})
         chat, reply = self.say("What's on my calendar tomorrow?",
@@ -369,9 +395,18 @@ class OnTheWire(PluginChat):
         chat, reply = self.say("Lunch Friday.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
                                                                             "arguments": {"title": "Lunch"}})]}, {"parts": ["Card."]})
         card = reply["actions"][0]
+        self.world["answers"]["create_event"] = '{"id":"evt_1","status":"confirmed"}'
+        before = len(self.world["read"])
+        self.world["script"].append({"parts": ["Calendar confirmed the lunch."]})
         self.service.dispatch({"type": "chatdgc_action", "request_id": "a1", "conversation_id": chat["id"],
                                "message_id": reply["id"], "action_id": card["id"], "op": "run"})
         self.assertEqual(self.wait_for("chatdgc_action", request_id="a1")["action"]["status"], "done")
+        self.wait_for("chatdgc_turn", request_id="a1", state="ended")
+        self.assertIn("Calendar confirmed the lunch.", self.engine.open(chat["id"])["messages"][-1]["text"])
+        continued = [x for x in self.world["read"][before:]
+                     if "I chose Send it now" in x["messages"][-1]["content"]]
+        self.assertEqual(len(continued), 1, "one action continuation")
+        self.assertIn("evt_1", str(continued[0]["messages"]))
         chat, reply = self.say("Every week.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
                                                                           "arguments": {"title": "Weekly"}, "recurring": True})]},
                                {"parts": ["Card."]})
@@ -390,6 +425,29 @@ class OnTheWire(PluginChat):
         message = next(r for r in sent if r["type"] == "send_pip_message")
         self.assertEqual(message["idempotency_key"], f"chatdgc-{card['id']}", "sent once, however often it's asked")
         self.assertIn("I want this done repeatedly", message["text"])
+
+    def test_stop_cancels_a_sent_cards_continuation(self):
+        chat, reply = self.say("Lunch.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
+                                                                      "arguments": {"title": "Lunch"}})]},
+                               {"parts": ["I can send it."]})
+        card = reply["actions"][0]
+        entered = threading.Event()
+        original = Model.chat
+        def waiting(model, messages, **kw):
+            if "I chose Send it now" in messages[-1]["content"]:
+                entered.set()
+                kw["cancel"].wait(5)
+                return SimpleNamespace(content="", tool_calls=[], finish_reason="stop", thinking="", usage={})
+            return original(model, messages, **kw)
+        with patch.object(Model, "chat", waiting):
+            self.service.dispatch({"type": "chatdgc_action", "request_id": "send-stop", "conversation_id": chat["id"],
+                                   "message_id": reply["id"], "action_id": card["id"], "op": "run"})
+            self.assertTrue(entered.wait(5))
+            self.service.dispatch({"type": "chatdgc_cancel", "request_id": "stop", "conversation_id": chat["id"]})
+            self.wait_for("chatdgc_turn", request_id="send-stop", state="ended")
+        kept = self.engine.open(chat["id"])["messages"][-1]
+        self.assertEqual(kept["actions"][0]["status"], "done", "Stop does not undo an action already sent")
+        self.assertEqual(kept["finish"], "cancelled")
 
     def test_a_card_waits_while_its_chat_is_answering(self):
         chat, reply = self.say("Lunch.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",

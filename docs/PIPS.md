@@ -1153,6 +1153,10 @@ reviewed job:
 | Notion | Page titles, edit dates and links from one search. No page bodies. |
 | Google Contacts | Names and email addresses from one search |
 
+When a Pip uses Composio's multi-action tool directly, DGC treats it as a read only if every
+inner action is on DGC's reviewed read list. A mixed, unknown or sending batch waits for an
+Allow card as a whole; the tool's description alone never makes it a read.
+
 In the Pips view, open the Personal Pip's job, choose **Choose a connected
 account…**, pick the account explicitly, and save the review. DGC never picks an
 account for you, not even a default one. Each Pip can have up to four reads on one

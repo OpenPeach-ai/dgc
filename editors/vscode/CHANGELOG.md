@@ -9,6 +9,7 @@
 - Personal and Project tabs keep the Chat and Work tab alignment in wide editor views.
 - Sessions home now receives unread Pip counts and message previews, with a visible retry if the count cannot load. Open Pips goes to the Pip list; selecting an unread row opens that conversation.
 - Composio's current connected-account IDs work in Pip account selection and reviewed send flows.
+- ChatDGC's Composio action cards now name the inner app and action in plain words, hide connection plumbing, and show Composio's logo. Sending a card lets the same reply finish with the action's result.
 
 ## 0.34.2 — 2026-11-01
 

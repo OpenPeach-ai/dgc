@@ -285,12 +285,15 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     chats move back to your chats.
 - **Plugins in chat**, as ChatGPT uses its apps: every plugin turned on in **Settings → Plugins** is ChatDGC's
   to use, with no "use this plugin?" question. Ask for something one of them does and it uses it in the reply.
-  - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once.
+  - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once. For a Composio
+    multi-action call, DGC checks every inner action against its reviewed reads; a mixed, unknown or
+    sending batch still waits for review.
   - **Changes** (sending, creating, editing, deleting, sharing, paying) show a card under the reply with the
     exact tool and inputs. Nothing happens until you choose: **Send it now** (after **Edit**, if you like),
     **Hand it to a Pip** (one of your Personal Pips takes it on: that's offered first for something recurring,
     on a schedule, or that has to wait), or **Don't**. The card then says what came of it, and the chat's next
-    reply knows.
+    reply knows. After **Send it now**, the bounded result is passed back as untrusted data and the
+    same reply finishes with what happened. **Don't** and **Hand it to a Pip** leave that reply as it is.
   - **How much asks** is each plugin's level in Settings → Pips → Plugins (Always ask, Any changes, Important
     actions, Never ask), shared with your Pips. A plugin that can move money always asks.
   - **No made-up addresses:** a wallet address in a plugin call has to be one you gave or a plugin answered

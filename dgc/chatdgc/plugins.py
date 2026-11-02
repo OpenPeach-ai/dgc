@@ -27,7 +27,7 @@ MAX_CALLS = 20                  # plugin calls in one reply, reads and cards tog
 MAX_CARDS = 3                   # cards in one reply
 CALL_SECONDS = 45
 MAX_ANSWER = 12_000             # what the model reads of an answer
-MAX_KEPT = 2_000                # what a card keeps of what a sent action answered
+MAX_KEPT = MAX_ANSWER           # the continuation reads the same bounded answer as an immediate plugin read
 TOOLS = ("plugin_tools", "call_plugin")
 WALLET = re.compile(r"\b0x[0-9a-fA-F]{40}\b")
 
@@ -232,8 +232,8 @@ class ChatPlugins:
         if pip_plugins.saved_credential_in(arguments, self.config):
             return "error: remove credentials from the inputs.", None
         server, row, entry, manager = tools[tool]
-        reads = pip_plugins.read_only(row, info)
-        waits = pip_plugins.asks(info["plugin"], info, row, unattended=False)
+        reads = pip_plugins.read_only(row, info, arguments)
+        waits = pip_plugins.asks(info["plugin"], info, row, unattended=False, arguments=arguments)
         if not waits and not reads and self.carries(json.dumps(arguments, ensure_ascii=False)):
             waits = True                     # it carries what the chat read from the user's apps: the card shows it
         if not waits:

@@ -299,14 +299,17 @@ def important(row) -> bool:
     return not (marks.get("destructiveHint") is False and marks.get("openWorldHint") is False)
 
 
-def asks(plugin, info, row, *, unattended: bool) -> bool:
+def asks(plugin, info, row, *, unattended: bool, arguments=None) -> bool:
     """Whether one call waits for the user's Allow: the plugin's level decides; while nobody is watching every
     change waits."""
     chosen = level(plugin, info)
     if chosen == "always_ask":
         return True
-    if read_only(row, info):
+    if read_only(row, info, arguments):
         return False
+    if (isinstance(row, dict) and row.get("name") == "COMPOSIO_MULTI_EXECUTE_TOOL"
+            and (info or {}).get("plugin") == "composio" and arguments is not None):
+        return True  # a mixed or unknown batch is one action; its inner writes never bypass review
     if unattended or chosen == "any_changes" or info.get("money"):
         return True                     # a plugin that can move money asks before every change
     if chosen == "never_ask":
@@ -496,16 +499,36 @@ def _answer(registry, pip_id, server, call):
 
 # --------------------------------------------------------------------------- one run's plugin calls
 
-def read_only(row, info=None) -> bool:
+def _composio_reads(row, info, arguments) -> bool:
+    """A Composio batch is a read only when every actual inner action is on our reviewed list.
+
+    Discovery cannot make this decision because the batch arguments do not exist yet. Unknown,
+    malformed, or empty batches retain the ordinary approval path.
+    """
+    if (not isinstance(row, dict) or row.get("name") != "COMPOSIO_MULTI_EXECUTE_TOOL"
+            or (info or {}).get("plugin") != "composio" or not isinstance(arguments, dict)):
+        return False
+    calls = arguments.get("tools")
+    return (isinstance(calls, list) and 0 < len(calls) <= 20
+            and all(isinstance(call, dict) and call.get("tool_slug") in apps.READ_ACTIONS
+                    and set(call) <= {"tool_slug", "account", "arguments"}
+                    and isinstance(call.get("arguments"), dict) for call in calls))
+
+
+def read_only(row, info=None, arguments=None) -> bool:
     """Marked read-only by its vendor, or on DGC's reviewed list of reads for its plugin, and never marked
     destructive."""
     marks = row.get("annotations") if isinstance(row, dict) else None
     marks = marks if isinstance(marks, dict) else {}
     if marks.get("destructiveHint") is True:
         return False
+    if (isinstance(row, dict) and row.get("name") == "COMPOSIO_MULTI_EXECUTE_TOOL"
+            and (info or {}).get("plugin") == "composio"):
+        return _composio_reads(row, info, arguments)
     if marks.get("readOnlyHint") is not None:
         return marks.get("readOnlyHint") is True        # the vendor said, either way: DGC's list never overrides it
-    return isinstance(row, dict) and row.get("name") in ((info or {}).get("reads") or ())
+    return (_composio_reads(row, info, arguments) or
+            isinstance(row, dict) and row.get("name") in ((info or {}).get("reads") or ()))
 
 
 def _first_sentence(text, limit=140):
@@ -656,15 +679,15 @@ class Session:
         if saved_credential_in(arguments, self.config):
             return "error: remove credentials from the inputs."
         server, row, entry, manager = tools[tool]
-        waits = asks(info["plugin"], info, row, unattended=self.unattended)
-        if (not waits and not read_only(row, info) and self.carries is not None
+        waits = asks(info["plugin"], info, row, unattended=self.unattended, arguments=arguments)
+        if (not waits and not read_only(row, info, arguments) and self.carries is not None
                 and self.carries(json.dumps(arguments, ensure_ascii=False))):
             # Careful mode: a change the level would let through still asks when it carries what the Pip read from
             # the user's apps (and the user didn't say themselves); the card shows it before it goes.
             waits = True
         if not waits:
             # A read, or a change the plugin's level lets through while the user is here: it runs now.
-            changed = not read_only(row, info)
+            changed = not read_only(row, info, arguments)
             self.reads += 0 if changed else 1
             cancel = apps.DeadlineCancellation(time.monotonic() + CALL_SECONDS)
             raw = manager.call(entry["_route"], arguments, cancel=cancel, input_handler=lambda *a, **kw: {"action": "cancel"})
