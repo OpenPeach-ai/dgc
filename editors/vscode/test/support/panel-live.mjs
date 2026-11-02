@@ -275,7 +275,20 @@ export async function panelSession({ browser, python, model, name, config = {}, 
     newProvider();
     return s.openWebview(options);
   };
-  s.ready = () => until(() => s.provider.sessionReady, "the session to be ready", 30_000);
+  let modeRequest = 0;
+  s.ready = async () => {
+    await until(() => s.provider.sessionReady, "the session to be ready", 30_000);
+    if ((config.mode ?? "auto") === "auto") {
+      // These tests deliberately use Auto for synthetic model tool calls. The
+      // editor no longer inherits a saved Auto default, so select it for each
+      // test chat (and again after a simulated window reload).
+      const request_id = `test-auto-${++modeRequest}`;
+      s.provider.ensureBackend().send({ type: "set_mode", mode: "auto",
+        acknowledge_workspace_trust: true, request_id });
+      await until(() => s.events.find((e) => e.type === "mode_changed" && e.request_id === request_id),
+        "the test chat to select Auto", 10_000);
+    }
+  };
   s.typePrompt = async (text, { queue = false } = {}) => {
     await s.page.locator("#input").click();
     await s.page.locator("#input").fill(text);
