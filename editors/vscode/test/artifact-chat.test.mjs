@@ -109,6 +109,7 @@ test("a reply that is still being written shows its cards as they come, and no n
     await s.send({ type: "artifacts", offered: OFFER });
     await s.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: false });
     await s.send({ type: "message", message: reply({ artifacts: [DECK] }) });
+    await s.page.locator(".cd-artifact").waitFor({ state: "visible", timeout: 5000 });
     assert.equal(await s.page.locator(".cd-artifact").count(), 1);
     assert.equal(await s.page.locator(".cd-output-note").count(), 0);
   } finally { await s.page.close(); }
