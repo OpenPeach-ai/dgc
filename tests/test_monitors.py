@@ -1910,6 +1910,12 @@ class ServeTests(unittest.TestCase):
             serve.send({"type": "new_session", "request_id": "n"})
             self.assertTrue(wait_for(lambda: not group_alive(pgid), 15), "a new chat stops the monitor")
 
+            # Auto was confirmed for the previous Work chat only. The person
+            # must choose it again before this new chat can start a monitor.
+            serve.send({"type": "set_mode", "mode": "auto", "acknowledge_workspace_trust": True,
+                        "request_id": "mode-new-chat"})
+            self.assertTrue(serve.wait(lambda e: e["type"] == "mode_changed"
+                                       and e.get("request_id") == "mode-new-chat", 30))
             serve.send({"type": "prompt", "text": "keep watching again", "request_id": "p2"})
             self.assertTrue(serve.wait(lambda e: e["type"] == "monitor_started"
                                        and e["id"] != started["id"], 60))

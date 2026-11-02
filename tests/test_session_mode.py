@@ -133,6 +133,21 @@ class SessionModeTest(unittest.TestCase):
         current.reset()
         self.assertEqual(current.mode, "default", "New chat inherited the previous chat's Auto")
 
+    def test_editor_backend_downgrades_auto_saved_by_an_older_release(self):
+        from dgc import cli
+        self.store("auto")
+        with patch.dict(os.environ, {"DGC_SDK_ISOLATED": "", "DGC_EDITOR_SESSION": "1"}):
+            config = cli._serve_config()
+        self.assertEqual(config.get("mode"), "default")
+        self.assertEqual(self.stored_mode(), "auto", "the editor changed the CLI's saved choice")
+        with patch.dict(os.environ, {"DGC_SDK_ISOLATED": "1", "DGC_EDITOR_SESSION": "1"}):
+            isolated = cli._serve_config()
+        self.assertEqual(isolated.get("mode"), "auto")
+        self.assertTrue(isolated.mode_explicit)
+        with patch.dict(os.environ, {"DGC_SDK_ISOLATED": "", "DGC_EDITOR_SESSION": ""}):
+            external_serve = cli._serve_config()
+        self.assertEqual(external_serve.get("mode"), "auto")
+
     def test_editor_set_mode_command_does_not_change_global_mode(self):
         from types import SimpleNamespace
         from dgc import headless

@@ -2,7 +2,7 @@
 
 ## 0.34.3 — 2026-11-02
 
-- Auto mode confirmation applies to the current Work chat. A new chat starts with the saved default mode.
+- Auto mode confirmation applies to the current Work chat. New editor sessions start in Default if 0.50.0 saved Auto globally.
 - Approval cards from parallel helpers name the helper and its requested step.
 - Pip model menus omit embedding and reranking models reported by the DGC connection.
 

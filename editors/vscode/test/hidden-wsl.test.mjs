@@ -48,12 +48,13 @@ test("a Windows path is the distro's /mnt path, and back", () => {
 });
 
 test("DGC starts in the distro through wsl.exe, in the Windows folder, with no shell", () => {
-  const env = { SystemRoot: "C:\\Windows", WSLENV: "MYVAR/p", DGC_SKIP_EXTENSION: "1", PATH: "C:\\x" };
+  const env = { SystemRoot: "C:\\Windows", WSLENV: "MYVAR/p", DGC_SKIP_EXTENSION: "1",
+    DGC_EDITOR_SESSION: "1", PATH: "C:\\x" };
   const spec = host.launch("DGC", "C:\\Users\\Me\\proj; rm -rf /", ["serve"], env);
   assert.equal(spec.command, "C:\\Windows\\System32\\wsl.exe");
   assert.deepEqual(spec.args, ["-d", "DGC", "--cd", "C:\\Users\\Me\\proj; rm -rf /", "--exec", "/home/dgc/.local/bin/dgc", "serve"]);
   assert.equal(spec.env.WSL_UTF8, "1");
-  assert.equal(spec.env.WSLENV, "MYVAR/p:DGC_SKIP_EXTENSION/u", "the user's own WSLENV is kept");
+  assert.equal(spec.env.WSLENV, "MYVAR/p:DGC_SKIP_EXTENSION/u:DGC_EDITOR_SESSION/u", "the editor marker reaches WSL");
   assert.equal(host.launch("DGC", undefined, ["serve"], { SystemRoot: "C:\\Windows" }).env.WSLENV, "");
   assert.equal(host.distroName("My Distro; x"), "DGC", "an unsafe name falls back");
   assert.equal(host.distroName("DGC-test.2"), "DGC-test.2");

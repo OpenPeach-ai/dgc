@@ -6,7 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.50.1 — 2026-11-02
 
-- Editor Auto permission mode now stays with the Work chat that confirmed it. New chats keep the saved default.
+- Editor Auto permission mode now stays with the Work chat that confirmed it. New editor sessions treat an Auto default saved by 0.50.0 as Default; explicit CLI and SDK modes remain available.
 - A fresh DGC home starts owner-only, so Pips Controls can use it immediately.
 - Pip model menus omit embedding and reranking models identified by their names or Ollama families.
 - An approved batch of helpers can run together in Default and acceptEdits modes. Their live approval cards appear one at a time and name the helper asking. A waiting helper uses an Always allow rule once it has been saved.

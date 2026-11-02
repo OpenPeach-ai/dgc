@@ -2442,6 +2442,7 @@ class Agent(GoalLifecycle):
         # (mode, already held or one-shot) before a reopened session's mode replaced it; a new
         # chat goes back to it. None once the user chooses a mode.
         self._mode_before_restore: tuple[str, bool] | None = None
+        self._mode_chosen_for_chat = False
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self._recall_pending: list[dict] = []   # display rows the last compaction dropped
         self._notes = None                      # context notes, opened on first use
@@ -4237,11 +4238,13 @@ class Agent(GoalLifecycle):
                         hold("mode", mode)
                     else:
                         self.config.set("mode", mode, persist=False)
+                    self._mode_chosen_for_chat = True
             except Exception:
                 self.config.data["mode"] = previous
                 raise
             if persist:
                 self._mode_before_restore = None       # a global choice carries to new chats
+                self._mode_chosen_for_chat = False
             if mode == "plan" and previous != "plan":
                 self.plan_return_mode = previous
             self._mode_prompt_dirty = True
@@ -4293,7 +4296,10 @@ class Agent(GoalLifecycle):
             # The mode this chat would be in without a reopened session's: what the first reopen
             # replaced, until someone chooses one.
             before = self._mode_before_restore
-            base = before[0] if before is not None else self.mode
+            # A mode the person just selected for this chat is explicit even
+            # though it is held rather than saved globally. A mode inherited
+            # from a different restored chat is not.
+            base = self.mode if self._mode_chosen_for_chat else (before[0] if before is not None else self.mode)
             if base not in _MODE_RANK:
                 return
             target = saved if _MODE_RANK[saved] <= _MODE_RANK[base] else base
@@ -4412,6 +4418,7 @@ class Agent(GoalLifecycle):
         self._goal_progress = None
         self._reset_todo_clear()
         self._undo_session_mode()           # before the prompt below, which names the mode
+        self._mode_chosen_for_chat = False
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._explicit_skill_instructions: dict[str, dict] = {}

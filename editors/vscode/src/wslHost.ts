@@ -16,7 +16,7 @@ export const LAUNCHER = `/home/${LINUX_USER}/.local/bin/dgc`;
 export const BASE_IMAGE = "Ubuntu-24.04";
 /** Variables the extension sets that DGC must see inside the distro (WSLENV: /u = from Windows to Linux only). */
 // DGC_ATTACH_SESSION / DGC_ATTACH: a window reopening a session that kept running (dgc/serve_relay.py).
-const PASSED = ["DGC_SKIP_EXTENSION", "DGC_INSTALL_VERSION", "DGC_BASE_URL", "DGC_ATTACH_SESSION", "DGC_ATTACH"];
+const PASSED = ["DGC_SKIP_EXTENSION", "DGC_INSTALL_VERSION", "DGC_BASE_URL", "DGC_ATTACH_SESSION", "DGC_ATTACH", "DGC_EDITOR_SESSION"];
 
 export function wslExe(env: NodeJS.ProcessEnv = process.env): string {
   return join(env.SystemRoot || env.windir || "C:\\Windows", "System32", "wsl.exe");

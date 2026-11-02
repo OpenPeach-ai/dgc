@@ -299,7 +299,8 @@ export class DgcBackend extends EventEmitter {
     // session (dgc/serve_relay.py); an older one ignores them. Asked once with the caller's mode; a
     // later start of this instance asks again automatically.
     const attach: Record<string, string> = this.attach?.session
-      ? { DGC_ATTACH_SESSION: this.attach.session, DGC_ATTACH: this.attach.mode } : {};
+      ? { DGC_ATTACH_SESSION: this.attach.session, DGC_ATTACH: this.attach.mode,
+          DGC_EDITOR_SESSION: "1" } : { DGC_EDITOR_SESSION: "1" };
     if (this.attach) { this.attach = { session: this.attach.session, mode: "auto" }; }
     try {
       if (this.route) {

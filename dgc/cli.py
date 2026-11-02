@@ -2948,6 +2948,11 @@ def _serve_config() -> Config:
     config = Config()
     if os.environ.get("DGC_SDK_ISOLATED") == "1":
         config.mode_explicit = True
+    elif os.environ.get("DGC_EDITOR_SESSION") == "1" and config.get("mode") == "auto":
+        # 0.50.0 could persist an editor chat's Auto choice as the global
+        # default. Do not reopen that unsafe default in a new editor process.
+        # A CLI/SDK run that explicitly asks for Auto still keeps its mode.
+        config.hold("mode", "default")
     return config
 
 def main(argv: list[str] | None = None) -> int | None:
