@@ -2060,7 +2060,7 @@ class CLI:
     # ---------------------------------------------------------------- loop ---
     def repl(self) -> None:
         self.banner()
-        USER_HOME.mkdir(parents=True, exist_ok=True)
+        USER_HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
         session: PromptSession = PromptSession(
             history=FileHistory(str(USER_HOME / "history")),
             completer=ClassicSlashCompleter(self.config.project_root, self.config),

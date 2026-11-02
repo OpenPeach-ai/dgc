@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.34.3 — 2026-11-02
+
+- Auto mode confirmation applies to the current Work chat. A new chat starts with the saved default mode.
+- Approval cards from parallel helpers name the helper and its requested step.
+- Pip model menus omit embedding and reranking models reported by the DGC connection.
+
 ## 0.34.2 — 2026-11-01
 
 - **Unread Pip messages are visible.** The Work Pips strip shows the latest two unread updates; Pip rows and Personal / Project tabs show counts. Reading the chat clears only what was shown, including scheduled all-clear results.

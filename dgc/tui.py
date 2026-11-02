@@ -5749,11 +5749,15 @@ class TUI:
 
     def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         from rich.text import Text
+        from .agent import interaction_helper_label
         self._flush_text()
         th = style_mod.theme()
-        header = [Text(f"{glyphs.RAIL} Allow ", style="bold").append(
+        helper = interaction_helper_label()
+        header = ([Text(f"{glyphs.RAIL} {style_mod.terminal_safe_text(helper)} asks:", style="bold")]
+                  if helper else [])
+        header.append(Text(f"{glyphs.RAIL} Allow ", style="bold").append(
                   style_mod.terminal_safe_text(name), style=f"bold {th.accent}")
-                  .append(" to run?", style="bold")]
+                  .append(" to run?", style="bold"))
         if name in ("bash", "monitor") and args.get("command"):   # show the shell command itself
             for ln in style_mod.terminal_safe_text(args["command"]).splitlines()[:6]:
                 header.append(Text("  $ ", style=th.faint).append(ln, style=th.text))

@@ -7406,7 +7406,9 @@ class Backend:
                 from .trust import mark_trusted
                 mark_trusted(self.config, self.config.project_root)
                 self.workspace_trusted = True
-            self.agent.set_mode(mode)
+            # The editor's confirmation is scoped to this Work chat. A new chat
+            # loads its mode from the user's saved default, not this decision.
+            self.agent.set_mode(mode, persist=False)
             self.em.emit("mode_changed", mode=self.agent.mode,
                          workspace_trusted=self.workspace_trusted,
                          **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}

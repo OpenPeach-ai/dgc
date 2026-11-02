@@ -69,6 +69,24 @@ class PipModelsTests(unittest.TestCase):
         self.assertEqual(self.config["api_mode"], factory.call_args.kwargs["api_mode"])
         self.assertEqual(before, self.config)
 
+    def test_embedding_models_do_not_appear_or_become_explicit_pip_choices(self):
+        ids = ["deepseek-v4.1-flash:cloud", "nomic-embed-text:latest", "mxbai-embed-large:latest",
+               "bge-large:latest", "my-chat-model"]
+        with patch.object(models.LLMClient, "list_models", return_value=ids):
+            got = models.list_pip_models(self.config)
+            self.assertEqual(["deepseek-v4.1-flash:cloud", "my-chat-model"],
+                             [row["id"] for row in got["models"]])
+            self.assert_code("model_not_available", models.resolve_model_choice, self.config,
+                             {"mode": "model", "model": "nomic-embed-text:latest"})
+
+    def test_ollama_family_excludes_an_embedding_alias(self):
+        # A family is useful when the person renamed an embedding model.
+        with patch.object(models, "LLMClient") as factory:
+            factory.return_value.api_mode = "ollama"
+            factory.return_value._listed_ollama_families = {"my-alias": "bert", "chat-model": "llama"}
+            factory.return_value.list_models.return_value = ["my-alias", "chat-model"]
+            self.assertEqual(["chat-model"], [row["id"] for row in models.list_pip_models(self.config)["models"]])
+
     def test_explicit_choice_requires_genuine_catalog_membership(self):
         with patch.object(models.LLMClient, "list_models", return_value=["other"]):
             self.assertEqual("other", models.resolve_model_choice(self.config, {"mode": "model", "model": "other"}))

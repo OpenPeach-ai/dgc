@@ -632,7 +632,7 @@ TOOL_SCHEMAS = [
         "conflicting or incomplete work is preserved without overwriting the caller. A helper starts "
         "cold, so it saves time only beside other helpers: to run several helpers at once, pass them "
         "all in ONE call as `tasks` (2-32, each with its own description, prompt and agent). They "
-        "start together (in auto mode, in a Git project) and the call returns every result, in the "
+        "start together (in a Git project, after any needed approval) and the call returns every result, in the "
         "order you listed them. For one helper, pass description and prompt instead. Never put parts "
         "that depend on each other or edit the same files in one batch. The user does not see the "
         "results: summarize them.",

@@ -153,6 +153,77 @@ class TaskBatchRunTests(HarnessCase):
     def tool_messages(self, h):
         return [m for m in h.agent.messages if m.get("role") == "tool"]
 
+    def test_approved_batch_runs_together_in_default_and_accept_edits(self):
+        for mode in ("default", "acceptEdits"):
+            with self.subTest(mode=mode):
+                h = self.make(git=True, mode=mode, max_parallel_tasks=2)
+                h.answer("permission_request", {"decision": "once"})
+                together = threading.Barrier(2)
+
+                def concurrent(messages, results, cancel):
+                    together.wait(10)
+                    return ChatResult(content="mapped")
+
+                h.run(PARENT, [("CHILD0", concurrent), ("CHILD1", concurrent),
+                               (PARENT, calls_then([batch(helper(0), helper(1))]))])
+                self.assertEqual(len(h.of("permission_request")), 1)
+                self.assertTrue(all(frame["parallel"] for frame in h.of("agent_started")))
+                self.assertEqual([frame["state"] for frame in h.of("agent_ended")], ["finished"] * 2)
+
+    def test_separate_preapproved_tasks_run_together_in_default(self):
+        h = self.make(git=True, mode="default", max_parallel_tasks=2)
+        h.config.permissions["allow"].append("Task")
+        together = threading.Barrier(2)
+
+        def concurrent(messages, results, cancel):
+            together.wait(10)
+            return ChatResult(content="mapped")
+
+        calls = [ToolCall("a", "task", helper(0)), ToolCall("b", "task", helper(1))]
+        h.run(PARENT, [("CHILD0", concurrent), ("CHILD1", concurrent),
+                       (PARENT, calls_then(calls))])
+        self.assertEqual(h.of("permission_request"), [])
+        self.assertTrue(all(frame["parallel"] for frame in h.of("agent_started")))
+
+    def test_denying_one_parallel_helpers_step_leaves_its_sibling_running(self):
+        h = self.make(git=True, mode="default", max_parallel_tasks=2)
+        answered = set()
+        saw = []
+        done = threading.Event()
+
+        def respond():
+            while not done.wait(0.01):
+                agents = {frame["id"]: frame["description"] for frame in h.of("agent_started")}
+                for frame in h.of("permission_request"):
+                    if frame["id"] in answered:
+                        continue
+                    answered.add(frame["id"])
+                    call_id = str(frame.get("call_id") or "")
+                    helper = next((label for ident, label in agents.items() if ident in call_id), "")
+                    decision = "deny" if helper == "area 0" else "once"
+                    saw.append((frame["name"], helper, decision))
+                    h.pending.resolve(frame["id"], {"decision": decision})
+
+        responder = threading.Thread(target=respond, daemon=True)
+        responder.start()
+        self.addCleanup(done.set)
+
+        def step(messages, results, cancel):
+            if not results:
+                return ChatResult(tool_calls=[ToolCall("cmd", "bash", {"command": "pwd"})])
+            return ChatResult(content=str(results[-1].get("content", "")))
+
+        h.run(PARENT, [("CHILD0", step), ("CHILD1", step),
+                       (PARENT, calls_then([batch(helper(0), helper(1))]))])
+        done.set()
+        responder.join(2)
+        self.assertEqual(saw[0], ("task", "", "once"))
+        self.assertEqual(sorted(saw[1:]), sorted([
+            ("bash", "area 0", "deny"), ("bash", "area 1", "once")]))
+        output = self.tool_messages(h)[0]["content"]
+        self.assertIn("DENIED", output)
+        self.assertIn(str(h.root), output)
+
     def test_the_helpers_of_one_call_run_at_the_same_time(self):
         h = self.make(git=True, max_parallel_tasks=4)
         together = threading.Barrier(3)

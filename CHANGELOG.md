@@ -4,6 +4,13 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.50.1 — 2026-11-02
+
+- Editor Auto permission mode now stays with the Work chat that confirmed it. New chats keep the saved default.
+- A fresh DGC home starts owner-only, so Pips Controls can use it immediately.
+- Pip model menus omit embedding and reranking models identified by their names or Ollama families.
+- An approved batch of helpers can run together in Default and acceptEdits modes. Their live approval cards appear one at a time and name the helper asking. A waiting helper uses an Always allow rule once it has been saved.
+
 ## 0.50.0 — 2026-11-01
 
 - **Unread Pip updates appear in Work and Pips.** Work shows the latest two unread replies or run results with short previews; Personal and Project tabs and Pip rows show counts. Even an all-clear routine is counted. Opening a Pip chat at the newest messages marks only the replies and results actually shown, so a later arrival stays unread.

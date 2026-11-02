@@ -3780,7 +3780,7 @@ def unit_tests(tmp: Path):
     _trusted.config = _TrustCfg()
     _trusted.agent = type("TrustedAgent", (), {
         "mode": "default",
-        "set_mode": lambda self, mode: setattr(self, "mode", mode),
+        "set_mode": lambda self, mode, *, persist=True: setattr(self, "mode", mode),
     })()
     _trusted.dispatch({"type": "set_mode", "mode": "auto",
                        "acknowledge_workspace_trust": True})

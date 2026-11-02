@@ -116,6 +116,7 @@ def _catalog(config) -> list[str]:
     if len(values) > MAX_CATALOG_MODELS:
         raise RegistryError("model_catalog_limit", "The configured connection returned too many models. Choose DGC default or use a smaller model catalog.")
     models, seen, byte_count = [], set(), 0
+    families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
     for value in values:
         # Invalid entries fail the entire response, rather than implying that a partial
         # or redacted ID is an executable route offered by the configured connection.
@@ -126,10 +127,24 @@ def _catalog(config) -> list[str]:
         byte_count += len(model)  # IDs are ASCII, checked above, including duplicates.
         if byte_count > MAX_CATALOG_BYTES:
             raise RegistryError("model_catalog_limit", "The configured model catalog exceeds the discovery budget. Choose DGC default or use a smaller catalog.")
+        family = families.get(model, "") if isinstance(families, dict) else ""
+        # Ollama's /api/tags includes the architecture even when the display
+        # name is an alias. Other compatible hosts expose no standard chat
+        # capability field, so use only narrow, known embedding/rerank names.
+        if _embedding_only(model, family):
+            continue
         if model not in seen:
             seen.add(model)
             models.append(model)
     return sorted(models)
+
+
+_EMBEDDING_NAME = re.compile(r"(?:^|[/_.:-])(?:embed(?:ding|dings)?|rerank|bge|gte|minilm|e5)(?:$|[/_.:-])", re.I)
+
+
+def _embedding_only(model: str, family: str = "") -> bool:
+    return bool(_EMBEDDING_NAME.search(model) or _EMBEDDING_NAME.search(family)
+                or family in {"bert", "nomic-bert"})
 
 
 def model_window(config, model) -> int | None:

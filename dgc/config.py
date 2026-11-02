@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import re
+import stat
 import tempfile
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
@@ -27,6 +28,24 @@ def _user_home_root() -> Path:
 
 
 USER_HOME = _user_home_root() / ".dgc"
+
+
+def _repair_user_home_permissions() -> None:
+    """Narrow an older DGC home only when it is a real directory owned by us."""
+    if os.name != "posix":
+        return
+    fd = None
+    try:
+        fd = os.open(USER_HOME, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and info.st_mode & 0o077:
+            os.fchmod(fd, 0o700)
+    except OSError:
+        pass                         # Pips Controls still refuses an unsafe directory
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def dgc_home() -> Path:
@@ -354,7 +373,7 @@ def _config_write_lock():
     path = USER_CONFIG.parent / "config.lock"
     fd = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(str(path), os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0), 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
     except OSError:
@@ -390,7 +409,7 @@ def _read_config_payload(path: Path) -> dict | None:
 
 def _write_private_json(path: Path, payload: dict) -> None:
     """Atomically persist user configuration with owner-only permissions."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         path.parent.chmod(0o700)
     except OSError:
@@ -893,6 +912,7 @@ class Config:
         self.load()
 
     def load(self) -> None:
+        _repair_user_home_permissions()
         raw: dict = {}
         if USER_CONFIG.exists():
             try:

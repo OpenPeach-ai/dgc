@@ -123,6 +123,32 @@ class SessionModeTest(unittest.TestCase):
         reopened.set_mode("acceptEdits")
         self.assertEqual(self.stored_mode(), "acceptEdits")
 
+    def test_editor_auto_applies_only_to_the_current_chat(self):
+        current = self.agent()
+        current.set_mode("auto", persist=False)
+        self.assertEqual(current.mode, "auto")
+        current.config.set("thinking", "high")
+        self.assertEqual(self.stored_mode(), "default", "a later settings save persisted the editor's Auto")
+        self.assertEqual(self.agent().mode, "default", "a new backend inherited the editor's Auto")
+        current.reset()
+        self.assertEqual(current.mode, "default", "New chat inherited the previous chat's Auto")
+
+    def test_editor_set_mode_command_does_not_change_global_mode(self):
+        from types import SimpleNamespace
+        from dgc import headless
+        backend = object.__new__(headless.Backend)
+        events = []
+        backend.em = SimpleNamespace(emit=lambda kind, **fields: events.append((kind, fields)))
+        backend._busy = lambda: False
+        backend.agent = self.agent()
+        backend.config = backend.agent.config
+        backend.workspace_trusted = True
+        backend._dispatch({"type": "set_mode", "mode": "auto", "request_id": "r1"})
+        self.assertEqual(backend.agent.mode, "auto")
+        self.assertEqual(self.stored_mode(), "default")
+        self.assertTrue(any(kind == "mode_changed" and fields.get("mode") == "auto"
+                            for kind, fields in events))
+
     def test_auto_comes_back_only_while_the_folder_is_trusted(self):
         path = self.saved_in("auto")
         self.store("auto")

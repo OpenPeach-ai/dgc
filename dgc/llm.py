@@ -2356,6 +2356,14 @@ class LLMClient:
                                                deadline=time.monotonic() + _MODEL_METADATA_TOTAL_S)
                 if not isinstance(value, dict) or not isinstance(value.get("models"), list):
                     raise LLMError("Ollama model catalog returned an invalid shape")
+                # Pips need to avoid offering embedding-only entries. Keep the
+                # catalog's bounded family metadata beside the IDs for that UI.
+                self._listed_ollama_families = {
+                    str(m.get("model") or m.get("name") or ""):
+                    str((m.get("details") or {}).get("family") or "").lower()[:128]
+                    for m in value["models"] if isinstance(m, dict)
+                    and isinstance(m.get("details"), dict)
+                }
                 return sorted(str(m.get("model") or m.get("name") or "?")
                               for m in value["models"] if isinstance(m, dict))
             _close_response(r)

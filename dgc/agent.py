@@ -806,6 +806,11 @@ def interaction_cancel():
     return getattr(_INTERACTION, "cancel", None)
 
 
+def interaction_helper_label() -> str:
+    """The helper asking on this worker thread, for terminal approval headings."""
+    return getattr(_INTERACTION, "helper_label", "")
+
+
 class _RouteGate:
     """Cancellation view for one model request that a mid-turn model switch may retire.
 
@@ -1711,6 +1716,7 @@ class _SubUI:
         # event it emits at that moment from landing behind the ones being replayed.
         self._buffer_lock = threading.Lock()
         self._interaction_lock = interaction_lock
+        self._held_approval_lock = None
         self._cancel = cancel
         tls = getattr(parent, "_tls", None)
         self._route_session = getattr(tls, "session", None) if tls is not None else None
@@ -1895,17 +1901,22 @@ class _SubUI:
         # under the child's own (prefixed) card.
         self._emit("tool_images", self._call_id(call_id), images, caption, **extra)
 
-    def _interact(self, name: str, fallback, *args, feedback_attr: str = ""):
+    def _interact(self, name: str, fallback, *args, feedback_attr: str = "", recheck=None,
+                  keep_on_always: bool = False):
         def invoke():
             # The innermost child sets it first and a parent _SubUI leaves it alone: the innermost
             # child's token already reads every ancestor's stop.
             outer = getattr(_INTERACTION, "cancel", None)
+            outer_label = getattr(_INTERACTION, "helper_label", "")
             if outer is None and self._cancel is not None:
                 _INTERACTION.cancel = self._cancel
+            if not outer_label:
+                _INTERACTION.helper_label = self._label
             try:
-                value = self._direct(name, *args)
+                value = self._direct(name, *args, **({"recheck": recheck} if recheck is not None else {}))
             finally:
                 _INTERACTION.cancel = outer
+                _INTERACTION.helper_label = outer_label
             if not feedback_attr:
                 return value
             feedback = str(getattr(self._parent, feedback_attr, "") or "")
@@ -1925,9 +1936,20 @@ class _SubUI:
             if self._cancel is not None and self._cancel.is_set():
                 self._failure = "turn cancelled before delegated interaction"
                 return cancelled
-            return invoke()
+            if recheck is not None:
+                decision = recheck()
+                if decision in ("once", "no"):
+                    return (decision, "") if feedback_attr else decision
+            result = invoke()
+            if keep_on_always and result[0] == "always":
+                # Keep this lane until Agent has saved the new rule. A waiting
+                # sibling must recheck after the rule exists, not between the
+                # answer and the separate add_permission_rule call.
+                self._held_approval_lock = lock
+            return result
         finally:
-            lock.release()
+            if self._held_approval_lock is not lock:
+                lock.release()
 
     def approve(self, name, args, call_id=None):
         verdict, reason = self._interact(
@@ -1935,8 +1957,32 @@ class _SubUI:
         self.deny_reason = reason
         return verdict
 
+    def approve_live(self, name, args, call_id=None, *, recheck=None):
+        if not callable(getattr(type(self._parent), "approve_live", None)):
+            return self.approve(name, args, call_id)
+        verdict, reason = self._interact(
+            "approve_live", "no", name, args, self._call_id(call_id),
+            feedback_attr="deny_reason", recheck=recheck, keep_on_always=True)
+        self.deny_reason = reason
+        return verdict
+
     def add_permission_rule(self, name, args):
+        if self._held_approval_lock is not None:
+            try:
+                return self._direct("add_permission_rule", name, args)
+            finally:
+                self.finish_approval()
         return self._interact("add_permission_rule", None, name, args)
+
+    def finish_approval(self):
+        lock, self._held_approval_lock = self._held_approval_lock, None
+        if lock is not None:
+            lock.release()
+        # A nested helper can pass through another _SubUI before reaching the
+        # terminal/editor. Its Always response holds one lane at each depth.
+        parent_finish = getattr(type(self._parent), "finish_approval", None)
+        if callable(parent_finish):
+            parent_finish(self._parent)
 
     def present_plan(self, plan):
         choice, feedback = self._interact(
@@ -2002,7 +2048,7 @@ class _SubUI:
         # below stops the instance's own attrs from recursing during partial init.)
         if name in ("_parent", "_label", "_buf", "_last", "_failure", "_call_prefix",
                     "_buffered", "_events", "_interaction_lock", "_cancel", "_route_session",
-                    "_deny_reason", "_plan_feedback", "_buffer_lock"):
+                    "_deny_reason", "_plan_feedback", "_buffer_lock", "_held_approval_lock"):
             raise AttributeError(name)
         return getattr(self._parent, name)
 
@@ -4174,17 +4220,28 @@ class Agent(GoalLifecycle):
     def mode(self) -> str:
         return self.config.data.get("mode", "default")
 
-    def set_mode(self, mode: str) -> None:
+    def set_mode(self, mode: str, *, persist: bool = True) -> None:
         if mode not in ("default", "acceptEdits", "plan", "auto"):
             raise ValueError("Unknown permission mode")
         with self._mode_lock:
             previous = self.mode
             try:
-                self.config.set("mode", mode)
+                if persist:
+                    self.config.set("mode", mode)
+                else:
+                    if self._mode_before_restore is None:
+                        ephemeral = getattr(self.config, "_ephemeral_keys", set())
+                        self._mode_before_restore = (previous, "mode" in ephemeral)
+                    hold = getattr(self.config, "hold", None)
+                    if callable(hold):
+                        hold("mode", mode)
+                    else:
+                        self.config.set("mode", mode, persist=False)
             except Exception:
                 self.config.data["mode"] = previous
                 raise
-            self._mode_before_restore = None           # chosen: a new chat keeps it
+            if persist:
+                self._mode_before_restore = None       # a global choice carries to new chats
             if mode == "plan" and previous != "plan":
                 self.plan_return_mode = previous
             self._mode_prompt_dirty = True
@@ -9736,16 +9793,24 @@ class Agent(GoalLifecycle):
                             "guidance instead; do not retry the denied action.")
                 return "The user DENIED this action. Do not retry it; ask how to proceed or move on."
             if verdict == "always":
-                if contains_secret(args, secrets):
-                    approval["decision"] = "once"
-                    self.ui.info("credential-bearing approvals are one-time only; no rule was saved")
-                else:
-                    saved_rule = (self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
-                                  if external_paths else self.ui.add_permission_rule(name, perms.canonical_args(name, policy_args)))
-                    if isinstance(saved_rule, str) and saved_rule:
-                        approval["rule"] = redact_text(saved_rule, secrets)[:1000]
-                    else:
+                finish_approval = getattr(type(self.ui), "finish_approval", None)
+                try:
+                    if contains_secret(args, secrets):
                         approval["decision"] = "once"
+                        self.ui.info("credential-bearing approvals are one-time only; no rule was saved")
+                    else:
+                        saved_rule = (self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
+                                      if external_paths else self.ui.add_permission_rule(name, perms.canonical_args(name, policy_args)))
+                        if isinstance(saved_rule, str) and saved_rule:
+                            approval["rule"] = redact_text(saved_rule, secrets)[:1000]
+                        else:
+                            approval["decision"] = "once"
+                finally:
+                    # A parallel sibling may be waiting on the one approval lane.
+                    # Release it even if saving a rule or reporting a one-time
+                    # credential approval fails unexpectedly.
+                    if callable(finish_approval):
+                        finish_approval(self.ui)
 
             # A newly selected plan/deny policy still wins over an earlier approval response.
             decision, reason = current_permissions().decide(name, policy_args)
@@ -12329,10 +12394,6 @@ class Agent(GoalLifecycle):
             return "max_parallel_tasks is 1, which runs one sub-agent at a time"
         if self.depth >= self.max_subagent_depth():
             return "this agent is at the sub-agent depth limit"
-        if self.mode != "auto":
-            # Each helper's own steps ask for approval outside auto mode; one at a time, the cards
-            # come in the order the helpers work instead of interleaved from several at once.
-            return f"helpers run side by side only in auto mode, and this chat is in {self.mode} mode"
         if self.turn_budget_exceeded():   # serial path: one visible refusal per call
             return "this turn's token budget is spent"
         if self.config.get("hooks"):
@@ -12374,7 +12435,7 @@ class Agent(GoalLifecycle):
 
         This path is intentionally narrower than normal delegation: every call is a task (or a
         `todo`, which the normal path runs after the batch), every task must already be
-        auto-approved, hooks must be absent, the source must be Git-backed, and at least two worker
+        approved, hooks must be absent, the source must be Git-backed, and at least two worker
         slots must be enabled. All worktrees are prepared under one source lease before any child
         starts, so siblings observe one exact baseline. Children run concurrently; their buffered UI
         traces replay atomically as they finish; integration remains deterministic and conflict-safe.

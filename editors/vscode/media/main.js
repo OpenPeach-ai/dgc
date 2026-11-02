@@ -7928,6 +7928,10 @@
       case "permission_request": {
         if (requestShown(ev.id)) break;     // announced again after a history snapshot
         const fixAsk = pipFixAskHome(ev.call_id);     // a background fix's: asked on its card
+        const helperIds = String(ev.call_id || "").match(/sub-[0-9a-f]{12}/g) || [];
+        const helper = helperIds.reverse().map(id => agentRecords.get(id)).find(Boolean);
+        const helperName = helper?.description ? String(helper.description).replace(/\s+/g, " ").trim().slice(0, 120) : "";
+        const helperHeading = helperName ? `<div class="muted">Helper: ${esc(helperName)}</div>` : "";
         if (!fixAsk) ensureTurn();
         if (!replaying) {
           imageViewerAttention("permission_request");
@@ -7953,7 +7957,7 @@
         const buttons = fixFile
           ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
           : `<button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button>`;
-        const inner = `<div class="q">${icon("shield")}<span>${title}</span></div>${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>`;
+        const inner = `<div class="q">${icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>`;
         // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
         const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
