@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -352,6 +353,52 @@ class NoteStaysInItsOwnHomeTest(unittest.TestCase):
 
     def mine(self, home: Path) -> Path:
         return home / ".dgc" / "peers" / f"{os.getpid()}.json"
+
+    def test_host_note_cannot_restore_an_old_chat_holder_snapshot(self):
+        from dgc import holder_note
+        from dgc.headless import Host
+
+        host = Host.__new__(Host)
+        host.chats = {}
+        host.switchboard = None
+        host.editor_app = ""
+        host._peer_announce_lock = threading.RLock()
+        captured = threading.Event()
+        release = threading.Event()
+        second_done = threading.Event()
+        held = ["chat-id"]
+
+        def snapshot(_host, _editor):
+            value = list(held)
+            if value:
+                captured.set()
+                self.assertTrue(release.wait(5), "first note stayed inside the snapshot test")
+            return {"held": value}
+
+        def second_announce():
+            host.announce_peers()
+            second_done.set()
+
+        with patch.object(holder_note, "note_block", side_effect=snapshot):
+            first = threading.Thread(target=host.announce_peers)
+            second = threading.Thread(target=second_announce)
+            first.start()
+            try:
+                self.assertTrue(captured.wait(5), "first note captured the old holder")
+                held.clear()                  # the chat moved to another window
+                second.start()
+                self.assertFalse(second_done.wait(0.1), "a newer note cannot pass the first write")
+            finally:
+                release.set()
+                first.join(5)
+                if second.ident is not None:
+                    second.join(5)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertTrue(second_done.is_set())
+        record = json.loads(self.mine(self.first).read_text())
+        self.assertEqual(record[holder_note.NOTE_KEY]["held"], [],
+                         "the note on disk must reflect the latest holder state")
 
     def test_a_sessions_note_stays_in_the_home_it_started_in(self):
         from dgc.headless import Backend
