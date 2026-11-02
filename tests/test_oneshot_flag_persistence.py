@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -90,8 +91,13 @@ class MoreOneShotFlagsTests(OneShotFlagPersistenceTests):
         # `persist=False` only skips the save at that moment; save() diffs against the LOAD-TIME
         # baseline, so the next save in the process writes them anyway. The first version of this
         # batch asserted in a comment that these two were already handled. They were not.
-        saved = self.run_cli("-p", "hi", "--trust", "--model", "scratch-model",
-                             "--base-url", "http://127.0.0.2:9/v1")
+        # A bound but non-listening loopback socket rejects connects immediately
+        # on Linux and macOS. Some macOS hosts blackhole 127.0.0.2 instead.
+        with socket.socket() as unavailable:
+            unavailable.bind(("127.0.0.1", 0))
+            port = unavailable.getsockname()[1]
+            saved = self.run_cli("-p", "hi", "--trust", "--model", "scratch-model",
+                                 "--base-url", f"http://127.0.0.1:{port}/v1")
         self.assertEqual(saved.get("model"), "fixture", "a one-shot --model became the default")
         self.assertEqual(saved.get("base_url"), "http://127.0.0.1:1/v1",
                          "a one-shot --base-url became the default endpoint")

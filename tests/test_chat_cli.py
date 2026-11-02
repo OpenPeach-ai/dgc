@@ -71,7 +71,8 @@ class ChatCliTests(unittest.TestCase):
         markdown = self.dgc("--export", chat_id)
         self.assertEqual(markdown.returncode, 0, markdown.stderr)
         path = Path(markdown.stdout.strip())
-        self.assertEqual(path.parent, self.home / ".dgc" / "exports", "saved where `dgc export` saves")
+        self.assertEqual(path.parent.resolve(), (self.home / ".dgc" / "exports").resolve(),
+                         "saved where `dgc export` saves")
         self.assertIn(ANSWER, path.read_text(encoding="utf-8"))
 
     def test_json_piped_question_and_a_temporary_chat(self):
