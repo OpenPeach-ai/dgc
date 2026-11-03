@@ -81,6 +81,7 @@ class _Model(BaseHTTPRequestHandler):
     behavior = "text"
     posts = 0
     last_system = ""
+    call_systems: list[tuple[str, str]] = []
 
     def log_message(self, *args):
         pass
@@ -105,7 +106,8 @@ class _Model(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         request = json.loads(self.rfile.read(length) or b"{}")
         messages = request.get("messages") or []
-        _Model.last_system = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
+        system = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
+        _Model.last_system = system
         last = ""
         for message in reversed(messages):
             if message.get("role") == "tool":
@@ -114,6 +116,7 @@ class _Model(BaseHTTPRequestHandler):
             if message.get("role") == "user":
                 last = str(message.get("content") or "")
                 break
+        _Model.call_systems.append((last, system))
         if self.behavior == "flaky429":
             if _Model.posts <= 2:
                 self.send_response(429)
@@ -226,6 +229,7 @@ class SdkTests(unittest.TestCase):
         os.environ["HOME"] = str(self.host_home)
         _Model.behavior = "text"
         _Model.posts = 0
+        _Model.call_systems = []
         self.server, self.base_url = _start_model()
 
     def tearDown(self):

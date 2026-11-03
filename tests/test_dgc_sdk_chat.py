@@ -59,14 +59,23 @@ class ChatTests(unittest.TestCase):
         """What the editor's Chat tab can do, a program can too (the overnight battle found both missing): Study mode
         from a message, and answering a reply's question card -- one choice, or a card of several questions."""
         from dgc_sdk import DGCUnsupportedError  # noqa: F401
+
+        def assert_study_prompt(message: str, enabled: bool) -> None:
+            # ChatDGC may ask for follow-up suggestions after the answer. That separate model call
+            # can overwrite the mock's global last_system before send() returns. Inspect the call
+            # for this user message instead of whichever background call happened to finish last.
+            systems = [system for prompt, system in list(harness._Model.call_systems) if prompt == message]
+            self.assertTrue(systems, f"the mock did not receive the chat message {message!r}")
+            self.assertEqual(any("Study mode is on" in system for system in systems), enabled)
+
         with self._client() as dgc, dgc.chat() as chats:
             chat = chats.new()
             chat.send("Teach me how compound interest works.", search="off", study=True)
-            self.assertIn("Study mode is on", harness._Model.last_system, "the model is told to teach")
+            assert_study_prompt("Teach me how compound interest works.", True)
             chat.send("And simple interest?", search="off")
-            self.assertIn("Study mode is on", harness._Model.last_system, "it stays on for the chat")
+            assert_study_prompt("And simple interest?", True)
             chat.send("Thanks.", search="off", study=False)
-            self.assertNotIn("Study mode is on", harness._Model.last_system, "and off when asked")
+            assert_study_prompt("Thanks.", False)
             with self.assertRaises(DGCConfigError):
                 chat.send("x", study="yes")
             card = None
