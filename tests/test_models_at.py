@@ -224,6 +224,9 @@ class ListModelsAt(unittest.TestCase):
                                      "api_mode": "chat_completions", "thinking": "off"})
         self.assertEqual(config.get("api_key"), "", "the old key must not authorize another host")
         self.assertIn(MAIN_KEY, secret_values(config), "old transcript text still needs redaction")
+        child = config.clone_for_root(self.root)
+        self.assertEqual(child.get("api_key"), "")
+        self.assertIn(MAIN_KEY, secret_values(child), "a helper must redact its parent's former key")
 
     def test_a_different_host_never_receives_a_saved_key(self):
         host = self.host()

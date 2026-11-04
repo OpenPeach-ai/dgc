@@ -2400,6 +2400,7 @@ class Config:
         clone._stored_secrets = dict(self._stored_secrets)
         clone._stored_provider_identity = dict(self._stored_provider_identity)
         clone._provider_secret_identity = dict(self._provider_secret_identity)
+        clone._session_secret_values = tuple(getattr(self, "_session_secret_values", ()))
         clone._stored_mcp_env = copy.deepcopy(self._stored_mcp_env)
         clone._stored_mcp_identity = dict(self._stored_mcp_identity)
         clone._env_secret_keys = set(self._env_secret_keys)
