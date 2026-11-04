@@ -246,7 +246,7 @@ class ChatPlugins:
             return "error: those inputs are too large.", None
         if pip_plugins._composio(info) and tool == pip_plugins.COMPOSIO_EXECUTE:
             calls = pip_plugins.composio_calls(arguments)
-            if calls is None or any(not isinstance(call.get("arguments"), dict) for call in calls):
+            if calls is None:
                 # A model sometimes uses COMPOSIO_GET_TOOL_SCHEMAS's `tool_slugs` input for
                 # COMPOSIO_MULTI_EXECUTE_TOOL. That malformed request used to become a Send it
                 # card, despite having nothing valid to execute. Give the model a chance to
@@ -367,6 +367,10 @@ def run(config, card: dict, arguments: dict | None = None, *, installed=None, ma
         apps.bounded(arguments, 10000)
     except RegistryError:
         return {"status": "failed", "error": "Those inputs are too large."}
+    if pip_plugins._composio({**info, "plugin": card["plugin"]}) and card["tool"] == pip_plugins.COMPOSIO_EXECUTE:
+        if pip_plugins.composio_calls(arguments) is None:
+            return {"status": "failed", "error": "This Composio card has invalid execution inputs. Ask DGC to fetch "
+                                               "or prepare the action again; nothing was sent."}
     if pip_plugins.saved_credential_in(arguments, config):
         return {"status": "failed", "error": "Remove credentials from the inputs."}
     session = ChatPlugins(config, installed=available, manager_factory=manager_factory)

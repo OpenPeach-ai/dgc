@@ -176,6 +176,23 @@ class ReadsAndCards(PluginChat):
         self.assertIn("tool_slugs` belongs to schema lookup", self.told(1)[0])
         self.assertTrue(any("first" in answer for answer in self.told(2)))
 
+    def test_legacy_or_edited_malformed_composio_card_cannot_run(self):
+        spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
+        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+                                               "money": False, "reads": (), "servers": {"composio": spec}}
+        self.world["tools"]["composio"] = [{"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute app tools.",
+                                               "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}]
+        change = {"tools": [{"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"to": "person@example.com"}}]}
+        chat, reply = self.say("Prepare a mail", {"calls": [("call_plugin", {
+            "plugin": "composio", "tool": "COMPOSIO_MULTI_EXECUTE_TOOL", "arguments": change})]},
+            {"parts": ["Review the mail before sending."]})
+        card = reply["actions"][0]
+        result = self.engine.act(chat["id"], reply["id"], card["id"], "run",
+                                 arguments={"tool_slugs": ["GMAIL_SEND_EMAIL"]})
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("nothing was sent", result["error"])
+        self.assertEqual(self.world["calls"], [])
+
     def test_a_read_runs_at_once_and_its_answer_is_untrusted_data(self):
         self.world["answers"]["list_events"] = json.dumps({"events": [{"title": "Dentist", "at": "10:00"}]})
         chat, reply = self.say("What's on my calendar tomorrow?",

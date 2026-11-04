@@ -622,7 +622,8 @@ def composio_calls(arguments) -> list[dict] | None:
     calls = arguments.get("tools") if isinstance(arguments, dict) else None
     if not isinstance(calls, list) or not calls or len(calls) > 50:
         return None
-    if not all(isinstance(c, dict) and isinstance(c.get("tool_slug"), str) for c in calls):
+    if not all(isinstance(c, dict) and isinstance(c.get("tool_slug"), str)
+               and isinstance(c.get("arguments"), dict) for c in calls):
         return None
     return calls
 
