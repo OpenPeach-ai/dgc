@@ -244,6 +244,19 @@ class ChatPlugins:
             apps.bounded(arguments, 10000)
         except RegistryError:
             return "error: those inputs are too large.", None
+        if pip_plugins._composio(info) and tool == pip_plugins.COMPOSIO_EXECUTE:
+            calls = pip_plugins.composio_calls(arguments)
+            if calls is None or any(not isinstance(call.get("arguments"), dict) for call in calls):
+                # A model sometimes uses COMPOSIO_GET_TOOL_SCHEMAS's `tool_slugs` input for
+                # COMPOSIO_MULTI_EXECUTE_TOOL. That malformed request used to become a Send it
+                # card, despite having nothing valid to execute. Give the model a chance to
+                # correct its inputs in this reply; no app call or approval is made.
+                return ("error: COMPOSIO_MULTI_EXECUTE_TOOL needs a nonempty `tools` array. "
+                        "Each item needs `tool_slug` and an `arguments` object. For a Gmail read, "
+                        "use `tools: [{\"tool_slug\": \"GMAIL_FETCH_EMAILS\", "
+                        "\"arguments\": {\"max_results\": 10, \"include_payload\": false, "
+                        "\"verbose\": false}}]`. `tool_slugs` belongs to schema lookup, not execution. "
+                        "Call plugin_tools for the full execution schema and retry."), None
         if pip_plugins.saved_credential_in(arguments, self.config):
             return "error: remove credentials from the inputs.", None
         server, row, entry, manager = tools[tool]

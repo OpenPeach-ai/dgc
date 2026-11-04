@@ -180,6 +180,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - Composio reads (Gmail fetch, Calendar find and the like) run at once in ChatDGC and Pips, even though Composio marks
   its run-tools command as one that can change things. A batch with anything else in it, or a read of another
   account, still asks.
+- In ChatDGC, a malformed Composio execution call now returns an input error to the model so it can retry in the
+  same reply. It no longer puts an unusable "Send it" card in the chat.
 - When Composio returns a short Gmail preview and a remote file pointer, DGC retries that same reviewed read once
   in compact form in Work, ChatDGC, Pips and the CLI. The model receives the returned list directly and says when
   only previews are available; the remote workbench remains a separate action.

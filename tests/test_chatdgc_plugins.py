@@ -149,12 +149,32 @@ class ReadsAndCards(PluginChat):
         self.assertIn("first", self.told()[0])
         self.assertIn("Untrusted data", self.told()[0])
         self.assertEqual(len(self.world["calls"]), 1)
-        for calls in ([send], [fetch, send], [{"tool_slug": "UNKNOWN_READ", "arguments": {}}], []):
+        for calls in ([send], [fetch, send], [{"tool_slug": "UNKNOWN_READ", "arguments": {}}]):
             with self.subTest(calls=calls):
                 before = len(self.world["calls"])
                 _, reply = self.say("Do this", {"calls": [call(calls)]}, {"parts": ["Review the card."]}, chat=chat)
                 self.assertEqual(len(reply["actions"]), 1)
                 self.assertEqual(len(self.world["calls"]), before, "a mixed or unknown batch never runs immediately")
+
+    def test_malformed_composio_execution_is_rejected_before_card_then_model_can_retry_read(self):
+        spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
+        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+                                               "money": False, "reads": (), "servers": {"composio": spec}}
+        self.world["tools"]["composio"] = [{"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute tool calls.",
+                                               "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}]
+        self.world["answers"]["COMPOSIO_MULTI_EXECUTE_TOOL"] = json.dumps({"emails": ["first", "second"]})
+        def call(arguments):
+            return ("call_plugin", {"plugin": "composio", "tool": "COMPOSIO_MULTI_EXECUTE_TOOL",
+                                    "arguments": arguments})
+        malformed = {"tool_slugs": ["GMAIL_FETCH_EMAILS"], "arguments": {"max_results": 10}}
+        valid = {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": 10}}]}
+        _, reply = self.say("Summarise ten Gmail emails", {"calls": [call(malformed)]},
+                            {"calls": [call(valid)]}, {"parts": ["Here is the summary."]})
+        self.assertNotIn("actions", reply)
+        self.assertEqual(len(self.world["calls"]), 1)
+        self.assertEqual(self.world["calls"][0][1], valid)
+        self.assertIn("tool_slugs` belongs to schema lookup", self.told(1)[0])
+        self.assertTrue(any("first" in answer for answer in self.told(2)))
 
     def test_a_read_runs_at_once_and_its_answer_is_untrusted_data(self):
         self.world["answers"]["list_events"] = json.dumps({"events": [{"title": "Dentist", "at": "10:00"}]})
