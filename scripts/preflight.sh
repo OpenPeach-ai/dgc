@@ -183,7 +183,7 @@ DATASET_COMMIT=7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f
 if [ ! -f "$CORPUS" ]; then
   EDIT_GATE_TMP=$(mktemp -d)
   DATASET="$EDIT_GATE_TMP/polyglot-benchmark"
-  echo "edit corpus absent — regenerating from the pinned polyglot dataset $DATASET_COMMIT…"
+  echo "edit corpus absent — regenerating from the pinned polyglot dataset ${DATASET_COMMIT}…"
   git init -q "$DATASET"
   git -C "$DATASET" remote add origin https://github.com/Aider-AI/polyglot-benchmark.git
   git -C "$DATASET" fetch -q --depth=1 origin "$DATASET_COMMIT"
