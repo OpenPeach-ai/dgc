@@ -363,8 +363,8 @@ class SessionModeTest(unittest.TestCase):
         self.assertIn("mode_changed", kinds, events)
         replay = {"history", "agents", "context", "goal_changed", "monitors"}
         self.assertGreater(kinds.index("mode_changed"), max(i for i, kind in enumerate(kinds) if kind in replay), kinds)
-        # 0.48: only the prompt cache's clock follows it, a new event no older SDK counts as replay.
-        self.assertEqual(kinds[kinds.index("mode_changed") + 1:], ["cache_clock"], kinds)
+        # Per-session provider routing now also refreshes the model controls after replay.
+        self.assertEqual(kinds[kinds.index("mode_changed") + 1:], ["config", "cache_clock"], kinds)
 
     def test_an_sdk_apps_session_runs_in_the_mode_the_app_asked_for(self):
         # SDK 0.6.9 cannot correct a mode a reopen restored (0.6.10 sends set_mode afterwards), so
@@ -660,14 +660,16 @@ class SessionModeTest(unittest.TestCase):
         self.assertEqual(reopened.take_mode_restore_note(), "", "a stale note from the earlier reopen")
 
     def test_only_a_mode_the_subscription_engine_supports(self):
-        # Kimi always approves tools, so DGC runs it only in auto: a chat saved in plan keeps auto.
+        # A saved native route owns its mode. A newly selected global subscription
+        # must not silently convert that existing native Plan chat into Auto.
         path = self.saved_in("plan")
         reopened = self.agent()
         mark_trusted(reopened.config, self.root)
         reopened.config.data["subscription_engine"] = "kimi"
         reopened.config.data["mode"] = "auto"
         reopened.load_session(path, saved_mode=True)
-        self.assertEqual(reopened.mode, "auto")
+        self.assertEqual(reopened.mode, "plan")
+        self.assertEqual(reopened.config.get("subscription_engine"), "")
 
     def test_a_reopened_plan_keeps_its_way_back(self):
         path = self.saved_in("plan")

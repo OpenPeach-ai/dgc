@@ -180,8 +180,11 @@ class ContinuityTests(unittest.TestCase):
             store=pips.PipStore(other)
             retry=pip_chat.send(store,self.pip['id'],'Keep project codename Lavender. Never deploy without a visual review.','second','user',self.cfg)
             self.assertEqual(retry['run']['id'],second['id'])
-            with self.assertRaisesRegex(RegistryError,'already has'):
-                pip_chat.send(store,self.pip['id'],'Another','different','user',self.cfg)
+            steered = pip_chat.send(store,self.pip['id'],'Another','different','user',self.cfg)
+            self.assertEqual(steered['run']['id'], second['id'], 'a mid-turn update belongs to the live reply')
+            self.assertTrue(steered['message']['steered'])
+            repeated = pip_chat.send(store,self.pip['id'],'Another','different','user',self.cfg)
+            self.assertEqual(repeated['message']['id'], steered['message']['id'], 'the update is idempotent')
         self.assertEqual(self.send('second')['manifest']['conversation'],second['manifest']['conversation'])
 
 

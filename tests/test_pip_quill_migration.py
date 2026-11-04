@@ -20,10 +20,10 @@ class QuillSemanticMigrationTests(unittest.TestCase):
 
     @staticmethod
     def snapshot(db):
-        tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images','pip_chat_files','pip_read_state','pip_flows','pip_flow_steps') AND name NOT LIKE 'pip_chat_fts%' ORDER BY name")]   # later additive tables are not legacy data
+        tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images','pip_chat_files','pip_read_state','pip_flows','pip_flow_steps','pip_chat_steers') AND name NOT LIKE 'pip_chat_fts%' ORDER BY name")]   # later additive tables are not legacy data
         rows = {name: [tuple(row) for row in db.execute('SELECT * FROM "' + name.replace('"', '""') + '" ORDER BY rowid')]
                 for name in tables}
-        definitions = [tuple(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images','pip_chat_files','pip_read_state','pip_flows','pip_flow_steps') ORDER BY type,name")]
+        definitions = [tuple(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('pip_commit_path_observations','pip_setup_proposals','pip_app_actions','pip_message_drafts','pip_calendar_drafts','pip_connector_drafts','pip_notify_settings','pip_digest_state','pip_computer_actions','pip_chat_images','pip_chat_files','pip_read_state','pip_flows','pip_flow_steps','pip_chat_steers') ORDER BY type,name")]
         return rows, definitions
 
     def legacy(self):
@@ -57,12 +57,13 @@ class QuillSemanticMigrationTests(unittest.TestCase):
         from dgc.pip_digest import NEWS_SEEN_SCHEMA, RUN_SEEN_SCHEMA
         from dgc.pip_unread import SCHEMA as UNREAD_SCHEMA
         from dgc.pip_flows import SCHEMA as FLOW_SCHEMA
+        from dgc.pip_steering import SCHEMA as STEERING_SCHEMA
         with patch.object(schema, '_execute_schema', wraps=schema._execute_schema) as ddl:
             with WorkspaceRegistry(self.registry.directory, clock=self.registry.clock) as upgraded:
                 self.assertEqual([call.args for call in ddl.call_args_list],
                                  [(upgraded.db, SCHEMA_V22), (upgraded.db, SETUP_SCHEMA),
                                   (upgraded.db, CONTINUITY_SCHEMA), (upgraded.db, APP_ACTION_SCHEMA), (upgraded.db, MESSAGE_DRAFT_SCHEMA), (upgraded.db, CALENDAR_SCHEMA), (upgraded.db, CONNECTOR_SCHEMA), (upgraded.db, DIGEST_SCHEMA), (upgraded.db, COMPUTER_SCHEMA), (upgraded.db, IMAGES_SCHEMA), (upgraded.db, FILES_SCHEMA),
-                                  (upgraded.db, APP_LINKS_SCHEMA), (upgraded.db, CHOICES_SCHEMA), (upgraded.db, ROUTINES_SCHEMA), (upgraded.db, PROFILE_SCHEMA), (upgraded.db, PLUGINS_SCHEMA), (upgraded.db, NOTES_SCHEMA), (upgraded.db, NEWS_SEEN_SCHEMA), (upgraded.db, RUN_SEEN_SCHEMA), (upgraded.db, UNREAD_SCHEMA), (upgraded.db, FLOW_SCHEMA)])
+                                  (upgraded.db, APP_LINKS_SCHEMA), (upgraded.db, CHOICES_SCHEMA), (upgraded.db, ROUTINES_SCHEMA), (upgraded.db, PROFILE_SCHEMA), (upgraded.db, PLUGINS_SCHEMA), (upgraded.db, NOTES_SCHEMA), (upgraded.db, NEWS_SEEN_SCHEMA), (upgraded.db, RUN_SEEN_SCHEMA), (upgraded.db, UNREAD_SCHEMA), (upgraded.db, FLOW_SCHEMA), (upgraded.db, STEERING_SCHEMA)])
                 self.assertEqual(upgraded.db.execute('SELECT count(*) FROM pip_commit_path_observations').fetchone()[0], 0)
                 self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0], schema.SCHEMA_VERSION)
                 self.assertEqual(self.snapshot(upgraded.db), before)

@@ -1395,7 +1395,10 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
                 "SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
                 "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
                 (pip_id,)).fetchone()
-            if active_for_attachment:
+            saved_retry = store.db.execute(
+                "SELECT 1 FROM pip_chat_messages WHERE pip_id=? AND request_key=? LIMIT 1",
+                (pip_id, key)).fetchone()
+            if active_for_attachment and not saved_retry:
                 raise RegistryError('steer_attachments', 'Send photos or files after this Pip finishes its reply. Mid-turn updates are text only.')
         if images is not None or spooled_images is not None:
             job = store._job(pip_id)
@@ -1425,6 +1428,10 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
                                   "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') "
                                   "ORDER BY m.seq DESC LIMIT 1", (pip_id,)).fetchone()
         if active:
+            if _intro:
+                # Routine, app and computer follow-ups are separate turns. Only the
+                # person's text can steer a live reply; a scheduled event must retry.
+                raise RegistryError("conversation_busy", "This Pip already has a queued or active reply. Wait for it or stop it before sending another message.")
             return pip_steering.send(store, store._job(pip_id), store.run(active['id']), req, actor)
         # A tap on the card a Pip that couldn't see showed (pip_eyes): applied before the run is queued, so a
         # switch to a model that sees already holds for it.
