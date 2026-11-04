@@ -17,6 +17,7 @@ import re
 from urllib.parse import urlsplit
 
 from .llm import LLMClient
+from .model_discovery import embedding_only
 from .redaction import redact_text, secret_values
 from .workspace_registry import RegistryError
 
@@ -170,20 +171,12 @@ def _catalog(config) -> list[str]:
         # Ollama's /api/tags includes the architecture even when the display
         # name is an alias. Other compatible hosts expose no standard chat
         # capability field, so use only narrow, known embedding/rerank names.
-        if _embedding_only(model, family):
+        if embedding_only(model, family):
             continue
         if model not in seen:
             seen.add(model)
             models.append(model)
     return sorted(models)
-
-
-_EMBEDDING_NAME = re.compile(r"(?:^|[/_.:-])(?:embed(?:ding|dings)?|rerank|bge|gte|minilm|e5)(?:$|[/_.:-])", re.I)
-
-
-def _embedding_only(model: str, family: str = "") -> bool:
-    return bool(_EMBEDDING_NAME.search(model) or _EMBEDDING_NAME.search(family)
-                or family in {"bert", "nomic-bert"})
 
 
 def model_window(config, model) -> int | None:

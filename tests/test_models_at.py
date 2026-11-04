@@ -87,10 +87,13 @@ class StubHost:
                 if status != 200:        # a refusal that quotes a key: it must never reach a frame
                     body = {"error": f"bad key {MAIN_KEY}"}
                 elif self.path.endswith("/api/tags"):
-                    body = {"models": [{"name": "qwen3:8b"}, {"name": "glm-5.3:cloud"}]}
+                    body = {"models": [{"name": "qwen3:8b"}, {"name": "glm-5.3:cloud"},
+                                       {"name": "nomic-embed-text:latest"},
+                                       {"name": "my-embedding-alias", "details": {"family": "bert"}}]}
                 elif "/models" in self.path:
                     body = {"object": "list", "data": [{"id": "served-a", "type": "model"},
-                                                       {"id": "served-b", "type": "model"}]}
+                                                       {"id": "served-b", "type": "model"},
+                                                       {"id": "mxbai-embed-large", "type": "model"}]}
                 else:
                     status, body = 404, {"error": "not found"}
                 raw = json.dumps(body).encode()
@@ -198,6 +201,19 @@ class ListModelsAt(unittest.TestCase):
         self.assertEqual(sub["ids"], ["served-a", "served-b"], sub)
         self.assertEqual(self.sub.keys_received(), {SUB_KEY}, "the sub-agents' own key, never the main one")
         self.assertNoSavedKeyOnTheWire()
+
+    def test_work_model_picker_hides_embedding_models_and_ollama_aliases(self):
+        host = self.host()
+        host.dispatch({"type": "list_models", "request_id": "work-models"})
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            frames = [frame for frame in self.frames("models")
+                      if frame.get("request_id") == "work-models"]
+            if frames:
+                self.assertEqual(frames[-1]["ids"], ["glm-5.3:cloud", "qwen3:8b"])
+                return
+            time.sleep(0.02)
+        self.fail("Work model picker did not answer")
 
     def test_a_different_host_never_receives_a_saved_key(self):
         host = self.host()

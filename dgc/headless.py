@@ -47,6 +47,7 @@ from . import shown_files
 from . import prompt_images
 from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
+from .model_discovery import embedding_only
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
@@ -5626,8 +5627,12 @@ class Backend:
             answer(error=_models_at_reason(exc, bool(key)))
             return
         ids = []
+        families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
         for item in listed[:4096] if isinstance(listed, list) else []:
             if isinstance(item, str) and item and item != "?":
+                family = families.get(item, "") if isinstance(families, dict) else ""
+                if embedding_only(item, family):
+                    continue
                 shown = redact_value(item, secrets)[:512]
                 if shown == item and shown not in ids:
                     ids.append(shown)
@@ -8212,9 +8217,12 @@ class Backend:
                     # transport state. It still shares bounded endpoint+model capability evidence.
                     client = self.agent._new_client(
                         self.config.base_url, self.config.api_key, self.config.model)
+                    listed = client.list_models()
+                    families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
                     ids = [redact_value(item, secret_values(self.config))[:512]
-                           for item in client.list_models()[:4096]
-                           if isinstance(item, str)]
+                           for item in listed[:4096]
+                           if isinstance(item, str) and not embedding_only(
+                               item, families.get(item, "") if isinstance(families, dict) else "")]
                     self.em.emit("models", request_id=request_id, ids=ids,
                                  base_url=self.config.base_url, api_mode=client.api_mode)
                 except Exception as exc:
