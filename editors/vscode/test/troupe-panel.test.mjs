@@ -3,7 +3,7 @@
 // troupe's popover: the webview names a run, this side finds its journal under ~/.dgc/troupes and nowhere else.
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanup, makeProvider, notices } from "./support/panel-bundle.mjs";
@@ -11,7 +11,7 @@ import { cleanup, makeProvider, notices } from "./support/panel-bundle.mjs";
 after(cleanup);
 
 test("Open the journal opens the run's report, else what it has written so far, only under ~/.dgc/troupes", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "dgc-journal-home-"));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "dgc-journal-home-")));
   const priorHome = process.env.HOME;
   const vscode = globalThis.__DGC_TEST_VSCODE;
   const opened = [], priorExecute = vscode.commands.executeCommand;

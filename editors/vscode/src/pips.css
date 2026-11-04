@@ -191,6 +191,7 @@ details.advanced>.section:first-of-type{padding-top:12px}
 .tabs .tabs-menu button{border:0;border-radius:5px;padding:7px 10px;text-align:left;color:var(--vscode-foreground)}
 .tabs .tabs-menu button:hover{background:var(--pip-wash)}
 .dialog{border-color:var(--pip-edge);border-radius:10px}
+@container (max-width:450px){.dialog{padding:16px;overflow-x:hidden}.dialog .meta{grid-template-columns:minmax(0,1fr);gap:3px}.dialog .meta dd{margin-bottom:7px}}
 .dialog .actions{gap:8px}
 .notice{border-radius:6px}
 .runner-menu{z-index:30}

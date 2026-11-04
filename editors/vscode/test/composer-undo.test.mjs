@@ -46,8 +46,9 @@ after(async () => { await browser?.close(); });
 const value = () => page.evaluate(() => document.getElementById("input").value);
 // Linux Chromium binds undo to Ctrl+Z; macOS binds it to Cmd+Z. The browser's own undo command,
 // which a key binding ends up running, is exercised directly too.
-const undo = () => page.keyboard.press("Control+Z");
-const redo = () => page.keyboard.press("Control+Shift+Z");
+const mod = process.platform === "darwin" ? "Meta" : "Control";
+const undo = () => page.keyboard.press(`${mod}+Z`);
+const redo = () => page.keyboard.press(`${mod}+Shift+Z`);
 
 test("undo right after sending brings the sent prompt back", async (t) => {
   if (skipReason()) return t.skip(skipReason());
@@ -77,12 +78,12 @@ test("text deleted by hand comes back with undo", async (t) => {
   if (skipReason()) return t.skip(skipReason());
   await page.click("#input");
   await page.keyboard.type("keep this draft");
-  await page.keyboard.press("Control+A");
+  await page.keyboard.press(`${mod}+A`);
   await page.keyboard.press("Backspace");
   assert.equal(await value(), "");
   await undo();
   assert.equal(await value(), "keep this draft");
-  await page.keyboard.press("Control+A");
+  await page.keyboard.press(`${mod}+A`);
   await page.keyboard.press("Backspace");
 });
 

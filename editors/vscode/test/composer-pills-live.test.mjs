@@ -53,8 +53,9 @@ after(async () => { await browser?.close(); });
 const value = () => page.evaluate(() => document.getElementById("input").value);
 // Linux Chromium binds undo to Ctrl+Z; macOS binds it to Cmd+Z. The browser's own undo command,
 // which a key binding ends up running, is exercised directly too.
-const undo = () => page.keyboard.press("Control+Z");
-const redo = () => page.keyboard.press("Control+Shift+Z");
+const mod = process.platform === "darwin" ? "Meta" : "Control";
+const undo = () => page.keyboard.press(`${mod}+Z`);
+const redo = () => page.keyboard.press(`${mod}+Shift+Z`);
 
 
 const pills = () => page.evaluate(() =>
@@ -378,7 +379,7 @@ test("clearing the box by hand does not leave its selections attached", async (t
   await freshComposer(["fixture"]);
   await page.keyboard.type("draft ");
   await pickSkill("fixture");
-  await page.keyboard.down("Control"); await page.keyboard.press("KeyA"); await page.keyboard.up("Control");
+  await page.keyboard.press(`${mod}+A`);
   await page.keyboard.press("Delete");
   assert.deepEqual(await pills(), []);
   // Read what the next message CARRIES, not the attachment row: without reconciliation nothing

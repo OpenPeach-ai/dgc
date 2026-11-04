@@ -226,7 +226,7 @@ test("a checklist: a box you tick, the toolbar makes one, Enter adds an unticked
   await page.keyboard.press("Enter");
   await page.keyboard.type("Hat");
   assert.equal(await lastEdit(page), "Packing:\n\n- [x] Passport\n- [x] Tickets\n- [ ] Hat\n\nTo buy\n");
-  await page.keyboard.press("Control+Enter");                         // ticks the item you're in
+  await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Enter`); // ticks the item you're in
   await click(page, ".cv-doc > p >> text=To buy");
   await click(page, '[data-do="checklist"]');
   assert.equal(await lastEdit(page), "Packing:\n\n- [x] Passport\n- [x] Tickets\n- [x] Hat\n\n- [ ] To buy\n");
