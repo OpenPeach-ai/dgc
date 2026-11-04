@@ -513,16 +513,14 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    and without this every message in the transcript is unattributed. */
 .role { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-/* What happened to a message sent mid-turn, said out loud. The role label above is for screen
-   readers only, and the agent stops printing its own line once a frontend claims to show this --
-   so without these a sighted user had nothing telling them the model had taken the message. */
+/* Pending and queued delivery states sit below the bubble. A completed steer joins the timestamp
+   inside `.msg-time`, where it inherits the same size and colour. */
 .msg.user > .steer-note {
   /* Keep the delivery state with the message it describes. A left-aligned line looked attached
      to the previous work row in a wide editor, especially after reopening a chat. */
   align-self: flex-end; margin-top: var(--sp-1); color: var(--muted);
   font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right;
 }
-.msg.user[data-steer="applied"] > .steer-note { color: var(--accent-text, var(--accent)); }
 /* Steer now / Steer all: link-like, in the note's own line and size. */
 .steer-note .steer-now, #queued .steer-all { padding: 0 2px; border: 0; border-radius: var(--r-sm); background: transparent;
   color: var(--link, var(--accent-text)); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }

@@ -2696,7 +2696,8 @@
     recordPin(node, height);
     return true;
   }
-  // What became of a message you sent mid-turn, as a line UNDER the bubble.
+  // Pending and queued messages keep a line under the bubble. Once the model reads one,
+  // its delivery state joins the timestamp in the same quiet type and colour.
   //
   // It sat inside the bubble for a while, which was wrong twice over: a status line about the
   // message read as words you had typed, and it was only in there to keep the transcript's own
@@ -2705,16 +2706,25 @@
   const STEER_NOTE = {
     pending: "\u21b3 steering \u2026",
     queued: "\u21b3 queued for the next turn",
-    applied: "\u21b3 steered \u2014 the model has read this",
   };
+  function syncSteerTime(node) {
+    const time = node?.querySelector(":scope > .msg-time");
+    if (!time) return;
+    time.querySelector(":scope > .steer-time-prefix")?.remove();
+    if (node.dataset.steer === "applied") {
+      time.prepend(el("span", "steer-time-prefix", "Steered \u00b7 "));
+      node.querySelector(":scope > .steer-note")?.remove();
+    }
+  }
   function setSteerState(node, state) {
     if (!node) return;
     node.dataset.steer = state;
-    const words = STEER_NOTE[state];
+    const words = state === "applied" && !node.querySelector(":scope > .msg-time") ? "Steered" : STEER_NOTE[state];
     let note = node.querySelector(":scope > .steer-note");
-    if (!words) { if (note) note.remove(); return; }
+    if (!words) { if (note) note.remove(); syncSteerTime(node); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
     note.textContent = words;
+    syncSteerTime(node);
     // A queued message can be steered into the running turn instead of waiting for it to end (reported
     // 19 Oct): the same as pressing Enter while the model works, so it keeps going and reads it at its next step.
     if (state === "queued" && steerQueuedLive && !replaying) {
@@ -4050,6 +4060,7 @@
     const old = node.querySelector(":scope > .msg-time");
     const bubble = node.querySelector(":scope > .bubble");
     if (old) old.replaceWith(time); else if (bubble) bubble.after(time); else node.appendChild(time);
+    syncSteerTime(node);
   }
   // ---- the box a turn goes in (0.47 pinned prompt) ----
   // A prompt opens a box: its row, then anything the log wrote between that prompt and its turn

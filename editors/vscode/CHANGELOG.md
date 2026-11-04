@@ -2,7 +2,7 @@
 
 ## 0.35.0 — 2026-11-04
 
-- Restored Work sessions place a mid-turn prompt's “steered” status below that prompt, aligned with its bubble, matching the live transcript. The two “Worked for” rows still show time before and after the update.
+- A completed mid-turn Work prompt says “Steered · 11:01 PM” on its timestamp line, in the timestamp's colour and size. Restored chats place it with the right prompt. The two “Worked for” rows still show time before and after the update.
 - Use it with DGC CLI 0.51.0 or newer. DGC Router, pictures, videos, plugin cards and token usage by system need
   it, and stay hidden with an older CLI.
 - Settings → Models now holds every model choice in one page: Main model, Fallback, Sub-agents, Pips, Images & video

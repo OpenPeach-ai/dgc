@@ -44,6 +44,8 @@ test("a steered message reports each stage it reaches", () => {
   p.event({ type: "steering_update", request_id: id, state: "applied" });
   assert.equal(bubble(p.doc)?.dataset.steer, "applied",
                "the model has now read it -- this is the moment that had no visible sign");
+  assert.match(bubble(p.doc)?.querySelector(":scope > .msg-time")?.textContent || "", /^Steered · /);
+  assert.equal(bubble(p.doc)?.querySelector(":scope > .steer-note"), null);
 });
 
 test("a queued message says so instead", () => {
@@ -53,7 +55,7 @@ test("a queued message says so instead", () => {
   assert.equal(bubble(p.doc)?.dataset.steer, "queued");
 });
 
-test("every state is drawn, and not with the screen-reader-only label", () => {
+test("every delivery state is visible, with completed steering on the timestamp line", () => {
   // A fresh panel per state: a queued prompt is re-parented to the waiting area, so reusing one
   // panel makes "the last .msg.user" the queued row rather than the one just sent.
   for (const [state, words] of [["pending", /steering/], ["queued", /queued/], ["applied", /steered/]]) {
@@ -65,8 +67,13 @@ test("every state is drawn, and not with the screen-reader-only label", () => {
     const row = [...p.doc.querySelectorAll(".msg.user")].find((n) => n.dataset.steer === state);
     assert.ok(row, `no row reached the ${state} state`);
     const note = row.querySelector(":scope > .steer-note");
-    assert.ok(note, `${state} draws nothing, so it would be invisible like .role is`);
-    assert.match(note.textContent, words);
+    if (state === "applied") {
+      assert.equal(note, null);
+      assert.match(row.querySelector(":scope > .msg-time")?.textContent || "", /^Steered · /);
+    } else {
+      assert.ok(note, `${state} draws nothing, so it would be invisible like .role is`);
+      assert.match(note.textContent, words);
+    }
   }
   // .role must stay screen-reader-only AND not be the only thing carrying this information.
   assert.match(mainCss, /\.role \{[^}]*clip-path:\s*inset\(50%\)/,
@@ -76,12 +83,18 @@ test("every state is drawn, and not with the screen-reader-only label", () => {
                "the status stays under its own bubble at the right edge");
 });
 
-test("the applied line is the one that stands out", () => {
-  const applied = /\.msg\.user\[data-steer="applied"\] > \.steer-note \{([^}]*)\}/.exec(mainCss)?.[1] ?? "";
-  assert.match(applied, /color:/, "the moment the model reads it is worth a colour of its own");
+test("completed steering inherits the timestamp's size and colour", () => {
+  const p = panel();
+  const id = steerDuringTurn(p);
+  p.event({ type: "prompt_accepted", request_id: id, state: "steered" });
+  p.event({ type: "steering_update", request_id: id, state: "applied" });
+  const time = bubble(p.doc)?.querySelector(":scope > .msg-time");
+  assert.ok(time?.querySelector(":scope > .steer-time-prefix"));
+  assert.doesNotMatch(mainCss, /\.steer-time-prefix\s*\{/,
+                      "the prefix has no colour or font override");
 });
 
-test("the note sits under the bubble, not inside it", () => {
+test("a pending note sits under the bubble, not inside it", () => {
   // It lived in the bubble for one release-candidate, purely to keep the transcript's spacing
   // measurements quiet. Inside, a status line about the message reads as words the user typed --
   // a user caught it in a recording. The spacing check now measures the prompt's real foot.
@@ -96,7 +109,7 @@ test("the note sits under the bubble, not inside it", () => {
                       "no pseudo-element route back into the bubble either");
 });
 
-test("a restored mid-turn message keeps its status below its bubble and time", () => {
+test("a restored mid-turn message puts Steered before its timestamp", () => {
   const p = panel();
   p.event({ type: "ready", capabilities: { history_snapshot: true }, model: "m", mode: "default",
             think: "off", base_url: "http://127.0.0.1:1/v1", workspace_trusted: true, commands: [],
@@ -113,5 +126,6 @@ test("a restored mid-turn message keeps its status below its bubble and time", (
   assert.ok(row, "the saved steering prompt was restored");
   const order = [...row.children].map((n) => n.classList.contains("bubble") ? "bubble"
     : n.classList.contains("msg-time") ? "time" : n.classList.contains("steer-note") ? "note" : "other");
-  assert.deepEqual(order.filter((kind) => kind !== "other"), ["bubble", "time", "note"]);
+  assert.deepEqual(order.filter((kind) => kind !== "other"), ["bubble", "time"]);
+  assert.match(row.querySelector(":scope > .msg-time")?.textContent || "", /^Steered · /);
 });
