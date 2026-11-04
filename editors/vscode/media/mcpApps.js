@@ -277,6 +277,7 @@
     notLoaded() {
       if (this.started || !this.node.isConnected) return;
       this.loading.hidden = true;
+      this.node.dataset.failed = "true";
       this.note.textContent = `${this.card.plugin || this.card.server}'s card took too long to open. Its server may be busy.`;
       this.note.hidden = false;
     }
@@ -322,6 +323,7 @@
         case "ui/initialize":
           this.started = true;
           clearTimeout(this.loadTimer);
+          delete this.node.dataset.failed;
           clearTimeout(this.startTimer);
           if (this.note) this.note.hidden = true;
           this.toolSent = false;            // a page that (re)started hears its tool again
