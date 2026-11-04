@@ -23,6 +23,8 @@ It pairs with DGC CLI 0.51.0, which advertises **Pips API 71** over editor proto
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
+When a person asks their Primary Core Pip to set up other Personal Pips, its reply may leave up to three pending setup cards. SDK apps can list them with `list_pip_setups` for the Personal workspace, show each card with `get_pip_setup`, and use the existing `accept_pip_setup` or `reject_pip_setup` controls after the person decides. Core cannot accept its own proposals.
+
 `session.pips` never turns Pips on, starts or resumes the runner, installs a service,
 or changes a model connection. Runs and Pip chat messages still need a running local
 runner, and every backend review and permission check still applies.

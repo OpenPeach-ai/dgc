@@ -40,7 +40,7 @@ const auditRun=(id=RUN,status='succeeded')=>({id,pip_id:AUDIT,workspace_id:W,sta
 const controls={version:1,mode:'read_only',options:{context_size:8192,thinking:'off'},options_source:'last_message',inherited_context_size:1048576,effective_context_size:8192,context_min:2048,context_max:32768,thinking_levels:['off','low','medium','high','xhigh'],reasoning_control:'provider_dependent',reasoning_note:'n',context_note:'n'};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setups=[setupCard]}={}){
+function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setups=[setupCard],personalSetups=[]}={}){
   const dom=new JSDOM('<!doctype html><html><body><div id="pips-host"></div></body></html>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
   const sent=[],answered=new Set(),listeners=new Set(),asks=[];
   w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
@@ -53,7 +53,7 @@ function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setup
   const pips={[PW]:[planner],[W]:[audit,pip(DOCS,'quill','Docs writer'),pip(PATCH,'patch','Fixer'),pip(TESTS,'pulse','Test runner'),pip(LIVE,'pulse','Shop status',{live_plan:{schema_version:1}})]};
   const all=()=>[...pips[PW],...pips[W]],byId=id=>all().find(p=>p.id===id);
   const reply=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'},{id:W,name:'shop',kind:'git'}],current_workspace_id:W}),
-    list_pip_types:()=>({types}),list_pip_setups:()=>({setups:r.workspace_id===W?setups:[]}),get_pip_setup:()=>({setup:setupCard}),get_pip_runner:()=>({runner}),
+    list_pip_types:()=>({types}),list_pip_setups:()=>({setups:r.workspace_id===W?setups:personalSetups}),get_pip_setup:()=>({setup:setupCard}),get_pip_runner:()=>({runner}),
     list_pip_starters:()=>({starters:[{id:'daily_review',title:'Daily code review',summary:'Reviews the committed code every day.',scope:'project',params:['time','timezone']}]}),
     list_pips:()=>{const list=pips[r.workspace_id]||[];return {pips:list,total:list.length,next_offset:null};},
     get_pip:()=>byId(r.pip_id)?{pip:byId(r.pip_id)}:{error:{code:'not_found',message:'gone'}},
@@ -218,6 +218,16 @@ test('a change waiting for you and new Pips waiting stay in sight on a Project P
   await x.click(`[data-setup="${SETUP}"]`);
   assert.equal(x.requests('get_pip_setup').at(-1).setup_id,SETUP);
   assert.match(text(x.$('.dialog h2')),/Create Nightly review\?/);
+});
+
+test('Personal Pip setup reviews stay visible in a Personal Pip chat and open the review list',async()=>{
+  const personalSetup={...setupCard,workspace_id:PW,source_policy:'personal',work_kind:'personal_task'};
+  const x=setup({personalSetups:[personalSetup]});await x.drain();await x.tab('personal');
+  await x.click(`[data-job="${PLANNER}"]`);
+  assert.equal(text(x.$('.pip-setup-strip #chat-review-setups span')),'1 new Pip waiting for you');
+  await x.click('#chat-review-setups');
+  assert.equal(x.$('[data-details="setup-inbox"]').open,true);
+  assert.match(text(x.$('.setup-card')),/Nightly review/);
 });
 
 // The old form, on the old page (a DGC from before Pips API 51), and the character picker: the same create_pip.

@@ -22,7 +22,7 @@ page.
 
 | Character | Role | What it does in a project |
 | --- | --- | --- |
-| Core | Main chat | Core is your main DGC chat. It coordinates the conversation and cannot be created as a Pip. |
+| Core | Main chat and Primary Pip | Core is the main DGC chat's character and your Primary Personal Pip. The Primary Pip can propose other Personal Pips for your review. |
 | Scout | Repository exploration | Reads the approved source to orient a review: layout, entry points, component boundaries. It runs no commands. |
 | Lens | Repository research | Investigates one question using the approved source files. It does no web research. |
 | Patch | File fixes | Edits only reviewed paths in a private copy of the project. Every fix needs its own approved handoff. |

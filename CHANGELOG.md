@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-04
 
+- Core, your Primary Personal Pip, can prepare up to three new Personal Pips in one conversation. Each appears as a separate review in Pips; only your Create Pip decision makes it real. A proposed Pip inherits no app connection or secret. Core can suggest research, writing and image jobs using your configured generators, but a paid image still follows the generator's cost approval.
 - DGC Router lets DGC use the other computers on your network that run models. Add the computers that run Ollama,
   llama.cpp, vLLM, SGLang, TGI, LM Studio or any OpenAI-compatible server, and DGC spreads sub-agents and Pips across
   them. Each computer (a system) has its jobs (sub-agents, Pips or both), its workers, the models to use with the

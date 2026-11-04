@@ -2760,9 +2760,10 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             raise RegistryError('unsupported_model', pip_brain.PROJECT_PIPS)
         brain_launch = pip_brain.launch_from_env(brain)
     conversation = pip_chat.validate_context(manifest.get("conversation")) if kind == "conversation" else None
-    from . import pip_chat_setup, pip_routines
+    from . import pip_chat_setup, pip_core_setup, pip_routines
     chat_setup = pip_chat_setup.validate_pin(manifest)
     setup_candidate = None
+    core_setup_candidates = []
     choices_candidate = None
     routine_candidates = []            # routines it suggests in a chat reply (pip_routines.add_routine)
     note_candidates = []               # notes it keeps about the user in a chat reply (pip_notes.remember)
@@ -2990,7 +2991,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
 
         def _tool_schemas(self, *args, **kwargs):
             if personal:
-                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)])] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
+                return ([pip_chat_setup.schema()] if chat_setup is not None and chat_setup['allowed'] else []) + ([pip_core_setup.schema()] if selected_type.id == 'core' and pip_core_setup.pinned(manifest) else []) + ([pip_message_drafts.schema()] if email_drafting else []) + ([pip_message_drafts.schema(kind='calendar')] if calendar_drafting else []) + (pip_connector_drafts.schemas() if connector_context is not None and connector_context.get('connections') else []) + ([pip_computer.schema(self._pip_eyes() if self._pip_eyes() in ('own', 'relay') else None, eyes['convention'], desktop=computer_pin.get('desktop') is True)] if computer_pin is not None else []) + (pip_app_links.schemas(apps_pin['apps'], apps_pin.get('microsoft')) if apps_pin is not None else []) + (pip_images.schemas() if apps_pin is not None else []) + (pip_videos.schemas() if apps_pin is not None else []) + (pip_plugins.schemas(apps_pin['plugins']) if apps_pin is not None and apps_pin.get('plugins') else []) + (pip_sdk_apps.schemas(apps_pin['sdk_apps']) if apps_pin is not None and apps_pin.get('sdk_apps') else []) + ([OFFER_CHOICES] if conversation is not None else []) + ([pip_routines.schema([a.get('app') for a in (apps_pin or {}).get('sdk_apps') or [] if isinstance(a, dict)])] if personal and conversation is not None else []) + ([pip_notes.schema()] if keeps_notes else []) + ([_skill_schema()] if pip_skills else []) + ([pip_working_notes.schema()] if working_notes is not None else []) + _borrow_schemas()
             schemas = super()._tool_schemas(*args, **kwargs)
             if specialist_pin is not None:
                 return [pip_specialists.schema(specialist_pin['grant'])
@@ -3122,6 +3123,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     role_instructions += (' You are the user\'s Primary Pip: their go-to for everyday tasks. You can see '
                         'their other Pips when DGC lists them. When another Pip fits a request better, say which one, '
                         'and suggest a new Pip when none does.')
+                    if pip_core_setup.pinned(manifest):
+                        base_instructions += '\n' + pip_core_setup.NOTICE
                 if chat_setup is not None and chat_setup['allowed']:
                     base_instructions += '\n' + pip_chat_setup.NOTICE
                 if kind == 'personal_task' and (email_drafting or calendar_drafting or connector_context is not None):
@@ -3239,6 +3242,18 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return 'Candidate prepared in this reply only. No settings changed. The controller will save a review after a successful reply. Ask the user to review it.'
                 except RegistryError as exc:
                     return 'Invalid setup draft: ' + str(exc)
+            if personal and selected_type.id == 'core' and pip_core_setup.pinned(manifest) and call.name == pip_core_setup.TOOL:
+                if len(core_setup_candidates) >= pip_core_setup.MAX_PER_REPLY:
+                    return 'Three Personal Pips are already proposed in this reply. Ask for the next one later.'
+                try:
+                    from .redaction import secret_values
+                    candidate = pip_core_setup.validate(call.arguments, secrets=secret_values(config))
+                    if any(item['name'].casefold() == candidate['name'].casefold() for item in core_setup_candidates):
+                        return 'That Pip is already proposed in this reply. Give each one a distinct name.'
+                    core_setup_candidates.append(candidate)
+                    return 'Proposal prepared. After your reply it appears in Personal Pips for review; only the user can create it.'
+                except RegistryError as exc:
+                    return 'Invalid Personal Pip proposal: ' + str(exc)
             if personal and pip_skills and call.name == 'skill':
                 import types
                 from .tools import skill_tool
@@ -3707,7 +3722,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             ok = agent.run_turn(prompt)
         if (ok and personal and conversation is not None and not agent.cancelled.is_set()
                 and _claims_a_card(_turn_text(agent.messages))
-                and not (cards_shown or routine_candidates or choices_candidate is not None
+                    and not (cards_shown or routine_candidates or core_setup_candidates or choices_candidate is not None
                          or any(c is not None for c in (setup_candidate, email_candidate, calendar_candidate, connector_candidate)))):
             # It told the user to tap a card it never made ("the card below is how you add that", battle test
             # 2026-10-09): once, ask it to make the card or say it again without one.
@@ -3721,7 +3736,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         # turn: the card is its answer (a default line says so below).
         wordless = (ok is False and conversation is not None and not agent.cancelled.is_set()
                     and "without a user-facing response" in str(getattr(agent, "_last_turn_error", ""))
-                    and (bool(routine_candidates) or any(c is not None for c in (setup_candidate, email_candidate,
+                    and (bool(routine_candidates or core_setup_candidates) or any(c is not None for c in (setup_candidate, email_candidate,
                                                                                 calendar_candidate, connector_candidate))))
         if (ok is False and not wordless) or agent.cancelled.is_set():
             raise RegistryError("model_failed", getattr(agent, "_last_turn_error", "") or "The audit model did not finish its bounded turn.")
@@ -3770,7 +3785,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             if not final.strip():
                 # Some models end a turn on a tool call with no words. The card it made is the answer:
                 # say so, rather than failing the turn and losing the card.
-                final = ("Here’s a routine for that. Choose Add routine below to start it." if routine_candidates
+                final = ("Your Personal Pip proposals are ready for review in Pips. Review each one before creating it." if core_setup_candidates
+                         else "Here’s a routine for that. Choose Add routine below to start it." if routine_candidates
                          else "Here’s the change. Review it below." if setup_candidate is not None
                          else "Here’s a draft. It waits for you below." if (email_candidate or calendar_candidate
                                                                           or connector_candidate) is not None
@@ -3779,6 +3795,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             result = {"text": pip_chat.validate_text(redact_text(final, secret_values(config)), reply=True)}
             if setup_candidate is not None:
                 result['setup_draft'] = setup_candidate
+            if core_setup_candidates:
+                result['core_setup_drafts'] = core_setup_candidates
             if email_candidate is not None:
                 result['message_draft'] = email_candidate
             if calendar_candidate is not None:

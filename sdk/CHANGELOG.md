@@ -2,6 +2,7 @@
 
 ## 0.9.0 — 2026-11-04
 
+- A message to the Primary Core Pip can propose up to three Personal Pip setup cards. Apps use the existing Pips API 23 `list_pip_setups`, `get_pip_setup`, `accept_pip_setup` and `reject_pip_setup` operations to present and decide them; no new SDK mutation or implicit approval is added.
 Pairs with CLI 0.51.0. The Python and TypeScript SDK suites passed on Linux, macOS 26.5.1
 (Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04). Native Windows remains experimental.
 

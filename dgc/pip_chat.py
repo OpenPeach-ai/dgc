@@ -1189,7 +1189,7 @@ def valid_apps(value):
 
 
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
     if "apps" in result and valid_apps(result["apps"]) is None:
         raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
@@ -1232,6 +1232,8 @@ def insert_reply(store, run, result, now):
         if not validate_pin(run["manifest"]):raise RegistryError("permission_denied", "Email drafting was not pinned for this conversation.")
     from .pip_chat_setup import commit as commit_setup
     commit_setup(store, run, result)
+    from .pip_core_setup import commit as commit_core_setup
+    commit_core_setup(store, run, result)
     from .pip_routines import commit as commit_routines      # routines it suggested: cards to Add
     commit_routines(store, run, result)
     from .pip_notes import commit as commit_notes            # notes it kept about you: on its page

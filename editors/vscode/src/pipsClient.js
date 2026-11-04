@@ -796,7 +796,7 @@ async function loadChatStream(){
     S.stream.error='';if(!page.has_more||S.stream.limited)break;
   }}catch(error){if(token===scope()&&sequence===streamSeq&&S.stream){S.stream.error='The reply will appear when it’s done.';changed=true;}}
   finally{if(token===scope()&&sequence===streamSeq){streamLoading=false;if(changed)render();
-    if(ended)void loadMessages();       // the reply is saved: show it now, not at the next 4 s refresh
+    if(ended){void loadMessages();if(S.pip?.pip_type==='core')void loadSetups();} // Core may have prepared new Personal Pip reviews.
     else if(S.stream?.runId===runId&&S.tab==='chat'&&S.visible&&!document.hidden)streamTimer=window.setTimeout(()=>{void loadChatStream();},400);}}
 }
 // Images in a Pip's chat (API 43): added with the image button, pasted or dropped, shown as previews, and
@@ -2654,9 +2654,8 @@ function runNowMarkup(){
  const blocked=runBlocked();
  return `<button type="button" id="pip-run-now" class="topbar-icon" aria-label="${esc(action.label)}" title="${esc(blocked||action.title)}"${blocked?' disabled':''}>${simpleIcon('play')}</button>`;
 }
-// What a Project Pip's page keeps in sight above its chat and sections: new Pips waiting for you from the DGC chat, and
-// a Pip of a kind this editor doesn't know.
-function projectPipNotes(){
+// Keep pending Pip setup reviews in sight when a user opens any Pip chat.
+function pipSetupNotes(){
  const setups=S.apiVersion>=23&&(setupRows.length||setupError)?`<div class="pip-setup-strip"><button type="button" id="chat-review-setups" class="pip-setup-open"><span>${setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`}</span><span class="pip-setup-review" aria-hidden="true">Review</span></button></div>`:'';
  const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
  return setups+unknown;
@@ -2690,7 +2689,7 @@ function simpleMarkup(){
  if(project&&!S.selected&&!S.overview&&['context','notifications'].includes(S.tab))return `<header class="pip-topbar">${back('workspace-back','Your Pips')}<div class="pip-pill settings-pill"><span>${S.tab==='context'?'Workspace context':'Notifications'}</span></div><span></span></header><div class="simple-content" data-view="${esc(S.tab)}">${notes}${S.tab==='context'?contextMarkup():notificationsMarkup()}</div>`;
  if(!S.selected||S.overview||S.create)return `${bar}${notes}${setupRows.length?setupsMarkup():''}<div class="simple-content"${scopePanelAttrs()}>${S.switching?'':simpleHomeMarkup()}</div>`;
  if(!S.pip)return `${bar}<p role="status" class="muted simple-note">Loading…</p>`;
- return `${simplePipHeader()}${project?projectPipNotes():''}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
+ return `${simplePipHeader()}${pipSetupNotes()}<div class="simple-content${S.tab==='chat'?' chat':''}" data-view="${esc(S.tab)}">${S.tab==='chat'?chatMarkup():`${notes}${waitingMarkup()}${simpleTabContent()}`}</div>`;
 }
 function render() {
   if(disposed)return;

@@ -3807,6 +3807,12 @@ researches a question, Rook reviews, Lock looks for security issues, Quill draft
 Patch prepares a fix in a private copy, Pulse runs the exact commands you reviewed. A **Personal
 Pip** belongs to your DGC profile and helps with errands, plans and replies.
 
+Your Primary Pip, Core, can propose up to three new Personal Pips in one conversation. Each is a
+separate review in Personal Pips: only your Create Pip decision makes it real. Core can plan a
+researcher, writer and image designer together, but creating them does not automatically connect
+apps or pass results between them. An image Pip uses your configured generators under their cost
+approvals; never put a generator key in its goal.
+
 Work shows the latest unread messages from your Pips, including all-clear routine results. The
 Personal and Project tabs show unread counts, and each Pip's row previews its latest unread note.
 Opening its chat at the newest messages marks the replies and run results you saw as read; a later

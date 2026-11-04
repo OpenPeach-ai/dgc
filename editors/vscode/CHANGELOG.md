@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-04
 
+- Ask Core to set up Personal Pips. Review each proposed job in the Pips view before it is created; Core's chat can show the waiting reviews.
 - A plugin card whose page never finishes loading now replaces its spinner and empty frame with a compact message after 20 seconds. A page that loads but never starts is compact too. The card can still finish opening if its server recovers.
 - A completed mid-turn Work prompt says “Steered · 11:01 PM” on its timestamp line, in the timestamp's colour and size. Restored chats place it with the right prompt. The two “Worked for” rows still show time before and after the update.
 - Use it with DGC CLI 0.51.0 or newer. DGC Router, pictures, videos, plugin cards and token usage by system need
