@@ -2014,7 +2014,7 @@ class Config:
                     secret = value
             elif route["base_url"] == DEFAULTS["base_url"]:
                 secret = DEFAULTS["api_key"]
-        if not secret and self._provider_secret_identity.get("api_key") == identity:
+        if not secret and getattr(self, "_provider_secret_identity", {}).get("api_key") == identity:
             # A launcher may have supplied this endpoint's key through
             # DGC_API_KEY(_FILE), or the editor may have supplied it at runtime.
             # It is already bound to this URL; clearing it on New chat would
@@ -2029,6 +2029,13 @@ class Config:
         # another one; that chat can then select its own model's window.
         self.hold("context_size", defaults.get("context_size", DEFAULTS["context_size"]))
         self._window_from_switch = ""
+        previous = self.data.get("api_key")
+        if isinstance(previous, str) and previous != secret and 8 <= len(previous) <= 16_384:
+            # A previous route's credential must not authorize the restored route, but it
+            # can still occur in saved text. Keep it redacted after clearing the live key.
+            remembered = tuple(getattr(self, "_session_secret_values", ()))
+            if previous not in remembered:
+                self._session_secret_values = (*remembered[-255:], previous)
         self.hold("api_key", secret)
         bindings = self.__dict__.setdefault("_provider_secret_identity", {})
         if secret and identity:

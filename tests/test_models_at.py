@@ -49,6 +49,7 @@ from dgc import config as config_module  # noqa: E402
 from dgc import editor_protocol as ep  # noqa: E402
 from dgc import headless, sessions  # noqa: E402
 from dgc.config import Config, bound_provider_key  # noqa: E402
+from dgc.redaction import secret_values  # noqa: E402
 
 MAIN_KEY = "sk-main-saved-0123456789"
 SUB_KEY = "sk-subagent-saved-0123456789"
@@ -214,6 +215,15 @@ class ListModelsAt(unittest.TestCase):
                 return
             time.sleep(0.02)
         self.fail("Work model picker did not answer")
+
+    def test_restoring_another_provider_drops_the_old_key_but_keeps_it_redacted(self):
+        host = self.host()
+        config = host.default.config
+        self.assertEqual(config.get("api_key"), MAIN_KEY)
+        config.restore_native_route({"base_url": self.other.url + "/v1", "model": "served-a",
+                                     "api_mode": "chat_completions", "thinking": "off"})
+        self.assertEqual(config.get("api_key"), "", "the old key must not authorize another host")
+        self.assertIn(MAIN_KEY, secret_values(config), "old transcript text still needs redaction")
 
     def test_a_different_host_never_receives_a_saved_key(self):
         host = self.host()
