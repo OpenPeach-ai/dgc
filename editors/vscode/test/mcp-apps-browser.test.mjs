@@ -277,6 +277,7 @@ test("a card whose page loads but never starts says so under the card; one that 
   assert.equal(notes[1].hidden, false);
   assert.match(notes[1].text, /^Higgsfield's card didn't start\./);
   assert.equal(notes[1].under, "mcp-app-frame", "said under the card, never over it");
+  assert.equal(await page.locator(".mcp-app-frame").nth(1).isVisible(), false, "a page that never starts is compact too");
   await page.close();
 });
 

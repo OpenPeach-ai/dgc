@@ -271,6 +271,7 @@
     notStarted() {
       if (this.started || !this.node.isConnected) return;
       const who = this.card.plugin || this.card.server;
+      this.node.dataset.failed = "true";
       this.note.textContent = `${who}'s card didn't start. Its page may need a site it didn't list, or ${who} may be down.`;
       this.note.hidden = false;
     }
