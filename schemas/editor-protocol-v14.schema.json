@@ -2568,6 +2568,40 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "model_defaults_changed"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "base_url",
+            "model"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "cache_settings"
             },
             "seq": {
@@ -10229,11 +10263,27 @@
             "api_key": {
               "type": "string"
             },
+            "api_mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "ollama",
+                "anthropic",
+                "chat_completions",
+                "responses"
+              ]
+            },
             "route": {
               "type": "string",
               "enum": [
                 "native",
                 "subscription"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "session"
               ]
             },
             "clear_stored_api_key": {
@@ -10245,6 +10295,48 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "set_model_defaults"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "api_key": {
+              "type": "string"
+            },
+            "api_mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "ollama",
+                "anthropic",
+                "chat_completions",
+                "responses"
+              ]
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "base_url",
+            "model",
+            "api_mode"
           ],
           "additionalProperties": false
         },
@@ -11498,6 +11590,12 @@
                 "max"
               ]
             },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "session"
+              ]
+            },
             "request_id": {
               "type": "string"
             }
@@ -12081,6 +12179,12 @@
             },
             "values": {
               "type": "object"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "session"
+              ]
             },
             "request_id": {
               "type": "string"

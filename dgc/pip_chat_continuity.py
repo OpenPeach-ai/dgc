@@ -99,6 +99,11 @@ def _pairs(store, pip_id):
         for r in pair:
             content = store.db.execute('SELECT text FROM pip_chat_messages WHERE seq=?', (r['seq'],)).fetchone()[0]
             validate_text(content, reply=r['role'] == 'assistant')
+            if r['role'] == 'user':
+                from .pip_steering import applied_text
+                updates = applied_text(store.db, r['run_id'])
+                if updates:
+                    content += ''.join('\n\n[User update during this reply]\n' + text for text in updates)
             messages.append({'role': r['role'], 'content': content})
         yield pair, messages
 

@@ -7,9 +7,10 @@ const id='setup_'+'3'.repeat(32),ws='ws_'+'1'.repeat(32),pip='pip_'+'2'.repeat(3
 const setup=()=>({id,digest:'a'.repeat(64),workspace_id:ws,project_root:'/review/project',pip_id:null,name:'Daily review',goal:'Review committed source.',pip_type:'rook',work_kind:'source_review',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,status:'pending',created_at:'2099-10-02T04:00:00Z',expires_at:'2099-10-03T06:00:00Z',receipt:null,reason:'Recurring code checks.',expected_version:null,expected_lifecycle_revision:null,permissions:'read_only',source_policy:'committed_only',runner_notice:'The runner must be online.',scope_notice:'Read source only. No tests or project changes.',run_now_policy:null,model_choice:{mode:'default'}});
 const resolved=(s,accepted)=>({...s,status:accepted?'accepted':'rejected',receipt:{setup_id:s.id,pip_id:accepted?pip:null,job_version:accepted?1:null,run_id:null,next_run_at:null,accepted,actor:'editor-user',resolved_at:'2099-10-02T04:01:00Z'}});
 async function flush(){for(let i=0;i<16;i++)await Promise.resolve();}
-function harness(t,{onContinue=()=>true,api=25,dock}={}){
+function harness(t,{onContinue=()=>true,api=25,dock,dismissedState}={}){
  const dom=new JSDOM('<main><section id="turn"><div class="tool"><div class="head"><button class="tool-toggle"><span class="verb"></span></button><span class="badge"></span></div><div class="body"><pre></pre></div></div></section></main>',{runScripts:'outside-only'});t.after(()=>{cards.dispose();dom.window.close();});const w=dom.window;w.TextEncoder=TextEncoder;w.eval(bundle+";window.Cards=Cards;");const sent=[];
- const cards=w.Cards.mountSetupCards({document:w.document,postMessage:m=>sent.push(m),onContinue,dock});cards.receive({type:'pipsConnection',generation:1,connected:true,enabled:true,backgroundSetup:true,apiVersion:api});
+ const cards=w.Cards.mountSetupCards({document:w.document,postMessage:m=>sent.push(m),onContinue,dock,
+  getDismissed:()=>dismissedState?.ids||[],setDismissed:ids=>{if(dismissedState)dismissedState.ids=ids;}});cards.receive({type:'pipsConnection',generation:1,connected:true,enabled:true,backgroundSetup:true,apiVersion:api});
  const send=s=>cards.toolResult(w.document.querySelector('.tool'),{name:'pips_setup',output:JSON.stringify({setup:s})});
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
  const answer=(request,result)=>cards.receive({type:'pipsReply',id:request.id,ok:true,result});
@@ -161,4 +162,33 @@ test('an accepted Pip with a first run shows one face; the run is its status lin
  assert.equal(x.d.querySelectorAll('.pip-run-line').length,0,'no second card inside the first');
  assert.equal(x.d.querySelectorAll('.pip-run-avatar').length,0,'no second face');
  assert.match(line.querySelector('.pip-setup-title').textContent,/^Daily review is onFirst run: report ready$/);
+});
+
+test('five accepted Pips, including a late long result, share one expandable dismissible card',async t=>{
+ const state={ids:[]},x=harness(t,{dismissedState:state}),block=x.d.querySelector('#turn');
+ const proposals=Array.from({length:5},(_,i)=>({
+  ...setup(),id:'setup_'+String(i+1).repeat(32),name:`Pip ${i+1}`,
+  receipt:{...resolved(setup(),true).receipt,setup_id:'setup_'+String(i+1).repeat(32),pip_id:'pip_'+String(i+1).repeat(32)},
+  status:'accepted',
+ }));
+ for(let i=0;i<5;i++){
+  const card=i?x.d.querySelector('.tool').cloneNode(true):x.d.querySelector('.tool');
+  if(i){card.className='tool';card.removeAttribute('data-pip-setup');card.querySelector('.body').replaceChildren();block.append(card);}
+  const s=proposals[i];x.cards.toolResult(card,{name:'pips_setup',output:JSON.stringify({setup:{id:s.id},padding:i===4?'x'.repeat(5000):''})});
+  x.answer(x.requests('get_pip_setup').at(-1),{setup:s});await flush();
+  if(i===3)x.cards.finish(block); // The fifth result can arrive after an initial projection.
+ }
+ await flush();x.cards.finish(block);
+ const group=block.querySelector(':scope > .pip-setup-batch');
+ assert.ok(group,'one group replaces separate Pip rows');
+ assert.equal(block.querySelectorAll(':scope > .pip-setup-batch').length,1);
+ assert.equal(group.querySelectorAll('.pip-setup-card').length,5);
+ assert.equal(group.querySelector('.pip-setup-batch-label').textContent,'5 Pips set up');
+ assert.equal(group.querySelectorAll('.pip-setup-batch-face .dgc-plush').length,5,'all five Pip faces appear in the compact header');
+ assert.equal(group.querySelector('.pip-setup-batch-list').hidden,true);
+ group.querySelector('.pip-setup-batch-toggle').click();
+ assert.equal(group.querySelector('.pip-setup-batch-list').hidden,false);
+ assert.deepEqual([...group.querySelectorAll('.pip-setup-title strong')].map(el=>el.textContent),proposals.map(s=>`${s.name} is on`));
+ group.querySelector('.pip-setup-batch-dismiss').click();
+ assert.equal(group.hidden,true);assert.deepEqual([...state.ids].sort(),proposals.map(s=>s.id).sort());
 });

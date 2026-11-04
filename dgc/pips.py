@@ -83,6 +83,7 @@ CONTROL_COMMANDS = frozenset({
     "get_pip_computer_apps", "set_pip_computer_apps",
     "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login",
     "get_pip_level", "set_pip_level",
+    "list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow",
     "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow",
     "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret",
     "list_app_approvals", "decide_app_approval",
@@ -141,6 +142,10 @@ _COMMAND_ARGS = {
     "save_pip_login": {"pip_id", "site", "username", "password", "totp", "pips", "action_id", "expected_digest"},
     # How much a Personal Pip asks (pip_levels, API 58): ask, approve or full.
     "get_pip_level": {"pip_id"}, "set_pip_level": {"pip_id", "level"},
+    # Reviewed or unattended result routing; external actions keep the target Pip's own permissions.
+    "list_pip_flows": {"workspace_id"}, "get_pip_flow": {"flow_id"},
+    "create_pip_flow": {"name", "pip_ids", "tasks", "mode"},
+    "set_pip_flow": {"flow_id", "expected_revision", "status"},
     # Borrowing the user's own signed-in Chrome (pip_borrow, API 59): a card each time, Allow once, Not now, Stop.
     "list_pip_borrows": {"pip_id"}, "allow_pip_borrow": {"pip_id", "borrow_id"}, "decline_pip_borrow": {"pip_id", "borrow_id"},
     "stop_pip_borrow": {"pip_id", "borrow_id"},
@@ -2831,6 +2836,23 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         _pip_specialist_role = ''
         _pip_specialist_record = None
 
+        def _drain_steer(self, *, close_if_empty=False):
+            # The controller stages only this run's text inside its private run
+            # folder. A Pip's isolated model worker never opens the registry.
+            received = []
+            if conversation is not None:
+                from .pip_steering import read_worker
+                seen = getattr(self, '_pip_steers_seen', set())
+                for item in read_worker(snapshot.parent, seen):
+                    if self.steer(item['text'], request_id=item['id']):
+                        seen.add(item['id'])
+                        received.append(item['id'])
+                self._pip_steers_seen = seen
+            applied = super()._drain_steer(close_if_empty=close_if_empty)
+            if applied and received:
+                emit({'kind': 'steer_applied', 'ids': received})
+            return applied
+
         @property
         def agent_defs(self):
             if specialist_pin is None:
@@ -3756,7 +3778,11 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
             # A chat reply is all the Pip said after the user's message, in order: text it wrote before
             # a tool call (say, offer_choices or connect_app) is part of what the user reads.
             from .reasoning import display_text
-            turn = next((i for i in range(len(agent.messages) - 1, -1, -1) if agent.messages[i].get("role") == "user"), -1)
+            # Steering is another user message inside the same reply, not a
+            # fresh turn. Keep the Pip's prose before it as part of this reply.
+            turn = next((i for i in range(len(agent.messages) - 1, -1, -1)
+                         if agent.messages[i].get("role") == "user"
+                         and not agent.messages[i].get("_dgc_steering")), -1)
             said = []
             for item in agent.messages[turn + 1:choices_cut]:
                 text = item.get("content") if item.get("role") == "assistant" else None
@@ -3902,6 +3928,9 @@ def _worker_main():
         "router": {"enabled": False, "when_busy": "wait", "systems": []},
     }.items():
         config.set(key, value, persist=False)
+    # A worker's immutable manifest, not the empty private HOME's user default,
+    # owns its provider route. Agent.reset() runs during construction.
+    config._pinned_run_route = True
     config.permissions = {"allow": [], "ask": [], "deny": []}
     if action is not None and action["kind"] == "patch":
         config.set("mode", "acceptEdits", persist=False)
@@ -4403,6 +4432,9 @@ def _execute_run(registry, row, config):
         try:
             with WorkspaceRegistry(registry.directory) as watcher:
                 while not stop.wait(0.1):
+                    if manifest.get('run_kind') == 'conversation':
+                        from .pip_steering import stage
+                        stage(watcher.db, row['id'], run_dir)
                     if config.get("pips_enabled", False) is not True or is_runtime_paused(watcher):
                         PipStore(watcher).cancel(row["id"], "runner-stop")
                     status = watcher.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
@@ -4453,6 +4485,9 @@ def _execute_run(registry, row, config):
                 result = event.get("result")
             elif kind == "failure":
                 failure = event.get("error")
+            elif kind == 'steer_applied' and manifest.get('run_kind') == 'conversation':
+                from .pip_steering import applied
+                applied(PipStore(registry), row['id'], event.get('ids'))
             elif kind in ("tool_call", "tool_result", "tool_denied", "progress", "error", "text_delta"):
                 if len(_json(event).encode()) > 2048:
                     raise RegistryError("output_limit", "The worker emitted an oversized progress event.")
@@ -4611,7 +4646,22 @@ def _drain(config, directory):
         return
     try:
         with WorkspaceRegistry(directory) as registry:
-            PipStore(registry).recover()
+            store = PipStore(registry)
+            store.recover()
+            from . import pip_flows
+            try:
+                pip_flows.recover(store, config)
+            except Exception:
+                # A workflow fault cannot strand unrelated Pip jobs.
+                try:
+                    with registry.transaction():
+                        for flow in registry.db.execute("SELECT id,workspace_id FROM pip_flows WHERE status='on'").fetchall():
+                            registry.db.execute("UPDATE pip_flows SET status='paused',revision=revision+1,updated_at=? WHERE id=?",
+                                                (registry.clock(), flow['id']))
+                            registry.event(flow['workspace_id'], 'pip_flow_paused',
+                                           payload={'flow_id': flow['id'], 'reason': 'recovery_error'})
+                except Exception:
+                    pass
             from .pip_run_cleanup import prune_finished
             try:
                 prune_finished(registry)    # copies left by earlier runs, a bounded batch at a time
@@ -4789,12 +4839,27 @@ def _run_claimed(registry, store, row, config, directory):
         store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
             "message": redact_text(str(exc), secret_values(config))[:1500]})
     finally:
+        if row['id'] and json.loads(row['manifest']).get('run_kind') == 'conversation':
+            from .pip_steering import miss_pending
+            miss_pending(store, row['id'])
         _router_release(row["id"])            # its DGC Router worker, whatever happened
         with _THREAD_LOCK:
             owned = _ACTIVE_RUNS.get(str(directory), set())
             owned.discard(row["id"])
             if not owned:
                 _ACTIVE_RUNS.pop(str(directory), None)
+    # A workflow failure must never rewrite a completed Pip result as failed.
+    # Its own edge records a paused receipt for review.
+    try:
+        from . import pip_flows
+        pip_flows.after_run(store, config, row["id"])
+    except Exception:
+        try:
+            with registry.transaction():
+                registry.event(row['workspace_id'], 'pip_flow_controller_error', pip_id=row['pip_id'],
+                               run_id=row['id'], payload={'reason': 'Workflow routing needs review.'})
+        except Exception:
+            pass  # A broken registry cannot record an additional event; the Pip result remains accurate.
     try:
         status = registry.db.execute("SELECT status FROM pip_runs WHERE id=?", (row["id"],)).fetchone()
         if status and status[0] in TERMINAL:
@@ -5013,7 +5078,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 "get_workspace_session_outcome", "list_workspace_session_outcomes",
                 "accept_workspace_session_outcome", "reject_workspace_session_outcome", "get_workspace_context")
             receipt_command = command in ("list_workspace_execution_receipts", "get_workspace_execution_receipt", "record_workspace_execution_context")
-            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
+            current = None if selected_session_workspace or receipt_command or command in STATEMENT_COMMANDS or command in ("list_pip_flows", "get_pip_flow", "create_pip_flow", "set_pip_flow", "get_pip_runner", "get_pip_execution", "stop_pips", "list_pip_run_activity", "list_pip_types", "list_pip_models", "list_workspace_overviews", "list_pending_pip_reviews", "list_recent_workspace_activity", "get_pip_proposal", "list_pip_notifications", "mark_pip_notification_read", "get_pip_digest", "mark_pip_digest_seen", "mark_pip_news_seen", "get_pips_keep_running", "set_pips_keep_running", "get_pips_desktop_notifications", "set_pips_desktop_notifications", "get_pip_computers", "update_pip_computers", "list_pip_apps", "get_pip_computer_apps", "set_pip_computer_apps", "list_pip_logins", "save_pip_login", "remove_pip_login", "grant_pip_login", "list_pip_borrows", "allow_pip_borrow", "decline_pip_borrow", "stop_pip_borrow", "register_app", "update_app", "accept_app_update", "list_apps", "remove_app", "rotate_app_secret", "list_app_approvals", "decide_app_approval", "trigger_app_event", "list_app_events", "ensure_pip_template", "prune_pip_templates", "list_pip_templates", "decide_pip_template_change", "export_pip", "set_pip_feedback", "list_pip_feedback", "list_pip_action_grants", "revoke_pip_action_grant", "get_pip_computer", "list_pip_computer_actions", "decide_pip_computer_action", "get_pip_computer_frame", "list_pip_computer_frames", "stop_pip_computer", "open_pip_computer", "use_pip_computer_view", "always_allow_pip_computer_action", "get_pip_exception_source", "record_pip_exception", "revoke_pip_exception", "list_pip_memories", "archive_pip", "restore_pip", "delete_archived_pip", "list_pip_attention") else registry.resolve(config.project_root)
             workspace_id = request.get("workspace_id", current["id"] if current else "")
             if actor not in ('editor-user','local-console'):
                 # Personal scope is deliberately local for this milestone. Existing
@@ -5284,6 +5349,23 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     raise RegistryError('local_only', "How much a Pip asks is set on this computer only.")
                 result = (pip_levels.listing(registry, pip_id) if command == 'get_pip_level'
                           else pip_levels.set_level(registry, pip_id, request.get('level'), actor))
+            elif command in ('list_pip_flows', 'get_pip_flow', 'create_pip_flow', 'set_pip_flow'):
+                from . import pip_flows
+                if actor not in ('editor-user', 'local-console'):
+                    raise RegistryError('local_only', 'Manage Pip workflows on this computer.')
+                if command == 'list_pip_flows':
+                    workspace_id = request.get('workspace_id')
+                    result = {'flows': pip_flows.listing(store, workspace_id),
+                              'core_suggestions': pip_flows.core_suggestions(store, workspace_id)}
+                elif command == 'get_pip_flow':
+                    result = {'flow': pip_flows.get(store, request.get('flow_id'))}
+                elif command == 'create_pip_flow':
+                    result = {'flow': pip_flows.create(store, request.get('name'), request.get('pip_ids'),
+                                                       request.get('tasks'), request.get('mode'), actor, config)}
+                else:
+                    result = {'flow': pip_flows.set_status(store, request.get('flow_id'),
+                                                           request.get('expected_revision'), request.get('status'),
+                                                           actor, config)}
             elif command in ('list_pip_borrows', 'allow_pip_borrow', 'decline_pip_borrow', 'stop_pip_borrow'):
                 # Borrowing the user's own signed-in Chrome (pip_borrow): the Pip asks with a card each time; only the
                 # user, on this computer, allows it once, says Not now, or takes it back with Stop.

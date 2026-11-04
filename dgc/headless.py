@@ -394,8 +394,11 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 71: video generation in a Personal Pip's chat (dgc/pip_videos.py). A reply that started a video carries `videos`:
 # [job], each as dgc/videos.py's view of it now ({id, state, status, label, duration_s, resolution, price, result?:
 # {path, poster?, bytes, seconds?, width?, height?}, error?, charged?}); a client reads it only from a runtime
-# advertising 71. No command is added.
-PIPS_API_VERSION = 71
+# advertising 71. API 72 adds local, reviewed Pip workflow controls; routing a result
+# never changes either Pip's authority to use apps, send, or operate its computer.
+# API 73 lets a new text message join one running Pip conversation. It keeps the
+# same run and session history instead of starting a competing reply.
+PIPS_API_VERSION = 73
 
 
 def _pips_platform_supported() -> bool:
@@ -437,7 +440,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
-    "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
+    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
@@ -2572,6 +2575,10 @@ class Backend:
                           # (the editor's list, a tab after a reload): it comes back in the mode it had, re-checked
                           # against trust. Without it a reopen only lowers the mode, as an SDK app's always does.
                           "resume_saved_mode": True,
+                          # set_model and set_config with scope=session keep the provider,
+                          # model and effort in this Work chat only, even after reload.
+                          "session_model_route": True,
+                          "model_defaults": True,
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
@@ -6302,6 +6309,17 @@ class Backend:
                 ensure_turn()
                 saved = str(content or "")
                 output = shown_output(name, saved)    # the row as it read live: no sentence for the model alone
+                # A Pip setup card reads only the proposal ID, then fetches its authoritative
+                # record from the registry. Truncating a large JSON result in the middle made
+                # otherwise successful Pips disappear from a restored chat (one five-Pip setup
+                # had a 4,105-character fifth result). Preserve that identity across replay.
+                if name == "pips_setup":
+                    try:
+                        setup_id = json.loads(output).get("setup", {}).get("id")
+                    except (TypeError, ValueError, AttributeError):
+                        setup_id = None
+                    if isinstance(setup_id, str) and re.fullmatch(r"setup_[a-f0-9]{32}", setup_id):
+                        output = json.dumps({"setup": {"id": setup_id}}, separators=(",", ":"))
                 output = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
                 # Both of these are pure functions of the saved output string, so a reviewed patch
                 # comes back as a diff card and a failed command comes back red, with no migration.
@@ -7986,8 +8004,43 @@ class Backend:
                          **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}
                             if active_engine and self._busy() else {}),
                          **_request_fields(request_id))
+        elif t == "set_model_defaults":
+            from .sessions import _clean_native_route
+            from .config import Config
+            route = {key: cmd.get(key) for key in ("base_url", "model", "api_mode")}
+            route["thinking"] = "off"
+            cleaned = _clean_native_route(route)
+            key = cmd.get("api_key", "")
+            if (cleaned is None or not cleaned.get("model")
+                    or not isinstance(key, str) or len(key) > 16384
+                    or any(ord(char) < 32 for char in key)):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="Choose a valid provider URL, model and single-line key.",
+                             **_request_fields(request_id))
+                return
+            try:
+                # A fresh Config owns the global default. The running chat's Config, model
+                # client and session snapshot stay untouched. Config saves the key only in its
+                # owner-private secret store, bound to this exact endpoint.
+                defaults = Config(project_root=self.config.project_root)
+                defaults._persist = False
+                for name in ("base_url", "api_mode", "model"):
+                    defaults.set(name, cleaned[name], persist=False)
+                defaults.set("api_key", key, persist=False)
+                for name in ("subscription_engine", "subscription_model", "subscription_effort"):
+                    defaults.set(name, "", persist=False)
+                defaults._persist = True
+                defaults.save()
+            except Exception:
+                self.em.emit("command_rejected", command=t, reason="defaults_save_failed",
+                             message="DGC could not save the default model.",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("model_defaults_changed", base_url=cleaned["base_url"],
+                         model=cleaned["model"], **_request_fields(request_id))
         elif t == "set_model":
             config_get = getattr(self.config, "get", None)
+            session_route = cmd.get("scope") == "session"
             active_engine = str(
                 config_get("subscription_engine", "") if callable(config_get)
                 else getattr(self.config, "data", {}).get("subscription_engine", "")
@@ -8024,7 +8077,16 @@ class Backend:
                                  **_request_fields(request_id))
                     return
                 previous = str(config_get("subscription_model", "") if callable(config_get) else "").strip()
-                self.config.set("subscription_model", model)
+                if session_route:
+                    self.config.hold("subscription_model", model)
+                    if not self.agent._persist():
+                        self.config.hold("subscription_model", previous)
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its model choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("subscription_model", model)
                 self.em.emit("model_changed", model=model, base_url=self.config.base_url,
                              **_request_fields(request_id))
                 if model and model != previous:
@@ -8032,14 +8094,34 @@ class Backend:
                         f"Model → {model} · applies when the next subscription turn starts"
                         if self._busy() else f"Switched to {model}"))
                 return
+            route_before = None
+            if session_route:
+                if cmd.get("base_url"):
+                    from .sessions import _clean_native_route
+                    proposed = {key: str(self.config.get(key, "") or "")
+                                for key in ("base_url", "model", "api_mode", "thinking")}
+                    proposed["base_url"] = cmd["base_url"]
+                    if _clean_native_route(proposed) is None:
+                        self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                     message="the provider endpoint must be a plain HTTP or HTTPS URL",
+                                     **_request_fields(request_id))
+                        return
+                route_before = {
+                    'data': copy.deepcopy(self.config.data),
+                    'ephemeral': set(getattr(self.config, '_ephemeral_keys', set())),
+                    'held': set(getattr(self.config, '_held_keys', set())),
+                    'bindings': dict(getattr(self.config, '_provider_secret_identity', {})),
+                    'env_keys': set(getattr(self.config, '_env_secret_keys', set())),
+                    'window_switch': getattr(self.config, '_window_from_switch', ''),
+                }
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
                 # switches provider, erase any older CLI secret so a later CLI launch cannot
                 # attach that credential to the newly persisted endpoint.
                 self.config.data["api_key"] = ""
-                if hasattr(self.config, "_stored_secrets"):
+                if not session_route and hasattr(self.config, "_stored_secrets"):
                     self.config._stored_secrets["api_key"] = ""
-                if hasattr(self.config, "_stored_provider_identity"):
+                if not session_route and hasattr(self.config, "_stored_provider_identity"):
                     self.config._stored_provider_identity.pop("api_key", None)
                 runtime_secret = getattr(self.config, "set_runtime_secret", None)
                 if callable(runtime_secret):
@@ -8047,7 +8129,17 @@ class Backend:
                 else:
                     self.config._env_secret_keys.add("api_key")
             if cmd.get("base_url"):
-                self.config.set("base_url", cmd["base_url"])
+                if session_route:
+                    self.config.hold("base_url", cmd["base_url"])
+                    if "api_key" not in cmd:
+                        self.config.set_runtime_secret("api_key", "")
+                else:
+                    self.config.set("base_url", cmd["base_url"])
+            if "api_mode" in cmd:
+                if session_route:
+                    self.config.hold("api_mode", cmd["api_mode"])
+                else:
+                    self.config.set("api_mode", cmd["api_mode"])
             if "api_key" in cmd:
                 # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
                 # a later non-secret config save preserves any existing CLI secret instead of
@@ -8060,13 +8152,28 @@ class Backend:
                     self.config._env_secret_keys.add("api_key")
             previous = str(self.config.model or "")
             if cmd.get("model"):
-                self.config.set("model", cmd["model"])
+                if session_route:
+                    self.config.hold("model", cmd["model"])
+                else:
+                    self.config.set("model", cmd["model"])
             self.agent.refresh_client()
             # The previous model keeps the window chosen for it; the new one gets its own (remembered,
             # reported, or recommended for a local model), never just a name-table guess.
             switch_window = getattr(self.agent, "window_after_switch", None)
             context_changed = bool(cmd.get("model") and callable(switch_window)
-                                   and switch_window(previous))
+                                   and switch_window(previous, scoped=session_route))
+            if session_route and not self.agent._persist():
+                self.config.data = route_before['data']
+                self.config._ephemeral_keys = route_before['ephemeral']
+                self.config._held_keys = route_before['held']
+                self.config._provider_secret_identity = route_before['bindings']
+                self.config._env_secret_keys = route_before['env_keys']
+                self.config._window_from_switch = route_before['window_switch']
+                self.agent.refresh_client()
+                self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                             message="The session could not save its provider choice.",
+                             **_request_fields(request_id))
+                return
             # While delegation is active, keep the public model control aligned with the route a
             # prompt will use even when a settings operation updates the native fallback.
             shown_model = (str(config_get("subscription_model", "")).strip()
@@ -8121,6 +8228,7 @@ class Backend:
             self._list_models_at(cmd)
         elif t == "set_think":
             level = str(cmd.get("level", "off"))
+            session_route = cmd.get("scope") == "session"
             config_get = getattr(self.config, "get", None)
             active_engine = str(
                 config_get("subscription_engine", "") if callable(config_get)
@@ -8143,7 +8251,16 @@ class Backend:
                         **_request_fields(request_id))
                     return
                 previous = str(config_get("subscription_effort", "") if callable(config_get) else "") or "off"
-                self.config.set("subscription_effort", effort)
+                if session_route:
+                    self.config.hold("subscription_effort", effort)
+                    if not self.agent._persist():
+                        self.config.hold("subscription_effort", previous if previous != "off" else "")
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its reasoning choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("subscription_effort", effort)
                 shown = effort or "off"
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
@@ -8158,7 +8275,16 @@ class Backend:
                         **_request_fields(request_id))
                     return
                 previous = str(self.config.get("thinking", "off") or "off")
-                self.config.set("thinking", level)   # persisted native route
+                if session_route:
+                    self.config.hold("thinking", level)
+                    if not self.agent._persist():
+                        self.config.hold("thinking", previous)
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its reasoning choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("thinking", level)
                 shown = str(self.config.get("thinking", "off") or "off")
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
@@ -8280,6 +8406,7 @@ class Backend:
                          **_request_fields(request_id))
             self._emit_mode_if_changed(mode_before)
             self._emit_context(request_id)
+            self._emit_config()
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
@@ -8324,6 +8451,7 @@ class Backend:
             self._emit_mode_if_changed(mode_before)
             self.em.emit("history", items=[])
             self._emit_context()
+            self._emit_config()
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
@@ -8380,6 +8508,7 @@ class Backend:
                 # until the first event it does not know as one, and mode_changed is new to a
                 # resume -- sent first, the whole history landed in the app's first stream().
                 self._emit_mode_if_changed(mode_before)
+                self._emit_config()
                 self._forget_ended_shells()
                 if held:
                     # Shown to be read: what runs there runs there; nothing is started or offered here.
@@ -8778,6 +8907,7 @@ class Backend:
             self._emit_artifacts(request_id)
         elif t == "set_config":
             from .subscriptions import ENGINE_KEYS as _sub_keys
+            session_route = cmd.get("scope") == "session"
             if self._busy():
                 # An editor saves the whole settings form, so ~25 keys ride along with the one the
                 # user actually moved. Rejecting on key NAMES made every mid-turn save fail on an
@@ -8795,6 +8925,12 @@ class Backend:
             if problem or values is None:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message=problem or "invalid settings values",
+                             **_request_fields(request_id))
+                return
+            if session_route and not set(values).issubset({
+                    "subscription_engine", "subscription_model", "subscription_effort"}):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="session route may only change its subscription engine, model and effort",
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)
@@ -8856,7 +8992,8 @@ class Backend:
             attr_before = {
                 attr: copy.deepcopy(getattr(self.config, attr))
                 for attr in ("_stored_secrets", "_stored_provider_identity",
-                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys")
+                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys",
+                             "_ephemeral_keys", "_held_keys")
                 if hasattr(self.config, attr)
             }
             missing = object()
@@ -8871,6 +9008,8 @@ class Backend:
                 for key, value in values.items():
                     if key not in secret_keys:
                         self.config.set(key, value)
+                if session_route:
+                    self.config.mark_ephemeral(*values.keys())
                 if has_persist_flag:
                     self.config._persist = persist_before
                 for key in secret_keys:
@@ -8896,6 +9035,9 @@ class Backend:
                     self.agent.autonomous_gate = values["autonomous_gate"]
                 if "autonomous_max_turns" in values:
                     self.agent.autonomous_max_turns = values["autonomous_max_turns"]
+                if session_route and values and not self.agent._persist():
+                    raise RuntimeError(getattr(self.agent, "_last_persist_error", "")
+                                       or "the Work session could not save its model route")
             except Exception as exc:
                 if has_persist_flag:
                     self.config._persist = persist_before

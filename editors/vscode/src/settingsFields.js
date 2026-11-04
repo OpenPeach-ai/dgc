@@ -125,14 +125,14 @@ export function renderFields(section, main, config, providers, ui) {
     const more = (key, summary, body, set) => `<details class="more" data-more="${key}"${OPEN.has(key) || set ? " open" : ""}><summary>${summary}</summary>${body}</details>`;
     const advanced = (key, body) => `<section class="group group-more"><div class="rows">${more(key, "Advanced", body, false)}</div></section>`;
     // A host with its presets beside it: picking one fills the host (settingsClient lists its models again).
-    const hostRow = (id, presetId, value) => `<div class="field host-field"><span class="words"><span class="name-line"><label class="name" for="${id}">Host</label></span></span>`
-        + `<span class="host-control">${inp(id, value)}${presetId ? sel(presetId, [["", "Presets"]].concat(providers.map((p) => [p.id, p.label])), "") : ""}</span></div>`;
+    const hostRow = (id, presetId, value, engine = "") => `<div class="field host-field"><span class="words"><span class="name-line"><label class="name" for="${id}">Host</label></span></span>`
+        + `<span class="host-control">${inp(id, value)}${presetId ? sel(presetId, [["", "Presets"]].concat(providers.map((p) => [p.id, p.label]), presetId === "provider" ? Object.entries(ENGINE_NAMES).map(([key, label]) => [`subscription:${key}`, `${label} subscription`]) : []), engine ? `subscription:${engine}` : "") : ""}</span></div>`;
     const saveBar = ui.saveBar();
     const hostName = (url) => { try { return new URL(url).host; } catch { return String(url || ""); } };
     function wire(main) {
         main.querySelectorAll("details.more[data-more]").forEach((d) => d.addEventListener("toggle", () => { if (d.open) OPEN.add(d.dataset.more); else OPEN.delete(d.dataset.more); }));
         // A preset's select is only a way to fill the host: it never shows a stale choice.
-        main.querySelectorAll(".host-control select").forEach((el) => { el.setAttribute("aria-label", "Fill the host from a preset"); el.title = "Fill the host from a preset"; });
+        main.querySelectorAll(".host-control select").forEach((el) => { const label = el.id === "provider" ? "Choose a model host or subscription" : "Fill the host from a preset"; el.setAttribute("aria-label", label); el.title = label; });
     }
     function renderGeneral(main) {
         const c = config;
@@ -164,23 +164,45 @@ export function renderFields(section, main, config, providers, ui) {
     }
     function renderModels(main) {
         const c = config;
+        const savedProviders = Array.isArray(ui.providerProfiles) ? ui.providerProfiles : [];
+        const providerDraft = ui.providerDraft || {};
+        const savedRows = savedProviders.map(row => `<div class="field"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${escapeHtml(row.model)} · ${escapeHtml(row.base_url)}</span></span><span class="host-control"><button type="button" class="secondary" data-provider-default="${escapeHtml(row.id)}" ${ui.defaultProviderId === row.id ? 'disabled' : ''}>${ui.defaultProviderId === row.id ? 'Default for new chats' : 'Set as default'}</button><button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`).join("");
+        const addSaved = `<details class="more" data-more="saved-providers"><summary>+ Add provider</summary><div class="rows">`
+            + field("Name", "Shown in the Work model menu.", inp("saved_provider_name", providerDraft.name || ""))
+            + field("Host", "Reachable from this computer.", inp("saved_provider_url", providerDraft.base_url || ""))
+            + field("Model", "The starting model for this provider.", inp("saved_provider_model", providerDraft.model || ""))
+            + field("Transport", "Auto works for most hosts.", sel("saved_provider_mode", TRANSPORTS, providerDraft.api_mode || "auto"))
+            + field("API key", "Saved in VS Code, never shown again.", inp("saved_provider_key", providerDraft.api_key || "", "password"))
+            + `<div class="field"><span class="words"><span class="hint" id="saved-provider-status" role="status"></span></span><span class="host-control"><button type="button" class="secondary" id="saved-provider-add">Save provider</button></span></div></div></details>`;
         const engine = String(c.subscription_engine || "");
+        const subscription = (Array.isArray(c.subscription_engines) ? c.subscription_engines : [])
+            .find(row => row && row.key === engine);
+        const models = Array.isArray(subscription?.model_hints) ? subscription.model_hints : [];
+        const cliDefault = String(subscription?.cli_default_model || "");
+        const defaultHint = engine === "codex" && cliDefault
+            ? `CLI default: ${escapeHtml(cliDefault)}${subscription?.cli_default_listed === false ? " · not in this account's model list" : ""}.`
+            : "Blank uses the CLI's own.";
+        const subscriptionModelInput = inp("subscription_model", c.subscription_model || "")
+            .replace('id="subscription_model"', 'id="subscription_model" list="subscription-models"')
+            + `<datalist id="subscription-models">${models.map(id => `<option value="${escapeHtml(id)}"></option>`).join("")}</datalist>`;
         const anthropic = /(^|\.)anthropic\.com/i.test(hostName(c.base_url)) || c.api_mode === "anthropic";
         const cacheLife = field("Cache lifetime", c.cache_settable ? "How long Anthropic keeps it." : old,
             sel("prompt_cache_ttl", [["5m", "5 minutes"], ["1h", "1 hour"]], c.prompt_cache_ttl === "1h" ? "1h" : "5m"),
             c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "");
         main.innerHTML = head("Models", "The models DGC uses, and where they run.")
-            + group("Main model", hostRow("base_url", "provider", c.base_url || "")
+            + group("Main model", hostRow("base_url", "provider", c.base_url || "", engine)
                 + field("API key", "Blank keeps the saved key.", inp("api_key", c.api_key || "", "password"),
                     "Saved for this host only. A key is never sent to any other host.")
                 + model("model", "Model", "", c.model || ""))
             + group("Subscription", field("Run turns on", "Your own Claude Code, Codex and others.",
                     sel("subscription_engine", [["", "Off: the model above"], ["claude", "Claude Code"], ["codex", "Codex"], ["qwen", "Qwen Code"], ["kimi", "Kimi Code"], ["copilot", "Copilot"]], engine),
-                    "Turns run through that CLI, on your own plan. ChatDGC, sub-agents and Pips keep the connection above unless set otherwise.")
+                    "Turns run through that CLI on the computer running DGC. Install and sign in to its CLI first. ChatDGC, sub-agents and Pips keep the connection above unless set otherwise.")
                 + `<div data-when-engine${engine ? "" : " hidden"}>`
-                + field("Model", "Blank uses the CLI's own.", inp("subscription_model", c.subscription_model || ""))
+                + field("Model", defaultHint, subscriptionModelInput)
                 + field("Effort", "", sel("subscription_effort", [["", "Default"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], c.subscription_effort || ""))
                 + "</div>")
+            + group("Saved providers", savedRows + addSaved,
+                "Keep several model hosts ready. Work chats can choose one without changing the default for new chats.")
             + group("Cache", field("Prompt cache", "Reuses what the model already read.", bool("prompt_cache", c.prompt_cache !== false))
                 + (anthropic ? cacheLife : "")
                 + (localOllama(c) ? field("Keep the model loaded", c.cache_settable ? "After the last reply, so the next is quick." : old,
@@ -218,7 +240,12 @@ export function renderFields(section, main, config, providers, ui) {
         if (between) Object.assign(between, { min: "0", max: "1440", step: "any" });
         if (!c.wait_settable) for (const el of [waitPick, waitMinutes, between]) if (el) el.disabled = true;
         const pick = main.querySelector("#subscription_engine"), rows = main.querySelector("[data-when-engine]");
-        if (pick && rows) pick.addEventListener("change", () => { rows.hidden = !pick.value; });
+        if (pick && rows) pick.addEventListener("change", () => {
+            rows.hidden = !pick.value;
+            const preset = main.querySelector("#provider");
+            if (preset) preset.value = pick.value ? `subscription:${pick.value}` : "";
+            pick.dispatchEvent(new Event("input", { bubbles: true }));
+        });
         const box = main.querySelector("#subscription_model");
         if (box) box.placeholder = "The CLI's default";
         wireHelpers(main);

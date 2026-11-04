@@ -2499,7 +2499,7 @@ class Agent(GoalLifecycle):
         self._edit_checkpoints_required = True
         self._last_task_integrated = False         # structured convergence signal; never infer from model text
         self._usage_lock = threading.Lock()       # title/suggestion work may finish off the main thread
-        self.reset()
+        self.reset(new_session=False)
 
     # ------------------------------------------------------------ setup ---
     @property
@@ -3179,7 +3179,7 @@ class Agent(GoalLifecycle):
         return recommended_window(self.config, getattr(self, "client", None),
                                   str(model or self.config.model), probe=probe)
 
-    def window_after_switch(self, previous_model: str = "") -> int | None:
+    def window_after_switch(self, previous_model: str = "", *, scoped: bool = False) -> int | None:
         """After a model switch: the previous model keeps its window, the new one gets its own.
 
         A switch used to overwrite context_size with the new model's name-table guess, so switching
@@ -3192,7 +3192,7 @@ class Agent(GoalLifecycle):
         remembered = self.config.get("model_context_sizes", {})
         # The one-time carry-over from a config.json written before 0.48, when nothing was
         # remembered yet; never a window DGC itself picked on an earlier switch.
-        if (previous and previous != current and not remembered
+        if (not scoped and previous and previous != current and not remembered
                 and getattr(self.config, "_window_from_switch", "") != previous
                 and self.config.is_explicit("context_size")):
             try:
@@ -3214,6 +3214,12 @@ class Agent(GoalLifecycle):
         except (TypeError, ValueError):
             configured = 32768
         if window and window != configured:
+            if scoped:
+                # The provider picker changed this chat, not the user's global
+                # context window or remembered per-model choices.
+                self.config.hold("context_size", window)
+                self.config._window_from_switch = current
+                return window
             setter = getattr(self.config, "set_model_window", None)
             if callable(setter):
                 setter(window)
@@ -4780,7 +4786,7 @@ class Agent(GoalLifecycle):
                 pass
         return target
 
-    def reset(self) -> None:
+    def reset(self, *, new_session: bool = True) -> None:
         # A background sub-task belongs to the chat that started it. Leaving it running across a
         # new chat meant a child could still be writing files and integrating its worktree minutes
         # after the user cleared the conversation -- into THIS agent's checkpoints, which by then
@@ -4832,6 +4838,14 @@ class Agent(GoalLifecycle):
         self._goal_progress = None
         self._reset_todo_clear()
         self._undo_session_mode()           # before the prompt below, which names the mode
+        if new_session and not getattr(self.config, "_pinned_run_route", False):
+            restore_route = getattr(self.config, "restore_subscription_route", None)
+            if callable(restore_route):
+                restore_route()            # a new chat starts from the saved user default
+            restore_native = getattr(self.config, "restore_native_route", None)
+            if callable(restore_native):
+                restore_native()
+                self.refresh_client()
         self._mode_chosen_for_chat = False
         self._mode_restore_note = ""
         self._active_tool_intents: set[str] = set()
@@ -6879,6 +6893,15 @@ class Agent(GoalLifecycle):
                         usage=usage, activity=activity, timing=timing,
                         checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
                         subscription_sessions=self.subscription_sessions,
+                        subscription_route={
+                            "engine": str(self.config.get("subscription_engine", "") or ""),
+                            "model": str(self.config.get("subscription_model", "") or ""),
+                            "effort": str(self.config.get("subscription_effort", "") or ""),
+                        },
+                        native_route={
+                            key: str(self.config.get(key, "") or "")
+                            for key in ("base_url", "model", "api_mode", "thinking")
+                        },
                         images=image_index,
                         agents=self.subagents.saved_state(),
                         mode=self.mode, plan_return_mode=self.plan_return_mode,
@@ -7317,6 +7340,18 @@ class Agent(GoalLifecycle):
             self._plan_presented = False
             self._executing_plan = False
             self._plan_approved_this_turn = False
+            restore_route = getattr(self.config, "restore_subscription_route", None)
+            if callable(restore_route):
+                restore_route(record.get("subscription_route"))
+            restore_native = getattr(self.config, "restore_native_route", None)
+            if callable(restore_native):
+                prior_model = str(self.config.model or "")
+                prior_url = str(self.config.base_url or "")
+                restore_native(record.get("native_route"))
+                self.refresh_client()
+                if (record.get("native_route") and
+                        (self.config.model != prior_model or self.config.base_url != prior_url)):
+                    self.window_after_switch(prior_model, scoped=True)
             self._restore_session_mode(record, saved_mode=saved_mode)
             self._reset_todo_clear()
             self.subscription_sessions = sessions.subscription_sessions_of(record)

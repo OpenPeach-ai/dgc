@@ -19,6 +19,29 @@
 .pip-setup-details>.pip-setup-refresh{border:0;padding:3px 0;color:var(--muted)}
 .pip-setup-error{margin:6px 0;color:var(--err-text,var(--vscode-errorForeground,#f48771));font:var(--w-reg,400) var(--t-xs,11px)/1.5 var(--sans)}
 .pip-setup-pending{margin-top:10px}
+.pip-setup-batch{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md,8px);background:var(--surface);min-width:0;overflow:hidden}
+.pip-setup-batch[hidden]{display:none}
+.pip-setup-batch-head{display:flex;align-items:center;min-height:48px}
+.pip-setup-batch-toggle{display:flex;flex:1;align-items:center;gap:8px;min-width:0;min-height:48px;border:0;background:transparent;color:var(--text);text-align:left;cursor:pointer;padding:7px 10px;font:var(--w-reg,400) var(--t-sm,13px)/1.35 var(--sans)}
+.pip-setup-batch-toggle:hover{background:color-mix(in srgb,var(--text) 4%,transparent)}
+.pip-setup-batch-toggle:focus-visible,.pip-setup-batch-dismiss:focus-visible{outline:1px solid var(--vscode-focusBorder,var(--accent));outline-offset:-1px}
+.pip-setup-batch-faces{display:inline-flex;align-items:center;flex:none;padding-left:1px}
+.pip-setup-batch-face{display:block;width:23px;height:23px;margin-left:-6px}
+.pip-setup-batch-face:first-child{margin-left:0}
+.pip-setup-batch-face .pip-setup-avatar-line,.pip-setup-batch-face .dgc-plush{width:23px;height:23px}
+.pip-setup-batch-extra{align-self:center;padding-left:5px;color:var(--muted);font:var(--w-med,500) var(--t-xs,11px)/1 var(--sans)}
+.pip-setup-batch-copy{display:flex;flex:1;flex-direction:column;min-width:0}
+.pip-setup-batch-label{font-weight:var(--w-semi,600);color:var(--text-strong,var(--text));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pip-setup-batch-detail{font:var(--w-reg,400) var(--t-xs,11px)/1.4 var(--sans);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pip-setup-batch-chevron{flex:none;color:var(--muted);transition:transform .12s}
+.pip-setup-batch[data-open=true] .pip-setup-batch-chevron{transform:rotate(90deg)}
+.pip-setup-batch-dismiss{flex:none;align-self:stretch;min-width:30px;margin-right:3px;border:0;background:transparent;color:var(--muted);font-size:18px;cursor:pointer}
+.pip-setup-batch-dismiss:hover{color:var(--text)}
+.pip-setup-batch-list[hidden]{display:none}
+.pip-setup-batch-list{border-top:1px solid var(--border)}
+.pip-setup-batch-list .pip-setup-line{margin:0;border-radius:0;border-top:1px solid var(--border);background:transparent}
+.pip-setup-batch-list .pip-setup-line:first-child{border-top:0}
+@media(prefers-reduced-motion:reduce){.pip-setup-batch-chevron{transition:none}}
 
 /* The tool card that carried the setup gives its place to the line; a moved line leaves no husk. */
 .tool:has(>.body>.pip-setup-card)>.head{display:none}.pip-setup-moved{display:none!important}

@@ -83,10 +83,9 @@ def level(registry, pip_id) -> str:
     return value
 
 
-# A Personal Pip made from now on starts at Approve for me (reported 2026-10-21): it removed every Allow tap in the
-# bills and shirts tests while orders, payments, new recipients, posts and deletes still ask. A Pip made before has no
-# saved level and stays at DEFAULT (Ask) until someone changes it.
-NEW_PIP = APPROVE
+# New Personal Pips start with Ask. Existing Pips retain their saved level; creating a workflow
+# or accepting a setup card never changes the new Pip's authority to send or submit.
+NEW_PIP = ASK
 
 
 def start(registry, pip_id) -> None:

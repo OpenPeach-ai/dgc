@@ -45,6 +45,8 @@ def _selected_rows(db, pip_id, run_ids):
     db.execute('DELETE FROM temp.dgc_purge_run_ids')
     db.executemany('INSERT INTO temp.dgc_purge_run_ids(id) VALUES(?)', ((r,) for r in run_ids))
     tables = _tables(db)
+    flow_ids = ([r[0] for r in db.execute('SELECT id FROM pip_flows WHERE instr(definition,?)>0', (pip_id,))]
+                if 'pip_flows' in tables else [])
     columns = {t: [r[1] for r in db.execute(f'PRAGMA table_info({_q(t)})')] for t in tables}
     chosen = {t: set() for t in tables}
     for table, names in columns.items():
@@ -59,6 +61,13 @@ def _selected_rows(db, pip_id, run_ids):
             clauses.append('instr(payload,?)>0'); values.append(pip_id)
             if run_ids:
                 clauses.append('EXISTS (SELECT 1 FROM temp.dgc_purge_run_ids r WHERE instr(payload,r.id)>0)')
+            for flow_id in flow_ids:
+                clauses.append('instr(payload,?)>0'); values.append(flow_id)
+        if table == 'pip_flows':
+            # The reviewed sequence stores Pip identities inside bounded JSON.
+            # Removing one Pip permanently removes that entire workflow and its
+            # step receipts, including references in other Pips' history.
+            clauses.append('instr(definition,?)>0'); values.append(pip_id)
         for name in names:
             if name == 'pip_id' or name.endswith('_pip_id'):
                 clauses.append(f'{_q(name)}=?'); values.append(pip_id)

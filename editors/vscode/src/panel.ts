@@ -33,6 +33,7 @@ import { pipsAttention, PipsAttentionState } from "./pipsAttention";
 import { settingsDocument } from "./settingsView";
 import { onPicturesSetting, pictureFoldsMessage, rememberPictureFold, setPicturesInReplies, picturesFolded } from "./pictureFolds";
 import { pipHomeDismissedAttr, rememberPipHomeDismissed } from "./pipHomeDismiss";
+import { addProfile, clearDefaultProfile, defaultProfileId, listProfiles, markDefaultProfile, profileCredential, removeProfile } from "./providerProfiles.js";
 
 function isSlashCommandText(text: string): boolean {
   if (!text.startsWith("/")) { return false; }
@@ -2757,6 +2758,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       (item) => item && item.key === this.routeState.subscriptionEngine);
   }
 
+  private configuredSubscriptions(): string[] {
+    const value = this.context.globalState.get<unknown>("dgc.configuredSubscriptionEngines.v1", []);
+    return Array.isArray(value) ? value.filter((item): item is string =>
+      typeof item === "string" && ["claude", "codex", "qwen", "kimi", "copilot"].includes(item)) : [];
+  }
+
+  private async rememberSubscription(engine: string): Promise<void> {
+    if (!engine) { return; }
+    const saved = this.configuredSubscriptions();
+    if (!saved.includes(engine)) {
+      await this.context.globalState.update("dgc.configuredSubscriptionEngines.v1", [...saved, engine]);
+    }
+  }
+
+  private async verifySubscription(engine: string, be = this.ensureBackend()): Promise<void> {
+    if (!engine) { return; }
+    // Check on the backend host at selection time. An editor connected over SSH must not mistake
+    // its own installed CLI or login for the remote machine's.
+    const ev = await be.request({ type: "get_config", request_id: this.nextRequestId("subscription-check") },
+                                "config", 10000);
+    const rows = Array.isArray(ev.subscription_engines) ? ev.subscription_engines : [];
+    const selected = rows.find((row: any) => row && row.key === engine);
+    if (!selected) { throw new Error("This DGC backend does not offer that subscription. Update the DGC CLI."); }
+    const label = String(selected.label || engine).split(" (")[0];
+    if (selected.installed === false) {
+      throw new Error(`${label} is not installed on the computer running DGC. Install its CLI there, then try again.`);
+    }
+    if (selected.auth_state === "signed_out") {
+      throw new Error(`${label} is not signed in on the computer running DGC. Run ${selected.login_cmd || `${engine} login`} there, then try again.`);
+    }
+  }
+
   private syncActiveRouteState(): void {
     const engine = this.routeState.subscriptionEngine;
     this.state.subscriptionEngine = engine;
@@ -2767,23 +2800,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const info = this.activeSubscription();
     const short = String(info?.label || engine).split(" (")[0];
-    this.state.model = this.routeState.subscriptionModel || `${short} default`;
+    const cliDefault = String(info?.cli_default_model || "");
+    this.state.model = this.routeState.subscriptionModel
+      || (cliDefault ? `${short} · ${cliDefault}${info?.cli_default_listed === false ? " (not listed)" : ""}`
+                     : `${short} default`);
     this.state.think = this.routeState.subscriptionEffort || "off";
   }
 
   private modelCommand(model: string): { command: any; response: DgcEvent["type"] } {
     return this.routeState.subscriptionEngine
-      ? { command: { type: "set_config", values: { subscription_model: model } },
+      ? { command: { type: "set_config", scope: "session", values: { subscription_model: model } },
           response: "config" }
-      : { command: { type: "set_model", route: "native", model }, response: "model_changed" };
+      : { command: { type: "set_model", route: "native", scope: "session", model }, response: "model_changed" };
   }
 
   private thinkCommand(level: string): { command: any; response: DgcEvent["type"] } {
     return this.routeState.subscriptionEngine
-      ? { command: { type: "set_config",
+      ? { command: { type: "set_config", scope: "session",
                      values: { subscription_effort: level === "off" ? "" : level } },
           response: "config" }
-      : { command: { type: "set_think", level }, response: "think_changed" };
+      : { command: { type: "set_think", scope: "session", level }, response: "think_changed" };
   }
 
   /** The folders this chat works in: the window's, or, for a chat opened in another folder, that
@@ -5402,6 +5438,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "listModels":
         this.listModels();
         break;
+      case "setSubscription":
+        await this.selectSubscription(String(msg.engine || ""));
+        break;
       case "setModel":
         {
           const mutation = this.modelCommand(String(msg.model || ""));
@@ -7404,7 +7443,43 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // in-composer model menu (rendered inside the webview)
   async listModels(): Promise<void> {
+    // A restored Work tab can receive `status` before its first `config` event. The header then
+    // knows the delegated route while this picker's local routeState still describes the native
+    // fallback. Read the actual backend route before opening the menu, so its models and effort
+    // slider always belong to the same provider that will run the next prompt.
+    try {
+      const ev: any = await this.requestState(this.ensureBackend(), "models-route",
+        { type: "get_config" }, "config", 10000);
+      this.routeState.nativeModel = String(ev.model || this.routeState.nativeModel);
+      this.routeState.nativeThink = String(ev.think || this.routeState.nativeThink);
+      this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
+      this.routeState.subscriptionModel = String(ev.subscription_model || "");
+      this.routeState.subscriptionEffort = String(ev.subscription_effort || "");
+      this.routeState.subscriptionEngines = Array.isArray(ev.subscription_engines)
+        ? ev.subscription_engines : [];
+      this.syncActiveRouteState();
+      this.postState();
+    } catch {
+      this.post({ type: "models", ids: [], err: true, routes: [] });
+      return;
+    }
     const subscription = this.activeSubscription();
+    const nativeLabel = Object.values(PROVIDERS).find(p => p.url === this.state.baseUrl)?.label
+      || "Custom host";
+    // The engine catalogue describes what the backend could support. The Work picker is a list
+    // of configured routes, so an uninstalled or never-added CLI does not appear here.
+    const saved = listProfiles(this.context);
+    const currentProfile = !this.routeState.subscriptionEngine
+      ? saved.find(row => row.base_url === this.state.baseUrl && row.model === this.routeState.nativeModel)
+      : undefined;
+    const routes = [
+      { key: "native", label: `Current host · ${nativeLabel}` },
+      ...saved.map(row => ({ key: row.id, label: row.name })),
+      ...this.routeState.subscriptionEngines.filter(row => row &&
+        (row.key === this.routeState.subscriptionEngine || this.configuredSubscriptions().includes(row.key))
+        && row.installed !== false && row.auth_state !== "signed_out"),
+    ];
+    const currentRouteKey = this.routeState.subscriptionEngine || currentProfile?.id || "native";
     if (this.routeState.subscriptionEngine) {
       const ids = Array.isArray(subscription?.model_hints)
         ? subscription.model_hints.filter((id: unknown): id is string => typeof id === "string")
@@ -7416,15 +7491,58 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "models", ids, current: this.routeState.subscriptionModel,
                   subscription: true,
                   supportsEffort: subscription?.supports_effort !== false,
-                  label: String(subscription?.label || this.routeState.subscriptionEngine) });
+                  label: String(subscription?.label || this.routeState.subscriptionEngine),
+                  cliDefaultModel: String(subscription?.cli_default_model || ""),
+                  cliDefaultListed: subscription?.cli_default_listed !== false, routes,
+                  currentRouteKey });
       return;
     }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {
       const ids = await this.fetchModels();
-      this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true });
+      this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true,
+                  routes, currentRouteKey });
     } catch {
-      this.post({ type: "models", ids: [], base, err: true });
+      this.post({ type: "models", ids: [], base, err: true, routes, currentRouteKey });
+    }
+  }
+
+  private async selectSubscription(engine: string): Promise<void> {
+    try {
+      if ((this.lastReadyEvent?.capabilities as any)?.session_model_route !== true) {
+        throw new Error("Update DGC CLI to choose a provider for this Work session.");
+      }
+      if (engine.startsWith("provider_")) {
+        const { route, api_key } = await profileCredential(this.context, engine);
+        const be = this.ensureBackend();
+        const previous = { engine: this.routeState.subscriptionEngine,
+                           model: this.routeState.subscriptionModel,
+                           effort: this.routeState.subscriptionEffort };
+        if (previous.engine) {
+          await this.requestState(be, "subscription-off", { type: "set_config", scope: "session",
+            values: { subscription_engine: "" } }, "config", 10000);
+        }
+        try {
+          await this.requestState(be, "provider-route", { type: "set_model", route: "native",
+            scope: "session", base_url: route.base_url, api_mode: route.api_mode,
+            model: route.model, api_key }, "model_changed", 10000);
+        } catch (error) {
+          if (previous.engine) {
+            await this.requestState(be, "subscription-restore", { type: "set_config", scope: "session",
+              values: { subscription_engine: previous.engine, subscription_model: previous.model,
+                        subscription_effort: previous.effort } }, "config", 10000).catch(() => {});
+          }
+          throw error;
+        }
+        return;
+      }
+      await this.verifySubscription(engine);
+      await this.requestState(this.ensureBackend(), "subscription-route", {
+        type: "set_config", scope: "session", values: { subscription_engine: engine },
+      }, "config", 10000);
+      await this.rememberSubscription(engine);
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC could not switch provider.");
     }
   }
 
@@ -7874,6 +7992,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private refreshEditorSettings(): void {
     const providers = Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
     this.settingsEditor?.webview.postMessage({ type: "providers", providers });
+    this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
     const be = this.ensureBackend();
     // The web search's address and whether its key is saved are opt-in fields (an older editor never
     // sees them); every supported CLI takes `fields` and ignores names it doesn't know.
@@ -7958,7 +8077,39 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await setPicturesInReplies(msg.value);
       this.settingsEditor?.webview.postMessage({ type: "picturesInReplies", value: picturesFolded() ? "folded" : "shown" });
     } else if (msg?.type === "saveSettings") {
-      await this.saveSettings(msg.values || {});
+      await this.saveSettings(msg.values || {}, String(msg.section || ""));
+    } else if (msg?.type === "addProviderProfile") {
+      try {
+        await addProfile(this.context, msg.profile);
+        this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context), saved: true });
+      } catch (error: any) {
+        this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
+      }
+    } else if (msg?.type === "removeProviderProfile") {
+      try {
+        await removeProfile(this.context, String(msg.id || ""));
+        this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+      } catch (error: any) {
+        this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not remove provider.") });
+      }
+    } else if (msg?.type === "setProviderDefault") {
+      try {
+        if ((this.lastReadyEvent?.capabilities as any)?.model_defaults !== true) {
+          throw new Error("Update DGC CLI to set a default for new chats.");
+        }
+        const id = String(msg.id || "");
+        const { route, api_key } = await profileCredential(this.context, id);
+        await this.requestState(be, "model-defaults", {
+          type: "set_model_defaults", base_url: route.base_url, model: route.model,
+          api_mode: route.api_mode, api_key,
+        }, "model_defaults_changed", 10000);
+        await markDefaultProfile(this.context, id);
+        this.settingsEditor?.webview.postMessage({ type: "providerProfiles",
+          profiles: listProfiles(this.context), defaultId: id });
+      } catch (error: any) {
+        this.settingsEditor?.webview.postMessage({ type: "providerProfileError",
+          message: String(error?.message || "Could not set the default model.") });
+      }
     } else if (msg?.type === "listModelsAt") {
       await this.listModelsAt(msg);
     } else if (msg?.type === "removeSearchKey") {
@@ -8287,7 +8438,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async saveSettings(v: any): Promise<void> {
+  async saveSettings(v: any, section = ""): Promise<void> {
     if (this.settingsSaveInFlight) {
       void vscode.window.showWarningMessage("DGC is already saving settings.");
       return;
@@ -8348,6 +8499,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const selectedEngine = String(v.subscription_engine || "").trim().toLowerCase();
       if (selectedEngine && !["claude", "codex", "qwen", "kimi", "copilot"].includes(selectedEngine)) {
         throw new Error("DGC settings contain an unsupported subscription engine.");
+      }
+      if (section === "models" && selectedEngine && !this.configuredSubscriptions().includes(selectedEngine)) {
+        await this.verifySubscription(selectedEngine, be);
       }
       if (selectedEngine === "kimi" && requestedMode !== "auto") {
         throw new Error("Kimi prompt mode requires DGC auto mode.");
@@ -8568,6 +8722,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       this.routeState.subagentBaseUrl = String(v.subagent_base_url || "");
       this.routeState.fallbackBaseUrl = String(v.fallback_base_url || "");
+      await this.rememberSubscription(selectedEngine);
+      const savedDefault = listProfiles(this.context).find(row => row.id === defaultProfileId(this.context));
+      if (section === "models" && savedDefault && (selectedEngine || savedDefault.base_url !== String(v.base_url || "")
+          || savedDefault.model !== String(v.model || "")
+          || savedDefault.api_mode !== String(v.api_mode || "auto"))) {
+        await clearDefaultProfile(this.context);
+        this.settingsEditor?.webview.postMessage({ type: "providerProfiles",
+          profiles: listProfiles(this.context), defaultId: "" });
+      }
       this.settingsEditor?.webview.postMessage({ type: "settingsSaved", ok: true });
       this.pipsEditor?.modelsChanged(); this.pipsTab?.modelsChanged();     // Pips run on may have changed
       void vscode.window.showInformationMessage("DGC settings saved.");

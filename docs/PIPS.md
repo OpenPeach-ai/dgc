@@ -14,6 +14,16 @@ Code extension 0.35.0 (the Pips view, setup cards and review dialogs) and SDK 0.
 (`session.pips`). For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
+### Personal Pip workflows
+
+In **Pips → Personal → Workflows**, choose two to four distinct active Personal Pips and write the exact task for each receiving Pip. A manual task or a scheduled routine result from the first Pip starts the sequence. **Review each handoff** leaves the next result for your decision. **Unattended handoffs** pass that result to the next Pip without another routing question, up to three starts in any 24 hours. The previous Pip's result is shared exactly; an oversized or held result pauses that step. Pause stops future handoffs, while runs already queued may finish. Changing a Pip, its model, or its app access pauses the workflow until you create a new reviewed one.
+
+If Core proposed a team in one reply, create each Pip from its separate setup card. When all of those cards have been accepted, **Workflows** offers that team in Core's proposed order. Select **Set up workflow**, write the receiving tasks, choose the routing mode, and review the exact sequence. Core's suggestion never starts a workflow by itself.
+
+Workflow routing never changes a Pip's tool permissions. New Personal Pips start at **Ask**, and existing Pips keep their saved level. Sending mail, publishing, paid generation, computer actions and other changes still follow each Pip's own approval rules.
+
+**Project Pips → Workflows** routes the first source checked finding from a completed audit to the next read only Project Pip on the same committed source. Choose review at each handoff or unattended routing, again capped at three starts in any 24 hours. Scout, Lens, Rook and Lock can join; Patch and Pulse still require their own exact action review. A Project workflow cannot include Personal Pips.
+
 ## The characters
 
 Each Pip is one of eight characters. A character is a look and a role, not a
@@ -1265,8 +1275,8 @@ without.
 ### How much it asks
 
 Each Personal Pip has a level, on its page under **How much it asks** (Pips API 58), the way OpenMausBot's bots do.
-Only you change it, on this computer. A new Personal Pip starts at **Approve for me**; a Pip made before levels keeps
-**Ask** until you change it.
+Only you change it, on this computer. A new Personal Pip starts at **Ask**. Existing Pips keep
+the level you chose for them.
 
 | Level | What goes by itself | What still asks |
 |---|---|---|

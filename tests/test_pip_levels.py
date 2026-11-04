@@ -71,14 +71,15 @@ class LevelSettingTests(Store):
             self.assertNotRegex(line, r"\bAI\b")
         self.assertIn("payment", got["levels"][2]["says"])
 
-    def test_a_personal_pip_made_now_starts_at_approve_for_me_and_one_made_before_keeps_ask(self):
-        # Reported 2026-10-21: new Personal Pips start at Approve for me; existing ones stay at Ask.
+    def test_a_personal_pip_made_now_starts_at_ask_and_one_made_before_keeps_ask(self):
         self.cfg.data["pips_enabled"] = True
         before = self.personal()                                   # made before: nothing saved for it
         made = self.control("create_pip", workspace_id=self.registry.personal()["id"], name="Shopper",
                             goal="Order things I ask for", computer=False)["pip"]
-        self.assertEqual(levels.level(self.registry, made["id"]), "approve")
+        self.assertEqual(levels.level(self.registry, made["id"]), "ask")
         self.assertEqual(levels.level(self.registry, before["id"]), "ask")
+        self.control("set_pip_level", pip_id=before["id"], level="approve")
+        self.assertEqual(levels.level(self.registry, before["id"]), "approve", "a saved choice stays in place")
         project = self.control("create_pip", workspace_id=self.workspace["id"], name="Reviewer", goal="Review")["pip"]
         self.assertEqual(levels.level(self.registry, project["id"]), "ask", "a Project Pip always asks")
         self.control("set_pip_level", pip_id=made["id"], level="ask")

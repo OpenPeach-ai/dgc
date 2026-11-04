@@ -48,7 +48,8 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 // Agents was its own page until 0.51: its Sub-agents, Fallback and Pips are blocks of Models now (an old link to
 // "agents" opens Models at Sub-agents).
 const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
-let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+let providerForm = {name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -165,6 +166,7 @@ function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus =
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
     config = ev;
+    draft.subscription_engines = Array.isArray(ev.subscription_engines) ? ev.subscription_engines : [];
     for (const [key, fallback] of Object.entries(defaults)) {
         if (!dirty.has(key))
             draft[key] = key.endsWith('api_key') ? '' : ev[key] ?? fallback;
@@ -348,7 +350,20 @@ function render() {
         main.innerHTML = '<h2>' + sections.find(([id]) => id === section)[1] + '</h2><p class="sub" role="status">Reading settings from DGC…</p>';
         return;
     }
+    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;
     renderFields(section, main, draft, providers, ui);
+    if(section==='models'){
+        const form={saved_provider_name:'name',saved_provider_url:'base_url',saved_provider_model:'model',saved_provider_mode:'api_mode',saved_provider_key:'api_key'};
+        for(const [id,key] of Object.entries(form))main.querySelector('#'+id)?.addEventListener('input',event=>{providerForm[key]=event.target.value;});
+        main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
+            const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
+            send({type:'addProviderProfile',profile:{...providerForm}});
+        });
+        main.querySelectorAll('[data-provider-remove]').forEach(button=>button.addEventListener('click',()=>send({type:'removeProviderProfile',id:button.dataset.providerRemove})));
+        main.querySelectorAll('[data-provider-default]').forEach(button=>button.addEventListener('click',()=>{
+            button.disabled=true;send({type:'setProviderDefault',id:button.dataset.providerDefault});
+        }));
+    }
     // Sub-agents' Context window: a size typed or picked (src/contextCombo.js), as DGC Router's Context each.
     const subWindow = main.querySelector('#subagent_context_size')?.closest('[data-ctx-combo]');
     if (subWindow) bindContextCombos(subWindow.parentElement);
@@ -367,7 +382,7 @@ function render() {
         const input = $(id);
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
-    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', values: { ...draft } }); };
+    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', section, values: { ...draft } }); };
     // Web search -> Remove: the chosen provider's own key, cleared at once (the rest of the page waits for Save).
     const removeKey = $('search-key-remove');
     if (removeKey) removeKey.onclick = () => {
@@ -382,7 +397,21 @@ function render() {
     for (const [presetId, urlId] of [['provider', 'base_url'], ['subagent_provider', 'subagent_base_url']]) {
         const el = $(presetId);
         if (el)
-            el.onchange = () => { const p = providers.find(x => x.id === el.value); if (p) {
+            el.onchange = () => {
+                if (presetId === 'provider' && el.value.startsWith('subscription:')) {
+                    const engine = el.value.slice('subscription:'.length);
+                    const choice = $('subscription_engine');
+                    if (choice && [...choice.options].some(option => option.value === engine)) {
+                        choice.value = engine;
+                        choice.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    return;
+                }
+                const p = providers.find(x => x.id === el.value); if (p) {
+                if (presetId === 'provider') {
+                    const choice = $('subscription_engine');
+                    if (choice && choice.value) { choice.value = ''; choice.dispatchEvent(new Event('change', { bubbles: true })); }
+                }
                 $(urlId).value = p.url;
                 setDraft(urlId, p.url);
                 $(urlId).dispatchEvent(new Event('input', { bubbles: true }));    // its Model box lists the new host
@@ -1280,8 +1309,21 @@ window.addEventListener('message', event => {
     }
     else if (msg.type === 'providers') {
         providers = msg.providers || [];
-        if (config && !dirty.size)
+        if (config) {
+            // The preset catalogue may arrive after the person has edited another field.
+            // Preserve that draft, then expose the new choices in the existing selector.
+            snapshot();
             render();
+        }
+    }
+    else if(msg.type==='providerProfiles'){
+        savedProfiles=Array.isArray(msg.profiles)?msg.profiles:[];
+        defaultProviderId=String(msg.defaultId||'');
+        if(msg.saved){providerForm={name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
+        if(config&&section==='models'){snapshot();render();}
+    }
+    else if(msg.type==='providerProfileError'){
+        const status=$('saved-provider-status');if(status)status.textContent=String(msg.message||'Could not save provider.');
     }
     else if (msg.type === 'plugins') {
         items = Array.isArray(msg.items) ? msg.items : [];

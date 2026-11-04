@@ -3797,6 +3797,7 @@ def unit_tests(tmp: Path):
     _clear.config = type("ClearCfg", (), {"project_root": tmp})()
     _clear._worker = None
     _clear._emit_context = lambda: _clear_cap.emit("context", used=0, size=1)
+    _clear._emit_config = lambda: _clear_cap.emit("config")
     _clear.dispatch({"type": "clear_session"})
     check("headless clear resets model context and rotates the session",
           _clear.agent.reset_count == 1 and _clear.agent.session_file.parent != tmp

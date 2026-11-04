@@ -1,7 +1,8 @@
 """Explicitly reviewed personal-result sharing, using the existing handoff ledger.
 
 The source contributes bounded text, never its transcript, tools or app grants.
-The target keeps its own reviewed job/model/app scope. No automatic chain runs.
+The target keeps its own reviewed job/model/app scope. A controller-owned workflow
+may route a completed routine reply through the same exact handoff ledger.
 """
 from pathlib import Path
 from . import pip_handoffs as h
@@ -56,11 +57,27 @@ def source(store, run_id, shared_text):
     h._text(shared_text, 'Shared result text', MAX_TEXT, multiline=True)
     run = store.run(run_id)
     manifest = run['manifest']
-    if (run['status'] != 'succeeded' or manifest.get('run_kind') != 'personal_task'
-            or manifest.get('source_policy') != {'mode': 'personal'}):
+    if run['status'] != 'succeeded' or manifest.get('source_policy') != {'mode': 'personal'}:
         raise h._error('Choose a completed Personal Pip result.', 'source_unavailable')
-    from .pip_personal_results import validate
-    result = validate(run['result'])
+    if manifest.get('run_kind') == 'personal_task':
+        from .pip_personal_results import validate
+        result = validate(run['result'])
+        digest = h._digest(result)
+    elif manifest.get('run_kind') == 'conversation' and run.get('requested_by') == 'local-routine':
+        # Only a completed scheduled/app routine is an automatic workflow source.
+        # The controller already validated and saved the reply in this run's chat.
+        rows = store.db.execute('SELECT role,request_key,text FROM pip_chat_messages WHERE run_id=?',
+                                (run_id,)).fetchall()
+        user = next((r for r in rows if r['role'] == 'user'), None)
+        answer = next((r for r in rows if r['role'] == 'assistant'), None)
+        if (user is None or answer is None or not str(user['request_key'] or '').startswith('routine_')
+                or not isinstance(run.get('result'), dict)
+                or run['result'].get('text') != answer['text']):
+            raise h._error('Only a saved routine reply may feed a Personal workflow.', 'source_unavailable')
+        result = {'text': answer['text']}
+        digest = h._digest(result)
+    else:
+        raise h._error('Choose a completed Personal Pip result.', 'source_unavailable')
     if shared_text not in result['text']:
         raise h._error('Shared text must be an exact excerpt of the saved result.', 'source_mismatch')
     job = store._job(run['pip_id'])
@@ -71,7 +88,7 @@ def source(store, run_id, shared_text):
     return run['workspace_id'], {
         'pip_id': run['pip_id'], 'run_id': run_id, 'job_version': manifest['job_version'],
         'lifecycle_revision': job['lifecycle_revision'], 'source_revision': None,
-        'model': manifest['model'], 'result_digest': h._digest(result), 'text': shared_text}
+        'model': manifest['model'], 'result_digest': digest, 'text': shared_text}
 
 
 def current(store, source, target_id, config):

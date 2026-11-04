@@ -2403,10 +2403,10 @@ body.vscode-high-contrast { --agent-run:var(--vscode-charts-green, #89D185); --a
    "Continued 18:42 · asked by you" and what it was asked -- on its page and in its transcript. */
 .agent-run-divider { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0; min-width: 0; }
 .agent-run-report { color: var(--text); font: var(--w-reg) var(--t-sm)/1.55 var(--sans); overflow-wrap: anywhere; min-width: 0; }
-.agent-run-mark { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--muted);
-  font: var(--w-med) var(--t-xs)/1.45 var(--sans); }
+.agent-run-mark { display: flex; align-items: center; gap: var(--sp-1); margin: 0; color: var(--muted);
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); white-space: nowrap; }
 .agent-run-mark::before, .agent-run-mark::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--border); }
-.agent-run-mark::before { flex: 0 0 var(--sp-3); }
+.agent-run-mark::before { flex: 0 0 var(--sp-2); }
 /* "Ask it to do more": its card's box, and its report line's. */
 .agent-more { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; min-width: 0; }
 .agent-more[hidden] { display: none; }

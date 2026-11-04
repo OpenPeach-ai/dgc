@@ -1383,8 +1383,8 @@ def find_project_root(start: Path | None = None) -> Path:
 
 
 # What a running conversation is: its permission mode, its model route (and the credentials bound
-# to it), and how it samples. A change in one session is still written -- it is the default the
-# next session starts from -- but no OTHER running session adopts it at its next save. Adopted, a
+# to it), and how it samples. Settings owns the default for NEW chats; a model choice in a Work
+# chat is saved with that chat. No other running session adopts it at its next save. Adopted, a
 # model switch in one window moved every other window's chat to that model mid-conversation, a
 # mode switch put a chat sitting in `default` into `auto`, and an endpoint switch left the other
 # sessions on the new endpoint holding the old endpoint's key.
@@ -1966,6 +1966,76 @@ class Config:
         """
         self.__dict__.setdefault("_ephemeral_keys", set()).update(k for k in keys if k)
 
+    def restore_subscription_route(self, saved: dict | None = None) -> None:
+        """Use a saved chat's CLI route, or the current default for a new chat.
+
+        The route contains model names only. Vendor sign-in remains in the vendor CLI,
+        and this per-chat choice must never become the next chat's default during an
+        unrelated config save.
+        """
+        from .sessions import _clean_subscription_route
+        route = _clean_subscription_route(saved)
+        if route is None:
+            defaults = _read_config_payload(USER_CONFIG) or {}
+            route = _clean_subscription_route({
+                "engine": defaults.get("subscription_engine", DEFAULTS["subscription_engine"]),
+                "model": defaults.get("subscription_model", DEFAULTS["subscription_model"]),
+                "effort": defaults.get("subscription_effort", DEFAULTS["subscription_effort"]),
+            }) or {"engine": "", "model": "", "effort": ""}
+        for key, value in (("subscription_engine", route["engine"]),
+                           ("subscription_model", route["model"]),
+                           ("subscription_effort", route["effort"])):
+            self.hold(key, value)
+
+    def restore_native_route(self, saved: dict | None = None) -> None:
+        """Restore a chat's native endpoint/model without borrowing another host's key.
+
+        A session file never contains credentials. For the user's saved default, use only its
+        separately bound key. An editor may supply a different endpoint's key from its own
+        SecretStorage after the route is restored; until then that route has no credential.
+        """
+        from .sessions import _clean_native_route
+        route = _clean_native_route(saved)
+        defaults = _read_config_payload(USER_CONFIG) or {}
+        default_route = _clean_native_route({
+            key: defaults.get(key, DEFAULTS[key])
+            for key in ("base_url", "model", "api_mode", "thinking")
+        })
+        route = route or default_route or {key: DEFAULTS[key]
+                                           for key in ("base_url", "model", "api_mode", "thinking")}
+        identity = _provider_secret_identity({**self.data, "base_url": route["base_url"]}, "api_key")
+        secret = ""
+        if default_route and route["base_url"] == default_route["base_url"]:
+            stored = _read_config_payload(USER_SECRETS) or {}
+            bindings = stored.get("provider_identity")
+            if isinstance(bindings, dict) and bindings.get("api_key") == identity:
+                value = stored.get("api_key")
+                if isinstance(value, str):
+                    secret = value
+            elif route["base_url"] == DEFAULTS["base_url"]:
+                secret = DEFAULTS["api_key"]
+        if not secret and self._provider_secret_identity.get("api_key") == identity:
+            # A launcher may have supplied this endpoint's key through
+            # DGC_API_KEY(_FILE), or the editor may have supplied it at runtime.
+            # It is already bound to this URL; clearing it on New chat would
+            # make the same provider stop working until the process restarts.
+            current = self.data.get("api_key")
+            if isinstance(current, str):
+                secret = current
+        for key in ("base_url", "model", "api_mode", "thinking"):
+            self.hold(key, route[key])
+        # A Work chat may have selected a larger window for a different model.
+        # Return to the saved default before opening a new chat or restoring
+        # another one; that chat can then select its own model's window.
+        self.hold("context_size", defaults.get("context_size", DEFAULTS["context_size"]))
+        self._window_from_switch = ""
+        self.hold("api_key", secret)
+        bindings = self.__dict__.setdefault("_provider_secret_identity", {})
+        if secret and identity:
+            bindings["api_key"] = identity
+        else:
+            bindings.pop("api_key", None)
+
     def _my_changes(self) -> tuple[dict, dict, set]:
         """(changed keys, permission rules added, permission rules removed) since the baseline."""
         base = getattr(self, "_baseline_data", None)
@@ -2331,6 +2401,7 @@ class Config:
         clone._explicit_keys = set(getattr(self, "_explicit_keys", set()))
         clone.credential_warnings = tuple(self.credential_warnings)
         clone.permissions = self.permissions
+        clone._pinned_run_route = getattr(self, "_pinned_run_route", False)
         if hasattr(self, "session_permissions"):
             clone.session_permissions = self.session_permissions
         return clone

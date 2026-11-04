@@ -6,7 +6,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-04
 
-- Core, your Primary Personal Pip, can prepare up to three new Personal Pips in one conversation. Each appears as a separate review in Pips; only your Create Pip decision makes it real. A proposed Pip inherits no app connection or secret. Core can suggest research, writing and image jobs using your configured generators, but a paid image still follows the generator's cost approval.
+- A text message sent while a Personal Pip is answering joins that active reply, like steering in Work. If its answer finishes first, DGC keeps the message and tells you to send it as a new turn.
+- Work chats keep their selected native or subscription provider, model and effort on reload; a new chat starts from the default set in Settings. Settings can keep several native hosts ready, with their keys bound to each endpoint. Changing the default saved host leaves open chats on their selected routes. A model's context window stays with that chat.
+- Pip workflows pass an exact Personal result, or a Project Pip's first source checked finding, through two to four Pips of the same kind. Reviewed mode asks at every handoff; unattended mode routes within the reviewed sequence, up to three starts per day. Project targets are read only; neither mode grants app sends, publishing, paid generation, file edits or computer actions. New Personal Pips start at Ask; existing levels remain as saved.
+- Core, your Primary Personal Pip, can prepare up to three new Personal Pips in one conversation. Each appears as a separate review in Pips; only your Create Pip decision makes it real. After all are created, Workflows offers their proposed order for an exact, separately reviewed route. A proposed Pip inherits no app connection or secret. Core can suggest research, writing and image jobs using your configured generators, but a paid image still follows the generator's cost approval.
 - DGC Router lets DGC use the other computers on your network that run models. Add the computers that run Ollama,
   llama.cpp, vLLM, SGLang, TGI, LM Studio or any OpenAI-compatible server, and DGC spreads sub-agents and Pips across
   them. Each computer (a system) has its jobs (sub-agents, Pips or both), its workers, the models to use with the

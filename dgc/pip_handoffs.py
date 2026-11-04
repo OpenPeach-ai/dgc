@@ -548,7 +548,7 @@ def validate_enqueue(store, pin, pip, source_revision, model, actor):
     return validate_manifest(pin, manifest)
 
 
-def accept(store, handoff_id, expected_revision, actor, config):
+def accept(store, handoff_id, expected_revision, actor, config, *, _origin_check=None):
     _int(expected_revision, "Expected handoff revision", 0, 1)
     actor = _text(actor, "Approving actor")
     prior = get(store, handoff_id)
@@ -574,6 +574,15 @@ def accept(store, handoff_id, expected_revision, actor, config):
             return {"handoff": _public(store, row), "run": store.run(row["run_id"])}
         if row["status"] != "pending" or row["revision"] != expected_revision:
             raise _error("This handoff has already been reviewed; refresh it.", "conflict")
+        if row['requested_by'].startswith('pip-flow:'):
+            # A human review made for a workflow is still bound to its live
+            # routing authority. Pausing/removing it must close this path too.
+            flow = store.db.execute('SELECT status,enabled_at FROM pip_flows WHERE id=?',
+                                    (row['requested_by'][len('pip-flow:'):],)).fetchone()
+            if flow is None or flow['status'] != 'on' or row['created_at'] < flow['enabled_at']:
+                raise _error('This workflow is paused or changed. Review a fresh handoff.', 'stale_handoff')
+        if _origin_check is not None:
+            _origin_check()
         if row["expires_at"] <= now:
             _resolve(store, row, "expired", "expiry", now, "The seven-day review window ended.")
             expired = True

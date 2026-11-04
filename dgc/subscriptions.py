@@ -16,7 +16,12 @@ it a shared interface (session, checkpoints, transcript).
 from __future__ import annotations
 
 import json
+import queue
 import shutil
+import subprocess
+import re
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -213,6 +218,106 @@ def get_engine(key: str) -> SubEngine | None:
     return ENGINES.get((key or "").strip().lower())
 
 
+_codex_catalog_cache: tuple[float, str, tuple[str, ...]] | None = None
+
+
+def _codex_cli_default_model() -> str:
+    """Read only the top-level model setting, never Codex's authentication file."""
+    path = Path.home() / ".codex" / "config.toml"
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            return ""
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith("["):
+                break
+            match = re.fullmatch(r'\s*model\s*=\s*["\']([A-Za-z0-9._:-]{1,128})["\']\s*(?:#.*)?', line)
+            if match:
+                return match.group(1)
+    except (OSError, UnicodeError):
+        pass
+    return ""
+
+
+def _codex_models(binary: str) -> tuple[str, ...]:
+    """Ask the installed Codex CLI for its account's model catalogue, with a short bound.
+
+    The catalogue can be cached by Codex and is a picker hint, not proof that a turn can run.
+    DGC never reads the CLI's authentication file or sends its credentials itself.
+    """
+    global _codex_catalog_cache
+    now = time.monotonic()
+    if _codex_catalog_cache and _codex_catalog_cache[0] > now and _codex_catalog_cache[1] == binary:
+        return _codex_catalog_cache[2]
+    models: tuple[str, ...] = ()
+    proc = None
+    try:
+        proc = subprocess.Popen([binary, "app-server", "--stdio"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        assert proc.stdin is not None and proc.stdout is not None
+        for message in (
+            {"id": 1, "method": "initialize", "params": {"clientInfo": {
+                "name": "dgc", "title": "DGC", "version": "0.51"}}},
+            {"method": "initialized", "params": {}},
+            {"id": 2, "method": "model/list", "params": {}},
+        ):
+            proc.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+        proc.stdin.flush()
+        replies: queue.Queue[dict] = queue.Queue(maxsize=1)
+
+        def read_reply() -> None:
+            assert proc is not None and proc.stdout is not None
+            while True:
+                try:
+                    line = proc.stdout.readline(256 * 1024 + 1)
+                except (OSError, ValueError):
+                    return
+                if not line or len(line) > 256 * 1024:
+                    return
+                try:
+                    payload = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(payload, dict) and payload.get("id") == 2:
+                    replies.put(payload)
+                    return
+
+        reader = threading.Thread(target=read_reply, daemon=True)
+        reader.start()
+        try:
+            payload = replies.get(timeout=4)
+        except queue.Empty:
+            payload = {}
+        rows = (payload.get("result") or {}).get("data", [])
+        if isinstance(rows, list):
+            ids = [str(row.get("id") or "") for row in rows if isinstance(row, dict)]
+            models = tuple(dict.fromkeys(value for value in ids
+                                         if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value)))[:128]
+    except (OSError, ValueError, TypeError, AssertionError):
+        pass
+    finally:
+        if proc is not None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    proc.kill()
+                    proc.wait(timeout=1)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            for stream in (proc.stdin, proc.stdout):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+    _codex_catalog_cache = (time.monotonic() + 300, binary, models)
+    return models
+
+
 def status() -> list[dict]:
     """Installed / logged-in state for every engine — for the picker and `dgc doctor`."""
     out = []
@@ -221,10 +326,14 @@ def status() -> list[dict]:
         marked = installed and e.logged_in()
         auth_state = ("not_installed" if not installed else "signed_in" if marked else
                       "check_on_launch" if e.auth_on_launch else "signed_out")
+        cli_default = _codex_cli_default_model() if e.key == "codex" and installed else ""
+        hints = (_codex_models(e.resolve() or e.binary) if e.key == "codex" and marked
+                 else e.model_hints)
         out.append({"key": e.key, "label": e.label, "installed": installed,
                     "logged_in": marked, "auth_state": auth_state,
                     "login_cmd": e.login_cmd, "note": e.note,
-                    "model_hints": list(e.model_hints),
+                    "model_hints": list(hints), "cli_default_model": cli_default,
+                    "cli_default_listed": cli_default in hints if hints and cli_default else None,
                     "supports_effort": e.supports_effort()})
     return out
 
@@ -299,8 +408,20 @@ def _session_event(value) -> list[dict]:
 def _error_text(obj: dict) -> str:
     error = obj.get("error")
     if isinstance(error, dict):
-        return str(error.get("message") or error.get("error") or "")
-    return str(error or obj.get("message") or "")
+        value = str(error.get("message") or error.get("error") or "")
+    else:
+        value = str(error or obj.get("message") or "")
+    # Codex sometimes places an HTTP JSON error document inside the error message. Show the
+    # actual reason, never a serialized object in the conversation.
+    if value.startswith("{"):
+        try:
+            nested = json.loads(value)
+            detail = nested.get("error") if isinstance(nested, dict) else None
+            if isinstance(detail, dict) and isinstance(detail.get("message"), str):
+                value = detail["message"]
+        except (ValueError, TypeError):
+            pass
+    return value
 
 
 # ---- reconnecting: a subscription CLI's own retries ----------------------------------------------
@@ -448,7 +569,10 @@ def _events_codex(obj: dict) -> list[dict]:
         if retry is not None:
             return retry
     if top_type in ("turn.failed", "error"):
-        return _text_event("error", _error_text(obj) or "Codex turn failed")
+        message = _error_text(obj) or "Codex turn failed"
+        if "model is not supported when using Codex with a ChatGPT account" in message:
+            message += " Choose a model available to your signed-in Codex account in DGC's model menu."
+        return _text_event("error", message)
     if top_type == "turn.completed" and isinstance(obj.get("usage"), dict):
         return [{"kind": "usage", "usage": obj["usage"]}]
     if top_type in ("item.started", "item.completed", "item.updated"):

@@ -221,6 +221,26 @@ button.pill{border-radius:999px;padding:6px 16px}
 .meet-core p{max-width:340px;color:var(--muted);margin:0 0 10px;line-height:1.55}
 .simple-home-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
 .simple-home-head h2{font-size:15px;margin:0}
+.pip-flows{border-top:1px solid var(--pip-edge);margin-top:24px;padding-top:18px}
+.pip-flow-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pip-flow-head h2{font-size:15px;margin:0 0 3px}
+.pip-flow-head p{font-size:12px;margin:0}
+.pip-flow-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--pip-edge)}
+.pip-flow-row>div:first-child{display:grid;gap:4px;min-width:0}
+.pip-flow-row strong{font-size:13px}
+.pip-flow-row small{color:var(--muted);font-size:12px;line-height:1.4}
+.pip-flow-actions{display:flex;gap:6px;flex:none}
+.pip-flow-actions button{font-size:12px}
+.pip-flow-form{display:grid;gap:12px;margin-top:14px;padding:14px;border:1px solid var(--pip-edge);border-radius:12px}
+.pip-flow-form label{display:grid;gap:5px;font-size:12px}
+.pip-flow-form input,.pip-flow-form select,.pip-flow-form textarea{width:100%;min-width:0;box-sizing:border-box}
+.pip-flow-stages{display:grid;gap:10px}
+.pip-flow-stage{padding-top:9px;border-top:1px solid var(--pip-edge)}
+.pip-flow-stage p{margin:5px 0 0}
+.pip-flow-form .muted{font-size:12px;line-height:1.45;margin:0}
+.pip-flow-review li{margin-bottom:10px}
+.pip-flow-review p{margin:3px 0 0;overflow-wrap:anywhere}
+@media(max-width:440px){.pip-flow-row{align-items:flex-start;flex-direction:column}.pip-flow-actions{align-self:flex-end}}
 .core-offer{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:14px;margin:0 0 12px}
 .core-offer p{margin:0;display:grid;gap:2px}
 .core-offer span{color:var(--muted);font-size:12px}

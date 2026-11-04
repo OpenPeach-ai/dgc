@@ -348,6 +348,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "busy": _B(False),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
+    "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
     # 0.48: the prompt-cache settings, for Settings -> Models. Sent before `config` to a client whose
     # get_config `fields` named "cache_settings" (an older client never asks, so never sees it).
     # prompt_cache_ttl is the Anthropic cache-entry lifetime; ollama_keep_alive is how long a local
@@ -766,8 +767,18 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "set_model": {
         "model": _S(False), "base_url": _S(False), "api_key": _S(False),
+        "api_mode": _f("string", required=False,
+                       enum=("auto", "ollama", "anthropic", "chat_completions", "responses")),
         "route": _f("string", required=False, enum=("native", "subscription")),
+        "scope": _f("string", required=False, enum=("session",)),
         "clear_stored_api_key": _B(False), "request_id": _S(False),
+    },
+    # The default for FUTURE chats. This does not alter the active chat's route.
+    # Advertised by ready.capabilities.model_defaults.
+    "set_model_defaults": {
+        "base_url": _S(), "model": _S(), "api_key": _S(False),
+        "api_mode": _f("string", enum=("auto", "ollama", "anthropic", "chat_completions", "responses")),
+        "request_id": _S(False),
     },
     "list_models": {"request_id": _S(False)},
     "list_mcp_tools": {
@@ -844,6 +855,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                    "pip_id": _S(False)},
     "set_think": {
         "level": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
+        "scope": _f("string", required=False, enum=("session",)),
         "request_id": _S(False),
     },
     "set_goal": {
@@ -897,7 +909,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_artifacts": {"request_id": _S(False)},
     "stop_artifact": {"id": _S(), "request_id": _S(False)},
     # v14: ``values`` may carry thinking_inline (bool) and thinking_inline_max_chars (int 0..1000).
-    "set_config": {"values": _O(), "request_id": _S(False)},
+    "set_config": {"values": _O(), "scope": _f("string", required=False, enum=("session",)),
+                   "request_id": _S(False)},
     # `fields`: config fields added after v14 first shipped that this client understands (see
     # Backend._config_fields); an editor that lists none never receives them.
     "get_config": {"request_id": _S(False), "fields": _A(False)},

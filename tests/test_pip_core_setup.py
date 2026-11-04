@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from dgc import pip_chat, pip_core_setup, pip_setup
+from dgc import pip_chat, pip_core_setup, pip_flows, pip_setup
 from dgc.workspace_registry import RegistryError
 from tests import test_pips_local as fixtures
 
@@ -53,6 +53,27 @@ class CoreSetupTests(unittest.TestCase):
         with self.assertRaises(RegistryError):
             self.store.finish(run["id"], result={"text": "A draft.", "core_setup_drafts": [self.candidate()]})
         self.assertEqual(pip_setup.list_pending(self.registry, self.registry.personal()["id"]), [])
+
+    def test_accepted_core_team_prefills_a_workflow_only_after_all_cards_are_reviewed(self):
+        core = self.store.create(self.registry.personal()["id"], "Core", None, "editor-user", pip_type="core")
+        run = self.queued_reply(core)
+        candidates = [self.candidate("Research"), self.candidate("Writer"), self.candidate("Image")]
+        self.store.finish(run["id"], result={"text": "Review the team.", "core_setup_drafts": candidates})
+        workspace = self.registry.personal()["id"]
+        cards = sorted(pip_setup.list_pending(self.registry, workspace), key=lambda card: card["name"])
+        self.assertEqual(pip_flows.core_suggestions(self.store, workspace), [])
+        for card in cards:
+            pip_setup.review(self.registry, card["id"], workspace, card["digest"],
+                             "local-user", self.cfg, True)
+        suggestions = pip_flows.core_suggestions(self.store, workspace)
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual([pip["name"] for pip in suggestions[0]["pips"]],
+                         ["Research", "Writer", "Image"])
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM pip_flows").fetchone()[0], 0,
+                         "Core's suggestion never starts a route")
+        pip_flows.create(self.store, "Daily post", [pip["pip_id"] for pip in suggestions[0]["pips"]],
+                         ["Write a draft.", "Plan an image."], "reviewed", "local-console", self.cfg)
+        self.assertEqual(pip_flows.core_suggestions(self.store, workspace), [])
 
     def test_core_cannot_use_an_unattended_or_hidden_turn_to_create_setup_cards(self):
         core = self.store.create(self.registry.personal()["id"], "Core", None, "editor-user", pip_type="core")

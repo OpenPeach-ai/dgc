@@ -120,6 +120,8 @@ details.more>summary::-webkit-details-marker{display:none}
 details.more>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .12s ease}
 details.more[open]>summary::before{transform:rotate(45deg)}
 details.more>summary:hover{color:var(--text)}
+/* This form sits inside the Saved providers card; a second inset border shifts its controls by 1px. */
+details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;border-radius:0;margin:0}
 .host-control{display:flex;gap:6px;flex:none}.host-control input{flex:1;min-width:0}.host-control select{flex:none;width:86px}
 .wait-control{display:flex;gap:6px;flex:none}.wait-control select{flex:1;min-width:0}.wait-control input{flex:none;width:96px}.wait-control input[hidden]{display:none}
 .field>.search-key-control{display:flex;align-items:center;gap:8px}.field>.search-key-control input{flex:1;min-width:0}

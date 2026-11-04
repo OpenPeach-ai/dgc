@@ -50,7 +50,7 @@ assert.match(panelSrc, /path: uri\.fsPath/,
 assert.match(panelSrc, /case "plan_response":[\s\S]*?await this\.confirmAutoMode\(false\)/,
   "approving a plan into auto mode must use the same explicit warning gate");
 assert.match(panelSrc,
-  /this\.routeState\.subscriptionEngine\s*\?\s*\{ command: \{ type: "set_config", values: \{ subscription_model: model \} \}/,
+  /this\.routeState\.subscriptionEngine\s*\?\s*\{ command: \{ type: "set_config", scope: "session", values: \{ subscription_model: model \} \}/,
   "editor model changes must explicitly target the active subscription route");
 assert.match(panelSrc, /async listModels[\s\S]*?if \(this\.routeState\.subscriptionEngine\)[\s\S]*?this\.post\(\{ type: "models"[\s\S]*?return;[\s\S]*?this\.fetchModels\(\)/,
   "subscription composer model listing must return before native endpoint discovery");
@@ -2925,9 +2925,10 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
     supportsEffort: true, label: "Codex" });
   assert.equal(modelMenu.querySelector(".effort-slider").value, "0");
   assert.equal(modelMenu.querySelector(".effort-slider").getAttribute("aria-valuetext"), "Default");
-  assert.equal(modelMenu.querySelector(".model-options").hidden, true);
-  modelMenu.querySelector(".model-summary").click();
-  assert.equal(modelMenu.querySelector(".model-options").hidden, false);
+  assert.equal(modelMenu.querySelector(".model-options").hidden, false,
+    "the current provider's models open immediately");
+  assert.equal(modelMenu.querySelector(".effort-control").hidden, false,
+    "the thinking slider remains visible beside the current provider's models");
 
   const modeButton = doc.getElementById("btn-mode");
   modeButton.click();
@@ -4738,7 +4739,8 @@ test("the model menu's note is three lines with Show more, and Show more opens i
   send({ type: "event", event: { type: "ready", provider_capabilities: { reasoning_control: "ollama-levels" } } });
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud" });
-  const menu = doc.getElementById("modelmenu"), note = menu.querySelector(".reasoning-note"), more = menu.querySelector(".reasoning-more");
+  const menu = doc.getElementById("modelmenu");
+  const note = menu.querySelector(".reasoning-note"), more = menu.querySelector(".reasoning-more");
   assert.equal(menu.hidden, false);
   assert.match(note.textContent, /^Off turns thinking off\./);
   assert.ok(note.classList.contains("clamped"), "three lines at first");
@@ -4753,4 +4755,41 @@ test("the model menu's note is three lines with Show more, and Show more opens i
   assert.ok(note.classList.contains("clamped"));
   assert.deepEqual(errors, []);
   dom.window.close();
+});
+
+test("the Work model picker lists only configured routes supplied by the backend", () => {
+  const { doc, send, errors } = makeDom();
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["deepseek-v4.1-flash:cloud"], current: "deepseek-v4.1-flash:cloud",
+    routes: [{ key: "native", label: "Ollama" }, { key: "codex", label: "Codex" }] });
+  const menu = doc.getElementById("modelmenu");
+  const slider = menu.querySelector(".effort-slider");
+  const summary = menu.querySelector(".model-summary");
+  assert.ok(menu.querySelector("[data-provider-back]"), "the current provider's models open first");
+  menu.querySelector("[data-provider-back]").click();
+  assert.equal(menu.querySelector(".effort-slider"), slider,
+    "changing the lower list must keep the same thinking slider mounted");
+  assert.equal(menu.querySelector(".model-summary"), summary);
+  assert.equal(menu.querySelector(".effort-control").hidden, false);
+  assert.equal(menu.querySelectorAll("[data-provider-i]").length, 2);
+  assert.match(menu.textContent, /Ollama/);
+  assert.match(menu.textContent, /Codex/);
+  assert.doesNotMatch(menu.textContent, /Claude Code|Qwen Code|GitHub Copilot/);
+  assert.deepEqual(errors, []);
+});
+
+test("a Codex CLI default missing from its model list is labelled and cannot be reselected", () => {
+  const { doc, send, posted, errors } = makeDom();
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["gpt-5.6-terra", "gpt-5.6-luna"], current: "",
+    subscription: true, label: "Codex", cliDefaultModel: "gpt-5.6-sol",
+    cliDefaultListed: false, routes: [{ key: "codex", label: "Codex" }] });
+  const menu = doc.getElementById("modelmenu");
+  const fallback = menu.querySelector("[data-default]");
+  assert.match(fallback.textContent, /gpt-5\.6-sol \(not listed\)/);
+  assert.equal(fallback.disabled, true);
+  menu.querySelector('[data-i="0"]').click();
+  assert.equal(posted.at(-1).type, "setModel");
+  assert.equal(posted.at(-1).model, "gpt-5.6-terra");
+  assert.deepEqual(errors, []);
 });

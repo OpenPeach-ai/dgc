@@ -1222,6 +1222,14 @@ test("settings cancellation happens before backend or SecretStorage mutation", a
   assert.equal(notices.warnings.length, 1);
 });
 
+test("Models Settings checks a new subscription on the backend host before saving it", async () => {
+  const { provider, timeline } = harness({ mode: "default", engine: "" });
+  await provider.saveSettings(settings({ subscription_engine: "codex" }), "models");
+  assert.deepEqual(requestTypes(timeline), ["get_config"]);
+  assert.deepEqual(secretMutations(timeline), []);
+  assert.match(notices.errors.at(-1) || "", /does not offer that subscription/);
+});
+
 test("Ultra profile is acknowledged independently from permission mode and normal effort", async () => {
   const { provider, timeline, commands } = harness({ mode: "default", engine: "codex" });
   await provider.setReasoningProfile("ultra");

@@ -899,8 +899,17 @@ def snapshot(store, pip_id, *, context_size=32768):
         pair = [{"role": item["role"], "content": store.db.execute(
                     "SELECT text FROM pip_chat_messages WHERE seq=? AND pip_id=?",
                     (item["seq"], pip_id)).fetchone()[0]} for item in (user, assistant)]
+        from .pip_steering import applied_text
+        interjections = applied_text(store.db, user['run_id'])
+        if interjections:
+            pair[0]['content'] += ''.join('\n\n[User update during this reply]\n' + text for text in interjections)
+        # Validate each stored message against its own contract. A run may also
+        # have several individually bounded mid-turn updates, so their joined
+        # context is bounded by the pair budget below instead.
         for index, message in enumerate(pair):
-            validate_text(message["content"], reply=index == 1)
+            original = store.db.execute("SELECT text FROM pip_chat_messages WHERE seq=? AND pip_id=?",
+                                        ((user if index == 0 else assistant)["seq"], pip_id)).fetchone()[0]
+            validate_text(original, reply=index == 1)
         amount = len(_json(pair).encode()) - 2 + (1 if history else 0)
         if size + amount > budget:
             break
@@ -1296,8 +1305,17 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             raise RegistryError("invalid_cursor", "That message cursor does not belong to this Pip.")
         before = cursor[0]
     rows = _bounded_rows(store.db, pip_id, before, limit + 1)
-    messages, size = [], 0
+    from .pip_steering import in_run, message as steer_message
+    selected = []
+    projected = 0
     for row in rows[:limit]:
+        extra = len(in_run(store.db, row['run_id'])) if row['role'] == 'user' else 0
+        if selected and projected + 1 + extra > 50:
+            break
+        selected.append(row)
+        projected += 1 + extra
+    messages, size = [], 0
+    for row in selected:
         message = _message(row)
         if row["role"] == "user" and row["status"] == "failed":
             reason = failure_text(store.db.execute("SELECT error FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone())
@@ -1327,7 +1345,12 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             clips = message_videos(pip_id, row["id"])
             if clips:
                 message["videos"] = clips       # API 71: the videos it started, each as its job is now
-        amount = len(_json(message).encode())
+        # A running reply can have several mid-turn user messages. They are
+        # projected beside its original prompt below, so count them against
+        # the same page budget before accepting the row.
+        steers = ([steer_message(steering, message['status']) for steering in in_run(store.db, row['run_id'])]
+                  if row['role'] == 'user' else [])
+        amount = len(_json(message).encode()) + sum(len(_json(item).encode()) for item in steers)
         if size + amount > 96 * 1024:
             break
         messages.append(message)
@@ -1340,7 +1363,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         omitted = max(0, omitted - continuity['summarized_messages'])
     active = store.db.execute("SELECT r.id,r.status,r.created_at,r.started_at FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
                               "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1", (pip_id,)).fetchone()
-    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": list(reversed(messages)),
+    expanded = []
+    for item in reversed(messages):
+        expanded.append(item)
+        if item['role'] == 'user':
+            for steering in in_run(store.db, item['run_id']):
+                expanded.append(steer_message(steering, item['status']))
+    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
 
@@ -1361,6 +1390,13 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             from .cards import card_number, refusal
             if card_number(text):
                 raise RegistryError("card_in_chat", refusal(store._job(pip_id)["name"]))
+        if images is not None or files is not None or spooled_images is not None or spooled_files is not None:
+            active_for_attachment = store.db.execute(
+                "SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
+                "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                (pip_id,)).fetchone()
+            if active_for_attachment:
+                raise RegistryError('steer_attachments', 'Send photos or files after this Pip finishes its reply. Mid-turn updates are text only.')
         if images is not None or spooled_images is not None:
             job = store._job(pip_id)
             given, spooled_images = spooled_images, None
@@ -1378,8 +1414,18 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
+    from . import pip_steering
+    steered = store.db.execute('SELECT run_id FROM pip_chat_steers WHERE pip_id=? AND request_key=?',
+                               (pip_id, key)).fetchone()
+    if steered:
+        return pip_steering.send(store, store._job(pip_id), store.run(steered['run_id']), req, actor)
     run = prior(store, pip_id, req, actor)
     if run is None:
+        active = store.db.execute("SELECT r.id FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
+                                  "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') "
+                                  "ORDER BY m.seq DESC LIMIT 1", (pip_id,)).fetchone()
+        if active:
+            return pip_steering.send(store, store._job(pip_id), store.run(active['id']), req, actor)
         # A tap on the card a Pip that couldn't see showed (pip_eyes): applied before the run is queued, so a
         # switch to a model that sees already holds for it.
         from .pip_eyes import answer, bind

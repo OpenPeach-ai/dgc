@@ -26,6 +26,7 @@ import platform
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -637,13 +638,10 @@ class ContainerDesktop:
         return self._up and self.computer.running() and self._vnc_ready()
 
     def _vnc_ready(self) -> bool:
-        """A published socket can accept before the desktop sends an RFB greeting."""
+        """Readiness must not consume a VNC handshake and blacklist viewers."""
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                conn.settimeout(0.25)
-                conn.connect(str(self.vnc_socket))
-                return conn.recv(4) == b"RFB "
-        except (OSError, TimeoutError):
+            return stat.S_ISSOCK(self.vnc_socket.stat().st_mode)
+        except OSError:
             return False
 
     def start(self, launch=lambda start: start()) -> None:

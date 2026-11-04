@@ -433,7 +433,8 @@ function chatControlsMarkup(canSend,busy){
  const contextMenu=S.composerPanel==='context'?`<section class="composer-model-menu composer-context-menu" role="dialog" aria-label="Context window">${meter}${o?`<div class="composer-context-size"><label for="chat-context">Window size</label><select id="chat-context" aria-label="Context window" title="${esc(choiceScope())}"${locked?' disabled':''}>${sizes.map(n=>`<option value="${n}"${o.context_size===n?' selected':''}>${n===1048576?'1M':n%1024===0?n/1024+'K':n.toLocaleString()}</option>`).join('')}</select></div>${composerNote(`${choiceScope()} Pips supports 2,048–${S.chatControls.context_max.toLocaleString()} tokens; main DGC requests ${S.chatControls.inherited_context_size.toLocaleString()}. ${S.chatControls.context_note}`)}${continuityMarkup()}`:unavailable}</section>`:'';
  // An empty box offers voice mode where Send is, as ChatGPT does; a word typed, and it's Send again.
  const offerVoice=!!voiceMode&&!busy&&canSend&&!draft.chatText.trim()&&!(canAttachImages()&&(pendingImages().length||pendingFiles().length));
- const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>`:`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="Send message" title="Send message"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
+ const sendAction=`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="${busy?'Send mid-turn update':'Send message'}" title="${busy?'Send mid-turn update':'Send message'}"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
+ const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=personalPip()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
  return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
@@ -516,7 +517,7 @@ function workingMeta(since,chars){return `(${Math.max(0,Math.floor((Date.now()-s
 const workingClock=window.setInterval(()=>{for(const el of document.querySelectorAll('.pip-working-meta'))el.textContent=workingMeta(Number(el.dataset.since),Number(el.dataset.chars));
   for(const el of document.querySelectorAll('.run-post-clock[data-since]'))el.textContent=elapsed(Date.now()-Number(el.dataset.since));},1000);
 function chatMarkup(){
-  const type=pipType(S.pip,S.types),busy=S.chatActiveRun,canSend=(S.apiVersion<24||!!S.chatControls)&&!archived()&&S.messagesLoaded&&usable()&&takesMessages()&&supportedSource()&&S.runner?.online&&!S.runner?.paused&&!S.busy&&!busy;
+  const type=pipType(S.pip,S.types),busy=S.chatActiveRun,canSend=(S.apiVersion<24||!!S.chatControls)&&!archived()&&S.messagesLoaded&&usable()&&takesMessages()&&supportedSource()&&S.runner?.online&&!S.runner?.paused&&!S.busy&&(!busy||S.apiVersion>=73);
   const markdown=renderPipMarkdown;
   const sending=S.sending&&S.sending.pip===S.selected&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
   const shown=[...S.messages.filter(m=>!(m.role==='user'&&m.intro===true)),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at}]:[])];
@@ -936,10 +937,10 @@ function sendCardMessage(text){
   draft.chatText=String(text||'').slice(0,4000);void sendChat();return true;
 }
 async function sendChat(){
-  // Enter while the Pip is answering said nothing before; the draft stays in the box either way.
-  if(S.chatActiveRun&&draft.chatText.trim()&&!S.busy){S.notice=`${S.pip?.name||'The Pip'} is still answering. Send this when it is done.`;render();return;}
-  if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!takesMessages()||!S.runner?.online||S.runner?.paused||S.chatActiveRun)return;
+  if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!takesMessages()||!S.runner?.online||S.runner?.paused)return;
+  if(S.chatActiveRun&&S.apiVersion<73){setError('Update DGC before sending a mid-turn update to this Pip.');return;}
   const text=draft.chatText.trim(),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
+  if(S.chatActiveRun&&(images.length||files.length)){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
@@ -2073,7 +2074,7 @@ async function resolveSetup(review){
  const token=scope(),workspace=S.workspace.id;S.busy=true;renderReview();
  try{const result=await send(review.request.type,{setup_id:review.request.setup_id,expected_digest:review.request.expected_digest});if(token!==scope()||!usable())return;const accepted=review.request.type==='accept_pip_setup',s=pipSetupResolution(result.setup,review.setup,accepted);
  closeReview();setupRows=setupRows.filter(row=>row.id!==s.id);S.busy=false;
- if(accepted){const selecting=select(s.receipt.pip_id),selectedScope=scope();await selecting;if(selectedScope!==scope()||!usable()||S.workspace?.id!==workspace)return;S.notice=s.source_policy==='personal'?(s.receipt.run_id?`${s.name} is on and starting its first task.`:`${s.name} is on. It works ${s.next_run_at?'on its schedule and ':''}when you ask.`):s.receipt.run_id?`${s.name} is on and starting its first run. ${s.pip_type==='pulse'?'Check its results before you count it as passing.':s.work_kind==='documentation_draft'?'Its first draft is on the way.':'It reviews the code; it doesn’t test the running app.'}`:s.next_run_at?`${s.name} is on. Its first run is ${date(s.next_run_at)}.`:`${s.name} is on. It runs when you ask.`;S.notice+=keepRunningTold(result);}else S.notice='Rejected. Nothing was created or changed.';
+ if(accepted){flowState.loaded=false;const selecting=select(s.receipt.pip_id),selectedScope=scope();await selecting;if(selectedScope!==scope()||!usable()||S.workspace?.id!==workspace)return;S.notice=s.source_policy==='personal'?(s.receipt.run_id?`${s.name} is on and starting its first task.`:`${s.name} is on. It works ${s.next_run_at?'on its schedule and ':''}when you ask.`):s.receipt.run_id?`${s.name} is on and starting its first run. ${s.pip_type==='pulse'?'Check its results before you count it as passing.':s.work_kind==='documentation_draft'?'Its first draft is on the way.':'It reviews the code; it doesn’t test the running app.'}`:s.next_run_at?`${s.name} is on. Its first run is ${date(s.next_run_at)}.`:`${s.name} is on. It runs when you ask.`;S.notice+=keepRunningTold(result);}else S.notice='Rejected. Nothing was created or changed.';
  await refresh(true);
  }catch(error){if(token===scope()){if(S.review){S.review.error=errorText(error);renderReview();}else setError(error);}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
@@ -2117,6 +2118,8 @@ function detailMarkup() {
 // of the old page (History, Settings, Schedule, Handoffs, Changes, Memory, Context, Notifications) in its "…" menu. A
 // new one is a character too, then its job and the code it reads. A remote view and an older DGC keep the old page.
 const SIMPLE_CHARACTERS=['core','scout','lens','patch','rook','pulse','lock','quill'];
+const flowDraft={name:'',mode:'reviewed',count:3,pips:['','','',''],tasks:['','','']};
+const flowState={workspace:'',flows:[],suggestions:[],loaded:false,loadedAt:0,loading:false,error:'',form:false};
 const PROJECT_SIMPLE_API=51;
 function simpleMode(){return !remoteHost&&!!S.workspace&&S.apiVersion>=(S.workspace.kind==='personal'?43:PROJECT_SIMPLE_API);}
 function projectHome(){return S.workspace?.kind!=='personal';}
@@ -2479,11 +2482,49 @@ function searchPips(value){
  window.clearTimeout(pipSearchTimer);
  pipSearchTimer=window.setTimeout(()=>{const query=' '.concat(value).trim().replace(/\s+/g,' ').slice(0,120);if(query===S.pipSearch)return;S.pipSearch=query;jobsExtra=[];S.jobsNext=null;void refresh(false);},250);
 }
+function flowMarkup(){
+ if(S.apiVersion<72||remoteHost||!S.workspace)return '';
+ const ready=flowState.workspace===S.workspace.id&&flowState.loaded;
+ const project=projectHome(),choices=S.jobs.filter(p=>p.status==='active'&&(!project||['scout','lens','rook','lock'].includes(p.pip_type)&&p.source_policy?.mode==='committed_only'));
+ const form=flowState.form?`<form id="pip-flow-form" class="pip-flow-form"><label>Name<input id="flow-name" maxlength="120" value="${esc(flowDraft.name)}" placeholder="${project?'Review → security check':'Research → writing → image'}"></label><label>Route results<select id="flow-mode"><option value="reviewed"${flowDraft.mode==='reviewed'?' selected':''}>Review each handoff</option><option value="unattended"${flowDraft.mode==='unattended'?' selected':''}>Route without asking again</option></select></label><label>Number of Pips<select id="flow-count">${[2,3,4].map(n=>`<option value="${n}"${flowDraft.count===n?' selected':''}>${n}</option>`).join('')}</select></label><div class="pip-flow-stages">${Array.from({length:flowDraft.count},(_,i)=>`<div class="pip-flow-stage"><label>Step ${i+1} · Pip<select id="flow-pip-${i}"><option value="">Choose Pip</option>${choices.map(p=>`<option value="${esc(p.id)}"${flowDraft.pips[i]===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></label>${i?`<label>Task for this Pip<textarea id="flow-task-${i-1}" maxlength="4000" rows="2" placeholder="What should it do with the previous Pip’s ${project?'top source finding':'result'}?">${esc(flowDraft.tasks[i-1])}</textarea></label>`:`<p class="muted">${project?'A completed source checked run with a finding starts here.':'A manual task or routine run by this Pip starts the workflow.'}</p>`}</div>`).join('')}</div><p class="muted">At most 3 starts in any 24 hours. ${project?'Only the first source checked finding moves to the next read-only Pip, on the same committed source. Patch and Pulse still need their own exact review.':'An unattended route shares the previous Pip’s exact result with the next Pip. It never changes either Pip’s Ask setting or approves mail, publishing, purchases, or computer actions.'} Pause stops future handoffs; queued runs may still finish.</p><div class="actions"><button type="button" id="flow-cancel" class="quiet">Cancel</button><button type="submit" class="primary"${choices.length<2?' disabled':''}>Review workflow…</button></div></form>`:'';
+ const rows=ready?flowState.flows.filter(f=>f.status!=='retired').map(f=>{
+   const step=f.steps?.[0],pending=step?.status==='review'&&step.handoff_status==='pending';
+   const latest=pending?'Latest result is waiting for your handoff review.':step?.status==='paused'?`Latest result stopped here: ${step.reason||'Start a fresh run after checking this step.'}`:step?.handoff_status==='accepted'?'Latest result was handed to the next Pip.':step?.status==='queued'?'Latest result was queued for the next Pip.':'';
+   return `<div class="pip-flow-row"><div><strong>${esc(f.name)}</strong><small>${esc(f.definition.pips.map(pin=>S.jobs.find(p=>p.id===pin.pip_id)?.name||'Pip').join(' → '))} · ${f.mode==='reviewed'?'Review each handoff':'Unattended handoffs'} · ${f.status==='on'?'On':'Paused'}</small>${latest?`<small class="pip-flow-latest">${esc(latest)}</small>`:''}</div><div class="pip-flow-actions">${pending?`<button type="button" data-flow-handoff="${esc(f.id)}">Review</button>`:''}<button type="button" data-flow-status="${esc(f.id)}" data-flow-revision="${f.revision}" data-flow-next="${f.status==='on'?'paused':'on'}"${S.busy?' disabled':''}>${f.status==='on'?'Pause':'Resume'}</button><button type="button" data-flow-status="${esc(f.id)}" data-flow-revision="${f.revision}" data-flow-next="retired"${S.busy?' disabled':''}>Remove</button></div></div>`;
+ }).join(''):'';
+ const suggestions=ready&&!project&&!flowState.form?flowState.suggestions.filter(s=>s.pips.every(p=>S.jobs.some(job=>job.id===p.pip_id&&job.status==='active'))).map(s=>`<div class="pip-flow-row"><div><strong>Core’s suggested team</strong><small>${esc(s.pips.map(p=>p.name).join(' → '))} · Add the handoff tasks and review its mode</small></div><div class="pip-flow-actions"><button type="button" data-core-flow="${esc(s.id)}">Set up workflow</button></div></div>`).join(''):'';
+ return `<section class="pip-flows" aria-label="Pip workflows"><div class="pip-flow-head"><div><h2>Workflows</h2><p class="muted">${project?'Pass a source finding to the next read-only Pip.':'Pass one Pip’s result to the next.'}</p></div>${!flowState.form?`<button type="button" id="flow-new" class="quiet pill"${S.busy?' disabled':''}>New workflow</button>`:''}</div>${flowState.loading?'<p class="muted">Loading workflows…</p>':''}${flowState.error?`<p class="notice">${esc(flowState.error)}</p>`:''}${suggestions}${rows||(!suggestions&&!flowState.form&&!flowState.loading?'<p class="muted">No workflows yet.</p>':'')}${form}</section>`;
+}
+async function loadFlows(){
+ if(S.apiVersion<72||remoteHost||!S.workspace||flowState.loading)return;
+ const workspace=S.workspace.id,token=scope();flowState.loading=true;flowState.error='';
+ if(flowState.workspace&&flowState.workspace!==workspace){flowState.form=false;flowDraft.pips=['','','',''];flowDraft.tasks=['','',''];flowDraft.name='';}
+ try{const answer=await send('list_pip_flows',{workspace_id:workspace});if(token!==scope()||S.workspace?.id!==workspace)return;if(!Array.isArray(answer.flows)||!answer.flows.every(f=>f.workspace_id===workspace)||!Array.isArray(answer.core_suggestions)||!answer.core_suggestions.every(s=>typeof s.id==='string'&&Array.isArray(s.pips)&&s.pips.length>=2&&s.pips.length<=3&&s.pips.every(p=>typeof p.pip_id==='string'&&typeof p.name==='string')))throw Error('Workflow list does not match this workspace.');flowState.workspace=workspace;flowState.flows=answer.flows;flowState.suggestions=answer.core_suggestions;flowState.loaded=true;flowState.loadedAt=Date.now();}
+ catch(error){if(token===scope())flowState.error=errorText(error);}
+ finally{
+  flowState.loading=false;
+  if(token===scope()&&(!S.selected||S.overview)&&!S.create){
+   render();
+   // The user may switch Personal/Project while the previous workspace is loading.
+   // Start the new workspace's read once the old promise releases its loading slot.
+   if(S.workspace?.id!==workspace&&S.workspace?.id!==flowState.workspace)void loadFlows();
+  }
+ }
+}
+function reviewFlow(){
+ const name=flowDraft.name.trim(),pip_ids=flowDraft.pips.slice(0,flowDraft.count),tasks=flowDraft.tasks.slice(0,flowDraft.count-1).map(v=>v.trim());
+ if(!name||new TextEncoder().encode(name).length>120||pip_ids.some(id=>!S.jobs.some(p=>p.id===id&&p.status==='active'))||new Set(pip_ids).size!==pip_ids.length||tasks.some(t=>!t||new TextEncoder().encode(t).length>4000)){flowState.error='Name the workflow, choose distinct active Pips, and write each handoff task.';render();return;}
+ const mode=flowDraft.mode;
+ if(!['reviewed','unattended'].includes(mode))return;
+ const steps=pip_ids.map((id,i)=>`<li><strong>${esc(S.jobs.find(p=>p.id===id)?.name||'Pip')}</strong>${i?`<p>${esc(tasks[i-1])}</p>`:'<p>Manual task or routine starts here.</p>'}</li>`).join('');
+ const body=`<ol class="pip-flow-review">${steps}</ol><p><strong>${mode==='reviewed'?'Review each handoff':'Unattended handoffs'}</strong> · Up to 3 starts in any 24 hours.</p><p class="muted">${projectHome()?'Only the top source checked finding reaches the next read-only Pip. File fixes and test commands still require their own exact review.':'Unattended only routes the exact prior result. Each Pip’s Ask setting and all action approvals stay in force.'} Pause stops future handoffs, but already queued runs may finish.</p>`;
+ openReview({title:name,description:'Review this exact Pip sequence and its routing mode.',body,confirm:'Create workflow',request:{type:'create_pip_flow',name,pip_ids,tasks,mode}});
+}
 function simpleHomeMarkup(){
  const all=S.jobs.filter(p=>S.showArchived||p.status!=='archived'),live=S.jobs.filter(p=>p.status!=='archived');
- if(projectHome())return simpleHomeList(all,live);
+ if(projectHome())return simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
  if(!live.length&&!S.jobs.length&&!S.pipSearch)return meetCoreMarkup();   // a search that finds nothing is not an empty home
- return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live);
+ return (S.pipSearch?'':attentionHomeMarkup())+simpleHomeList(all,live)+(S.pipSearch?'':flowMarkup());
 }
 // A project's home: where the Personal home has Pips settings, a menu with the project's own pages (its context and its
 // notifications: the old side bar's buttons), and with no Pips yet, what each character does.
@@ -3456,7 +3497,7 @@ async function refreshNow(includeContext=false) {
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)){clearSelection();S.selected='';}
     if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=4000)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
   }catch(error){if(token===scope())S.error=errorText(error);}
-  finally{if(epoch===S.epoch&&sequence===refreshSeq){S.refreshing=false;render();}}
+  finally{if(epoch===S.epoch&&sequence===refreshSeq){S.refreshing=false;render();if(S.apiVersion>=72&&(!S.selected||S.overview)&&!S.create&&(!flowState.loaded||flowState.workspace!==S.workspace.id||Date.now()-flowState.loadedAt>15000))void loadFlows();}}
 }
 async function initialize() {
   const epoch=S.epoch;S.loading=true;render();
@@ -3625,11 +3666,22 @@ function updateDraft(event) {
 // The chat box's undo keys and typing, for its history. The box is redrawn, so the page listens, for the box.
 for(const type of ['keydown','beforeinput','input','compositionstart','compositionend'])document.addEventListener(type,event=>{if(chatHistory&&event.target?.id==='chatText')chatHistory[type](event);});
 document.addEventListener('input',updateDraft);
+document.addEventListener('input',event=>{
+ const id=event.target.id;if(id==='flow-name')flowDraft.name=event.target.value;
+ else if(/^flow-task-[0-2]$/.test(id))flowDraft.tasks[Number(id.slice(-1))]=event.target.value;
+});
+document.addEventListener('change',event=>{
+ const id=event.target.id;
+ if(id==='flow-mode')flowDraft.mode=event.target.value;
+ else if(id==='flow-count'){flowDraft.count=Number(event.target.value);render();}
+ else if(/^flow-pip-[0-3]$/.test(id))flowDraft.pips[Number(id.slice(-1))]=event.target.value;
+});
 document.addEventListener('paste',event=>{if(event.target?.id!=='chatText'||!canAttachImages())return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('dragover',event=>{if(canAttachImages()&&event.target?.closest?.('#chat-form')&&[...(event.dataTransfer?.types||[])].includes('Files'))event.preventDefault();});
 document.addEventListener('drop',event=>{if(!canAttachImages()||!event.target?.closest?.('#chat-form'))return;const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();addImageFiles(files);});
 document.addEventListener('change',event=>{if(event.target.dataset?.pluginLevel){const t=event.target,level=t.value,label=(PLUGIN_LEVELS.find(l=>l[0]===level)||[])[1]||level;void pipsSettingsCall('set_plugin_permission',{plugin:t.dataset.pluginLevel,level},`Saved. ${t.dataset.pluginName||'This plugin'}: ${label.toLowerCase()}.`);return;}if(event.target.id==='chat-attach-input'){addImageFiles(event.target.files||[]);event.target.value='';return;}if(event.target.id==='keep-running'){void setKeepRunning(event.target.checked);return;}if(event.target.id==='desktop-notifications'){void setDesktopNotifications(event.target.checked);return;}if(event.target.id==='pipEyes'){void setEyes(event.target.value);return;}if(event.target.id==='pipLevel'){void setLevel(event.target.value);return;}if(event.target.id==='pipReportAs'){const v=event.target.value;void setArtifacts({report_as:v},value=>reportNotice(value,S.pip?.name||'It'));return;}if(event.target.id==='pipDashboardAdd'){const id=event.target.value;if(id&&artifactsState.value){const list=[...artifactsState.value.dashboards,id];void setArtifacts({dashboards:dashboardsToSave(list)},`${S.pip?.name||'It'} refreshes “${dashboardTitle(id)}” after every run it finishes.${goneNote(list)}`);}return;}if(event.target.dataset?.loginAll){const l=(loginsState.value||[]).find(x=>x.id===event.target.dataset.loginAll),all=event.target.checked;if(l)void loginCall('grant_pip_login',{login_id:l.id,pips:all?'all':[S.selected]},all?`All your Pips can use the login for ${l.site}.`:`Only ${S.pip?.name||'this Pip'} uses the login for ${l.site} now.`);return;}if(event.target.id==='pipCareful'){const on=event.target.checked;void carefulCall('set_pip_careful',{on},on?'Careful mode is on.':'Careful mode is off. Its submits still wait for you.');return;}if(event.target.id==='pipNotify'){const on=event.target.checked;void setProfile({notify:on},on?'It tells you when it finishes something on its own or needs you.':'It won’t notify you. Its chat still has everything.');return;}if(event.target.dataset?.routineToggle){const id=event.target.dataset.routineToggle,on=event.target.checked;void routineCall('update_pip_routine',{routine_id:id,changes:{status:on?'on':'off'}},id,on?'Routine on.':'Routine off. It won’t run until you turn it on.');return;}if(event.target.id==='chat-context'){updateChatPreference('context_size',event.target.value);return;}if(event.target.id==='chat-thinking'){updateChatPreference('thinking',chatThinkingLevels[Number(event.target.value)]);return;}if(event.target.id==='commandReceiptSession'){commandDetailSeq++;commandSeq++;commandLoading=false;commandSession=event.target.value;commandReceipts=[];commandLoaded=false;commandCursor=null;commandMore=false;void loadCommandReceipts();return;}updateDraft(event);});
 document.addEventListener('submit',event=>{
+  if(event.target.id==='pip-flow-form'){event.preventDefault();reviewFlow();return;}
   if(event.target.id==='login-form'){event.preventDefault();void saveLogin();return;}
   if(event.target.id==='computer-go'){event.preventDefault();const url=$('computer-url').value.trim();if(url)void computerView('go',{url:/^https?:\/\//i.test(url)?url:'https://'+url});return;}
   if(event.target.id==='computer-type'){event.preventDefault();const input=$('computer-text'),text=input.value;if(text){input.value='';void computerView('type',{text});}return;}
@@ -3940,6 +3992,26 @@ document.addEventListener('click',event=>{
   if(target.dataset.messageConnection){void chooseMessageAccount(target.dataset.messageConnection);return;}
   if(target.dataset.messageReview){void openMessageReview(target.dataset.messageReview);return;}
   if(target.dataset.messageMore){void messageReviews(target.dataset.messageMore);return;}
+  if(target.dataset.coreFlow){
+    const suggestion=flowState.suggestions.find(s=>s.id===target.dataset.coreFlow);
+    if(!suggestion||S.workspace?.kind!=='personal'||!suggestion.pips.every(p=>S.jobs.some(job=>job.id===p.pip_id&&job.status==='active')))return;
+    flowDraft.name=(suggestion.pips[0].name+' workflow').slice(0,120);
+    flowDraft.mode='reviewed';flowDraft.count=suggestion.pips.length;
+    flowDraft.pips=[...suggestion.pips.map(p=>p.pip_id),'','',''].slice(0,4);
+    flowDraft.tasks=['','',''];flowState.form=true;flowState.error='';render();$('flow-task-0')?.focus();return;
+  }
+  if(target.dataset.flowHandoff){
+    const flow=flowState.flows.find(f=>f.id===target.dataset.flowHandoff),step=flow?.steps?.[0];
+    const pipId=flow?.definition?.pips?.[step?.stage+1]?.pip_id;
+    if(!step?.handoff_id||step.handoff_status!=='pending'||!pipId||!S.jobs.some(p=>p.id===pipId))return;
+    void (async()=>{try{await select(pipId);S.tab='handoffs';rememberView();render();await loadHandoffs();await openSavedHandoff(step.handoff_id);}catch(error){setError(error);}})();return;
+  }
+  if(target.dataset.flowStatus){
+    const flow=flowState.flows.find(f=>f.id===target.dataset.flowStatus&&f.revision===Number(target.dataset.flowRevision));
+    const status=target.dataset.flowNext;
+    if(!flow||!['on','paused','retired'].includes(status))return;
+    openReview({title:status==='retired'?'Remove workflow?':status==='paused'?'Pause workflow?':'Resume workflow?',description:status==='retired'?'Past handoff receipts remain, but this workflow cannot run again.':status==='paused'?'Future handoffs stop. Runs already queued may finish.':'New runs can start the exact approved Pip sequence again.',confirm:status==='retired'?'Remove':status==='paused'?'Pause':'Resume',danger:status==='retired',request:{type:'set_pip_flow',flow_id:flow.id,expected_revision:flow.revision,status}});return;
+  }
   switch(target.id){
     case 'workspace-notifications':leaveForProjectPage();S.tab='notifications';S.overview=false;S.create=false;rememberView();render();void loadNotifications();break;
     case 'refresh-notifications':void loadNotifications();break;
@@ -4095,8 +4167,10 @@ document.addEventListener('click',event=>{
       break;
     }
     case 'simple-new':openNewPip();break;
+    case 'flow-new':flowDraft.name='';flowDraft.mode='reviewed';flowDraft.count=3;flowDraft.pips=['','','',''];flowDraft.tasks=['','',''];flowState.form=true;flowState.error='';render();$('flow-name')?.focus();break;
+    case 'flow-cancel':flowState.form=false;flowState.error='';render();break;
     case 'create-core':void createSimplePip('core','Core');break;
-    case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();break;
+    case 'simple-back':chatDrafts.set(S.selected,draft.chatText);S.overview=true;rememberView();render();void loadFlows();break;
     case 'pips-settings-open':pipsSettings.view=pipsSettings.view||'computer';pipsSettings.confirmReset='';render();void loadPipsSettings();break;
     case 'pips-settings-close':pipsSettings.view='';render();break;
     case 'pip-page-back':S.pipPage='info';lookDirty=false;render();void loadRoutines();break;
@@ -4132,6 +4206,12 @@ document.addEventListener('click',event=>{
         const keyBody=JSON.stringify({reason,expiry});if(review.memoryRetry?.body!==keyBody)review.memoryRetry={body:keyBody,key:window.crypto.randomUUID()};memoryArgs={expires_at:expiry,request_key:review.memoryRetry.key};
       }
       void mutate({...review.request,...(reason?{reason}:{}),...memoryArgs},async result=>{
+        if(['create_pip_flow','set_pip_flow'].includes(review.request.type)){
+          const flow=result.flow;
+          if(!record(flow)||flow.workspace_id!==S.workspace.id||flow.id!==review.request.flow_id&&review.request.type==='set_pip_flow'||flow.status!==(review.request.type==='create_pip_flow'?'on':review.request.status))throw Error('Workflow receipt does not match the review. Refresh and try again.');
+          flowState.form=false;flowState.loaded=false;flowState.error='';S.notice=review.request.type==='create_pip_flow'?'Workflow created. Its next start follows the routing mode you approved.':flow.status==='on'?'Workflow resumed.':flow.status==='paused'?'Workflow paused.':'Workflow removed.';
+          void loadFlows();return;
+        }
         if(review.request.type==='accept_pip_app_action'){const a=messageReview(result.action,S.selected,S.workspace.id);if(a.id!==review.messageAction||a.digest!==review.messageDigest)throw Error('The send receipt does not match this saved review.');showMessageReview(a);return;}
         if(review.request.type==='record_workspace_execution_context'){
           const c=context(result.context,S.workspace.id),saved=commandRecording(result.recording),q=review.request;

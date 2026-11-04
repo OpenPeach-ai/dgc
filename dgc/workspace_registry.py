@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 48
+SCHEMA_VERSION = 50
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -401,6 +401,16 @@ class WorkspaceRegistry:
             from . import pip_unread
             _execute_schema(self.db, pip_unread.SCHEMA)
             pip_unread.migrate(self.db)
+        if version < 49:
+            # Workflow routing records exact Pip pins and each handoff decision.
+            # No existing run or job receives new authority during migration.
+            from .pip_flows import SCHEMA as flow_schema
+            _execute_schema(self.db, flow_schema)
+        if version < 50:
+            # A user can add bounded text to one live Pip conversation. The worker
+            # receives only that run's inbox; the chat archive keeps each message.
+            from .pip_steering import SCHEMA as steering_schema
+            _execute_schema(self.db, steering_schema)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

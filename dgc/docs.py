@@ -3813,6 +3813,13 @@ researcher, writer and image designer together, but creating them does not autom
 apps or pass results between them. An image Pip uses your configured generators under their cost
 approvals; never put a generator key in its goal.
 
+After you accept all of Core's proposed Pips, **Personal → Workflows** offers their order as a
+starting point. Write the exact receiving tasks and review the route. A workflow can ask you at
+each handoff or pass each exact result unattended, up to three starts in any 24 hours. Project workflows can
+pass the first source-checked finding to another read-only Project Pip on the same committed
+source. Neither route changes a Pip's Ask setting or grants a send, purchase, paid image, file edit
+or computer action. New Personal Pips start at Ask; existing Pips keep the level you chose.
+
 Work shows the latest unread messages from your Pips, including all-clear routine results. The
 Personal and Project tabs show unread counts, and each Pip's row previews its latest unread note.
 Opening its chat at the newest messages marks the replies and run results you saw as read; a later
@@ -3893,7 +3900,7 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
 - **How much it asks.** Each Personal Pip has a level you set on its page: **Ask** (every submit and
   send waits for you), **Approve for me** (routine steps such as a search, adding to a cart or saving a
   draft go by themselves; orders, posting, deleting and sending to someone new still ask) or **Full
-  access**. New Pips start at Approve for me. Payments ask at every level.
+  access**. New Pips start at Ask; existing Pips keep their chosen level. Payments ask at every level.
 - **Always allow** lets one exact kind of action through from then on, for the same account, tool or
   site; its page lists them, with **Stop allowing**. A payment never offers it.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types

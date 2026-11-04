@@ -867,6 +867,11 @@
         dock: { show: dockPipCard, hide: undockPipCard },
         // The Pip runs this chat started are background tasks: the pill counts them, the map lists them.
         onRunsChange: () => renderAgents(),
+        getDismissed: () => {
+          const saved = vscode.getState();
+          return saved?.pipSetupScope === draftScope ? saved.pipSetupDismissed : [];
+        },
+        setDismissed: ids => vscode.setState({...(vscode.getState() || {}), pipSetupScope: draftScope, pipSetupDismissed: ids}),
       });
     }
     return pipSetupCards;
@@ -1898,11 +1903,12 @@
     const options = el("div", "model-options"); options.hidden = true;
     [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
     mm.appendChild(options);
+    // Thinking is a primary control of this menu. The model-list disclosure must never hide it.
+    card.querySelector(".effort-control").hidden = false;
     const toggle = card.querySelector(".model-summary");
     toggle.onclick = () => {
       options.hidden = !options.hidden;
       toggle.setAttribute("aria-expanded", String(!options.hidden));
-      card.querySelector(".effort-control").hidden = !options.hidden;
       if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
     };
     slider.oninput = () => {
@@ -1921,31 +1927,86 @@
       hideModelMenu();
     };
   }
-  function renderModelMenu(ids, current, err, subscription, label, supportsEffort) {
+  let lastModelMenu = null;
+  function showProviderStep() {
+    if (!lastModelMenu) return;
+    renderProviderChoices();
+  }
+  function renderModelMenu(ids, current, err, subscription, label, supportsEffort, routes, cliDefaultModel, cliDefaultListed, currentRouteKey) {
+    lastModelMenu = { ids, current, err, subscription, label, supportsEffort, routes,
+                      cliDefaultModel, cliDefaultListed, currentRouteKey };
+    renderProviderModels(lastModelMenu);
+  }
+  function renderProviderChoices() {
+    const { routes, currentRouteKey } = lastModelMenu;
+    const mm = $("modelmenu");
+    const options = mm.querySelector(".model-options");
+    if (!options) return;
+    const choices = (Array.isArray(routes) ? routes : [{ key: "native", label: "Current host" }])
+      .filter(row => row && row.key);
+    // Keep the same model/effort control mounted while only the lower list changes.
+    options.innerHTML = `<div class="mhead"><span>Provider</span></div>`
+      + choices.map((row, i) => {
+        const selected = row.key === currentRouteKey;
+        const note = row.installed === false ? " · install CLI first"
+          : row.auth_state === "signed_out" ? " · sign in first" : "";
+        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key).split(" (")[0] + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+      }).join("")
+      + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button>`;
+    options.hidden = false;
+    mm.querySelector(".model-summary")?.setAttribute("aria-expanded", "true");
+    options.querySelectorAll("[data-provider-i]").forEach(button => button.onclick = (event) => {
+      event.stopPropagation();
+      const row = choices[Number(button.dataset.providerI)];
+      if (row.key === currentRouteKey) {
+        renderProviderModels(lastModelMenu);
+      } else {
+        vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key });
+        hideModelMenu();
+      }
+    });
+    options.querySelector("[data-manage-providers]").onclick = () => {
+      vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu();
+    };
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
+    (options.querySelector(".sel") || options.querySelector("button"))?.focus();
+  }
+  function renderProviderModels({ ids, current, err, subscription, label, supportsEffort,
+                                  cliDefaultModel, cliDefaultListed }) {
     const mm = $("modelmenu");
     const profile = profileMenu(subscription, supportsEffort);
+    const back = `<button type="button" role="menuitem" class="mrow" data-provider-back="1"><span class="mi codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
     if (subscription) {
       mm.innerHTML = profile + `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
-        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>CLI default</span></button>`
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
         + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
         + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
       bindProfiles(mm);
+      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+      mm.querySelector(".model-summary")?.click();
       mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
       mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
       mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
+      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
       mm.querySelector(".model-summary")?.focus(); return;
     }
     if (err || !ids.length) {
       mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
       bindProfiles(mm);
+      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+      mm.querySelector(".model-summary")?.click();
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
+      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
     mm.innerHTML = profile + `<div class="mhead"><span>Model</span></div>` +
       ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
     bindProfiles(mm);
+    mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+    mm.querySelector(".model-summary")?.click();
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+    mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     mm.querySelector(".model-summary")?.focus();
   }
@@ -11442,7 +11503,7 @@ function permissionChoices(ev) {
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }

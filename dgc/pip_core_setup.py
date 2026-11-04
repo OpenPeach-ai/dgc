@@ -25,8 +25,11 @@ NOTICE = (
     "The user's configured image generators, including fal.ai if present, are available to a Personal Pip "
     "through list_image_generators and generate_image under their own cost approvals. An unattended routine "
     "cannot spend on an image unless the person has explicitly allowed that generator. "
-    "If the user wants a team, explain the order in which the Pips' results should be used; do not claim "
-    "that creating the Pips alone wires an automatic handoff."
+    "If the user wants a sequence of Pips, put a schedule only on the first Pip unless the user explicitly "
+    "wants an independent schedule for another. The others receive work through a separately reviewed "
+    "workflow. Explain the order of results and tell the user to review the workflow after creating the Pips; "
+    "creating the Pips alone never wires a handoff. An unattended workflow routes results, but never grants "
+    "mail sending, publishing, paid image generation or other external actions."
 )
 
 

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .session import Session
 
 PipReadCommand = Literal[
+    'list_pip_flows', 'get_pip_flow',
     "get_pip_artifacts",
     "list_pip_run_fixes",
     "list_pip_templates",
@@ -83,6 +84,7 @@ PipReadCommand = Literal[
     'list_workspaces',
 ]
 PipMutationCommand = Literal[
+    'create_pip_flow', 'set_pip_flow',
     "ensure_pip_template", "prune_pip_templates", "decide_pip_template_change",
     "decide_app_approval",
     "register_app", "update_app", "accept_app_update", "remove_app", "rotate_app_secret",
@@ -372,9 +374,17 @@ API69_READS = frozenset({'list_pip_unread'})
 API69_MUTATIONS = frozenset({'mark_pip_read'})
 READ_COMMANDS |= API69_READS
 MUTATION_COMMANDS |= API69_MUTATIONS
+API72_READS = frozenset({'list_pip_flows', 'get_pip_flow'})
+API72_MUTATIONS = frozenset({'create_pip_flow', 'set_pip_flow'})
+READ_COMMANDS |= API72_READS
+MUTATION_COMMANDS |= API72_MUTATIONS
 PIP_REPORT_AS = frozenset({'chat', 'doc', 'sheet'})
 TEMPLATE_CHANGE_ID = re.compile(r"tmplchange_[a-f0-9]{32}\Z")
 COMMAND_FIELDS = {
+    'list_pip_flows': frozenset({'workspace_id'}),
+    'get_pip_flow': frozenset({'flow_id'}),
+    'create_pip_flow': frozenset({'name', 'pip_ids', 'tasks', 'mode'}),
+    'set_pip_flow': frozenset({'flow_id', 'expected_revision', 'status'}),
     'get_pip_artifacts': frozenset({'pip_id'}),
     'set_pip_artifacts': frozenset({'pip_id', 'report_as', 'dashboards'}),
     'list_pip_run_fixes': frozenset({'pip_id'}),
@@ -786,7 +796,9 @@ class Pips:
         caps = session._ready.get("capabilities", {})
         version = caps.get("pips_api_version") if isinstance(caps, dict) else None
         minimum = 10 if command in ('get_pip_proposal', 'list_workspace_overviews', 'list_pending_pip_reviews', 'list_recent_workspace_activity', 'list_pip_adaptations') else (9 if command == "accept_pip_execution_context" else 8)
-        if command in API69_READS | API69_MUTATIONS:
+        if command in API72_READS | API72_MUTATIONS:
+            minimum = 72
+        elif command in API69_READS | API69_MUTATIONS:
             minimum = 69
         elif command in API68_MUTATIONS:
             minimum = 68
@@ -1026,6 +1038,20 @@ class Pips:
             raise DGCUnsupportedError("Reviewed lifecycle revisions require a runtime advertising Pips API 16 or newer")
         if set(values) - COMMAND_FIELDS[command]:
             raise DGCConfigError("Unknown or reserved Pip parameter")
+        if command == 'create_pip_flow':
+            ids, tasks = values.get('pip_ids'), values.get('tasks')
+            if (type(values.get('name')) is not str or not values['name'].strip()
+                    or len(values['name'].encode('utf-8')) > 120
+                    or values.get('mode') not in ('reviewed', 'unattended')
+                    or type(ids) is not list or not 2 <= len(ids) <= 4
+                    or any(type(p) is not str or not p for p in ids) or len(set(ids)) != len(ids)
+                    or type(tasks) is not list or len(tasks) != len(ids)-1
+                    or any(type(t) is not str or not t.strip() or len(t.encode('utf-8')) > 4000 for t in tasks)):
+                raise DGCConfigError('A workflow needs a name, two to four distinct Pips, one bounded task per handoff, and reviewed or unattended mode')
+        if command == 'set_pip_flow' and (type(values.get('flow_id')) is not str or not values['flow_id']
+                or type(values.get('expected_revision')) is not int or values['expected_revision'] < 0
+                or values.get('status') not in ('on', 'paused', 'retired')):
+            raise DGCConfigError('Workflow status requires its id, revision, and on, paused or retired')
         if command in ('list_pip_notes', 'add_pip_note', 'forget_pip_note') and 'shared' in values and version < 46:
             raise DGCUnsupportedError("A Pip's notes in the one shared memory require Pips API 46 or newer")
         if (command == 'propose_pip_update' and isinstance(values.get('changes'), dict)

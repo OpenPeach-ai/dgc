@@ -23,15 +23,15 @@ const runId='run_'+'a'.repeat(32);
 const message=(id,role,text,pipId,extra={})=>({id,pip_id:pipId,workspace_id:PW,role,text,run_id:runId,status:'succeeded',model:'m',created_at:'2026-10-06T09:47:00.000Z',...extra});
 async function flush(){for(let i=0;i<12;i++)await Promise.resolve();}
 
-function setup({apiVersion=43,jobs=[],messages={},active=null,computer=null,runnerState=runner}={}){
+function setup({apiVersion=43,jobs=[],flows=[],suggestions=[],messages={},active=null,computer=null,runnerState=runner}={}){
  const dom=new JSDOM(viewModule.exports.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;windows.push(w);
- const sent=[],answered=new Set();let current=[...jobs];
+ const sent=[],answered=new Set();let current=[...jobs],currentFlows=[...flows];
  w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;
  w.acquireVsCodeApi=()=>({postMessage:m=>sent.push(m),getState:()=>undefined,setState:()=>{}});w.eval(code);
  const send=data=>w.dispatchEvent(new w.MessageEvent('message',{data}));
  const answer=(request,result,ok=true)=>{answered.add(request.id);send({type:'pipsReply',id:request.id,ok,...(ok?{result}:{error:result})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
- const defaults=r=>({list_workspaces:()=>({workspaces,current_workspace_id:PROJECT}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),list_pips:()=>({pips:current.filter(p=>p.workspace_id===(r.workspace_id||PROJECT))}),
+ const defaults=r=>({list_workspaces:()=>({workspaces,current_workspace_id:PROJECT}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),list_pips:()=>({pips:current.filter(p=>p.workspace_id===(r.workspace_id||PROJECT))}),list_pip_flows:()=>({flows:currentFlows,core_suggestions:suggestions}),
   get_pip:()=>({pip:current.find(p=>p.id===r.pip_id)}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner:runnerState}),get_workspace_context:()=>({context:{workspace_id:r.workspace_id||PW,revision:0,entries:[]}}),
   list_pip_messages:()=>({pip_id:r.pip_id,workspace_id:PW,messages:messages[r.pip_id]||[],next_before_id:null,active_run:active&&active.pip===r.pip_id?{id:runId,status:'running',created_at:'2026-10-06T09:47:00.000Z',started_at:null,run_kind:'conversation'}:null,history_context_omitted_count:0,continuity:null,chat_controls:controls}),
   list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
@@ -39,7 +39,7 @@ function setup({apiVersion=43,jobs=[],messages={},active=null,computer=null,runn
   get_pip_digest:()=>undefined}[r.type]?.());
  async function drain(overrides={}){for(let round=0;round<14;round++){await flush();let count=0;for(const m of sent.filter(m=>m.type==='pipsRequest'&&!answered.has(m.id))){const result=m.request.type in overrides?overrides[m.request.type](m.request):defaults(m.request);if(result!==undefined){answer(m,result);count++;}}await flush();if(!count)break;}await flush();}
  send({type:'pipsConnection',apiVersion,connected:true,supported:true,enabled:true});
- return {w,d:w.document,sent,answer,requests,drain,addPip:p=>{current.push(p);},
+ return {w,d:w.document,sent,answer,requests,drain,addPip:p=>{current.push(p);},addFlow:f=>{currentFlows.push(f);},
   click:s=>{const el=w.document.querySelector(s);assert.ok(el,'Missing '+s);el.click();},
   input:(s,value)=>{const e=w.document.querySelector(s);assert.ok(e,'Missing '+s);e.value=value;e.dispatchEvent(new w.Event('input',{bubbles:true}));}};
 }
@@ -51,6 +51,67 @@ test('on API 43 the view opens on your Pips, and with none it introduces Core',a
  // ERP session review (2026-10-18): "Core" is also the main chat; the user had to ask which one the Pip was.
  assert.match(meet.textContent,/Core is also the character of DGC’s main chat: your Primary Pip uses it/);
  assert.equal(x.d.querySelector('.tabs'),null,'no tabs, no job form');
+});
+
+test('API 72 reviews an exact Personal Pip workflow and keeps unattended routing separate from action authority',async()=>{
+ const jobs=[pip('pip_'+'a'.repeat(32),'Research','scout'),pip('pip_'+'b'.repeat(32),'Writer','quill'),pip('pip_'+'c'.repeat(32),'Image','lens')];
+ const x=setup({apiVersion:72,jobs});await x.drain();
+ assert.ok(x.requests('list_pip_flows').some(r=>r.request.workspace_id===PW));
+ x.click('#flow-new');x.input('#flow-name','Daily post');
+ const mode=x.d.querySelector('#flow-mode');mode.value='unattended';mode.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+ for(let i=0;i<3;i++){const select=x.d.querySelector(`#flow-pip-${i}`);select.value=jobs[i].id;select.dispatchEvent(new x.w.Event('change',{bubbles:true}));}
+ x.input('#flow-task-0','Write the blog post.');x.input('#flow-task-1','Plan its hero image.');
+ x.d.querySelector('#pip-flow-form').dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));
+ const dialog=x.d.querySelector('[role=dialog]');assert.ok(dialog);assert.match(dialog.textContent,/Unattended handoffs/);assert.match(dialog.textContent,/Each Pip’s Ask setting and all action approvals stay in force/);
+ assert.match(dialog.textContent,/Write the blog post/);
+ x.click('#review-confirm');const sent=x.requests('create_pip_flow')[0];assert.ok(sent);
+ assert.deepEqual(JSON.parse(JSON.stringify(sent.request.pip_ids)),jobs.map(p=>p.id));assert.deepEqual(JSON.parse(JSON.stringify(sent.request.tasks)),['Write the blog post.','Plan its hero image.']);assert.equal(sent.request.mode,'unattended');
+ const flow={id:'flow_'+'d'.repeat(32),workspace_id:PW,name:'Daily post',mode:'unattended',status:'on',revision:0,definition:{pips:jobs.map(p=>({pip_id:p.id})),tasks:sent.request.tasks},steps:[]};
+ x.addFlow(flow);x.answer(sent,{flow});await x.drain();
+ assert.match(x.d.querySelector('.pip-flows').textContent,/Research → Writer → Image/);
+ x.click(`[data-flow-status="${flow.id}"][data-flow-next="paused"]`);assert.match(x.d.querySelector('[role=dialog]').textContent,/Runs already queued may finish/);
+});
+
+test('a held workflow result explains its stop, while a pending edge opens its Pip review',async()=>{
+ const jobs=[pip('pip_'+'a'.repeat(32),'Research','scout'),pip('pip_'+'b'.repeat(32),'Writer','quill')];
+ const base={id:'flow_'+'d'.repeat(32),workspace_id:PW,name:'Daily post',mode:'reviewed',status:'on',revision:0,definition:{pips:jobs.map(p=>({pip_id:p.id})),tasks:['Write the draft.']}};
+ const held={...base,steps:[{stage:0,status:'paused',reason:'A computer action is still waiting for your decision.',handoff_id:null,handoff_status:null}]};
+ const pending={...base,id:'flow_'+'e'.repeat(32),steps:[{stage:0,status:'review',handoff_id:'handoff_'+'f'.repeat(32),handoff_status:'pending'}]};
+ const x=setup({apiVersion:72,jobs,flows:[held,pending]});await x.drain();
+ assert.match(x.d.querySelector('.pip-flows').textContent,/Latest result stopped here: A computer action is still waiting/);
+ assert.equal(x.d.querySelectorAll('[data-flow-handoff]').length,1);
+ x.click(`[data-flow-handoff="${pending.id}"]`);
+ await x.drain({list_pip_handoffs:()=>({handoffs:[],next_before_id:null})});
+ assert.ok(x.requests('get_pip_handoff').some(r=>r.request.handoff_id===pending.steps[0].handoff_id));
+});
+
+test('API 72 offers Project workflows only for committed-source readers',async()=>{
+ const review=pip('pip_'+'d'.repeat(32),'Review','rook',{workspace_id:PROJECT,source_policy:{mode:'committed_only'}});
+ const security=pip('pip_'+'e'.repeat(32),'Security','lock',{workspace_id:PROJECT,source_policy:{mode:'committed_only'}});
+ const patcher=pip('pip_'+'f'.repeat(32),'Fix','patch',{workspace_id:PROJECT,source_policy:{mode:'committed_only'}});
+ const x=setup({apiVersion:72,jobs:[review,security,patcher]});await x.drain();
+ x.click('[data-pips-tab="project"]');await x.drain();
+ assert.ok(x.requests('list_pip_flows').some(r=>r.request.workspace_id===PROJECT));
+ x.click('#flow-new');
+ assert.match(x.d.querySelector('.pip-flows').textContent,/source finding/);
+ const names=[...x.d.querySelector('#flow-pip-0').options].map(o=>o.textContent);
+ assert.ok(names.includes('Review'));assert.ok(names.includes('Security'));
+ assert.ok(!names.includes('Fix'),'Patch cannot receive an unattended Project workflow');
+});
+
+test('Core’s accepted Pips prefill a reviewed workflow without starting one',async()=>{
+ const jobs=[pip('pip_'+'a'.repeat(32),'Research','lens'),pip('pip_'+'b'.repeat(32),'Writer','quill'),pip('pip_'+'c'.repeat(32),'Image','scout')];
+ const suggestion={id:'core_run'+'d'.repeat(32),pips:jobs.map(p=>({pip_id:p.id,name:p.name}))};
+ const x=setup({apiVersion:72,jobs,suggestions:[suggestion]});await x.drain();
+ assert.ok(x.d.querySelector('[data-core-flow]'));
+ assert.equal(x.requests('create_pip_flow').length,0);
+ x.click('[data-core-flow]');
+ assert.equal(x.d.querySelector('#flow-name').value,'Research workflow');
+ assert.equal(x.d.querySelector('#flow-mode').value,'reviewed');
+ assert.equal(x.d.querySelector('#flow-pip-0').value,jobs[0].id);
+ assert.equal(x.d.querySelector('#flow-pip-2').value,jobs[2].id);
+ assert.match(x.d.querySelector('.pip-flow-form').textContent,/Task for this Pip/);
+ assert.equal(x.requests('create_pip_flow').length,0,'prefilling never creates the workflow');
 });
 
 test('Create Core makes Core with just its name, asks it to say hello, and opens its chat',async()=>{
@@ -168,15 +229,16 @@ test('archiving a Pip from its Settings returns to your Pips',async()=>{
  assert.equal(x.d.querySelector('.pip-topbar'),null,'not the archived Pip');
  assert.match(x.d.body.textContent,/Gmail is archived\. Its chats and history are kept; Show archived brings it back\./);
 });
-// Found battle-testing in real VS Code: Enter while the Pip was answering did nothing, and said nothing.
-test('Enter while the Pip is answering keeps the draft and says to wait',async()=>{
+// An older backend cannot consume steering. Keep the draft and tell the person
+// why Enter did not send it; API 73 uses the live mid-turn path instead.
+test('Enter while the Pip is answering on an older backend retains the draft and names the upgrade',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const x=setup({jobs:[gmail],active:{pip:gmail.id}});await x.drain();x.click(`[data-job="${gmail.id}"]`);await x.drain();
  x.input('#chatText','Yes, connect my Gmail');
  x.d.getElementById('chatText').dispatchEvent(new x.w.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await x.drain();
  assert.equal(x.requests('send_pip_message').length,0,'nothing sent over the reply');
  assert.equal(x.d.getElementById('chatText').value,'Yes, connect my Gmail');
- assert.match(x.d.body.textContent,/Gmail is still answering\. Send this when it is done\./);
+ assert.match(x.d.body.textContent,/Update DGC before sending a mid-turn update to this Pip\./);
 });
 test('back returns to your Pips, and the menu reaches Results and Settings',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
