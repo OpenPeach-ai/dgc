@@ -20,7 +20,7 @@
   if (window.DgcMcpApps) return;
   const PROTOCOL = "2026-01-26";
   const CARD_ID = /^app_[0-9a-f]{24}$/;
-  const MIN_HEIGHT = 80, MAX_INLINE = 720, START_HEIGHT = 220, START_WAIT_MS = 15000;
+  const MIN_HEIGHT = 80, MAX_INLINE = 720, START_HEIGHT = 220, START_WAIT_MS = 15000, LOAD_WAIT_MS = 20000;
   const MAX_REQUEST_CHARS = 256 * 1024;
   let post = () => {};
   let pageSurface = "work";
@@ -246,6 +246,9 @@
         try { this.origin = new URL(shown).origin; } catch { this.origin = ""; }
         this.frame.src = shown;
         this.watchWindow();
+        // A vendor page may keep the navigation pending indefinitely. The load event never fires in that case,
+        // so the normal "didn't start" timer cannot replace the spinner.
+        this.loadTimer = setTimeout(() => this.notLoaded(), LOAD_WAIT_MS);
       });
       if (!this.data) fetchResource(this.card.card_id).then((res) => {
         this.data = res ? { tool_input: res.tool_input, tool_result: res.tool_result } :
@@ -258,6 +261,7 @@
       // A frame's window exists once it is in the document; it is the same object across its navigations.
       this.retake();
       this.frame.addEventListener("load", () => {
+        clearTimeout(this.loadTimer);
         this.retake();
         this.loading.hidden = true;
         clearTimeout(this.startTimer);
@@ -268,6 +272,12 @@
       if (this.started || !this.node.isConnected) return;
       const who = this.card.plugin || this.card.server;
       this.note.textContent = `${who}'s card didn't start. Its page may need a site it didn't list, or ${who} may be down.`;
+      this.note.hidden = false;
+    }
+    notLoaded() {
+      if (this.started || !this.node.isConnected) return;
+      this.loading.hidden = true;
+      this.note.textContent = `${this.card.plugin || this.card.server}'s card took too long to open. Its server may be busy.`;
       this.note.hidden = false;
     }
     retake() { if (this.frame.contentWindow) byWindow.set(this.frame.contentWindow, this); }
@@ -311,6 +321,7 @@
       switch (m.method) {
         case "ui/initialize":
           this.started = true;
+          clearTimeout(this.loadTimer);
           clearTimeout(this.startTimer);
           if (this.note) this.note.hidden = true;
           this.toolSent = false;            // a page that (re)started hears its tool again
@@ -431,6 +442,8 @@
     }
 
     gone() {
+      clearTimeout(this.loadTimer);
+      clearTimeout(this.startTimer);
       views.delete(this);
       for (const [win, view] of byWindow) if (view === this) byWindow.delete(win);
     }

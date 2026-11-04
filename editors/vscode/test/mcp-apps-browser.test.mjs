@@ -27,6 +27,7 @@ const skipOrFail = (t) => {
 };
 const CARD_ID = "app_" + "c".repeat(24);
 const QUIET_ID = "app_" + "d".repeat(24);
+const HUNG_ID = "app_" + "e".repeat(24);
 
 // The plugin's page: it talks MCP Apps JSON-RPC to window.parent and records what it heard on document.body.dataset.
 const CARD_PAGE = `<!doctype html><html><body><p id="said">waiting</p><script>
@@ -77,6 +78,7 @@ window.show = (card) => document.getElementById("log").append(DgcMcpApps.card(ca
 
 before(async () => {
   cardServer = createServer((req, res) => {
+    if (req.url.startsWith(`/card/${HUNG_ID}`)) return; // a vendor that never finishes the HTTP response
     if (req.url.startsWith(`/card/${QUIET_ID}`)) {      // a page that loads but never starts (its code was blocked)
       res.writeHead(200, { "Content-Type": "text/html" }); res.end("<!doctype html><html><body></body></html>"); return;
     }
@@ -270,5 +272,20 @@ test("a card whose page loads but never starts says so under the card; one that 
   assert.equal(notes[1].hidden, false);
   assert.match(notes[1].text, /^Higgsfield's card didn't start\./);
   assert.equal(notes[1].under, "mcp-app-frame", "said under the card, never over it");
+  await page.close();
+});
+
+test("a card whose page never finishes loading replaces its spinner with a useful note", async (t) => {
+  if (skipOrFail(t)) return;
+  const page = await browser.newPage();
+  await page.clock.install();
+  await page.goto(`http://127.0.0.1:${pagePort}/`);
+  const hung = { ...card(), card_id: HUNG_ID, plugin: "Higgsfield",
+    url: `http://127.0.0.1:${cardPort}/card/${HUNG_ID}?t=tok` };
+  await page.evaluate((c) => window.show(c), hung);
+  await page.waitForFunction((id) => !!document.querySelector(`.mcp-app iframe[src*="${id}"]`), HUNG_ID);
+  await page.clock.runFor(21000);
+  assert.equal(await page.locator(".mcp-app-loading").isVisible(), false);
+  assert.match(await page.locator(".mcp-app-note").textContent(), /Higgsfield's card took too long to open/);
   await page.close();
 });
