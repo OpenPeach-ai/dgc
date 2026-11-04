@@ -72,6 +72,8 @@ test("every state is drawn, and not with the screen-reader-only label", () => {
   assert.match(mainCss, /\.role \{[^}]*clip-path:\s*inset\(50%\)/,
                ".role is still for screen readers, as it should be");
   assert.match(mainCss, /\.msg\.user > \.steer-note/, "and something visible carries it too");
+  assert.match(mainCss, /\.msg\.user > \.steer-note \{[^}]*align-self:\s*flex-end/,
+               "the status stays under its own bubble at the right edge");
 });
 
 test("the applied line is the one that stands out", () => {

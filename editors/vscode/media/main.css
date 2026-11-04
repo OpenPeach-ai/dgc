@@ -517,16 +517,10 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
    readers only, and the agent stops printing its own line once a frontend claims to show this --
    so without these a sighted user had nothing telling them the model had taken the message. */
 .msg.user > .steer-note {
-  /* Flush LEFT, under the bubble, where the backend's own `↳ steering: …` line used to print as a
-     `.sys` row until 2026-09-11 -- the transcript's machine voice lives on that margin, and a
-     reader follows one column, not two. `.msg.user` is `align-items: flex-end`, so without
-     `align-self` this flex child is dragged under the bubble's right edge and reads as a caption
-     hanging off the message rather than a note about what became of it.
-     Kept in --muted and --sans: the original was --faint, which is VS Code's disabledForeground
-     at 2.13:1 in the light themes, and settings-contrast.test.mjs now forbids it for text a
-     reader needs. */
-  align-self: flex-start; margin-top: var(--sp-1); color: var(--muted);
-  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: left;
+  /* Keep the delivery state with the message it describes. A left-aligned line looked attached
+     to the previous work row in a wide editor, especially after reopening a chat. */
+  align-self: flex-end; margin-top: var(--sp-1); color: var(--muted);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); text-align: right;
 }
 .msg.user[data-steer="applied"] > .steer-note { color: var(--accent-text, var(--accent)); }
 /* Steer now / Steer all: link-like, in the note's own line and size. */
