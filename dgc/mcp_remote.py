@@ -96,6 +96,7 @@ CLIENT_FILE_ENV = "DGC_MAINTAINER_OAUTH_CLIENT_FILE"
 _AUTHORIZATION_PARAMS = {"access_type": ("offline", "online"), "prompt": ("consent", "select_account", "consent select_account"),
                          "include_granted_scopes": ("true", "false")}
 _SHARED_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 
 
 class RemoteError(RuntimeError):
@@ -944,13 +945,57 @@ class RemoteAuth:
                 raise SignInDeclined("sign-in was cancelled")
             raise RemoteError(f"the service didn't sign you in ({error[:60] or 'HTTP ' + str(answer.status_code)})")
         own = self._own_app()
-        # DGC's own app keeps its id alone: whether the next sign-in uses a code depends on that computer then.
-        self._store({"client": {"client_id": client["client_id"]} if own else client, "issuer": found["issuer"],
+        # DGC's own app keeps its id alone: whether the next sign-in uses a code depends on that computer then. A client
+        # registered for a code the user chose keeps that mark, never the device grant's (see _device_registration).
+        kept = ({"client_id": client["client_id"]} if own else
+                {"client_id": client["client_id"], "issuer": found["issuer"], "device_registered": True}
+                if client.get("device_registered") else client)
+        self._store({"client": kept, "issuer": found["issuer"],
                      "resource": "", "tokens": tokens, "server": self._server_kept(found),
                      **({"requested_scope": scope, **self._kept()} if own else {})})
         self.signed_out = ""
         self.note("signed in")
         return True
+
+    def _device_offered(self, metadata: dict) -> bool:
+        """Whether this sign-in can also be made with a code on another device (RFC 8628): the sign-in server offers the
+        device grant and lets DGC register itself for it (Clerk does: Cardboard's and Higgsfield's). Never for a
+        registered app, which signs in the way it was registered."""
+        if self.options.static_client:
+            return False
+        grants = metadata.get("grant_types_supported")
+        endpoint, registration = metadata.get("device_authorization_endpoint"), metadata.get("registration_endpoint")
+        return (isinstance(grants, list) and DEVICE_GRANT in grants and isinstance(endpoint, str) and _allowed(endpoint)
+                and isinstance(registration, str) and _allowed(registration))
+
+    def _device_registration(self, found: dict) -> dict:
+        """A client registered for the device grant (no redirect), for a sign-in the user chose to make with a code.
+        Kept with that sign-in (``device_registered``) for refreshing and the next code; a later sign-in in the
+        browser registers its own, so choosing a code once never changes how the next sign-in is made."""
+        saved = self._load().get("client") or {}
+        if saved.get("device_registered") is True and saved.get("issuer") == found["issuer"] \
+                and isinstance(saved.get("client_id"), str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,256}", saved["client_id"]):
+            return {"client_id": saved["client_id"], "issuer": found["issuer"], "device_registered": True}
+        endpoint = found["metadata"].get("registration_endpoint")
+        if not isinstance(endpoint, str) or not _allowed(endpoint):
+            raise RemoteError("the service doesn't let apps register themselves for sign-in with a code")
+        body = {"client_name": self.options.client_metadata.get("client_name") or CLIENT_NAME,
+                "client_uri": self.options.client_metadata.get("client_uri") or CLIENT_URI,
+                "grant_types": [DEVICE_GRANT, "refresh_token"], "response_types": [],
+                "token_endpoint_auth_method": "none"}
+        if self.options.client_metadata.get("scope"):
+            body["scope"] = self.options.client_metadata["scope"]
+        response = self.session.post(endpoint, json=body, timeout=(CONNECT_TIMEOUT, 30), allow_redirects=False)
+        if response.status_code not in (200, 201) or len(response.content) > MAX_METADATA:
+            raise RemoteError(f"the service refused DGC's registration for sign-in with a code (HTTP {response.status_code})")
+        try:
+            registered = response.json()
+        except ValueError:
+            registered = None
+        if not isinstance(registered, dict) or not isinstance(registered.get("client_id"), str) \
+                or not re.fullmatch(r"[A-Za-z0-9._:-]{1,256}", registered["client_id"]):
+            raise RemoteError("the service's registration answer has no client id")
+        return {"client_id": registered["client_id"], "issuer": found["issuer"], "device_registered": True}
 
     def _client(self, found: dict, redirect: str) -> dict:
         static = self._static()
@@ -1080,11 +1125,13 @@ class RemoteAuth:
             return SignInDeclined(f"{self.signed_out} Connect it in Settings → Plugins.")
         return SignInDeclined("Needs sign-in. Connect it in Settings → Plugins.")
 
-    def _ask(self, url: str, redirect) -> bool:
-        """Ask whoever can (the editor's card, the terminal) to sign in, saying why when a sign-in just ended."""
+    def _ask(self, url: str, redirect, *, device: bool = False):
+        """Ask whoever can (the editor's card, the terminal) to sign in, saying why when a sign-in just ended. With
+        ``device`` the editor may offer a code on another device instead: its answer is then "device"."""
+        extra = {"device": True} if device else {}
         if self.signed_out:
-            return self.sign_in(url, redirect, reason=self.signed_out)
-        return self.sign_in(url, redirect)
+            return self.sign_in(url, redirect, reason=self.signed_out, **extra)
+        return self.sign_in(url, redirect, **extra)
 
     def needs_sign_in(self) -> bool:
         """A server that answers without a token (Google's answer ``initialize`` and ``tools/list`` to anyone) signs
@@ -1260,7 +1307,13 @@ class RemoteAuth:
                     query.setdefault(key, value)
                 endpoint = metadata["authorization_endpoint"]
                 url = endpoint + ("&" if urlsplit(endpoint).query else "?") + urlencode(query)
-                if not self._ask(url, redirect):
+                asked = self._ask(url, redirect, device=self._device_offered(metadata))
+                if asked == "device":
+                    # The user chose a code on another device (their browser can't reach this computer's callback):
+                    # nothing comes back to the listener, so it closes, and DGC polls the service instead.
+                    callback.close()
+                    return self._device_sign_in(found, self._device_registration(found), scope, saved, step_up)
+                if not asked:
                     if step_up:
                         # Nobody can approve it mid-conversation: the next Connect signs in for this scope.
                         self._store({**saved, "step_up_scope": scope})

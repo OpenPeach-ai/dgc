@@ -806,6 +806,20 @@ test("picking a saved session in an idle chat opens it right there", () => {
     && c.path === "/proj/.dgc/sessions/20260930-old-chat.json"));
 });
 
+test("a chat picked from the list asks to come back in the mode it had, when the CLI offers it", () => {
+  for (const offered of [true, false]) {
+    const { provider, spawned } = harness();
+    makeLive(provider, { sessionId: "alpha", name: "Idle" });
+    if (offered) provider.lastReadyEvent.capabilities.resume_saved_mode = true;
+    provider.confirmedTurnActive = provider.turnActive = false;
+    provider.openPastSession(provider.backend, "/proj/.dgc/sessions/20260930-old-chat.json");
+    const resume = spawned[0].sent.find((c) => c.type === "resume_session");
+    assert.ok(resume, "no resume_session");
+    assert.equal(resume.saved_mode, offered ? true : undefined,
+      offered ? "the chat reopened lowered to the default" : "an older CLI was sent a field it refuses");
+  }
+});
+
 test("a new chat opened on a saved session keeps its folder", () => {
   const { provider } = harness();
   makeLive(provider, { sessionId: "alpha", name: "Working" });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Ask one read-only question about a workspace and print the answer. Node 22 or newer.
  *
- *   npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.5.3/vibedgc-sdk-0.5.3.tgz
+ *   npm install https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.9.0/vibedgc-sdk-0.9.0.tgz
  *   export DGC_MODEL=qwen3:8b DGC_BASE_URL=http://127.0.0.1:11434/v1
  *   node hello_run.mjs /path/to/workspace
  *

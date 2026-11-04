@@ -27,7 +27,7 @@ test('packaged artwork is a bounded WebP atlas with alpha and the declared dimen
  const data=readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url));
  assert.equal(data.subarray(0,4).toString(),'RIFF');assert.equal(data.subarray(8,12).toString(),'WEBP');assert.equal(data.subarray(12,16).toString(),'VP8X');
  assert.ok(data[20]&0x10,'the atlas carries an alpha channel');
- assert.equal(1+data.readUIntLE(24,3),1660);assert.equal(1+data.readUIntLE(27,3),948);assert.ok(data.length<300000);
+ assert.equal(1+data.readUIntLE(24,3),3320);assert.equal(1+data.readUIntLE(27,3),1896);assert.ok(data.length<1000000);
 });
 test('every state has its own motion: eyes look around in a group under the lenses, the body leans with them',t=>{
  const {d,api}=setup(t);const node=d.createElement('div');d.body.append(node);

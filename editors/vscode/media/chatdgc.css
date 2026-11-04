@@ -115,6 +115,21 @@ body.cd-blank .cd-fine { display: none; }
    slashes' rules are main.css's .thinking ones, which name .cd-wave too). The words hold still: no pulse. */
 .cd-wave { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; vertical-align: middle; }
 .cd-working { display: flex; color: var(--muted); font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+/* The reply drawn the moment you press Enter: waiting for the model, with its clock (one line, its numbers steady). */
+.cd-waiting { white-space: nowrap; min-width: 0; overflow: hidden; }
+.cd-waiting .verb { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cd-wait-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--faint);
+  font-variant-numeric: tabular-nums; }
+/* Your message before the backend has it: as sent, a little quieter, with "Sending…" under it. */
+.cd-msg.cd-sending .cd-bubble { opacity: .85; }
+.cd-sending-note { margin: 2px 0 0; text-align: right; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
+/* A send refused before the reply started: what happened, and Retry. */
+.cd-send-failed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); color: var(--muted);
+  font: var(--w-reg) var(--t-sm)/1.5 var(--sans); }
+.cd-send-failed .cd-retry { border: 1px solid var(--border); border-radius: var(--r-sm, 4px); background: transparent;
+  color: var(--text); padding: 2px 10px; font: inherit; cursor: pointer; }
+.cd-send-failed .cd-retry:hover { background: var(--hover, rgba(127,127,127,.12)); }
+.cd-send-failed .cd-retry:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 
 .cd-thinking { border-left: 2px solid var(--border-strong); padding-left: var(--sp-3); }
 .cd-thinking-label { cursor: pointer; color: var(--muted); font: var(--w-med) var(--t-sm)/1.5 var(--sans); }
@@ -257,6 +272,13 @@ body.cd-blank .cd-fine { display: none; }
 .cd-thumb img { display: block; max-width: 220px; max-height: 160px; object-fit: cover; }
 .cd-thumb-big { cursor: zoom-out; }
 .cd-thumb-big img { max-width: min(100%, 720px); max-height: 70vh; object-fit: contain; }
+/* An image the reply made: the picture on its own row above the card's name and buttons. */
+.cd-file-image { flex-wrap: wrap; }
+/* The picture on a row of its own (the file's name and buttons under it), its frame exactly the picture's size: a frame
+   as wide as the row showed its grey background beside any picture narrower than the row. */
+.cd-file-image > .cd-thumb { flex: 0 0 100%; max-width: 100%; border: 0; border-radius: 0; background: none; text-align: left; }
+.cd-file-image > .cd-thumb img { max-width: min(100%, 360px); max-height: 280px; object-fit: contain;
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface2); }
 .cd-thumb-missing { display: block; padding: var(--sp-3) var(--sp-4); color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
 /* What a vision model saw, for a chat whose own model can't see. */
 .cd-seen { max-width: 85%; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
@@ -758,16 +780,28 @@ body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cd-card-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
   border-radius: var(--r-md); background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); color: var(--text-strong);
   font: var(--w-semi) var(--t-sm)/1 var(--sans); }
-.cd-card-mark img { width: 22px; height: 22px; object-fit: contain; }
-.cd-card-mark[data-plugin-mark="composio"] { background: #4930ad; }
+/* The plugin's own logo in place of its letter: on a light tile in both themes, as the logo was drawn for one. */
+.cd-card-mark.has-logo { background: transparent; border: 1px solid var(--border); }
+.cd-card-mark.logo-on-light { background: #fff; }
+.cd-card-mark.logo-on-dark { background: #1b1b1f; border-color: #1b1b1f; }
+.cd-card-mark img { width: 20px; height: 20px; border-radius: 4px; object-fit: contain; }
+.cd-card-calls { margin: 0; padding: 0 0 0 var(--sp-1); list-style: none; display: flex; flex-direction: column; gap: 2px;
+  color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow-wrap: anywhere; }
 .cd-card-actions-list { margin: 0; padding-left: 20px; color: var(--text); font: var(--w-reg) var(--t-xs)/1.5 var(--sans); }
+.cd-card-sent { font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.cd-card-sent > summary { cursor: pointer; color: var(--muted); }
+.cd-card-sent > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.cd-card-sent pre { margin: var(--sp-1) 0 0; max-height: 260px; overflow: auto; padding: var(--sp-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); background: var(--code); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); }
 .cd-card-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cd-card-words strong { color: var(--text-strong); font: var(--w-semi) var(--t-sm)/1.35 var(--sans); }
 .cd-card-words small { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); overflow-wrap: anywhere; }
 .cd-card-inputs { display: grid; grid-template-columns: minmax(70px, auto) 1fr; gap: 4px var(--sp-3); margin: 0;
   font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .cd-card-inputs dt { color: var(--muted); }
-.cd-card-inputs dd { margin: 0; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.cd-card-inputs dd { margin: 0; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; max-height: 14em; overflow: auto; }
+.cd-card-calls .cd-card-inputs { margin: 2px 0 var(--sp-1) var(--sp-2); }
 .cd-card-fields { display: flex; flex-direction: column; gap: 4px; }
 .cd-card-error { margin: 0; color: var(--err-text); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); }
 .cd-card-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
@@ -778,6 +812,28 @@ body.vscode-light .lib-menu { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .cd-card-answer summary { color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); cursor: pointer; }
 .cd-card-answer pre { max-height: 200px; overflow: auto; margin: var(--sp-1) 0 0; padding: var(--sp-2); border-radius: var(--r-md);
   background: var(--bg); color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--mono, ui-monospace, monospace); white-space: pre-wrap; }
+
+/* A finished plugin card, folded to one row where it happened in the reply (as Work's tool steps): chevron, logo, what
+   it did, how it went. The card itself opens under the row, on a rule, without its own head (the row is its head). */
+.cd-cardrow { max-width: 560px; margin: var(--sp-1) 0; border: 1px solid transparent; border-radius: var(--r-md); }
+.cd-cardrow:hover, .cd-cardrow.open { border-color: var(--border); background: var(--surface); }
+.cd-cardrow-toggle { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; min-height: 28px;
+  padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-md); background: transparent; color: var(--text);
+  font: var(--w-med) var(--t-sm)/1.45 var(--sans); text-align: left; cursor: pointer; }
+.cd-cardrow-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.cd-cardrow-chev { flex: none; color: var(--faint); font-size: 12px; transition: transform .12s ease; }
+.cd-cardrow.open .cd-cardrow-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .cd-cardrow-chev { transition: none; } }
+.cd-card-mark.cd-cardrow-mark { width: 18px; height: 18px; border-radius: 4px; font-size: var(--t-xs); }
+.cd-card-mark.cd-cardrow-mark img { width: 14px; height: 14px; border-radius: 3px; }
+.cd-cardrow-what { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-semi); }
+.cd-cardrow-state { flex: none; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); white-space: nowrap; }
+.cd-cardrow-state.cd-card-failed { color: var(--err-text); }
+.cd-card.cd-card-in-row { margin: 0 var(--sp-2) var(--sp-2) 23px; padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); border: 0;
+  border-left: 1px solid var(--border-strong); border-radius: 0; background: transparent; max-width: none; }
+.cd-card.cd-card-in-row[hidden] { display: none; }
+.cd-card-in-row > .cd-card-head { display: none; }
+.cd-card-apps { display: flex; flex-direction: column; gap: var(--sp-2); }
 
 /* Follow-ups (ChatGPT's): a few next messages under the last reply, each a row that sends itself. */
 .cd-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: var(--sp-2);

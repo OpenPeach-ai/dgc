@@ -16,7 +16,7 @@
 @media(prefers-reduced-motion:reduce){.avatar .dgc-plush *{animation:none!important}}
 /* Embedded chat uses the panel's actual width, including narrow editor sidebars. */
 :host{display:block;width:100%;height:100%;min-width:0}.pip-app-root{width:100%;height:100%;min-height:0;min-width:0;flex:1 1 auto;overflow:auto;container-type:inline-size}body.pip-app-root{height:100vh}#app{min-width:0;min-height:100%;display:flex;flex-direction:column}header{padding:10px 12px 9px}h1{font-size:15px}.heading p{font-size:11px}.runner{font-size:11px;gap:6px;padding-top:7px}.runner button{font-size:11px;padding:3px 7px}.content{padding:12px 16px 22px}.back-control{background:transparent;color:var(--muted);font-size:11px;padding:2px 0;margin:0 0 7px;min-height:24px}.back-control:hover{background:transparent;color:var(--vscode-foreground)}.tabs{gap:12px;margin-bottom:12px}.tabs button{font-size:11px;padding:6px 0}.content[data-view=chat] .hero{gap:8px;margin-bottom:12px}.content[data-view=chat] .hero .avatar{width:calc(52px * var(--pip-character-scale,1));height:calc(50px * var(--pip-character-scale,1))}.content[data-view=chat] .hero h2{font-size:14px}.content[data-view=chat] .hero .muted{font-size:11px}.content[data-view=chat] .hero .type-role{font-size:11px;margin:3px 0}
-.pip-conversation{display:flex;flex-direction:column;min-width:0;min-height:260px}.conversation-log{min-width:0;overflow:auto;max-height:calc(100vh - 390px);min-height:100px;scrollbar-width:thin;overscroll-behavior:contain}.conversation-empty{padding:20px 2px 28px}.conversation-empty h3{font-size:14px}.conversation-empty p{font-size:12px}.pip-message{margin:0 0 18px;font-size:13px;line-height:1.6;min-width:0}.pip-message.user{padding:9px 11px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.message-label{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:5px}.message-label strong{font-size:11px;font-weight:500;color:var(--muted)}.message-label small,.message-model{font-size:10px;color:var(--muted)}.message-body{overflow-wrap:anywhere;min-width:0}.chat-text{white-space:pre-wrap}.message-body p{margin:4px 0 9px}.message-body h1,.message-body h2,.message-body h3{font-size:14px;margin:12px 0 7px}.message-body ul,.message-body ol{padding-left:21px}.message-body pre{position:relative;overflow:auto;white-space:pre;max-width:100%}.message-body .copy{font-size:10px;float:right;min-height:22px}.message-body .copy:empty:after{content:'Copy'}.message-body .md-link{display:inline;padding:0;background:transparent;border:0;min-height:0;color:var(--vscode-textLink-foreground);text-decoration:underline;text-align:left}.message-body .code-language{font-size:10px;color:var(--muted);display:block;margin-bottom:5px}.message-body table{display:block;max-width:100%;overflow:auto}.message-status,.context-limit{font-size:11px;color:var(--muted);line-height:1.5}.pip-composer{border:1px solid var(--vscode-input-border,var(--line));border-radius:12px;padding:9px;background:var(--vscode-input-background);margin-top:12px}.pip-composer textarea{border:0;padding:2px;outline:none;min-height:76px;max-height:200px;resize:vertical;background:transparent;font-size:13px;line-height:1.5}.pip-composer textarea:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}.composer-controls{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:5px}.composer-controls button{min-height:28px;font-size:11px}.composer-controls .model-control{background:transparent;color:var(--muted);padding:3px 2px;min-width:0;overflow-wrap:anywhere;text-align:left}.composer-hint{font-size:10px;color:var(--muted);margin:6px 2px 0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.pip-conversation{display:flex;flex-direction:column;min-width:0;min-height:260px}.conversation-log{min-width:0;overflow:auto;max-height:calc(100vh - 390px);min-height:100px;scrollbar-width:thin;overscroll-behavior:contain;padding-right:12px}.conversation-empty{padding:20px 2px 28px}.conversation-empty h3{font-size:14px}.conversation-empty p{font-size:12px}.pip-message{margin:0 0 18px;font-size:13px;line-height:1.6;min-width:0}.pip-message.user{padding:9px 11px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.message-label{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:5px}.message-label strong{font-size:11px;font-weight:500;color:var(--muted)}.message-label small,.message-model{font-size:10px;color:var(--muted)}.message-body{overflow-wrap:anywhere;min-width:0}.chat-text{white-space:pre-wrap}.message-body p{margin:4px 0 9px}.message-body h1,.message-body h2,.message-body h3{font-size:14px;margin:12px 0 7px}.message-body ul,.message-body ol{padding-left:21px}.message-body pre{position:relative;overflow:auto;white-space:pre;max-width:100%}.message-body .copy{font-size:10px;float:right;min-height:22px}.message-body .copy:empty:after{content:'Copy'}.message-body .md-link{display:inline;padding:0;background:transparent;border:0;min-height:0;color:var(--vscode-textLink-foreground);text-decoration:underline;text-align:left}.message-body .code-language{font-size:10px;color:var(--muted);display:block;margin-bottom:5px}.message-body table{display:block;max-width:100%;overflow:auto}.message-status,.context-limit{font-size:11px;color:var(--muted);line-height:1.5}.pip-composer{border:1px solid var(--vscode-input-border,var(--line));border-radius:12px;padding:9px;background:var(--vscode-input-background);margin-top:12px}.pip-composer textarea{border:0;padding:2px;outline:none;min-height:76px;max-height:200px;resize:vertical;background:transparent;font-size:13px;line-height:1.5}.pip-composer textarea:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}.composer-controls{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:5px}.composer-controls button{min-height:28px;font-size:11px}.composer-controls .model-control{background:transparent;color:var(--muted);padding:3px 2px;min-width:0;overflow-wrap:anywhere;text-align:left}.composer-hint{font-size:10px;color:var(--muted);margin:6px 2px 0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @container(max-width:700px){.layout{display:block;min-height:0}.layout.selected>aside{display:none}.layout.overview>.content{display:none}.layout.overview>aside{border-bottom:0}.layout.overview .job-list{max-height:none}.content{padding:10px 12px 18px}.type-grid{margin-top:15px}.type-picker>h2{font-size:18px}.type-card{padding:10px;grid-template-columns:calc(74px * var(--pip-character-scale,1)) minmax(0,1fr)}.type-card>.avatar{width:calc(74px * var(--pip-character-scale,1));height:calc(76px * var(--pip-character-scale,1))}.create-hero h2{font-size:18px}.type-card h3{font-size:14px}}
 @container(max-width:300px){.type-card{grid-template-columns:minmax(0,1fr)}.type-card>.avatar{justify-self:center;width:calc(100px * var(--pip-character-scale,1));height:calc(94px * var(--pip-character-scale,1))}.type-card h3{justify-content:center}.type-card .type-role{text-align:center}.tabs{gap:9px}.runner .actions{gap:4px}.hero{grid-template-columns:calc(42px * var(--pip-character-scale,1)) minmax(0,1fr)}.composer-controls{align-items:flex-end}.create-hero{gap:6px}.create-hero .avatar{width:calc(62px * var(--pip-character-scale,1));height:calc(64px * var(--pip-character-scale,1))}}
 
@@ -233,6 +233,16 @@ button.pill{border-radius:999px;padding:6px 16px}
 .pip-row-unread{grid-template-columns:44px minmax(0,1fr) auto}
 .pip-row-unread-count,.pip-tab-unread{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:var(--pip-accent);color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
 .pip-row-unread-count{justify-self:end}
+/* An unread Pip's count is a button over its row's end, where the count always sat (the row keeps that room, sized for
+   the count or "Read"): it reads "Read" on hover or keyboard focus, and marks the chat read. */
+.pip-row-item{position:relative;min-width:0}.pip-row-item:hover>.pip-row{background:var(--pip-wash)}
+.pip-row-read-room{display:inline-grid;visibility:hidden}.pip-row-read-room>span{grid-area:1/1;text-align:right}
+.pip-row-read{position:absolute;top:50%;right:10px;transform:translateY(-50%);min-height:0;border:0;cursor:pointer}
+.pip-row-dot>.pip-row-read{right:25px}
+.pip-row-read:hover{background:var(--pip-accent-hover)}
+.pip-row-read .pip-read-word{display:none}
+.pip-row-read:is(:hover,:focus-visible) .pip-read-count{display:none}
+.pip-row-read:is(:hover,:focus-visible) .pip-read-word{display:inline}
 .pip-tab-unread{min-width:16px;height:16px;padding:0 4px;font-size:10px}
 .primary-badge{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#F5A524;color:#1b1b1b;font-size:10px;line-height:1}
 .pip-topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px;flex:none}
@@ -249,7 +259,10 @@ button.pill{border-radius:999px;padding:6px 16px}
 .simple-pips.chat-open #app{height:100%;min-height:0;overflow:hidden}
 .simple-pips.chat-open .simple-content.chat{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:0 12px 10px;max-width:760px}
 .simple-pips.chat-open .simple-content.chat .pip-conversation{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
-.simple-pips.chat-open .simple-content.chat .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding-top:6px}
+/* The chat's scrollbar sits at its column's edge (into the column's 12px), and the messages keep those 12px from it: a
+   scrollbar drawn over the content (macOS's overlay scrollbars, where scrollbar-gutter reserves nothing) never covers
+   a bubble or its time (reported 2026-11-03: "the scroll bar ... cuts the chat"). */
+.simple-pips.chat-open .simple-content.chat .conversation-log{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding-top:6px;margin-right:-12px;padding-right:12px}
 .chat-style .pip-message.assistant .answer{display:inline-block;max-width:88%;background:var(--pip-bubble);border-radius:18px;padding:10px 14px}
 .chat-style .pip-message.assistant .answer p:first-child{margin-top:0}
 .chat-style .pip-message.assistant .answer p:last-child{margin-bottom:0}
@@ -363,6 +376,12 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-link-head{display:flex;align-items:center;gap:10px;min-width:0}
 .app-link-mark{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--pip-accent);color:#fff;font-weight:600;font-size:14px}
 .app-link[data-state=connected] .app-link-mark{width:22px;height:22px;border-radius:7px;font-size:11px}
+/* A plugin's own logo in place of its letter (an action card): on a light tile in both themes. */
+.app-link-mark.has-logo{background:transparent;border:1px solid var(--line,rgba(128,128,128,.35))}
+.app-link-mark.logo-on-light{background:#fff}.app-link-mark.logo-on-dark{background:#1b1b1f;border-color:#1b1b1f}
+.app-link-mark img{width:20px;height:20px;border-radius:4px;object-fit:contain}
+.allow-calls{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px;font-size:12px;overflow-wrap:anywhere}
+.allow-sent{margin:0;font-size:12px}.allow-sent pre{margin:6px 0 0;max-height:260px;overflow:auto}
 .app-link-words{display:flex;flex-direction:column;gap:2px;min-width:0}
 .app-link-words strong{font-weight:600;overflow-wrap:anywhere}
 .app-link-words small{color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
@@ -379,7 +398,8 @@ button.pill{border-radius:999px;padding:6px 16px}
 /* Grok's Allow card: an email the Pip wrote, with Send / Always allow / Edit / Don't send. */
 .allow-card{display:flex;flex-direction:column;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:12px;max-width:560px;background:color-mix(in srgb,var(--pip-accent) 5%,transparent)}
 .allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
-.allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere}
+.allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:14em;overflow:auto}
+.allow-calls .allow-meta{margin:2px 0 4px 8px}
 .allow-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;max-height:13.5em;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--vscode-textCodeBlock-background,color-mix(in srgb,var(--vscode-foreground) 6%,transparent))}
 /* A Personal Pip's page, as on Grok's bots: its face and name, then Info · Links · Media · Files. */
 .simple-home-actions{display:inline-flex;align-items:center;gap:8px}
@@ -661,3 +681,37 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pip-artifacts>.pip-page-label+p.pip-artifacts-says{padding-top:2px}
 .pip-artifacts>.pip-dashboards+.pip-page-row,.pip-artifacts>.pip-dashboards+p{border-top:1px solid var(--pip-edge)}
 .pip-artifacts>.pip-dashboards+p.pip-artifacts-says{padding-top:10px}
+
+/* A Pip reply's videos (API 71): the shared player figure (media/videoPlayer.js). */
+.msg-videos{display:flex;flex-direction:column;gap:8px;margin:6px 0}
+.msg-videos .made-video{display:flex;flex-direction:column;gap:4px;margin:0;width:min(100%,480px)}
+.msg-videos .video-player{display:block;width:100%;max-height:320px;border-radius:6px;background:rgba(127,127,127,.12)}
+.msg-videos .made-video.loading .video-player{min-height:160px}
+.msg-videos .video-wait{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px dashed var(--vscode-panel-border,rgba(127,127,127,.4));border-radius:6px}
+.msg-videos .video-words{flex:1 1 auto;min-width:0}
+.msg-videos .video-spinner{width:12px;height:12px;border-radius:50%;border:2px solid rgba(127,127,127,.4);border-top-color:var(--vscode-focusBorder,#3794ff);animation:pip-video-spin 1s linear infinite}
+@keyframes pip-video-spin{to{transform:rotate(360deg)}}
+.msg-videos .video-caption{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;opacity:.8}
+.msg-videos .video-actions{display:flex;gap:12px;flex-wrap:wrap}
+.msg-videos .video-act{border:0;background:none;padding:0;color:var(--vscode-textLink-foreground);cursor:pointer;font:inherit;font-size:11px}
+.msg-videos .video-said{margin:0;padding:8px 10px;border:1px solid rgba(127,127,127,.4);border-radius:6px;opacity:.85}
+
+/* ---- pictures and videos in a reply fold away (media/pictureFold.js): one header row, its chevron, and Open while
+   folded. Folded, the block is that one line; the reply reads straight through. */
+.pic-fold { margin: var(--sp-2, 8px) 0 0; min-width: 0; }
+.pic-fold-head { display: flex; align-items: center; gap: var(--sp-2, 8px); min-width: 0; }
+.pic-fold-toggle { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 2px 6px 2px 2px;
+  border: 0; border-radius: var(--r-sm, 4px); background: transparent; color: var(--muted, var(--vscode-descriptionForeground));
+  font: inherit; font-size: var(--t-sm, 12px); line-height: 1.5; cursor: pointer; text-align: left; }
+.pic-fold-toggle:hover { color: var(--text, var(--vscode-foreground)); background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.12)); }
+.pic-fold-toggle:focus-visible, .pic-fold-open:focus-visible { outline: 1px solid var(--vscode-focusBorder, #0078d4); outline-offset: 1px; }
+.pic-fold-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pic-fold-chev { flex: none; transition: transform .12s ease; }
+.pic-fold[data-folded="false"] > .pic-fold-head .pic-fold-chev { transform: rotate(90deg); }
+.pic-fold-open { flex: none; padding: 1px 8px; border: 1px solid var(--border, var(--vscode-widget-border, rgba(127,127,127,.35)));
+  border-radius: var(--r-sm, 4px); background: transparent; color: var(--text, var(--vscode-foreground)); font: inherit;
+  font-size: var(--t-xs, 11px); line-height: 1.6; cursor: pointer; }
+.pic-fold-open:hover { background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.12)); }
+.pic-fold-open[hidden], .pic-fold-body[hidden] { display: none; }
+.pic-fold-body > .made-files { margin-top: var(--sp-1, 4px); }
+@media (prefers-reduced-motion: reduce) { .pic-fold-chev { transition: none; } }

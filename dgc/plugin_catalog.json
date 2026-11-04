@@ -1240,6 +1240,46 @@
    "privacy_url": "https://higgsfield.ai/privacy-policy"
   },
   {
+   "name": "cardboard",
+   "display_name": "Cardboard",
+   "summary": "Edit your footage into finished videos: highlights, vertical clips, captions and music. Browser sign-in.",
+   "developer": "Cardboard",
+   "category": "Creativity",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-11-01",
+   "compatibility_url": "https://www.cardboard.ai/mcp",
+   "requirements": "A Cardboard account. Edits use your Cardboard plan.",
+   "verification": "Cardboard's sign-in server lets any app register, or accepts DGC's published app details, with PKCE. Signing in and the tools need your account (not tested).",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://www.cardboard.ai/mcp",
+   "license": "Cardboard service terms",
+   "license_url": "https://www.cardboard.ai/terms",
+   "mcp_presets": {
+    "cardboard": {
+     "url": "https://mcp.cardboard.ai/mcp"
+    }
+   },
+   "metadata": {
+    "display_name": "Cardboard",
+    "developer": "Cardboard",
+    "category": "Creativity",
+    "long_summary": "Edit your footage into finished videos: highlights, vertical clips, captions and music. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "cardboard",
+      "url": "https://mcp.cardboard.ai/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.cardboard.ai/terms",
+   "privacy_url": "https://www.cardboard.ai/privacy"
+  },
+  {
    "name": "intercom",
    "display_name": "Intercom",
    "summary": "Search Intercom conversations, contacts and Help Center articles. Browser sign-in.",

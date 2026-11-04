@@ -71,6 +71,9 @@ class PermissionRequest:
     call_id: str | None = None
     diff: str | None = None
     command: str | None = None
+    # The answers this request takes, from once, always and deny (an older CLI lists all three). A DGC Router change
+    # and a look on the network offer ("once", "deny") (CLI 0.51+): they ask every time, and "always" counts as once.
+    choices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

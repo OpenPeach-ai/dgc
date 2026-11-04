@@ -278,6 +278,39 @@ class SharedMemory:
                 self._log({"op": "clear", "by": by, "surface": "settings", "where": "", "facts": gone})
             return count
 
+    def erase_pip(self, pip_id: str) -> int:
+        """A permanently deleted Pip's facts go, with every journal entry that holds one (its words, the quote of
+        the chat it came from), so no Undo brings back what the deletion erased. How many facts went."""
+        def mine(fact) -> bool:
+            return isinstance(fact, dict) and isinstance(fact.get("source"), dict) and fact["source"].get("pip") == pip_id
+        if not isinstance(pip_id, str) or not pip_id:
+            return 0
+        with self._locked():
+            data = self._read()
+            kept = [f for f in data["facts"] if not mine(f)]
+            gone = len(data["facts"]) - len(kept)
+            if gone:
+                self._write({**data, "facts": kept})
+            rows, out, dropped = self._journal_rows(), [], set()
+            for row in rows:
+                if mine(row.get("fact")):
+                    dropped.add(row["id"])
+                    continue
+                if row.get("op") == "clear" and isinstance(row.get("facts"), list) and any(mine(f) for f in row["facts"]):
+                    row = {**row, "facts": [f for f in row["facts"] if not mine(f)]}
+                    if not row["facts"]:
+                        dropped.add(row["id"])
+                        continue
+                out.append(row)
+            out = [r for r in out if not (r.get("op") == "undo" and r.get("undo_of") in dropped)]
+            if out != rows:
+                temp = self.journal_path.with_name(f".journal.{os.getpid()}.tmp")
+                fd = os.open(str(temp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_CLOEXEC", 0), 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write("".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n" for r in out))
+                os.replace(temp, self.journal_path)
+            return gone
+
     def hide_project(self, folder: str, hidden: bool) -> None:
         folder = str(folder or "").strip()
         if not folder:

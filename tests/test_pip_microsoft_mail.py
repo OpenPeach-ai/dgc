@@ -83,6 +83,35 @@ class MicrosoftMailPipTests(unittest.TestCase):
             with self.subTest(tool=tool), self.assertRaises(RegistryError):
                 mail.read(self.cfg, linked, tool, args, manager_factory=self.factory)
 
+    def test_a_long_message_is_read_with_its_body_cut_to_fit(self):
+        from dgc import microsoft_graph
+        linked = self.linked()
+        for name, line in (("a long thread", "A long quoted reply thread line. "),
+                           ("Hindi, three bytes a character", "यह एक लंबा संदेश है। ")):
+            body = (line * 6000)[:microsoft_graph.MAX_TEXT]
+
+            class Long(Manager):
+                def call(self, route, args, **_kw):
+                    if route == "route_mail_account":
+                        return super().call(route, args)
+                    # What GraphServer.read_mail answers: the message pretty-printed, its body cut at MAX_TEXT.
+                    return microsoft_graph._result({"id": args["id"], "subject": "Thread", "from": "ana@example.com",
+                                                    "body": microsoft_graph._cut(body)})
+            with self.subTest(name):
+                text = mail.read(self.cfg, linked, "MICROSOFT_READ_MAIL", {"id": "AAMk1"},
+                                 manager_factory=lambda _c, _x: Long())
+                self.assertLessEqual(len(text.encode()), mail.MAX_RESULT)
+                value = json.loads(text)
+                self.assertEqual((value["subject"], value["from"]), ("Thread", "ana@example.com"))
+                self.assertTrue(value["body"].startswith(line * 3))
+                self.assertRegex(value["body"], r"\[… \d+ more characters of this message not shown\]$")
+                self.assertGreater(len(value["body"]), 8000, "as much of it as fits")
+        class Huge(Manager):
+            def call(self, route, args, **_kw):
+                return super().call(route, args) if route == "route_mail_account" else "x" * (mail.MAX_RAW + 1)
+        with self.assertRaisesRegex(RegistryError, "did not complete the bounded read"):
+            mail.read(self.cfg, linked, "MICROSOFT_READ_MAIL", {"id": "AAMk1"}, manager_factory=lambda _c, _x: Huge())
+
     def test_account_or_saved_connection_change_fails_closed(self):
         linked = self.linked()
         def changed(_cfg, _cancel):

@@ -88,6 +88,9 @@ class AgentUI(Protocol):
     def ask_questions(self, questions: list[dict], call_id=None) -> dict: ...
     # How a question request ended: answered | dismissed | cancelled | unavailable.
     def options_resolved(self, call_id, outcome, questions, answers) -> None: ...
+    # The chat's permission mode changed under the agent (a plan approved into auto, say), for a front-end that
+    # shows the mode and isn't the one that chose it. A terminal reads agent.mode itself.
+    def current_mode(self, mode: str) -> None: ...
 
 
 # ---- shared formatters (used by both the REPL and the JSON backend) ----------
@@ -249,10 +252,11 @@ def _pip_call_summary(name: str, args: dict) -> str:
 def task_batch_summary(args) -> str:
     """A batch `task` call's card in one line: "3 helpers · Map auth, Map billing, Map search".
 
-    "" for the single form, whose card is named by its description as it always was."""
+    "" for the single form, whose card is named by its description as it always was, and for a batch that names no
+    helper (its `tasks` missing or empty): that step only fails, and "Couldn't delegate 0 helpers" read like a bug."""
     from .subagents import task_batch_items
     items = task_batch_items(args)
-    if items is None:
+    if not items:
         return ""
     names = [" ".join(str(item.get("description") or "").split()) for item in items]
     names = [name for name in names if name]
@@ -279,6 +283,17 @@ def arg_summary(name: str, args: dict, root=None) -> str:
         # its id. Blank, the editor's card read "Used tool · message task": a message to no one.
         value = str(args.get("agent") or args.get("id") or "").replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
+    if name == "generate_image" and isinstance(args, dict) and args.get("generator") and args.get("price"):
+        # A generation's card (image_tools.Plan.card): which generator, how many, what size, and what it costs.
+        count = int(args.get("count") or 1)
+        value = (f"{args['generator']} · {count} × {args.get('size', '')} · {args['price']}"
+                 + (f" · {args['this_month']} this month" if args.get("this_month") else "")).replace("\n", " ")
+        return value[:160] + ("…" if len(value) > 160 else "")
+    if name == "generate_video" and isinstance(args, dict) and args.get("video") and args.get("facts"):
+        # A video's card (video_tools.Plan.card): which model, its length, resolution and price, and this month.
+        value = (f"{args.get('label') or args.get('generator')} · {args['facts']}"
+                 + (f" · this month {args['this_month']}" if args.get("this_month") else "")).replace("\n", " ")
+        return value[:180] + ("…" if len(value) > 180 else "")
     if name == "view_image" and isinstance(args, dict) and args.get("via"):
         # The card DGC draws when a vision model looked at a prompt's attachments (dgc/vision.py).
         value = f"{args.get('path') or 'image'} · via {args['via']}".replace("\n", " ")
@@ -311,6 +326,9 @@ def edit_preview(name: str, args: dict, root) -> str:
     try:
         if name == "apply_patch":
             return _cap_diff(str(args.get("patch") or ""))
+        if name == "router_update":
+            # DGC Router: the exact change to ~/.dgc/config.json, worked out before asking (router_tools.UpdatePlan).
+            return _cap_diff(str(args.get("diff") or ""))
         raw = str(args.get("path") or "")
         if not raw or name not in ("write_file", "edit_file", "multi_edit"):
             return ""
@@ -369,6 +387,22 @@ def split_diff(out: str) -> tuple[bool, str]:
             return True, out[offset:]
         offset += len(line) + 1
     return False, ""
+
+
+def shown_output(name: str, out: str) -> str:
+    """A tool's result as the person reads it in their tool row, on every surface (the editor, the terminal app and
+    the classic CLI, an ACP client; live and when a chat is reopened). The same text the model read, except the
+    sentences DGC wrote for the model alone, which become a short plain line: a plugin card's note ("Opened
+    Cardboard's card") and an image's sidecar and "the user sees it" ("Made 1 image with ComfyUI · 768×320 · free").
+    A pure function of the saved result, as split_diff and tool_output_is_error are."""
+    text = str(out or "")
+    if name == "generate_image":
+        from .image_tools import shown_text as image_text
+        text = image_text(text)
+    if "[DGC showed " in text:
+        from .mcp_apps import shown_text as card_text
+        text = card_text(text)
+    return text
 
 
 _SIGPIPE_EXIT = 141          # 128 + SIGPIPE: a reader such as `head` closed the pipe early

@@ -1,6 +1,6 @@
-export const VERSION = "0.8.0";
+export const VERSION = "0.9.0";
 export const PROTOCOL = 14;
-export const REQUIRES_CLI = "0.50.0";
+export const REQUIRES_CLI = "0.51.0";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto";
 export type PermissionAction = "once" | "always" | "deny";
@@ -36,6 +36,9 @@ export type PermissionRequest = {
   callId?: string;
   diff?: string;
   command?: string;
+  /** The answers this request takes, from once, always and deny (an older CLI lists all three). A DGC Router change
+   * and a look on the network offer `["once", "deny"]` (CLI 0.51+): they ask every time, and "always" counts as once. */
+  choices?: PermissionAction[];
 };
 
 export type PlanRequest = {

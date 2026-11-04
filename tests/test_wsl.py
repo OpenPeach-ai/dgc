@@ -574,7 +574,7 @@ class KeepRunningTests(unittest.TestCase):
     def test_on_writes_the_runner_loop_registers_it_with_windows_and_starts_it(self):
         value = keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
         self.assertEqual(value, {"platform": "wsl", "supported": True, "reason": "", "on": True, "starts_at_login": True,
-                                 "restarts_after_failure": True, "while_logged_out": False})
+                                 "restarts_after_failure": True, "while_logged_out": False, "outdated": False})
         spec = self.spec()
         self.assertEqual(stat.S_IMODE(spec["script"].stat().st_mode), 0o700)
         self.assertTrue(spec["mark"].is_file())
@@ -599,6 +599,52 @@ class KeepRunningTests(unittest.TestCase):
             index += 1 + known[options[index]]
         self.assertIn("none", options, "no shell between wslg and the script")
         self.assertEqual(command, ["/bin/sh", str(self.spec()["script"])])
+
+    def updating(self, busy=False):
+        """The installer's step after an update, with this test's home, Python and fake Windows."""
+        import sqlite3
+        state = self.home / "state"
+        state.mkdir(exist_ok=True)
+        db = sqlite3.connect(state / "registry.sqlite3")
+        db.execute("CREATE TABLE IF NOT EXISTS pip_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+        db.execute("DELETE FROM pip_runs")
+        if busy:
+            db.execute("INSERT INTO pip_runs VALUES('run_now','running')")
+        db.commit(); db.close()
+        real = keep._wsl_spec
+        with patch.object(keep, "_home", return_value=self.home), \
+             patch.object(keep, "_wsl_spec", side_effect=lambda home, **kw: real(home, **{**self.options, **kw})), \
+             patch("dgc.workspace_registry.state_directory", return_value=state), \
+             patch("dgc.workspace_registry.WorkspaceRegistry", side_effect=AssertionError("opening it migrates it")):
+            return keep.upgrade_after_install()
+
+    def test_an_update_moves_the_runner_loop_to_the_new_install_without_asking_windows_anything(self):
+        old_root = self.home / "versions" / "0.50.1"
+        (old_root / "dgc").mkdir(parents=True)
+        for name in ("__init__.py", "cli.py"):
+            (old_root / "dgc" / name).write_text("")
+        keep.set_on(True, runner_online=True, dgc_home=self.home, **{**self.options, "package_root": old_root})
+        spec = self.spec()
+        self.assertIn(str(old_root), spec["script"].read_text())
+        self.assertTrue(keep.status(dgc_home=self.home, **self.options)["outdated"])
+        asked = self.fake.log()
+        self.assertEqual(self.updating(busy=True), keep.BUSY_NOTE)
+        self.assertEqual(spec["script"].read_text(), spec["content"], "the next start runs this install")
+        self.assertEqual(stat.S_IMODE(spec["script"].stat().st_mode), 0o700)
+        self.assertFalse(keep.status(dgc_home=self.home, **self.options)["outdated"])
+        self.assertEqual(self.updating(), "", "already this install's")
+        self.assertEqual(self.fake.log(), asked, "Windows was asked nothing, and no second loop was started")
+
+    def test_an_update_leaves_keep_pips_running_off_and_a_foreign_script_alone(self):
+        self.assertEqual(self.updating(), "")
+        self.assertFalse(self.spec()["script"].exists())
+        keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+        spec = self.spec()
+        spec["script"].write_text("#!/bin/sh\necho mine\n")
+        self.assertEqual(self.updating(), "")
+        self.assertEqual(spec["script"].read_text(), "#!/bin/sh\necho mine\n")
+        keep.set_on(False, runner_online=True, dgc_home=self.home, **self.options)
+        self.assertEqual(self.updating(), "")
 
     def test_a_runner_already_running_is_not_started_twice(self):
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)

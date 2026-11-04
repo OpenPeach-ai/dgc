@@ -1,5 +1,8 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
+import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
+
+const foldPictures=(key,inner,facts)=>globalThis.DgcPictureFold?globalThis.DgcPictureFold.markup(key,inner,facts):inner;
 
 // These controls mirror the main conversation's action row. They are SVG rather
 // than font glyphs so they also work inside the Pip client's isolated ShadowRoot.
@@ -13,20 +16,20 @@ const phase=status=>({queued:'Queued',running:'Working',cancelling:'Stopping',fa
 const readAction=id=>`<button type="button" class="ract" data-chat-action="read" data-message-id="${esc(id)}" data-read-aloud="${esc(id)}" aria-label="Read aloud" title="Read aloud" aria-pressed="false"><span class="ra-play">${transcriptIcon('speaker')}</span><span class="ra-stop">${transcriptIcon('stop')}</span><span class="sr-only">Read aloud</span></button>`;
 const action=(name,label,id,disabled=false)=>`<button type="button" class="ract" data-chat-action="${name}" data-message-id="${esc(id)}" aria-label="${esc(label)}" title="${esc(label)}"${disabled?' disabled':''}>${transcriptIcon(name)}<span class="sr-only">${esc(label)}</span></button>`;
 
-// A reply as a chat would show it: one short bubble per paragraph. A code block or a list stays
-// in one piece, and a long reply never becomes more than eight bubbles.
+// A reply as the Pip means it to read: one bubble, or the short messages it parts with a line of just ---
+// (pip_chat.BUBBLES). Where it breaks is the Pip's call: split at every paragraph, a poem came apart at each
+// stanza and an email draft at each paragraph (asked 2026-11-03: "leave this to the llm model to decide").
+// A --- in a code block is code, the --- lines are not shown, and a reply is never more than eight bubbles.
 export function replyParts(text) {
   const parts=[];let current=[],fence=false;
   const flush=()=>{const chunk=current.join('\n').trim();if(chunk)parts.push(chunk);current=[];};
   for(const line of String(text).split('\n')){
     if(/^\s*(```|~~~)/.test(line))fence=!fence;
-    if(!fence&&!line.trim()){flush();continue;}
+    if(!fence&&/^\s*---\s*$/.test(line)){flush();continue;}
     current.push(line);
   }
   flush();
-  const listy=p=>/^\s*([-*+]|\d+[.)])\s/.test(p);
-  const merged=[];for(const p of parts){if(merged.length&&listy(p)&&listy(merged.at(-1)))merged[merged.length-1]+='\n\n'+p;else merged.push(p);}
-  return merged.length>8?[...merged.slice(0,7),merged.slice(7).join('\n\n')]:merged;
+  return parts.length>8?[...parts.slice(0,7),parts.slice(7).join('\n\n')]:parts;
 }
 
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
@@ -34,18 +37,28 @@ export function replyParts(text) {
 export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null}) {
   const m=message,user=m.role==='user',label=user?'You':name;
   // Every photo the message brought (no four-photo cap from Pips API 52); a click opens the original.
-  const pictures=user&&Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
+  // A Pip's reply shows the images it made (generate_image) the same way, below its words.
+  const pictures=Array.isArray(m.images)&&m.images.length?`<div class="msg-images">${m.images.slice(0,64).map(i=>{const key=`${m.id}:${Number(i.index)}`,src=imageSrc(m.id,Number(i.index));return `<img class="msg-image" data-message-image="${esc(key)}" data-pic-open alt="Image ${Number(i.index)+1}" title="Open the photo"${src?` src="${esc(src)}"`:''}>`;}).join('')}</div>`:'';
   const size=n=>n<1024?`${n} B`:n<1048576?`${Math.round(n/1024)} KB`:`${(n/1048576).toFixed(1)} MB`;
   const files=user&&Array.isArray(m.files)&&m.files.length?`<div class="msg-files">${m.files.slice(0,16).map(f=>{const name=String(f.name||''),dot=name.lastIndexOf('.');return `<span class="msg-file" title="${esc(name)}"><span class="chat-file-ext" aria-hidden="true">${esc((dot>0?name.slice(dot+1):'txt').slice(0,4))}</span><span class="chat-file-name">${esc(name)}</span><span class="chat-file-size">${esc(size(Number(f.bytes)||0))}</span></span>`;}).join('')}</div>`:'';
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
-  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(said)}</div></div>`)
+  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
+    // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
+    +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
+    // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the
+    // page after it draws: its progress, then its player.
+    +(!user&&Array.isArray(m.videos)&&m.videos.length?foldPictures(`pip:${m.id}:videos`,`<div class="msg-videos made-pictures">${m.videos.slice(0,4).map(v=>`<div class="msg-video" data-message-video="${esc(String(v.id||''))}"></div>`).join('')}</div>`,{videos:Math.min(4,m.videos.length),label:m.videos.length===1?String(m.videos[0].prompt||''):''}):'')
     +(!user&&clip?`<button type="button" class="link run-post-show" data-post-more="${esc(clip.key)}" aria-expanded="${clip.open===true}">${clip.open?'Show less':'Show all'}</button>`:'');
   // The plugins it took an answer from, as ChatGPT names the apps it used ("Used [logo] Aave"): what it says came
   // from a plugin did, rather than from the model's memory. A logo not here yet shows a plug until the host sends it.
   const plugins=!user&&Array.isArray(m.plugins)?m.plugins.slice(0,8):[];
   const used=plugins.length?`<div class="msg-plugins" title="This reply used ${plugins.length===1?'this plugin':'these plugins'}"><span>Used</span> ${plugins.map((p,i)=>{const src=pluginLogo(p.plugin);return `<span class="msg-plugin"><span class="msg-plugin-mark" data-plugin-mark="${esc(p.plugin)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span><span>${esc(p.name)}${i<plugins.length-1?',':''}</span></span>`;}).join(' ')}</div>`:'';
+  // The plugins' own cards it showed (MCP Apps): each a slot the page fills with the card's live frame
+  // (media/mcpApps.js), above its words, so a redraw never reloads one.
+  const cards=!user&&Array.isArray(m.apps)?m.apps.filter(a=>a&&/^app_[0-9a-f]{24}$/.test(String(a.card_id||''))).slice(0,8):[];
+  const shownCards=cards.length&&globalThis.DgcMcpApps?`<div class="msg-apps">${cards.map(a=>`<div class="mcp-app-slot" data-card-id="${esc(a.card_id)}"></div>`).join('')}</div>`:'';
   // Grok's A/B card: the choices the Pip offered under its latest reply; a tap answers it.
   const offered=!user&&Array.isArray(choices)&&choices.length?`<div class="msg-choices" role="group" aria-label="Answer ${esc(name)}">${choices.slice(0,4).map((c,i)=>`<button type="button" class="msg-choice" data-pip-choice="${esc(c)}"${canSend?'':' disabled'}><span class="msg-choice-key" aria-hidden="true">${'ABCD'[i]}</span><span>${esc(c)}</span></button>`).join('')}</div>`:'';
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${esc(m.status)}">${phase(m.status)}${m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':''}</p>`:'';
@@ -54,7 +67,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
   const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?time:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?time:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

@@ -3,6 +3,8 @@ import { MIC_MESSAGES, SPEAK_MESSAGES, type Dictation, type DictationOwner, type
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import type { Artifacts } from './artifacts';
+import { mcpAppsHost } from './mcpApps';
+import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
@@ -28,8 +30,9 @@ const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.ends
 const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
 const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
-export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = ''): string {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};"><link rel="stylesheet" href="${attr(styleUri)}"><title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
+export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = ''): string {
+  // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}"><link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
 
 /** A Pip's computer in an editor tab: its Browser, Files and Terminal. */
@@ -73,8 +76,21 @@ export class PipsEditor implements vscode.Disposable {
    *  document or sheet and its dashboards in the artifact panel. */
   private artifacts?: () => PipArtifactsHub | undefined;
   useArtifacts(hub: () => PipArtifactsHub | undefined): void { this.artifacts = hub; }
+  /** A reply's pictures folded or opened (media/pictureFold.js): kept by the extension (src/pictureFolds.ts), and
+   *  what was kept, with the setting, given to the page as it opens. */
+  private folds?: { remember: (message: any) => boolean; initial: () => any };
+  useFolds(remember: (message: any) => boolean, initial: () => any): void { this.folds = { remember, initial }; }
+  /** Settings changed Pictures in replies: the page follows it. */
+  picturesSetting(message: any): void { this.post(message); }
   private newsDismissed?: (pipIds: string[], until: string) => void;
   useNewsDismissed(notify: (pipIds: string[], until: string) => void): void { this.newsDismissed = notify; }
+  /** A Pip's messages were marked read here (mark_pip_read answered): the home's count and the other Pips pages follow. */
+  private unreadRead?: () => void;
+  useUnreadRead(notify: () => void): void { this.unreadRead = notify; }
+  /** A video's Stop from a Pip's chat: the window's backend (videos_stop), set by the panel. */
+  videoStop?: (job: string) => Promise<Record<string, unknown> | undefined>;
+  /** A Pip reply's running video: the window's backend polls (or watches) it, so one a restart left on disk ends. */
+  videoFollow?: (job: string) => void;
   constructor(private readonly extensionUri: vscode.Uri, private readonly send: (message: any, backendIdentity?: object) => boolean, private readonly connect: () => void, private readonly requireGeneration = false) {}
   attach(post: (message: any) => void): void {
     // The main panel is now the primary surface. Retire any old editor instance
@@ -89,6 +105,11 @@ export class PipsEditor implements vscode.Disposable {
     if (this.embeddedPost) this.embeddedPost(message);
     else this.panel?.webview.postMessage(message);
   }
+  /** Settings saved, or the Router's settings changed: what a Pip on Default runs on may have changed with them (Pips run
+   *  on, the Router on or off, its Pip systems), so an open Pips page reads list_pip_models again. */
+  modelsChanged(): void { this.post({ type: 'pipsModelsChanged' }); }
+  /** A Pip was marked read somewhere else: an open Pips page reads its unread counts again. */
+  unreadChanged(): void { this.post({ type: 'pipsUnreadChanged' }); }
   /** Open a Pip's computer as an editor tab ("Gmail · Computer"), or bring its tab forward. */
   openComputer(pip: ComputerPip): void {
     const open = this.computers.get(pip.id);
@@ -148,7 +169,9 @@ export class PipsEditor implements vscode.Disposable {
     panel.onDidChangeViewState(() => panel.webview.postMessage({ type: 'pipsVisibility', visible: panel.visible }));
     panel.webview.onDidReceiveMessage(message => this.receive(message));
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
-    panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'));
+    const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
+    panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'),
+                                      media('mcpApps.js'), media('mcpApps.css'), media('videoPlayer.js'));
     this.connect();
   }
   ready(capabilities: any, backendIdentity?: object): void {
@@ -187,6 +210,22 @@ export class PipsEditor implements vscode.Disposable {
         clearTimeout(timer); this.hostReads.delete(requestId); reject(new Error('DGC is not connected.'));
       }
     });
+  }
+  /** A Pip's report card in a Work chat acted on (Dismiss, Fix): that run's post counts as read for its Pip. Only on Pips
+   *  API 69, which keeps unread; DGC refuses a run with no post in that Pip's chat, and nothing changes. */
+  markRunRead(pipId: string, runId: string): void {
+    if (!this.state.connected || !this.state.supported || !this.state.enabled || this.apiVersion < 69) return;
+    if (!/^pip_[0-9a-f]{32}$/.test(pipId) || !/^run_[0-9a-f]{32}$/.test(runId)) return;
+    const requestId = 'pips-host-' + randomBytes(12).toString('hex');
+    const timer = setTimeout(() => this.hostReads.delete(requestId), 20000);
+    (timer as any).unref?.();
+    this.hostReads.set(requestId, (event) => {
+      clearTimeout(timer); this.hostReads.delete(requestId);
+      if (event.type === 'pips_result' && event.ok === true && event.command === 'mark_pip_read') this.unreadRead?.();
+    });
+    if (!this.send({ type: 'pips_control', request: { type: 'mark_pip_read', pip_id: pipId, post_id: runId, request_id: requestId } }, this.backendIdentity)) {
+      clearTimeout(timer); this.hostReads.delete(requestId);
+    }
   }
   event(event: any): boolean {
     if ((event.type === 'skill_draft' || event.type === 'skill_saved') && this.pending.has(event.request_id)) {
@@ -233,6 +272,7 @@ export class PipsEditor implements vscode.Disposable {
     if (owner.newsDismiss && event.type === 'pips_result' && event.ok === true) {
       this.newsDismissed?.(owner.newsDismiss.pipIds, owner.newsDismiss.until);
     }
+    if (owner.command === 'mark_pip_read' && event.type === 'pips_result' && event.ok === true) this.unreadRead?.();
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
       result: event.type === 'pips_status' ? event : event.result,
@@ -444,6 +484,21 @@ export class PipsEditor implements vscode.Disposable {
   receive(message: any, surface = 'main'): void {
     const computer = surface.startsWith('computer:') ? this.computers.get(surface.slice(9)) : undefined;
     if (surface !== 'main' && !computer) return;
+    if (VIDEO_MESSAGES.has(String(message?.type || '')) && !computer && this.panel) {
+      // A Pip reply's video: its bytes and state from DGC's own folder, Open, Show in folder, and a Stop through this
+      // window's backend (src/videoHost.ts).
+      const panel = this.panel;
+      void handleVideoMessage(message, reply => { void panel.webview.postMessage(reply); },
+                              { stop: this.videoStop, follow: this.videoFollow });
+      return;
+    }
+    if (message?.type === 'mcpApp' && !computer && this.panel) {
+      // A plugin's card in a Pip's reply, in the Pips tab: what it asks goes to this window's backend (src/mcpApps.ts).
+      const panel = this.panel;
+      mcpAppsHost(this.extensionUri).fromPage(message, reply => { void panel.webview.postMessage(reply); },
+                                              command => this.send(command, this.backendIdentity));
+      return;
+    }
     if (message?.type === 'pipsOpenComputer' && !computer) {
       const pip = message.pip;
       if (this.apiVersion >= 43 && pip && typeof pip.id === 'string' && /^pip_[A-Za-z0-9]{1,64}$/.test(pip.id) && typeof pip.name === 'string'
@@ -477,7 +532,9 @@ export class PipsEditor implements vscode.Disposable {
       this.send({ type: 'pip_desktop', pip_id: computer.pip.id, op, ...(op === 'send' ? { data } : {}) }, this.backendIdentity);
       return;
     }
+    if (!computer && this.folds?.remember(message)) return;
     if (message?.type === 'pipsReady') {
+      if (!computer && this.folds) this.post(this.folds.initial());
       if (computer) { this.post({ type: 'pipComputerInit', pip: computer.pip, desktop: this.desktopStream }, surface); this.post({ type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...this.state }, surface); }
       else {
         this.publish();
@@ -563,6 +620,8 @@ export class PipsEditor implements vscode.Disposable {
     if (request.type === 'revise_pip_setup' && this.apiVersion < 25) { fail('Update DGC to change the model on a new-Pip card.'); return; }
     // API 55: a Personal Pip on the user's own Claude Code or Codex (model_choice mode "subscription").
     if ([request.model_choice, request.changes?.model_choice].some(choice => choice?.mode === 'subscription') && this.apiVersion < 55) { fail('Update DGC to run a Pip on your own Claude Code or Codex.'); return; }
+    // API 70: a Pip on DGC Router (model_choice mode "router").
+    if ([request.model_choice, request.changes?.model_choice].some(choice => choice?.mode === 'router') && this.apiVersion < 70) { fail('Update DGC to run a Pip on DGC Router.'); return; }
     if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update DGC to change context and thinking.'); return; }
     if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update DGC for a context window above 32K tokens.'); return; }
     if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update DGC for calendar invitations and repeating events.'); return; }

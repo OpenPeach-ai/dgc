@@ -114,7 +114,22 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    # The user's one memory, as ChatDGC and Pips keep it: no card. Only what the user typed can be
                    # kept, the tool card says what was, and Settings -> Memory forgets it. A rule can still deny
                    # them by name (Remember, Forget).
-                   "remember", "forget"}
+                   "remember", "forget",
+                   # DGC Router (dgc/router_tools.py): reading the systems and testing one (a few seconds of that
+                   # computer's model, nothing changed). Not in DISPLAY, for list_tasks' reason above.
+                   "router_status", "router_probe",
+                   # Image generators (dgc/image_tools.py): reading them changes nothing. generate_image follows its
+                   # generator's own "asks before each image" (Agent._handle_call), not this table.
+                   "list_image_generators",
+                   # Video generators (dgc/video_tools.py): reading them changes nothing. generate_video asks before
+                   # every clip (Agent._handle_call), whatever this table or the mode says.
+                   "list_video_generators"}
+# A change to the DGC Router's settings, and a look for model servers on the user's network: the user's call in
+# every mode, auto included, with the exact change on the card. A deny rule still wins; an allow rule never skips it.
+ALWAYS_ASK_TOOLS = frozenset({"router_update", "router_find"})
+# A card with no Always: these and every video (an Always for videos is the user's own switch in Settings, per
+# generator, never a card's button).
+NO_ALWAYS_TOOLS = ALWAYS_ASK_TOOLS | {"generate_video"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 # Ending a process the agent itself started. Allowed in every mode, plan included; a deny rule
 # still wins.
@@ -638,6 +653,10 @@ class PermissionEngine:
                     return ASK, f"rule: {session_ask.render()}"
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
+
+        if policy_tool in ALWAYS_ASK_TOOLS:
+            return ASK, ("DGC Router changes are the user's to allow, in every mode" if policy_tool == "router_update"
+                         else "looking on the user's network is theirs to allow, in every mode")
 
         if signed_in:
             # The user's own Chrome, signed in as them: opening a new site asks them in every mode, auto included,

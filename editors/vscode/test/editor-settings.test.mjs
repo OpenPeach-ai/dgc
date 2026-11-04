@@ -22,7 +22,7 @@ test('Save says it applies to every workspace, which is where it writes',()=>{
   // the tab said nothing about that at all -- the statement existed only on the surface nobody
   // could open. Checked on every page that offers Save, because each renders its own button.
   const x=setup();
-  for(const nav of ['general','models','agents','web','chatdgc','security']){
+  for(const nav of ['general','models','web','chatdgc','security']){
     x.click(`[data-nav=${nav}]`);
     const save=x.d.querySelector('#save');
     assert.ok(save,`${nav} offers Save`);
@@ -65,7 +65,7 @@ test('a backend config never populates a secret field in the webview',()=>{
   x.message({type:'event',event:{...x.config,api_key:'sk-live-secret',fallback_api_key:'sk-live-fallback'}});
   x.click('[data-nav=models]');
   assert.equal(x.d.querySelector('#api_key').value,'','the backend may hold a key; the webview may not');
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const fallback=x.d.querySelector('#fallback_api_key');
   if(fallback)assert.equal(fallback.value,'','nor the fallback route\'s key');
   assert.equal(JSON.stringify(x.sent).includes('sk-live-'),false,'and none of it is echoed back');
@@ -248,7 +248,7 @@ test('installed plugin reconnect uses the branded dialog and only actual sign-in
  x.click('#confirm-connect');assert.equal(x.sent.at(-1).type,'installPlugin');assert.equal(x.sent.filter(m=>m.type==='inspectPlugin').length,0);
  x.message({type:'signin',server:'unrelated',title:'Other'});assert.equal(x.d.querySelector('dialog [data-browser]'),null);
  x.message({type:'signin',server:'figma',title:'Figma'});assert.match(x.d.querySelector('dialog').textContent,/Finish connecting Figma/);x.click('dialog [data-browser]');assert.equal(x.sent.at(-1).type,'openSignIn');
- x.message({type:'plugins',items:[{...row,connected:true}]});assert.match(x.d.querySelector('dialog').textContent,/Figma is connected/);assert.doesNotMatch(x.d.querySelector('dialog').textContent,/approval required/);x.click('#connection-done');assert.equal(x.d.querySelector('dialog'),null);
+ x.message({type:'plugins',items:[{...row,connected:true}]});assert.match(x.d.querySelector('dialog').textContent,/Figma is connected/);assert.equal(x.d.querySelector('#dialog-cancel'),null,'nothing left to cancel: Done closes it');assert.doesNotMatch(x.d.querySelector('dialog').textContent,/approval required/);x.click('#connection-done');assert.equal(x.d.querySelector('dialog'),null);
 });
 
 test('cancelling branded browser progress sends the existing cancellation command',()=>{
@@ -1088,7 +1088,7 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
   // had since 0.40 (subagent_context_size: 0 is the main model's, else 2,048 to 16,777,216 tokens).
   const hintOf=x=>x.d.querySelector('#subagent_context_size').closest('.field').querySelector('.hint').textContent;
   const older=setup();
-  older.click('[data-nav=agents]');
+  older.click('[data-nav=models]');
   const box=older.d.querySelector('#subagent_context_size');
   assert.ok(box,'the card has the field');
   assert.equal(box.disabled,true,'a CLI that never answered it would refuse the save');
@@ -1096,23 +1096,24 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
 
   const x=setup();
   x.message({type:'event',event:{...x.config,subagent_context_size:0}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const size=()=>x.d.querySelector('#subagent_context_size');
   assert.equal(size().disabled,false);
   assert.equal(size().value,'','0 is shown as blank');
-  assert.equal(size().placeholder,'Same as the main model');
+  // 0.51: the same box as DGC Router's Context each, its first choice "Same as the main chat" (src/contextCombo.js).
+  assert.equal(size().placeholder,'Same as the main chat');
   assert.equal(size().closest('.group').querySelector('h3').textContent,'Sub-agents');
   x.message({type:'event',event:{...x.config,subagent_context_size:65536}});
-  assert.equal(size().value,'65536');
+  assert.equal(size().value,'64K','a size, as the list says it');
 
   const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
-  for(const bad of ['1024','50000','33554432','-2048']){
+  for(const bad of ['1024','33554432','-2048','lots']){
     x.input('#subagent_context_size',bad);
     const before=saves().length;
     x.click('#save');
     assert.equal(saves().length,before,`${bad} is refused on the page, as the main Context size refuses one`);
   }
-  for(const [typed,posted] of [['131072','131072'],['','' ],['0','0'],['2048','2048']]){
+  for(const [typed,posted] of [['131072','131072'],['','' ],['0','0'],['2048','2048'],['24K','24576'],['24,576','24576'],['50000','50000']]){
     x.input('#subagent_context_size',typed);
     x.click('#save');
     assert.equal(saves().at(-1)?.values.subagent_context_size,posted,typed||'blank');
@@ -1127,13 +1128,14 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
 // ---- Model boxes: each lists the models at its own card's host (list_models_at) ------------------------------
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const asks=x=>x.sent.filter(m=>m.type==='listModelsAt');
+const mainAsks=x=>asks(x).filter(m=>m.token.startsWith('model-'));
 const answer=(x,ask,fields)=>x.message({type:'modelsAt',token:ask.token,role:ask.role,...fields});
 const openList=(x,id)=>x.d.querySelector(`[data-model-open=${id}]`).dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
 const optionsOf=(x,id)=>[...x.d.querySelectorAll(`#${id}-list [role=option]`)].map(li=>li.textContent);
 
 test('Model boxes stay text boxes with a CLI that can\'t list a host\'s models',()=>{
   const x=setup();
-  for(const [nav,ids] of [['models',['model']],['agents',['subagent_model','fallback_model']]]){
+  for(const [nav,ids] of [['models',['model']],['models',['subagent_model','fallback_model']]]){
     x.click(`[data-nav=${nav}]`);
     for(const id of ids){
       const box=x.d.querySelector('#'+id);
@@ -1151,7 +1153,8 @@ test('Models: the Model box lists the models at the host as typed, and still tak
   x.click('[data-nav=models]');
   const box=x.d.querySelector('#model');
   assert.equal(box.getAttribute('role'),'combobox');
-  const first=asks(x).at(-1);
+  // Models also holds the fallback, sub-agent and Pips boxes (0.51): the main box's own ask.
+  const first=asks(x).filter(m=>m.token.startsWith('model-')).at(-1);
   assert.deepEqual({role:first.role,base_url:first.base_url,api_mode:first.api_mode,key:'api_key' in first},
     {role:'main',base_url:'https://model.example/v1',api_mode:'ollama',key:false},'the saved host, and no key: none was typed');
   answer(x,first,{ids:['glm-5.3:cloud','original','qwen3:8b']});
@@ -1172,28 +1175,29 @@ test('Models: the Model box lists the models at the host as typed, and still tak
   assert.equal(x.sent.filter(m=>m.type==='saveSettings').pop().values.model,'my-own-model');
   x.message({type:'settingsSaved',ok:true});
 
-  // Another host typed: listed again after a pause, without saving, and with no saved key.
-  const before=asks(x).length;
+  // Another host typed: listed again after a pause, without saving, and with no saved key. (The boxes that follow the
+  // main host on Models -- the Pips', the sub-agents' and the fallback's -- list it too; this is the main box's.)
+  const before=mainAsks(x).length;
   x.input('#base_url','http://127.0.0.1:11434/v1');
   x.input('#base_url','http://127.0.0.1:11434/v1/');
-  assert.equal(asks(x).length,before,'not on every keystroke');
+  assert.equal(mainAsks(x).length,before,'not on every keystroke');
   await pause(750);
-  assert.equal(asks(x).length,before+1,'once, after the pause');
-  const local=asks(x).at(-1);
+  assert.equal(mainAsks(x).length,before+1,'once, after the pause');
+  const local=mainAsks(x).at(-1);
   assert.equal(local.base_url,'http://127.0.0.1:11434/v1/');
   assert.equal('api_key' in local,false);
   assert.equal(x.sent.filter(m=>m.type==='saveSettings').length,1,'nothing was saved to list it');
   // A key typed in the form goes with it; a transport chosen lists again.
   x.input('#api_key','typed-key');
   await pause(750);
-  assert.equal(asks(x).at(-1).api_key,'typed-key');
+  assert.equal(mainAsks(x).at(-1).api_key,'typed-key');
   x.d.querySelector('#api_mode').value='chat_completions';
   x.d.querySelector('#api_mode').dispatchEvent(new x.w.Event('change',{bubbles:true}));
   await pause(750);
-  assert.equal(asks(x).at(-1).api_mode,'chat_completions');
+  assert.equal(mainAsks(x).at(-1).api_mode,'chat_completions');
   // A late answer to an older request is not this box's any more.
   answer(x,local,{ids:['stale-model']});
-  answer(x,asks(x).at(-1),{ids:[],error:'it needs an API key (HTTP 401)'});
+  answer(x,mainAsks(x).at(-1),{ids:[],error:'it needs an API key (HTTP 401)'});
   const status=x.d.querySelector('#model-status');
   assert.equal(status.hidden,false);
   assert.equal(status.textContent,"Couldn't list the models at this host: it needs an API key (HTTP 401).");
@@ -1206,7 +1210,7 @@ test('Models: the Model box works from the keyboard',()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,list_models_at:true}});
   x.click('[data-nav=models]');
-  answer(x,asks(x).at(-1),{ids:['a-model','b-model','original']});
+  answer(x,asks(x).filter(m=>m.token.startsWith('model-')).at(-1),{ids:['a-model','b-model','original']});
   const box=x.d.querySelector('#model');
   const key=k=>box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
   box.focus();
@@ -1228,7 +1232,7 @@ test('Models: the Model box works from the keyboard',()=>{
 test('Agents: each Model box lists its own card\'s host; Subscription model stays text',async()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',fallback_base_url:'',subagent_api_mode:'chat_completions'}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const of=role=>asks(x).filter(m=>m.role===role).at(-1);
   assert.deepEqual([of('subagent').base_url,of('subagent').api_mode],['https://agent.example/v1','chat_completions']);
   assert.deepEqual([of('fallback').base_url,of('fallback').api_mode],['https://model.example/v1','ollama'],
@@ -1263,14 +1267,16 @@ test('a provider preset lists the host it fills in',async()=>{
   const preset=x.d.querySelector('#provider');
   preset.value='ollama';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
   await pause(750);
-  assert.equal(asks(x).length,before+1);
-  assert.equal(asks(x).at(-1).base_url,'http://127.0.0.1:11434/v1');
+  // Every box that follows the main host lists it again (the main model's, and the Pips' and others' on Models).
+  const asked=asks(x).slice(before);
+  assert.ok(asked.length>=1);
+  assert.equal(asked.find(m=>m.token.startsWith('model-')).base_url,'http://127.0.0.1:11434/v1');
 });
 
-test('Agents: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
+test('Models: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
   const older=setup();
-  older.click('[data-nav=agents]');
-  const card=[...older.d.querySelectorAll('.group')].find(c=>c.querySelector('h3').textContent==='Pips');
+  older.click('[data-nav=models]');
+  const card=[...older.d.querySelectorAll('.group')].find(c=>c.querySelector('h3')?.textContent==='Pips');
   assert.ok(card,'a Pips group');
   assert.equal(card.querySelector('#pips_model').disabled,true,'a CLI that never answered pips_settings would refuse the save');
   assert.match(card.textContent,/Model for Pips/);
@@ -1278,7 +1284,7 @@ test('Agents: Model for Pips, a Pips-wide default that every Pip on Default foll
 
   const x=setup();
   x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',pips_settable:true,pips_model:''}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=()=>x.d.querySelector('#pips_model');
   assert.equal(box().disabled,false);
   assert.equal(box().value,'');
@@ -1306,7 +1312,7 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   const x=setup();
   x.click('[data-nav=general]');
   assert.equal(x.d.querySelector('#max_parallel_tasks'),null,'one place for it');
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=x.d.querySelector('#max_parallel_tasks');
   assert.equal(box.closest('.group').querySelector('h3').textContent,'Sub-agents');
   assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
@@ -1362,7 +1368,7 @@ test('Models and Agents: every setting still reachable, detail one click away',(
   assert.equal(preset.value,'');
   assert.equal(preset.selectedOptions[0].textContent,'Presets');
 
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   for(const id of ['subagent_model','max_parallel_tasks','subagent_context_size','subagent_provider','subagent_base_url','subagent_api_mode','subagent_api_key','fallback_model','fallback_base_url','fallback_api_mode','fallback_api_key','pips_model'])
     assert.ok(x.d.querySelector('#'+id),`Agents still has ${id}`);
   // The sub-agents' own host is here (it is set); the fallback has none, so its host waits one click away.
@@ -1389,7 +1395,7 @@ test('Models and Agents: every setting still reachable, detail one click away',(
 test('a hint is one line and the rest is behind "?": open, remembered through a redraw, closed again',()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,turn_token_budget:0}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=x.d.querySelector('#max_parallel_tasks');
   const info=box.closest('.field').querySelector('.info');
   assert.ok(info,'a "?" beside Run at once');
@@ -1522,4 +1528,17 @@ test('a plugin\'s page: no maintainers\' notes, no "Not provided" rows; director
   assert.match(x.d.querySelector('.meta').textContent,/License/);
   x.click('#back');x.click('#browse-directory');
   assert.doesNotMatch(x.d.querySelector('.directory-card-footer').textContent,/dgc-curated|MIT|License/);
+});
+
+test('Permission mode says it is this Work chat\'s, and that a new chat never starts in Auto',()=>{
+  // The field sends set_mode, which since 0.50.1 changes only this Work chat, and an editor process holds a saved
+  // Auto to Default. Read as a default for every chat, Auto chosen here was quietly undone by the next reload.
+  const x=setup();
+  x.click('[data-nav=general]');
+  const mode=x.d.querySelector('#mode');
+  assert.deepEqual([...mode.options].map(o=>o.value),['default','acceptEdits','plan','auto']);
+  assert.match(rowHint(mode),/this Work chat/);
+  assert.match(rowDetail(mode),/Auto[^.]*one Work chat at a time/);
+  assert.match(rowDetail(mode),/new chat[^.]*starts in Default/);
+  assert.match(rowDetail(mode),/chat you reopen, or this one after a reload, comes back in the mode it had/);
 });

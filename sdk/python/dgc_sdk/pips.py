@@ -934,6 +934,13 @@ class Pips:
             if any(isinstance(choice, dict) and choice.get('mode') == 'subscription'
                    and (set(choice) != {'mode', 'engine'} or choice.get('engine') not in SUBSCRIPTION_ENGINES) for choice in choices):
                 raise DGCConfigError('A subscription model_choice is {"mode": "subscription", "engine": "claude" | "codex"}')
+        if any(isinstance(choice, dict) and choice.get('mode') == 'router' for choice in choices):
+            # API 70: a Pip on DGC Router, any of the user's systems with the Pips job, or one system and model.
+            if version < 70:
+                raise DGCUnsupportedError("A Pip on DGC Router requires a runtime advertising Pips API 70 or newer")
+            if any(isinstance(choice, dict) and choice.get('mode') == 'router'
+                   and set(choice) not in ({'mode'}, {'mode', 'system', 'model'}) for choice in choices):
+                raise DGCConfigError('A DGC Router model_choice is {"mode": "router"} or {"mode": "router", "system": id, "model": name}')
         if command == 'set_pip_eyes' and (type(values.get('choice')) is not str or values['choice'] not in EYES_CHOICES):
             raise DGCConfigError('choice must be ask, relay or off')
         if command == 'set_pip_computer_apps' and (type(values.get('choice')) is not str or values['choice'] not in APPS_CHOICES):

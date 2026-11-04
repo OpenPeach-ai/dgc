@@ -102,3 +102,13 @@ endorsement implied. Bundled locally, so the Settings page makes no image reques
   https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/outlook_96x1.png
 - OneDrive (onedrive.png): Microsoft's Fluent product icon,
   https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/png/onedrive_96x1.png
+
+# Creativity plugin marks
+
+Downloaded unchanged on 2 November 2026 from each vendor's own site (the icon its pages declare) and only resized
+to 128×128 (fit inside, centred on a transparent square), never recoloured or redrawn. Used only to identify each
+vendor's plugin; no partnership implied. Bundled locally, no remote image requests.
+
+- cardboard: https://cardboard.ai/images/favicon-circle.png (SHA-256 of the download `97c482c1e8074211326a6c8f81741a3676f44241b2b896bb4a4b85ede481c9ea`)
+- higgsfield: https://higgsfield.ai/apple-icon.png (SHA-256 `47f5136c65f9dd2360c59d2b65d06d9e7289230aa4edd7b150f28e6f0582bf1c`)
+- runway: https://runwayml.com/icon.png (SHA-256 `f545e0e706d0c6be0e8602a8e8d685d4f43ab72880bd5e6a234916e765ff2b70`)

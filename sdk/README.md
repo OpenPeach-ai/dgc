@@ -1,14 +1,14 @@
 # DGC SDK
 
-Embed the DGC coding agent in an application or a CI job. **0.8.0**, editor protocol **v14**,
-pairs with CLI **0.50.0**. The release dry run passed on Linux, macOS 26.5.1 (Apple silicon),
-and Windows 11 through WSL 2 (Ubuntu 24.04). Native Windows remains experimental; focused Python
-and TypeScript SDK checks passed there, while its full suite was not run. Release tag **`sdk-v0.8.0`**
-(not `v0.5.x`, which are historical CLI tags).
+Embed the DGC coding agent in an application or a CI job. **0.9.0**, editor protocol **v14**,
+pairs with CLI **0.51.0**. The Python and TypeScript SDK suites passed on Linux, macOS 26.5.1
+(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04); see
+[COMPATIBILITY.md](COMPATIBILITY.md). Native Windows is experimental.
+Release tag **`sdk-v0.9.0`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
 | --- | --- |
-| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.8.0` |
+| Python `dgc-sdk` | `python3 -m pip install dgc-sdk==0.9.0` |
 | Node `@vibedgc/sdk` | `npm install @vibedgc/sdk` |
 
 Both drive `dgc serve` from a DGC CLI install, which they find on their own; `DGC_PYTHON` pins a

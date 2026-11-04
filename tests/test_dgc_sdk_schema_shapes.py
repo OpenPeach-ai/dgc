@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sdk" / "python"))
 
 from dgc_sdk.errors import DGCConfigError  # noqa: E402
-from dgc_sdk.schema import assert_supported, validate  # noqa: E402
+from dgc_sdk.schema import assert_supported, extract_json, validate  # noqa: E402
 
 
 class SchemaShapesTest(unittest.TestCase):
@@ -50,6 +50,22 @@ class SchemaShapesTest(unittest.TestCase):
                   "additionalProperties": {"type": "number", "minimum": 0}}
         assert_supported(schema)
         self.assertEqual(validate({"x": "ok", "y": 2}, schema), [])
+
+
+
+class ExtractJsonTest(unittest.TestCase):
+    """The final text an output_schema run is read from, the same way the TypeScript SDK reads it (one fixture)."""
+
+    def test_the_shared_cases(self):
+        import json
+        cases = json.loads((Path(__file__).resolve().parent / "fixtures" / "sdk_extract_json.json").read_text())
+        for case in cases:
+            with self.subTest(case["why"]):
+                if case.get("error"):
+                    with self.assertRaises(ValueError):
+                        extract_json(case["text"])
+                else:
+                    self.assertEqual(extract_json(case["text"]), case["value"])
 
 
 if __name__ == "__main__":

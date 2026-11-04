@@ -13,6 +13,7 @@ and opens that file; a running DGC (the terminal, the editor) serves it at an ad
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import webbrowser
@@ -92,13 +93,18 @@ def _open(aid: str, out) -> int:
 
 def _export(aid: str, fmt: str, to: str | None, out) -> int:
     path = service.export(aid, fmt)
-    if to:
-        target = Path(to).expanduser()
-        if target.is_dir():
-            target = target / path.name
-        shutil.copyfile(path, target)
-        path = target
-    out(str(path))
+    try:
+        if to:
+            target = Path(to).expanduser()
+            if target.is_dir():
+                target = target / path.name
+            shutil.copyfile(path, target)
+        else:
+            target = path.parent.parent / path.name     # the artifact's exports folder, one file per title and format
+            os.replace(path, target)
+    finally:
+        shutil.rmtree(path.parent, ignore_errors=True)  # the export's own private folder
+    out(str(target))
     return 0
 
 

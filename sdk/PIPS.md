@@ -13,8 +13,13 @@ from API 65 it can read what Ask DGC to fix did for each of a Pip's runs (`pips.
 `pips.unread(workspace_id)` and `pips.mark_read(pip_id, message_id=..., post_id=..., approved=True)`;
 TypeScript calls these `unread(workspaceId)` and `markRead(pipId, cursors, { approved: true })`.
 Mark only the message and run-result IDs the user actually saw, so later arrivals stay unread.
+API 70 lets a Pip run on DGC Router: `model_choice` takes `{"mode": "router"}` (any of the user's systems with the
+Pips job) or `{"mode": "router", "system": "nas", "model": "qwen3.5:9b"}` (that one), and `list_pip_models` names
+those systems while the Router is on. A run on the Router waits in the Pip queue while every worker that could take it
+is busy; see `session.router` in [docs/SDK.md](../docs/SDK.md). From API 71 a Personal Pip's chat reply that
+started a video carries `videos`, each video's job as DGC last saw it.
 
-It pairs with DGC CLI 0.50.0, which advertises **Pips API 69** over editor protocol
+It pairs with DGC CLI 0.51.0, which advertises **Pips API 71** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -136,7 +141,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.50.0 is API 69; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.51.0 is API 71; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -194,6 +199,8 @@ job with `create_pip` and a reviewed update.
 | 64 | Pip templates in code ([below](#pips-in-code-api-64)): `ensure_pip_template`, `prune_pip_templates` and `decide_pip_template_change` (M) and `list_pip_templates` (R), local only; `pips.ensure()`, `pips.ensure_all()`, `pips.templates()` and `pips.decide_template_change()` in both SDKs, refused before API 64. `PipTemplate` / `definePipTemplate` check a template before anything is sent and need no runtime. |
 | 65 | `list_pip_run_fixes {pip_id}` (R, local only): what Ask DGC to fix did for each of a Pip's runs, `{pip_id, workspace_id, fixes}`, the latest fix of each run, newest first: `fix_id`, `run_id`, `state` (`queued`, `preparing`, `running` or `applying` while it works; `applied`, `partial`, `unchanged`, `not_applied`, `failed`, `stopped`, `interrupted` or `undone`), `created_at`, `started_at?`, `ended_at?`, `files?` (`[{path, kind, additions, deletions, counted}]`), `held?`, `tests?`, `summary?`, `message?`, `undo?` and `session_id?` (the Work chat it ran in). A Personal Pip has none. `pips.run_fixes()` / `pips.runFixes()`, refused before API 65. |
 | 66 | No new command. `list_pip_models` also returns `pips_model`, the Pips default as set (`""` when Pips follow DGC; `default_model` stays what Default runs), and each model may carry `context_window`: the window DGC starts that model with (the one the user chose for it, else DGC's recommendation for its family), never a provider's maximum; a model without one has none known. Read the new fields only from a runtime advertising 66. The main chat reads the same list and changes models with its own tools (docs/PIPS.md, Models from the main chat). |
+| 70 | DGC Router: `model_choice` `{"mode": "router"}` (any of the user's systems with the Pips job) or `{"mode": "router", "system": id, "model": name}`, as a command's `model_choice` or `changes.model_choice`. Both SDKs refuse it before API 70. While the Router is on, `list_pip_models` also carries `router` (its systems and their models). |
+| 71 | No new command. A Personal Pip's chat reply that started a video carries `videos`: each video's job as DGC last saw it (its state, price and, once it is made, its file). Read it only from a runtime advertising 71. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 

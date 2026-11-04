@@ -392,7 +392,10 @@ test("in a tall window an opened prompt short enough to pin still scrolls away, 
 
 test("a prompt whose pinned strip would take more than 30% of the window does not pin, whatever the draft does", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openPage({ width: 900, height: 360 });
+  // 420px: the short prompt's strip fits both shares, 30% of the window and 40% of the 246px transcript. At 360px the
+  // transcript is 186px, and that strip would cover 46% of it, which is what left a woken reply as its last line (the
+  // test above).
+  const s = await openPage({ width: 900, height: 420 });
   try {
     // Tall from its words, not its picture: a sent image is a small chip now. Its compact preview
     // still yields the pin if the entire window is too short for the prompt and its Show more strip.
@@ -428,6 +431,65 @@ test("a prompt whose pinned strip would take more than 30% of the window does no
     assert.ok(!tall.tall.off && tall.tall.pinned, "in a taller window the same prompt pins");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
+});
+
+// 0.51.0 release candidate, a short Work chat: after a video's Stop woke the chat, the reply showed as its last line
+// under the pinned prompt, "different framing or a vertical cut.", then its time and actions. The prompt fitted 30% of
+// the window, but the window is not the transcript: here a 308px panel gives the transcript 134px, and the strip took
+// most of it. The turn, as his session had it: a commentary, generate_video, the answer, the wake, the reply.
+test("in a short panel the prompt never pins over most of the transcript: the end of a woken turn shows its whole reply", async (t) => {
+  if (skipOrFail(t)) return;
+  const A = "I'll do a second take — same subject and light, but a lower, closer macro angle with the ball rolling toward the light and a slow slight pan.";
+  const B = "Second take is rendering (~1–2 min, 5 s, 720p, about $0.15): lower macro angle, ball rolling toward the lens with the light raking in from the right, slow pan with a touch of handheld feel. I'll tell you the moment it's ready, and the player will appear under this reply.";
+  const C = "Understood — the second take was stopped, so I won't re-run it. Nothing else is rendering now; say the word if you want a new take with different framing or a vertical cut.";
+  const woken = [
+    { type: "turn_start", turn_id: "t1", prompt: "generate another one", kind: "prompt" },
+    { type: "text_delta", text: A }, { type: "stream_end", message_id: "t1:1", phase: "commentary" },
+    { type: "tool_call", call_id: "call_5", name: "generate_video", args: { aspect: "16:9", duration_s: 5, prompt: "a felt ball rolls", resolution: "720p" }, summary: "" },
+    { type: "tool_result", call_id: "call_5", name: "generate_video", is_error: false, is_diff: false, diff: "",
+      output: "Started a 5 s video with fal Wan 2.2 5B (720p, about $0.15), about 1–2 min (job vid_0123456789ab). It's made in the background." },
+    { type: "text_delta", text: B }, { type: "stream_end", message_id: "t1:2", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 0, final_message_id: "t1:2" },
+    { type: "turn_start", turn_id: "t2", prompt: "video: fal Wan 2.2 5B · ended", kind: "monitor" },
+    { type: "text_delta", text: C }, { type: "stream_end", message_id: "t2:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 0, final_message_id: "t2:1" },
+  ];
+  const read = (s) => s.page.evaluate(() => {
+    const P = window.__pin, head = P.heads().at(-1), view = P.log.getBoundingClientRect();
+    const reply = [...P.log.querySelectorAll(".text.final")].at(-1);
+    const pinned = P.pinned().includes(head);
+    // What covers the top of the view: the pinned bubble and its 12px fade, else nothing.
+    const covered = pinned ? head.getBoundingClientRect().bottom + 12 : view.top;
+    return { pinned, off: head.classList.contains("pin-off"), log: P.log.clientHeight, inner: innerHeight,
+      atEnd: P.log.scrollHeight - P.log.scrollTop - P.log.clientHeight < 2,
+      replyTop: reply.getBoundingClientRect().top - covered, replyBottom: view.bottom - reply.getBoundingClientRect().bottom };
+  });
+  const short = await openPage({ width: 520, height: 308 });
+  try {
+    await short.events([...turn("t0", "make a video of a felt ball", "Here it is."), ...woken]);
+    await short.settle();
+    const m = await read(short);
+    assert.ok(m.log < 160 && m.atEnd, `a short transcript, following the end (${JSON.stringify(m)})`);
+    assert.ok(m.off && !m.pinned, `the prompt does not pin over it (${JSON.stringify(m)})`);
+    assert.ok(m.replyTop >= 0 && m.replyBottom >= 0, `the whole reply is in view, its first line too (${JSON.stringify(m)})`);
+    assert.deepEqual(short.errors, []);
+  } finally { await short.page.close(); }
+  // The same turn in a tall panel still pins its prompt while its answer is read.
+  const tall = await openPage({ width: 520, height: 900 });
+  try {
+    await tall.events([...turn("t0", "make a video of a felt ball", "Here it is."), ...woken]);
+    await tall.settle();
+    const pinnedWhileRead = await tall.page.evaluate(async () => {
+      const P = window.__pin, head = P.heads().at(-1), box = head.parentElement;
+      // A turn taller than the view: read from its middle.
+      box.querySelector(".text.final").insertAdjacentHTML("beforeend", "<p style='height:1400px'></p>");
+      await P.frames(2);
+      await P.bring(box, -400);
+      return { off: head.classList.contains("pin-off"), pinned: P.pinned().includes(head) };
+    });
+    assert.deepEqual(pinnedWhileRead, { off: false, pinned: true });
+    assert.deepEqual(tall.errors, []);
+  } finally { await tall.page.close(); }
 });
 
 test("a click on a pinned prompt goes back to it; a double-click, a link and a click under the fade do not jump", async (t) => {

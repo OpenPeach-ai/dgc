@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -408,6 +409,26 @@ def render(aid: str, n: int | None = None, *, mode: str = "view", store: Store |
     return {"index.html": html.encode("utf-8")}, "index.html"
 
 
+# An export's own folder is kept this long: every caller copies its file at once, so older ones are removed.
+EXPORT_KEEP_SECONDS = 3600
+
+
+def _sweep_exports(folder: Path) -> None:
+    """Remove export folders older than EXPORT_KEEP_SECONDS, so repeated exports don't pile up in the store."""
+    cutoff = time.time() - EXPORT_KEEP_SECONDS
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if (entry.name.startswith("export-") and entry.is_dir(follow_symlinks=False)
+                    and entry.stat(follow_symlinks=False).st_mtime < cutoff):
+                shutil.rmtree(entry.path, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=None, store: Store | None = None) -> Path:
     """The artifact as a file, written to its exports folder; returns the path."""
     from .chatdgc import made
@@ -421,6 +442,7 @@ def export(aid: str, fmt: str, *, n: int | None = None, config=None, browser=Non
     # Each request owns its bytes until its caller copies them, even if another window exports
     # the same title and format meanwhile. The directory is private and the path is handed out
     # only after a complete write; failed exports leave no partial copy behind.
+    _sweep_exports(st.export_dir(aid))
     folder = Path(tempfile.mkdtemp(prefix="export-", dir=st.export_dir(aid)))
     target = folder / made.file_name(art.title, fmt)
     try:

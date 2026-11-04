@@ -151,6 +151,51 @@ class ServiceTests(unittest.TestCase):
         self.assertCode("service_conflict", service.install, self.home, upgrade=True, **self.options)
         self.assertIn("RestartSec=1", self.file.read_text())
 
+    def _unit_whose_interpreter_vanishes(self, *, pruned):
+        # An earlier install's venv interpreter is a link to the system Python; an OS upgrade then removes it.
+        old_source = self.base / "old-release"
+        (old_source / "dgc").mkdir(parents=True)
+        (old_source / "dgc" / "__init__.py").write_text('')
+        (old_source / "dgc" / "cli.py").write_text('')
+        real = self.base / "system-python" / "python3.12"
+        real.parent.mkdir()
+        real.write_text("#!/bin/sh\n")
+        real.chmod(0o755)
+        link = self.base / "old-venv" / "bin" / "python3"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        old = service.preview(self.home, python_executable=link, package_root=old_source, **self.options)
+        self.units.mkdir()
+        self.file.write_text(old["content"])
+        self.file.chmod(0o600)
+        real.unlink()
+        if pruned:
+            for item in (old_source / "dgc" / "cli.py", old_source / "dgc" / "__init__.py"):
+                item.unlink()
+            (old_source / "dgc").rmdir()
+            old_source.rmdir()
+        self.active, self.enabled = "failed", "enabled"
+
+    def _vanished_interpreter_unit_is_refreshed_and_turned_off(self, pruned):
+        self._unit_whose_interpreter_vanishes(pruned=pruned)
+        self.assertTrue(service.status(self.home, **self.options)["outdated"])
+        service.disable(self.home, **self.options)
+        self.assertIn(["disable", self.spec["unit_name"]], self.calls)
+        self.assertTrue(service.install(self.home, upgrade=True, **self.options)["changed"])
+        self.assertEqual(self.file.read_text(), self.spec["content"])
+
+    def test_a_unit_whose_interpreter_vanished_is_still_ours_to_refresh_and_turn_off(self):
+        self._vanished_interpreter_unit_is_refreshed_and_turned_off(pruned=False)
+
+    def test_a_pruned_unit_whose_interpreter_vanished_is_still_ours_to_refresh_and_turn_off(self):
+        self._vanished_interpreter_unit_is_refreshed_and_turned_off(pruned=True)
+
+    def test_an_edited_unit_whose_interpreter_vanished_is_still_a_conflict(self):
+        self._unit_whose_interpreter_vanishes(pruned=True)
+        self.file.write_text(self.file.read_text().replace("RestartSec=30", "RestartSec=1"))
+        self.assertCode("service_conflict", service.install, self.home, upgrade=True, **self.options)
+        self.assertCode("service_conflict", service.disable, self.home, **self.options)
+
     def test_failed_replacement_keeps_previous_service_unit(self):
         old_source = self.base / "old-release"
         (old_source / "dgc").mkdir(parents=True)

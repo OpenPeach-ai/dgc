@@ -1,4 +1,6 @@
-// The settings pages DGC saves with one Save (General, Models, Agents, Web search, ChatDGC, Security), drawn with the
+import { contextComboHTML, parseContext } from "./contextCombo.js";
+import { pipChoices } from "./settingsRouter.js";
+// The settings pages DGC saves with one Save (General, Models, Web search, ChatDGC, Security), drawn with the
 // page grammar settings.css gives every page: a title and one line, groups of rows, one-line hints with detail
 // behind "?", detail one click away (Advanced, Another host), and one Save at the foot that covers every page.
 /** The keep-loaded choices, with a value set elsewhere (the CLI, config.json) kept as it is. */
@@ -67,17 +69,27 @@ export function contextSizeMore(c) {
 // The sub-agents' context window (subagent_context_size, dgc/config.py): 0 is the main model's, else 2,048 to
 // 16,777,216 tokens. The box shows 0 as blank, under "Same as the main model".
 export const SUBAGENT_WINDOW_MIN = 2048, SUBAGENT_WINDOW_MAX = 16777216;
+/** Settings -> Models -> Sub-agents -> Thinking: "" is the main chat's level. */
+export const SUBAGENT_THINKING_CHOICES = [["", "Same as the main chat"], ["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"]];
 export function subagentWindowShown(c) {
     const tokens = Number(c?.subagent_context_size) || 0;
     return tokens > 0 ? String(tokens) : "";
 }
-/** Why a typed sub-agent window can't be saved, or "" when it can (blank and 0 both mean the main model's). */
+/** Why a typed sub-agent window can't be saved, or "" when it can (blank and 0 both mean the main model's). It reads
+ *  a size as the box does: 24576, 24,576, 24K or 24k. */
 export function subagentWindowProblem(text) {
     const raw = String(text ?? "").trim();
     if (!raw || Number(raw) === 0) return "";
-    const tokens = Number(raw);
-    return Number.isInteger(tokens) && tokens >= SUBAGENT_WINDOW_MIN && tokens <= SUBAGENT_WINDOW_MAX ? ""
-        : "Leave it blank for the main model's window, or enter 2,048 to 16,777,216 tokens.";
+    const tokens = parseContext(raw);
+    return typeof tokens === "number" && tokens >= SUBAGENT_WINDOW_MIN && tokens <= SUBAGENT_WINDOW_MAX ? ""
+        : "Leave it blank for the main model's window, or enter 2K to 16,384K (2,048 to 16,777,216 tokens), like 24K.";
+}
+/** Settings -> Models -> Sub-agents -> Context window: the same box as DGC Router's Context each (src/contextCombo.js),
+ *  its first choice "Same as the main chat" (blank: subagent_context_size 0). */
+function subagentWindowBox(c) {
+    const tokens = parseContext(c?.subagent_context_size);
+    return contextComboHTML({ id: "subagent_context_size", value: typeof tokens === "number" && tokens > 0 ? tokens : "",
+        blank: "Same as the main chat", label: "Context window", disabled: !c?.subagent_window_settable });
 }
 
 /** The number Context size shows: the window in use, so never more than a server's own window (above it can't apply). */
@@ -108,7 +120,7 @@ export function renderFields(section, main, config, providers, ui) {
     const old = "Update the DGC CLI to set this here.";
     // A page: its title, one line, and the rest of what it means behind "?".
     const head = (title, sub, more = "") => `<h2>${title}</h2>${ui.intro(section, sub, more)}`;
-    const group = (title, body, note = "") => `<section class="group"><h3>${title}</h3>${note ? `<p class="group-note">${note}</p>` : ""}<div class="rows">${body}</div></section>`;
+    const group = (title, body, note = "", id = "") => `<section class="group"${id ? ` id="${id}"` : ""}><h3>${title}</h3>${note ? `<p class="group-note">${note}</p>` : ""}<div class="rows">${body}</div></section>`;
     // A disclosure that remembers being open across redraws; open by itself when what it holds is set.
     const more = (key, summary, body, set) => `<details class="more" data-more="${key}"${OPEN.has(key) || set ? " open" : ""}><summary>${summary}</summary>${body}</details>`;
     const advanced = (key, body) => `<section class="group group-more"><div class="rows">${more(key, "Advanced", body, false)}</div></section>`;
@@ -127,8 +139,8 @@ export function renderFields(section, main, config, providers, ui) {
         const think = c.subscription_engine ? (c.subscription_effort || "off") : (c.think || "off");
         const shown = c.show_reasoning === false ? "hidden" : c.thinking_inline === false ? "collapsed" : "inline";
         main.innerHTML = head("General", "How DGC works on this computer.")
-            + group("Turns", field("Permission mode", "What DGC may do without asking.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"),
-                    "Default asks before it changes anything. Accept edits applies file edits without asking. Plan reads and proposes only. Auto acts without asking. Security's sandbox applies in every mode.")
+            + group("Turns", field("Permission mode", "What DGC may do in this Work chat.", sel("mode", [["default", "Default"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]], c.mode || "default"),
+                    "Default asks before it changes anything. Accept edits applies file edits without asking. Plan reads and proposes only. Auto acts without asking, so it is chosen for one Work chat at a time, here or in the mode menu. A new chat starts in Default, or in the mode you saved with dgc in a terminal unless that is Auto. A chat you reopen, or this one after a reload, comes back in the mode it had, Auto included, in a folder that is still trusted. Security's sandbox applies in every mode.")
                 + field("Thinking", "How hard the model thinks first.", sel("think", [["off", "Off"], ["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], think),
                     "Applies from the next model round.")
                 + field("DGC Ultra", "Splits big turns across sub-agents.", bool("ultra_mode", c.ultra_mode === true),
@@ -137,6 +149,8 @@ export function renderFields(section, main, config, providers, ui) {
                     c.budget_settable ? "Tokens one turn may spend, sub-agents included. When it is reached, no new sub-agent starts and the turn wraps up, keeping its work." : "")
                 + field("Context window", contextSizeHint(c), inp("context_size", contextSizeShown(c), "number"), contextSizeMore(c)))
             + group("What you see", field("Show thinking", "Inline, collapsed or hidden.", sel("show_reasoning", [["inline", "Inline"], ["collapsed", "Collapsed"], ["hidden", "Hidden"]], shown))
+                + field("Pictures in replies", "Shown, or folded to one line.", sel("pictures_in_replies", [["shown", "Shown"], ["folded", "Folded"]], c.pictures_in_replies === "folded" ? "folded" : "shown"),
+                    "Pictures and videos in a reply, in Work, ChatDGC and a Pip's chat. Folded, each block is one line you click to open. Folding or opening one reply's pictures yourself holds for that reply. Saved at once, for this editor.")
                 + field("Prompt suggestions", "Suggests what to ask next.", bool("suggest", c.suggest !== false),
                     "A grey suggestion in the message box after a reply; Tab or → takes it.")
                 + field("Wake on monitors", "A monitor's output starts a short turn.", bool("monitor_wake", c.monitor_wake !== false),
@@ -155,8 +169,8 @@ export function renderFields(section, main, config, providers, ui) {
         const cacheLife = field("Cache lifetime", c.cache_settable ? "How long Anthropic keeps it." : old,
             sel("prompt_cache_ttl", [["5m", "5 minutes"], ["1h", "1 hour"]], c.prompt_cache_ttl === "1h" ? "1h" : "5m"),
             c.cache_settable ? "Anthropic only. 5 minutes suits replies that follow each other; 1 hour keeps the cache between replies further apart, and each write costs more." : "");
-        main.innerHTML = head("Models", "The model that answers your turns, and its host.")
-            + group("Connection", hostRow("base_url", "provider", c.base_url || "")
+        main.innerHTML = head("Models", "The models DGC uses, and where they run.")
+            + group("Main model", hostRow("base_url", "provider", c.base_url || "")
                 + field("API key", "Blank keeps the saved key.", inp("api_key", c.api_key || "", "password"),
                     "Saved for this host only. A key is never sent to any other host.")
                 + model("model", "Model", "", c.model || ""))
@@ -185,6 +199,7 @@ export function renderFields(section, main, config, providers, ui) {
                     c.wait_settable ? FIRST_WORD_MORE : "")
                 + field("Wait between words", c.wait_settable ? "Minutes of quiet once it answers." : old,
                     inp("wait_between_words", c.wait_between_words ?? "5", "number"), c.wait_settable ? BETWEEN_WORDS_MORE : ""))
+            + helperBlocks()
             + saveBar;
         if (!c.cache_settable) for (const id of ["prompt_cache_ttl", "ollama_keep_alive"]) { const el = main.querySelector("#" + id); if (el) el.disabled = true; }
         const waitPick = main.querySelector("#wait_first_word"), waitMinutes = main.querySelector("#wait_first_word_minutes");
@@ -206,45 +221,98 @@ export function renderFields(section, main, config, providers, ui) {
         if (pick && rows) pick.addEventListener("change", () => { rows.hidden = !pick.value; });
         const box = main.querySelector("#subscription_model");
         if (box) box.placeholder = "The CLI's default";
+        wireHelpers(main);
         wire(main);
     }
-    function renderAgents(main) {
-        const c = config;
+    // Settings -> Models, after the main model: Fallback, Sub-agents, Pips, Images and DGC Router (the plan's blocks).
+    // Images and DGC Router save as they change (settingsImages.js, settingsRouter.js), apart from Save all.
+    // With DGC Router on, Sub-agents says the Router chooses (the usual model one click away, for when it is off or
+    // every worker is busy) and Pips can run on any Pip system, or one system and model.
+    function helperBlocks() {
+        const c = config, router = ui.router;
+        const routed = !!(router && router.capable() && router.on());
         const subHost = String(c.subagent_base_url || ""), fallbackHost = String(c.fallback_base_url || "");
         const routeRows = (prefix, presetId) => hostRow(`${prefix}_base_url`, presetId, c[`${prefix}_base_url`] || "")
             + field("Transport", "Inherit uses the main one.", sel(`${prefix}_api_mode`, [["", "Inherit"]].concat(TRANSPORTS), c[`${prefix}_api_mode`] || ""),
                 "Inherit uses the main transport on the main host, and Auto on any other.")
             + field("API key", "Blank keeps the saved key.", inp(`${prefix}_api_key`, c[`${prefix}_api_key`] || "", "password"),
                 "Saved for this host only. With none here, the main key goes only to the main host.");
-        main.innerHTML = head("Agents", "Helpers for parts of a turn, a fallback, and Pips.")
-            + group("Sub-agents", model("subagent_model", "Model", "", c.subagent_model || "")
-                + field("Run at once", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"), parallelMore(c))
+        const usual = model("subagent_model", "Model", "", c.subagent_model || "")
+            + field("Context window", c.subagent_window_settable ? "Tokens each keeps before it compacts." : old,
+                subagentWindowBox(c))
+            + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost);
+        const runAtOnce = field("Run at once", parallelHint(c), inp("max_parallel_tasks", c.max_parallel_tasks ?? 4, "number"), parallelMore(c));
+        // How hard each helper thinks (subagent_thinking), from a CLI that answers it. Which level wins: a DGC Router
+        // model's own choice, then the agent file's effort:, then this, then the main chat's.
+        const thinking = c.subagent_thinking_settable ? field("Thinking", "How hard each helper thinks.",
+            sel("subagent_thinking", SUBAGENT_THINKING_CHOICES, SUBAGENT_THINKING_CHOICES.some(([v]) => v === c.subagent_thinking) ? c.subagent_thinking : ""),
+            "Same as the main chat follows the chat's own level. An agent file's effort: wins over this, and on DGC Router a model's own Thinking wins over both; a model that can't think ignores it.") : "";
+        const subagents = routed
+            ? group("Sub-agents", `<div class="row-line router-chosen"><span class="words"><span class="name" id="router-subagents-line">${escapeHtml(router.summary())}</span>`
+                    + `<span class="hint">DGC picks a free worker for each. <button type="button" class="link" data-router-goto>See systems</button></span></span></div>`
+                + runAtOnce + thinking
+                + more("subagent-usual", "The usual sub-agent model", usual, false), "", "models-subagents")
+            : group("Sub-agents", model("subagent_model", "Model", "", c.subagent_model || "") + runAtOnce + thinking
                 + field("Context window", c.subagent_window_settable ? "Tokens each keeps before it compacts." : old,
-                    inp("subagent_context_size", subagentWindowShown(c), "number"))
-                + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost))
-            + group("Fallback", model("fallback_model", "Model", "Tried when the main model fails.", c.fallback_model || "")
-                + more("fallback-host", fallbackHost ? `Another host · ${escapeHtml(hostName(fallbackHost))}` : "Another host", routeRows("fallback", ""), !!fallbackHost))
-            + group("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it." : old, c.pips_model || ""))
-            + saveBar;
+                    subagentWindowBox(c))
+                + more("subagent-host", subHost ? `Another host · ${escapeHtml(hostName(subHost))}` : "Another host", routeRows("subagent", "subagent_provider"), !!subHost), "", "models-subagents");
+        const following = "Same as DGC" + (followed(c) ? ` (${followed(c)})` : "");
+        const pipsValue = String(c.pips_model || "");
+        const pipsOnRouter = routed && router.pipsDefault() && c.pips_settable;
+        const pips = pipsOnRouter
+            ? group("Pips", field("Pips run on", "A Pip can still choose its own.",
+                sel("pips_model", pipsRouterOptions(router, pipsValue, following), pipsValue),
+                "Every Pip set to Default runs there: on any computer with the Pips job, or on one system and model. Off the Router, they use DGC's own connection."), "", "models-pips")
+            : group("Pips", model("pips_model", "Model for Pips", c.pips_settable ? "Every Pip set to Default uses it." : old, /^router(:|$)/.test(pipsValue) ? "" : pipsValue), "", "models-pips");
+        // Images (settingsImages.js): only from a CLI that makes them (ready.capabilities.images); an older one has none.
+        const images = ui.images && ui.images.capable() ? ui.images.block() : "";
+        return group("Fallback", model("fallback_model", "Model", "Tried when the main model fails.", c.fallback_model || "")
+                + more("fallback-host", fallbackHost ? `Another host · ${escapeHtml(hostName(fallbackHost))}` : "Another host", routeRows("fallback", ""), !!fallbackHost), "", "models-fallback")
+            + subagents + pips + images + (router ? router.routerBlock() : "");
+    }
+    function pipsRouterOptions(router, value, following) {
+        const choices = pipChoices(router.status());
+        const known = new Set(choices.map(([v]) => v));
+        const rest = [["", `Not the Router: ${following}`]];
+        if (value && !known.has(value) && !/^router(:|$)/.test(value)) rest.push([value, `Not the Router: ${value}`]);
+        if (/^router:/.test(value) && !known.has(value)) choices.push([value, `${value.slice(7).replace("/", " · ")} (not offered now)`]);
+        return choices.concat(rest);
+    }
+    function wireHelpers(main) {
+        const c = config;
         const placeholders = { subagent_model: "Same as the main model", fallback_model: "None", subagent_base_url: "Same as the main host", fallback_base_url: "Same as the main host" };
         for (const [id, text] of Object.entries(placeholders)) { const el = main.querySelector("#" + id); if (el) el.placeholder = text; }
         const fallbackHint = main.querySelector("#fallback_model")?.closest(".field")?.querySelector(".hint");
         if (fallbackHint) fallbackHint.title = "If the main model fails or stalls, DGC tries this one.";
         const pipsBox = main.querySelector("#pips_model");
-        if (pipsBox) {
+        if (pipsBox && pipsBox.tagName !== "SELECT") {
             pipsBox.placeholder = "Same as DGC" + (followed(c) ? ` (${followed(c)})` : "");
             if (!c.pips_settable) pipsBox.disabled = true;
         }
         const window = main.querySelector("#subagent_context_size");
         if (window) {
-            // As the main window: whole kilotokens from 2,048 up; 0 (blank) is the main model's own.
-            Object.assign(window, { placeholder: "Same as the main model", min: "0", max: String(SUBAGENT_WINDOW_MAX), step: "1024" });
+            // 2K and up, typed or picked; blank is the main chat's own (the box's first choice).
             const check = () => window.setCustomValidity(subagentWindowProblem(window.value));
             window.addEventListener("input", check);
+            window.addEventListener("change", check);
             check();
             if (!c.subagent_window_settable) window.disabled = true;
         }
-        wire(main);
+        if (pipsBox?.tagName === "SELECT" && !c.pips_settable) pipsBox.disabled = true;
+        // The Router is off but the Pips default is set to it: the box shows DGC's own, and the choice is kept unless
+        // something else is typed (it applies again when the Router is back on).
+        if (pipsBox && pipsBox.tagName !== "SELECT" && /^router(:|$)/.test(String(c.pips_model || ""))) {
+            pipsBox.dataset.keepRouter = "1";
+            pipsBox.placeholder = "Same as DGC (DGC Router when it's on)";
+        }
+        main.querySelector("[data-router-goto]")?.addEventListener("click", () => {
+            main.querySelector("#models-router")?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+            main.querySelector("#router-on")?.focus({ preventScroll: true });
+        });
+        const routerBlock = main.querySelector("#models-router");
+        if (routerBlock && ui.router) ui.router.bind(routerBlock);
+        const imagesBlock = main.querySelector("#models-images");
+        if (imagesBlock && ui.images) { ui.images.bind(imagesBlock); ui.images.shown(); }
     }
     function renderSecurity(main) {
         const c = config;
@@ -339,7 +407,7 @@ export function renderFields(section, main, config, providers, ui) {
         if (!c.search_settable) { const web = main.querySelector("#chatdgc_web"); if (web) web.disabled = true; }
         wire(main);
     }
-    const renderers = { general: renderGeneral, models: renderModels, agents: renderAgents,
+    const renderers = { general: renderGeneral, models: renderModels,
         web: renderWeb, chatdgc: renderChatDGC, security: renderSecurity };
     if (!Object.hasOwn(renderers, section)) return;
     renderers[section](main);

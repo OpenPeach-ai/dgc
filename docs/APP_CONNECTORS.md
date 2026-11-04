@@ -112,6 +112,24 @@ its own approved apps.
 - Node.js and `npx` on the machine that runs DGC, for the standard MCP bridge that
   connects DGC to these services.
 
+## Signing in when your browser is on another computer
+
+DGC can run on one computer while your browser is on another: over SSH, or in an editor's remote window (VS Code's or
+Cursor's Remote-SSH, WSL, a dev container). A browser sign-in then returns to an address on the computer that runs
+DGC, which the editor forwards to your browser's computer.
+
+- DGC waits ten minutes for such a sign-in (two minutes otherwise). An editor's remote window tells DGC; so does a
+  terminal over SSH. For an editor shown from another computer some other way (over VNC, say), set
+  `DGC_EDITOR_REMOTE=1` for it.
+- Where the service also takes a code entered on any device (its sign-in server offers the device grant and lets DGC
+  register itself, as Clerk's does for Cardboard and Higgsfield), a remote window asks first: **Open the sign-in
+  page** or **Sign in with a code on another device**. With a code, DGC shows it, opens the service's page for it and
+  waits until you approve; nothing has to reach the computer that runs DGC.
+- If you signed in but nothing happened (the page your browser ended on shows an error such as "empty response"),
+  open **Signed in but nothing happened?** on the sign-in card, paste the whole address from that page's address bar
+  (it starts with `http://localhost`), and choose **Finish signing in**. DGC hands it to the sign-in still waiting and
+  finishes it. Only that sign-in's own address is taken.
+
 ## Where credentials live
 
 - A pasted connection token is kept in the editor's secret storage, tied to that

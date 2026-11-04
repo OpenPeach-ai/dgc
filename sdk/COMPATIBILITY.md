@@ -2,7 +2,8 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.8.0** | **v14, Pips API 69** | **0.50.0** | **≥ 3.10** | **≥ 22** | **Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04)** |
+| **0.9.0** | **v14, Pips API 71** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04)** |
+| 0.8.0 | v14, Pips API 69 | 0.50.0 | ≥ 3.10 | ≥ 22 | Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04) |
 | 0.7.0 | v14 | 0.48.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.10 | v14 | 0.47.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.9 | v14 | 0.46.0 | ≥ 3.10 | ≥ 22 | Linux |
@@ -18,9 +19,14 @@
 | 0.5.3 | v14 | 0.41.6 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.5.2 | v14 | 0.41.5 | ≥ 3.10 | ≥ 22 (source only, strip-types) | Linux |
 
-These host proofs are release dry runs with isolated CLI 0.50.0 installs, package builds,
+SDK 0.9.0's Python and TypeScript suites passed against CLI 0.51.0 on Linux, macOS 26.5.1
+(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04). The full Python product suite
+also passed on Linux and macOS; the WSL product suite is tracked separately from this SDK proof.
+These checks do not cover every macOS or WSL version.
+
+The 0.8.0 host proofs are release dry runs with isolated CLI 0.50.0 installs, package builds,
 the full Python and Node SDK suites. They do not cover every macOS or WSL version.
-Native Windows is experimental. Focused Python and TypeScript checks, plus an isolated
+Native Windows is experimental. For 0.8.0, focused Python and TypeScript checks, plus an isolated
 read-only runtime start, passed on Windows 11. The full native suite is outside the host
 proof: custom tools require Unix sockets and the native CLI has no OS sandbox for auto mode.
 
@@ -36,7 +42,7 @@ that GitHub release (one comment line and the README). From 0.5.3 the PyPI files
 release assets are the same bytes, built by one workflow from the tag.
 
 ```bash
-python3 -m pip install dgc-sdk==0.6.8
+python3 -m pip install dgc-sdk==0.9.0
 npm install @vibedgc/sdk
 ```
 

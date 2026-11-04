@@ -626,6 +626,24 @@ test("a refused delegation says it couldn't delegate, in the group's sentence an
   assert.deepEqual(p.errors, []);
 });
 
+// Seen 11-02: a batched delegation sent without its `tasks` array failed, and its step read "Couldn't delegate 0
+// helpers". A delegation that never named a helper says "Couldn't delegate"; its reason is its card's output.
+test("a batch that named no helper never counts 0 helpers, live or from an older CLI", () => {
+  for (const summary of ["", "0 helpers"]) {
+    const p = panel({ capabilities: {} });
+    p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });
+    p.event({ type: "tool_call", call_id: "call_0", name: "task", args: { tasks: null }, summary });
+    assert.doesNotMatch(p.doc.querySelector(".tool-group").textContent, /0 helper/);
+    const why = "error: task needs a `tasks` array of 1 to 8 helpers.";
+    p.event({ type: "tool_result", call_id: "call_0", name: "task", is_error: true, output: why });
+    assert.equal(p.doc.querySelector(".tool-group-label").textContent, "Couldn't delegate");
+    assert.equal(p.doc.querySelector(".tool .verb").textContent, "Couldn't delegate");
+    assert.doesNotMatch(p.doc.querySelector(".tool-group").textContent, /0 helper/);
+    assert.match(p.doc.querySelector(".tool .body pre").textContent, /needs a `tasks` array/, "the reason, one click away");
+    assert.deepEqual(p.errors, []);
+  }
+});
+
 test("an agent page rebuilt from its step log never touches the live turn", async () => {
   const p = panel({ clock: false });
   p.event({ type: "turn_start", turn_id: "t1", prompt: "go" });

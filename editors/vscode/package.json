@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.34.3",
+  "version": "0.35.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -326,6 +326,11 @@
         "title": "Settings",
         "category": "DGC",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "dgc.routerSettings",
+        "title": "Router Settings",
+        "category": "DGC"
       },
       {
         "command": "dgc.updateExtension",
@@ -708,6 +713,20 @@
           "scope": "window",
           "description": "Show a notification when a DGC chat you are not looking at needs your answer: an approval, a question or a plan. Open chat goes straight to it."
         },
+        "dgc.picturesInReplies": {
+          "type": "string",
+          "enum": [
+            "shown",
+            "folded"
+          ],
+          "enumDescriptions": [
+            "Pictures and videos in a reply show in full.",
+            "Pictures and videos in a reply start folded to one line; a click shows them."
+          ],
+          "default": "shown",
+          "scope": "application",
+          "description": "Pictures and videos in DGC's replies (Work, ChatDGC and a Pip's chat): shown, or folded to one line. Folding or opening one reply's pictures yourself holds for that reply."
+        },
         "dgc.linkFavicons": {
           "type": "boolean",
           "default": true,
@@ -725,7 +744,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the current `dgc` CLI (0.50.1 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the current `dgc` CLI (0.51.0 or newer; editor protocol v14 required). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }
@@ -805,5 +824,5 @@
     },
     "@azure/msal-node": "7.1.1"
   },
-  "dgcCliVersion": "0.50.1"
+  "dgcCliVersion": "0.51.0"
 }

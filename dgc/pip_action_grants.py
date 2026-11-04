@@ -48,10 +48,27 @@ def _local(actor):
 
 
 def require_can_always(payload) -> None:
-    """Refuse Always allow for a payment plugin's action, before anything runs."""
+    """Refuse Always allow for a payment plugin's action, or one of a plugin the user set to Always ask, before
+    anything runs."""
     money = _asks_every_time(payload)
     if money:
         raise RegistryError("asks_every_time", f"{money} can move money, so a Pip asks you every time. Choose Allow for this one.")
+    asks = _always_ask(payload)
+    if asks:
+        raise RegistryError("asks_every_time", f"You set {asks} to Always ask, so a Pip asks you every time. Choose Allow "
+                            "for this one.")
+
+
+def _always_ask(payload) -> str:
+    """The plugin's name when the user set it to Always ask (Pips settings, Plugins): then no Always allow holds for
+    its calls, as an allow rule never beats an ask rule of the user's own."""
+    if payload.get("kind") != "connector_call":
+        return ""
+    from .pip_plugins import always_asks, owner
+    if not always_asks(payload.get("server")):
+        return ""
+    found = owner(payload.get("server"))
+    return found["display_name"] if found else str(payload.get("server") or "this plugin")
 
 
 def _asks_every_time(payload) -> str:
@@ -229,8 +246,8 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 draft = drafts.get(store, draft_id, kind=draft_kind)
                 content = draft["payload"]["action" if draft_kind == "connector" else "event" if draft_kind == "calendar" else "message"]
                 grant = _matching(grants, action_kind, content)
-                if grant is None:
-                    continue
+                if grant is None or (draft_kind == "connector" and _always_ask({"kind": action_kind, **content})):
+                    continue                     # Always ask, set after this grant was given, wins: its card waits
                 actor = "pip-grant:" + grant["id"]
                 message = content["call"] if draft_kind == "connector" else content
                 prepared = drafts.prepare(store, draft_id, draft["digest"], grant["server"], grant["connection_digest"],

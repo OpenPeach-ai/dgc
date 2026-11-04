@@ -108,6 +108,15 @@ def _session_generation_guard(agent) -> dict:
     return {}
 
 
+def _tell_videos(agent) -> None:
+    """A reopened chat: its videos that ended while it was closed are told to its model, and the unfinished ones are
+    polled again (dgc/videos.py)."""
+    try:
+        agent.tell_finished_videos()
+    except Exception:                               # noqa: BLE001 -- a video never costs the resume
+        pass
+
+
 class SlashCompleter(Completer):
     """A live command palette: while the composer holds just `/word`, offer matching commands
     (name + description) as a dropdown. Filters as you type; picks with ↑/↓ + Enter."""
@@ -804,11 +813,15 @@ class TUI:
             ("session_redaction", "Redact credentials from saved sessions", "bool"),
         ],
         "Model routing": [
+            ("router", "DGC Router (your other computers)", "router"),
+            ("images", "Image generators", "images"),
             ("subagent_model", "Sub-agent model", "str"),
             ("subagent_base_url", "Sub-agent endpoint", "str"),
             ("subagent_api_mode", "Sub-agent transport", "enum",
              ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
             ("subagent_context_size", "Sub-agent context window (0 = main)", "int"),
+            ("subagent_thinking", "Sub-agent thinking (same = the main chat's)", "enum",
+             ["same", "off", "low", "medium", "high", "xhigh"]),
             ("max_parallel_tasks", "Parallel task workers (1–32)", "int"),
             ("fleet_worktree_root", "Fleet worktree storage", "str"),
             ("fallback_model", "Fallback model", "str"),
@@ -860,6 +873,18 @@ class TUI:
                            accent=True, back=self._palette_back)
 
     def _fmt_setting(self, key: str, typ: str):
+        if typ == "images":                     # image generators: their own block, shown and changed through /images
+            from . import images as images_mod
+            block = images_mod.settings(self.config)
+            count = len(block.get("generators") or [])
+            return (f"{count} generator{'s' if count != 1 else ''}"
+                    + (f" · default {block['default']}" if block.get("default") else "") + " · Enter for /images")
+        if typ == "router":                     # DGC Router: its own block, shown and changed through /router
+            from . import router as router_mod
+            block = router_mod.settings(self.config)
+            count = len(block.get("systems") or [])
+            return (("on" if block.get("enabled") else "off")
+                    + f" · {count} system{'s' if count != 1 else ''} · Enter for /router")
         v = self.config.get(key, "")
         if typ == "bool":
             return "on" if v else "off"
@@ -890,11 +915,19 @@ class TUI:
                            accent=True, back=self._open_settings)
 
     def _edit_setting(self, cat: str, key: str, typ: str, spec) -> None:
+        if typ == "router":
+            self._router_command("")
+            return
+        if typ == "images":
+            self._images_command("")
+            return
         if typ in ("bool", "enum"):
             choices = (["on", "off"] if typ == "bool" else spec[0])
             cur = self._fmt_setting(key, typ) if typ == "bool" else str(self.config.get(key, ""))
             if key in ("subagent_api_mode", "fallback_api_mode") and not cur:
                 cur = "inherit"
+            if key == "subagent_thinking" and not cur:
+                cur = "same"
             rows = [{"label": ("● " if c == cur else "○ ") + c, "value": c} for c in choices]
             self._open_overlay(rows, on_pick=lambda r: self._apply_setting(cat, key, r["value"], typ),
                                title=key, footer="↑↓ move · Enter select · Esc back",
@@ -919,6 +952,8 @@ class TUI:
             if typ == "bool":
                 val = raw == "on" if isinstance(raw, str) else bool(raw)
             elif key in ("subagent_api_mode", "fallback_api_mode") and raw == "inherit":
+                val = ""
+            elif key == "subagent_thinking" and raw == "same":
                 val = ""
             elif str(raw).strip() in ("", "default", "none") and typ != "enum":
                 val = DEFAULTS.get(key)         # the REAL default ("" for sampling, "qwen3:8b" for model)
@@ -1263,15 +1298,119 @@ class TUI:
                     if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
 
     def _show_usage(self, rest: str = "") -> None:
-        """`/usage [range]`: the local token ledger, the same aggregates as `dgc usage`."""
+        """`/usage [range] [system]`: the local token ledger, the same aggregates as `dgc usage`."""
         from . import usage_ledger
         try:
-            range_name = usage_ledger.normalize_range(rest)
+            range_name, wanted = usage_ledger.parse_usage_args(rest)
+            report, system, systems = usage_ledger.system_report(range_name, wanted)
         except ValueError as exc:
             self._flash(str(exc))
             return
-        self._open_reader(usage_ledger.format_report(usage_ledger.report(range_name)),
-                          footer="token usage · /usage today|7d|30d|month|all · Esc close")
+        self._open_reader(usage_ledger.format_report(report, system=system, by_system=None if system else systems),
+                          footer="token usage · /usage today|7d|30d|month|all [system] · Esc close")
+
+    def _router_command(self, rest: str = "") -> None:
+        """`/router`: DGC Router's systems (status), and add, test, on, off and a system's key. Network reads run
+        on a thread of their own; the answer lands in the transcript."""
+        from .router_cli import slash
+        words = rest.split()
+        sub = words[0].lower() if words else "status"
+        sess = self._cur_session() if hasattr(self, "_cur_session") else None
+
+        def ask_key(system_id, done, what="key"):
+            def save(text):
+                try:
+                    done(str(text or "").strip())
+                    self._flash(f"{what} {'saved' if str(text or '').strip() else 'removed'} for {system_id}")
+                except ValueError as exc:
+                    self._flash(f"DGC Router: {exc}")
+            self._ask_input(f"{what} for {system_id} (masked) · Enter saves it · blank removes it ", save, secret=True)
+
+        def work():
+            if sess is not None:
+                self._tls.session = sess
+            try:
+                body, line = slash(self.config, rest, ask_key=ask_key)
+            except Exception as exc:              # noqa: BLE001 -- a network surprise is a line, not a crash
+                body, line = "", f"DGC Router: {type(exc).__name__}: {exc}"
+            if body:
+                self._append_md(redact_text(body, secret_values(self.config)))
+            if line:
+                self._flash(line)
+            try:
+                self.agent._refresh_system()
+            except Exception:                     # noqa: BLE001
+                pass
+            self._invalidate()
+        if sub in ("key", "token"):
+            work()
+            return
+        self._flash({"status": "reading DGC Router…", "add": "looking at that computer…",
+                     "test": "testing it (a few seconds of its GPU)…",
+                     "hardware": "reading its hardware…"}.get(sub, "DGC Router…"))
+        threading.Thread(target=work, name="dgc-tui-router", daemon=True).start()
+
+    def _images_command(self, rest: str = "") -> None:
+        """`/images`: the image generators (list), and add, test, default, this project's choice and a key. Network
+        reads run on a thread of their own; the answer lands in the transcript."""
+        from .images_cli import slash
+        words = rest.split()
+        sub = words[0].lower() if words else "list"
+        sess = self._cur_session() if hasattr(self, "_cur_session") else None
+
+        def ask_key(generator_id, done):
+            def save(text):
+                try:
+                    done(str(text or "").strip())
+                    self._flash(f"key {'saved' if str(text or '').strip() else 'removed'} for {generator_id}")
+                except ValueError as exc:
+                    self._flash(f"Images: {exc}")
+            self._ask_input(f"key for {generator_id} (masked) · Enter saves it · blank removes it ", save, secret=True)
+
+        def work():
+            if sess is not None:
+                self._tls.session = sess
+            try:
+                body, line = slash(self.config, rest, ask_key=ask_key, project_root=self.config.project_root)
+            except Exception as exc:              # noqa: BLE001 -- a network surprise is a line, not a crash
+                body, line = "", f"Images: {type(exc).__name__}: {exc}"
+            if body:
+                self._append_md(redact_text(body, secret_values(self.config)))
+            if line:
+                self._flash(line)
+            self._invalidate()
+        if sub == "key":
+            work()
+            return
+        self._flash({"list": "reading your image generators…", "add": "looking at that generator…",
+                     "test": "testing (no image is made)…"}.get(sub, "Images…"))
+        threading.Thread(target=work, name="dgc-tui-images", daemon=True).start()
+
+    def _videos_command(self, rest: str = "") -> None:
+        """`/videos`: the video generators and jobs; stop, show and open one (dgc/videos_cli.py)."""
+        from .videos_cli import slash
+        try:
+            body, line = slash(self.config, rest, project_root=self.config.project_root)
+        except Exception as exc:                  # noqa: BLE001 -- a surprise is a line, not a crash
+            body, line = "", f"Videos: {type(exc).__name__}: {exc}"
+        if body:
+            self._append_md(redact_text(body, secret_values(self.config)))
+        if line:
+            self._flash(line)
+        self._invalidate()
+
+    def video_job(self, job: dict, change: str) -> None:
+        """A video this chat started: its end as a transcript line ("Made a 5 s video with fal Wan · 720p · $0.15"),
+        with where it is and how to open it."""
+        if job.get("state") not in ("done", "failed", "cancelled"):
+            return
+        from . import videos
+        th = style_mod.theme()
+        self._append(self._rich(f"[{th.accent}]▶[/] {_esc(videos.line(job))}"))
+        path = (job.get("result") or {}).get("path")
+        if path:
+            self._append(self._rich(f"[{th.faint}]  {_esc(path)} · Open: /videos open {_esc(job['id'])}[/]"))
+        self._invalidate()
 
     def _set_notify(self, rest: str = "") -> None:
         choice = rest.strip().lower()
@@ -2535,6 +2674,9 @@ class TUI:
             elif isinstance(blk, dict) and blk.get("kind") == "handback":
                 frags, nl = reuse(blk, lambda b=blk: self._handback_frags(b))
                 add(frags, "think", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "mcp_card":
+                frags, nl = reuse(blk, lambda b=blk: self._card_frags(b))
+                add(frags, "tool", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
                 frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
                 add(frags, "tool", nl)
@@ -2642,7 +2784,11 @@ class TUI:
                     bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "",
                     blk.get("more", ""), getattr(self, "_width", 0), theme_key,
                     len(blk.get("images") or ()), blk.get("images_omitted") or 0,
+                    # a generated image's picture arrives after the step, from a thread of its own
+                    tuple(len(p.get("rows") or ()) for p in blk.get("previews") or ()),
                     id(blk))  # two identical steps must keep separate click handlers
+        if kind == "mcp_card":
+            return ("mcp_card", blk.get("url", ""), blk.get("plugin", ""), theme_key, id(blk))   # its own click handler
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
             # width and height in the identity preserves the resize reflow exactly.
@@ -3141,6 +3287,17 @@ class TUI:
                            f"\u2014 click / /expand{extra}")
                 for ln in (lines[-tail:] if tail else []):
                     body_rows(body, ln)
+        for preview in b.get("previews") or ():
+            # A generated image: where it was saved, and a small picture of it where the terminal shows colour.
+            frags.append(("", "\n"))
+            frags.append(rail())
+            frags.append((f"fg:{th.accent_dim}", "\u25a3 " + str(preview.get("label") or "")[:max(8, room - 2)]))
+            for cells_row in preview.get("rows") or ():
+                frags.append(("", "\n"))
+                frags.append(rail())
+                frags.append(("", " "))
+                for top, bottom in cells_row:
+                    frags.append((f"fg:{top} bg:{bottom}", "\u2580"))
         if shot_label:
             self._image_rows(b, frags, rail, th, shots, shot_omitted, exp, toggle_row, toggled[0], toggle)
         return frags
@@ -3475,14 +3632,15 @@ class TUI:
 
     def _mod_allow_card(self, host, entry: dict) -> None:
         """Allow, once: everything it asks for, in plain words, then Allow or Not now."""
-        from .mods import consent as mod_consent
+        from .mods import catalog as mod_catalog, consent as mod_consent
         th = style_mod.theme()
         header = [Text.from_markup(f"[bold]{_esc(entry['title'])}[/] [{th.faint}]{_esc(entry.get('version', ''))}[/]")]
         header += [Text.from_markup(f"[{th.text}]· {_esc(line)}[/]") for line in entry["asks"]]
         if entry.get("written"):
             header.append(Text.from_markup(f"[{th.faint}]DGC wrote it in this session; allowed, it runs for this "
                                            f"session only.[/]"))
-        elif entry["state"] == "needs_allow" and mod_consent.record(entry["name"]) is not None:
+        elif entry["state"] == "needs_allow" and (found := mod_catalog.find(entry["name"], host.extra)) is not None \
+                and mod_consent.record_for(found) is not None:
             header.append(Text.from_markup(f"[{th.warn}]This version asks for more than you allowed before.[/]"))
         rows = [{"label": "Allow", "value": "yes"}, {"label": "Not now", "value": "no"}]
         self._open_overlay(rows, on_pick=lambda r: self._mod_act(host, "allow-yes", entry["name"], review=entry.get("review", ""))
@@ -5069,6 +5227,9 @@ class TUI:
         blk["error"] = tool_output_is_error(out)
         if blk.get("asked"):                            # a settled question: its Q → A lines, not the model text
             out = "\n".join(blk["asked"][1:]) or blk["asked"][0]
+        else:                                           # no sentence written for the model alone (ui.shown_output)
+            from .ui import shown_output
+            out = shown_output(name, out)
         out = style_mod.terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
@@ -5115,9 +5276,40 @@ class TUI:
             self.blocks.append(blk)
         blk.setdefault("images", []).extend(rows)
         blk["images_omitted"] = int(blk.get("images_omitted") or 0) + max(0, int(omitted or 0))
+        if str(caption or "").startswith("generated image"):
+            self._image_previews(blk, rows)
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
+
+    def _image_previews(self, blk: dict, rows: list) -> None:
+        """A generated image's saved path, and (decoded on a thread of its own) a small half-block picture of it when
+        the terminal shows colour. No colour (NO_COLOR, a dumb terminal): the path alone."""
+        root = str(getattr(self.config, "project_root", "") or "")
+        entries = []
+        for row in rows:
+            path = str(row.get("source_path") or row.get("path") or "")
+            if not path:
+                continue
+            label = path[len(root) + 1:] if root and path.startswith(root + os.sep) else path
+            size = f"{row.get('width')}×{row.get('height')}" if row.get("width") else ""
+            entry = {"label": f"{label}" + (f"  ({size})" if size else ""), "rows": []}
+            entries.append((entry, path))
+            blk.setdefault("previews", []).append(entry)
+        colour = not os.environ.get("NO_COLOR") and os.environ.get("TERM", "") not in ("dumb",)
+        if not entries or not colour:
+            return
+
+        def draw():
+            from .image_preview import cells
+            for entry, path in entries:
+                try:
+                    with open(path, "rb") as handle:
+                        entry["rows"] = cells(handle.read(), 36, max_rows=18) or []
+                except OSError:
+                    entry["rows"] = []
+            self._invalidate()
+        threading.Thread(target=draw, name="dgc-tui-image-preview", daemon=True).start()
 
     def _settle_running_tools(self) -> None:
         """Turn end / cancel: stop any tool block still marked running so its rail doesn't animate forever.
@@ -5272,6 +5464,109 @@ class TUI:
             if caption:
                 line.append(f"   {style_mod.terminal_safe_text(caption)}", style=th.faint)
             self._append(self._rich(line))
+
+    # ---- MCP Apps: a plugin's card can't be drawn in a terminal. One line says it opened, and "Open it" (or /cards)
+    # shows it in the browser, on a loopback page DGC serves for this chat alone (dgc/mcp_apps.py, CardServer).
+    def mcp_apps_shown(self) -> bool:
+        return True
+
+    def _card_token(self, sess) -> str:
+        """This session's token for the browser page: what a card there asks reaches this session's agent."""
+        token = getattr(sess, "_mcp_card_token", "")
+        if token:
+            return token
+        from . import mcp_apps
+
+        def add_rule(route, sess=sess):
+            return self.add_permission_rule(route, {})
+
+        def message(record, text, sess=sess):
+            self._card_message(sess, text)
+
+        def context(record, text, sess=sess):
+            mcp_apps.stage_context(sess.agent, record, text)
+
+        token = mcp_apps.CardServer.get().register(mcp_apps.WorkLink(sess.agent, add_rule=add_rule),
+                                                     message=message, context=context)
+        sess._mcp_card_token = token
+        return token
+
+    def _card_message(self, sess, text: str) -> None:
+        """A card's ui/message in the browser: the user's message in this session, labelled with its plugin."""
+        def send():
+            if not any(item is sess for item in self._sessions) or getattr(sess, "_closing", False):
+                return
+            prior = getattr(self._tls, "session", None)
+            self._tls.session = sess
+            try:
+                if sess._turn.is_set():
+                    self._route_followup(text, queue_only=True)
+                else:
+                    self._submit(text)
+                self._invalidate()
+            finally:
+                if prior is None:
+                    del self._tls.session
+                else:
+                    self._tls.session = prior
+        loop = getattr(getattr(self, "app", None), "loop", None)
+        if loop is not None:
+            loop.call_soon_threadsafe(send)
+
+    def mcp_app_card(self, record: dict) -> None:
+        from . import mcp_apps
+        sess = self._cur_session()
+        token = self._card_token(sess)
+        mcp_apps.CardServer.get().owned(token, record["card_id"])
+        url = mcp_apps.CardServer.get().page_url(token, record["card_id"])
+        cards = sess.__dict__.setdefault("_mcp_cards", [])
+        cards.append(url)
+        del cards[:-32]
+        sess.blocks.append({"kind": "mcp_card", "plugin": str(record.get("plugin") or record.get("server") or "A plugin"),
+                            "tool": str(record.get("tool") or ""), "url": url})
+        self._invalidate()
+
+    def _card_frags(self, blk: dict) -> list:
+        th = style_mod.theme()
+        url = blk.get("url", "")
+
+        def open_it(mouse_event, url=url):
+            from prompt_toolkit.mouse_events import MouseEventType
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                self._open_card(url)
+                return None
+            return NotImplemented
+
+        return [(f"bold fg:{th.accent}", "  \u25c6 "),
+                (f"bold fg:{th.text_strong}", style_mod.terminal_safe_text(f"{blk.get('plugin')} opened a card")),
+                (f"fg:{th.faint}", " \u00b7 "),
+                (f"underline fg:{th.accent_bright}", "Open it", open_it),
+                (f"fg:{th.faint}", "   /cards opens it in your browser")]
+
+    def _open_card(self, url: str) -> None:
+        """Open a card's page in the browser, and say its address in the transcript: on a computer you reach over SSH
+        the browser that opens (if any) isn't yours, so the address is there to copy (forward the port to use it)."""
+        if not url:
+            self._flash("no card to open yet")
+            return
+        opened = self._open_url(url)
+        from rich.text import Text
+        th = style_mod.theme()
+        t = Text()
+        t.append("  \u25c6 ", style=f"bold {th.accent}")
+        t.append("The card's page" + (" (opened in your browser)" if opened else "") + ": ", style=th.muted)
+        t.append(style_mod.terminal_safe_text(url), style=f"bold {th.accent_bright}")
+        t.append("\n    It answers on this computer only: from another computer, forward its port first.", style=th.faint)
+        self._append(self._rich(t))
+        self._flash("opened the card in your browser" if opened else "the card's address is above: open it in a browser")
+
+    def _cards_command(self, rest: str) -> None:
+        cards = self._cur_session().__dict__.get("_mcp_cards") or []
+        try:
+            back = max(1, int(rest)) if rest.strip() else 1
+        except ValueError:
+            back = 1
+        self._open_card(cards[-back] if len(cards) >= back else "")
 
     def artifact_ready(self, art) -> None:
         """Propose opening a freshly-served localhost artifact, right in the transcript."""
@@ -5765,6 +6060,12 @@ class TUI:
             detail = _arg_summary(args, name)
             if detail:
                 header.append(Text("  " + detail, style=th.muted))
+            if name in ("generate_image", "generate_video") and args.get("prompt"):
+                # What it will show, and anything about the money the card says (this month's limit reached).
+                prompt = " ".join(style_mod.terminal_safe_text(str(args["prompt"])).split())
+                header.append(Text("  " + (prompt[:140] + ("…" if len(prompt) > 140 else "")), style=th.faint))
+                if args.get("note"):
+                    header.append(Text("  " + style_mod.terminal_safe_text(str(args["note"])), style=th.warn))
         # Show WHAT the edit does before asking whether to allow it. A shell command is its own
         # preview (above); an edit tool's arguments are not -- a write_file that truncates a
         # 3,000-line file to five looked exactly like a one-character fix, because the card was the
@@ -5783,15 +6084,26 @@ class TUI:
             safe = style_mod.terminal_safe_text(
                 redact_text(preview, secret_values(self.config)))
             self._append(self._rich(render_mod.render_diff(safe.expandtabs(4))))
-        ans = self._ask({"kind": "approve", "header": header,
-                         "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
-                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"},
-                        recheck=(lambda: {"once": 0, "no": 2}.get(recheck())) if recheck else None)
-        if ans == 3:                                     # deny + tell the model why (steers the retry)
+        # A DGC Router change and a look on the network ask every time (permissions.ALWAYS_ASK_TOOLS), and so does a
+        # call the user's own ask rule asks about: the card never offers an Always it couldn't keep.
+        from .agent import interaction_offers_always
+        from .permissions import NO_ALWAYS_TOOLS
+        if name in NO_ALWAYS_TOOLS or not interaction_offers_always():
+            options, footer = (["Allow once", "Deny", "Deny with a reason"],
+                               "↑↓ · 1 allow · 2 deny · Enter select · Esc deny")
+            answers = {0: "once", 1: "no", 2: "reason"}
+        else:
+            options, footer = (["Allow once", "Always allow this", "Deny", "Deny with a reason"],
+                               "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny")
+            answers = {0: "once", 1: "always", 2: "no", 3: "reason"}
+        rows = {value: index for index, value in answers.items()}
+        ans = self._ask({"kind": "approve", "header": header, "options": options, "footer": footer},
+                        recheck=(lambda: rows.get(recheck())) if recheck else None)   # once | no | None
+        if answers.get(ans) == "reason":                 # deny + tell the model why (steers the retry)
             self.deny_reason = self._ask_text("why / what to do instead:")
             return "no"
         self.deny_reason = ""
-        return {0: "once", 1: "always"}.get(ans, "no")
+        return {"once": "once", "always": "always"}.get(answers.get(ans), "no")
 
     def _ask_text(self, prompt: str, cancel=None) -> str:
         """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
@@ -6183,8 +6495,10 @@ class TUI:
 
     def _chrome_below(self) -> int:
         # the actual rows under the header: status(1) + composer box(composer+2) + shortcut(1),
-        # plus the welcome tip while the transcript is empty.
-        return self._composer_height() + 4 + (1 if self._tip_visible() else 0)
+        # plus the welcome tip while the transcript is empty, and the mods' band and status line (dgc/mods/terminal).
+        # Without those, the welcome card took every row the mods needed too, and with Context and Tally allowed
+        # prompt_toolkit said "Window too small..." at every size.
+        return self._composer_height() + 4 + (1 if self._tip_visible() else 0) + self._mod_band_height()
 
     def _line_prefix(self, line_no, wrap_count):
         th = style_mod.theme()
@@ -6477,7 +6791,8 @@ class TUI:
                 # The user's untracked files its copy had no room for, named as a helper's are.
                 agent._left_out_note = workspace.left_out_note
             if session_path:
-                agent.load_session(session_path)
+                agent.load_session(session_path, saved_mode=True)    # opened from the list here: in its own mode
+                _tell_videos(agent)
             else:
                 agent.session_file = _sess.new_path(home)
             sess = AgentSession(session_config, self, agent=agent)
@@ -7228,6 +7543,12 @@ class TUI:
             self._show_eta(rest)
         elif cmd == "usage":
             self._show_usage(rest)
+        elif cmd == "router":
+            self._router_command(rest)
+        elif cmd == "images":
+            self._images_command(rest)
+        elif cmd == "videos":
+            self._videos_command(rest)
         elif cmd == "notify":
             self._set_notify(rest)
         elif cmd == "monitors":
@@ -7247,6 +7568,8 @@ class TUI:
                 self._flash(f"/make {'|'.join(kinds)} TEXT")
             else:
                 self._submit(ask.strip(), output=kind)
+        elif cmd == "cards":
+            self._cards_command(rest)
         elif cmd in ("artifact", "artifacts"):
             words = rest.split()
             if len(words) == 2 and words[0] == "open":
@@ -7679,6 +8002,14 @@ class TUI:
             defs = ", ".join(getattr(self.agent, "agent_defs", {}).keys()) or "(none)"
             # This chat's agents first (what matters now; `/agents all` for every one), then the configuration.
             listing = self._agents_listing(everything=rest.strip().lower() == "all")
+            from . import router as _router_mod
+            _block = _router_mod.settings(cfg)
+            if _block.get("enabled"):
+                # DGC Router chooses: what is said above is only where a helper goes when no system can take it.
+                _on = [s for s in _block["systems"] if s.get("enabled", True) and "subagents" in s.get("jobs", [])]
+                listing += (f"[bold {th.accent}]DGC Router[/]  [{th.text}]chooses each helper's system · "
+                            f"{len(_on)} system{'s' if len(_on) != 1 else ''} for sub-agents[/]  "
+                            f"[{th.faint}]/router for the detail[/]\n")
             self._append(self._rich(listing + f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
                                     f"  host   [{th.text}]{_esc(sh)}[/]\n"
                                     f"  route  [{th.text}]{_esc(st)}[/]\n"
@@ -8267,6 +8598,10 @@ class TUI:
         note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
         if note:
             self.blocks.append(self._rich(f"[{th.faint}]◉ {_esc(note)}[/]"))
+        # Saved in Auto or Accept edits in a folder not trusted now: it reopened in Default, said once.
+        note = getattr(self.agent, "take_mode_restore_note", lambda: "")()
+        if note:
+            self.blocks.append(self._rich(f"[{th.warn}]◉ {_esc(note)}[/]"))
         self._show_monitor_restarts(getattr(self.agent, "restart_monitors", lambda: [])())
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
@@ -8311,7 +8646,8 @@ class TUI:
             if association:
                 self._open_saved_session(items[i][0], home)
                 return
-            n = self.agent.load_session(items[i][0])
+            n = self.agent.load_session(items[i][0], saved_mode=True)    # the person's pick: in its own mode
+            _tell_videos(self.agent)
             self.blocks.clear(); self._buf = ""; self._think = ""
             self._ft_cache = {}
             self._render_history()          # show the loaded conversation, not a blank screen
@@ -8846,15 +9182,23 @@ class TUI:
                 self._flash("context must be a token count of at least 2048, or 0 for the main window"); return
             cfg.set("subagent_context_size", size)
             self._flash(f"sub-agent context → {size:,} tokens" if size else "sub-agent context → the main window"); return
+        if args and args[0] == "thinking" and len(args) == 2:
+            level = args[1].lower()
+            if level not in ("same", "off", "low", "medium", "high", "xhigh"):
+                self._flash("thinking must be same (the main chat's), off, low, medium, high or xhigh"); return
+            cfg.set("subagent_thinking", "" if level == "same" else level)
+            self._flash("sub-agent thinking → the main chat's level" if level == "same"
+                        else f"sub-agent thinking → {level}"); return
         if args and args[0] == "clear":
             for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                      "subagent_api_mode", "subagent_context_size"):
+                      "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
                 cfg.set(k, 0 if k == "subagent_context_size" else "")
             self._flash("sub-agent overrides cleared — inherits the main model/host"); return
         labels = ["Set sub-agent host (provider or a custom LAN URL)",
                   "Set sub-agent model (from that host)",
                   "Set sub-agent API transport",
                   "Set sub-agent context window",
+                  "Set sub-agent thinking",
                   "Clear — inherit the main model & host"]
 
         def pick(i):
@@ -8871,18 +9215,24 @@ class TUI:
                 names = ["Same as the main model"] + [f"{size // 1024}K tokens" for size in SUBAGENT_WINDOWS]
                 self._show_picker("Sub-agent context window", names,
                                   lambda j: self._subagent_flow(f"context {sizes[j]}"))
+            elif i == 4:
+                levels = ["same", "off", "low", "medium", "high", "xhigh"]
+                names = ["Same as the main chat", "Off", "Low", "Medium", "High", "Extra high"]
+                self._show_picker("Sub-agent thinking", names,
+                                  lambda j: self._subagent_flow(f"thinking {levels[j]}"))
             else:
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode", "subagent_context_size"):
+                          "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
                     cfg.set(k, 0 if k == "subagent_context_size" else "")
                 self._flash("sub-agent → inherits the main model/host")
         sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
         sh = cfg.get("subagent_base_url") or "(inherit main host)"
         st = cfg.get("subagent_api_mode") or "inherit/infer"
         sc = _subagent_window_text(cfg)
+        sk = cfg.get("subagent_thinking") or "same as the main chat"
         self._append(self._rich(
             f"[{style_mod.theme().faint}]sub-agent model {_esc(sm)} · host {_esc(sh)} · "
-            f"transport {_esc(st)} · context {_esc(sc)}[/]"))
+            f"transport {_esc(st)} · context {_esc(sc)} · thinking {_esc(sk)}[/]"))
         self._show_picker("Sub-agents", labels, pick)
 
     def _tui_worktree(self, rest: str) -> None:
@@ -10105,10 +10455,11 @@ class TUI:
                 self._invalidate()
                 return
             try:
-                agent.load_session(agent.session_file)          # as it was saved there, last
+                agent.load_session(agent.session_file, saved_mode=True)   # as it was saved there, last
             except Exception as exc:                            # noqa: BLE001
                 self.error(f"Open here: the session couldn't be read: {exc}")
                 return
+            _tell_videos(agent)
             if sess is self.active:
                 sess.blocks.clear()
                 self._ft_cache = {}
@@ -10310,6 +10661,11 @@ def _arg_summary(args: dict, name: str = "") -> str:
         # The agent, by what it was asked to do (the agent resolves it into `agent`), else its id.
         v = style_mod.terminal_safe_text(args.get("agent") or args.get("id") or "").replace("\n", " ")
         return v[:100] + ("…" if len(v) > 100 else "")
+    if name in ("generate_image", "generate_video") and isinstance(args, dict) and args.get("generator") and args.get("price"):
+        # A generation's card: which generator, how many at what size (or how long), and what it costs (dgc/ui.py).
+        from .ui import arg_summary
+        v = style_mod.terminal_safe_text(arg_summary(name, args)).replace("\n", " ")
+        return v[:150] + ("…" if len(v) > 150 else "")
     if isinstance(args, dict) and args.get("via"):   # a vision model looked (dgc/vision.py)
         v = style_mod.terminal_safe_text(f"{args.get('path') or 'image'} · via {args['via']}")
         v = v.replace("\n", " ")

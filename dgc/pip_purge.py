@@ -5,6 +5,8 @@ import json
 import os
 import re
 import shutil
+import sqlite3
+import time
 from pathlib import Path
 
 from .workspace_registry import RegistryError
@@ -18,11 +20,24 @@ def _q(name):
     return '"' + name.replace('"', '""') + '"'
 
 
+# The tables full-text search keeps beside a virtual table (FTS5, then FTS3/4).
+_SHADOW = ('_data', '_idx', '_docsize', '_config', '_content', '_segments', '_segdir', '_stat')
+
+
 def _tables(db):
     # FTS shadow tables are maintained by the chat triggers; deleting their rows
     # directly corrupts the index. SQLite's table_list distinguishes them.
-    return {row[1] for row in db.execute('PRAGMA table_list') if row[2] == 'table'
-            and not row[1].startswith(('sqlite_', 'dgc_purge_'))}
+    rows = db.execute('PRAGMA table_list').fetchall()
+    if rows:
+        return {row[1] for row in rows if row[2] == 'table'
+                and not row[1].startswith(('sqlite_', 'dgc_purge_'))}
+    # SQLite before 3.37 has no table_list and answers nothing. sqlite_master lists a
+    # virtual table and its shadow tables as plain tables: leave both out by name.
+    master = db.execute("SELECT name,sql FROM sqlite_master WHERE type='table'").fetchall()
+    virtual = {r[0] for r in master if re.match(r'\s*CREATE\s+VIRTUAL\s+TABLE\b', r[1] or '', re.I)}
+    shadows = {v + suffix for v in virtual for suffix in _SHADOW}
+    return {r[0] for r in master if r[0] not in virtual and r[0] not in shadows
+            and not r[0].startswith(('sqlite_', 'dgc_purge_'))}
 
 
 def _selected_rows(db, pip_id, run_ids):
@@ -120,6 +135,37 @@ def _delete_rows(db, selected):
         raise RegistryError('unsafe_state', 'Pip deletion would leave broken registry references.')
 
 
+def _names(value, pip_id):
+    return pip_id in json.dumps(value)
+
+
+def _without(value, pip_id):
+    """A shared JSON value with this Pip's entries taken out: the list items and object members that name it."""
+    if isinstance(value, list):
+        return [_without(v, pip_id) for v in value if not _names(v, pip_id)]
+    if isinstance(value, dict):
+        return {k: _without(v, pip_id) for k, v in value.items()
+                if pip_id not in k and not (isinstance(v, str) and pip_id in v)}
+    return value
+
+
+def _forget_metadata(db, pip_id):
+    """Every per-Pip row names the Pip in its key and goes. A row shared by every Pip (the desktop notifier's seen
+    list, say) loses only this Pip's entries: deleting it whole would forget the other Pips' too."""
+    db.execute('DELETE FROM metadata WHERE instr(key,?)>0', (pip_id,))
+    for key, value in db.execute('SELECT key,value FROM metadata WHERE instr(value,?)>0', (pip_id,)).fetchall():
+        try:
+            shared = json.loads(value)
+        except (TypeError, ValueError, RecursionError):
+            shared = None
+        if isinstance(shared, (dict, list)):
+            kept = _without(shared, pip_id)
+            if not _names(kept, pip_id):
+                db.execute('UPDATE metadata SET value=? WHERE key=?', (json.dumps(kept), key))
+                continue
+        db.execute('DELETE FROM metadata WHERE key=?', (key,))
+
+
 def _journal_path(directory, pip_id):
     return Path(directory) / 'purges' / f'{pip_id}.json'
 
@@ -162,108 +208,205 @@ def _remove_private(path, root):
 
 
 def _artifact_owned(folder, pip_id):
+    """True for this Pip's saved Output, False for another's. None when DGC can't tell and it may be this Pip's (a
+    half-made Output from a crash, a damaged or unreadable record): never decided by guessing, and never deleted."""
     from .artifact_store import Artifact, ArtifactError
     record = folder / 'artifact.json'
     if folder.is_symlink() or record.is_symlink():
-        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.')
+        return None
     try:
         raw = record.read_bytes()
-    except OSError as exc:
-        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
+    except FileNotFoundError:
+        # Half-made: the Library's own list skips these. An empty one holds nobody's data.
+        try:
+            return None if any(folder.iterdir()) else False
+        except OSError:
+            return None
+    except OSError:
+        return None
     try:
         meta = json.loads(raw)
-    except ValueError as exc:
-        # Ownership cannot be established from a damaged record. Keep the
-        # journal pending instead of claiming that all of this Pip's data was
-        # removed while an unknown Output remains in the Library.
-        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(meta, dict):
+        return None
     try:
         art = Artifact.from_json(meta)
-    except ArtifactError as exc:
-        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.') from exc
-    if art.id != folder.name[:19] or (art.origin.get('surface') == 'pip'
-                                     and not isinstance(art.origin.get('pip'), str)):
-        raise RegistryError('unsafe_state', 'A saved Output needs repair before Pip deletion can finish.')
+    except ArtifactError:
+        # Readable, but a record this DGC doesn't know (a newer DGC's type): whether it names this Pip is plain.
+        return None if pip_id in json.dumps(meta) else False
+    if art.id != folder.name[:19]:
+        return None if pip_id in json.dumps(meta) else False
+    if art.origin.get('surface') == 'pip' and not isinstance(art.origin.get('pip'), str):
+        return None
     return art.origin.get('pip') == pip_id or art.legacy.get('pip') == pip_id
 
 
 def _cleanup(registry, pip_id, run_ids):
+    """Erase what the deleted Pip left on disk. Every part runs even when an earlier one fails, and the first
+    failure is raised after them (the journal stays, so a later Pips command finishes it). Returns the saved
+    Outputs left in place because DGC couldn't tell whether they were this Pip's."""
     from . import pip_computer
     from .pip_logins import Store as LoginStore
     from .artifact_store import ARTIFACT_ID, Store as ArtifactStore
-    pip_computer.stop_host(pip_id)
     root = Path(registry.directory)
-    for path in (root / 'computers' / pip_id, root / 'chat_images' / pip_id,
-                 root / 'chat_files' / pip_id, root / 'daily-log' / pip_id,
-                 root / 'working-notes' / f'{pip_id}.md', root / 'careful' / f'{pip_id}.json'):
-        _remove_private(path, root)
-    for run_id in run_ids:
-        _remove_private(root / 'runs' / run_id, root)
-    logins = LoginStore(root)
-    with logins._locked():
-        data = logins.read(strict=True)
-        kept = []
-        changed = False
-        for login in data['logins']:
-            grants = login['pips']
-            if grants == 'all':
-                kept.append(login)
-            elif pip_id not in grants:
-                kept.append(login)
-            elif len(grants) > 1:
-                login['pips'] = [p for p in grants if p != pip_id]
-                kept.append(login); changed = True
-            else:
-                changed = True
-        if changed:
-            logins._write({**data, 'logins': kept})
-    # Pip state and the account artifact Library are siblings under .dgc.
-    # Using the process-global store here can erase a different profile when
-    # controls target an explicit registry (including SDK isolated homes).
-    arts = ArtifactStore(root.parent / 'artifacts')
-    if arts.root.is_symlink():
-        raise RegistryError('unsafe_state', 'The Output Library must not be a symbolic link.')
-    with arts.lock():
-        for folder in arts.root.iterdir():
-            if ARTIFACT_ID.fullmatch(folder.name) and _artifact_owned(folder, pip_id):
-                _remove_private(folder, arts.root)
-        trash = arts.root / '.trash'
-        if trash.is_symlink():
-            raise RegistryError('unsafe_state', 'The Output Library trash must not be a symbolic link.')
-        if trash.is_dir():
-            for folder in trash.iterdir():
-                if not folder.is_dir() or not re.fullmatch(r'ar_[0-9a-f]{16}-\d{8}T\d{6}Z', folder.name):
-                    continue
-                if _artifact_owned(folder, pip_id):
+    left, failures = [], []
+
+    def files():
+        pip_computer.stop_host(pip_id)
+        for path in (root / 'computers' / pip_id, root / 'chat_images' / pip_id,
+                     root / 'chat_files' / pip_id, root / 'daily-log' / pip_id,
+                     root / 'working-notes' / f'{pip_id}.md', root / 'careful' / f'{pip_id}.json'):
+            _remove_private(path, root)
+        for run_id in run_ids:
+            _remove_private(root / 'runs' / run_id, root)
+
+    def logins():
+        store = LoginStore(root)
+        with store._locked():
+            data = store.read(strict=True)
+            kept = []
+            changed = False
+            for login in data['logins']:
+                grants = login['pips']
+                if grants == 'all':
+                    kept.append(login)
+                elif pip_id not in grants:
+                    kept.append(login)
+                elif len(grants) > 1:
+                    login['pips'] = [p for p in grants if p != pip_id]
+                    kept.append(login); changed = True
+                else:
+                    changed = True
+            if changed:
+                store._write({**data, 'logins': kept})
+
+    def outputs():
+        # Pip state and the account artifact Library are siblings under .dgc.
+        # Using the process-global store here can erase a different profile when
+        # controls target an explicit registry (including SDK isolated homes).
+        arts = ArtifactStore(root.parent / 'artifacts')
+        if arts.root.is_symlink():
+            raise RegistryError('unsafe_state', 'The Output Library must not be a symbolic link.')
+        if not arts.root.is_dir():
+            return
+        with arts.lock():
+            folders = [f for f in arts.root.iterdir() if ARTIFACT_ID.fullmatch(f.name)]
+            trash = arts.root / '.trash'
+            if trash.is_symlink():
+                raise RegistryError('unsafe_state', 'The Output Library trash must not be a symbolic link.')
+            if trash.is_dir():
+                folders += [f for f in trash.iterdir()
+                            if re.fullmatch(r'ar_[0-9a-f]{16}-\d{8}T\d{6}Z', f.name) and f.is_dir()]
+            for folder in sorted(folders):
+                owned = _artifact_owned(folder, pip_id)
+                if owned:
                     _remove_private(folder, arts.root)
+                elif owned is None:
+                    # One Output DGC can't read never holds up the rest, and is never deleted on a guess.
+                    left.append(str(folder))
 
+    def memory():
+        # What a Personal Pip kept in the user's one memory is tagged with it, with a quote of the chat it came
+        # from. Look where the Pip wrote (DGC's memory) and in this registry's own profile.
+        from . import shared_memory
+        places = {}
+        for where in (shared_memory.default_root(), root.parent / 'memory'):
+            places.setdefault(os.path.abspath(where), Path(where))
+        for where in places.values():
+            if not (where / 'facts.json').exists() and not (where / 'journal.ndjson').exists():
+                continue
+            try:
+                shared_memory.SharedMemory(where).erase_pip(pip_id)
+            except shared_memory.NotRemembered as exc:
+                raise RegistryError('unsafe_state', "DGC's memory file couldn't be read, so what this Pip kept "
+                                    'there stays until it can be. Check it in Settings → Memory.') from exc
 
-def recover(registry):
-    root = Path(registry.directory) / 'purges'
-    if not root.is_dir():
-        return
-    if root.is_symlink():
-        raise RegistryError('unsafe_state', 'The Pip deletion journal directory is not private.')
-    for path in root.glob('pip_*.json'):
+    for part in (files, logins, outputs, memory):
         try:
-            if path.is_symlink() or not path.is_file():
-                raise ValueError('unsafe purge journal')
-            value = json.loads(path.read_text())
-            pip_id, run_ids = value['pip_id'], value['run_ids']
-            if not _PIP.fullmatch(pip_id) or path.name != f'{pip_id}.json' or not isinstance(run_ids, list) or not all(_RUN.fullmatch(r) for r in run_ids):
-                raise ValueError('invalid purge journal')
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            raise RegistryError('unsafe_state', 'A Pip deletion journal needs repair before continuing.') from exc
-        # A concurrent purge may have written the journal but not committed.
-        # Wait for its write transaction before deciding the journal is stale.
-        with registry.transaction():
-            still_live = registry.db.execute('SELECT 1 FROM pips WHERE id=?', (pip_id,)).fetchone() is not None
-        if still_live:
-            # The database transaction never committed. This journal contains no
-            # authorization to delete a still-live Pip's files.
-            path.unlink(); continue
-        _cleanup(registry, pip_id, run_ids)
+            part()
+        except (RegistryError, OSError) as exc:
+            failures.append(exc)
+    if failures and left:
+        raise RegistryError(getattr(failures[0], 'code', 'unsafe_state'),
+                            f'{failures[0]} {left_note(left)}') from failures[0]
+    if failures:
+        raise failures[0]
+    return left
+
+
+def left_note(left):
+    """What to tell the user about saved Outputs a deletion left in place."""
+    one = len(left) == 1
+    return (f"DGC couldn't read {'a saved Output' if one else f'{len(left)} saved Outputs'}, so it left "
+            f"{'it' if one else 'them'} in place: {', '.join(left)}. Delete {'it' if one else 'them'} "
+            f"if {'it was' if one else 'they were'} this Pip's.")
+
+
+def _finish(registry, path):
+    """Finish one journalled deletion: (pip_id, the saved Outputs left in place)."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('unsafe purge journal')
+        value = json.loads(path.read_text())
+        pip_id, run_ids = value['pip_id'], value['run_ids']
+        if not _PIP.fullmatch(pip_id) or path.name != f'{pip_id}.json' or not isinstance(run_ids, list) or not all(_RUN.fullmatch(r) for r in run_ids):
+            raise ValueError('invalid purge journal')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RegistryError('unsafe_state', 'A Pip deletion journal needs repair before continuing.') from exc
+    # A concurrent purge may have written the journal but not committed.
+    # Wait for its write transaction before deciding the journal is stale.
+    with registry.transaction():
+        still_live = registry.db.execute('SELECT 1 FROM pips WHERE id=?', (pip_id,)).fetchone() is not None
+    if still_live:
+        # The database transaction never committed. This journal contains no
+        # authorization to delete a still-live Pip's files.
         path.unlink()
+        return pip_id, []
+    left = _cleanup(registry, pip_id, run_ids)
+    path.unlink()
+    return pip_id, left
+
+
+RETRY_SECONDS = 60
+
+
+def recover(registry, *, strict=True):
+    """Finish deletions a crash or a failure left half done: {pip_id: saved Outputs left in place}. `strict`
+    raises the first problem. Otherwise (every Pips command does this first) a deletion that can't finish yet
+    never fails the command: it is tried again at most once a minute, until what stops it is fixed."""
+    root = Path(registry.directory) / 'purges'
+    done = {}
+    try:
+        if not root.is_dir():
+            return done
+        if root.is_symlink():
+            raise RegistryError('unsafe_state', 'The Pip deletion journal directory is not private.')
+        journals = sorted(root.glob('pip_*.json'))
+    except (RegistryError, OSError, sqlite3.Error):
+        if strict:
+            raise
+        return done
+    for path in journals:
+        try:
+            if not strict and time.time() - path.lstat().st_mtime < RETRY_SECONDS:
+                continue
+            pip_id, left = _finish(registry, path)
+            done[pip_id] = left
+        except (RegistryError, OSError, sqlite3.Error):
+            _tried(path)
+            if strict:
+                raise
+    return done
+
+
+def _tried(path):
+    """Note when a deletion was last tried: the next try waits RETRY_SECONDS."""
+    try:
+        if path.is_file() and not path.is_symlink():
+            os.utime(path)
+    except OSError:
+        pass
 
 
 def delete(store, pip_id, *, expected_name, expected_version, expected_lifecycle_revision, actor):
@@ -276,7 +419,8 @@ def delete(store, pip_id, *, expected_name, expected_version, expected_lifecycle
     _integer(expected_lifecycle_revision, 'Expected lifecycle revision')
     if actor not in ('editor-user', 'local-console'):
         raise RegistryError('local_only', 'Permanently delete a Pip on this computer.')
-    recover(store.registry)
+    # Another Pip's unfinished deletion never stops this one.
+    recover(store.registry, strict=False)
     with store.registry.transaction():
         current = _current(store, pip_id)
         if current['status'] != 'archived':
@@ -294,8 +438,16 @@ def delete(store, pip_id, *, expected_name, expected_version, expected_lifecycle
         store.db.execute('PRAGMA defer_foreign_keys=ON')
         selected = _selected_rows(store.db, pip_id, run_ids)
         _delete_rows(store.db, selected)
-        store.db.execute('DELETE FROM metadata WHERE instr(key,?)>0 OR instr(value,?)>0', (pip_id, pip_id))
+        _forget_metadata(store.db, pip_id)
         if store.db.execute('SELECT 1 FROM pips WHERE id=?', (pip_id,)).fetchone():
             raise RegistryError('unsafe_state', 'The Pip remained in the registry.')
-    recover(store.registry)
-    return {'deleted': True, 'pip_id': pip_id}
+    journal = _journal_path(store.registry.directory, pip_id)
+    try:
+        _, left = _finish(store.registry, journal)
+    except (RegistryError, OSError):
+        _tried(journal)
+        raise
+    result = {'deleted': True, 'pip_id': pip_id}
+    if left:
+        result['outputs_left'] = left
+    return result

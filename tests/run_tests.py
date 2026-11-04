@@ -6987,12 +6987,19 @@ def test_mcp_protocol():
         check("MCP remote auth materializes only as a runtime environment reference",
               remote_args[1] == "mcp-remote@0.8.3"
               and remote_args[remote_args.index("--header") + 1] == "Authorization: Bearer ${SERVER_TOKEN}")
-        proxy_only_args = _runtime_server_args({
-            "transport": "remote", "command": "npx",
-            "args": ["-y", "mcp-remote", "https://example.invalid/mcp"],
-            "url": "https://example.invalid/mcp",
-            "env_names": ["HTTPS_PROXY"],
-        })
+        # A sign-in waits longer in a remote session (DGC_EDITOR_REMOTE, or a terminal over SSH): this check is about
+        # the local default, so run it as a local session whatever shell the suite runs in.
+        _remote_env = {k: os.environ.pop(k) for k in ("DGC_EDITOR_REMOTE", "SSH_CONNECTION", "SSH_TTY")
+                       if k in os.environ}
+        try:
+            proxy_only_args = _runtime_server_args({
+                "transport": "remote", "command": "npx",
+                "args": ["-y", "mcp-remote", "https://example.invalid/mcp"],
+                "url": "https://example.invalid/mcp",
+                "env_names": ["HTTPS_PROXY"],
+            })
+        finally:
+            os.environ.update(_remote_env)
         check("MCP remote environment passthrough is never mistaken for Bearer auth",
               proxy_only_args[:5] == ["-y", "mcp-remote@0.8.3", "https://example.invalid/mcp", "--auth-timeout", "120"]
               and "--header" not in proxy_only_args)
@@ -10991,6 +10998,8 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/atlassian-rovo.png",
         "extension/media/plugin-logos/build-web-apps.png",
         "extension/media/plugin-logos/calendar.png", "extension/media/plugin-logos/canva.png",
+        "extension/media/plugin-logos/cardboard.png", "extension/media/plugin-logos/higgsfield.png",
+        "extension/media/plugin-logos/runway.png",
         "extension/media/plugin-logos/composio.svg",
         "extension/media/plugin-logos/contacts.png", "extension/media/plugin-logos/dgc.svg",
         "extension/media/plugin-logos/drive.png", "extension/media/plugin-logos/dropbox.png",
@@ -11090,6 +11099,11 @@ def test_extension_vsix_guard():
         "extension/media/voicemode.js",
         "extension/media/promptrail.js",
         "extension/media/mods.js",
+        "extension/media/videoPlayer.js",
+        "extension/media/pictureFold.js",
+        "extension/media/pluginCalls.js",
+        "extension/media/mcpApps.js",
+        "extension/media/mcpApps.css",
         "extension/media/chatdgc.js",
         "extension/media/chatdgc.css",
         "extension/media/chart.js",
@@ -11137,7 +11151,7 @@ def test_extension_vsix_guard():
         "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 183)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 191)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real

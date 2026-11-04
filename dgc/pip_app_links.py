@@ -406,7 +406,17 @@ def _search_settings(config) -> tuple[str, str, str]:
     return shared_settings(config)
 
 
-def schemas(apps_now) -> list[dict]:
+def outlook_words(microsoft) -> str:
+    """How Outlook Mail reaches a Pip, as true as DGC knows it: through the user's Microsoft plugin when it is set up,
+    else through that plugin once they add it. "Uses the user's existing Microsoft plugin", said in a home with none,
+    became "the only app connected is Outlook Mail" in Core's first hello."""
+    if microsoft is True:
+        return "Outlook Mail uses the user's DGC Microsoft plugin, which is set up"
+    return ("Outlook Mail would use DGC's Microsoft plugin, which the user hasn't set up (it is not connected; the "
+            "Connect card says how to add it)")
+
+
+def schemas(apps_now, microsoft=None) -> list[dict]:
     # "Nothing is connected yet" read as "Composio is not connected", and a Pip told the user Composio
     # was out of its reach. Only this Pip's own apps are meant.
     connected_line = ("Direct app links to you now: " + ", ".join(f"{a['app']} ({a['label']})" for a in apps_now) + ". "
@@ -414,8 +424,8 @@ def schemas(apps_now) -> list[dict]:
     reads = ", ".join(sorted(f"{t} ({app_name(k)})" for t, k in READ_TOOLKITS.items()))
     return [
         {"type": "function", "function": {"name": "connect_app", "description": (
-            "Ask the user to connect one of their apps to you. Outlook Mail uses the user's existing DGC Microsoft "
-            "plugin; other apps use Composio only when no enabled DGC plugin already supplies that app. Check the "
+            "Ask the user to connect one of their apps to you. " + outlook_words(microsoft) + "; "
+            "other apps use Composio only when no enabled DGC plugin already supplies that app. Check the "
             "plugin_tools route first for an enabled plugin. Do not call connect_app merely because the list of "
             "direct app links is empty. If you can already read the app through a plugin, a "
             "time-scheduled routine can use that plugin on every run: do not claim it needs another app link. "
@@ -482,6 +492,10 @@ class RunSocket:
         from . import pip_sdk_apps          # your own apps' tools (Pips API 61)
         self.sdk_apps = pip_sdk_apps.Session(config, pip_id, workspace_id, run_id, unattended=unattended)
         self.borrow = None           # borrowing the user's own Chrome (pip_borrow.Session): asking, and the one turn lent it
+        from . import pip_images     # image generation (made here, never in the worker: the keys stay here)
+        self.images = pip_images.Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
+        from . import pip_videos     # video generation, the same way (the job outlives the run)
+        self.videos = pip_videos.Session(directory, config, pip_id, workspace_id, run_id, unattended=unattended)
         self._stopped = threading.Event()
         threading.Thread(target=self._serve, name="pip-apps-run", daemon=True).start()
 
@@ -498,7 +512,8 @@ class RunSocket:
             except Exception:
                 own = []                          # a broken apps file never stops the Pip's other tools
         pin = {"socket": str(self.path), "token": self.token, "apps": now, "plugins": plugins,
-               "composio": composio_server(self.config) is not None}
+               "composio": composio_server(self.config) is not None,
+               "microsoft": microsoft_mail.ready(self.config)}
         if own:
             pin["sdk_apps"] = own
         lent = self.borrow.pin() if self.borrow is not None else None
@@ -516,6 +531,18 @@ class RunSocket:
     def call(self, op: str, args: dict):
         from .pip_plugins import TOOLS as PLUGIN_TOOLS
         from .pip_borrow import TOOLS as BORROW_TOOLS
+        from .pip_images import TOOLS as IMAGE_TOOLS
+        from .pip_videos import TOOLS as VIDEO_TOOLS
+        if op in IMAGE_TOOLS:
+            try:
+                return self.images.call(op, args)
+            except Exception as exc:              # never hang the Pip: say so
+                return f"error: the image wasn't made ({type(exc).__name__})."
+        if op in VIDEO_TOOLS:
+            try:
+                return self.videos.call(op, args)
+            except Exception as exc:              # never hang the Pip: say so
+                return f"error: the video wasn't started ({type(exc).__name__})."
         if op in BORROW_TOOLS:
             if self.borrow is None:
                 return "error: borrowing the user's Chrome isn't available in this run."
@@ -625,9 +652,11 @@ class RunSocket:
                         args = message.get("args")
                         from .pip_plugins import TOOLS as PLUGIN_TOOLS
                         from .pip_borrow import TOOLS as BORROW_TOOLS
+                        from .pip_images import TOOLS as IMAGE_TOOLS
+                        from .pip_videos import TOOLS as VIDEO_TOOLS
                         answer = ("error: invalid app arguments" if not isinstance(args, dict) else
                                   self.call(op, args) if op in TOOLS + PLUGIN_TOOLS + BORROW_TOOLS + SDK_APP_OPS
-                                  else "error: unknown app operation")
+                                  + IMAGE_TOOLS + VIDEO_TOOLS else "error: unknown app operation")
                         reply = answer if isinstance(answer, dict) else {"text": answer}
                     client.sendall(json.dumps(reply).encode("utf-8") + b"\n")
                 except (OSError, ValueError, TypeError):

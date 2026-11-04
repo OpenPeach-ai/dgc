@@ -6,12 +6,13 @@ answers its permission and question requests, and gets a structured result back.
 
 | Package | Version | Pairs with | Protocol | Runtime |
 | --- | --- | --- | --- | --- |
-| `dgc-sdk` (Python, PyPI) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Python 3.10+ |
-| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.8.0** | CLI **0.50.0** | editor protocol v14 | Node 22+ |
+| `dgc-sdk` (Python, PyPI) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Python 3.10+ |
+| `@vibedgc/sdk` (Node, GitHub release tarball) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Node 22+ |
 
-The release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
-(Ubuntu 24.04). Native Windows is experimental: focused Python and TypeScript SDK checks passed,
-but the full SDK suite was not run there (custom tools need Unix sockets).
+SDK 0.9.0's Python and TypeScript suites passed on Linux, macOS 26.5.1 (Apple silicon), and
+Windows 11 through WSL 2 (Ubuntu 24.04). [sdk/COMPATIBILITY.md](../sdk/COMPATIBILITY.md)
+records the scope of the host checks.
+Native Windows is experimental (custom tools need Unix sockets).
 The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
 application attribute the model-token spend your provider bills you.
 
@@ -27,12 +28,12 @@ application attribute the model-token spend your provider bills you.
 
 ## Install
 
-### Pips (SDK 0.8.0)
+### Pips (SDK 0.9.0)
 
 SDK 0.7.0 introduced `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
 managing the Pips of an existing DGC profile: standing agents that review, test and
-draft beside the main chat. SDK 0.8.0 pairs with DGC CLI 0.50.0, which advertises Pips API
-69; each control checks the minimum Pips API it needs before sending anything. See
+draft beside the main chat. SDK 0.9.0 pairs with DGC CLI 0.51.0, which advertises Pips API
+71; each control checks the minimum Pips API it needs before sending anything. See
 [sdk/PIPS.md](../sdk/PIPS.md) for the full command list and capability gates.
 
 | API | Purpose |
@@ -125,14 +126,14 @@ iterator. TypeScript uses camelCase (`chatId`, `messageId`,
 ### Published packages
 
 ```bash
-python3 -m pip install dgc-sdk==0.8.0
+python3 -m pip install dgc-sdk==0.9.0
 ```
 
 That installs `import dgc_sdk`. Do not `pip install dgc`: the PyPI project named `dgc` is an
 unrelated library.
 
 The SDK does not contain the agent. It drives `dgc serve` from a DGC CLI install, so you also need
-the CLI (0.50.0 or newer, protocol v14):
+the CLI (0.51.0 or newer, protocol v14):
 
 ```bash
 curl -fsSL https://vibedgc.com/install.sh | bash
@@ -424,6 +425,112 @@ result's `made_artifacts` holds what the run made. `AsyncSession.artifacts` is `
 awaited. TypeScript: `session.artifacts.list({ type })`, `.update(id, content, { baseVersion })`,
 `.compare(id, before, after?)`, `.allowSource(id, source, allowed, baseVersion?)`, and `output` in run options.
 
+DGC Router (CLI 0.51+, `capabilities["router"]`; without it `session.router` raises `DGCUnsupportedError`): the
+user's other computers that run models, for sub-agents and Pips. `session.router` (the `router` property) is a `Router`; each call is one
+request, and the answers are the CLI's status dicts (`{enabled, when_busy, workers, systems: [...], line}`):
+
+- `status(*, refresh=False)` → every system with its jobs, models, workers busy and free, health and measured speed;
+  `refresh` checks every system and re-reads it first.
+- `update(action, **fields)` → `{"change", "status"}`: `turn_on`, `turn_off`, `add_system`, `edit_system`,
+  `remove_system`, `enable_system`, `disable_system`, `set_model`, `set_jobs`, `set_when_busy`, `apply_suggestion`
+  (`system`, `context`), with the fields the model's `router_update` tool takes. `add_system(base_url, *, name=None, system=None, jobs=None, models=None,
+  workers=None, one_model_at_a_time=None, memory_gb=None)` is `update("add_system", ...)`.
+- `set_key(system, key)`: the only way a system's key travels; DGC keeps it in the user's `secrets.json`, bound to
+  the system's address, and never sends it back (a system says `has_key`).
+- `probe(system, *, model=None, checks=None)` → the speed, parallel and tool-call tests (and `models`), saved by DGC.
+- `find()` → the model servers on this computer's own network, the known ports only.
+- `prefer(system=None, model=None)`: where the next turn's helpers run. `run(..., system=, system_model=)` and
+  `stream(...)` do this for you: that run's sub-agents go to that system.
+- `set_hardware(system, url=None, *, token=None)` (needs `router_hardware` in `capabilities["router"]["commands"]`):
+  a system's hardware readout. `url` is an exporter's (node_exporter, NVIDIA DCGM, AMD's device-metrics exporter,
+  Glances, Netdata) or a dgc node's address, which the CLI detects; `""` stops it. `token` is a dgc node's pairing
+  token, kept in `secrets.json` bound to that address and never sent back (`hardware.has_token`). With neither it
+  reads the hardware now. A system's `hardware` in the status has its `line` ("GB10 · 92 of 128 GB · 34% · 61°C").
+- `suggest(system, *, context=None)` (needs `router_suggest`) → workers per model from its memory, what the server
+  reports and what `probe` measured: `{workers, memory, models: [{name, context, workers, basis, line}], notes,
+  applicable}`. A model's `workers` is `None` when nothing backs a number. `update("apply_suggestion", system=...)`
+  makes it the settings.
+
+`AsyncSession.router` is `AsyncRouter`, the same calls awaited. TypeScript: `session.router.status()`, `.update(action,
+fields)`, `.addSystem(baseUrl, fields)`, `.setKey(system, key)`, `.probe(system, { model, checks })`, `.find()`,
+`.prefer(system, model)` (await it before `run`), `.setHardware(system, url, { token })` and
+`.suggest(system, { context })`. A Pip runs on DGC Router with the Pips API 70 `model_choice`
+`{"mode": "router"}` or `{"mode": "router", "system": id, "model": name}` ([sdk/PIPS.md](../sdk/PIPS.md)).
+
+Plugin cards (MCP Apps; CLI 0.51+, `capabilities["mcp_apps"]`; without it `session.cards` raises
+`DGCUnsupportedError`): a plugin's own small app, which DGC's editor draws under the step that used it. An SDK app that
+wants to draw them opts in with `session.cards.watch()` (`session.cards`, the `cards` property, is a `Cards`); from then on a tool whose server gave it a card shows it as an
+`mcp_app_card` event in the run (and `history()` replays it). Each one carries `card_id`, `plugin`, `tool`,
+`tool_input`, the tool's whole `tool_result`, `url` (where the CLI serves the page on loopback, behind the card's own
+token, with a CSP built only from the domains it declared) and `html` when it fits one frame.
+
+- `get(card_id)` → the card with its `html`, its whole result and `csp_header`, the exact Content-Security-Policy to
+  serve the page with if you serve it yourself.
+- `call(card_id, method, params)` → what the card asked of its own server (`tools/call` or `resources/read`):
+  `{"result": ...}`, `{"error": {...}}`, or `{"ask": {...}, "request_id": ...}` for a change DGC asks about first.
+  Show the user `ask` (the tool, its arguments, and whether `always` may be offered) and pass their choice to
+  `answer(asked, "once" | "always" | "deny")`, which returns the outcome.
+- `context(card_id, content, structured)` → the card's `ui/update-model-context`: the next turn in that chat gets it
+  once, as untrusted plugin content.
+- `message_text(card, text)` → a card's `ui/message` as the user's prompt, labelled as the editor labels it; send it
+  with `run` as any prompt.
+
+Draw the card in a sandboxed iframe (`allow-scripts allow-same-origin allow-forms`) at `url`, and answer its JSON-RPC
+over `postMessage` (`ui/initialize`, then `ui/notifications/tool-input` and `tool-result` from the event), checking
+`event.source` on every message. `AsyncSession.cards` is `AsyncCards`, the same calls awaited. TypeScript:
+`session.cards.watch()`, `.get(id)`, `.call(id, method, params)`, `.answer(asked, choice)`, `.context(id, content,
+structured)` and `Cards.messageText(card, text)`.
+
+Image generation (CLI 0.51+, `capabilities["images"]`; without it `session.images` raises `DGCUnsupportedError`):
+the user's image generators (ComfyUI, Automatic1111, OpenAI-compatible, Gemini, Black Forest Labs, fal.ai, Replicate).
+`session.images` (the `images` property) is an `Images`; each call is one request:
+
+- `generate(prompt, *, size=None, aspect=None, count=1, images=None, mask=None, generator=None, model=None, seed=None,
+  negative_prompt=None, save_to=None, approve=False)` → `{ok, text, images: [{path, rel, sidecar, width, height, seed,
+  mime, bytes}], generator, model, cost_usd?, error?, card?}`. Each image is saved with a sidecar in DGC's own folder
+  (`.dgc/images/sessions/sdk/` in the home the client runs with: its `state_dir`, or yours with
+  `inherit_user_state=True`), or in the project with `save_to` or a save folder the user set in the Images settings.
+  A generator that asks before each image (a paid one) runs only with `approve=True`; without it `ok` is false,
+  `error["kind"]` is `"needs_approval"` and `card` has its provider, model, size, count and price. `error["kind"]`
+  is otherwise one of `needs_credit`, `rate_limited`, `bad_key`, `server_down`, `refused` (by the provider's
+  policy), `bad_request` or `failed`.
+- `generators(*, refresh=False)` → every generator with what it can do, its price, whether it works now, and this
+  project's choice; `refresh` tests each one (no image is made).
+- `add(provider, *, base_url=None, key=None, **fields)`, `update(action, **fields)` (`add_generator`,
+  `edit_generator`, `remove_generator`, `set_default`, `set_project_choice`, `set_auto_fallback`, `set_save_dir`,
+  `set_key`, `test`), `set_key(generator, key)` (the only way a key travels; never sent back), `remove(generator)`,
+  `set_default(generator)`, `test(generator=None)`. A ComfyUI `workflow` (API format) comes back first as `pending`
+  with the inputs DGC found; add it again with `confirm=True` or a `mapping`.
+- `library(*, query=None, surface=None, limit=60, offset=0)` → every image DGC made, newest first.
+- After any of these, the session's runs also carry `images_made` events (`{call_id, images, generator, model,
+  cost_usd}`) when the model's `generate_image` made pictures; `watch()` asks for them without doing anything else.
+
+`AsyncSession.images` is `AsyncImages`, the same calls awaited. TypeScript: `session.images.generate(prompt, { size,
+aspect, count, images, mask, generator, model, seed, negativePrompt, saveTo, approve })`, `.generators({ refresh })`,
+`.add(provider, fields)`, `.update(action, fields)`, `.setKey(generator, key)`, `.remove()`, `.setDefault()`,
+`.test()` and `.library()`.
+
+Video generation (CLI 0.51+, `capabilities["videos"]`; without it `session.videos` raises `DGCUnsupportedError`): a
+video is a long job on one of the user's video generators (the image generators whose `makes` is `videos` or `both`).
+`session.videos` is a `Videos`:
+
+- `generate(prompt, *, duration_s=None, aspect=None, resolution=None, image=None, audio=None, generator=None,
+  model=None, seed=None, negative_prompt=None, save_to=None, approve=False, wait=True, timeout=1800, poll_s=5)` →
+  `{ok, text, job?, card?, error?}`. Every video runs only with `approve=True` (or a generator the user set to make
+  videos without asking); without it `ok` is false, `error["kind"]` is `"needs_approval"` (`"over_limit"` when it
+  would pass the monthly limit, and it is never sent) and `card` has its length, resolution and price. With `wait`,
+  `job` is the ended job; its `result` has `path`, `sidecar`, `poster`, `seconds`, `width`, `height` and `bytes`.
+- `generators(*, refresh=False)` → the generators that make videos, each with `video` (lengths, resolutions, shapes,
+  sound, start image, price per second, minutes).
+- `jobs(job=None)`, `job(id)`, `wait(id, *, timeout, poll_s)`, `stop(id)` (at the provider where it can; `charged`
+  says what it cost) and `library(*, query=None, surface=None, limit=60, offset=0)`.
+- On the wire: `videos_jobs`, `videos_stop`, `videos_generate` and `videos_library`, answered by `video_jobs` and
+  `videos_library`; once a client has sent one, `video_job {job}` events follow its jobs.
+
+`AsyncSession.videos` is `AsyncVideos`, the same calls awaited. TypeScript: `session.videos.generate(prompt, {
+durationS, aspect, resolution, image, audio, generator, model, seed, negativePrompt, saveTo, approve, wait, timeoutMs,
+pollMs })`, `.generators()`, `.jobs()`, `.job()`, `.wait()`, `.stop()` and `.library()`.
+
 Generative UI is an optional presentation format in a reply. `extract_generative_ui` is the Python
 reader and `extractGenerativeUi` is its TypeScript counterpart. Work, ChatDGC and Pips may include a
 bounded `dgc-ui` v1 JSON fence alongside ordinary prose. The SDK exposes validated card data without
@@ -441,7 +548,9 @@ TypeScript: `import { extractGenerativeUi } from "@vibedgc/sdk";` then
 `extractGenerativeUi(result.finalText)`. The same helper accepts text returned from a ChatDGC or
 Pip conversation. Cards contain metrics, steps, bars, tables and up to four reply choices. The
 normal SDK session, ChatDGC or Pip send method keeps all existing permission decisions; parsing a
-card never grants one. Malformed, unknown and oversized card data is ignored.
+card never grants one. Malformed, unknown and oversized card data is ignored. Text fields come back as strings: a
+number or true/false the model wrote in one (a metric's value, a table cell) is given as its text, as the editor
+draws it; only a bar's value is a number.
 
 Mods (CLI 0.50+, `capabilities["mods"]`; without it `session.mods` raises `DGCUnsupportedError`): small programs that
 add panels, status lines, commands and guards to DGC, each in its own sandbox, each able only to watch a step, ask the
@@ -498,7 +607,7 @@ async with AsyncDGC(state_dir=state, model=model, base_url=base_url) as dgc:
 
 | Type | Fields |
 | --- | --- |
-| `PermissionRequest` | `id`, `name` (tool), `args`, `summary`, `suggested_rule`, `call_id`, `diff`, `command` |
+| `PermissionRequest` | `id`, `name` (tool), `args`, `summary`, `suggested_rule`, `call_id`, `diff`, `command`, `choices` (the answers it takes, CLI 0.51+: a DGC Router change offers `once` and `deny` only) |
 | `PlanRequest` | `id`, `plan` (markdown), `choices` |
 | `QuestionRequest` | `id`, `questions: tuple[Question, ...]`, `call_id` |
 | `Question` | `id`, `question`, `options: tuple[QuestionOption, ...]`, `header`, `multi_select` |
@@ -634,7 +743,7 @@ A run that fails does not raise: its `RunResult` has `status="failed"` and the r
 
 ### Constants
 
-`__version__` (`"0.8.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.50.0"`).
+`__version__` (`"0.9.0"`), `PROTOCOL` (`14`), `REQUIRES_CLI` (`"0.51.0"`).
 
 ## Events
 
@@ -780,15 +889,15 @@ CycloneDX SBOM and `SHA256SUMS` to the GitHub release, each with a GitHub artifa
 
 ```bash
 # The PyPI file matches the GitHub release, and the workflow built it from the tag:
-python3 -m pip download --no-deps dgc-sdk==0.8.0 -d dl
-curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.8.0/SHA256SUMS
+python3 -m pip download --no-deps dgc-sdk==0.9.0 -d dl
+curl -fsSLO https://github.com/OpenPeach-ai/dgc/releases/download/sdk-v0.9.0/SHA256SUMS
 (cd dl && sha256sum -c ../SHA256SUMS --ignore-missing)
-gh attestation verify dl/dgc_sdk-0.8.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
+gh attestation verify dl/dgc_sdk-0.9.0-py3-none-any.whl --repo OpenPeach-ai/dgc \
   --signer-workflow OpenPeach-ai/dgc/.github/workflows/publish-dgc-sdk.yml
 ```
 
 PyPI shows the same provenance on the file's page, and
-`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.8.0-py3-none-any.whl`
+`pypi-attestations verify pypi --repository https://github.com/OpenPeach-ai/dgc pypi:dgc_sdk-0.9.0-py3-none-any.whl`
 checks it from the command line.
 
 The source tree also carries a checkout manifest: `sdk/sbom/SHA256SUMS` lists every SDK source

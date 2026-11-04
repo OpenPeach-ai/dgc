@@ -95,14 +95,30 @@ def _set_paused(registry, paused, actor, *, expected_control=_UNSET):
     with registry.transaction():
         if expected_control is not _UNSET and _read(registry, CONTROL_KEY) != expected_control:
             raise RegistryError("conflict", "The runtime stop changed while resuming. Review its status and retry locally.")
-        _write(registry, CONTROL_KEY, {"schema_version": 1, "paused": paused,
-                                      "revision": identifier("control"),
-                                      "changed_at": registry.clock(), "actor": actor})
-        from .pip_event_triggers import discard_runtime_backlog
-        discard_runtime_backlog(registry)
-        for workspace in registry.list():
-            registry.event(workspace["id"], "pip_runtime_stopped" if paused else "pip_runtime_resumed",
-                           payload={"actor": actor})
+        _write_paused(registry, paused, actor)
+
+
+def _write_paused(registry, paused, actor):
+    _write(registry, CONTROL_KEY, {"schema_version": 1, "paused": paused,
+                                  "revision": identifier("control"),
+                                  "changed_at": registry.clock(), "actor": actor})
+    from .pip_event_triggers import discard_runtime_backlog
+    discard_runtime_backlog(registry)
+    for workspace in registry.list():
+        registry.event(workspace["id"], "pip_runtime_stopped" if paused else "pip_runtime_resumed",
+                       payload={"actor": actor})
+
+
+def pause_if_idle(registry, actor) -> bool:
+    """The runtime stop alone (no Pip is paused, nothing is cancelled), set only while no Pip run is queued or
+    running, in the same transaction that checked: False, and nothing set, when one is."""
+    actor = _actor(actor)
+    with registry.transaction():
+        if registry.db.execute("SELECT 1 FROM pip_runs WHERE status IN ('queued','running','cancelling') "
+                               "LIMIT 1").fetchone():
+            return False
+        _write_paused(registry, True, actor)
+    return True
 
 
 def stop_all(config, actor):

@@ -4,6 +4,9 @@
 it's on, and whether it may run with no sandbox (only on a computer without one, and only when the user said so for
 that mod). A mod runs only while every grant it asks for is in its record: an update that asks for more is held until
 the user allows it again; one that asks for less runs.
+
+A record holds only for the mod it was given to (``identity``): DGC's own mod of that name, or the one folder it was
+allowed in (its installed copy, or a dev folder). Another folder that takes the same name gets none of it.
 """
 from __future__ import annotations
 
@@ -62,7 +65,8 @@ def _valid(got) -> bool:
     return (isinstance(got, dict) and isinstance(got.get("grants"), list)
             and all(isinstance(g, str) for g in got["grants"])
             and isinstance(got.get("enabled", True), bool)
-            and isinstance(got.get("unsandboxed", False), bool))
+            and isinstance(got.get("unsandboxed", False), bool)
+            and isinstance(got.get("folder", ""), str))
 
 
 def record(name: str) -> dict | None:
@@ -70,24 +74,44 @@ def record(name: str) -> dict | None:
     return got if _valid(got) else None
 
 
-def missing(m: Manifest) -> set[str]:
-    """What it asks for that the user hasn't allowed (everything, when never allowed)."""
+def identity(m: Manifest) -> str:
+    """Who an Allow is for: DGC's own mod (its folder moves with each DGC update), or the one folder it runs from."""
+    return "builtin" if m.builtin else str(m.folder)
+
+
+def record_for(m: Manifest, *, at=None) -> dict | None:
+    """The user's record for this mod: None when the record of its name was given to another (another folder that
+    took the name). ``at`` asks for the folder it will run from instead (a plugin's mod about to be installed)."""
     got = record(m.name)
+    if got is None:
+        return None
+    mine = identity(m) if at is None else str(Path(at).resolve())
+    where = got.get("folder")
+    if where is None:
+        # Given before DGC kept where: an Allow was for DGC's own mod or the installed copy.
+        from .catalog import installed_root
+        return got if mine in ("builtin", str((installed_root() / m.name).resolve())) else None
+    return got if where == mine else None
+
+
+def missing(m: Manifest, *, at=None) -> set[str]:
+    """What it asks for that the user hasn't allowed (everything, when never allowed)."""
+    got = record_for(m, at=at)
     return set(m.grants()) if got is None else m.grants() - set(got.get("grants") or [])
 
 
 def allowed(m: Manifest) -> bool:
     """On, and everything it asks for allowed."""
-    got = record(m.name)
+    got = record_for(m)
     return bool(got and got.get("enabled", True) and m.grants() <= set(got["grants"]))
 
 
 def allow(m: Manifest, *, unsandboxed: bool = False) -> dict:
-    """The user's Allow, of exactly what this manifest asks for; it turns the mod on."""
+    """The user's Allow, of exactly what this manifest asks for, for this mod only; it turns the mod on."""
     with write_lock():
         data = _read()
         data[m.name] = {"version": m.version, "grants": sorted(m.grants()), "enabled": True,
-                        "allowed_at": int(time.time()), "unsandboxed": bool(unsandboxed)}
+                        "allowed_at": int(time.time()), "unsandboxed": bool(unsandboxed), "folder": identity(m)}
         _write(data)
         return data[m.name]
 

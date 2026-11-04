@@ -83,13 +83,40 @@ def _install_roots(argv0: str) -> list[Path]:
             continue
         # Seatbelt checks the spelling used while following a virtualenv symlink as well as its
         # final target. Keeping only the resolved prefix made macOS refuse to exec Python from a
-        # venv whose base prefix is an alias (including uv's version alias).
-        for c in (resolved, candidate) if sys.platform == "darwin" else (resolved,):
+        # venv whose base prefix is an alias (including uv's version alias). Bubblewrap needs the
+        # spelling too: DGC starts the interpreter by the name it knows (sys.executable), and a .venv
+        # that is a symlink to another folder (a worktree sharing another's) wasn't there by that name,
+        # so every mod failed to start. A bind of the spelled path shows what it resolves to there.
+        for c in (resolved, candidate):
             if account is not None and (c == account or c in account.parents):
                 continue  # e.g. ~/bin/node must not expose the account's entire home
             if c != Path("/") and c not in roots:
                 roots.append(c)
     return roots
+
+
+def _link_chain(start: str) -> list[Path]:
+    """Every link on the way from the interpreter's spelled path to the file it runs, and every linked folder on that
+    way. A Python DGC's installer set up on a Mac starts through four of them: the install's venv/bin/python ->
+    python3.13 -> ~/.local/bin/python3.13 (uv's link) -> uv's version alias folder -> the real interpreter. macOS's
+    sandbox must be able to read each one to follow it; the account's other files stay hidden."""
+    found: list[Path] = []
+    seen: set[Path] = set()
+    path = Path(os.path.abspath(start))
+    for _ in range(40):
+        if path in seen:
+            break
+        seen.add(path)
+        found.append(path)
+        found.extend(a for a in path.parents if a.is_symlink() and a not in found)
+        if not path.is_symlink():
+            break
+        try:
+            target = Path(os.readlink(path))
+        except OSError:
+            break
+        path = Path(os.path.normpath(target if target.is_absolute() else path.parent / target))
+    return found
 
 
 def sandboxed_argv(m: Manifest, argv: list[str], scratch: Path) -> list[str] | None:
@@ -117,7 +144,7 @@ def sandboxed_argv(m: Manifest, argv: list[str], scratch: Path) -> list[str] | N
     if kind == "sandbox-exec":
         from .. import seatbelt
         system = [Path(p) for p in ("/System/Library", "/System/Cryptexes", "/usr/lib", "/usr/share", "/bin", "/sbin", "/dev")]
-        readable = list(dict.fromkeys(q for p in [*system, *shown, scratch] if p.exists()
+        readable = list(dict.fromkeys(q for p in [*system, *shown, *_link_chain(argv[0]), scratch] if p.exists()
                                       for q in (p, p.resolve())))
         # The interpreter may start through a venv and uv symlink inside the account.
         # A read deny on /Users itself prevents that exec, despite later narrow allows.
@@ -135,6 +162,14 @@ def sandboxed_argv(m: Manifest, argv: list[str], scratch: Path) -> list[str] | N
                                    reachable=readable, network=False)
         return [str(executable), "-p", profile] + argv
     return None
+
+
+def _unseen_program(stderr: str) -> str:
+    """The program a sandbox couldn't start because it doesn't show it ("bwrap: execvp /x/bin/python: No such file or
+    directory"), or ""."""
+    import re
+    found = re.search(r"bwrap: execvp (\S+): No such file or directory", stderr or "")
+    return found.group(1) if found else ""
 
 
 def _hidden_siblings(readable: list[Path], root: Path = Path("/")) -> list[Path]:
@@ -375,7 +410,11 @@ class ModProcess:
             except subprocess.TimeoutExpired:
                 code = None
         tail = " ".join(list(self.stderr)[-3:]).strip()
+        unseen = _unseen_program(tail)
         if self.state == "crashed":
+            self._finish("crashed", self.error)
+        elif unseen:
+            self._fail(f"It couldn't start: its sandbox can't see {unseen}, the program that runs it.")
             self._finish("crashed", self.error)
         elif code not in (0, None):
             self._fail(f"It stopped (exit {code})" + (f": {tail[-300:]}" if tail else "."))

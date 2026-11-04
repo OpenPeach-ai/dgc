@@ -865,6 +865,24 @@ class TerminalStateTests(HarnessCase):
         self.assertEqual(snap["items"][1]["parent_id"], snap["items"][0]["id"])
         self.assertEqual(snap["items"][1]["tokens"], 99)
 
+    def test_a_reopened_chat_keeps_where_each_helper_ran(self):
+        # DGC Router: the agent map says "on NAS · qwen3.5:9b"; reopening the chat lost the system, so it said only
+        # the model. The saved record carries it; restoring keeps it (a name, clipped like the live one).
+        reg = SubagentRegistry()
+        reg.start(id="sub-333333333333", description="count TODOs", depth=1, call_id="t1", model="qwen3.5:9b")
+        reg.set_system("sub-333333333333", "NAS")
+        reg.end("sub-333333333333", "finished", tokens=13_900)
+        reg.start(id="sub-444444444444", description="plain helper", depth=1, call_id="t2", model="m")
+        reg.end("sub-444444444444", "finished")
+        saved = reg.saved_state()
+        saved["items"][1]["system"] = {"not": "a name"}
+        other = SubagentRegistry()
+        self.assertTrue(other.restore_state(saved))
+        items = {i["id"]: i for i in other.snapshot()["items"]}
+        self.assertEqual((items["sub-333333333333"].get("system"), items["sub-333333333333"].get("model")), ("NAS", "qwen3.5:9b"))
+        self.assertNotIn("system", items["sub-444444444444"], "only a name comes back")
+        self.assertIsNone(ep.event_error({"type": "agents", "seq": 0, **other.snapshot()}))
+
     def ended(self, h):
         return {f["id"]: f for f in h.of("agent_ended")}
 
@@ -1187,6 +1205,22 @@ class HeadlessSnapshotTests(HarnessCase):
         h.backend._emit_agents()
         self.assertEqual({k: v for k, v in h.of("agents")[-1].items() if k != "seq"},
                          {"type": "agents", "items": [], "total": 0, "active": 0})
+        self.assertFramesValid(h)
+
+    def test_a_reopened_chats_snapshot_says_where_each_helper_ran(self):
+        # A reopened chat has no Router lease left to name a helper's system: its snapshot carries it, inside the item.
+        h = self.make()
+        h.run("go", [("CHILD", child()),
+                     ("go", calls_then([ToolCall("t1", "task", {"description": "one", "prompt": "CHILD"})]))])
+        record = h.agent.subagents.snapshot()["items"][0]
+        h.agent.subagents.set_system(record["id"], "NAS")
+        other = SubagentRegistry()
+        self.assertTrue(other.restore_state(h.agent.subagents.saved_state()))
+        h.agent.subagents = other
+        h.backend._emit_agents("reopened")
+        snap = h.of("agents")[-1]
+        self.assertEqual([(i["id"], i.get("system")) for i in snap["items"]], [(record["id"], "NAS")])
+        self.assertEqual(set(snap) - {"seq"}, {"type", "items", "total", "active", "request_id"}, "no new top-level field")
         self.assertFramesValid(h)
 
     def test_resync_after_a_lost_frame_emits_a_snapshot(self):

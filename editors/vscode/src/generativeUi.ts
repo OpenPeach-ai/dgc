@@ -3,8 +3,11 @@ type Row = Record<string, unknown>;
 
 const esc = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;")
   .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-const word = (value: unknown, max = 160): string => typeof value === "string"
-  ? value.trim().slice(0, max) : "";
+/** A text field: a string, or a finite number or true/false read as its text, the same rule as the SDK readers.
+ *  Models write {"value": 42} and [["a.py", 120]] as often as strings. */
+const text = (value: unknown): string | null => typeof value === "string" ? value
+  : typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) ? String(value) : null;
+const word = (value: unknown, max = 160): string => (text(value) ?? "").trim().slice(0, max);
 const record = (value: unknown): Row | null => value && typeof value === "object" && !Array.isArray(value)
   ? value as Row : null;
 const items = (value: unknown, limit: number): Row[] | null => Array.isArray(value) && value.length > 0
@@ -29,13 +32,15 @@ function choices(block: Row): string | null {
     const label = word(item.label, 70), reply = word(item.reply, 500);
     // A choice is a message, never a slash command or an editor control.
     if (!label || !reply || reply.startsWith("/") || /\s\/(?:goal|plan|review|init)$/i.test(reply)) return "";
+    // The exact words a click sends are on the button: never a label over hidden text.
     return `<button type="button" class="genui-choice genui-send" data-genui-send="${esc(reply)}"`
-      + ` aria-label="Send: ${esc(label)}"><strong>${esc(label)}</strong>`
-      + `<span>${esc(word(item.description, 180))}</span><span class="genui-choice-arrow" aria-hidden="true">↗</span></button>`;
+      + ` aria-label="${esc(label)}. Sends: ${esc(reply)}"><strong>${esc(label)}</strong>`
+      + `<span>${esc(word(item.description, 180))}</span><span class="genui-choice-sends">Sends “${esc(reply)}”</span>`
+      + `<span class="genui-choice-arrow" aria-hidden="true">↗</span></button>`;
   });
   if (rows.some((row) => !row)) return null;
   return `<section class="genui-block"><h4>${esc(word(block.label, 100) || "Choose a direction")}</h4>`
-    + `<div class="genui-choices">${rows.join("")}</div><small>One click sends the request. Actions still follow your permissions.</small></section>`;
+    + `<div class="genui-choices">${rows.join("")}</div><small>One click sends the request shown, as your message. Actions still follow your permissions.</small></section>`;
 }
 
 function steps(block: Row): string | null {
@@ -80,7 +85,7 @@ function table(block: Row): string | null {
   const columns = block.columns.map((column) => word(column, 70));
   if (columns.some((column) => !column)) return null;
   const rows = block.rows.map((row) => Array.isArray(row) && row.length === columns.length
-    ? row.map((cell) => word(cell, 150)) : null);
+    && row.every((cell) => text(cell) !== null) ? row.map((cell) => word(cell, 150)) : null);
   if (rows.some((row) => !row)) return null;
   return `<section class="genui-block"><h4>${esc(word(block.label, 100) || "Details")}</h4>`
     + `<div class="genui-table-scroll"><table><thead><tr>${columns.map((column) => `<th>${esc(column)}</th>`).join("")}</tr></thead>`

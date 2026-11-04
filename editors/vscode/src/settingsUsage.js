@@ -1,9 +1,16 @@
-// The existing chat usage ledger renderer, now hosted in editor settings.
-export function createUsage(root, vscode) {
+import { bySystemTable, fillPicker, systemsOf, whereLine } from "./settingsUsageSystems.js";
+// The existing chat usage ledger renderer, now hosted in editor settings. `shared` holds the System the
+// Everything and Pips views share (as they share the range): getSystem() / setSystem(id).
+export function createUsage(root, vscode, shared = {}) {
     const $ = id => root.querySelector("#" + id);
     const USAGE_RANGES = ["today", "7d", "30d", "month", "all"];
     const USAGE_TIMEOUT_MS = 15000;
     let usageRequestId = "", usageSequence = 0, usageTimer = 0, usageHasData = false;
+    // Token usage by system. The picker lists every system of the range, so a range is first asked for whole
+    // ("list"); one system is then asked for alone ("show"). `systems` is that whole range's list.
+    let usagePhase = "show", usageAsked = "", systems = [];
+    const getSystem = () => typeof shared.getSystem === "function" ? String(shared.getSystem() || "") : "";
+    const setSystem = (id) => { if (typeof shared.setSystem === "function") shared.setSystem(id); };
     let usageBuckets = [], usageDay = -1;
     const usageSection = () => root;
     const usageCount = (value) => {
@@ -49,10 +56,12 @@ export function createUsage(root, vscode) {
         else
             section.removeAttribute("aria-busy");
     }
-    function requestUsage() {
+    function askUsage(system, phase) {
         const select = $("usage-range");
         const range = USAGE_RANGES.includes(select.value) ? select.value : "7d";
         usageRequestId = `usage-${Date.now().toString(36)}-${++usageSequence}`;
+        usagePhase = phase;
+        usageAsked = system;
         const requestId = usageRequestId;
         setUsageStatus(usageHasData ? "Refreshing\u2026" : "Counting\u2026", true);
         clearTimeout(usageTimer);
@@ -61,7 +70,21 @@ export function createUsage(root, vscode) {
                 return;
             setUsageStatus("No answer from the DGC backend yet. Try Refresh.", false);
         }, USAGE_TIMEOUT_MS);
-        vscode.postMessage({ type: "getUsage", range, requestId });
+        vscode.postMessage({ type: "getUsage", range, requestId, ...(system ? { system } : {}) });
+    }
+    // A range (or Refresh) with one system chosen asks for the whole range first, for the picker's list.
+    function requestUsage() {
+        const system = getSystem();
+        askUsage("", system ? "list" : "show");
+    }
+    function paintSystems() {
+        const pick = root.querySelector(".usage-system-pick"), select = $("usage-system");
+        if (!pick || !select)
+            return;
+        pick.hidden = systems.length < 2;
+        const kept = fillPicker(select, systems, getSystem());
+        if (kept !== getSystem())
+            setSystem(kept);
     }
     function usageUnavailable(msg) {
         if (msg.requestId && msg.requestId !== usageRequestId)
@@ -72,8 +95,8 @@ export function createUsage(root, vscode) {
         $("usage-empty").hidden = true;
         setUsageStatus(String(msg.message || "Token usage is unavailable."), false);
     }
-    // A long id keeps the part that tells variants apart: the ":tag"/quantisation or "-suffix" of
-    // a model, the ":port" of a host. The head truncates with an ellipsis; the tail always shows.
+    // A long host keeps the part that tells endpoints apart, its ":port": the head truncates with an
+    // ellipsis; the tail always shows. (A model's name wraps instead: see renderUsage.)
     function usageSplit(text, kind) {
         const value = String(text || "");
         let cut = -1;
@@ -82,17 +105,7 @@ export function createUsage(root, vscode) {
             if (port)
                 cut = port.index;
         }
-        else if (kind === "model" && value.length > 14) {
-            const colon = value.lastIndexOf(":");
-            const dash = value.lastIndexOf("-");
-            if (colon > 0 && value.length - colon <= 14)
-                cut = colon;
-            else if (dash > 0 && value.length - dash <= 10)
-                cut = dash;
-            else
-                cut = value.length - 8;
-        }
-        const line = usageNode("span", kind === "model" ? "usage-clip usage-name" : "usage-clip usage-where");
+        const line = usageNode("span", "usage-clip usage-where");
         if (cut <= 0) {
             line.appendChild(usageNode("span", "usage-head", value));
         }
@@ -111,13 +124,25 @@ export function createUsage(root, vscode) {
         node.classList.toggle("more-left", more > 1 && node.scrollLeft > 1);
     }
     let lastUsage = null;
-    function renderUsage(ev) {
+    function renderUsage(ev, redraw) {
         if (!ev || ev.request_id !== usageRequestId)
             return; // a late answer to an older request
+        if (!redraw && !ev.error && !usageAsked) {
+            // A whole range: its systems are the picker's list.
+            systems = systemsOf(ev.by_model);
+            const wanted = getSystem();
+            paintSystems();
+            if (usagePhase === "list" && wanted && getSystem() === wanted) {
+                askUsage(wanted, "show");      // the chosen system, alone
+                return;
+            }
+        }
         // Filtering and hiding are presentation, not a new count: keep the report so typing in the
         // box redraws from what is already here instead of going back to the ledger per keystroke.
         lastUsage = ev;
         clearTimeout(usageTimer);
+        const chosen = usageAsked ? systems.find((s) => s.id === usageAsked) : null;
+        const named = systems.length > 1;
         const totals = ev.totals && typeof ev.totals === "object" ? ev.totals : {};
         const models = (Array.isArray(ev.by_model) ? ev.by_model : [])
             .filter((row) => row && typeof row === "object").slice(0, 100);
@@ -141,7 +166,28 @@ export function createUsage(root, vscode) {
         $("usage-empty").hidden = usageHasData;
         $("usage-empty-all").hidden = usageHasData || $("usage-range").value === "all";
         $("usage-content").hidden = !usageHasData;
+        const emptyTitle = root.querySelector(".usage-empty-title");
+        if (emptyTitle)
+            emptyTitle.textContent = chosen ? `No model requests on ${chosen.name} in this range`
+                : "No model requests counted in this range yet";
         setUsageStatus(updated, false);
+        // By system: every system of the range, in All systems only, and only when there is more than one.
+        const bySystem = $("usage-systems");
+        if (bySystem) {
+            bySystem.hidden = !(named && !usageAsked);
+            const holder = $("usage-systems-table");
+            holder.replaceChildren();
+            if (!bySystem.hidden)
+                holder.appendChild(bySystemTable(systems, (id) => {
+                    setSystem(id);
+                    paintSystems();
+                    askUsage(id, "show");
+                    $("usage-system")?.focus();
+                }));
+        }
+        const thWhere = $("usage-th-where");
+        if (thWhere)
+            thWhere.textContent = named ? "system \u00b7 provider" : "provider \u00b7 host";
         if (!usageHasData) {
             usageBuckets = [];
             $("usage-strip-in").replaceChildren();
@@ -188,7 +234,7 @@ export function createUsage(root, vscode) {
         // line below says how much is behind the checkbox.
         const find = String($("usage-find")?.value || "").trim().toLowerCase();
         const hideZero = $("usage-hide-zero") ? $("usage-hide-zero").checked : false;
-        const matches = (row) => !find || [row.model, row.provider, row.host]
+        const matches = (row) => !find || [row.model, row.provider, row.host, row.system]
             .some((field) => String(field || "").toLowerCase().includes(find));
         const shown = models.filter((row) => matches(row) && !(hideZero && tokensOf(row) === 0));
         const hiddenZero = models.filter((row) => matches(row) && tokensOf(row) === 0).length;
@@ -211,17 +257,19 @@ export function createUsage(root, vscode) {
             const modelCell = usageNode("th", "usage-model");
             modelCell.setAttribute("scope", "row");
             modelCell.title = where ? `${model}\n${where}` : model;
-            modelCell.appendChild(usageSplit(model, "model"));
-            modelCell.appendChild(usageSplit(where || "—", host ? "host" : "where"));
+            // The name wraps (two lines in a narrow tab) rather than losing its middle.
+            modelCell.appendChild(usageNode("span", "usage-name usage-wrap", model));
+            // With more than one system the row names its system; the address stays one hover away.
+            modelCell.appendChild(whereLine(row, named) || usageSplit(where || "—", host ? "host" : "where"));
             tr.appendChild(modelCell);
             for (const key of ["input_tokens", "output_tokens", "cached_input_tokens", "requests"]) {
-                tr.appendChild(usageNode("td", "num", usageExact(row[key])));
+                tr.appendChild(usageNode("td", key === "cached_input_tokens" ? "num col-cached" : "num", usageExact(row[key])));
             }
             const share = tokenSum > 0 ? tokensOf(row) / tokenSum
                 : (requestSum > 0 ? usageCount(row.requests) / requestSum : 0);
             const percent = share * 100;
             const shareText = percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
-            const shareCell = usageNode("td", "usage-share-cell");
+            const shareCell = usageNode("td", "usage-share-cell col-share");
             const wrap = usageNode("span", "usage-share");
             wrap.setAttribute("role", "img");
             wrap.setAttribute("aria-label", `${shareText} of ${tokenSum > 0 ? "tokens" : "requests"}`);
@@ -315,7 +363,13 @@ export function createUsage(root, vscode) {
     });
     $("usage-range").onchange = requestUsage;
     $("usage-refresh").onclick = requestUsage;
-    const redrawUsage = () => { if (lastUsage) renderUsage(lastUsage); };
+    if ($("usage-system"))
+        $("usage-system").onchange = () => {
+            const id = String($("usage-system").value || "");
+            setSystem(id);
+            askUsage(id, "show");
+        };
+    const redrawUsage = () => { if (lastUsage) renderUsage(lastUsage, true); };
     if ($("usage-find")) $("usage-find").oninput = redrawUsage;
     if ($("usage-hide-zero")) $("usage-hide-zero").onchange = redrawUsage;
     $("usage-show-all").onclick = () => { $("usage-range").value = "all"; requestUsage(); };

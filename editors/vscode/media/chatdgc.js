@@ -4,10 +4,13 @@
 (() => {
   "use strict";
   const vscode = acquireVsCodeApi();
+  // Plugins' cards in a reply (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
+  window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "chat" });
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
-  const md = (text) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || "")) : null);
+  // ``cards``: a ```dgc-ui card is live only in the chat's own reply; anywhere else it stays code.
+  const md = (text, cards = false) => (window.DgcMarkdown?.render ? window.DgcMarkdown.render(String(text || ""), { cards }) : null);
   window.DgcMarkdown?.setFavicons?.(false);      // no image ever loads from a link's site
   // Maths, as ChatGPT draws it: the Markdown leaves each formula as TeX in a placeholder, and KaTeX (loaded the first
   // time one shows) draws it in the conversation. A copied reply is built afresh, so it carries the TeX as written.
@@ -40,7 +43,7 @@
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
-    if (!button) return;
+    if (!button || !button.closest("#cd-log .cd-msg.cd-assistant")) return;
     const prompt = String(button.dataset.genuiSend || "").slice(0, 500);
     if (prompt) sendText(prompt);
   });
@@ -179,9 +182,9 @@
     const open = e.target.closest?.(".cd-panel [data-url], .cd-reader [data-url]");
     if (open) vscode.postMessage({ type: "openLink", target: open.dataset.url || "" });
   });
-  function body(message, drafts) {
+  function body(message, drafts, cards = message.role === "assistant") {
     const node = el("div", "text cd-body");
-    const html = md(message.text);
+    const html = md(message.text, cards);
     if (html === null) node.textContent = message.text || ""; else node.innerHTML = html;
     uncite(node, message.sources);
     if (drafts) { draftBlocks(node, message, drafts.live); chartBlocks(node, drafts.live); widgetBlocks(node, message, drafts.live); }
@@ -465,21 +468,89 @@
     box.append(manage);
     return box;
   }
-  /** A reply's words, with each question it asked as a card where it asked it. */
-  function replyParts(message, live) {
-    const questions = Array.isArray(message.questions) ? message.questions : [];
-    if (!questions.length) return [body(message, { live })];
+  /** A place in a reply's words as the backend counts it (characters, as Python does) in this page's string, where a
+   *  character beyond the first 65,536 (an emoji) is two. */
+  function unitsAt(text, points) {
+    if (!/[\ud800-\udfff]/.test(text)) return Math.min(points, text.length);
+    let units = 0;
+    for (let n = 0; n < points && units < text.length; n++) units += text.codePointAt(units) > 0xffff ? 2 : 1;
+    return units;
+  }
+  const pointsIn = (text) => text.length - (text.match(/[\ud800-\udbff][\udc00-\udfff]/g) || []).length;
+  /** The Markdown blocks a card can't sit inside of, as [start, end) in the words: a code fence, a list (all its items,
+   *  and what is under each), a table, a quote and a display formula. Cut inside one, the words on either side would
+   *  no longer read as the reply wrote them (half a fence shows as code to the end; a list starts again at 1). */
+  function solidBlocks(text) {
+    const lines = [];
+    for (let s = 0; ;) { const nl = text.indexOf("\n", s); lines.push([s, nl < 0 ? text.length : nl]); if (nl < 0) break; s = nl + 1; }
+    const line = (k) => text.slice(lines[k][0], lines[k][1]);
+    const blank = (k) => k >= lines.length || !line(k).trim();
+    const ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/, QUOTE = /^ {0,3}>/, PIPE = /^ {0,3}\|/;
+    const RULE = /^ {0,3}\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+    const blocks = [];
+    for (let i = 0; i < lines.length;) {
+      const t = line(i);
+      let j = i, m;
+      if ((m = /^ {0,3}(`{3,}|~{3,})/.exec(t))) {
+        const close = new RegExp(`^ {0,3}${m[1][0] === "`" ? "`" : "~"}{${m[1].length},}\\s*$`);
+        j = i + 1;
+        while (j < lines.length && !close.test(line(j))) j++;
+        j = Math.min(j, lines.length - 1);
+      } else if (/^\s*\$\$/.test(t) && !/^\s*\$\$.*\S.*\$\$\s*$/.test(t)) {
+        j = i + 1;
+        while (j < lines.length && !line(j).includes("$$")) j++;
+        j = Math.min(j, lines.length - 1);
+      } else if (ITEM.test(t)) {
+        // A list goes on through its items' own lines, and past a blank line to another item or an indented line.
+        while (j + 1 < lines.length) {
+          if (!blank(j + 1)) { j++; continue; }
+          let k = j + 1;
+          while (k < lines.length && blank(k)) k++;
+          if (k < lines.length && (ITEM.test(line(k)) || /^(?: {2,}|\t)\S/.test(line(k)))) { j = k; continue; }
+          break;
+        }
+      } else if (QUOTE.test(t) || PIPE.test(t) || (t.includes("|") && i + 1 < lines.length && RULE.test(line(i + 1)) && line(i + 1).includes("-"))) {
+        while (!blank(j + 1)) j++;
+      }
+      if (j > i) blocks.push([lines[i][0], lines[j][1]]);
+      i = j + 1;
+    }
+    return blocks;
+  }
+  /** Where a card or a question made at `at` goes in the words: past the sentence's own punctuation ("let's do it"
+   *  [card] "." keeps its full stop above the card), and at the end of a block it would cut (solidBlocks). */
+  function cutAt(text, at, blocks) {
+    while (at < text.length && /[.,;:!?…)\]"'”’]/.test(text[at])) at++;
+    for (const [start, end] of blocks) if (start < at && at < end) return end;
+    return at;
+  }
+  /** The plugin cards a reply's words have a place for: made at a character of the words it has (`at`). A card with
+   *  none (an earlier build's, or a place past the end) is drawn after the reply's other parts, as it always was. */
+  function cardsInWords(message) {
     const text = message.text || "";
+    if (!text) return [];
+    const length = pointsIn(text);
+    return (Array.isArray(message.actions) ? message.actions : [])
+      .filter((card) => typeof card?.at === "number" && Number.isSafeInteger(card.at) && card.at >= 0 && card.at <= length);
+  }
+  /** A reply's words, with each question it asked and each plugin card it made where it happened, in order. */
+  function replyParts(message, live, cards = [], apps = new Map()) {
+    const questions = Array.isArray(message.questions) ? message.questions : [];
+    if (!questions.length && !cards.length) return [body(message, { live })];
+    const text = message.text || "";
+    const blocks = solidBlocks(text);
+    const places = [
+      ...cards.map((card) => ({ at: unitsAt(text, card.at), draw: () => actionNode(message, card, live, apps.get(card.id)) })),
+      ...questions.map((q, i) => ({ at: unitsAt(text, Math.max(0, Number(q.at) || 0)), draw: () => questionCard(message, q, i, live) })),
+    ].map((p, i) => ({ ...p, i })).sort((a, b) => a.at - b.at || a.i - b.i);
     const parts = [];
     let done = 0;
-    questions.map((q, i) => [q, i]).sort((a, b) => (Number(a[0].at) || 0) - (Number(b[0].at) || 0)).forEach(([q, i]) => {
-      let at = Math.max(done, Math.min(text.length, Number(q.at) || 0));
-      // Asked mid-sentence ("let's do it" [card] "."): the sentence's own punctuation stays with it, above the card.
-      while (at < text.length && /[.,;:!?…)\]"'”’]/.test(text[at])) at++;
+    for (const place of places) {
+      const at = Math.max(done, cutAt(text, Math.min(text.length, place.at), blocks));
       if (text.slice(done, at).trim()) parts.push(body({ ...message, text: text.slice(done, at) }, { live }));
-      parts.push(questionCard(message, q, i, live));
+      parts.push(place.draw());
       done = at;
-    });
+    }
     if (text.slice(done).trim()) parts.push(body({ ...message, text: text.slice(done) }, { live }));
     return parts;
   }
@@ -677,6 +748,81 @@
     line.append(el("span", "verb", words));
     return line;
   }
+  // ---- the moment you press Enter (as Work does): your message, and under it a reply waiting for the model with its
+  // clock, "Waiting for deepseek-v4.1-flash… (4s · usually starts within 12s)", until the model starts (then
+  // Thinking, a search, or its words). The usual wait is the backend's (chatdgc_waiting: dgc/model_pace.py, what
+  // "No response from the model" waits for). A send refused before it started says so, with Retry; your text is back
+  // in the box. Before, nothing showed until the first word: on a slow or cold model, the send looked lost.
+  let localSeq = 0, waitClock = 0;
+  const waitWords = (seconds) => seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  function waitingMeta(message) {
+    const w = message.waiting;
+    // From the backend (a chat opened mid-wait, or chatdgc_waiting): how long it has waited so far.
+    if (!Number.isFinite(w.since)) w.since = Date.now() - Math.max(0, Number(w.elapsed_s) || 0) * 1000;
+    const seconds = Math.max(0, Math.floor((Date.now() - w.since) / 1000));
+    const usual = Number(w.usual_s) > 0 ? ` · usually starts within ${waitWords(Math.max(1, Math.ceil(w.usual_s)))}` : "";
+    return `(${waitWords(seconds)}${usual})`;
+  }
+  function waitingNode(message) {
+    const model = String(message.waiting.model || "").trim();
+    const line = wave(model ? `Waiting for ${model}…` : "Waiting for the model…", "div", "cd-working cd-waiting");
+    line.append(" ", el("span", "cd-wait-meta", waitingMeta(message)));
+    line.setAttribute("role", "status");
+    tickWaiting();
+    return line;
+  }
+  // One clock for every waiting reply: only its numbers change, the reply isn't redrawn.
+  function tickWaiting() {
+    if (waitClock) return;
+    waitClock = setInterval(() => {
+      let any = false;
+      for (const node of log.querySelectorAll(".cd-waiting .cd-wait-meta")) {
+        const message = state.messages.find((m) => m.id === node.closest(".cd-msg")?.dataset.id);
+        if (!message?.waiting) continue;
+        any = true;
+        const text = waitingMeta(message);
+        if (node.textContent !== text) node.textContent = text;
+      }
+      if (!any) { clearInterval(waitClock); waitClock = 0; }
+    }, 1000);
+  }
+  function failedSendNode(message) {
+    const box = el("div", "cd-send-failed");
+    box.setAttribute("role", "alert");
+    box.append(el("span", "", `Didn't send: ${message.failedSend.reason || "ChatDGC couldn't start the reply."}`));
+    const retry = changes(el("button", "cd-retry", "Retry"));
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      const item = message.failedSend.item;
+      state.messages = state.messages.filter((m) => m !== message);
+      if (input.value === item.text) { edit(() => { input.value = ""; state.pending = []; }); grow(); saveDraft(); chips(); }
+      render();
+      if (busyNow()) { enqueue(item); controls(); return; }
+      dispatch(item);
+    });
+    box.append(" ", retry);
+    return box;
+  }
+  /** Your message and its waiting reply, drawn at once; the backend's own replace them as they come. */
+  function showSending(item) {
+    if (!state.conversation || item.research) return;
+    const n = ++localSeq;
+    const names = item.pending.map((p) => p.name).filter(Boolean);
+    const model = item.model || state.conversation?.model || state.defaultModel || "";
+    state.messages.push({ id: `local-${n}`, role: "user", local: true, text: item.text || names.join(", "),
+                          created_at: new Date().toISOString() },
+                        { id: `local-reply-${n}`, role: "assistant", local: true, text: "", thinking: "",
+                          waiting: { model, since: Date.now(), usual_s: 0 }, item });
+    pinned = true;
+    render();
+  }
+  const localReply = () => state.messages.find((m) => m.local === true && m.role === "assistant" && !m.failedSend);
+  /** What the screen drew itself, gone: the backend's messages are the truth now (or the send was refused). */
+  function dropLocal({ keepFailed = true } = {}) {
+    const before = state.messages.length;
+    state.messages = state.messages.filter((m) => m.local !== true || (keepFailed && m.failedSend));
+    return before !== state.messages.length;
+  }
   // Collapsed, while it thinks and once it has answered: a click opens it, and what the reader chose holds for that
   // reply, as it streams and after.
   const thinkingChosen = new Map();
@@ -832,6 +978,14 @@
     else if (!known) { images.set(item.id, "asked"); vscode.postMessage({ type: "image", id: item.id }); }
     return button;
   }
+  /** A reply's block of pictures (or a video) under one header row that folds it (media/pictureFold.js). The key is the
+   *  reply's and the block's, so a choice holds through a redraw, a reload and the chat opened again. */
+  function foldPictures(key, body, facts, sig = "") {
+    if (!window.DgcPictureFold) return body;
+    const block = window.DgcPictureFold.element(key, body, facts);
+    if (sig) block.dataset.sig = sig;              // what it holds: a redraw keeps the block while this is the same
+    return block;
+  }
   // ---- pictures from the web above a reply (ChatGPT's image strip). The backend fetched and kept them with the
   // chat, so each is asked for by id like an attached image: the screen never asks an image host itself.
   function webPicture(item) {
@@ -856,6 +1010,7 @@
     for (const item of items) {
       const li = el("li", "cd-picture-item");
       const tile = el("button", "cd-picture");
+      tile.dataset.picOpen = "";
       tile.type = "button"; tile.title = item.title ? `${item.title} (${item.site || "web"})` : item.site || "Image";
       tile.setAttribute("aria-label", `${item.title || "Image"}, from ${item.site || "the web"}: view larger`);
       tile.append(webPicture(item), el("span", "cd-picture-site", item.site || ""));
@@ -1255,7 +1410,7 @@
     exporting.addEventListener("click", () => vscode.postMessage({ type: "exportReport", messageId: message.id, title }));
     const close = action("close", "Close", () => { shell.remove(); input.focus(); });
     top.append(el("span", "cd-reader-title", title), exporting, close);
-    const article = body(message);
+    const article = body(message, undefined, false);
     article.classList.add("cd-reader-text");
     const toc = el("nav", "cd-reader-toc");
     toc.setAttribute("aria-label", "Contents");
@@ -1276,8 +1431,57 @@
     document.body.append(shell);
     close.focus();
   }
+  // ---- plugins' cards (MCP Apps): each one a plugin's own page in a sandboxed frame, above the words of the reply
+  // that showed it. The frame lives through every redraw of the reply (media/mcpApps.js keeps it).
+  const cardOptions = () => ({ sendMessage: sendCardMessage });
+  function appsNode(message, shownBy = new Map()) {
+    const owned = new Set([...shownBy.values()].flat().map((a) => a.card_id));
+    const apps = (Array.isArray(message.apps) ? message.apps : [])
+      .filter((a) => a && /^app_[0-9a-f]{24}$/.test(String(a.card_id || "")) && !owned.has(a.card_id));
+    if (!apps.length || !window.DgcMcpApps) return null;
+    const box = el("div", "cd-apps");
+    box.dataset.key = apps.map((a) => a.card_id).join(",");
+    for (const a of apps.slice(-8)) box.append(window.DgcMcpApps.slot(a.card_id));
+    return box;
+  }
+  /** The MCP App cards each plugin card's action showed when it was sent, by the card's id: the reply keeps them in
+   *  `apps` beside the cards its reads showed, so a card owns one of its own server and tool shown while it was being
+   *  sent (from its making to its decision; an app's time is to the second). Each goes to one card, the first decided. */
+  function cardApps(message) {
+    const owned = new Map();
+    const apps = (Array.isArray(message.apps) ? message.apps : []).filter((a) => a && /^app_[0-9a-f]{24}$/.test(String(a.card_id || "")) && !a.call_id);
+    const sent = (Array.isArray(message.actions) ? message.actions : [])
+      .filter((c) => c && ["done", "failed"].includes(c.status) && c.kind !== "video" && c.kind !== "image" && Date.parse(c.decided_at))
+      .sort((a, b) => Date.parse(a.decided_at) - Date.parse(b.decided_at));
+    for (const app of apps) {
+      const when = Date.parse(app.created_at);
+      const card = sent.find((c) => c.server === app.server && c.tool === app.tool
+        && when >= Math.floor(Date.parse(c.created_at) / 1000) * 1000 && when <= Date.parse(c.decided_at));
+      if (card) owned.set(card.id, [...(owned.get(card.id) || []), app]);
+    }
+    return owned;
+  }
+  /** A card asked to send a message as yours (labelled with its plugin): sent as the box sends one, queued behind a
+   *  reply that is still being written. */
+  function sendCardMessage(text) {
+    if (!state.conversation || state.unavailable || readOnly()) return false;
+    const item = { text, research: false, model: modelPick.value || "", thinking: thinkingPick.value || "",
+                   search: searchMode(), study: !!state.study, pending: [], output: "" };
+    if (busyNow()) { enqueue(item); controls(); return true; }
+    dispatch(item);
+    return true;
+  }
+  function cardShown(card) {
+    window.DgcMcpApps?.remember(card);
+    const message = state.messages.find((m) => m.id === card.message_id);
+    if (!message) return;
+    const kept = { card_id: card.card_id, server: card.server, plugin: card.plugin, tool: card.tool, call_id: card.call_id || null,
+                   created_at: card.created_at || "" };
+    message.apps = [...(Array.isArray(message.apps) ? message.apps : []).filter((a) => a?.card_id !== card.card_id), kept];
+    update(message.id);
+  }
   function messageNode(message) {
-    const live = state.busy && message.id === state.replyId;
+    const live = state.busy && (message.id === state.replyId || message.local === true);
     const node = el("article", `cd-msg cd-${message.role === "user" ? "user" : "assistant"}`);
     node.dataset.id = message.id || "";
     if (message.role === "user") {
@@ -1319,6 +1523,12 @@
         bubble.textContent = message.text;
         node.append(bubble);
       }
+      if (message.local === true) {
+        // Shown the moment you press Enter; the backend's copy replaces it once it has it.
+        node.classList.add("cd-sending");
+        node.append(el("p", "cd-sending-note", "Sending…"));
+        return node;
+      }
       const actions = el("div", "cd-actions");
       const versions = versionsControl(message);
       if (versions) actions.append(versions);
@@ -1335,8 +1545,13 @@
     }
     if (message.research && typeof message.research === "object") return researchMessage(node, message, live);
     if (message.thinking) node.append(thinkingBlock(message, live));
-    { const strip = picturesStrip(message); if (strip) node.append(strip); }
-    if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live));
+    { const strip = picturesStrip(message);
+      if (strip) node.append(foldPictures(`chat:${message.id}:web`, strip, { pictures: shownPictures(message).length, label: message.images?.query || "" },
+        strip.dataset.key)); }
+    const shownBy = cardApps(message);                  // the MCP App cards a plugin card's action showed: in that card
+    { const cards = appsNode(message, shownBy); if (cards) node.append(cards); }
+    const inWords = message.text || !live || message.questions?.length ? cardsInWords(message) : [];
+    if (message.text || !live || message.questions?.length) node.append(...replyParts(message, live, inWords, shownBy));
     { const analysis = analysisNode(message); if (analysis) node.append(analysis); }
     for (const w of Array.isArray(message.widgets) ? message.widgets : []) {
       if (w && /^wg_[a-f0-9]{16}$/.test(String(w.id || "")) && (typeof w.html === "string" || w.removed === true)) {
@@ -1344,15 +1559,30 @@
                                                                    removed: w.removed === true }));
       }
     }
-    for (const file of Array.isArray(message.files) ? message.files : []) node.append(fileCard(message, file));
+    { // The pictures the reply made fold away together (media/pictureFold.js); its other files stay cards.
+      const files = Array.isArray(message.files) ? message.files : [];
+      const made = files.filter((file) => file?.kind === "image" && !file.removed && /^att_[a-f0-9]{32}$/.test(file.id || ""));
+      if (made.length) {
+        const group = el("div", "cd-made-pictures");
+        for (const file of made) group.append(fileCard(message, file));
+        node.append(foldPictures(`chat:${message.id}:made`, group,
+          { pictures: made.length, label: made.length === 1 ? String(made[0].prompt || made[0].name || "").replace(/\.(png|jpe?g|webp|gif)$/i, "") : "" },
+          made.map((file) => `${file.id}:${images.get(file.id)?.data ? 1 : 0}`).join(",")));
+      }
+      for (const file of files) if (!made.includes(file)) node.append(fileCard(message, file));
+    }
     for (const canvas of Array.isArray(message.canvases) ? message.canvases : []) node.append(canvasCard(canvas));
     for (const card of Array.isArray(message.artifacts) ? message.artifacts : []) { const box = artifactCard(card); if (box) node.append(box); }
     if (!live && typeof message.output_note === "string" && message.output_note.trim()) node.append(el("p", "cd-output-note", message.output_note.trim()));
-    for (const card of Array.isArray(message.actions) ? message.actions : []) node.append(actionCard(message, card, live));
+    for (const card of Array.isArray(message.actions) ? message.actions : []) {
+      if (!inWords.includes(card)) node.append(actionNode(message, card, live, shownBy.get(card.id)));
+    }
     const doing = live && state.searching[message.id];
     if (doing) node.append(wave(doing.kind === "looking"
       ? `Looking at the image with ${doing.text}…` : doing.kind === "plugin" ? `Using ${doing.text}…` : doing.kind === "making" ? `Making ${doing.text || "the file"}…` : doing.kind === "canvas" ? `Writing in the canvas ${doing.text}…` : doing.kind === "analyzing" ? "Analyzing the data…" : doing.kind === "compacting"
       ? "Summarizing earlier messages to fit the context window…" : `Searching the web for “${doing.text}”…`, "div", "cd-working cd-activity"));
+    else if (message.failedSend) node.append(failedSendNode(message));
+    else if (live && message.waiting && !message.text && !message.thinking) node.append(waitingNode(message));
     else if (live && !message.text && !message.thinking) node.append(wave("Thinking", "div", "cd-working"));
     if (message.partial) node.append(el("p", "cd-end", "This reply is too long to show in full here."));
     if (!live) { const found = sourcesBlock(message); if (found) node.append(found); }
@@ -1577,7 +1807,23 @@
     }
     return composio ? { ...args, ...Object.fromEntries(out) } : Object.fromEntries(out);
   }
-  const shown = (v) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t.length > 400 ? `${t.slice(0, 399)}…` : t; };
+  const whole = (v) => (typeof v === "string" ? v : JSON.stringify(v));
+  const shown = (v) => { const t = whole(v); return t.length > 400 ? `${t.slice(0, 399)}…` : t; };
+  /** Each input as name and value. ``full``: every one, each in full: what a waiting card sends is in sight before
+   *  Send it now (an email's recipient, subject and body), never cut and never one click away. */
+  function inputList(pairs, full) {
+    const list = el("dl", "cd-card-inputs");
+    for (const [key, value] of full ? pairs : pairs.slice(0, 12)) list.append(el("dt", "", key), el("dd", "", full ? whole(value) : shown(value)));
+    return list;
+  }
+  /** What a card sends, in full, one click away: the list above it is a summary (Edit isn't needed to see it). */
+  function sentInputs(tool, args, open = false) {
+    const box = el("details", "cd-card-sent");
+    box.open = open;
+    const text = globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.sent(tool, args) : JSON.stringify(args || {}, null, 2);
+    box.append(el("summary", "", "Inputs as sent"), el("pre", "", text));
+    return box;
+  }
   function composioAction(call) {
     const slug = typeof call?.tool_slug === "string" ? call.tool_slug : "";
     const [prefix, ...rest] = slug.split("_");
@@ -1594,10 +1840,16 @@
   }
   // A file the reply made (made.py), as ChatGPT hands you report.docx: what it is, Open, and Save a copy….
   const MADE = { docx: ["Word document", "DOCX"], pdf: ["PDF", "PDF"], xlsx: ["Excel workbook", "XLSX"],
-                 pptx: ["PowerPoint presentation", "PPTX"], csv: ["CSV", "CSV"], md: ["Markdown", "MD"] };
+                 pptx: ["PowerPoint presentation", "PPTX"], csv: ["CSV", "CSV"], md: ["Markdown", "MD"],
+                 png: ["Image", "PNG"], jpg: ["Image", "JPG"], webp: ["Image", "WEBP"] };
   function fileCard(message, file) {
     const [label, badge] = MADE[file.format] || ["File", "FILE"];
     const box = el("div", "cd-file");
+    // An image the reply made (generate_image): the picture itself, as an attached image shows, then its card.
+    if (file.kind === "image" && !file.removed && /^att_[a-f0-9]{32}$/.test(file.id || "")) {
+      box.classList.add("cd-file-image");
+      box.append(thumb(file));
+    }
     box.dataset.format = String(file.format || "");
     if (file.removed) box.dataset.removed = "true";
     box.setAttribute("role", "group");
@@ -1614,11 +1866,19 @@
       const buttons = el("div", "cd-file-actions");
       const open = el("button", "cd-continue cd-file-open", "Open");
       open.type = "button";
+      if (file.kind === "image") open.dataset.picOpen = "";     // a folded block's Open opens the picture, as this does
       open.addEventListener("click", () => vscode.postMessage({ type: "fileOpen", messageId: message.id, fileId: file.id, name: file.name }));
       const save = el("button", "cd-edit-cancel cd-file-save", "Save a copy…");
       save.type = "button";
       save.addEventListener("click", () => vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name }));
       buttons.append(open, save);
+      if (file.kind === "image") {
+        // A picture the chat made is in DGC's own folder: this puts a copy in the project (assets/, or where you pick).
+        const project = el("button", "cd-edit-cancel cd-file-project", "Save to project…");
+        project.type = "button"; project.title = "Save a copy into the open project (assets/ unless you choose another place)";
+        project.addEventListener("click", () => vscode.postMessage({ type: "fileSave", messageId: message.id, fileId: file.id, name: file.name, project: true }));
+        buttons.append(project);
+      }
       box.append(buttons);
     }
     return box;
@@ -1951,33 +2211,202 @@
     return box;
   }
 
-  function actionCard(message, card, live) {
+  /** The mark at the head of a plugin's card: its logo, as "Used [logo] Composio" under the reply has it. The logo is
+   *  always the plugin DGC calls (Composio's for Composio's tools, never the app inside it); its first letter only
+   *  when it has none. */
+  function cardMark(card, plugin) {
+    const mark = el("span", "cd-card-mark");
+    const id = String(card.plugin || "");
+    const src = PLUGIN_ID.test(id) && card.kind !== "image" ? pluginLogos.get(id) : "";
+    if (PLUGIN_ID.test(id) && card.kind !== "image") { mark.dataset.pluginMark = id; wantLogo(id); }
+    if (src) { mark.classList.add("has-logo"); const img = logoImage(src); mark.append(img); globalThis.DgcPluginCalls?.backdrop(img, mark); }
+    else mark.textContent = plugin.slice(0, 1).toUpperCase();
+    return mark;
+  }
+  // A video card (generate_video): its price before anything is sent, then its job as the shared player draws it
+  // (media/videoPlayer.js). One figure per job, kept across redraws, so a playing video isn't reloaded.
+  const videoFigures = new Map();
+  function videoJob(card) {
+    const view = card.job_view || {};
+    const state = card.status === "running" ? (view.state && !["done", "failed", "cancelled"].includes(view.state) ? view.state : "running")
+      : card.status === "done" ? "done" : card.status === "cancelled" ? "cancelled" : card.status === "failed" ? "failed" : view.state;
+    return { ...view, id: card.job || view.id, state, ...(card.video ? { result: card.video } : {}),
+      ...(card.status === "failed" && !view.error ? { error: { message: card.error || "" } } : {}) };
+  }
+  function videoCard(message, card, live) {
+    const box = el("div", "cd-card cd-video-card");
+    box.dataset.action = card.id; box.dataset.status = card.status || "waiting";
+    box.setAttribute("role", "group");
+    const facts = card.card || {};
+    const label = facts.label || card.plugin_name || "the video generator";
+    box.setAttribute("aria-label", `A video with ${label}`);
+    const head = el("div", "cd-card-head");
+    head.append(cardMark({ ...card, kind: "image" }, label));
+    const words = el("div", "cd-card-words");
+    const waiting = card.status === "waiting";
+    words.append(el("strong", "", waiting ? `Make this video with ${label}?` : `A video with ${label}`));
+    if (waiting) {
+      words.append(el("small", "", [facts.facts, facts.this_month ? `this month ${facts.this_month}` : "", facts.minutes,
+        "nothing is made until you send it."].filter(Boolean).join(" · ")));
+    }
+    head.append(words);
+    box.append(head);
+    if (!waiting && card.job && window.DgcVideo) {
+      const job = videoJob(card);
+      let fig = videoFigures.get(job.id);
+      if (!fig || fig._disposed) { fig = window.DgcVideo.figure(job); videoFigures.set(job.id, fig); }
+      else window.DgcVideo.update(job);
+      box.append(fig);
+      // A made video folds away as pictures do: its card under one header row.
+      return foldPictures(`chat:${message.id}:video-${card.id}`, box,
+        { videos: 1, label: String(card.arguments?.prompt || facts.prompt || "") });
+    }
+    if (!waiting) {
+      box.append(el("p", `cd-card-status cd-card-${card.status}`, card.status === "dismissed" ? "Not made."
+        : card.status === "failed" ? `Didn't go: ${card.error || "no answer."}` : String(card.answer || "")));
+      return box;
+    }
+    const editing = state.cardEdit[card.id];
+    const args = card.arguments || {};
+    if (editing) {
+      const form = el("div", "cd-card-fields");
+      const input = changes(el("textarea", "cd-field"));
+      input.id = `cd-card-${card.id}-prompt`; input.rows = 3; input.dataset.keep = input.id;
+      input.value = editing.values[0] ?? String(args.prompt || "");
+      input.addEventListener("input", () => { editing.values[0] = input.value; editing.error = ""; });
+      const lab = el("label", "cd-field-label", "The prompt"); lab.htmlFor = input.id;
+      form.append(lab, input);
+      if (editing.error) form.append(el("p", "cd-card-error", editing.error));
+      box.append(form);
+    } else if (args.prompt) {
+      box.append(el("blockquote", "perm-prompt", String(args.prompt)));
+    }
+    if (facts.note) box.append(el("p", "cd-card-note", String(facts.note)));
+    const busy = state.cardBusy[card.id], off = live || !!busy;
+    const row = el("div", "cd-card-actions");
+    const send = el("button", "cd-continue", busy === "sending" ? "Starting it…" : `Make it · ${card.price || ""}`.replace(/ · $/, ""));
+    send.type = "button"; send.title = `Make it with ${label} now`;
+    send.addEventListener("click", () => {
+      const edited = state.cardEdit[card.id] ? { ...args, prompt: String(state.cardEdit[card.id].values[0] || "").trim() } : null;
+      if (edited && !edited.prompt) { state.cardEdit[card.id].error = "Say what happens in the clip."; update(message.id); return; }
+      state.cardBusy[card.id] = "sending"; update(message.id);
+      vscode.postMessage({ type: "actionRun", messageId: message.id, actionId: card.id, ...(edited ? { arguments: edited } : {}) });
+    });
+    const edit = el("button", "cd-edit-cancel", editing ? "Undo changes" : "Edit"); edit.type = "button";
+    edit.addEventListener("click", () => {
+      if (state.cardEdit[card.id]) delete state.cardEdit[card.id];
+      else state.cardEdit[card.id] = { values: [String(args.prompt || "")], error: "" };
+      update(message.id);
+    });
+    const no = el("button", "cd-edit-cancel", "Don't"); no.type = "button";
+    no.addEventListener("click", () => { state.cardBusy[card.id] = "dismissing"; update(message.id);
+      vscode.postMessage({ type: "actionDismiss", messageId: message.id, actionId: card.id }); });
+    row.append(send, edit, no);
+    for (const b of row.querySelectorAll("button")) { b.disabled = off; changes(b); }
+    if (facts.over_limit) { send.disabled = true; send.title = "It would pass this month's limit"; }
+    box.append(row);
+    if (live) box.append(el("p", "cd-card-note", "You can choose once the reply is finished."));
+    return box;
+  }
+  // A plugin's card that is finished (sent and done or failed, handed to a Pip, not sent) folds to one row, as Work's
+  // tool steps do: its logo, what it did ("Gmail · Fetch emails") and how it went; the chevron opens the card itself
+  // under it (its inputs as sent, what the plugin answered, an MCP App card it showed). One that waits for you stays
+  // open with its buttons. Folded is how a finished card is drawn, live, after a reload and in a chat opened again;
+  // opening one holds while the page is open. A video's card is the player's (its own fold), never a row.
+  const FOLDS = new Set(["done", "failed", "dismissed", "handed"]);
+  function actionNode(message, card, live, apps) {
+    const box = actionCard(message, card, live, apps);
+    return card.kind !== "video" && FOLDS.has(card.status) ? cardRow(card, box, apps) : box;
+  }
+  /** "save_note" -> "Save note", "get-time" -> "Get time", "createEvent" -> "Create event". */
+  const toolWords = (tool) => {
+    const words = String(tool || "").replace(/^mcp__[a-z0-9_-]+__/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_\-\s]+/g, " ").trim().toLowerCase();
+    return words ? words[0].toUpperCase() + words.slice(1) : "Action";
+  };
+  /** What a folded card did, in a few words: "Gmail · Fetch emails" (Composio's app call), "Notes · Save note". */
+  function cardWhat(card, plugin) {
+    if (card.kind === "image") { const n = Number(card.arguments?.count) || 1; return `${plugin} · ${n === 1 ? "Image" : `${n} images`}`; }
+    const calls = globalThis.DgcPluginCalls?.describe(card.tool, card.sent_arguments || card.arguments, plugin);
+    if (calls?.length) return `${calls[0].app} · ${calls[0].action}${calls.length > 1 ? ` and ${calls.length - 1} more` : ""}`;
+    return `${plugin} · ${toolWords(card.tool)}`;
+  }
+  function cardState(card) {
+    const image = card.kind === "image";
+    return card.status === "done" ? (image ? "Made" : "Done") : card.status === "failed" ? "Failed"
+      : card.status === "handed" ? `Handed to ${card.pip?.name || "your Pip"}` : image ? "Not made" : "Not sent";
+  }
+  function cardRow(card, box, apps = []) {
+    const plugin = card.plugin_name || card.plugin || "the plugin";
+    const key = `card:${card.id}`, what = cardWhat(card, plugin), said = cardState(card);
+    const row = el("div", "cd-cardrow");
+    row.dataset.cardRow = card.id; row.dataset.status = card.status;
+    // What it holds: a redraw (each part of a reply that goes on after it) keeps the row while this is the same, so an
+    // MCP App card in it goes on as it is, and so does a focus on its chevron.
+    row.dataset.sig = `${card.status}:${hashOf([card.answer, card.error, card.sent_arguments ? 1 : 0, card.pip?.name,
+                                               apps.map((a) => a.card_id).join(",")].map((v) => String(v ?? "")).join("\u0000"))}`;
+    const toggle = el("button", "cd-cardrow-toggle");
+    toggle.type = "button";
+    const mark = cardMark(card, plugin);
+    mark.classList.add("cd-cardrow-mark");
+    const chev = icon("chevron-right"); chev.classList.add("cd-cardrow-chev");
+    toggle.append(chev, mark, el("span", "cd-cardrow-what", what), el("span", `cd-cardrow-state cd-card-${card.status}`, said));
+    box.id = `cd-card-${card.id}`;
+    box.classList.add("cd-card-in-row");
+    toggle.setAttribute("aria-controls", box.id);
+    const show = (open) => {
+      box.hidden = !open;
+      row.classList.toggle("open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", `${what} · ${said}, ${open ? "hide" : "show"} details`);
+      toggle.title = open ? "Fold this card away" : "Show what was sent and what came back";
+    };
+    show(state.open.has(key));
+    // In place, not a redraw: the button keeps the focus, and the keys (Enter, Space) are a button's own.
+    toggle.addEventListener("click", () => {
+      const open = !state.open.has(key);
+      if (open) state.open.add(key); else state.open.delete(key);
+      show(open);
+    });
+    row.append(toggle, box);
+    return row;
+  }
+  function actionCard(message, card, live, apps = []) {
+    if (card.kind === "video") return videoCard(message, card, live);
     const box = el("div", "cd-card");
     box.dataset.action = card.id; box.dataset.status = card.status || "waiting";
     box.setAttribute("role", "group");
     const waiting = card.status === "waiting", plugin = card.plugin_name || card.plugin || "the plugin";
+    const image = card.kind === "image";       // a paid image generator's card (generate_image): its price, then Make it
+    // Composio's multi-execute: its edit form shows one "Actions (JSON)" field and keeps the plumbing as it was (0.50.1).
     const composio = card.plugin === "composio" && card.tool === "COMPOSIO_MULTI_EXECUTE_TOOL";
-    const calls = composio && Array.isArray((card.sent_arguments || card.arguments || {}).tools)
-      ? (card.sent_arguments || card.arguments).tools.filter(c => c && typeof c === "object") : [];
-    box.setAttribute("aria-label", composio ? (calls.length === 1 ? composioAction(calls[0])
-      : `${calls.length || 1} actions through Composio`) : `${card.tool} in ${plugin}`);
+    box.setAttribute("aria-label", image ? `An image with ${plugin}` : `${card.tool} in ${plugin}`);
     const head = el("div", "cd-card-head");
-    const mark = el("span", "cd-card-mark", plugin.slice(0, 1).toUpperCase());
-    if (PLUGIN_ID.test(card.plugin || "")) {
-      mark.dataset.pluginMark = card.plugin;
-      wantLogo(card.plugin);
-      const src = pluginLogos.get(card.plugin);
-      if (src) mark.replaceChildren(logoImage(src));
-    }
-    head.append(mark);
+    head.append(cardMark(card, plugin));
     const words = el("div", "cd-card-words");
-    words.append(el("strong", "", composio ? (calls.length === 1 ? composioAction(calls[0]) : `${calls.length || 1} actions through Composio`)
-      : waiting ? `Do this in ${plugin}?` : `${card.tool} in ${plugin}`));
-    if (waiting) words.append(el("small", "", composio ? "Nothing happens until you choose."
-      : card.money ? `${card.tool} · ${plugin} can move money, so it always asks.`
-                   : `${card.tool} · nothing happens until you choose.`));
+    // Composio's multi-execute, in plain words: each app call it makes ("Gmail · Fetch emails · 5 from Inbox ·
+    // through Composio"), never its plumbing or raw JSON (media/pluginCalls.js). Edit still edits the real inputs.
+    const calls = !image && globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.describe(card.tool, card.sent_arguments || card.arguments, plugin) : null;
+    if (image) {
+      const a = card.arguments || {}, count = Number(a.count) || 1;
+      words.append(el("strong", "", waiting ? `Make ${count === 1 ? "this image" : `${count} images`} with ${plugin}?`
+                                            : `${count === 1 ? "An image" : `${count} images`} with ${plugin}`));
+      // This month's spend on its key, as Work's card and the video card say it, once there is any or a limit is set.
+      const month = card.card?.this_month ? `this month ${card.card.this_month} · ` : "";
+      if (waiting) words.append(el("small", "", `${count} × ${a.size || ""} · ${card.price || "price unknown"} · ${month}nothing is made until you send it.`));
+    } else if (calls) {
+      const what = calls.map((c) => `${c.app} · ${c.action}`).join(", ");
+      words.append(el("strong", "", waiting ? `Do this in ${plugin}?` : `${what} in ${plugin}`));
+      if (waiting) words.append(el("small", "", "Nothing happens until you choose."));
+    } else {
+      words.append(el("strong", "", waiting ? `Do this in ${plugin}?` : `${card.tool} in ${plugin}`));
+      if (waiting) words.append(el("small", "", card.money ? `${card.tool} · ${plugin} can move money, so it always asks.`
+                                                           : `${card.tool} · nothing happens until you choose.`));
+    }
     head.append(words);
     box.append(head);
+    // What the money needs said before Make it (this month's limit passed, a price DGC doesn't know).
+    if (image && waiting && card.card?.note) box.append(el("p", "cd-card-note", String(card.card.note)));
     const args = card.sent_arguments || card.arguments || {};
     const editing = waiting ? state.cardEdit[card.id] : null;
     if (editing) {
@@ -1995,26 +2424,33 @@
       });
       if (editing.error) form.append(el("p", "cd-card-error", editing.error));
       box.append(form);
+    } else if (calls) {
+      // Every app call the Allow covers; while it waits, one that sends or changes something shows what it sends.
+      const list = el("ul", "cd-card-calls");
+      for (const c of calls) {
+        const row = list.appendChild(el("li"));
+        row.append(el("span", "cd-call-line", c.line));
+        if (waiting && c.fields.length) row.append(inputList(c.fields, true));
+      }
+      box.append(list, sentInputs(card.tool, args));
     } else {
       const keys = Object.keys(args);
       if (composio) {
-        if (calls.length !== 1) {
-          const list = el("ul", "cd-card-actions-list");
-          for (const call of calls.slice(0, 20)) list.append(el("li", "", composioAction(call)));
-          if (!calls.length) list.append(el("li", "", "Review this Composio action before sending."));
-          box.append(list);
-        }
+        const raw = Array.isArray(args.tools) ? args.tools.filter((c) => c && typeof c === "object") : [];
+        const list = el("ul", "cd-card-actions-list");
+        for (const call of raw) list.append(el("li", "", composioAction(call)));
+        if (!raw.length) list.append(el("li", "", "Review this Composio action before sending."));
+        box.append(list, sentInputs(card.tool, args, waiting));          // no plain words for it: in full, open
       } else if (keys.length) {
-        const list = el("dl", "cd-card-inputs");
-        for (const key of keys.slice(0, 12)) list.append(el("dt", "", key), el("dd", "", shown(args[key])));
-        box.append(list);
+        box.append(inputList(Object.entries(args), waiting), sentInputs(card.tool, args));
       }
     }
     if (waiting) {
       const busy = state.cardBusy[card.id], off = live || !!busy;
       const row = el("div", "cd-card-actions");
-      const send = el("button", card.recurring ? "cd-edit-cancel" : "cd-continue", busy === "sending" ? "Sending…" : "Send it now");
-      send.type = "button"; send.title = `Do it in ${plugin} now`;
+      const send = el("button", card.recurring ? "cd-edit-cancel" : "cd-continue",
+        busy === "sending" ? (image ? "Making it…" : "Sending…") : image ? `Make it · ${card.price || ""}`.replace(/ · $/, "") : "Send it now");
+      send.type = "button"; send.title = image ? `Make it with ${plugin} now` : `Do it in ${plugin} now`;
       send.addEventListener("click", () => {
         let edited;
         if (state.cardEdit[card.id]) {
@@ -2041,20 +2477,34 @@
       no.addEventListener("click", () => { state.cardBusy[card.id] = "dismissing"; update(message.id);
         vscode.postMessage({ type: "actionDismiss", messageId: message.id, actionId: card.id }); });
       // Something recurring, or that has to wait, is a Pip's: that choice comes first.
-      row.append(...(card.recurring ? [pip, send] : [send, pip]), ...(Object.keys(card.arguments || {}).length ? [edit] : []), no);
+      row.append(...(card.recurring ? [pip, send] : image ? [send] : [send, pip]),
+        ...(Object.keys(card.arguments || {}).length ? [edit] : []), no);
       for (const b of row.querySelectorAll("button")) { b.disabled = off; changes(b); }
       box.append(row);
       if (live) box.append(el("p", "cd-card-note", "You can choose once the reply is finished."));
     } else {
-      const said = card.status === "done" ? "Done." + (card.sent_arguments ? " Sent with your changes." : "")
+      const said = card.status === "done" && image ? "Made: it's under this reply and in your Library."
+        : card.status === "done" ? "Done." + (card.sent_arguments ? " Sent with your changes." : "")
         : card.status === "failed" ? `Didn't go: ${card.error || "no answer."}`
         : card.status === "handed" ? `Handed to ${card.pip?.name || "your Pip"}: it takes it from here.`
         : card.status === "dismissed" ? "Not sent." : "";
       box.append(el("p", `cd-card-status cd-card-${card.status}`, said));
-      if (card.status === "done" && card.answer) {
+      if (card.status === "done" && card.answer && !image) {
         const more = el("details", "cd-card-answer");
+        // Opened from its folded row, what came back is the thing to see: in sight, one click to close.
+        more.open = state.open.has(`answer:${card.id}`) || !state.open.has(`!answer:${card.id}`);
+        more.addEventListener("toggle", () => {
+          if (more.open) { state.open.add(`answer:${card.id}`); state.open.delete(`!answer:${card.id}`); }
+          else { state.open.delete(`answer:${card.id}`); state.open.add(`!answer:${card.id}`); }
+        });
         more.append(el("summary", "", `What ${plugin} answered`), el("pre", "", String(card.answer)));
         box.append(more);
+      }
+      // The MCP App card its action showed, in the card that sent it (cardApps); its frame is kept across redraws.
+      if (apps.length && window.DgcMcpApps) {
+        const shown = el("div", "cd-card-apps");
+        for (const a of apps.slice(-4)) shown.append(window.DgcMcpApps.slot(a.card_id));
+        box.append(shown);
       }
     }
     return box;
@@ -2079,8 +2529,12 @@
   function sendText(text) {
     if (!text.trim() || state.busy || !state.conversation || state.unavailable || readOnly()) return;
     vscode.postMessage({ type: "send", text, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode() });
-    state.lastSent = { text, research: false, pending: [], followup: true };
+    const item = { text, research: false, model: modelPick.value || "", thinking: thinkingPick.value || "", search: searchMode(),
+                   study: !!state.study, pending: [], output: "" };
+    state.lastSent = { text, research: false, pending: [], followup: true, item };
     state.busy = true;
+    dropLocal({ keepFailed: false });
+    showSending(item);
     hideNotice(); controls();
   }
   /** Branch in new chat (ChatGPT's): this conversation up to here, in a new chat of its own, opened in a tab. */
@@ -2497,7 +2951,9 @@
       const words = d.querySelector(".cd-thought");
       return [d.dataset.id, words.scrollTop, words === document.activeElement];
     });
+    window.DgcMcpApps?.park();                     // a card's live frame waits out the redraw, then goes back
     log.replaceChildren(...nodes);
+    window.DgcMcpApps?.fill(log, cardOptions());
     for (const [id, top, focused] of places) {
       const words = log.querySelector(`details.cd-thinking[data-id="${CSS.escape(id)}"] .cd-thought`);
       if (words && top) words.scrollTop = top;
@@ -2546,6 +3002,7 @@
         if (twin) { if (twin !== document.activeElement) twin.focus(); if (caret) twin.setSelectionRange(caret[0], caret[1]); }
       }
       redraw.clear();
+      window.DgcMcpApps?.fill(log, cardOptions());
       if (readOnly()) holdChanges(log, true);
       document.body.classList.remove("cd-blank");
       $("cd-empty").hidden = true;
@@ -2578,9 +3035,24 @@
       if (was.open !== now.open) was.open = now.open;
       keep.set(now, was);
     }
-    // The pictures, unchanged: a picture drawn again would flicker.
+    // The pictures, unchanged: a picture drawn again would flicker. Each block is in its fold (media/pictureFold.js),
+    // kept whole while it holds the same pictures.
     const strip = old.querySelector(":scope > .cd-pictures"), stripNow = fresh.querySelector(":scope > .cd-pictures");
     if (strip && stripNow && strip.dataset.key === stripNow.dataset.key) keep.set(stripNow, strip);
+    for (const foldNow of fresh.querySelectorAll(":scope > .pic-fold[data-sig]")) {
+      const fold = [...old.querySelectorAll(":scope > .pic-fold[data-sig]")]
+        .find((f) => f.dataset.picFold === foldNow.dataset.picFold && f.dataset.sig === foldNow.dataset.sig);
+      if (fold) keep.set(foldNow, fold);
+    }
+    // A folded plugin card, unchanged: the same row, open or not, with an MCP App card in it going on as it is.
+    for (const rowNow of fresh.querySelectorAll(":scope > .cd-cardrow[data-sig]")) {
+      const row = [...old.querySelectorAll(":scope > .cd-cardrow[data-sig]")]
+        .find((r) => r.dataset.cardRow === rowNow.dataset.cardRow && r.dataset.sig === rowNow.dataset.sig);
+      if (row) keep.set(rowNow, row);
+    }
+    // The plugins' cards, unchanged: a card's page goes on as it is (its frame is never reloaded by a part coming).
+    const cards = old.querySelector(":scope > .cd-apps"), cardsNow = fresh.querySelector(":scope > .cd-apps");
+    if (cards && cardsNow && cards.dataset.key === cardsNow.dataset.key) keep.set(cardsNow, cards);
     // What it's doing, unchanged: its wave goes on where it was.
     const doing = old.querySelector(":scope > .cd-working"), doingNow = fresh.querySelector(":scope > .cd-working");
     if (doing && doingNow && doing.className === doingNow.className && doing.textContent === doingNow.textContent) keep.set(doingNow, doing);
@@ -2809,9 +3281,11 @@
                          ...(item.pending.length ? { attachments: item.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
                               ...(kind === "library" ? { ...(conversation_id ? { conversation_id } : { project_id }), attachment_id } : {}) })) } : {}) });
-    state.lastSent = { text: item.text, research: false, pending: item.pending };
+    state.lastSent = { text: item.text, research: false, pending: item.pending, item };
     state.busy = true;        // until the turn says otherwise: no second send in the meantime
     hideNotice();
+    dropLocal({ keepFailed: false });
+    showSending(item);
     controls();
   }
 
@@ -3236,9 +3710,20 @@
   const announce = (text) => { $("cd-announce").textContent = text; };
 
   // ---- what the host says
+  window.DgcVideo?.host((message) => vscode.postMessage(message));
+  // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it.
+  window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
+  window.DgcPictureFold?.host((message) => vscode.postMessage(message));
   window.addEventListener("message", (event) => {
     const msg = event.data || {};
+    if (window.DgcVideo?.message(msg)) return;           // a video card's bytes, state or Stop (src/videoHost.ts)
+    if (window.DgcPictureFold?.message(msg)) return;     // which pictures stay folded, and the setting
+    if (window.DgcMcpApps?.host(msg)) return;            // a card's link, download, address or message, answered
+    if (msg.type === "event" && /^mcp_app_/.test(String(msg.event?.type || ""))) { window.DgcMcpApps?.event(msg.event); return; }
     switch (msg.type) {
+      case "mcpAppCard":
+        if (msg.card && typeof msg.card === "object") cardShown(msg.card);
+        break;
       case "modsReady":
         mods?.ready(msg.capabilities || {});
         break;
@@ -3372,6 +3857,11 @@
         state.earlier = Number(msg.earlier) || 0;
         state.busy = msg.busy === true;
         state.replyId = msg.replyId || "";
+        if (state.busy && state.replyId && !state.messages.some((m) => m.id === state.replyId)) {
+          // A reply still waiting for the model (a DGC that sends nothing of it yet): shown waiting, never as nothing.
+          state.messages.push({ id: state.replyId, role: "assistant", text: "", thinking: "",
+                                waiting: { model: state.conversation?.model || state.defaultModel || "", elapsed_s: 0, usual_s: 0 } });
+        }
         state.opened = true;
         state.editing = "";
         state.editingSummary = false;
@@ -3413,14 +3903,25 @@
       }
       case "turn":
         if (msg.state === "started") {
+          const stopNow = state.stopping && !state.replyId;   // Stop pressed before the backend had started it
           state.busy = true; state.replyId = msg.replyId || ""; state.lastSent = null;
           state.stopping = false; state.failed = false;
-          if (!state.messages.some((m) => m.id === state.replyId)) {
-            // A continued reply already exists; a new one appears now, empty, and fills in.
+          const waiting = localReply();
+          if (waiting && state.replyId && !state.messages.some((m) => m.id === state.replyId)) {
+            // The reply drawn when you pressed Enter is this one: it keeps its clock and fills in.
+            waiting.id = state.replyId; delete waiting.local; delete waiting.item;
+            render();
+          } else if (waiting) {
+            // A continued reply already exists; it fills in where it is.
+            state.messages = state.messages.filter((m) => m !== waiting);
+            render();
           }
+          if (stopNow) stopReply();
         } else {
           state.busy = false; state.replyId = "";      // a later send refused before it starts isn't this turn
           state.searching = {};
+          dropLocal();
+          for (const m of state.messages) delete m.waiting;
           announce("Reply finished.");
           render();
         }
@@ -3433,6 +3934,21 @@
           if (held) restoreQueue(); else sendNext();
         }
         return;
+      case "waiting": {
+        // The backend asked the model (chatdgc_waiting): which model, and how long it usually takes to start.
+        if (typeof msg.messageId !== "string" || !msg.messageId) return;
+        let message = state.messages.find((m) => m.id === msg.messageId);
+        if (!message && msg.messageId === state.replyId) {
+          message = { id: msg.messageId, role: "assistant", text: "", thinking: "" };
+          state.messages.push(message);
+        }
+        if (!message || message.text || message.thinking) return;
+        const since = message.waiting?.since;
+        message.waiting = { model: String(msg.model || message.waiting?.model || "").slice(0, 200),
+                            usual_s: Math.max(0, Number(msg.usual_s) || 0), ...(Number.isFinite(since) ? { since } : { elapsed_s: 0 }) };
+        update(message.id);
+        return;
+      }
       case "activity":
         if (msg.kind === "compacting" && msg.messageId !== state.replyId) {
           // Compact now, a summary for a new chat, or (text "brief") Continue in Work asked for in another window.
@@ -3442,6 +3958,7 @@
         if (["searching", "looking", "compacting", "plugin", "making", "canvas", "analyzing"].includes(msg.kind) && msg.messageId) {
           state.searching[msg.messageId] = { kind: msg.kind, text: String(msg.text || "") };
           if (!state.messages.some((m) => m.id === msg.messageId)) state.messages.push({ id: msg.messageId, role: "assistant", text: "", thinking: "" });
+          delete state.messages.find((m) => m.id === msg.messageId).waiting;     // it has started: the line says what it does
           update(msg.messageId);
         }
         return;
@@ -3460,7 +3977,10 @@
           widgetsChrome();
           return;
         }
-        if (at >= 0) state.messages[at] = message; else state.messages.push(message);
+        const mine = message.role === "user" && at < 0 ? state.messages.findIndex((m) => m.local === true && m.role === "user") : -1;
+        if (at >= 0) state.messages[at] = message;
+        else if (mine >= 0) state.messages[mine] = message;              // what you sent, as the backend kept it
+        else state.messages.push(message);
         // A draft edit is saved once the reply comes back with it.
         const saved = Object.keys(state.draftEdit).filter((k) => k.startsWith(`${message.id}\u0000`) && state.draftEdit[k].saving);
         for (const k of saved) delete state.draftEdit[k];
@@ -3623,6 +4143,7 @@
         }
         if (message.finish && message.finish !== "stop") message.finish = undefined;   // continuing it
         if (msg.text) delete state.searching[message.id];           // it is writing again
+        if (msg.text || msg.thinking) delete message.waiting;      // the model has started
         message.text = (message.text || "") + (msg.text || "");
         message.thinking = (message.thinking || "") + (msg.thinking || "");
         update(message.id);
@@ -3682,6 +4203,14 @@
         if (state.busy && !state.replyId) state.planAsked = false;
         if (state.busy && state.replyId) state.failed = true;  // its turn ends next: what's queued waits for you
         const refused = state.busy && !state.replyId;
+        { const waiting = refused ? localReply() : null;
+          if (waiting) {
+            // The reply drawn at Enter: a short error with Retry. Your text is back in the box (above); your bubble goes.
+            state.messages = state.messages.filter((m) => !(m.local === true && m.role === "user"));
+            waiting.failedSend = { reason: String(msg.message || "").slice(0, 300), item: waiting.item };
+            delete waiting.waiting;
+            render();
+          } }
         state.lastSent = null;
         state.busy = state.busy && !!state.replyId;           // a send that never started isn't running
         showNotice(msg.message || "ChatDGC hit an error.");
@@ -3690,6 +4219,13 @@
         return;
       }
       case "lost":
+        { const waiting = !state.replyId ? localReply() : null;
+          if (waiting) {
+            state.messages = state.messages.filter((m) => !(m.local === true && m.role === "user"));
+            waiting.failedSend = { reason: String(msg.message || "The reply stopped."), item: waiting.item };
+            delete waiting.waiting;
+          } }
+        for (const m of state.messages) delete m.waiting;
         if (state.busy) { state.busy = false; showNotice(msg.message || "The reply stopped."); render(); }
         state.stopping = false; state.failed = false;
         restoreQueue();
@@ -3721,7 +4257,12 @@
         for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
           if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))) continue;
           pluginLogos.set(id, src);
-          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"], .cd-card-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
+          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
+          // A card's mark: the logo in place of the letter (none: the letter stays).
+          if (src) for (const mark of document.querySelectorAll(`.cd-card-mark[data-plugin-mark="${id}"]`)) {
+            const img = logoImage(src);
+            mark.classList.add("has-logo"); mark.replaceChildren(img); globalThis.DgcPluginCalls?.backdrop(img, mark);
+          }
         }
         return;
       case "favicons":
@@ -3757,7 +4298,15 @@
             picture.closest(".cd-picture-item").remove();
             const left = [...strip.querySelectorAll("img[data-att]")].map((i) => i.dataset.att);
             strip.dataset.key = left.join(","); strip.dataset.count = String(left.length);
-            if (!left.length) strip.remove();
+            // Its fold says so too: the same block, one picture fewer (media/pictureFold.js).
+            const fold = strip.closest(".pic-fold[data-sig]");
+            if (fold) {
+              fold.dataset.sig = strip.dataset.key;
+              const title = fold.querySelector(".pic-fold-title");
+              if (title && window.DgcPictureFold) title.textContent = window.DgcPictureFold.summary({ pictures: left.length,
+                label: state.messages.find((m) => m.id === fold.closest(".cd-msg")?.dataset.id)?.images?.query || "" });
+            }
+            if (!left.length) (fold || strip).remove();
           }
           else if (picture.closest(".cd-lightbox-frame")) picture.replaceWith(el("p", "cd-thumb-missing", "This picture is no longer there."));
           else picture.closest(".cd-thumb")?.replaceChildren(el("span", "cd-thumb-missing", picture.alt || "Image"));

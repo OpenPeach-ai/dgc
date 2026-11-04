@@ -189,7 +189,7 @@ export type PipMutationParams = {
   propose_pip_app_action: { source_run_id: string; server: string; connection_digest: string; account: string; schema_digest: string; message: { recipient_email: string; subject: string; body: string }; request_key: string };
   accept_pip_app_action: { action_id: string; expected_digest: string };
   reject_pip_app_action: { action_id: string; expected_digest: string };
-  revise_pip_setup: { setup_id: string; expected_digest: string; model_choice: { mode: "default" } | { mode: "model"; model: string } | { mode: "subscription"; engine: "claude" | "codex" } };
+  revise_pip_setup: { setup_id: string; expected_digest: string; model_choice: { mode: "default" } | { mode: "model"; model: string } | { mode: "subscription"; engine: "claude" | "codex" } | { mode: "router" } | { mode: "router"; system: string; model: string } };
   accept_pip_setup: { setup_id: string; expected_digest: string };
   reject_pip_setup: { setup_id: string; expected_digest: string };
   record_pip_statement: { pip_id: string; kind: "fact" | "preference"; title: string; statement: string; reason: string; expires_at: string | null; expected_anchor_digest: string; request_key: string; source_run_id?: string };
@@ -1137,6 +1137,16 @@ export class Pips {
       }
       if (choices.filter(subscription).some((choice) => Object.keys(choice).sort().join() !== "engine,mode" || !SUBSCRIPTION_ENGINES.has(choice.engine as string))) {
         throw new DGCConfigError('A subscription model_choice is {mode: "subscription", engine: "claude" | "codex"}');
+      }
+    }
+    // API 70: a Pip on DGC Router, any of the user's systems with the Pips job, or one system and model.
+    const router = (choice: unknown): choice is Record<string, unknown> => !!choice && typeof choice === "object" && (choice as Record<string, unknown>).mode === "router";
+    if (choices.some(router)) {
+      if ((this.caps.pips_api_version as number) < 70) {
+        throw new DGCUnsupportedError("A Pip on DGC Router requires a runtime advertising Pips API 70 or newer");
+      }
+      if (choices.filter(router).some((choice) => !["mode", "mode,model,system"].includes(Object.keys(choice).sort().join()))) {
+        throw new DGCConfigError('A DGC Router model_choice is {mode: "router"} or {mode: "router", system, model}');
       }
     }
     if (command === "set_pip_eyes" && !EYES_CHOICES.has(values.choice as string)) throw new DGCConfigError("choice must be ask, relay or off");

@@ -1,0 +1,49 @@
+/* A plugin's card (MCP Apps, media/mcpApps.js): the plugin's own page in a frame under its tool's row, with one quiet
+   line naming it, and DGC's Allow card above the page when the card asks to change something. */
+.mcp-app { margin: 6px 0 10px; max-width: 100%; }
+.mcp-app-head { display: flex; align-items: center; gap: 6px; min-height: 22px; font-size: 12px;
+  color: var(--vscode-descriptionForeground); }
+.mcp-app-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis; }
+.mcp-app-name strong { color: var(--vscode-foreground); font-weight: 600; }
+.mcp-app-tool { overflow: hidden; text-overflow: ellipsis; }
+.mcp-app-icon { width: 14px; height: 14px; flex: none; }
+.mcp-app-name .mcp-app-icon { opacity: .8; }
+.mcp-app-btn { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 22px;
+  height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.mcp-app-btn:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.mcp-app-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.mcp-app-collapse { margin-left: auto; width: auto; padding: 0 6px; font-size: 11px; }
+.mcp-app-collapse + .mcp-app-btn { margin-left: 0; }
+.mcp-app[data-collapsed="true"] .mcp-app-frame,
+.mcp-app[data-collapsed="true"] .mcp-app-note { display: none; }
+.mcp-app[data-failed="true"] .mcp-app-frame { display: none; }
+.mcp-app-frame { position: relative; margin-top: 4px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128,128,128,.35)));
+  border-radius: 10px; overflow: hidden; background: var(--vscode-editor-background); }
+.mcp-app[data-border="none"] .mcp-app-frame { border-color: transparent; background: transparent; }
+.mcp-app-frame iframe { display: block; width: 100%; border: 0; background: transparent; color-scheme: normal; }
+.mcp-app-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--vscode-descriptionForeground); pointer-events: none; }
+.mcp-app-loading[hidden] { display: none; }
+.mcp-app-asks:empty { display: none; }
+.mcp-app-note { margin: 6px 2px 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.mcp-app-note[hidden] { display: none; }
+.mcp-app-ask { margin-top: 6px; padding: 10px 12px; border: 1px solid var(--vscode-focusBorder, rgba(128,128,128,.5));
+  border-radius: 8px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); font-size: 13px; }
+.mcp-app-ask-line { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; flex-wrap: wrap; }
+.mcp-app-ask-line .mcp-app-icon { color: var(--vscode-textLink-foreground); }
+.mcp-app-ask-args summary { cursor: pointer; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.mcp-app-ask-args pre { margin: 4px 0 6px; max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace); color: var(--vscode-descriptionForeground); }
+.mcp-app-ask-note { margin: 4px 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.mcp-app-ask-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.mcp-app-ask-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, transparent));
+  background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, inherit); }
+.mcp-app-ask-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+.mcp-app-ask-btn:hover { filter: brightness(1.08); }
+.mcp-app-ask-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.mcp-app[data-display="fullscreen"] { display: flex; flex-direction: column; height: 100%; margin: 0; }
+.mcp-app[data-display="fullscreen"] .mcp-app-frame { flex: 1; min-height: 0; }
+.mcp-app[data-display="fullscreen"] .mcp-app-frame iframe { height: 100%; }
+.mcp-app-dup { display: none; }

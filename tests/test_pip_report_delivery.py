@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -441,6 +442,19 @@ class BackendTests(Scene):
         self.assertEqual(self.registry.db.execute("SELECT run_id FROM pip_news_run_seen").fetchone()[0], run,
                          "the home no longer counts this exact run")
         self.assertIsNone(ep.command_error({"type": "pip_report_dismiss", "run_id": run}))
+
+    def test_dismissing_a_card_whose_run_is_gone_still_saves_the_dismissal(self):
+        backend = self.make()
+        run = self.finished(findings=[finding("From a Pip erased since")])
+        backend._look_for_pip_reports(force=True)
+        self.registry.db.execute("PRAGMA foreign_keys=OFF")
+        with self.registry.transaction():                       # the Pip was erased, and its runs with it
+            self.registry.db.execute("DELETE FROM pip_runs WHERE id=?", (run,))
+        backend.dispatch({"type": "pip_report_dismiss", "run_id": run})
+        self.assertEqual([i for i in backend._history() if i.get("role") == "pip_report"], [])
+        self.assertIs(self.saved(backend)[-1][delivery.KEY][0]["dismissed"], True, "saved now, not at a later save")
+        with patch.object(pip_digest, "mark_run_seen", side_effect=sqlite3.OperationalError("database is locked")):
+            backend.dispatch({"type": "pip_report_dismiss", "run_id": run})
 
     def test_home_dismiss_removes_saved_chat_card_on_replay(self):
         backend = self.make()

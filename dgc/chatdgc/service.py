@@ -336,6 +336,7 @@ class _Live:
         self.lock = threading.RLock()
         self.message: dict | None = None
         self.activity: tuple[str, str] | None = None     # what it is doing that shows only as "Searching…"
+        self.waiting: dict | None = None                 # asked the model, nothing back yet: {model, usual_s, since}
         self.done = False
 
     def start(self, reply_id: str, existing: dict | None) -> None:
@@ -354,7 +355,12 @@ class _Live:
             if self.done or message is None:
                 return None
             kept = any(message.get(key) for key in ("text", "thinking", "questions", "images", "actions", "files",
-                                                     "canvases", "widgets", "research"))
+                                                     "canvases", "widgets", "research", "apps"))
+            if not kept and self.waiting is not None:
+                # Still waiting for the model: a screen opened now shows it waiting, with its clock, not nothing.
+                return {**json.loads(json.dumps(message)),
+                        "waiting": {"model": self.waiting["model"], "usual_s": self.waiting["usual_s"],
+                                    "elapsed_s": round(max(0.0, time.time() - self.waiting["since"]), 1)}}
             return json.loads(json.dumps(message)) if kept else None
 
     def said(self, event: str, /, **fields) -> None:
@@ -381,6 +387,8 @@ class _Live:
 
     def _fold(self, event: str, fields: dict) -> None:
         message = self.message
+        if event != "chatdgc_waiting":
+            self.waiting = None                      # the model has started: anything it sends ends the wait
         if event == "chatdgc_delta":
             if message.get("finish") and message.get("finish") != "stop":
                 message.pop("finish", None)          # a stopped reply, continued
@@ -419,6 +427,10 @@ class _Live:
         elif event == "chatdgc_activity":
             if fields.get("kind") in ("searching", "looking", "compacting", "plugin", "making", "canvas", "analyzing"):
                 self.activity = (str(fields.get("kind")), str(fields.get("text") or ""))
+        elif event == "mcp_app_card":
+            # A plugin's card the reply showed (MCP Apps): kept on it as its summary, as the saved reply keeps it.
+            kept = {key: fields.get(key) for key in ("card_id", "server", "plugin", "tool", "call_id", "created_at")}
+            message["apps"] = [*(a for a in message.get("apps") or [] if a.get("card_id") != kept["card_id"]), kept]
 
 
 class ChatService:
@@ -432,6 +444,8 @@ class ChatService:
         # An artifact a reply made or changed: every screen hears it (the chat's card, the Library).
         self.engine.on_artifact = lambda view, op, chat_id: self.emit(
             "artifact_changed", artifact=view, op=op, surface="chat", conversation_id=chat_id)
+        # A plugin's card a reply showed (MCP Apps), once a screen draws them (the Host says: watch_mcp_apps chat).
+        self.engine.on_mcp_app = self._mcp_app_shown
         self._turns: dict[str, dict] = {}
         self._naming: set[threading.Thread] = set()     # chats being named after their first reply
         self._lock = threading.Lock()
@@ -472,6 +486,16 @@ class ChatService:
         self._mod_lock = threading.Lock()
         if engine is None:                               # a test's own engine has no mods unless it starts them
             threading.Thread(target=self._mods, daemon=True, name="chatdgc-mods").start()
+        self._watch_videos()                             # last: a job's card can be written from here on
+
+    def _mcp_app_shown(self, record: dict) -> None:
+        """``mcp_app_card`` for a card a reply (or a card's Send it now) showed: through the running reply when there is
+        one, so a screen opening the chat mid-reply has it too."""
+        from ..mcp_apps import event_fields
+        fields = event_fields(record)
+        turn = self._turns.get(str(record.get("conversation_id") or ""))
+        live = (turn or {}).get("live") if isinstance(turn, dict) else None
+        (live.said if live is not None else self.emit)("mcp_app_card", **fields)
 
     # -- the router's door
 
@@ -1586,6 +1610,45 @@ class ChatService:
         self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked), request_id=cmd["request_id"])
         self._changed(conversation_id, None)
 
+    def _watch_videos(self) -> None:
+        """A chat's video card follows its job (dgc/videos.py): each change is written to the chat and sent as
+        chatdgc_action, so the card turns into the player, here or on a screen that reopens the chat. Jobs a reload
+        left on disk are polled again."""
+        from .. import videos
+        import weakref
+        ref = weakref.ref(self)
+
+        def heard(job: dict, change: str) -> None:
+            service = ref()
+            if service is None:
+                videos.JOBS.remove_listener(heard)
+                return
+            service._video_heard(job)
+        self._video_listener = heard
+        videos.JOBS.add_listener(heard)
+        try:
+            videos.JOBS.resume(self.engine.config, keep=lambda job: bool((job.get("target") or {}).get("chat")))
+        except Exception:                                # noqa: BLE001 -- a job stays on disk for the next try
+            pass
+
+    def _video_heard(self, job: dict) -> None:
+        if not (job.get("target") or {}).get("chat"):
+            return
+        from . import videos as chat_videos
+        try:
+            found = chat_videos.apply(self.engine, job)
+        except Exception:                                # noqa: BLE001 -- a chat that can't be written now
+            return
+        if found is None:
+            return
+        conversation_id, message_id, card = found
+        self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=card)
+
+    def _is_latest_reply(self, conversation_id: str, message_id: str) -> bool:
+        """Whether this reply is still the chat's last message: only that reply can carry on after its card."""
+        messages = self.engine.open(conversation_id).get("messages") or []
+        return bool(messages) and messages[-1].get("id") == message_id and messages[-1].get("role") == "assistant"
+
     def _action(self, cmd: dict) -> None:
         """Send it now (as edited), don't, or hand it to a Pip. Sending holds the chat's turn slot;
         a sent card's answer then continues the same reply while Stop can cancel that continuation."""
@@ -1621,8 +1684,19 @@ class ChatService:
                     done = self._hand(conversation_id, message_id, action_id, pip_id)
                 self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=done,
                           request_id=request_id)
+                if done.get("kind") == "image" and done.get("status") == "done":
+                    # The picture an image card made joins its reply: the reply as it is now, on every screen.
+                    now_chat = self.engine.open(conversation_id)
+                    message = next((m for m in now_chat["messages"] if m.get("id") == message_id), None)
+                    if message is not None:
+                        marked = self._marked(now_chat, [message])[0]
+                        self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked))
                 self._changed(conversation_id, None)
-                if op == "run" and done.get("status") in ("done", "failed"):
+                # Sent from a plugin's card: the reply carries on with what it answered (Don't and Hand it to a Pip
+                # don't). An image card's pictures join the reply instead. A card on an earlier reply ends here:
+                # its status says what happened, and the next reply reads it.
+                if (op == "run" and done.get("kind") not in ("image", "video") and done.get("status") in ("done", "failed")
+                        and self._is_latest_reply(conversation_id, message_id)):
                     self._reviews.started(conversation_id)
                     def continue_run(cancel, on_start, stream_for, activity):
                         return self.engine.continue_action(conversation_id, message_id, action_id,
@@ -2039,6 +2113,20 @@ class ChatService:
         thread.start()
         self._turns_changed()
 
+    def _waiting_for(self, chat) -> dict | None:
+        """A new reply about to ask its model: which model, and how long it usually takes to start. None for a reply
+        that already has something (continued) or a chat that couldn't be read."""
+        if not isinstance(chat, dict):
+            return None
+        from .. import model_pace
+        config = self.engine.config
+        model = str(chat.get("model") or config.model or "")[:200]
+        try:
+            usual = float(model_pace.usual_for(model, str(config.base_url or "")))
+        except Exception:                            # noqa: BLE001 -- only a hint
+            usual = 0.0
+        return {"model": model, "usual_s": round(usual, 1), "since": time.time()}
+
     def _turn(self, conversation_id: str, request_id: str, cancel, run, turn: dict) -> None:
         stream = {"value": None}
         live = turn.get("live") or _Live(self.emit)
@@ -2047,6 +2135,7 @@ class ChatService:
         def on_start(mine, reply_id):
             with live.lock:
                 turn["reply_id"] = reply_id
+                now_chat = None
                 try:                                  # a reply continued, or research's plan: what it has so far
                     now_chat = self.engine.open(conversation_id)
                     turn["title"] = now_chat.get("title")  # named by its first message by now (the note shows it)
@@ -2057,6 +2146,8 @@ class ChatService:
                 stream["value"] = _Stream(say, conversation_id, reply_id)
                 self.emit("chatdgc_turn", conversation_id=conversation_id, state="started", reply_id=reply_id,
                           request_id=request_id)
+                waiting = self._waiting_for(now_chat if existing is None else None)
+                live.waiting = waiting
             self._turns_changed()                     # the note names the chat as its first message did
             if turn.get("refresh"):
                 # A new version: the conversation from the fork point on is what it is now, on every screen.
@@ -2067,6 +2158,10 @@ class ChatService:
                 marked = self._marked(self.engine.open(conversation_id), [mine])[0]
                 self.emit("chatdgc_message", conversation_id=conversation_id, message=fit(marked),
                           request_id=request_id)
+            if waiting is not None:
+                # The model is asked next: the screen's waiting line names it, and how long it usually takes.
+                say("chatdgc_waiting", conversation_id=conversation_id, message_id=reply_id, model=waiting["model"],
+                    usual_s=waiting["usual_s"])
 
         def activity(kind, text):
             if stream["value"] is not None:

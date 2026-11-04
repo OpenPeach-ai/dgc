@@ -7,8 +7,8 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "prompt_pips" | "pips_result" | "pips_status" | "pip_report" | "pip_desktop_data" | "pip_desktop_closed" | "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "cache_settings" | "pips_settings" | "model_wait_settings" | "cache_clock" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "plugin_catalog" | "composio_connection" | "plugin_preview" | "plugin_marketplaces" | "plugin_operation" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_draft" | "skill_saved" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "outline" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "monitor_restart" | "task_interrupted" | "background_shells" | "background_output" | "troupe_started" | "troupe_progress" | "troupe_finished" | "troupes" | "usage_report" | "pip_usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step" | "moved_to_background" | "agent_message" | "chat_opened" | "chat_closed" | "chatdgc_held" | "session_live" | "session_moved" | "live_sessions" | "turn_interrupted" | "session_holder" | "session_held" | "chatdgc_holder" | "pip_fix" | "pip_fixes" | "pip_fix_change" | "pip_runs_running" | "agent_report" | "agent_runs" | "server_window" | "turn_files" | "rewind_preview" | "undo_result" | "models_at" | "chatdgc_chats" | "chatdgc_folder" | "chatdgc_work_brief" | "chatdgc_opened" | "chatdgc_projects" | "chatdgc_library" | "chatdgc_action" | "chatdgc_pips" | "chatdgc_followups" | "chatdgc_library_file" | "chatdgc_project" | "chatdgc_earlier" | "chatdgc_outline" | "chatdgc_turn" | "chatdgc_delta" | "chatdgc_activity" | "chatdgc_message" | "chatdgc_question" | "chatdgc_images" | "chatdgc_made" | "chatdgc_canvas" | "chatdgc_widget" | "context_breakdown" | "chatdgc_widgets" | "chatdgc_research" | "memory_state" | "memory_history" | "memory_learned" | "voice_state" | "voice_progress" | "voice_text" | "voice_audio" | "voice_error" | "chatdgc_changed" | "chatdgc_error" | "chatdgc_file" | "chatdgc_exported" | "chatdgc_context" | "chatdgc_compacted" | "artifact_items" | "artifact_changed" | "artifact_detail" | "artifact_served" | "artifact_exported" | "artifact_comparison" | "mods" | "mod_ui" | "mod_toast" | "mod_result" | "mod_offer";
-export type DgcCommandType = "list_prompt_pips" | "pips_control" | "pips_enable" | "watch_pip_reports" | "pip_report_dismiss" | "pips_runtime" | "pip_desktop" | "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "steer_queued" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "editor_state" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "list_plugins" | "install_plugin" | "composio_connection" | "inspect_plugin" | "uninstall_plugin" | "set_plugin_key" | "remove_plugin_key" | "set_plugin_sign_in_scopes" | "list_plugin_marketplaces" | "add_plugin_marketplace" | "remove_plugin_marketplace" | "refresh_plugin_marketplace" | "create_plugin" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "learn_skill" | "save_skill" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "get_outline" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "context_breakdown" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "restart_monitor" | "rerun_task" | "list_background_shells" | "stop_background_shell" | "get_background_output" | "list_troupes" | "stop_troupe" | "get_usage" | "get_pip_usage_report" | "list_agents" | "get_image" | "agent_control" | "background_now" | "open_chat" | "close_chat" | "set_detach" | "set_detach_chatdgc" | "chatdgc_shown" | "chatdgc_open_here" | "detach" | "list_live_sessions" | "stop_live_session" | "editor_app" | "session_holder" | "chatdgc_holder" | "watch_session_owner" | "start_pip_fix" | "undo_pip_fix" | "list_pip_fixes" | "get_pip_fix_change" | "watch_pip_runs" | "watch_agent_reports" | "watch_agent_runs" | "continue_agent" | "server_window" | "watch_turn_files" | "rewind_preview" | "user_saved" | "undo_to" | "list_models_at" | "chatdgc_list" | "chatdgc_open" | "chatdgc_projects" | "chatdgc_project" | "chatdgc_move" | "chatdgc_library" | "chatdgc_draft" | "chatdgc_canvas" | "chatdgc_widget_report" | "chatdgc_context" | "chatdgc_context_breakdown" | "chatdgc_widgets" | "chatdgc_action" | "chatdgc_pips" | "chatdgc_library_file" | "chatdgc_earlier" | "chatdgc_outline" | "chatdgc_send" | "chatdgc_continue" | "chatdgc_edit" | "chatdgc_regenerate" | "chatdgc_version" | "chatdgc_answer" | "chatdgc_export" | "chatdgc_research" | "chatdgc_research_start" | "chatdgc_research_steer" | "voice_models" | "voice_install" | "voice_cancel" | "voice_remove" | "voice_use" | "voice_transcribe" | "voice_speak" | "voice_stop" | "memory_list" | "memory_add" | "memory_edit" | "memory_forget" | "memory_clear" | "memory_project" | "memory_history" | "memory_undo" | "memory_watch" | "chatdgc_compact" | "chatdgc_summary" | "chatdgc_carry" | "chatdgc_branch" | "chatdgc_cancel" | "chatdgc_file" | "chatdgc_update" | "chatdgc_folder" | "chatdgc_set_folder" | "chatdgc_work_brief" | "artifact_list" | "artifact_get" | "artifact_update" | "artifact_restore" | "artifact_compare" | "artifact_export" | "artifact_open" | "artifact_remove" | "artifact_refresh" | "artifact_allow_source" | "mods_list" | "mod_set" | "mod_command" | "mod_action" | "watch_mod_offers" | "mod_offer_answer";
+export type DgcEventType = "prompt_pips" | "pips_result" | "pips_status" | "pip_report" | "pip_desktop_data" | "pip_desktop_closed" | "chat_changes" | "chat_change" | "workspace_changes" | "workspace_change" | "ready" | "turn_start" | "turn_end" | "turn_eta" | "turn_activity" | "text_delta" | "thinking_delta" | "thinking_end" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_images" | "image" | "tool_denied" | "todos" | "artifact_ready" | "files_ready" | "goal_changed" | "info" | "error" | "model_retry" | "request_expired" | "permission_request" | "permission_decision" | "rule_added" | "plan_proposal" | "ask_request" | "ask_resolved" | "options_request" | "options_resolved" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "cache_settings" | "pips_settings" | "model_wait_settings" | "subagent_settings" | "cache_clock" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "plugin_catalog" | "composio_connection" | "plugin_preview" | "plugin_marketplaces" | "plugin_operation" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_draft" | "skill_saved" | "skill_package" | "mcp_context_catalog" | "mcp_context" | "mcp_command_result" | "handoff" | "queued" | "prompt_accepted" | "steering_update" | "permission_resolved" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "recall" | "outline" | "sessions" | "checkpoints" | "rewound" | "retained_tasks" | "monitor_started" | "monitor_event" | "monitor_ended" | "monitors" | "monitor_restart" | "task_interrupted" | "background_shells" | "background_output" | "troupe_started" | "troupe_progress" | "troupe_finished" | "troupes" | "usage_report" | "pip_usage_report" | "agent_started" | "agent_updated" | "agent_ended" | "agents" | "agent_step" | "moved_to_background" | "agent_message" | "chat_opened" | "chat_closed" | "chatdgc_held" | "session_live" | "session_moved" | "live_sessions" | "turn_interrupted" | "session_holder" | "session_held" | "chatdgc_holder" | "pip_fix" | "pip_fixes" | "pip_fix_change" | "pip_runs_running" | "agent_report" | "agent_runs" | "server_window" | "router_suggestion" | "router_status" | "router_changed" | "images_status" | "images_result" | "images_library" | "images_made" | "video_job" | "video_jobs" | "videos_library" | "turn_files" | "rewind_preview" | "undo_result" | "models_at" | "chatdgc_chats" | "chatdgc_folder" | "chatdgc_work_brief" | "chatdgc_opened" | "chatdgc_projects" | "chatdgc_library" | "chatdgc_action" | "chatdgc_pips" | "chatdgc_followups" | "chatdgc_library_file" | "chatdgc_project" | "chatdgc_earlier" | "chatdgc_outline" | "chatdgc_turn" | "chatdgc_delta" | "chatdgc_waiting" | "chatdgc_activity" | "chatdgc_message" | "chatdgc_question" | "chatdgc_images" | "chatdgc_made" | "chatdgc_canvas" | "chatdgc_widget" | "context_breakdown" | "chatdgc_widgets" | "chatdgc_research" | "memory_state" | "memory_history" | "memory_learned" | "voice_state" | "voice_progress" | "voice_text" | "voice_audio" | "voice_error" | "chatdgc_changed" | "chatdgc_error" | "chatdgc_file" | "chatdgc_exported" | "chatdgc_context" | "chatdgc_compacted" | "artifact_items" | "artifact_changed" | "artifact_detail" | "artifact_served" | "artifact_exported" | "artifact_comparison" | "mods" | "mod_ui" | "mod_toast" | "mod_result" | "mod_offer" | "mcp_app_card" | "mcp_app_reply" | "mcp_app_resource";
+export type DgcCommandType = "list_prompt_pips" | "pips_control" | "pips_enable" | "watch_pip_reports" | "pip_report_dismiss" | "pips_runtime" | "pip_desktop" | "get_chat_changes" | "get_chat_change" | "get_workspace_changes" | "get_workspace_change" | "prompt" | "slash_command" | "steer_queued" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "ask_skip" | "ping" | "editor_state" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "list_plugins" | "install_plugin" | "composio_connection" | "inspect_plugin" | "uninstall_plugin" | "set_plugin_key" | "remove_plugin_key" | "set_plugin_sign_in_scopes" | "list_plugin_marketplaces" | "add_plugin_marketplace" | "remove_plugin_marketplace" | "refresh_plugin_marketplace" | "create_plugin" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_mcp_context" | "get_history" | "start_goal" | "mcp_command" | "get_mcp_context" | "set_mcp_enabled" | "reconnect_mcp_server" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "learn_skill" | "save_skill" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "fork_session" | "resume_goal" | "resume_turn" | "get_recall" | "get_outline" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "clear_todos" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "context_breakdown" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown" | "list_monitors" | "stop_monitor" | "restart_monitor" | "rerun_task" | "list_background_shells" | "stop_background_shell" | "get_background_output" | "list_troupes" | "stop_troupe" | "get_usage" | "get_pip_usage_report" | "list_agents" | "get_image" | "agent_control" | "background_now" | "open_chat" | "close_chat" | "set_detach" | "set_detach_chatdgc" | "chatdgc_shown" | "chatdgc_open_here" | "detach" | "list_live_sessions" | "stop_live_session" | "editor_app" | "session_holder" | "chatdgc_holder" | "watch_session_owner" | "start_pip_fix" | "undo_pip_fix" | "list_pip_fixes" | "get_pip_fix_change" | "watch_pip_runs" | "watch_agent_reports" | "watch_agent_runs" | "continue_agent" | "server_window" | "router_status" | "router_update" | "router_probe" | "router_find" | "router_hardware" | "router_suggest" | "router_thinking" | "images_list" | "images_update" | "images_generate" | "images_library" | "videos_jobs" | "videos_stop" | "videos_generate" | "videos_library" | "watch_turn_files" | "rewind_preview" | "user_saved" | "undo_to" | "list_models_at" | "chatdgc_list" | "chatdgc_open" | "chatdgc_projects" | "chatdgc_project" | "chatdgc_move" | "chatdgc_library" | "chatdgc_draft" | "chatdgc_canvas" | "chatdgc_widget_report" | "chatdgc_context" | "chatdgc_context_breakdown" | "chatdgc_widgets" | "chatdgc_action" | "chatdgc_pips" | "chatdgc_library_file" | "chatdgc_earlier" | "chatdgc_outline" | "chatdgc_send" | "chatdgc_continue" | "chatdgc_edit" | "chatdgc_regenerate" | "chatdgc_version" | "chatdgc_answer" | "chatdgc_export" | "chatdgc_research" | "chatdgc_research_start" | "chatdgc_research_steer" | "voice_models" | "voice_install" | "voice_cancel" | "voice_remove" | "voice_use" | "voice_transcribe" | "voice_speak" | "voice_stop" | "memory_list" | "memory_add" | "memory_edit" | "memory_forget" | "memory_clear" | "memory_project" | "memory_history" | "memory_undo" | "memory_watch" | "chatdgc_compact" | "chatdgc_summary" | "chatdgc_carry" | "chatdgc_branch" | "chatdgc_cancel" | "chatdgc_file" | "chatdgc_update" | "chatdgc_folder" | "chatdgc_set_folder" | "chatdgc_work_brief" | "artifact_list" | "artifact_get" | "artifact_update" | "artifact_restore" | "artifact_compare" | "artifact_export" | "artifact_open" | "artifact_remove" | "artifact_refresh" | "artifact_allow_source" | "mods_list" | "mod_set" | "mod_command" | "mod_action" | "watch_mod_offers" | "mod_offer_answer" | "watch_mcp_apps" | "mcp_app_call" | "mcp_app_answer" | "mcp_app_context" | "mcp_app_get";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
 
@@ -2151,6 +2151,20 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "between_words_s": {
       "types": [
         "integer"
+      ],
+      "required": true
+    }
+  },
+  "subagent_settings": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "thinking": {
+      "types": [
+        "string"
       ],
       "required": true
     }
@@ -4963,6 +4977,285 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     }
   },
+  "router_suggestion": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "suggestion": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    }
+  },
+  "router_status": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "status": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "change": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "probe": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "found": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "router_changed": {
+    "status": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "why": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "images_status": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "status": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "change": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "pending": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "notes": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "tested": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "images_result": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "ok": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "text": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "images": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "generator": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "cost_usd": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "error": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "card": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "images_library": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "images": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "total": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "next_offset": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
+  "images_made": {
+    "call_id": {
+      "types": [
+        "null",
+        "string"
+      ],
+      "required": false
+    },
+    "images": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "generator": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "cost_usd": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    }
+  },
+  "video_job": {
+    "job": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    }
+  },
+  "video_jobs": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "jobs": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "change": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "card": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "error": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "videos_library": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "videos": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "total": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "next_offset": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
   "turn_files": {
     "turn_id": {
       "types": [
@@ -5527,6 +5820,32 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    }
+  },
+  "chatdgc_waiting": {
+    "conversation_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "message_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "usual_s": {
+      "types": [
+        "number"
+      ],
+      "required": true
     }
   },
   "chatdgc_activity": {
@@ -6543,6 +6862,318 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "work",
         "chat"
       ]
+    }
+  },
+  "mcp_app_card": {
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "call_id": {
+      "types": [
+        "null",
+        "string"
+      ],
+      "required": false
+    },
+    "surface": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "work",
+        "chat",
+        "pip"
+      ]
+    },
+    "server": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "plugin": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "tool": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "uri": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "url": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "tool_input": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "tool_result": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "tool_info": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "csp": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "declared_csp": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "link_hosts": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "created_at": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "permissions": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "prefers_border": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "conversation_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "message_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "pip_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "html": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_reply": {
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "result": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "error": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "ask": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_resource": {
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "call_id": {
+      "types": [
+        "null",
+        "string"
+      ],
+      "required": false
+    },
+    "surface": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "work",
+        "chat",
+        "pip"
+      ]
+    },
+    "server": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "plugin": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "tool": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "uri": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "url": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "tool_input": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "tool_result": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "tool_info": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "csp": {
+      "types": [
+        "object"
+      ],
+      "required": true
+    },
+    "declared_csp": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    },
+    "link_hosts": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "created_at": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "permissions": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "prefers_border": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "conversation_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "message_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "pip_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "html": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "csp_header": {
+      "types": [
+        "string"
+      ],
+      "required": true
     }
   }
 };
@@ -8108,6 +8739,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "saved_mode": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "request_id": {
       "types": [
         "string"
@@ -8441,6 +9078,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "month",
         "all"
       ]
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "get_pip_usage_report": {
@@ -8462,6 +9105,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "month",
         "all"
       ]
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "list_agents": {
@@ -8773,6 +9422,654 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "request_id": {
       "types": [
         "string"
+      ],
+      "required": false
+    }
+  },
+  "router_status": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "refresh": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    }
+  },
+  "router_update": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "action": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "base_url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "jobs": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "models": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "workers": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "one_model_at_a_time": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "memory_gb": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "use": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "context": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "note": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "when_busy": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "key": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "router_probe": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "checks": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    }
+  },
+  "router_find": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "router_hardware": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "token": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "router_suggest": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "context": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
+  "router_thinking": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "thinking": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "images_list": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "refresh": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    }
+  },
+  "images_update": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "action": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "generator": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "provider": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "base_url": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "size": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "steps": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "negative_prompt": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "asks": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "good_for": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "enabled": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "monthly_limit_usd": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "system": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "default": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "workflow": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "mapping": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "confirm": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "auto_fallback": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "save_dir": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "key": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "makes": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "video_asks": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "video_pips": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    }
+  },
+  "images_generate": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "prompt": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "size": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "aspect": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "count": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "images": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "mask": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "generator": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "seed": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "negative_prompt": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "save_to": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "approve": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    }
+  },
+  "images_library": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "query": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "surface": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "limit": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "offset": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
+  "videos_jobs": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "job": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "videos_stop": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "job": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
+  "videos_generate": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "prompt": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "duration_s": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "aspect": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "resolution": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "image": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "audio": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "generator": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "seed": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "negative_prompt": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "save_to": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "replace": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "approve": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    }
+  },
+  "videos_library": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "query": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "surface": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "limit": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "offset": {
+      "types": [
+        "integer"
       ],
       "required": false
     }
@@ -10733,6 +12030,120 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "work",
         "chat"
       ]
+    }
+  },
+  "watch_mcp_apps": {
+    "surface": {
+      "types": [
+        "string"
+      ],
+      "required": false,
+      "enum": [
+        "work",
+        "chat",
+        "pip"
+      ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_call": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "method": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "tools/call",
+        "resources/read"
+      ]
+    },
+    "params": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_answer": {
+    "ask_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "choice": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "once",
+        "always",
+        "deny"
+      ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_context": {
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "content": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "structured_content": {
+      "types": [
+        "object"
+      ],
+      "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "mcp_app_get": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "card_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
     }
   }
 };

@@ -9,8 +9,8 @@ Pips are careful by design. Everything a Pip does that matters, from its own set
 to a file fix or an email, is a proposal that you review first. The model drafts;
 you approve.
 
-Pips ship in DGC CLI 0.50.0 (`dgc pips …` and the main chat's Pips tools), the VS
-Code extension 0.34.x (the Pips view, setup cards and review dialogs) and SDK 0.8.0
+Pips ship in DGC CLI 0.51.0 (`dgc pips …` and the main chat's Pips tools), the VS
+Code extension 0.35.0 (the Pips view, setup cards and review dialogs) and SDK 0.9.0
 (`session.pips`). For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
@@ -184,6 +184,22 @@ dgc pips setup list
 dgc pips setup show SETUP_ID
 dgc pips setup accept SETUP_ID --expected-digest DIGEST
 ```
+
+## On your other computers (DGC Router)
+
+With DGC Router on (see its page in `/docs`), a Pip's model can be **DGC Router (any Pip system)**, or one
+system and model. Its runs take a worker from a computer with the Pips job when they start and give it back
+when they end. While every such worker is busy, the run waits in the queue; `pips_parallel_runs` still caps
+how many Pip runs go at once. From the CLI: `dgc pips models` lists the systems, and
+`dgc pips create NAME --goal ... --router` (or `--router nas/qwen3.5:9b`) chooses one.
+
+## Images (Personal Pips)
+
+A Personal Pip makes images with your image generators (see Image generation in `/docs`), in its chat and its
+tasks: they're made by DGC itself, never inside the Pip's run, kept with its reply (its chat shows them) and in
+`~/.dgc/images/pips/<pip>/`. A generator that costs money is never used on the Pip's own say-so: it tells you the
+price in its reply and makes the image only after your yes. A routine's run never makes a paid image; it says what it
+would make. A free generator, or one you allowed (Always allow), makes the image at once.
 
 ## Your own Claude Code or Codex (Personal Pips)
 
@@ -523,8 +539,9 @@ keeps each fix's record, and the message reads it. The status beside the Pip's n
 its last run found ("Today's audit: 5 findings") and goes to its message.
 
 **One chat for every Pip.** A Project Pip's chat looks and answers like a Personal Pip's: the Pip at work with its
-face, its name, what it is doing and its clock; its reply written into short bubbles as it comes; time marks between
-messages; the buttons under a message when you point at it; the same box. Its page is the same too (see
+face, its name, what it is doing and its clock; its reply written in as it comes, as one message or the few short
+messages the Pip chose (it parts them with a line of just `---`); time marks between messages; the buttons under a
+message when you point at it; the same box. Its page is the same too (see
 [A Project Pip's page](#a-project-pips-page)), and its runs with Ask DGC to fix are in its chat. Which code it reads
 (committed, or your current files) is under **What this Pip can do** beside the box.
 
@@ -1033,7 +1050,7 @@ with **Change**.
 
 ## Pips settings
 
-**One model for every Pip on Default.** DGC **Settings → Agents → Pips → Model for Pips** is the
+**One model for every Pip on Default.** DGC **Settings → Models → Pips → Model for Pips** is the
 model every Pip set to **Default** uses, on DGC's own connection (the host under **Models**); the
 box lists that host's models, and any name can be typed. Blank, it is the same as DGC: DGC's own
 model, or the Claude Code or Codex DGC runs on. New Pips start on Default, and a Pip's model menu
@@ -1064,6 +1081,10 @@ The gear on **Your Pips** opens settings for all of them:
 
   In a run you aren't watching (a routine or a schedule), a Pip always asks before it changes
   anything, whatever you chose.
+
+  A plugin that comes with a card (MCP Apps, such as Cardboard's project list) shows it under the
+  Pip's reply, and the chat keeps it: a card a Pip opened while you were away is there when you look.
+  See **Plugin cards** in `/docs`.
 
 Each Pip still has its own computer: a separate home, browser profile and sign-ins, so one Pip's
 sites never see another's. Settings are shared; computers are not.

@@ -28,7 +28,7 @@ from .mods import bridge as mod_bridge
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
                   normalize_usage, usage_reported)
 from .memory import load_instruction_file, load_memories, project_memory_path
-from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, SETUP_CARD, PermissionEngine
+from .permissions import ALLOW, ALWAYS_ASK_TOOLS, ASK, DENY, MODE_DESCRIPTIONS, SETUP_CARD, PermissionEngine
 from .agents import builtin_agents, discover_agents, parse_handoff_files
 from .mcp import MCPInputError, MCPManager
 from .reasoning import (ReasoningTracker, extend_persisted_reasoning, persisted_reasoning,
@@ -117,7 +117,11 @@ _CONTROL_TOOLS_WITH_RULES = frozenset({"present_plan", "propose_options", "ask_u
 # and every MCP route (which are discovered at runtime, so they are matched by shape).
 _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_search",
                                            "list_tasks", "wait_tasks", "use_pips", "troupe",
-                                           "request_project_file", "continue_task"})
+                                           "request_project_file", "continue_task",
+                                           # image generation (dgc/image_tools.py)
+                                           "generate_image", "list_image_generators",
+                                           # video generation (dgc/video_tools.py)
+                                           "generate_video", "list_video_generators"})
 # Pips tools reach the model only after `use_pips` loads them (or the user points a turn at a
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
@@ -167,6 +171,8 @@ _SUBAGENT_DECISION_LINE = ("If a decision belongs to the user, do not guess: fin
                            "not depend on it, then end your result with the question and the option "
                            "you recommend.")
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "present_document", "propose_options", "update_goal",
+                                 # Reading which image (or video) generators there are changes nothing.
+                                 "list_image_generators", "list_video_generators",
                                  # An artifact is DGC's own, never a project file: a plan's design doc or deck.
                                  "make_artifact", "edit_artifact",
                                  # Ending work this agent itself started, `monitor_stop`'s exact
@@ -811,6 +817,24 @@ def interaction_helper_label() -> str:
     return getattr(_INTERACTION, "helper_label", "")
 
 
+def interaction_offers_always() -> bool:
+    """Whether the Allow box asked on this thread may offer Always allow: not when the user's own ask rule is what asks
+    (an allow rule never beats an ask rule, so the rule Always saves would never stop the next ask)."""
+    return not getattr(_INTERACTION, "no_always", False)
+
+
+@contextmanager
+def asked_by_rule(flag: bool):
+    """While an Allow box is asked on this thread: whether the user's own ask rule is what asks
+    (interaction_offers_always)."""
+    held = getattr(_INTERACTION, "no_always", False)
+    _INTERACTION.no_always = bool(flag)
+    try:
+        yield
+    finally:
+        _INTERACTION.no_always = held
+
+
 class _RouteGate:
     """Cancellation view for one model request that a mid-turn model switch may retire.
 
@@ -1294,6 +1318,12 @@ def _compaction_split_index(messages: list[dict], keep_messages: int) -> int:
         if count >= wanted:
             break
     return split
+
+
+def _task_effort(arguments) -> str:
+    """The thinking a `task` call (or one of its `tasks`) asks for its helper: off, low, medium or high, else ""."""
+    value = arguments.get("effort") if isinstance(arguments, dict) else None
+    return value if value in ("off", "low", "medium", "high") else ""
 
 
 def _bounded_head_tail(text: str, limit: int) -> str:
@@ -1884,12 +1914,12 @@ class _SubUI:
                        call_id=self._call_id(call_id))
 
     def tool_result(self, name, out, call_id=None):
-        from .ui import tool_output_is_error
+        from .ui import shown_output, tool_output_is_error
         wire = self._call_id(call_id)
         text = str(out or "")
         self._record_display({
             "type": "tool_result", "call_id": wire, "name": name,
-            "output": text, "is_error": tool_output_is_error(text),
+            "output": shown_output(name, text), "is_error": tool_output_is_error(text),
         })
         self._emit("tool_result", name, out, wire)
 
@@ -2389,6 +2419,7 @@ class Agent(GoalLifecycle):
         self._turn_reasoning_pending: list = []  # thinking: blocks not yet saved on a message
         self._approval_records: dict = {}       # explicit human decisions, persisted with results
         self._shown_file_records: dict = {}     # path-only UI records, persisted with their tool result
+        self._mcp_app_records: dict = {}        # MCP Apps: the card each call showed, persisted with its result
         self._decision_records: dict = {}        # options: question outcomes by call id
         self._end_turn_after_batch = ""          # options: end the turn once this batch finishes
                                                  # ("dismissed" also skips the batch's later calls;
@@ -2443,6 +2474,7 @@ class Agent(GoalLifecycle):
         # chat goes back to it. None once the user chooses a mode.
         self._mode_before_restore: tuple[str, bool] | None = None
         self._mode_chosen_for_chat = False
+        self._mode_restore_note = ""          # said once where the chat shows it (take_mode_restore_note)
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self._recall_pending: list[dict] = []   # display rows the last compaction dropped
         self._notes = None                      # context notes, opened on first use
@@ -2573,13 +2605,24 @@ class Agent(GoalLifecycle):
         transport = str(getattr(client, "api_mode", "") or "")
         provider = ({"ollama": "ollama", "anthropic": "anthropic"}.get(transport)
                     or getattr(client, "family", "") or "unknown")
+        # Which DGC Router system it went to (Token usage by system): the worker this client leased, else the system
+        # whose address this client spoke to (a main turn on a system's own address). Kept by id, so a system whose
+        # address changes keeps its history.
+        route = getattr(client, "_router_route", None)
+        system_id = getattr(route, "system_id", None) if route is not None else None
+        if system_id is None:
+            try:
+                from .usage_systems import system_for_url
+                system_id = system_for_url(self.config, getattr(client, "base_url", ""))
+            except Exception:                    # noqa: BLE001 -- a name never costs a request its row
+                system_id = None
         usage_ledger.record(
             provider=provider,
             base_url=getattr(client, "base_url", ""), model=getattr(client, "model", ""),
             source=source, input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
             cached_input_tokens=usage["cached_input_tokens"],
-            metered=usage_reported(raw_usage))
+            metered=usage_reported(raw_usage), system_id=system_id)
 
     def refresh_client(self) -> None:
         previous = getattr(self, "client", None)
@@ -2682,6 +2725,20 @@ class Agent(GoalLifecycle):
             return None
         return {"call_id": call_id, "model": route.model, "origin": route.origin, "images": count,
                 "question": question[:500], "text": answer, "output": output}
+
+    def _router_failure_text(self, error) -> str:
+        """Why a DGC Router worker failed, in a few words for the task result (never a URL or a key)."""
+        cause = getattr(self, "_last_model_cause", None)
+        kind = str((cause.get("kind") if isinstance(cause, dict) else getattr(cause, "kind", "")) or "")
+        words = {"connect": "connection refused", "dns": "its name didn't resolve", "connect_timeout":
+                 "no answer in time", "reset": "the connection was reset", "stall": "it stopped mid-reply",
+                 "stream_cut": "the reply was cut off", "loading": "the model was still loading",
+                 "overloaded": "the server was overloaded", "model_not_found": "the model isn't there"}.get(kind)
+        if words:
+            return words
+        from .model_errors import scrub_urls
+        text = re.sub(r"\s+", " ", scrub_urls(str(error)))
+        return self._safe_text(text)[:160] or "it stopped answering"
 
     def _fallback_client(self, model: str) -> LLMClient:
         base = self.config.get("fallback_base_url") or self.config.base_url
@@ -3206,6 +3263,9 @@ class Agent(GoalLifecycle):
                 mcp_schemas = self.mcp.tool_schemas()
         schemas = (TOOL_SCHEMAS + SUPERVISION_TOOL_SCHEMAS
                    + ([TROUPE_TOOL_SCHEMA] if self._troupe_exposed() else [])
+                   + (self._router_tool_schemas() if self._router_tools_exposed() else [])
+                   + (self._image_tool_schemas() if self._image_tools_exposed() else [])
+                   + (self._video_tool_schemas() if self._image_tools_exposed() else [])
                    + (ARTIFACT_TOOL_SCHEMAS if self._artifacts_exposed() else [])
                    + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas)
         from .pip_access import tools_available as pips_tools_available
@@ -3341,7 +3401,34 @@ class Agent(GoalLifecycle):
         if allow:
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") in allow]
+        schemas = self._router_task_schema(schemas)
         return self._monitor_schema_filter(schemas)
+
+    def _router_task_schema(self, schemas: list) -> list:
+        """While DGC Router is on, `task`'s `system` argument names this user's systems in one line (their ids and
+        models; free workers are in the system prompt and router_status). Off, the schema is 0.50's own."""
+        from . import router as router_mod
+        try:
+            block = router_mod.settings(self.config)
+        except Exception:                      # noqa: BLE001 -- a stub config
+            return schemas
+        if not block.get("enabled") or not block.get("systems"):
+            return schemas
+        listing = "; ".join(
+            f"{item['id']} ({', '.join(m['name'] for m in item['models'] if m.get('use') is not False) or 'no models'})"
+            for item in block["systems"] if item.get("enabled", True) and "subagents" in item.get("jobs", []))
+        if not listing:
+            return schemas
+        out = []
+        for tool in schemas:
+            function = tool.get("function", {})
+            if function.get("name") == "task" and "system" in (function.get("parameters", {}).get("properties") or {}):
+                tool = copy.deepcopy(tool)
+                tool["function"]["parameters"]["properties"]["system"]["description"] = (
+                    "DGC Router: which of the user's systems runs the helper: " + listing
+                    + ". Omit to let DGC pick a free worker")
+            out.append(tool)
+        return out
 
     def _non_interactive(self) -> bool:
         """`dgc -p`: nobody can answer a question. An identity check, so a permissive UI's
@@ -3589,6 +3676,247 @@ class Agent(GoalLifecycle):
         from .permissions import session_policy
         return session_policy() is None
 
+    def _router_tools_exposed(self) -> bool:
+        """Are the DGC Router tools offered (dgc/router_tools.py)? Every turn of the agent the user talks to, Router on
+        or off (the model decides; router_status says when it is off). Never to a sub-agent, and never to a session a
+        launching application's policy governs, for SUPERVISION_TOOL_SCHEMAS' reason: its SDK could not name them
+        (it has session.router)."""
+        if self.depth != 0:
+            return False
+        from .permissions import session_policy
+        return session_policy() is None
+
+    def _image_tools_exposed(self) -> bool:
+        """generate_image and list_image_generators: every turn of the agent the user talks to, set up or not (the
+        model decides; list_image_generators says when there is none). A sub-agent isn't offered them: its images
+        would ask the user from inside a helper. A Pip's run has its own (dgc/pips.py)."""
+        return self.depth == 0
+
+    def _image_tool_schemas(self) -> list:
+        from .image_tools import SCHEMAS
+        return list(SCHEMAS)
+
+    def _image_surface(self, call_id=None):
+        """Work's side of an image call: files in the project, its remembered choice, and the user's own question,
+        Allow card and progress line (dgc/image_tools.Surface)."""
+        from .image_tools import Surface
+        interactive = (self.depth == 0 and not getattr(self, "_monitor_turn", False)
+                       and getattr(self.ui, "non_interactive", False) is not True
+                       and callable(getattr(self.ui, "ask_questions", None)))
+        session = getattr(getattr(self, "session_file", None), "stem", "") or ""
+
+        def progress(text, value, total):
+            notify = getattr(self.ui, "tool_progress", None)
+            if callable(notify):
+                notify("generate_image", text, progress=value, total=total or None, call_id=call_id)
+
+        def approve(card):
+            return self._image_approve(card, call_id)
+        root = Path(self.config.project_root)
+        from .images import session_folder
+        return Surface(name="work", root=root, project_root=root, interactive=interactive,
+                       ask=(lambda title, options, recommended: self._image_ask(title, options, recommended, call_id))
+                       if interactive else None,
+                       approve=approve, progress=progress, unattended=not interactive,
+                       where={"project": str(root), **({"session": session} if session else {})},
+                       owner=f"images for {session or 'Work'}",
+                       # DGC's own folder, one per session (as Codex keeps its pictures), unless the call names a
+                       # place in the project (save_to) or the Images setting has a save folder.
+                       home=session_folder(session or "work"))
+
+    def _image_ask(self, title: str, options: list, recommended: int, call_id) -> int | None:
+        """DGC's own question for an image call (which generator), shown and kept as a propose_options step is."""
+        ask_id = f"{call_id or 'img'}-generator"
+        question = {"questions": [{"id": "generator", "header": "Image generator", "question": title,
+                                   "options": [{"label": label[:60], "description": description,
+                                                **({"recommended": True} if index == recommended else {})}
+                                               for index, (label, description) in enumerate(options)]}]}
+        self._ask_questions(ask_id, question, self._secret_values())
+        record = (getattr(self, "_decision_records", {}) or {}).get(ask_id) or {}
+        if record.get("outcome") != "answered":
+            return None
+        for entry in (record.get("answers") or {}).values():
+            picked = [i for i in (entry or {}).get("selected", []) if isinstance(i, int)]
+            if picked:
+                return picked[0]
+        return None
+
+    def _image_approve(self, card: dict, call_id) -> str:
+        """The Allow card for a paid generator the fallback moved to: "once", "always" or "no"."""
+        if getattr(self, "_monitor_turn", False) or getattr(self.ui, "non_interactive", False) is True:
+            return "no"
+        args = {"prompt": card.get("prompt", ""), **card}
+        live = getattr(type(self.ui), "approve_live", None)
+        try:
+            verdict = (live(self.ui, "generate_image", args, call_id, recheck=lambda: None) if callable(live)
+                       else self.ui.approve("generate_image", args, call_id))
+        except Exception:                      # noqa: BLE001 -- no card: no spending
+            return "no"
+        return verdict if verdict in ("once", "always") else "no"
+
+    def _image_tool(self, name: str, args: dict, call_id) -> str:
+        from . import image_tools
+        surface = self._image_surface(call_id)
+        if name == "list_image_generators":
+            return image_tools.list_text(self.config, args, surface)
+        plan = self.__dict__.setdefault("_image_plans", {}).pop(call_id, None)
+        if plan is None:
+            try:
+                plan = image_tools.prepare(self.config, args, surface)
+            except image_tools.Refused as exc:
+                return f"error: {exc}"
+        outcome = image_tools.execute(self.config, plan, surface)
+        if outcome.result is not None:
+            from .tools import _image_entry
+            entries = [_image_entry(item.data, name=item.path.name, source="view_image", path=str(item.path),
+                                    label=f"image generate_image made, saved as {item.rel or item.path.name}")
+                       for item in outcome.result.saved]
+            self.__dict__.setdefault("_generated_images", []).extend(entries)
+            made = self.__dict__.setdefault("_turn_made_pictures", set())
+            for item in outcome.result.saved:
+                try:
+                    made.add(str(Path(item.path).resolve()))
+                except OSError:
+                    made.add(str(item.path))
+            self._deliver_images(call_id, name, entries,
+                                 caption="generated image" if len(entries) == 1 else "generated images")
+            listener = getattr(self.ui, "images_made", None)
+            if callable(listener):
+                try:
+                    listener(call_id, outcome.result)
+                except Exception:              # noqa: BLE001 -- a listener never costs the result
+                    pass
+        return outcome.text
+
+    # ---- video generation (dgc/video_tools.py, dgc/videos.py) --------------------------------------------------------
+    def _video_tool_schemas(self) -> list:
+        from .video_tools import SCHEMAS
+        return list(SCHEMAS)
+
+    def _session_key(self) -> str:
+        return getattr(getattr(self, "session_file", None), "stem", "") or ""
+
+    def _video_surface(self, call_id=None):
+        """Work's side of a video call: the image surface (a start image from the project or DGC's own pictures,
+        save_to into the project), with DGC's own videos folder for this session."""
+        from . import videos
+        surface = self._image_surface(call_id)
+        surface.video_home = videos.session_folder(self._session_key() or "work")
+        return surface
+
+    def _video_tool(self, name: str, args: dict, call_id) -> str:
+        from . import video_tools
+        surface = self._video_surface(call_id)
+        if name == "list_video_generators":
+            return video_tools.list_text(self.config, args, surface)
+        plan = self.__dict__.setdefault("_video_plans", {}).pop(call_id, None)
+        if plan is None:
+            try:
+                plan = video_tools.prepare(self.config, args, surface)
+            except video_tools.Refused as exc:
+                return f"error: {exc}"
+        self._watch_videos()
+        started = video_tools.start(self.config, plan, surface,
+                                    target={"session": self._session_key(), "call_id": call_id or ""})
+        if started.job is not None:
+            self.__dict__.setdefault("_video_epochs", {})[started.job["id"]] = self.monitors.epoch
+            listener = getattr(self.ui, "video_job", None)
+            if callable(listener):
+                try:
+                    from . import videos
+                    listener(videos.view(started.job), "started")
+                except Exception:              # noqa: BLE001 -- a listener never costs the result
+                    pass
+        return started.text
+
+    def _watch_videos(self) -> None:
+        """Hear this session's video jobs: progress to the screen, and the end to the model (a wake, as a background
+        sub-task's result is), once. Registered once per Agent; a job of another session is someone else's."""
+        if self.depth != 0 or getattr(self, "_video_listener", None) is not None:
+            return
+        from . import videos
+        import weakref
+        ref = weakref.ref(self)
+
+        def heard(job: dict, change: str) -> None:
+            agent = ref()
+            if agent is None:
+                videos.JOBS.remove_listener(heard)
+                return
+            agent._video_heard(job, change)
+        self._video_listener = heard
+        videos.JOBS.add_listener(heard)
+
+    def _video_heard(self, job: dict, change: str) -> None:
+        from . import videos
+        target = job.get("target") or {}
+        mine = target.get("session") and target.get("session") == self._session_key()
+        if not mine:
+            return
+        listener = getattr(self.ui, "video_job", None)
+        if callable(listener):
+            try:
+                listener(videos.view(job), change)
+            except Exception:                  # noqa: BLE001
+                pass
+        if job.get("state") in videos.TERMINAL:
+            self._tell_video(job)
+
+    def _tell_video(self, job: dict) -> bool:
+        """The model hears a finished (or failed, or stopped) video once, as a background notice that wakes the chat."""
+        from . import video_tools, videos
+        told = self.__dict__.setdefault("_videos_told", set())
+        if job["id"] in told or (videos.load(job["id"]) or {}).get("told"):
+            return False
+        epoch = self.__dict__.get("_video_epochs", {}).get(job["id"], self.monitors.epoch)
+        if epoch != self.monitors.epoch:
+            epoch = self.monitors.epoch           # a reopened chat: its job is this conversation's now
+        head = {"done": "ready", "failed": "not made", "cancelled": "stopped"}.get(job.get("state"), "ended")
+        queued = self.monitors.queue_video_ended(job["id"], f"video: {job.get('label') or job.get('generator')}",
+                                                 head, video_tools.ready_text(job), epoch)
+        if queued:
+            told.add(job["id"])
+            videos.mark_told(job["id"])
+        return queued
+
+    def tell_finished_videos(self) -> int:
+        """A session opened (or reopened after a reload): its videos that finished while nobody listened are told
+        now, and its unfinished ones are polled again."""
+        from . import videos
+        session = self._session_key()
+        if self.depth != 0 or not session:
+            return 0
+        self._watch_videos()
+        try:
+            # This session's own jobs: polled here again, or watched while another DGC (the backend a reload left
+            # behind) still polls one.
+            videos.JOBS.resume(self.config, keep=lambda job: (job.get("target") or {}).get("session") == session)
+        except Exception:                      # noqa: BLE001 -- a job that can't be resumed stays on disk
+            pass
+        return sum(1 for job in videos.untold(session=session) if self._tell_video(job))
+
+    def _already_shown_picture(self, args) -> bool:
+        """Is show_file's path a picture generate_image made in this turn? Then it's on screen already, under the step
+        and the reply: showing it again drew the same picture twice (seen in testing, 2026-11-02)."""
+        made = self.__dict__.get("_turn_made_pictures") or set()
+        raw = str((args or {}).get("path") or "").strip()
+        if not made or not raw:
+            return False
+        try:
+            candidate = Path(raw)
+            if not candidate.is_absolute():
+                candidate = Path(self.config.project_root) / candidate
+            return str(candidate.resolve()) in made
+        except (OSError, ValueError):
+            return False
+
+    def _router_tool_schemas(self) -> list:
+        from .router_tools import SCHEMAS
+        if getattr(self, "_monitor_turn", False):
+            # Nobody is at the keyboard to allow a change or a network look: a wake turn can still read and test.
+            return [tool for tool in SCHEMAS if tool["function"]["name"] in ("router_status", "router_probe")]
+        return list(SCHEMAS)
+
     def _artifact_origin(self) -> dict:
         """Where an artifact this session makes comes from: Work, this project, this session."""
         session = getattr(getattr(self, "session_file", None), "stem", "") or ""
@@ -3649,6 +3977,21 @@ class Agent(GoalLifecycle):
         """
         return self._supervision_exposed() and bool(getattr(self, "_detached_jobs", None))
 
+    def _router_prompt_lines(self) -> list[str]:
+        """While DGC Router is on: one line naming the systems, their models and free workers (what DGC already
+        knows, never a network read), and one sentence on job size. Nothing while it is off."""
+        from . import router as router_mod
+        try:
+            line = router_mod.prompt_line(self.config)
+        except Exception:                      # noqa: BLE001 -- the Router never costs a prompt
+            line = ""
+        if not line:
+            return []
+        router_mod.ROUTER.ensure_health(self.config)     # a thread of its own: never a wait here
+        return [f"DGC Router spreads helpers across the user's computers. {line}",
+                router_mod.GUIDANCE + " Name one with task's system, model or size, or let DGC pick a free worker; "
+                "router_status has the detail."]
+
     def _delegation_guidance(self, mode: str) -> list[str]:
         """The lead agent's roster and delegation policy, sent only while `task` is offered."""
         if self.depth != 0 or not self._task_exposed():
@@ -3668,6 +4011,7 @@ class Agent(GoalLifecycle):
             "# Delegating work",
             "`task` starts a sub-agent with a fresh context; its `agent` argument picks one of:",
             *roster,
+            *self._router_prompt_lines(),
             "A child cannot see this conversation. Brief it like a new colleague: the goal, "
             "project-relative paths (it works in its own checkout), constraints, what is already "
             "known or ruled out, and exactly what to return.",
@@ -4023,7 +4367,10 @@ class Agent(GoalLifecycle):
                 ctx.todo_request_epoch = int(getattr(ctx, "todo_clear_epoch", 0) or 0)
         baked = getattr(self, "_prompt_think_level", None)
         if (getattr(self, "_mode_prompt_dirty", False)
-                or (baked is not None and baked != self._effective_thinking(""))):
+                or (baked is not None and baked != self._effective_thinking(""))
+                # A helper follows its chat's mode (see mode): its prompt says the mode it runs in now.
+                or (getattr(self, "_parent_agent", None) is not None
+                    and getattr(self, "_prompt_mode", None) not in (None, self.mode))):
             self._refresh_system()
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
@@ -4219,7 +4566,23 @@ class Agent(GoalLifecycle):
 
     @property
     def mode(self) -> str:
-        return self.config.data.get("mode", "default")
+        own = self.config.data.get("mode", "default")
+        parent = getattr(self, "_parent_agent", None)
+        if parent is None:
+            return own
+        # A helper or a Pip fix runs in its chat's mode as it is now, held for that chat or saved. Its config is a copy
+        # made when it started, so a chat set to Auto after a fix began went on asking at every step with "auto" on
+        # its chip (0.51.0 release candidate); lowered, it went on not asking. Never plan: no helper starts in plan,
+        # and one already running when its chat goes to plan asks before each change instead. It rises to acceptEdits
+        # or auto only where the chat's workspace is trusted (_workspace_trusted answers for the chat). The user's deny
+        # and ask rules apply as always (PermissionEngine.decide).
+        live = parent.mode
+        if live not in _MODE_RANK or live == "plan":
+            return "default"
+        if (live in ("acceptEdits", "auto") and _MODE_RANK[live] > _MODE_RANK.get(own, 0)
+                and not self._workspace_trusted()):
+            return own if own in ("default", "acceptEdits") else "default"
+        return live
 
     def set_mode(self, mode: str, *, persist: bool = True) -> None:
         if mode not in ("default", "acceptEdits", "plan", "auto"):
@@ -4267,23 +4630,34 @@ class Agent(GoalLifecycle):
         origin = getattr(config, "_trust_origin", None)
         return origin is not None and origin is not config and is_trusted(origin, origin.project_root)
 
-    def _restore_session_mode(self, record: dict) -> None:
+    def _restore_session_mode(self, record: dict, *, saved_mode: bool = False) -> None:
         """Reopen a session in the mode it ran in -- mode is per chat, as Codex keeps it per thread.
 
-        Lower only. A session last run in auto, reopened by `dgc -p --mode plan --continue`, by
-        a script with no --mode, or by an SDK app that asked for default, ran in auto: nothing
-        it did asked first. So never over a mode named for this run (`dgc --mode`), and never
-        to one that asks less than the mode this chat would be in without it; a chat that was
-        planning still comes back planning. Re-checked, not trusted from the file: acceptEdits
-        and auto only in a workspace still trusted, and only a mode the active subscription
-        engine supports. Held for this process, so reopening never rewrites the user's default,
-        and a new chat goes back to the mode it replaced (see reset). A session saved before
-        modes were recorded keeps the current mode.
+        ``saved_mode``: the person reopened this chat themselves -- the editor (a chat opened from
+        its list, a Work tab restored after a window reload, a closed chat opened again) or the
+        interactive terminal (`dgc --resume`, `--continue`, /resume). It comes back in the mode it
+        had, even one that asks less than the mode it replaces: they set that chat to Auto, and it
+        is still that chat.
+
+        Otherwise lower only. A session last run in auto, reopened by `dgc -p --mode plan
+        --continue`, by a script with no --mode, by an SDK app that asked for default or by an ACP
+        client, ran in auto: nothing it did asked first. So never to one that asks less than the
+        mode this chat would be in without it; a chat that was planning still comes back planning.
+
+        Either way never over a mode named for this run (`dgc --mode`, an isolated SDK session),
+        and re-checked, not trusted from the file: acceptEdits and auto only in a workspace still
+        trusted (otherwise default, and for a person's reopen a line saying so,
+        take_mode_restore_note), and only a mode the active subscription engine supports. Held
+        for this process, so reopening never rewrites the user's default, and a new chat goes back
+        to the mode it replaced (see reset). A session saved before modes were recorded keeps the
+        current mode. A helper never restores one (it follows its chat, Agent.mode).
         """
+        self._mode_restore_note = ""
         saved = record.get("mode")
         if (self.depth > 0 or saved not in _MODE_RANK
                 or getattr(self.config, "mode_explicit", False)):
             return
+        ran_in = saved
         if saved in ("acceptEdits", "auto") and not self._workspace_trusted():
             saved = "default"
         try:
@@ -4296,18 +4670,24 @@ class Agent(GoalLifecycle):
             # The mode this chat would be in without a reopened session's: what the first reopen
             # replaced, until someone chooses one.
             before = self._mode_before_restore
-            # A mode the person just selected for this chat is explicit even
-            # though it is held rather than saved globally. A mode inherited
-            # from a different restored chat is not.
-            base = self.mode if self._mode_chosen_for_chat else (before[0] if before is not None else self.mode)
-            if base not in _MODE_RANK:
-                return
-            target = saved if _MODE_RANK[saved] <= _MODE_RANK[base] else base
             back = record.get("plan_return_mode")
-            if back not in ("default", "acceptEdits", "auto") or target != "plan":
-                back = None
-            elif _MODE_RANK[back] > _MODE_RANK[base]:
-                back = base if base != "plan" else None   # approving a plan: no further than before
+            if saved_mode:
+                # The person's own chat, in its own mode. A plan approved later still re-checks trust (exit_plan).
+                target = saved
+                if back not in ("default", "acceptEdits", "auto") or target != "plan":
+                    back = None
+            else:
+                # A mode the person just selected for this chat is explicit even
+                # though it is held rather than saved globally. A mode inherited
+                # from a different restored chat is not.
+                base = self.mode if self._mode_chosen_for_chat else (before[0] if before is not None else self.mode)
+                if base not in _MODE_RANK:
+                    return
+                target = saved if _MODE_RANK[saved] <= _MODE_RANK[base] else base
+                if back not in ("default", "acceptEdits", "auto") or target != "plan":
+                    back = None
+                elif _MODE_RANK[back] > _MODE_RANK[base]:
+                    back = base if base != "plan" else None   # approving a plan: no further than before
             if target != self.mode or before is not None:
                 if before is None:
                     ephemeral = getattr(self.config, "_ephemeral_keys", None) or ()
@@ -4316,8 +4696,22 @@ class Agent(GoalLifecycle):
                     hold("mode", target)
                 else:
                     self.config.data["mode"] = target
+            if saved_mode:
+                # This chat's mode is the one it was saved in now, not one chosen for the chat it replaced:
+                # a later reopen in this process measures against the default again.
+                self._mode_chosen_for_chat = False
             self.plan_return_mode = back
             self._mode_prompt_dirty = True
+        if saved_mode and ran_in != saved:
+            label = {"acceptEdits": "Accept edits", "auto": "Auto"}[ran_in]
+            self._mode_restore_note = (
+                f"This chat ran in {label}. This folder is not trusted now, so it reopened in Default, "
+                "which asks before each change.")
+
+    def take_mode_restore_note(self) -> str:
+        """The line to show once after a reopen that could not bring the chat's mode back, or ""."""
+        note, self._mode_restore_note = getattr(self, "_mode_restore_note", ""), ""
+        return note
 
     def _undo_session_mode(self) -> None:
         """A new chat starts in the mode the reopened one replaced, not in the reopened one's.
@@ -4342,7 +4736,8 @@ class Agent(GoalLifecycle):
             self._mode_prompt_dirty = True
 
     def exit_plan(self, to_mode: str | None = None) -> str:
-        target = to_mode or self.plan_return_mode or "default"
+        back = self.plan_return_mode
+        target = to_mode or back or "default"
         substituted = target in ("acceptEdits", "auto") and not self._workspace_trusted()
         if substituted:
             # The plan card offers auto everywhere, and acceptEdits and auto act without asking, so
@@ -4356,14 +4751,33 @@ class Agent(GoalLifecycle):
         self._executing_plan = bool(getattr(self, "_plan_presented", False))
         self._plan_approved_this_turn = self._executing_plan
         hold = getattr(self.config, "hold", None)
+        scoped = self._mode_chosen_for_chat or "mode" in (getattr(self.config, "_ephemeral_keys", None) or ())
         if substituted and callable(hold):
             # Held, like the untrusted downgrade: default stands in for the mode they asked for,
             # and it is not theirs to keep. Saved, it replaced a stored auto everywhere.
             with self._mode_lock:
                 hold("mode", target)
                 self._mode_prompt_dirty = True
+        elif target == "auto" or scoped:
+            # Approving a plan picks the mode this chat carries it out in, never the saved default. Saved, an
+            # approval into auto made every later terminal, `dgc -p` and SDK session start in auto. A mode
+            # that is this chat's own (the editor's mode menu, a reopened chat's, `--mode`) stays so.
+            if not scoped:
+                # The terminal and ACP saved "plan" when planning began: the saved mode goes back to the
+                # one before it, short of auto.
+                self.set_mode(back if back in ("default", "acceptEdits") else "default")
+            self.set_mode(target, persist=False)
         else:
             self.set_mode(target)
+        # The chat runs in its new mode now: say so. Held for this chat (persist=False), nothing else told the
+        # editor or an ACP client, so their mode chip and status bar kept saying "plan" while it ran in auto.
+        # Only the chat's own agent: a helper follows its chat's mode (Agent.mode) and has no chip of its own.
+        notify = getattr(self.ui, "current_mode", None)
+        if getattr(self, "_parent_agent", None) is None and callable(notify):
+            try:
+                notify(self.mode)
+            except Exception:   # noqa: BLE001 -- a front-end's notice never undoes the approval
+                pass
         return target
 
     def reset(self) -> None:
@@ -4419,6 +4833,7 @@ class Agent(GoalLifecycle):
         self._reset_todo_clear()
         self._undo_session_mode()           # before the prompt below, which names the mode
         self._mode_chosen_for_chat = False
+        self._mode_restore_note = ""
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._explicit_skill_instructions: dict[str, dict] = {}
@@ -4575,6 +4990,7 @@ class Agent(GoalLifecycle):
         from .pip_access import tools_available as pips_tools_available
         cfg = self.config
         mode = self.mode
+        self._prompt_mode = mode
         pips_on = pips_tools_available(cfg) and self._pips_loaded()   # guidance travels with the tools
         profile = str(cfg.get("tool_profile", "standard") or "standard").lower()
         active_tools = set(getattr(self, "_active_tool_intents", set()))
@@ -5832,6 +6248,7 @@ class Agent(GoalLifecycle):
         # images: nothing an earlier turn or an idle editor action queued rides into this one.
         self._turn_images = []
         self._image_batch_open = False
+        self._turn_made_pictures = set()   # pictures generate_image made this turn (resolved paths): shown once
         with self._session_turn_scope(reentrant=False, reclaim=True) as reserved:
             if not reserved:
                 self._last_turn_error = self._last_persist_error = self._held_session_message(
@@ -5956,11 +6373,23 @@ class Agent(GoalLifecycle):
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 from .mcp_context import apply_staged_context
+                if self.depth == 0:
+                    # DGC Router: a main model served by one of the systems uses one of its workers while it answers
+                    # (given back while the turn's tools run: _router_main_pause).
+                    from . import router as router_mod
+                    self._router_turn_hold = router_mod.hold_main(self)
+                    self._router_turn_holds = bool(self._router_turn_hold)
                 completed = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text),
                                                  lambda prompt: self._record_chat_step(
                                                      (lambda text: self._run_turn(text, pip_setup_notice=pip_setup_notice))
                                                      if pip_setup_notice is not None else self._run_turn, prompt))
             finally:
+                self._router_turn_holds = False
+                if getattr(self, "_router_turn_hold", None):
+                    from . import router as router_mod
+                    router_mod.release_main(self._router_turn_hold)
+                    self._router_turn_hold = None
+                self._router_prefer = None       # an SDK run's system= is for that run's helpers alone
                 self._close_turn_retry_runs(completed)
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -6574,6 +7003,27 @@ class Agent(GoalLifecycle):
                     self.session_name = previous
                 return saved
 
+    def save_helper_records(self) -> bool:
+        """Write this chat's helper records to its saved chat now, so a window reload lists a helper that started or
+        ended between turns (a Pip fix) and its Prompt. A turn running on another thread writes them with its own
+        save, so this never competes with it; it joins the reservation as a rename does, and writes nothing else."""
+        if self.depth > 0 or not self.session_file or not self._session_exists:
+            return False
+        if self._a_running_turn_saves_it():
+            return True
+        with self._session_turn_scope(shared=True) as reserved:
+            if not reserved:
+                return False
+            with self._session_persist_lock:
+                from . import sessions
+                saved = sessions.set_agents(
+                    self.session_file, self.subagents.saved_state(), self.session_root,
+                    expected_revision=self._session_revision, expected_exists=True,
+                    redact_secrets=(self._secret_values() if self.config.get("session_redaction", True) else None))
+                if saved:
+                    self._session_revision += 1
+                return saved
+
     def _a_running_turn_saves_it(self) -> bool:
         """Whether a turn on another thread holds this session, and will save it."""
         with self._session_turn_state_lock:
@@ -6758,8 +7208,11 @@ class Agent(GoalLifecycle):
         finally:
             lease.release()
 
-    def load_session(self, path) -> int:
-        """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
+    def load_session(self, path, *, saved_mode: bool = False) -> int:
+        """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count.
+
+        ``saved_mode``: the person reopened it themselves, so it comes back in the mode it had
+        (_restore_session_mode)."""
         from . import sessions
         with self._session_persist_lock:
             path = sessions.resolve_path(self.session_root, path, must_exist=True)
@@ -6864,7 +7317,7 @@ class Agent(GoalLifecycle):
             self._plan_presented = False
             self._executing_plan = False
             self._plan_approved_this_turn = False
-            self._restore_session_mode(record)
+            self._restore_session_mode(record, saved_mode=saved_mode)
             self._reset_todo_clear()
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.image_views = image_views.load_index(record.get("images"))   # images: its index
@@ -7795,6 +8248,7 @@ class Agent(GoalLifecycle):
         options_repair = 0
         self._approval_records.clear()
         self._shown_file_records.clear()
+        self.__dict__.setdefault("_mcp_app_records", {}).clear()
         self._task_batch_records = {}       # batch `task` calls: each helper's result, by call id
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
@@ -8029,6 +8483,7 @@ class Agent(GoalLifecycle):
                 self.ui.end_stream("answer")
                 return True
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
+            self._router_main_resume()      # DGC Router: the main model's worker, for compacting and answering
             tools = self._tool_schemas() if self.client.tools_supported else None
             # What THIS request offered, so execution can refuse what it did not. Every filter in
             # `_tool_schemas` is a filter on the catalog, and a catalog is not an enforcement
@@ -8126,6 +8581,34 @@ class Agent(GoalLifecycle):
                     "(Ctrl+N) or lower context_size")
             except LLMError as e:
                 self._last_model_cause = self._model_failure_cause(e)
+                if getattr(self.client, "_router_route", None) is not None:
+                    # A DGC Router worker that failed after its stall retries: move this sub-agent to another
+                    # system (the same model first), and send the same request there. Its result says so.
+                    from . import router as router_mod
+                    failed_on = self.client._router_route
+                    attempts = (self._last_model_cause or {}).get("attempts") if isinstance(
+                        self._last_model_cause, dict) else None
+                    moved = router_mod.move(self, self._router_failure_text(e), cancel=self.cancelled,
+                                            attempts=attempts)
+                    if moved is not None:
+                        self._close_runs("gave_up")
+                        if held_final_messages:
+                            withhold_final("[Completion withheld by DGC: moved to another system.]",
+                                           "moved to another system")
+                        else:
+                            self.ui.end_stream()
+                        route = moved._router_route
+                        self.ui.info(self._safe_text(
+                            f"⤳ {failed_on.system_name} stopped answering; moved to {route.system_name} "
+                            f"({route.model})"))
+                        self.client = moved
+                        self._sync_vision()
+                        registry, agent_id = getattr(self, "subagents", None), getattr(self, "_subagent_id", None)
+                        if registry is not None and agent_id:
+                            registry.running(agent_id, model=route.model)
+                            registry.set_system(agent_id, route.system_name)
+                        next_request_reason = "fallback"
+                        continue
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self._close_runs("gave_up")         # the primary's retry lines end here
@@ -8228,6 +8711,7 @@ class Agent(GoalLifecycle):
             # message, so a restored turn describes what DGC actually ran. Explicit false stays
             # foreground for work whose result the lead needs immediately.
             _repair_task_batches(result.tool_calls)
+            self._note_router_hints(result.tool_calls)
             self._normalize_ultra_task_batch(result.tool_calls)
             assistant: dict = {"role": "assistant",
                                "content": _assistant_content_with_thinking(
@@ -8667,10 +9151,12 @@ class Agent(GoalLifecycle):
                 return True
 
             did_tools = True                # the model called tools → expect a closing summary
+            self._router_main_pause()       # DGC Router: its tools may need the worker the main model holds
             text_results: list[str] = []
             text_approvals: list[dict] = []
             text_decisions: list[dict] = []     # question outcomes recorded on the results message
             text_files: list[dict] = []
+            text_apps: list[dict] = []          # MCP Apps: the cards this batch's calls showed
             self._end_turn_after_batch = ""     # a dismissed question in THIS batch ends the turn
 
             def text_results_message() -> dict:
@@ -8678,6 +9164,7 @@ class Agent(GoalLifecycle):
                         "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>",
                         **({"_dgc_decision": list(text_decisions)} if text_decisions else {}),
                         **({"_dgc_files": list(text_files)} if text_files else {}),
+                        **({"_dgc_mcp_apps": list(text_apps)} if text_apps else {}),
                         **({"_dgc_approvals": list(text_approvals)} if text_approvals else {})}
 
             def flush_text_results() -> None:
@@ -8686,6 +9173,7 @@ class Agent(GoalLifecycle):
                     text_results.clear()
                     text_decisions.clear()
                     text_files.clear()
+                    text_apps.clear()
                     text_approvals.clear()
 
             def unfinished_text_batch(next_index: int) -> list:
@@ -8883,11 +9371,13 @@ class Agent(GoalLifecycle):
                 # its own card (Backend._history) and a reopened chat to restore (subagents.py).
                 helpers = (self.__dict__.get("_task_batch_records") or {}).pop(call.id, None)
                 files = self._shown_file_records.pop(call.id, None)
+                app_card = self.__dict__.get("_mcp_app_records", {}).pop(call.id, None)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
                                           **({"_dgc_decision": decision} if decision else {}),
                                           **({"_dgc_task_batch": helpers} if helpers else {}),
                                           **({"_dgc_files": [{"call_id": call.id, "items": files}]} if files else {}),
+                                          **({"_dgc_mcp_app": app_card} if app_card else {}),
                                           **({"_dgc_approval": approval} if approval else {})})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
@@ -8897,6 +9387,8 @@ class Agent(GoalLifecycle):
                         text_decisions.append({**decision, "call_id": None})
                     if files:
                         text_files.append({"call_id": None, "items": files})
+                    if app_card:
+                        text_apps.append(app_card)
                 if any(later not in parallel_tasks and later not in parallel_outputs
                        for later in range(call_index + 1, len(result.tool_calls))):
                     # A later call of this batch still has to run, and may run for minutes. Save the
@@ -9546,10 +10038,56 @@ class Agent(GoalLifecycle):
             self._last_task_integrated = False
             # A call that cannot run as written is answered before anything asks the user about it.
             problem = _task_call_error(args)
+            if not problem:
+                from . import router as router_mod
+                problem = router_mod.task_hint_error(self.config, args)
             if problem:
                 self.ui.tool_call(name, display_args, call_id)
                 self.ui.tool_result(name, problem, call_id)
                 return problem
+
+        if name == "router_update":
+            # The change is worked out BEFORE anyone is asked, so the Allow card shows exactly what will be written
+            # (router_tools.UpdatePlan.card), and only that plan is applied once allowed.
+            from . import router_tools
+            try:
+                plan = router_tools.plan_update(self.config, args)
+            except router_tools.UpdateError as exc:
+                problem = f"error: {exc}"
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, problem, call_id)
+                return problem
+            self.__dict__.setdefault("_router_plans", {})[call_id] = plan
+            display_args = {**display_args, **redact_value(plan.card(), secrets)}
+
+        if name == "generate_image":
+            # Worked out BEFORE anyone is asked, as router_update is: which generator (DGC asks the user once when
+            # several fit and the project has none chosen), the size, the price, and whether it asks first. The
+            # Allow card shows exactly that plan, and only that plan runs once allowed.
+            from . import image_tools
+            try:
+                image_plan = image_tools.prepare(self.config, args, self._image_surface(call_id))
+            except image_tools.Refused as exc:
+                problem = f"error: {exc}"
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, problem, call_id)
+                return problem
+            self.__dict__.setdefault("_image_plans", {})[call_id] = image_plan
+            display_args = {**display_args, **redact_value(image_plan.card(), secrets)}
+
+        if name == "generate_video":
+            # As generate_image: worked out before anyone is asked (which generator, the length, resolution and
+            # price, this month's spend on its key), so the card shows exactly what runs once allowed.
+            from . import video_tools
+            try:
+                video_plan = video_tools.prepare(self.config, args, self._video_surface(call_id))
+            except video_tools.Refused as exc:
+                problem = f"error: {exc}"
+                self.ui.tool_call(name, display_args, call_id)
+                self.ui.tool_result(name, problem, call_id)
+                return problem
+            self.__dict__.setdefault("_video_plans", {})[call_id] = video_plan
+            display_args = {**display_args, **redact_value(video_plan.card(), secrets)}
 
         if name == "present_plan":
             if self.mode != "plan":
@@ -9740,6 +10278,53 @@ class Agent(GoalLifecycle):
             from .tools import signed_in_page
             policy_args = {**args, "_page": signed_in_page(self.ctx)}
         decision, reason = perms.decide(name, policy_args)
+        # The user's own ask rule matched: an allow rule never beats it, so its card offers no Always allow.
+        ruled = decision == ASK and str(reason).startswith("rule:")
+        image_plan = self.__dict__.get("_image_plans", {}).get(call_id) if name == "generate_image" else None
+        video_plan = self.__dict__.get("_video_plans", {}).get(call_id) if name == "generate_video" else None
+        if video_plan is not None and decision != DENY:
+            # Every video is the user's call, in every mode, auto included: its card shows the price before anything
+            # is sent. Only the user's own Settings switch for this generator (video_asks off) skips the card; a
+            # clip that would pass the monthly limit always shows it (and is never sent).
+            if video_plan.asks:
+                decision, reason = ASK, (f"{video_plan.generator['name']} would pass this month's limit"
+                                         if video_plan.over_limit else
+                                         f"a video costs money ({video_plan.card()['price']}): every one asks")
+            elif not (decision == ASK and str(reason).startswith("rule:")):
+                decision, reason = ALLOW, f"{video_plan.generator['name']} makes videos without asking (Settings)"
+            if video_plan.into_project:
+                written, why = perms.decide("write_file", {"path": str(video_plan.target())})
+                if written == DENY:
+                    decision, reason = DENY, why
+                elif written == ASK and decision == ALLOW:
+                    decision, reason = ASK, f"saves into the project ({video_plan.card().get('saves_to', '')})"
+            if decision == ASK and getattr(self, "_monitor_turn", False):
+                self.ui.tool_denied(name, display_args, "a video waits for you", call_id)
+                return ("PERMISSION NEEDED: every video asks the user first, and nobody is at the keyboard on this "
+                        "turn, so none was made. Say what you would make and its price; the user can ask for it.")
+        if image_plan is not None and decision != DENY:
+            # Image generation follows its generator, in every mode: a paid one asks before each image unless the user
+            # allowed it (or this month's limit is reached); a free one, or one the user allowed, goes ahead. An ask
+            # rule the user wrote still asks.
+            if image_plan.asks:
+                decision, reason = ASK, (f"{image_plan.generator['name']} would pass this month's limit"
+                                         if image_plan.over_limit else
+                                         f"{image_plan.generator['name']} asks before each image ({image_plan.card()['price']})")
+            elif not (decision == ASK and str(reason).startswith("rule:")):
+                decision, reason = ALLOW, ("chosen by the user just now" if image_plan.approved
+                                           else f"{image_plan.generator['name']} doesn't ask before an image")
+            if image_plan.into_project:
+                # Into the project (save_to, or the Images save folder): what write_file's checks say of that path
+                # applies too, a deny rule, plan mode and default mode's ask among them. One card shows both.
+                written, why = perms.decide("write_file", {"path": str(image_plan.target())})
+                if written == DENY:
+                    decision, reason = DENY, why
+                elif written == ASK and decision == ALLOW:
+                    decision, reason = ASK, f"saves into the project ({image_plan.card().get('saves_to', '')})"
+            if decision == ASK and getattr(self, "_monitor_turn", False):
+                self.ui.tool_denied(name, display_args, "a paid image waits for you", call_id)
+                return ("PERMISSION NEEDED: this generator asks before each image, and nobody is at the keyboard on "
+                        "this turn, so none was made. Say what you would make; the user can allow it next time.")
         # The user's mods (dgc/mods): a mod may stop this step, or ask the user first where the rules would go
         # ahead; it can never allow one. Its Ask isn't answered by the card's re-check below.
         mod_asked = False
@@ -9772,6 +10357,10 @@ class Agent(GoalLifecycle):
                 result, _ = current_permissions().decide(name, policy_args)
                 if mod_asked:                   # a rule that allows it doesn't answer the mod's Ask
                     return "no" if result == DENY else None
+                if image_plan is not None or video_plan is not None:
+                    # A paid image's card is the user's alone: auto mode or an allow rule never answers it (the plain
+                    # rule for generate_image says "allow" in auto mode, which once let the card answer itself).
+                    return "no" if result == DENY else None
                 return "once" if result == ALLOW else "no" if result == DENY else None
             # Opt in via a real method, not a permissive fixture's __getattr__ fallback.
             live_approve = getattr(type(self.ui), "approve_live", None)
@@ -9779,11 +10368,30 @@ class Agent(GoalLifecycle):
             if waiting_id:                       # the agents list shows this child waiting on you
                 self.subagents.waiting(waiting_id, "permission")
             try:
-                verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
-                           if callable(live_approve) else self.ui.approve(name, display_args, call_id))
+                with asked_by_rule(ruled):               # every Allow box reads it (interaction_offers_always)
+                    verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
+                               if callable(live_approve) else self.ui.approve(name, display_args, call_id))
             finally:
                 if waiting_id:
                     self.subagents.waiting(waiting_id, None)
+            answered_always = verdict == "always"
+            if verdict == "always" and (name in ALWAYS_ASK_TOOLS or video_plan is not None or ruled):
+                # Each DGC Router change, and each look on the network, asks again, and so does a call the user's ask
+                # rule asks about. No card offers Always for them (permission_request.choices); an answer that says it
+                # anyway (an older editor) counts as once.
+                verdict = "once"
+            if verdict == "always" and image_plan is not None:
+                # Always allow on a paid generator: that generator stops asking (Settings → Models → Images & video shows it), with
+                # its monthly limit still holding. No permission rule is written for it.
+                from .image_tools import allow_always
+                allow_always(self.config, image_plan.generator["id"])
+                verdict = "once"
+            if answered_always and verdict != "always":
+                # A helper's Allow box keeps its lane for the rule an Always saves (_SubUI.finish_approval): no rule is
+                # saved here, so the lane is let go now.
+                finish_approval = getattr(type(self.ui), "finish_approval", None)
+                if callable(finish_approval):
+                    finish_approval(self.ui)
             approval_note = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets) if verdict == "no" else ""
             approval = {"name": name, "args": self._safe_value(display_args),
                         "decision": verdict, "reason": approval_note[:2000]}
@@ -9934,6 +10542,17 @@ class Agent(GoalLifecycle):
                             str(args.get("query", "")), args.get("limit", 8))
                     elif name == "use_pips":
                         out = self._load_pips_tools()
+                    elif name in ("generate_image", "list_image_generators"):
+                        out = self._image_tool(name, args, call_id)
+                    elif name in ("generate_video", "list_video_generators"):
+                        out = self._video_tool(name, args, call_id)
+                    elif name == "show_file" and self._already_shown_picture(args):
+                        out = (f"{args.get('path')} is a picture generate_image made in this turn, and it's already "
+                               "shown to the user above. There's nothing more to do: don't show it again.")
+                    elif name in ("router_status", "router_probe", "router_update", "router_find"):
+                        from . import router_tools
+                        out = router_tools.run(self, name, args,
+                                               plan=self.__dict__.setdefault("_router_plans", {}).pop(call_id, None))
                     elif name == "request_project_file":
                         from . import pip_fix
                         out = pip_fix.project_file_tool(self, args)
@@ -9975,10 +10594,35 @@ class Agent(GoalLifecycle):
                         if target:
                             image_kwargs = ({"on_image": self._mcp_image_sink(mcp_images)}
                                             if _accepts_keyword(self.mcp.call, "on_image") else {})
+                            # MCP Apps: a tool with a card hands over its whole result for the card.
+                            app_route = self._mcp_app_route(target)
+                            app_result: dict = {}
+                            if app_route is not None:
+                                image_kwargs["on_result"] = lambda res: app_result.update(res=res)
                             with helper_checkout.command_span(self, target):
                                 out = self.mcp.call(target, mcp_args, self.cancelled,
                                                     on_progress=on_progress, on_log=on_log,
                                                     input_handler=self._handle_mcp_input, **image_kwargs)
+                                # Composio sometimes returns only a short preview of a reviewed Gmail read and a
+                                # remote workbench file. Fetch the same read once in compact form so Work and the
+                                # CLI see the messages directly, as ChatDGC and Pips do. A batch with any change
+                                # cannot enter this path; the installed curated plugin identity is checked first.
+                                try:
+                                    route = self.mcp.route_of(target) if isinstance(self.mcp, MCPManager) else None
+                                except AttributeError:
+                                    # A restricted MCP manager (including the catalog-only test double) may
+                                    # have no route table. Its original tool result still stands.
+                                    route = None
+                                if route == ("composio", "COMPOSIO_MULTI_EXECUTE_TOOL"):
+                                    from . import pip_plugins
+                                    info = pip_plugins.installed(self.config).get("composio")
+                                    if info and info.get("composio") and "composio" in info["servers"]:
+                                        out = pip_plugins.complete_composio_gmail_read(
+                                            self.mcp, target, info, {"name": route[1]}, mcp_args, out,
+                                            cancel=self.cancelled,
+                                            on_result=image_kwargs.get("on_result"))
+                            if app_route is not None and "res" in app_result:
+                                out = self._show_mcp_app(app_route, mcp_args, app_result["res"], call_id, out)
                     else:
                         # When it ran, for whom: a change to a checkout is read against these spans.
                         # A shell or code action's changes are looked at around it, so Undo puts them
@@ -10023,7 +10667,11 @@ class Agent(GoalLifecycle):
             # What an isolated helper wrote outside its copy (a /tmp script) it may read back.
             helper_checkout.note_write(self, args["path"])
             if self.mods is not None:
-                mod_bridge.wrote(self, str(args["path"]))   # a mod's folder DGC wrote: asked once a session
+                # A mod's folder DGC wrote: asked once a session. A mod of it that was started and couldn't run is
+                # said to the model here, never left as a silent nothing.
+                said = mod_bridge.wrote(self, str(args["path"]))
+                if said:
+                    out = f"{out}\n\n{said}"
         _, post = self._run_lifecycle_hooks(
             "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
             cancelled=self.cancelled)
@@ -10201,7 +10849,72 @@ class Agent(GoalLifecycle):
         except Exception:
             pass
 
-    def _deliver_images(self, call_id, name: str, entries, *, omitted: int = 0) -> None:
+    # ------------------------------------------------------------ MCP Apps cards ---
+    def _mcp_app_route(self, target: str):
+        """(server, tool) when ``target``'s tool has a card and this chat's front end shows cards, else None."""
+        shows = getattr(self.ui, "mcp_apps_shown", None)
+        if not callable(getattr(self.ui, "mcp_app_card", None)) or not callable(shows):
+            return None
+        try:
+            if not shows():
+                return None
+        except Exception:                    # noqa: BLE001 -- no card rather than no call
+            return None
+        route_of = getattr(self.mcp, "route_of", None)
+        route = route_of(target) if callable(route_of) else None
+        if not route or not _accepts_keyword(self.mcp.call, "on_result"):
+            return None
+        server = (getattr(self.mcp, "servers", {}) or {}).get(route[0])
+        meta = (getattr(server, "tool_meta", None) or {}).get(route[1]) or {}
+        return (route[0], route[1]) if meta.get("uri") else None
+
+    def _show_mcp_app(self, route, arguments, result, call_id, out: str) -> str:
+        """Keep and show the card of the call that just ran; the model is told in one line. A card that can't be
+        shown costs nothing but a line for the user: the tool's own answer stands."""
+        from . import mcp_apps, pip_plugins
+        server_name, tool = route
+        server = (getattr(self.mcp, "servers", {}) or {}).get(server_name)
+        if server is None:
+            return out
+        found = None
+        try:
+            found = pip_plugins.owner(server_name)
+            if found is None:
+                # A plugin's own local server: named as the editor's Allow card for it names it (plugin_names).
+                from .mcp import _safe_name
+                from .plugins import server_display_names
+                shown = server_display_names().get(_safe_name(server_name))
+                found = {"display_name": shown} if shown else None
+        except Exception:                    # noqa: BLE001
+            found = None
+        url = next((a for a in (getattr(server, "args", None) or []) if str(a).startswith("https://")), "")
+        session = getattr(self, "session_file", None)
+        try:
+            record = mcp_apps.make_card(
+                server=server, tool=tool, arguments=arguments, result=result, surface="work",
+                plugin=(found or {}).get("display_name") or server_name, plugin_id=(found or {}).get("name") or "",
+                server_url=str(url), call_id=call_id, cancel=self.cancelled,
+                owner={"session_id": session.stem if session else "",
+                       "project_root": str(self.config.project_root)})
+        except Exception as exc:             # noqa: BLE001 -- a card never costs the call
+            # Said to the person in plain words, and to the model in one line: without it, a model reading a vendor's
+            # answer about "the widget" says the card is there (Higgsfield, 2026-11-02).
+            name = (found or {}).get("display_name") or server_name
+            reason = str(exc) if isinstance(exc, mcp_apps.CardError) else "something went wrong showing it"
+            self.ui.info(f"{name}'s card couldn't be shown: {reason}. Its answer is in the reply.")
+            return f"{out}\n{mcp_apps.failed_line(name, tool, reason)}"
+        try:
+            self.ui.mcp_app_card(record)
+        except Exception:                    # noqa: BLE001
+            return out
+        if call_id:
+            records = self.__dict__.setdefault("_mcp_app_records", {})
+            if len(records) >= 64:
+                records.pop(next(iter(records)))
+            records[call_id] = mcp_apps.summary(record)
+        return f"{out}\n{mcp_apps.model_line(record)}"
+
+    def _deliver_images(self, call_id, name: str, entries, *, omitted: int = 0, caption: str = "") -> None:
         """Record, store and show the images one call produced; queue them for the model only while
         the tool loop owns this batch and the model can read them."""
         entries = list(entries or ())
@@ -10257,8 +10970,8 @@ class Agent(GoalLifecycle):
         emit_images = getattr(self.ui, "tool_images", None)
         if not callable(emit_images):
             return
-        caption = {"browser": f"{name} screenshot", "view_image": "viewed image", "read_file": "viewed image",
-                   "mcp": f"{name} image"}.get(kept[0]["source"] if kept else "", f"{name} image")
+        caption = caption or {"browser": f"{name} screenshot", "view_image": "viewed image", "read_file": "viewed image",
+                              "mcp": f"{name} image"}.get(kept[0]["source"] if kept else "", f"{name} image")
         try:
             emit_images(call_id, uris, caption,
                         items=items if items and len(items) == len(uris) else None,
@@ -10649,6 +11362,64 @@ class Agent(GoalLifecycle):
                 self.checkpoints.discard_last_empty()
             return result
 
+    def _router_main_pause(self) -> None:
+        """DGC Router: the main model is idle while this turn's tools run, so its worker is free for them. Holding it, a
+        helper or a picture on that system waited for the turn while the turn waited for it (one worker, or a
+        one-model-at-a-time system asked for another model). The next request takes it back (_router_main_resume)."""
+        hold = getattr(self, "_router_turn_hold", None)
+        if self.depth == 0 and hold:
+            from . import router as router_mod
+            self._router_turn_hold = None
+            router_mod.release_main(hold)
+
+    def _router_main_resume(self) -> None:
+        """The main model is about to answer again: it holds its worker again when it can (never waits, as at the
+        turn's start). Only a turn that held one does."""
+        if self.depth == 0 and getattr(self, "_router_turn_holds", False) and not getattr(self, "_router_turn_hold", None):
+            from . import router as router_mod
+            self._router_turn_hold = router_mod.hold_main(self)
+
+    def _note_router_hints(self, calls) -> None:
+        """Where each `task` helper the model just asked for should run (system, model, size; DGC Router), by the
+        call id it runs under: a batch's helpers under `<call id>#<place>`, each with the call's own as default."""
+        from . import router as router_mod
+        from .subagents import task_batch_child_id
+        hints = self.__dict__.setdefault("_router_hints", {})
+        # How hard each helper thinks, as the model asked (`task` effort): used only when the user set nothing.
+        efforts = self.__dict__.setdefault("_task_efforts", {})
+        for call in calls or ():
+            if getattr(call, "name", "") != "task" or not isinstance(getattr(call, "arguments", None), dict):
+                continue
+            top = router_mod.hints_from_call(call.arguments)
+            effort = _task_effort(call.arguments)
+            items = call.arguments.get("tasks")
+            if isinstance(items, list):
+                for place, item in enumerate(items, 1):
+                    hint = {**top, **router_mod.hints_from_call(item)}
+                    if hint:
+                        hints[task_batch_child_id(call.id or "task", place)] = hint
+                    asked = _task_effort(item) or effort
+                    if asked:
+                        efforts[task_batch_child_id(call.id or "task", place)] = asked
+            else:
+                if top:
+                    hints[str(call.id or "")] = top
+                if effort:
+                    efforts[str(call.id or "")] = effort
+        for kept in (hints, efforts):
+            while len(kept) > 256:
+                kept.pop(next(iter(kept)))
+
+    def _router_hint(self, call_id) -> dict:
+        """The call's own system/model/size, else what the launching application asked for this turn's helpers
+        (an SDK run with system=: router_update prefer), else nothing."""
+        hints = getattr(self, "_router_hints", None) or {}
+        hint = dict(hints.get(str(call_id or ""), {}))
+        prefer = getattr(self, "_router_prefer", None)
+        if isinstance(prefer, dict) and not (hint.get("system") or hint.get("model")):
+            hint.update({key: value for key, value in prefer.items() if value and key in ("system", "model")})
+        return hint
+
     def _subagent_window(self, adef) -> int:
         """A sub-agent's context window in tokens: its definition's ``context_size``, then
         ``subagent_context_size``, else 0 (it runs in the main window)."""
@@ -10661,10 +11432,49 @@ class Agent(GoalLifecycle):
                 return max(2_048, size)
         return 0
 
-    def _subagent_client(self, adef):
-        """Resolve a sub-agent's (base_url, api_key, model): per-agent def → global
-        subagent_* config → inherit the main loop. Returns None to reuse the parent client."""
+    def _helper_thinking(self, adef, route=None, asked: str = "") -> tuple[str, str]:
+        """How hard a helper thinks: (the level it is given, "" to follow the main chat as before; the level it
+        uses, for its card and the agent map, "" when its model can't think). Highest first:
+
+        1. the DGC Router model's own choice, when it isn't "same as the helper";
+        2. the agent file's ``effort:``;
+        3. Settings → Models → Sub-agents → Thinking (``subagent_thinking``);
+        then what the model asked for this helper (the `task` call's ``effort``, ``asked``), and last
+        4. the main chat's level.
+
+        A model the Router knows can't think gets none: its card says nothing about thinking."""
+        if route is not None and getattr(route, "thinks", None) is False:
+            return "off", ""
+        chosen = str(getattr(route, "thinking", "") or "") if route is not None else ""
+        if chosen not in THINK_LEVELS:
+            chosen = ""
+        if not chosen and adef is not None and str(getattr(adef, "effort", "") or "").strip():
+            chosen = str(adef.effort).strip()          # as before: the agent file's word, whatever it is
+        if not chosen:
+            setting = str(self.config.get("subagent_thinking", "") or "")
+            chosen = setting if setting in THINK_LEVELS else ""
+        if not chosen and asked in ("off", "low", "medium", "high"):
+            chosen = asked
+        if chosen:
+            return chosen, chosen
+        main = str(self._effort_override or self.config.get("thinking", "off") or "off")
+        return "", main if main in THINK_LEVELS else "off"
+
+    def _subagent_client(self, adef, *, lease_for: str = "", hint: dict | None = None, cancel=None,
+                         registry=None, agent_id=None, lease_label: str = ""):
+        """Resolve a sub-agent's (base_url, api_key, model): per-agent def → DGC Router → global
+        subagent_* config → inherit the main loop. Returns None to reuse the parent client.
+
+        DGC Router (dgc/router.py) routes only a child that is about to run (``lease_for`` names it, so a
+        worker can be leased for it and given back when it ends) and whose agent definition chose no model or
+        host of its own: that choice is explicit and still wins. With the Router off this is 0.50's route."""
         cfg = self.config
+        if lease_for and not (adef and (adef.model or adef.base_url)):
+            from . import router as router_mod
+            routed = router_mod.subagent_route(self, dict(hint or {}), owner=lease_for, cancel=cancel,
+                                               registry=registry, agent_id=agent_id, label=lease_label)
+            if routed is not None:
+                return routed
         base = (adef.base_url if adef else "") or cfg.get("subagent_base_url") or cfg.base_url
         import os
         # An agent definition may name an env var to read a key from, but never one of DGC's own
@@ -10851,15 +11661,37 @@ class Agent(GoalLifecycle):
                     # for everything the turn delegates: the child refuses ASK steps and asks no question,
                     # plan or goal verdict either (auto mode still runs normally; see _handle_call).
                     sub._monitor_turn = True
-                override = self._subagent_client(adef)
-                if override is not None:
+                router_owner = str(agent_id or call_id or f"child-{id(sub):x}")
+                override = self._subagent_client(adef, lease_for=router_owner, hint=self._router_hint(call_id),
+                                                 cancel=own_cancel, registry=registry, agent_id=agent_id,
+                                                 lease_label=description)
+                route = getattr(override, "_router_route", None)
+                if route is not None:
+                    # A DGC Router worker: its fixed context sizes every request (Ollama's num_ctx) and every
+                    # budget the child measures, compaction included -- not the main window's.
+                    child_config.data["context_size"] = int(route.context)
+                    child_config._explicit_keys = set(getattr(child_config, "_explicit_keys", set())) | {"context_size"}
+                    sub.client = override
+                elif override is not None:
                     if window:
                         override.context_size = window     # built from the parent's config
                     sub.client = override
                 if registry is not None and agent_id:
                     registry.running(agent_id, model=str(getattr(sub.client, "model", "") or ""))
-                if adef and adef.effort:
-                    sub._effort_override = adef.effort
+                    if route is not None:
+                        registry.set_system(agent_id, route.system_name)
+                asked = (self.__dict__.get("_task_efforts") or {}).get(str(call_id or ""), "")
+                level, shown = self._helper_thinking(adef, route, asked)
+                if level:
+                    sub._effort_override = level
+                elif shown == "off":
+                    shown = ""          # following a main chat that doesn't think: nothing to say on its row
+                if registry is not None and agent_id:
+                    registry.set_thinking(agent_id, shown)
+                if route is not None:
+                    from . import router as router_mod
+                    router_mod.ROUTER.mark_thinking(route.lease_id, shown)
+                    sub._router_thinking = shown        # and its result says it (router.child_note)
                 if prepare_child is not None:
                     prepare_child(sub)
                 if handle is not None:
@@ -10889,6 +11721,16 @@ class Agent(GoalLifecycle):
 
             failure = thrown or sub_ui.failure()
             result = sub_ui.result()
+            # Where it ran and anything that moved (DGC Router), for the model reading the result.
+            from . import router as router_mod
+            routed = " ".join(part for part in (
+                router_mod.result_note(self, str(agent_id or call_id or "")),
+                router_mod.child_note(sub) if sub is not None else "") if part)
+            if routed:
+                if result:
+                    result = result.rstrip() + "\n\n" + self._safe_text(routed)
+                elif failure:
+                    failure = failure.rstrip(". ") + ". " + self._safe_text(routed)
             if failure and isinstance(cancel, _ChildStop) and cancel.closed:
                 # The user stopped this one child. However its turn happened to unwind -- "turn
                 # cancelled", or still queued in a parallel batch -- that is what it was, and the
@@ -10901,6 +11743,9 @@ class Agent(GoalLifecycle):
             raised = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            if sub is not None:
+                from . import router as router_mod
+                router_mod.release_agent(sub)          # its DGC Router worker, whatever happened
             # A tool may finish spawning after close() took its snapshot. Sweep this child's
             # owner again once its worker lands; never stop a sibling chat's resources.
             if sub is not None and resources.closed:

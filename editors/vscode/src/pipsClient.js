@@ -42,7 +42,7 @@ import {ownAppsPage,ownAppForServer,ownAppsMarkup,isOwnApp,ownAppDecision,ownApp
 import {PIP_STATEMENT_NOTICE,pipStatementCandidate,pipStatement,pipStatementsPage,pipStatementDraft,pipStatementResult} from './pipsModel.js';
 import {COMMAND_OUTCOME_NOTICE,commandReceipt,commandReceiptsPage,commandRecording,commandOutcomeEntry,commandOutcomeSummary} from './pipsModel.js';
 import {outcomeWords,reviewStatusWords,commandLine,executionContextWords,notificationWords,eventWords} from './pipsModel.js';
-import {esc,record,active,statusLabel,personalStatusLabel,errorText,report,runner,context,presentation,requestBroker,execution,activityPage,activityLabel,scheduleLabel,scheduleFromDraft,approvalStatus,approvalsPage,pipTypes,pipType,pendingReviews,messagesPage,chatContinuity,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,runCheckpoint,checkpointsPage,checkpointBaseline,executionPip,pulsePip,pulsePlan,pulsePlanEqual,pulsePlanFromCommands,pulseRunPins,pulseVerificationPin,pulseVerificationReceipt,pulseCommandLabel,pulseProgress,handoffAction,handoffRecord,handoffsPage,handoffPin,executionResult,executionReview,patchArtifactSource,documentationPip,documentationDraft,savedProposal,ADAPTATION_MODES,adaptationPolicy,adaptationLabel,adaptationsPage,EVENT_TRIGGER_NAMES,commitPathRules,commitPathObservation,eventTrigger,eventTriggerLabel,eventTriggerFromDraft,eventRunPin,draftAutomationPin,sourcePolicy,sourcePolicyLabel,sourceSnapshot,sourcePin,sourceResult,sourceRules,sourceWithExcludes,sourceExcludeError,sourceLeftOut,leftOutLines,sourceCheck,sizeText,MAX_SOURCE_EXCLUDES,SESSION_STATEMENT_NOTICE,sessionGeneration,sessionSourceSelection,sessionStatement,sessionStatementsPage,workspaceSessionsPage,pipNotification,notificationsPage,notificationNavigation,PIP_MEMORY_NOTICE,pipExceptionSourceEqual,pipExceptionCandidate,pipMemory,pipMemoriesPage,pipMemoryPin,SPECIALIST_ROLES,specialistGrant,specialistPolicy,specialistReceipt,lifecycleRevision,archivalResult} from './pipsModel.js';
+import {esc,record,active,statusLabel,personalStatusLabel,errorText,report,runner,context,presentation,requestBroker,execution,activityPage,activityLabel,scheduleLabel,scheduleFromDraft,approvalStatus,approvalsPage,pipTypes,pipType,pendingReviews,messagesPage,chatContinuity,pipModels,modelChoice,pipRouter,routerChoices,defaultRunsOn,modelLabel,modelValue,subscriptionUsage,runCheckpoint,checkpointsPage,checkpointBaseline,executionPip,pulsePip,pulsePlan,pulsePlanEqual,pulsePlanFromCommands,pulseRunPins,pulseVerificationPin,pulseVerificationReceipt,pulseCommandLabel,pulseProgress,handoffAction,handoffRecord,handoffsPage,handoffPin,executionResult,executionReview,patchArtifactSource,documentationPip,documentationDraft,savedProposal,ADAPTATION_MODES,adaptationPolicy,adaptationLabel,adaptationsPage,EVENT_TRIGGER_NAMES,commitPathRules,commitPathObservation,eventTrigger,eventTriggerLabel,eventTriggerFromDraft,eventRunPin,draftAutomationPin,sourcePolicy,sourcePolicyLabel,sourceSnapshot,sourcePin,sourceResult,sourceRules,sourceWithExcludes,sourceExcludeError,sourceLeftOut,leftOutLines,sourceCheck,sizeText,MAX_SOURCE_EXCLUDES,SESSION_STATEMENT_NOTICE,sessionGeneration,sessionSourceSelection,sessionStatement,sessionStatementsPage,workspaceSessionsPage,pipNotification,notificationsPage,notificationNavigation,PIP_MEMORY_NOTICE,pipExceptionSourceEqual,pipExceptionCandidate,pipMemory,pipMemoriesPage,pipMemoryPin,SPECIALIST_ROLES,specialistGrant,specialistPolicy,specialistReceipt,lifecycleRevision,archivalResult} from './pipsModel.js';
 
 
 // The main DGC chat mounts one instance in a ShadowRoot; the editor document is a fallback.
@@ -52,12 +52,14 @@ export function mountPips(options) {
   const embedded=root!==nativeDocument,owner=root.ownerDocument||nativeDocument,disposers=[];
   const remoteHost=options.host==='remote';
   let disposed=false,motionPaused=false;
-  // A notice says what just happened, then goes: longer ones stay long enough to read. Errors stay.
-  let noticeShown='',noticeTimer=0;
+  // A notice says what just happened, then goes: longer ones stay long enough to read. Errors stay, and so does a
+  // notice someone may need to act on later (noticeStays: the folder a deletion left in place), until another replaces it.
+  let noticeShown='',noticeTimer=0,noticeStays='';
   function noticeFades(){
     if(!S.notice){noticeShown='';return;}
     if(S.notice===noticeShown)return;
     noticeShown=S.notice;window.clearTimeout(noticeTimer);
+    if(S.notice===noticeStays)return;
     const shown=S.notice;noticeTimer=window.setTimeout(()=>{if(!disposed&&S.notice===shown){S.notice='';noticeShown='';render();}},Math.min(15000,4000+60*shown.length));
   }
   if(embedded){
@@ -76,6 +78,10 @@ export function mountPips(options) {
     addEventListener(type,fn){const target=type==='visibilitychange'?nativeDocument:root;target.addEventListener(type,fn);disposers.push(()=>target.removeEventListener(type,fn));}
   };
 const vscode = {postMessage:options.postMessage};
+// A reply's pictures fold away (media/pictureFold.js, through pipsTranscript.js): drawn in this page's root (a shadow
+// root in the side bar), and a choice goes to the host, which keeps it.
+globalThis.DgcPictureFold?.root(root);
+if(!embedded)globalThis.DgcPictureFold?.host(message=>vscode.postMessage(message));
 const broker = requestBroker(message => vscode.postMessage({...message,generation:S.generation}));
 const $ = id => document.getElementById(id);
 const S = {posts:[],postsCursor:null,postsPip:'',postsLoaded:false,postsLoading:false,postsError:'',apiVersion:0,connected:false,supported:false,enabled:false,epoch:0,workspace:null,jobs:[],selected:'',pip:null,runs:[],run:null,runId:'',context:null,runner:null,tab:'chat',versions:[],cursor:null,historyLoaded:false,create:false,loading:false,refreshing:false,busy:false,error:'',notice:'',review:null,visible:true,generation:null,activity:null,activityLoading:false,activityError:'',approvals:[],approvalCursor:null,approvalsLoaded:false,approvalsLoading:false,approvalsError:'',scheduleDirty:false,scheduleDraftVersion:null};
@@ -88,9 +94,25 @@ async function loadUnread(force=false){
     if(token!==scope())return;unreadByPip.clear();unreadTotals.clear();
     for(const page of pages){if(!record(page)||!Array.isArray(page.pips)||!spaces.some(w=>w.id===page.workspace_id))continue;
       unreadTotals.set(page.workspace_id,Number.isSafeInteger(page.total)?page.total:0);
-      for(const item of page.pips)if(record(item)&&typeof item.pip_id==='string'&&Number.isSafeInteger(item.count)&&item.count>0&&typeof item.latest==='string')unreadByPip.set(item.pip_id,item);}
+      for(const item of page.pips)if(record(item)&&typeof item.pip_id==='string'&&Number.isSafeInteger(item.count)&&item.count>0&&typeof item.latest==='string'&&readFingerprints.get(item.pip_id)!==`${item.latest_message_id||''}|${item.latest_post_id||''}`)unreadByPip.set(item.pip_id,item);}
     lastUnreadAt=Date.now();render();maybeMarkRead();
   }catch{}finally{unreadLoading=false;}
+}
+// A Pip's unread pill on the Pips page: its whole chat read, up to the newest reply and run post list_pip_unread named.
+const readingPips=new Set();
+function canMarkRead(item){return !remoteHost&&S.apiVersion>=69&&(typeof item.latest_message_id==='string'||typeof item.latest_post_id==='string');}
+function markPipRead(pip){
+  const current=unreadByPip.get(pip);if(!current||readingPips.has(pip)||!canMarkRead(current)||!usable())return;
+  const message=typeof current.latest_message_id==='string'?current.latest_message_id:null,post=typeof current.latest_post_id==='string'?current.latest_post_id:null;
+  const token=scope(),fingerprint=`${message||''}|${post||''}`,focused=document.activeElement?.dataset?.pipRead===pip;
+  readingPips.add(pip);render();
+  if(focused)[...document.querySelectorAll('[data-job]')].find(e=>e.dataset.job===pip)?.focus({preventScroll:true});   // the pill goes: its row keeps the keyboard
+  void send('mark_pip_read',{pip_id:pip,...(message?{message_id:message}:{}),...(post?{post_id:post}:{})})
+    .then(()=>{if(token!==scope())return;readFingerprints.set(pip,fingerprint);const now=unreadByPip.get(pip);
+      if(now&&`${now.latest_message_id||''}|${now.latest_post_id||''}`===fingerprint){unreadByPip.delete(pip);if(unreadTotals.has(now.workspace_id))unreadTotals.set(now.workspace_id,Math.max(0,unreadTotals.get(now.workspace_id)-now.count));}
+      lastUnreadAt=0;})
+    .catch(error=>{if(token===scope())S.error=errorText(error);})
+    .finally(()=>{readingPips.delete(pip);if(token===scope()){render();void loadUnread(true);}});
 }
 function maybeMarkRead(){
   if(markingRead||remoteHost||S.apiVersion<69||!S.selected||S.overview||S.tab!=='chat'||!S.visible||document.hidden||
@@ -160,7 +182,7 @@ let setupEditing=false,setupRows=[],setupLoading=false,setupError='',setupSeq=0,
 const OLD_ZONES={'Asia/Calcutta':'Asia/Kolkata','Asia/Saigon':'Asia/Ho_Chi_Minh','Asia/Katmandu':'Asia/Kathmandu','Asia/Rangoon':'Asia/Yangon','Asia/Dacca':'Asia/Dhaka','Europe/Kiev':'Europe/Kyiv','America/Buenos_Aires':'America/Argentina/Buenos_Aires','America/Godthab':'America/Nuuk','Atlantic/Faeroe':'Atlantic/Faroe','Pacific/Truk':'Pacific/Chuuk'};
 const browserZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const defaultZone=OLD_ZONES[browserZone]||browserZone;
-S.sourceDirty=false;S.sourceDraftVersion=null;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;S.executionCapability=null;S.executionLoading=false;S.executionError='';S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';S.types=[];S.createStep='type';S.createType='';S.overview=true;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.modelsError='';S.modelsLoading=false;S.modelDirty=false;S.stream=null;
+S.sourceDirty=false;S.sourceDraftVersion=null;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;S.executionCapability=null;S.executionLoading=false;S.executionError='';S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';S.types=[];S.createStep='type';S.createType='';S.overview=true;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.modelDirty=false;S.stream=null;
 const creationDrafts=new Map(),avatarIds=new Map(),chatDrafts=new Map(),chatRequests=new Map();let avatarSequence=0,avatarObserver=null,characterCleanup=null,messageSeq=0,streamSeq=0,streamLoading=false,selectionGeneration=0;
 let savedView=options.getState?.(),restoreView=true,navigationPending=!!options.navigation;
 let postsSeq=0,fixesSeq=0;
@@ -219,6 +241,12 @@ function observeAvatars() {
 const field = (key,label,textarea=false) => `<label>${esc(label)}${textarea?`<textarea data-draft="${key}" id="${key}">${esc(draft[key])}</textarea>`:`<input data-draft="${key}" id="${key}" value="${esc(draft[key])}" autocomplete="off">`}</label>`;
 const errorMarkup = value => value ? `<p class="notice error" role="alert">${esc(value)}</p>` : '';
 function setError(error) { S.error=errorText(error); render(); }
+// DGC's queue of Pip controls was full for a moment: nothing ran, and DGC said to wait. The line goes as soon as a
+// later control gets through, which shows there is room again (release check, 2026-11-03: it stayed on the Pips
+// home and in Core's chat until a window reload).
+const PIPS_BUSY='Too many pending Pip controls; wait and retry.';
+// Checked once what that reply set off has run: a refresh says its error only after all its replies are in.
+function clearBusy(){if(!disposed&&S.error===PIPS_BUSY){S.error='';render();}}
 function contextEntries(entries,archivable=false) {
   if(entries.some(e=>e.provenance?.source==='session_execution'))return entries.map(e=>e.provenance?.source==='session_execution'?`<article class="entry"><span class="badge">Recorded command outcome</span><h3>${esc(e.title)}</h3>${commandContextSummary(e)}${commandContextDetails(e)}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`:contextEntries([e],archivable)).join('');
   return entries.length ? entries.map(e=>`<article class="entry"><span class="badge">${e.kind==='session_outcome'?'Session statement':e.kind==='execution'?'Accepted run outcome':e.kind==='finding'?'Finding':esc(e.kind[0].toUpperCase()+e.kind.slice(1))}</span><h3>${esc(e.title)}</h3><div class="goal">${esc(e.kind==='session_outcome'?e.provenance.proposal.statement:e.kind==='execution'?executionContextWords(e.provenance):e.content)}</div><p class="muted">${e.kind==='session_outcome'?'You wrote this. It wasn’t checked against anything that ran.':e.kind==='execution'?'What the run did when you accepted it. It doesn’t prove the code is correct now.':e.kind==='finding'?'The quoted code was checked; the model’s conclusion wasn’t.':'Added by you.'} ${e.kind==='command'?'A note only: it doesn’t let any Pip run this command.':''}</p>${e.kind==='finding'&&e.provenance.schema_version===2?`<dl class="meta">${pinnedSourceMarkup(e.provenance)}</dl>${pinnedSourceNotice(e.provenance)}`:''}${e.kind==='session_outcome'?sessionStatementDetails(e.provenance.proposal,e.provenance.proposal_digest):''}${e.kind==='execution'?`<details><summary>Saved record</summary><div class="goal">${esc(e.content)}</div></details>`:''}${e.provenance?.run_id?`<small>Version ${esc(e.provenance.job_version)} · ${esc(e.provenance.model)}</small>`:''}${archivable?`<div class="actions"><button type="button" data-archive="${esc(e.id)}"${S.busy||!usable()?' disabled':''}>Archive record</button></div>`:''}</article>`).join('') : '<p class="muted">No context yet.</p>';
@@ -232,10 +260,10 @@ async function loadKeepRunning(){
  catch(error){if(token===S.epoch)keepState.error=errorText(error);}
  finally{keepState.loading=false;if(token!==S.epoch)keepState.asked=false;render();}
 }
-async function setKeepRunning(enabled){
+async function setKeepRunning(enabled,refresh=false){
  if(S.busy||!usable())return;const token=scope();S.busy=true;render();
  try{const value=pipsKeepRunning((await send('set_pips_keep_running',{enabled})).keep_running);if(token!==scope())return;keepState.value=value;keepState.error='';
-  S.notice=value.on?(value.while_logged_out?'Pips keep running: they start when you log in, restart if they fail, and run while you are logged out.':'Pips keep running: they start when you log in and restart if they fail.'):'Pips no longer start on their own. They keep running now until you stop them.';}
+  S.notice=refresh&&value.on&&!value.outdated?'Keep Pips running now starts this DGC.':value.on?(value.while_logged_out?'Pips keep running: they start when you log in, restart if they fail, and run while you are logged out.':'Pips keep running: they start when you log in and restart if they fail.'):'Pips no longer start on their own. They keep running now until you stop them.';}
  catch(error){if(token===scope()){keepState.error=errorText(error);setError(error);}}
  finally{if(token===scope()){S.busy=false;render();}}
 }
@@ -271,7 +299,11 @@ function keepRunningMarkup(){
  if(!k)return keepState.error?`<p class="muted keep-running-note">${esc(keepState.error)}</p>`:'';
  if(!k.supported)return `<p class="muted keep-running-note">${esc(k.reason)}</p>`;
  const note=k.on?(k.while_logged_out?'Starts when you log in and after a restart, restarts if it fails, and runs while you are logged out.':'Starts when you log in and after a restart, and restarts if it fails.'):'Off: Pips run only after you start them. Turn this on so a schedule still runs after a restart.';
- return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>`;
+ // outdated: the service DGC wrote still starts an older DGC install. Refreshing it is turning it on again, which
+ // restarts the runner on Linux and macOS, so it waits while a Pip is working.
+ const c=S.runner?.counts,working=!!c&&(c.queued+c.running+(c.cancelling||0))>0;
+ const older=k.on&&k.outdated?`<p class="muted keep-running-note keep-running-older">${esc(working?'It still starts an older DGC. Refresh moves it to this one once no Pip is working.':'It still starts an older DGC. Refresh moves it to this one.')} ${button('keep-running-refresh','Refresh',S.busy||!usable()||working,'quiet')}</p>`:'';
+ return `<label class="keep-running"><input type="checkbox" id="keep-running"${k.on?' checked':''}${S.busy||!usable()?' disabled':''}> Keep Pips running</label><p class="muted keep-running-note">${esc(note)}</p>${older}`;
 }
 function runnerMarkup() {
   const r=S.runner,paused=r?.paused;
@@ -311,19 +343,38 @@ async function finishCreate(result){
 function rememberCreationDraft(){if(S.createType)creationDrafts.set(S.createType,{name:draft.name,goal:draft.goal,source_ref:draft.source_ref,createModel:draft.createModel});}
 // API 55 (pip_brain): a Personal Pip may run on the user's own Claude Code or Codex, listed when signed in here.
 function subscriptionChoices(personal){return S.apiVersion>=55&&personal?S.subscriptions||[]:[];}
-function defaultModelName(){return S.defaultEngine?S.defaultEngine.name:S.defaultModel;}
+// API 70: DGC Router, while it is on: any computer with the Pips job, or one system and model (list_pip_models' router).
+function routerOffer(){return S.apiVersion>=70?S.router:null;}
+function routerLabel(choice){const value=modelValue(choice);const found=routerChoices(S.router).find(([v])=>v===value);return found?found[1]:modelLabel(choice);}
+function defaultModelName(){return defaultRunsOn({router:S.router,default_engine:S.defaultEngine,default_model:S.defaultModel});}
 // Default: the Pips default model set in Settings, else DGC's own (list_pip_models' default_model says which runs).
 function defaultLabel(){return defaultModelName()?`Default (${defaultModelName()})`:'Default';}
+// The composer's model chip: its words and its hover. On Default it says so, as the menu row does ("Default (NAS ·
+// qwen3.5:9b)"): it read "NAS · qwen3.5:9b", the same as choosing that model. On the Router's any-system choice it
+// fits a side bar ("DGC Router (any Pip sy…" was cut) and names the computer the last reply came from, which the
+// reply keeps ("glm-5.3:cloud on Workstation (DGC Router)", dgc/pip_chat.py _answered_by); the hover says it all.
+function chipModel(choice,current){
+ if(choice?.mode==='subscription')return{text:modelLabel(choice),title:modelLabel(choice)};
+ if(choice?.mode==='router'&&choice.system){const label=routerLabel(choice);return{text:label,title:`${label} (DGC Router)`};}
+ if(choice?.mode==='router'){
+  const last=[...S.messages].reverse().find(m=>m.role==='assistant'&&typeof m.model==='string'),answered=/^(.+) on (.+) \(DGC Router\)$/.exec(last?.model||'');
+  return{text:answered?`DGC Router · ${answered[2]}`:'DGC Router',title:`DGC Router (any Pip system)${answered?` · the last reply came from ${answered[2]} · ${answered[1]}`:''}`};
+ }
+ if(current)return{text:current,title:current};
+ return{text:defaultLabel(),title:defaultLabel()};
+}
 // The one plain line about usage, where a subscription is chosen: by name, or by following DGC's default.
 function usageLine(value){const engine=value.startsWith('subscription:')?value.slice(13):value==='default'&&S.defaultEngine?.available?S.defaultEngine.engine:'';const name=engine?modelLabel({mode:'subscription',engine}):'';return name?subscriptionUsage(name):'';}
 function modelPicker(id,label,value,personal=false) {
   const explicit=value.startsWith('model:')?value.slice(6):'',subs=subscriptionChoices(personal),usage=subs.length||value.startsWith('subscription:')?usageLine(value):'';
   const engine=value.startsWith('subscription:')?value.slice(13):'';
-  return `<label for="${id}">${esc(label)}</label><select id="${id}" data-draft="${id}"><option value="default"${value==='default'?' selected':''}>${esc(defaultLabel())}</option>${explicit&&!S.models.some(m=>m.id===explicit)?`<option value="${esc(value)}" selected>${esc(explicit)} · not in current list</option>`:''}${S.models.map(m=>`<option value="model:${esc(m.id)}"${explicit===m.id?' selected':''}>${esc(m.name)}</option>`).join('')}${subs.length||engine?`<optgroup label="Your subscriptions">${engine&&!subs.some(x=>x.engine===engine)?`<option value="${esc(value)}" selected>${esc(modelLabel({mode:'subscription',engine}))} · not signed in here</option>`:''}${subs.map(x=>`<option value="subscription:${esc(x.engine)}"${engine===x.engine?' selected':''}>${esc(x.name)}</option>`).join('')}</optgroup>`:''}</select>${usage?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?`<p class="muted">${esc(S.modelsError)} ${button('refresh-models','Try again',S.modelsLoading||!usable(),'link')}</p>`:`<p class="muted">Models from your DGC connection${subs.length?', and your own subscriptions':''}. ${button('refresh-models','Refresh list',S.modelsLoading||!usable(),'link')}</p>`}`;
+  const routed=routerChoices(routerOffer()),routedValue=value==='router'||value.startsWith('router:');
+  const routerGroup=routed.length||routedValue?`<optgroup label="DGC Router">${routedValue&&!routed.some(([v])=>v===value)?`<option value="${esc(value)}" selected>${esc(value==='router'?'DGC Router':value.slice(7).replace('/',' · '))} · not offered now</option>`:''}${routed.map(([v,l])=>`<option value="${esc(v)}"${value===v?' selected':''}>${esc(l)}</option>`).join('')}</optgroup>`:'';
+  return `<label for="${id}">${esc(label)}</label><select id="${id}" data-draft="${id}"><option value="default"${value==='default'?' selected':''}>${esc(defaultLabel())}</option>${routerGroup}${explicit&&!S.models.some(m=>m.id===explicit)?`<option value="${esc(value)}" selected>${esc(explicit)} · not in current list</option>`:''}${S.models.map(m=>`<option value="model:${esc(m.id)}"${explicit===m.id?' selected':''}>${esc(m.name)}</option>`).join('')}${subs.length||engine?`<optgroup label="Your subscriptions">${engine&&!subs.some(x=>x.engine===engine)?`<option value="${esc(value)}" selected>${esc(modelLabel({mode:'subscription',engine}))} · not signed in here</option>`:''}${subs.map(x=>`<option value="subscription:${esc(x.engine)}"${engine===x.engine?' selected':''}>${esc(x.name)}</option>`).join('')}</optgroup>`:''}</select>${usage?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?`<p class="muted">${esc(S.modelsError)} ${button('refresh-models','Try again',S.modelsLoading||!usable(),'link')}</p>`:`<p class="muted">Models from your DGC connection${subs.length?', and your own subscriptions':''}. ${button('refresh-models','Refresh list',S.modelsLoading||!usable(),'link')}</p>`}`;
 }
 async function loadModels(){
   if(!usable()||S.modelsLoading)return;const epoch=S.epoch;S.modelsLoading=true;S.modelsError='';render();
-  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.modelsError=result.error?errorText(result.error):'';}
+  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.modelsError=result.error?errorText(result.error):'';}
   catch(error){if(epoch===S.epoch)S.modelsError=errorText(error);}
   finally{if(epoch===S.epoch){S.modelsLoading=false;render();}}
 }
@@ -367,14 +418,14 @@ function chatControlsMarkup(canSend,busy){
  // Dictating: the bottom row is the voice bar (media/voicebar.js), which draws itself into whatever is rendered here.
  if(voiceMode?.active)return `<div class="composer-controls pip-voice">${talkBar.markup('conversation')}</div>`;
  if(S.mic!=='idle')return `<div class="composer-controls pip-voice">${voiceBar?voiceBar.markup():''}</div>`;
- const locked=archived()||!usable()||S.busy,current=S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'',selected=modelValue(S.pip.model_choice),shownModel=S.pip.model_choice?.mode==='subscription'?modelLabel(S.pip.model_choice):current||defaultModelName()||'Default',available=S.apiVersion>=24&&!!S.chatControls,o=available?chosenChatOptions():null;
+ const locked=archived()||!usable()||S.busy,current=S.pip.model_choice?.mode==='model'?S.pip.model_choice.model:'',selected=modelValue(S.pip.model_choice),chip=chipModel(S.pip.model_choice,current),shownModel=chip.text,available=S.apiVersion>=24&&!!S.chatControls,o=available?chosenChatOptions():null;
  const subs=subscriptionChoices(personalPip()),usage=subs.length?usageLine(selected):'';
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
  const effortLabel=o?EFFORT_NAME[o.thinking]||o.thinking:'';
  const effortStep=Math.max(0,chatThinkingLevels.indexOf(o?.thinking));
  const effort=o?`<div class="composer-effort-control" style="--effort:${effortStep*25}%;--face-offset:${18-effortStep*9}px"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
  const reviewed=!personalPip();
- const list=`<div class="composer-model-list"><label class="sr-only" for="chatModelSearch">Search models</label><input id="chatModelSearch" data-draft="chatModelSearch" value="${esc(draft.chatModelSearch)}" placeholder="Search models" autocomplete="off">${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models"><button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>${subs.length?`<p class="composer-scope" role="presentation">Your subscriptions</p>${subs.filter(x=>x.name.toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(x=>`<button type="button" role="option" data-chat-model="subscription:${esc(x.engine)}" aria-selected="${selected==='subscription:'+x.engine}"${locked?' disabled':''}>${esc(x.name)}<small>Your own ${esc(x.name)}</small></button>`).join('')}${usage?`<p class="muted" data-usage-line role="presentation">${esc(usage)}</p>`:''}<p class="composer-scope" role="presentation">Models from your DGC connection</p>`:''}${S.models.filter(m=>(m.name+' '+m.id).toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(m=>`<button type="button" role="option" data-chat-model="model:${esc(m.id)}" aria-selected="${selected==='model:'+m.id}"${locked?' disabled':''}>${esc(m.name)}${m.name!==m.id?`<small>${esc(m.id)}</small>`:''}</button>`).join('')}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?errorMarkup(S.modelsError):''}${current&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${button('chat-refresh-models','Refresh models',S.modelsLoading||locked)}</div>`;
+ const list=`<div class="composer-model-list"><label class="sr-only" for="chatModelSearch">Search models</label><input id="chatModelSearch" data-draft="chatModelSearch" value="${esc(draft.chatModelSearch)}" placeholder="Search models" autocomplete="off">${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models"><button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>${routerChoices(routerOffer()).filter(([,l])=>l.toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(([v,l],i)=>`${i===0?'<p class="composer-scope" role="presentation">DGC Router</p>':''}<button type="button" role="option" data-chat-model="${esc(v)}" aria-selected="${selected===v}"${locked?' disabled':''}>${esc(l)}${v==='router'?'<small>Any computer with the Pips job</small>':''}</button>`).join('')}${subs.length?`<p class="composer-scope" role="presentation">Your subscriptions</p>${subs.filter(x=>x.name.toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(x=>`<button type="button" role="option" data-chat-model="subscription:${esc(x.engine)}" aria-selected="${selected==='subscription:'+x.engine}"${locked?' disabled':''}>${esc(x.name)}<small>Your own ${esc(x.name)}</small></button>`).join('')}${usage?`<p class="muted" data-usage-line role="presentation">${esc(usage)}</p>`:''}<p class="composer-scope" role="presentation">Models from your DGC connection</p>`:''}${S.models.filter(m=>(m.name+' '+m.id).toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(m=>`<button type="button" role="option" data-chat-model="model:${esc(m.id)}" aria-selected="${selected==='model:'+m.id}"${locked?' disabled':''}>${esc(m.name)}${m.name!==m.id?`<small>${esc(m.id)}</small>`:''}</button>`).join('')}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?errorMarkup(S.modelsError):''}${current&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${button('chat-refresh-models','Refresh models',S.modelsLoading||locked)}</div>`;
  const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${S.modelListOpen?list:effort}</div>`:'';
  const sizes=o?[...new Set([2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,o.context_size])].filter(n=>n<=S.chatControls.context_max).sort((a,b)=>a-b):[];
  const ctx=o&&S.chatContext&&S.chatContext.pip_id===S.selected&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
@@ -385,7 +436,7 @@ function chatControlsMarkup(canSend,busy){
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>`:`<button type="submit" class="chat-send${canSend&&(draft.chatText.trim()||canAttachImages()&&(pendingImages().length||pendingFiles().length))?' ready':''}" aria-label="Send message" title="Send message"${canSend?'':' disabled'}>${composerIcon('up')}</button>`;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=personalPip()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
- return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(shownModel)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -404,9 +455,9 @@ function updateChatPreference(kind,value){
 }
 function reviewChatModel(value){
  if(!usable()||S.busy||archived()||!S.pip)return;
- let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()));}catch(error){setError(error);return;}
+ let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()),routerOffer());}catch(error){setError(error);return;}
  S.composerPanel='';draft.chatModelSearch='';const current=S.pip.model_choice||{mode:'default'};if(JSON.stringify(choice)===JSON.stringify(current)){render();return;}
- if(personalPip()){const name=choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
+ if(personalPip()){const name=choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
  const version=S.pip.current_version,pip=S.selected;
  void mutate({type:'propose_pip_update',pip_id:pip,expected_version:version,changes:{model_choice:choice},reason:'Model selected in this Pip conversation.'},result=>{const proposal=result.proposal;if(!record(proposal)||proposal.pip_id!==pip||proposal.expected_version!==version||!record(proposal.definition)||JSON.stringify(proposal.definition.model_choice)!==JSON.stringify(choice))throw Error('The saved model choice differs from the selection. Refresh before reviewing it.');S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(p=>p.id!==proposal.id),proposal]};S.notice='New model is waiting for you. Nothing changes until you accept it.';proposalReview(proposal.id);});
 }
@@ -430,9 +481,12 @@ function waitingMarkup(){
  return `<section class="waiting" aria-label="Changes waiting for you"><h3>${waiting.length===1?'A change is waiting for you':`${waiting.length} changes are waiting for you`}</h3>${waiting.map(p=>`<div class="waiting-row"><p>${esc(changeSummary(p))}</p><div class="actions"><button type="button" class="primary" data-proposal="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Review</button><button type="button" data-reject="${esc(p.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></div>`).join('')}</section>`;
 }
 function renderPipMarkdown(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text):`<div class="chat-text">${esc(text)}</div>`;}
+// The Pip's own reply in its chat: the one place on this page a ```dgc-ui card is live. Its routine posts, run
+// reports and fixes keep it as code (renderPipMarkdown).
+function renderPipReply(text){return window.DgcMarkdown?.render?window.DgcMarkdown.render(text,{cards:true}):`<div class="chat-text">${esc(text)}</div>`;}
 document.addEventListener('click',event=>{
   const button=event.target?.closest?.('button.genui-send');
-  if(!button||!button.closest('.pip-app-root'))return;
+  if(!button||!button.closest('.pip-app-root .pip-message.assistant:not(.routine-reply) .message-body'))return;
   const text=String(button.dataset.genuiSend||'').slice(0,500);
   if(!text||!S.selected)return;
   if(pendingImages().length||pendingFiles().length){setError('Remove attachments before sending a card choice.');return;}
@@ -478,7 +532,7 @@ function chatMarkup(){
   const latest=S.messages.at(-1),answerable=latest&&latest.role==='assistant'&&Array.isArray(latest.choices)?latest:null;
   const drawMessage=m=>{
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id),routine=m.role==='assistant'&&prompt?.intro===true?postRoutineTitle(prompt.text):null;
-    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:markdown,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,...(routine?routineReply(m,routine,type):{})});
+    return timed(m,!routine)+messageMarkup(m,{imageSrc:messageImageSrc,pluginLogo:pluginLogoSrc,split:simple,name:S.pip?.name||type?.name||'Pip',formatDate:date,renderMarkdown:routine?markdown:renderPipReply,canSend,prompt,activity:chatActivities.get(m.run_id),choices:m===answerable?m.choices:null,stats:m.role==='assistant'?replyStats.get(m.run_id):null,...(routine?routineReply(m,routine,type):{})});
   };
   // Its runs, each a message from the Pip where it falls among the messages, all-clear runs in a row as one (Pips API
   // 51, pipRunPosts.js).
@@ -490,7 +544,7 @@ function chatMarkup(){
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
   const quietChat=!S.messages.length&&!items.length&&!live;
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(S.stream.text)}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -593,7 +647,7 @@ function liveMarkup(markdown){
     const state=live.stopping||run?.status==='cancelling'?'stopping':run?.status==='queued'?'queued':'running';
     return livePostMarkup({runId:live.runId,name:S.pip.name,face:pipAvatar(S.pip,state==="queued"?"idle":"working",`post-${live.runId}`,type),routine:live.routine,
       doing:!S.runner?.online?['Waiting for Pips to start']:state==='queued'?['Waiting to start']:act?[act.label]:['Getting started'],since:Date.parse(run?.started_at||''),state,started:live.started,
-      body:text?`<div class="run-post-reply">${markdown(text)}</div>`:''});
+      body:text?`<div class="run-post-reply">${markdown(replyParts(text).join('\n\n'))}</div>`:''});
   }
   // Its state and start from the latest look (get_pip, list_pip_runs); from the full read only what never changes (when
   // it was due, what started it): read while it waited, that read has no start time.
@@ -815,6 +869,8 @@ function addImageFiles(files){
 function messageImageSrc(messageId,index){return messageImageCache.get(`${messageId}:${index}`)||'';}
 function pluginLogoSrc(plugin){return pluginLogoCache.get(plugin)||'';}
 function hydratePluginLogos(){
+ // A logo already drawn (with the card's markup) gets the backdrop its own colours want (media/pluginCalls.js).
+ for(const img of document.querySelectorAll('.app-link-mark.has-logo img'))if(!img.parentElement.classList.contains('logo-on-dark')&&!img.parentElement.classList.contains('logo-on-light'))globalThis.DgcPluginCalls?.backdrop(img,img.parentElement);
  const wanted=[...new Set([...document.querySelectorAll('[data-plugin-mark]')].map(n=>n.dataset.pluginMark))].filter(id=>!pluginLogoCache.has(id)&&!pluginLogoAsked.has(id)).slice(0,16);
  if(!wanted.length)return;
  for(const id of wanted)pluginLogoAsked.add(id);
@@ -826,7 +882,7 @@ function takePluginLogos(logos){
   if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)||typeof src!=='string'||src&&!/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))continue;
   pluginLogoCache.set(id,src);
   if(!src)continue;
-  for(const mark of document.querySelectorAll(`[data-plugin-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);}
+  for(const mark of document.querySelectorAll(`[data-plugin-mark="${id}"]`)){const img=document.createElement('img');img.alt='';img.src=src;mark.replaceChildren(img);if(mark.classList.contains('app-link-mark')){mark.classList.add('has-logo');globalThis.DgcPluginCalls?.backdrop(img,mark);}}
  }
 }
 // A thumbnail of a big photo is drawn from the original once and kept small (a 12 MP photo is 48 MB once
@@ -840,6 +896,21 @@ function thumbnail(uri){
  });
 }
 // Thumbnails of images already sent load one at a time, when their message is on screen.
+// A reply's videos (API 71): each placeholder gets its job's figure (media/videoPlayer.js), kept across redraws so a
+// playing video isn't reloaded; it reads the job's state from the host until the video is made.
+const messageVideos=new Map();
+function hydrateMessageVideos(){
+ if(!window.DgcVideo)return;
+ if(!window.DgcVideo.hasHost())window.DgcVideo.host(m=>vscode.postMessage(m));
+ for(const node of root.querySelectorAll?.('[data-message-video]')||[]){
+  const id=node.dataset.messageVideo;if(!/^vid_[0-9a-f]{12}$/.test(id||'')||node.firstElementChild)continue;
+  const job=S.messages.flatMap(m=>Array.isArray(m.videos)?m.videos:[]).find(v=>v&&v.id===id)||{id,state:'queued'};
+  let fig=messageVideos.get(id);
+  if(!fig||fig._disposed){fig=window.DgcVideo.figure(job,{poll:true});messageVideos.set(id,fig);}
+  else window.DgcVideo.update(job);
+  node.appendChild(fig);
+ }
+}
 function hydrateMessageImages(){
  for(const node of document.querySelectorAll('img[data-message-image]')){
   const key=node.dataset.messageImage;if(messageImageCache.has(key)){if(!node.getAttribute('src'))node.src=messageImageCache.get(key);continue;}
@@ -856,6 +927,13 @@ function openMessageImage(key){
  const [messageId,index]=String(key||'').split(':');
  if(!S.selected||!messageId||!/^\d+$/.test(index||''))return;
  vscode.postMessage({type:'pipsOpenPhoto',pip_id:S.selected,message_id:messageId,index:Number(index)});
+}
+// A plugin's card asked to send a message as yours (MCP Apps ui/message, labelled with its plugin): sent as the box
+// sends one, when the box is empty and the Pip isn't answering.
+function sendCardMessage(text){
+  if(draft.chatText.trim()){S.notice='Send or clear what you\u2019re typing first, then try the card again.';render();return false;}
+  if(S.chatActiveRun||S.busy||!S.pip){S.notice=`${S.pip?.name||'The Pip'} is still answering. Try the card again when it is done.`;render();return false;}
+  draft.chatText=String(text||'').slice(0,4000);void sendChat();return true;
 }
 async function sendChat(){
   // Enter while the Pip is answering said nothing before; the draft stays in the box either way.
@@ -1356,7 +1434,7 @@ function lifecycleMarkup(){
 function reviewPermanentDelete(){
  if(!usable()||!archived()||S.apiVersion<68||!canLifecycle())return;
  draft.deletePipName='';
- openReview({title:`Delete ${S.pip.name} permanently?`,description:'This erases its chat, runs, computer files, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone.',
+ openReview({title:`Delete ${S.pip.name} permanently?`,description:'This erases its chat, runs, computer files, what it kept in your memory, saved sign-ins used only by this Pip, Pip-created artifacts and audit receipts. It also removes references to this Pip from other Pips. This cannot be undone.',
   body:'<p class="muted">Copies you exported or changes made in project files are outside this Pip’s private data.</p>',
   confirm:'Delete permanently',danger:true,permanentPip:true,
   request:{type:'delete_archived_pip',pip_id:S.selected,expected_version:S.pip.current_version,expected_lifecycle_revision:S.pip.lifecycle_revision}});
@@ -1370,8 +1448,18 @@ async function confirmPermanentDelete(review){
   const result=await broker.request({...review.request,expected_name:draft.deletePipName});
   if(token!==scope())return;
   if(result?.deleted!==true||result.pip_id!==pip.id)throw Error('Deletion was not confirmed by DGC. Refresh before trying again.');
-  S.jobs=S.jobs.filter(p=>p.id!==pip.id);draft.deletePipName='';
-  clearSelection();S.selected='';S.overview=true;S.tab='';S.notice=`${pip.name} and its private data were deleted permanently.`;rememberView();render();
+  // Gone from the list and from its count: the home said "Showing 1 of 2" with one Pip left.
+  const listed=S.jobs.some(p=>p.id===pip.id)||jobsExtra.some(p=>p.id===pip.id);
+  S.jobs=S.jobs.filter(p=>p.id!==pip.id);jobsExtra=jobsExtra.filter(p=>p.id!==pip.id);draft.deletePipName='';
+  if(listed&&Number.isSafeInteger(S.jobsTotal))S.jobsTotal=Math.max(S.jobs.length,S.jobsTotal-1);
+  // A saved Output DGC couldn't read is left in place, never deleted on a guess: say which, and where. A notice, not an
+  // error (nothing failed), and one that stays on screen.
+  const left=Array.isArray(result.outputs_left)?result.outputs_left.filter(p=>typeof p==='string').slice(0,20):[],one=left.length===1;
+  clearSelection();S.selected='';S.overview=true;S.tab='';
+  S.notice=left.length?`${pip.name} was deleted permanently. DGC couldn’t read ${one?'a saved Output':`${left.length} saved Outputs`}, so it left ${one?'it':'them'} in place: ${left.join(', ')}. Delete ${one?'it':'them'} if ${one?'it was':'they were'} this Pip’s.`
+   :`${pip.name} and its private data were deleted permanently.`;
+  noticeStays=left.length?S.notice:'';
+  rememberView();render();
  }catch(error){if(token===scope()&&S.review){review.error=errorText(error);renderReview();}}
  finally{if(token===scope()){S.busy=false;render();if(S.review)renderReview();}}
 }
@@ -2407,8 +2495,13 @@ function projectFirstMarkup(){
 }
 function simpleHomeList(all,live){
  const order=[...all.filter(p=>p.pip_type==='core'),...all.filter(p=>p.pip_type!=='core')];
- const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'?null:unreadByPip.get(p.id);
-  return `<button type="button" class="pip-row${unread?' pip-row-unread':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+esc(unread.latest):''}`:unread?esc(unread.latest):esc(pose.label)}</small></span>${unread?`<span class="pip-row-unread-count" aria-label="${unread.count} unread">${unread.count}</span>`:''}</button>`;};
+ const row=p=>{const type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,[],usable(),S.runner),waiting=pendingReviews(p)+(S.attention?.byPip[p.id]||0),unread=p.status==='archived'||readingPips.has(p.id)?null:unreadByPip.get(p.id),readable=!!unread&&canMarkRead(unread);
+  const button=`<button type="button" class="pip-row${unread?' pip-row-unread':''}" data-job="${esc(p.id)}" data-state="${esc(pose.state)}" data-waiting="${waiting}">${pipAvatar(p,pose.state,`row-${p.id}`,type)}<span class="pip-row-copy"><strong>${esc(p.name)}${p.pip_type==='core'?'<span class="primary-badge" title="Your Primary Pip. It uses Core, the character of DGC’s main chat." aria-label="Primary Pip">★</span>':''}</strong><small>${S.pipSearch&&record(p.match)&&['chat','instructions'].includes(p.match.in)&&typeof p.match.text==='string'?`<span class="pip-match">${p.match.in==='chat'?'In its chat':'In its instructions'}: ${esc(p.match.text.slice(0,200))}</span>`:p.status==='archived'?'Archived':waiting?`${waiting} waiting for you${unread?' · '+esc(unread.latest):''}`:unread?esc(unread.latest):esc(pose.label)}</small></span>${readable?`<span class="pip-row-unread-count pip-row-read-room" aria-hidden="true"><span>${unread.count}</span><span>Read</span></span>`:unread?`<span class="pip-row-unread-count" aria-label="${unread.count} unread">${unread.count}</span>`:''}</button>`;
+  // Its unread count is its own button over the row's end (never inside the row): "Read" on hover or focus, and a click
+  // marks its whole chat read without opening it.
+  if(!readable)return button;
+  const label=`Mark ${p.name}'s ${unread.count} unread message${unread.count===1?'':'s'} as read`,dot=['working','waiting_approval'].includes(pose.state);
+  return `<div class="pip-row-item${dot?' pip-row-dot':''}">${button}<button type="button" class="pip-row-unread-count pip-row-read" id="pip-read-${esc(p.id)}" data-pip-read="${esc(p.id)}" aria-label="${esc(label)}" title="Mark as read, without opening its chat"><span class="pip-read-count">${unread.count}</span><span class="pip-read-word">Read</span></button></div>`;};
  const project=projectHome();
  return `<section class="simple-home" aria-label="Your Pips"><div class="simple-home-head"><h2>Your Pips</h2><span class="simple-home-actions">${project?projectHomeMenu():S.apiVersion>=43&&!remoteHost?`<button type="button" id="pips-settings-open" class="topbar-icon" aria-label="Pips settings" title="Pips settings: computers, apps and plugins"${!usable()?' disabled':''}>${simpleIcon('gear')}</button>`:''}${button('simple-new','New Pip',S.busy||!usable(),'primary pill')}</span></div>${pipsPaged()?`<div class="pip-search"><label class="sr-only" for="pip-search">Search your Pips</label><input id="pip-search" type="search" placeholder="Search your Pips" autocomplete="off" value="${esc(draft.pipSearch||'')}" maxlength="120">${S.jobsTotal!==null&&(S.jobsTotal>S.jobs.length||S.pipSearch)?`<small class="pip-search-count">${S.pipSearch?`${S.jobsTotal.toLocaleString('en-US')} found`:`Showing ${S.jobs.length.toLocaleString('en-US')} of ${S.jobsTotal.toLocaleString('en-US')}`}</small>`:''}</div>`:''}${project?(S.jobs.length||S.pipSearch?'':projectFirstMarkup()):live.some(p=>p.pip_type==='core')||S.pipSearch?'':`<div class="core-offer">${avatar('idle',characterType('core'),'core-offer')}<p><strong>Meet Core</strong><span>Your Primary Pip, for everyday tasks.</span></p>${button('create-core','Create',S.busy||!usable(),'primary pill')}</div>`}<div class="pip-rows">${order.map(row).join('')}</div>${S.pipSearch&&!S.jobs.length?`<p class="muted">No Pip matches “${esc(S.pipSearch)}” in its name, instructions or chat.</p>`:''}${pipsPaged()&&S.jobsNext!==null?button('pips-more',jobsMoreBusy?'Loading…':'Load more',jobsMoreBusy||!usable(),'link'):''}${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived':'Show archived',false,'link'):''}</section>`;
 }
@@ -2481,7 +2574,7 @@ function createProjectPip(review){
  const type=S.types.find(t=>t.id===S.createType);
  if(!type?.available||type.id==='core'){review.error='Pick a character for the job.';renderReview();return;}
  if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){review.error='Give it a name, say what it does, and choose a branch or commit.';renderReview();return;}
- let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false));}catch(error){review.error=errorText(error);renderReview();return;}
+ let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false),routerOffer());}catch(error){review.error=errorText(error);renderReview();return;}
  const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:type.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
  if(executionPip(type)){openReview({...executionCreateReview(type,request,choice),secondary:{id:'new-pip-back',label:'Back'}});return;}
  void mutate(request,finishCreate);
@@ -2619,11 +2712,13 @@ function render() {
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
+  globalThis.DgcMcpApps?.park();          // a plugin card's live frame waits out the redraw (media/mcpApps.js)
   if(chatView&&oldLog&&oldPipId===S.selected){
     const next=owner.createElement('template');next.innerHTML=markup;
     patchChildren($('app'),next.content);
   }else $('app').innerHTML=markup;
   // The keyed chat patch above retains message nodes and their selection.
+  globalThis.DgcMcpApps?.fill($('app'),{sendMessage:sendCardMessage});
   shell.dataset.motionPip=S.selected||'';
   for(const row of document.querySelectorAll('[data-job][data-state]')){
     const previous=oldJobs.get(row.dataset.job);
@@ -2637,7 +2732,7 @@ function render() {
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
   for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
-  observeAvatars();fitChatInput();hydrateMessageImages();hydratePluginLogos();
+  observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
   const newLog=document.querySelector('.conversation-log');if(newLog){const first=newLog.querySelector('[data-message]')?.dataset.message;newLog.scrollTop=atEnd?newLog.scrollHeight:first!==oldFirst?oldScroll+newLog.scrollHeight-oldHeight:oldScroll;}
@@ -2770,10 +2865,18 @@ function pluginCards(){
  if(remoteHost||S.apiVersion<44||!personalPip())return '';
  const pipName=S.pip?.name||'This Pip',off=archived()||S.busy;
  const actions=(S.connectorDrafts||[]).filter(d=>d.status==='pending'&&!d.expired).map(pluginDraft).filter(Boolean)
-  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft)}));
- actions.push(ownAppDecidedCards());
+  .map(({draft,plugin})=>pluginActionMarkup(draft,plugin,{esc,busy:pluginBusy===draft.id||off,pipName,edit:cardEdit(draft),logo:pluginLogoSrc}));
+ actions.push(ownAppDecidedCards(),pluginNotRun());
  const cards=shownPluginCards(S.plugins).map(c=>pluginCardMarkup(c,{esc,busy:pluginBusy===c.id||off,pipName}));
  return actions.join('')+cards.join('')+(S.pluginsError?`<p class="app-link-note" role="alert">${esc(S.pluginsError)}</p>`:'');
+}
+// Don't on a plugin's Allow card says so where the card was, under the reply that offered it, while that reply is the
+// latest (and after a reload): "Not run." showed above the chat, out of sight, and the reply still said its card was
+// below (release check, 2026-11-03).
+function pluginNotRun(){
+ const last=(S.messages||[]).filter(m=>m.role==='assistant').at(-1);
+ return last?(S.connectorDrafts||[]).filter(d=>d.status==='dismissed'&&d.source_run_id===last.run_id)
+  .map(d=>`<p class="app-link-note plugin-not-run" role="status" data-plugin-not-run="${esc(d.id)}">Not run: you chose Don’t${d.subject?` for ${esc(d.subject)}`:''}.</p>`).join(''):'';
 }
 // Borrowing your own signed-in Chrome (pip_borrow, API 59): the card it asks with, Allow once or Not now; while lent,
 // "Using your Chrome · site" with Stop; then "Gave your Chrome back". Looked at again every 1.5 s while one is lent.
@@ -3590,7 +3693,7 @@ document.addEventListener('submit',event=>{
     void applyOwnChange({adaptation_policy:policy},d=>JSON.stringify(adaptationPolicy(d.adaptation_policy))===JSON.stringify(policy),'Saved. The Pip uses this from its next run.').then(ok=>{if(ok)S.adaptationDirty=false;});return;
   }
   if(id==='model-form'){
-    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(personalPip()));}catch(error){setError(error);return;}
+    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(personalPip()),routerOffer());}catch(error){setError(error);return;}
     void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`Model saved: ${modelLabel(choice)}. Its next run uses it.${choice.mode==='subscription'?' '+subscriptionUsage(modelLabel(choice)):''}`).then(ok=>{if(ok)S.modelDirty=false;});return;
   }
   if(id==='create-form'){
@@ -3598,7 +3701,7 @@ document.addEventListener('submit',event=>{
     const selectedType=S.types.find(t=>t.id===S.createType);
     if(!S.create||S.createStep!=='configure'||!selectedType?.available){setError('Choose an available Pip type first.');return;}
     if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){setError('Give it a name, say what it does, and choose a branch or commit.');return;}
-    let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(S.workspace?.kind==='personal'));}catch(error){setError(error);return;}
+    let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(S.workspace?.kind==='personal'),routerOffer());}catch(error){setError(error);return;}
     const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:selectedType.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
     if(executionPip(selectedType)&&S.workspace?.kind!=='personal')openReview(executionCreateReview(selectedType,request,choice));
     else void mutate(request,finishCreate);
@@ -3745,6 +3848,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.attentionMore!==undefined){attentionExpanded=target.dataset.attentionMore==='1';render();return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
+  if(target.dataset.pipRead){markPipRead(target.dataset.pipRead);return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}
   if(target.dataset.postFix){askDgcAbout(target.dataset.postFix);return;}
@@ -3942,6 +4046,7 @@ document.addEventListener('click',event=>{
     case 'cancel-run':openReview({title:personalPip()?'Stop this?':'Cancel this run?',description:personalPip()?`${S.pip?.name||'It'} stops what it’s doing. It can take a moment.`:'It stops what it’s doing. It can take a moment.',body:'',confirm:personalPip()?'Stop':'Cancel run',danger:true,request:{type:'cancel_pip_run',run_id:S.runId}});break;
     case 'stop-all':openReview({title:'Stop all Pips?',description:'Every Pip on this computer pauses and stops what it’s doing. They stay stopped after DGC restarts.',body:'<p class="muted">To undo it: Resume Pips, then resume each Pip.</p>',confirm:'Stop all Pips',danger:true,request:{type:'stop_pips'}});break;
     case 'start-runner':if(remoteHost)break;void mutate({type:'pips_runtime',action:'start'});break;
+    case 'keep-running-refresh':if(remoteHost||!keepState.value?.outdated)break;void setKeepRunning(true,true);break;
     case 'resume-runner':if(remoteHost)break;openReview({title:'Resume Pips?',description:'Pips start again. Each Pip stays paused until you resume it.',confirm:'Resume Pips',request:{type:'pips_runtime',action:'resume'}});break;
     case 'disable':if(remoteHost)break;openReview({title:'Turn off Pips?',description:'Every Pip stops what it’s doing and pauses, then Pips turn off. Turning them on later keeps them stopped until you resume.',confirm:'Turn off',danger:true,request:{type:'pips_enable',enabled:false}});break;
     case 'check-execution':void loadExecution();break;
@@ -4121,6 +4226,7 @@ document.addEventListener('keydown',event=>{
 });
 const stopMessages=options.onMessage(message=>{
   if(disposed||!record(message))return;
+  if(window.DgcVideo?.message(message))return;     // a reply video's bytes or state (src/videoHost.ts)
   if((message.type==='voiceReady'||message.type==='mic'||message.type==='micLevels')&&message.from==='pips'&&voiceMode?.receive(message))return;
   if(message.type==='micLevels'&&message.from==='pips'){voiceBar?.push(message.levels);return;}
   if((message.type==='speak'||message.type==='speakAudio')&&message.from==='pips'){reader?.receive(message);return;}
@@ -4131,13 +4237,18 @@ const stopMessages=options.onMessage(message=>{
     else if(was!==S.mic||message.error)render();
     return;
   }
-  if(message.type==='pipsReply'){broker.receive(message);return;}
+  if(message.type==='pipsReply'){broker.receive(message);if(message.ok===true)window.setTimeout(clearBusy,0);return;}
+  if(globalThis.DgcPictureFold?.message(message))return;     // which pictures stay folded, and the setting
   if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
+  // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
+  // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
+  if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
+  if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;
     S.generation=message.generation ?? null;
-    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
     render();if(usable())void initialize();
   }
 });
@@ -4155,6 +4266,9 @@ return {async navigate(value){if(value?.overview===true){if(!S.workspace||!usabl
 if(typeof window!=='undefined')window.DgcPips={mount:mountPips,mountSetupCards,mountDigestBar,mountHomePips};
 if(typeof window!=='undefined'&&typeof acquireVsCodeApi==='function'&&!window.document.getElementById('pips-host')){
   const api=acquireVsCodeApi();
+  // Plugins' cards in a Pip's replies (MCP Apps): what one asks goes to the extension host, its answers come back here.
+  window.DgcMcpApps?.setup({post:message=>api.postMessage(message),surface:'pip'});
+  window.addEventListener('message',event=>{const m=event.data;if(window.DgcMcpApps?.host(m))return;if(m?.type==='event'&&/^mcp_app_/.test(String(m.event?.type||'')))window.DgcMcpApps?.event(m.event);});
   const app=mountPips({root:window.document,postMessage:message=>api.postMessage(message),getState:()=>api.getState?.(),setState:value=>api.setState?.(value),onMessage:listener=>{const handle=event=>listener(event.data);window.addEventListener('message',handle);return()=>window.removeEventListener('message',handle);}});
   window.addEventListener('message',event=>{if(event.data?.type==='pipsNavigate')void app.navigate(event.data.navigation);});
 }

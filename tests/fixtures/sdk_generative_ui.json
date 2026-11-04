@@ -1,0 +1,52 @@
+[
+ {
+  "why": "a card",
+  "reply": "Here.\n```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"steps\", \"items\": [{\"label\": \"a\", \"state\": \"done\"}]}]}\n```",
+  "cards": 1
+ },
+ {
+  "why": "a step with no state is waiting",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"steps\", \"items\": [{\"label\": \"a\"}]}]}\n```",
+  "cards": 1
+ },
+ {
+  "why": "a step whose state is null",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"steps\", \"items\": [{\"label\": \"a\", \"state\": null}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "a step whose state is a list",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"steps\", \"items\": [{\"label\": \"a\", \"state\": [\"done\"]}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "a choice ending in /goal and a newline",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"choices\", \"items\": [{\"label\": \"a\", \"reply\": \"Ship it /goal\\n\"}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "a choice that starts a command",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"choices\", \"items\": [{\"label\": \"a\", \"reply\": \" /init\"}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "NaN is no JSON",
+  "reply": "```dgc-ui\n{\"version\":\"1\",\"title\":\"T\",\"x\":NaN,\"blocks\":[{\"type\":\"metrics\",\"items\":[{\"label\":\"a\",\"value\":\"1\"}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "40 emoji are 40 characters",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"metrics\", \"items\": [{\"label\": \"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\", \"value\": \"1\"}]}]}\n```",
+  "cards": 1
+ },
+ {
+  "why": "61 emoji are too many",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"metrics\", \"items\": [{\"label\": \"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\", \"value\": \"1\"}]}]}\n```",
+  "cards": 0
+ },
+ {
+  "why": "a table cell of 150 emoji",
+  "reply": "```dgc-ui\n{\"version\": \"1\", \"title\": \"T\", \"blocks\": [{\"type\": \"table\", \"columns\": [\"c\"], \"rows\": [[\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\"]]}]}\n```",
+  "cards": 1
+ }
+]

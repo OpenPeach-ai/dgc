@@ -1,7 +1,8 @@
 # Pip characters
 
 `plush.js` draws the eight Pips (Core, Scout, Lens, Patch, Rook, Pulse, Lock and Quill,
-indices 0–7) from one transparent atlas, `plush-bodies.webp` (1660×948). Eyes are SVG
+indices 0–7) from one transparent atlas, `plush-bodies.webp` (3320×1896, twice the 1660×948 layout the renderer
+draws in, so the felt stays sharp on high-density screens). Eyes are SVG
 paths drawn over the atlas; Lens's eyes are clipped inside its glasses. There is no
 WebGL, canvas, remote asset or per-character timer.
 

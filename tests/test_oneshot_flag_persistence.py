@@ -44,8 +44,10 @@ class OneShotFlagPersistenceTests(unittest.TestCase):
         if seed_config:
             (Path(home) / ".dgc" / "config.json").write_text(json.dumps(BASE), encoding="utf-8")
         env = {**os.environ, "HOME": home, "USERPROFILE": home, "PYTHONPATH": str(PROJECT)}
+        # Never inherit the suite runner's stdin. Under WSL that descriptor can be an open
+        # pipe, so the CLI waits for more piped prompt text instead of exercising the flags.
         subprocess.run([sys.executable, "-m", "dgc", *flags], cwd=work, env=env,
-                       capture_output=True, text=True, timeout=120)
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
         return json.loads((Path(home) / ".dgc" / "config.json").read_text(encoding="utf-8"))
 
     def test_mode_from_a_one_shot_run_is_not_saved(self):

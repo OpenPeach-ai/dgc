@@ -48,6 +48,9 @@ from .workspace import (
     stat_entry,
 )
 
+# `task`'s `system` argument (DGC Router). Agent._tool_schemas names this user's systems in it while the Router is on.
+TASK_SYSTEM_DESCRIPTION = ("DGC Router: which of the user's systems runs the helper (an id from router_status). Omit "
+                           "to let DGC pick a free worker; ignored while the Router is off")
 MAX_READ_LINES = 2000
 MAX_LINE_LEN = 2000
 MAX_BASH_OUT = 30000
@@ -371,7 +374,7 @@ TOOL_SCHEMAS = [
          "request_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}},
         ["pip_id", "expected_version", "changes", "reason", "request_key"]),
     _fn("pips_settings", "Change the Pips default model: the model every Pip set to Default uses, on DGC's own "
-        "connection (the editor's Settings > Agents > Pips). default_model: an id from pips_context models, or \"\" so "
+        "connection (the editor's Settings > Models > Pips). default_model: an id from pips_context models, or \"\" so "
         "Pips follow DGC's own model again. A Pip with a model of its own keeps it; to change one Pip, use "
         "pips_propose. Read pips_context models first. Calling this asks the user like any tool call (auto mode allows "
         "it); once allowed it is saved, and Pips use it from their next run. It starts no work and changes no "
@@ -652,8 +655,26 @@ TOOL_SCHEMAS = [
                                  "prompt": {"type": "string",
                                             "description": "Its self-contained brief, as for one helper"},
                                  "agent": {"type": "string",
-                                           "description": "Which agent, as agent above; omit for worker"}},
+                                           "description": "Which agent, as agent above; omit for worker"},
+                                 "system": {"type": "string", "description": "DGC Router: as system above"},
+                                 "model": {"type": "string", "description": "DGC Router: as model above"},
+                                 "size": {"type": "string", "enum": ["small", "medium", "large"],
+                                          "description": "DGC Router: as size above"},
+                                 "effort": {"type": "string", "enum": ["off", "low", "medium", "high"],
+                                            "description": "How hard this helper thinks, as effort above"}},
                              "required": ["description", "prompt"]}},
+         "system": {"type": "string", "description": TASK_SYSTEM_DESCRIPTION},
+         "model": {"type": "string", "description": "DGC Router: the model to run the helper on (one a system "
+                   "lists in router_status). Omit to let DGC pick"},
+         "size": {"type": "string", "enum": ["small", "medium", "large"],
+                  "description": "DGC Router: the size of model the job needs when you name no model: small for "
+                                 "search, reading and mechanical edits; large for design, debugging and anything "
+                                 "risky"},
+         "effort": {"type": "string", "enum": ["off", "low", "medium", "high"],
+                    "description": "How hard the helper thinks: low for a quick lookup or a mechanical edit, high "
+                                   "for a hard review or debugging. Used only when the user hasn't set a helper's "
+                                   "thinking (Settings, the agent file, a DGC Router model's own choice). Omit for the "
+                                   "main chat's level"},
          "background": {"type": "boolean", "description": "True only when you will not use the "
                         "result this turn -- a parallel track. False when your next step needs the "
                         "answer. With tasks it applies to every helper. In an interactive Ultra batch "
@@ -4511,8 +4532,10 @@ def code_intel(args: dict, ctx) -> str:
 _TAG = re.compile(r"<[^>]+>")
 
 
-def _public_destination(url: str) -> tuple[str, str]:
-    """Validate a URL and return one of the public addresses just checked."""
+def _public_destination(url: str) -> tuple[str, tuple[str, ...]]:
+    """Validate a URL and return it with every public address just checked, in the order to try them: the
+    resolver's first family first, then IPv4 and IPv6 taking turns (so one family that can't be reached, such as
+    IPv6 on a computer with no IPv6 route, never decides the fetch). Any address that isn't public refuses all."""
     try:
         parsed = urlsplit(str(url).strip())
         port = parsed.port
@@ -4530,7 +4553,7 @@ def _public_destination(url: str) -> tuple[str, str]:
                                    type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise ValueError(f"could not resolve URL host: {e}") from e
-    addresses = {info[4][0].split("%", 1)[0] for info in infos if info[4]}
+    addresses = list(dict.fromkeys(info[4][0].split("%", 1)[0] for info in infos if info[4]))
     if not addresses:
         raise ValueError("URL host resolved to no addresses")
     for raw in addresses:
@@ -4540,7 +4563,10 @@ def _public_destination(url: str) -> tuple[str, str]:
             raise ValueError("URL host resolved to an invalid address") from e
         if not addr.is_global:
             raise ValueError("local, private, link-local, and reserved network URLs are blocked")
-    return parsed.geturl(), next(iter(sorted(addresses)))
+    first = [a for a in addresses if (":" in a) == (":" in addresses[0])]
+    other = [a for a in addresses if (":" in a) != (":" in addresses[0])]
+    turns = [a for pair in _itertools.zip_longest(first, other) for a in pair if a is not None]
+    return parsed.geturl(), tuple(turns)
 
 
 def _validate_public_url(url: str) -> str:
@@ -4580,19 +4606,26 @@ def _fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, https_only: boo
     current = str(url).strip()
     try:
         for redirect_n in range(MAX_FETCH_REDIRECTS + 1):
-            current, address = _public_destination(current)
+            current, addresses = _public_destination(current)
             if https_only and urlsplit(current).scheme.lower() != "https":
                 raise ValueError("the page redirected away from https")
             parsed = urlsplit(current)
-            literal = f"[{address}]" if ":" in address else address
-            pinned_url = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
             previous = session.adapters.get(f"{parsed.scheme.lower()}://")
             if previous is not None:
                 previous.close()
             session.mount(f"{parsed.scheme.lower()}://", _PublicAddressAdapter(parsed.hostname))
-            response = session.get(pinned_url, timeout=(10, 20),
-                                   headers={"User-Agent": "dgc/0.20", "Host": parsed.netloc},
-                                   allow_redirects=False, stream=True)
+            # Only the addresses just checked, each in turn: one that can't be reached moves on to the next.
+            for n, address in enumerate(addresses):
+                literal = f"[{address}]" if ":" in address else address
+                pinned_url = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
+                try:
+                    response = session.get(pinned_url, timeout=(10, 20),
+                                           headers={"User-Agent": "dgc/0.20", "Host": parsed.netloc},
+                                           allow_redirects=False, stream=True)
+                    break
+                except requests.ConnectionError:
+                    if n == len(addresses) - 1:
+                        raise
             try:
                 if response.is_redirect or response.is_permanent_redirect:
                     if redirect_n >= MAX_FETCH_REDIRECTS:

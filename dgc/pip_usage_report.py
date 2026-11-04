@@ -36,19 +36,29 @@ def _split(row, imported) -> tuple[int, int]:
     return (0, 0)
 
 
-def report(range_name: str = "7d", *, now: float | None = None) -> dict:
+def report(range_name: str = "7d", *, now: float | None = None, system: str | None = None, systems=None) -> dict:
+    """``system`` (an id or a name, Token usage by system) keeps what the Pips ran on that system: the whole
+    range's tokens there, each Pip's tokens and runs there, and its models there. A run from before runs recorded
+    their models can't be placed, so it counts only in the unfiltered view."""
     from . import usage_ledger as ledger
     from .pip_usage import run_totals
+    from .usage_systems import Classifier, matches, router_systems
     from .workspace_registry import RegistryError, WorkspaceRegistry, in_use
     range_name = ledger.normalize_range(range_name)
     stamp = time.time() if now is None else float(now)
-    whole = ledger.report(range_name, now=stamp)       # also imports finished Pip runs' usage first
+    systems = router_systems() if systems is None else systems
+    wanted = str(system or "").strip()
+    whole = ledger.report(range_name, now=stamp, systems=systems,     # also imports finished Pip runs' usage first
+                          system=wanted or None)
+    # Which models the Pips used, from their own requests in the ledger (each Pip request is
+    # recorded with its model, source "pip"): complete for the range, older runs included.
+    # With a system, its rows are kept before the top 100 are taken.
+    model_rows = ledger.by_model_for_source("pip", range_name, now=stamp, systems=systems, system=wanted or None)
     out = {"range": range_name, "generated_at": whole["generated_at"], "timezone": whole["timezone"],
            "all_tokens": int(whole["totals"]["input_tokens"]) + int(whole["totals"]["output_tokens"]),
            "totals": {"input_tokens": 0, "output_tokens": 0, "runs": 0}, "by_pip": [], "omitted": 0,
-           # Which models the Pips used, from their own requests in the ledger (each Pip request is
-           # recorded with its model, source "pip"): complete for the range, older runs included.
-           "by_model": ledger.by_model_for_source("pip", range_name, now=stamp)}
+           "by_model": model_rows}
+    classifier = Classifier(systems)
     if whole.get("error"):
         out["error"] = whole["error"]
     if not in_use():
@@ -65,16 +75,25 @@ def report(range_name: str = "7d", *, now: float | None = None) -> dict:
                 "AND status IN ('succeeded','failed','cancelled')" + window, args).fetchall()
             imported = run_totals([r[0] for r in rows], home=Path(registry.directory).parent)
             from .pip_usage import run_models
-            by_run = run_models([r[0] for r in rows], home=Path(registry.directory).parent)
+            by_run = run_models([r[0] for r in rows], home=Path(registry.directory).parent, with_system=True)
             per: dict[str, list[int]] = {}
             models: dict[str, dict[tuple, list[int]]] = {}
             for row in rows:
-                inp, outp = _split(row, imported)
+                run_rows = by_run.get(row[0], ())
+                if wanted:
+                    # One system: the run's requests there, from its own models (a run that used none there is
+                    # not this system's).
+                    run_rows = [r for r in run_rows if matches(classifier.classify(r[0], r[1], r[2], r[6]), wanted)]
+                    if not run_rows:
+                        continue
+                    inp, outp = sum(r[3] for r in run_rows), sum(r[4] for r in run_rows)
+                else:
+                    inp, outp = _split(row, imported)
                 entry = per.setdefault(row[1], [0, 0, 0])
                 entry[0] += inp
                 entry[1] += outp
                 entry[2] += 1
-                for model, provider, host, m_in, m_out, requests in by_run.get(row[0], ()):
+                for model, provider, host, m_in, m_out, requests, _system in run_rows:
                     used = models.setdefault(row[1], {}).setdefault((model, provider, host), [0, 0, 0])
                     used[0] += m_in
                     used[1] += m_out

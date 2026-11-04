@@ -1,5 +1,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
+  // Plugins' cards (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
+  window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "work" });
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const composerPlaceholder = input.dataset.placeholder;
@@ -921,6 +923,12 @@
     if (!host || !window.DgcPips?.mount) return;
     if (!pipsApp) {
       const root = host.attachShadow({mode:"open"});
+      if (host.dataset.cardsStyleUri) {
+        // A plugin's card under a Pip's reply (media/mcpApps.js) is drawn inside this root: its look comes in with it.
+        const cardsStyle = document.createElement("link");
+        cardsStyle.rel = "stylesheet"; cardsStyle.href = host.dataset.cardsStyleUri;
+        root.append(cardsStyle);
+      }
       pipsApp = window.DgcPips.mount({
         root, stylesheetUri:host.dataset.styleUri,
         postMessage:message => vscode.postMessage({...message,documentId:document.documentElement.dataset.pipsDocumentId}),
@@ -1391,6 +1399,7 @@
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
   const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
   const pipFixSteps = new Map();         // agent id -> what the fixer is doing now ("Running npm test")
+  const pipFixPrompts = new Map();       // agent id -> the brief its fixer was given (the fix record's prompt)
   const PIP_FIX_ACTIVE = ["queued", "preparing", "running", "applying"];
   // ready.capabilities.pip_runs_running: which of this chat's Pips are running now, as the backend says (the chip).
   let pipRunsLive = false;
@@ -1516,7 +1525,7 @@
       <p class="auto-mode-risk"><strong>Mistakes or malicious instructions can cause data loss or expose private information.</strong> You can switch back to Default at any time.</p>
       <p class="auto-mode-limits">Your deny and ask rules still apply. Auto does not grant new account permissions or remove sandbox restrictions.</p>
       <p class="auto-mode-trust" hidden>This workspace is not trusted. Continuing also trusts this workspace.</p>
-      </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel" autofocus>Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
+      </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel">Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
     if (message.needsTrust === true) {
       dialog.querySelector(".auto-mode-trust").hidden = false;
       dialog.querySelector(".auto-mode-confirm span:last-child").textContent = "Trust and enable Auto";
@@ -1532,6 +1541,8 @@
     document.body.appendChild(dialog);
     if (typeof dialog.showModal === "function") dialog.showModal();
     else { closeAutoModePrompt(false); return; }
+    // Focused here, not by an autofocus attribute: VS Code's webview is a cross-origin frame, where Chromium refuses
+    // autofocus with a console error ("Blocked autofocusing on a <button> element in a cross-origin subframe.").
     dialog.querySelector(".auto-mode-cancel").focus();
   }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
@@ -2076,7 +2087,7 @@
   // sentence it already prints, so "Read files, ran a command" is a book and not a terminal.
   const BUCKET_ICON = {
     read: "book-open", edited: "pencil", created: "file-plus", ran: "square-terminal",
-    searched: "search", mapped: "folder-tree", looked: "globe", viewed: "image", web: "globe",
+    searched: "search", mapped: "folder-tree", looked: "globe", viewed: "image", web: "globe", fetched: "globe",
     other: "wrench",
   };
   const ICON_FALLBACK = "wrench";        // the one deliberately generic mark: "no better word"
@@ -2538,6 +2549,9 @@
   // before anything renders, or `dgc.linkFavicons: false` would still emit an <img> per link.
   DgcMarkdown.setFavicons?.(document.body.dataset.linkFavicons !== "off");
   const md = (source) => DgcMarkdown.render(source);
+  // DGC's own reply in this chat: the one place a ```dgc-ui card is live. Skills, docs, memory, goals, helpers' and
+  // Pips' reports and thinking keep it as code (md above).
+  const mdReply = (source) => DgcMarkdown.render(source, { cards: true });
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function textEl(tag, cls, value) { const e = el(tag, cls); e.textContent = String(value); return e; }
   // ---- hover labels ----
@@ -2879,6 +2893,12 @@
   window.__dgcPanelBuild = "follow-5";   // proves which panel code a recording actually ran
   let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
+  // At the very end, not merely near it: where following may start again. "Near" (atBottom's 60px) re-armed it
+  // while a person scrolled up a few pixels at a time near the live row, and the next tick pulled them back down:
+  // "it flickers and won't scroll up" (seen in testing).
+  // Every event's "was it at the end?" (stick) reads this too: read as "within 60px", an event arriving while a person
+  // had scrolled up a little took them back down.
+  function atEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 2; }
   function scroll() { if (replaying) return; log.scrollTop = log.scrollHeight; following = true; }
   // ---- reading back without losing the end ----
   // Scrolling up during a run is normal; being stranded there is not. The pill appears only
@@ -2888,7 +2908,8 @@
   let unread = false;
   function renderToLatest() {
     const away = !atBottom();
-    if (!away) { unread = false; following = true; }
+    if (!away) unread = false;
+    if (atEnd()) following = true;
     toLatest.hidden = !away;
     toLatest.classList.toggle("unread", away && unread);
     $("to-latest-label").textContent = away && unread ? "New" : "Latest";
@@ -2913,8 +2934,12 @@
       readingBack();
     }
   }, { passive: true });
+  let lastScrollTop = log.scrollTop;
   log.addEventListener("scroll", () => {
-    if (Date.now() - userScrolledAt < 700) following = atBottom();
+    // A person's own scroll up always wins, however small; following comes back only at the very end.
+    const up = log.scrollTop < lastScrollTop - 0.5;
+    lastScrollTop = log.scrollTop;
+    if (Date.now() - userScrolledAt < 700) following = up ? false : atEnd() || (following && atBottom());
     // Pins still waiting for the width (or the fonts) to hold still are exactly what a scroll is
     // about to reach: re-measure the blocks nearest the view now, before they come into view at
     // their old height, rather than after the debounce -- a scroll inside that window jumped ~200px.
@@ -2930,7 +2955,7 @@
   // the newest content off the bottom of the view — the end-of-turn summary went with it. If we
   // were following the run, keep following it.
   if (typeof ResizeObserver === "function") {
-    new ResizeObserver(() => { if (atBottom() || following) scroll(); })
+    new ResizeObserver(() => { if (following) scroll(); })
       .observe(document.querySelector("footer"));
   }
 
@@ -2946,24 +2971,50 @@
   const PIN_GROUND_PX = 28;        // the strip around a pinned bubble: 16px of ground above it, a 12px fade below
   const PIN_FADE_PX = 12;          // = --sp-3, the fade under the bubble
   const PIN_SHARE = 0.3;           // a strip taller than this share of the window does not pin
+  const PIN_LOG_SHARE = 0.4;       // nor one taller than this share of the transcript: the answer keeps the rest
   const PIN_JUMP_DELAY_MS = 300;   // a single click waits this long for a second one (the reference's 300ms)
   function fitPin(head, room) {
     if (head._pinH > 0) head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room);
   }
-  // Reads no layout: the observer hands over each head's height, kept on the head. The window's height
-  // is the measure, not #log's: a draft growing in the composer must not flip a pin per keystroke.
+  // The window's height is the measure, so that a draft growing in the composer never flips a pin per keystroke. But
+  // the window is not what the transcript gets: in a short Work chat (a low window, the terminal panel open, an editor
+  // split) the header and the composer take most of it, and a prompt that fitted 30% of a 308px window pinned over
+  // 134px of transcript with its ground. At the end of a long turn the reply then showed as its last line under the
+  // prompt, with everything above it out of sight: a wake turn's reply after a video Stop, reported on the 0.51.0
+  // release candidate. So the strip may take at most 40% of the transcript too. The transcript is read only when a
+  // pin is decided (a prompt's size changed, the window was resized, the transcript's height moved with no draft in
+  // the composer), never as a draft grows; not laid out (jsdom, a hidden panel), the window decides alone, as before.
+  function pinRoom() {
+    const byWindow = window.innerHeight * PIN_SHARE;
+    const shown = log.clientHeight;
+    return shown > 0 ? Math.min(byWindow, shown * PIN_LOG_SHARE) : byWindow;
+  }
+  // Reads one height per decision: the observer hands over each head's height, kept on the head.
   const pinFit = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
-    const room = window.innerHeight * PIN_SHARE;
+    const room = pinRoom();
     for (const entry of entries) {
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect?.height ?? 0;
       if (height > 0) entry.target._pinH = height;   // 0: not rendered (agent page, hidden panel); keep the last
       fitPin(entry.target, room);
     }
   }) : null;
-  window.addEventListener("resize", () => {
-    const room = window.innerHeight * PIN_SHARE;
+  const refitPins = () => {
+    const room = pinRoom();
     for (const head of log.querySelectorAll(".turn > .msg.user.turn-head, .turn > .msg.dgc > .msg.user.turn-steer")) fitPin(head, room);
-  });
+  };
+  window.addEventListener("resize", refitPins);
+  // The transcript's own height moves too, with no change to the window: a turn's controls and the rails under it come
+  // and go, a question docks above the composer. Decided again then, except while the composer holds a draft: that is
+  // the draft growing, and a pin never flips per keystroke.
+  if (typeof ResizeObserver === "function") {
+    let shownHeight = -1;
+    new ResizeObserver(() => {
+      const height = log.clientHeight;
+      if (height <= 0 || height === shownHeight) return;
+      shownHeight = height;
+      if (!input.value) refitPins();
+    }).observe(log);
+  }
   // Where a head is laid out: the top of its box (it is always the box's first child) plus its own
   // margin. Its rect says where it is drawn, which while it is pinned is the rest line.
   function laidOutTop(head) {
@@ -3578,6 +3629,94 @@
   function clearFileThumbs() {
     for (const id of fileThumbs.keys()) finishFileThumb(id);
   }
+  /** The pictures a turn's generate_image steps made, as the made-files row a shown image uses (one alone at the
+   *  reply's width, several as tiles), each opening the image viewer. Each is its own record beside the step's (a
+   *  twin by ref), so a picture that arrives by ref later fills both. Null when the turn made none. */
+  function madePictures(block) {
+    const records = [...block.querySelectorAll('.tool[data-tool-name="generate_image"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId)).flatMap((card) => card._images || []).slice(0, 8);
+    // The videos this turn started (generate_video), drawn in the same row as pictures: a figure each, its job's
+    // progress first and then its player (media/videoPlayer.js), so a turn's pictures and videos fold together.
+    const clips = [...block.querySelectorAll('.tool[data-tool-name="generate_video"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId) && card.dataset.videoJob).map((card) => card.dataset.videoJob)
+      .slice(0, 4);
+    if (!records.length && !clips.length) return null;
+    const row = el("ul", "made-files made-pictures");
+    row.setAttribute("role", "list");
+    row.setAttribute("aria-label", clips.length && !records.length
+      ? (clips.length === 1 ? "The video this turn made" : "The videos this turn made")
+      : records.length === 1 ? "The picture this turn made" : "The pictures this turn made");
+    for (const id of clips) {
+      if (!window.DgcVideo) break;
+      const li = el("li");
+      li.appendChild(window.DgcVideo.figure(videoJobs.get(id) || { id, state: "queued" }));
+      row.appendChild(li);
+    }
+    if (!records.length) return row;
+    row._images = records.map((record) => {
+      const twin = { ...record, owner: row, chip: null };
+      if (twin.ref) trackImageRef(twin);
+      return twin;
+    });
+    row._images.forEach((twin, index) => {
+      const li = el("li");
+      const figure = el("figure", "made-image");
+      figure.appendChild(imageChip(twin, index, row._images.length));
+      const caption = el("figcaption", "made-image-caption", esc(imageFileName(twin.name) || twin.name || "Image"));
+      // The picture is in DGC's own folder (~/.dgc/images): a copy goes into the project only when you put it there.
+      const save = el("button", "made-image-save");
+      save.type = "button";
+      save.textContent = "Save to project…";
+      save.title = "Save a copy into this project (assets/ unless you choose another place)";
+      save.addEventListener("click", () => {
+        if (twin.state !== "ready" || !twin.src) return;          // still loading: nothing to copy yet
+        vscode.postMessage({ type: "saveImage", name: imageFileName(twin.name) || twin.name || "image.png", data: twin.src, project: true });
+      });
+      figure.appendChild(caption);
+      figure.appendChild(save);
+      li.appendChild(figure);
+      row.appendChild(li);
+    });
+    requestImages(row._images.filter((twin) => twin.state === "pending"));
+    return row;
+  }
+  /** A reply's pictures and videos in a block that folds to one header row (media/pictureFold.js): "1 picture · a felt
+   *  purple ball", "3 pictures". Its key is what it holds (the pictures' names, the videos' jobs), so a reload and a
+   *  reopened session find the same choice. */
+  function foldPictures(row, block = null) {
+    if (!window.DgcPictureFold) return row;
+    const names = (row._images || []).map((image) => String(image.name || image.ref || ""));
+    const jobs = [...row.querySelectorAll(":scope > li > figure.made-video[data-video-job]")].map((n) => n.dataset.videoJob);
+    const steps = block ? [...block.querySelectorAll('.tool[data-tool-name="generate_image"], .tool[data-tool-name="generate_video"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId)) : [];
+    const videos = jobs.length;
+    const pictures = (row._images || []).length;
+    const label = steps.map((c) => c.dataset.prompt).find(Boolean)
+      || (pictures === 1 ? imageFileName((row._images || [])[0]?.name || "") : "");
+    const key = window.DgcPictureFold.keyOf("work", [...names, ...jobs].filter(Boolean).length ? [...names, ...jobs] : [label || "pictures"]);
+    return window.DgcPictureFold.element(key, row, { pictures, videos, label });
+  }
+  // ---- videos (0.51): each generate_video step's job, by id, as the backend last said it ----
+  const videoJobs = new Map();
+  /** A generate_video step's result names its job ("(job vid_…)"): the step keeps it, and the job's state is asked
+   *  for (a reloaded chat's steps come back this way, with their players). */
+  function videoStep(card, output) {
+    const id = /\(job (vid_[0-9a-f]{12})\)/.exec(output)?.[1];
+    if (!id) return;
+    card.dataset.videoJob = id;
+    if (!videoJobs.has(id)) videoJobs.set(id, { id, state: "queued" });
+    vscode.postMessage({ type: "videoJobs", job: id });
+  }
+  function videoJobEvent(job) {
+    if (!job || typeof job.id !== "string") return;
+    videoJobs.set(job.id, { ...(videoJobs.get(job.id) || {}), ...job });
+    window.DgcVideo?.update(videoJobs.get(job.id));
+    // The step's own line follows it too: "fal Wan 2.2 5B: in fal's queue" until it ends.
+    const step = [...document.querySelectorAll('.tool[data-tool-name="generate_video"]')]
+      .find((card) => card.dataset.videoJob === job.id);
+    const badge = step?.querySelector(".badge");
+    if (badge) badge.textContent = { done: "made", failed: "not made", cancelled: "stopped" }[job.state] || job.status || "";
+  }
   function producedImage(item, row) {
     const rel = String(item.rel || "");
     const name = String(item.name || rel.split("/").pop() || "image");
@@ -3841,10 +3980,12 @@
       // DGC started this turn because a background monitor printed something, or a detached
       // specialist finished. The label is backend-written, never a "you" bubble.
       const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
-      const lead = kind === "wake" ? "Woke on agent" : "Woke on monitor";
-      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : "activity"}">`
-        + `${icon(kind === "wake" ? "bot" : "activity")}</span>`
-        + `<span>${lead} · ${esc(String(prompt || "").slice(0, 200))}</span>`;
+      // A video this chat started ended (dgc/videos.py): the backend's label is "video: NAME · ended".
+      const clip = kind === "monitor" ? /^video: (.+?) · ended$/.exec(String(prompt || "")) : null;
+      const lead = kind === "wake" ? "Woke on agent" : clip ? "Woke as a video ended" : "Woke on monitor";
+      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : clip ? "play" : "activity"}">`
+        + `${icon(kind === "wake" ? "bot" : clip ? "play" : "activity")}</span>`
+        + `<span>${lead} · ${esc(String(clip ? clip[1] : prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
@@ -4376,6 +4517,10 @@
       const box = el("div", complete ? "answer complete" : "answer partial");
       answer.replaceWith(box);
       box.appendChild(answer);
+      // The pictures this turn made (generate_image) under the reply, as ChatDGC and a Pip's reply show theirs; the
+      // step keeps its own tiles. Before, a picture was three folds deep and the reply only named its path.
+      const pictures = madePictures(turn.block);
+      if (pictures) box.appendChild(foldPictures(pictures, turn.block));
       // The CLI's count of what this turn's recovery point restores, when it sent one (turn_files); else the
       // diffs this turn's own edit tools drew, as an older CLI (or a subscription engine's turn) leaves it.
       const summary = complete ? turnSummaryCard(turn.files ? turn.files.edits : turn.edits, turn.prompt, turn.files) : null;
@@ -5154,7 +5299,7 @@
     clearTimeout(turn.renderTimer); turn.renderTimer = null;
     if (turn.textEl && turn._buf) {
       turn.textEl._markdown = turn._buf;
-      turn.textEl.innerHTML = md(turn._buf); turn.renderedAt = Date.now();
+      turn.textEl.innerHTML = mdReply(turn._buf); turn.renderedAt = Date.now();
       enrichMarkdown(turn.textEl);
     }
   }
@@ -5177,7 +5322,7 @@
     // Replay renders inline: a batch timer would hand the fragment back to the pager half empty.
     if (replaying || !turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
-      const stick = atBottom(); flushText(); if (stick || following) scroll(); else noteNewContent();
+      const stick = atEnd(); flushText(); if (stick || following) scroll(); else noteNewContent();
     }, 48);
   }
   function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
@@ -5199,9 +5344,22 @@
     read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
     code_intel: "mapped", write_file: "created", create_file: "created",
     edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
-    bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
+    bash: "ran", browser: "looked", web_search: "web", web_fetch: "fetched",
     view_image: "viewed",
   };
+  // The pages web_fetch read, by site: "read a page on example.com", "read 3 pages on 2 sites". A fetch is no search,
+  // and its step said "Searched the web". The site is the address's host (its summary), never more of the address.
+  const siteOf = (address) => {
+    try { const u = new URL(String(address || "").trim()); return /^https?:$/.test(u.protocol) ? u.hostname.replace(/^www\./, "") : ""; }
+    catch { return ""; }
+  };
+  function fetchedPhrase(cards, past) {
+    const sites = cards.filter((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "fetched")
+      .map((card) => siteOf(card.dataset.summary));
+    const n = sites.length, known = [...new Set(sites.filter(Boolean))];
+    const where = known.length === 1 && sites.every(Boolean) ? ` on ${known[0]}` : known.length > 1 ? ` on ${known.length} sites` : "";
+    return `${past ? "read" : "reading"} ${n === 1 ? "a page" : `${n} pages`}${where}`;
+  }
   // "viewed 2 images" counts the images the viewing steps returned, not the steps. Finished, it also
   // counts the images other steps in the group produced (a screenshot), so the count is said once.
   function viewedPhrase(cards, past) {
@@ -5242,7 +5400,9 @@
       counts.looked && `${past ? "looked at" : "looking at"} ${some(counts.looked, "page", "pages")}`,
       counts.viewed && viewedPhrase(cards, past),
       counts.web && (past ? "searched the web" : "searching the web"),
-      counts.other && (past ? named || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
+      counts.fetched && fetchedPhrase(cards, past),
+      // A failed helper step that names no helper (a batch sent without its `tasks`) says only that it failed.
+      counts.other && (past ? named || failedAgentStep(loneOther).toLowerCase() || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
     ].filter(Boolean);
     const sentence = phrases.length > 1
       ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
@@ -5251,7 +5411,7 @@
   }
   // The order toolSentence() joins its phrases in. "The first phrase" is therefore already a
   // computed thing, and the header can wear it.
-  const BUCKET_ORDER = ["read", "edited", "created", "ran", "searched", "mapped", "looked", "viewed", "web", "other"];
+  const BUCKET_ORDER = ["read", "edited", "created", "ran", "searched", "mapped", "looked", "viewed", "web", "fetched", "other"];
   // The header wears the leading action of the sentence it already prints — and, when one kind of
   // tool did that action, that tool's own mark. The counts come from the same buckets that wrote
   // the words, so the icon and the sentence can never disagree: "Read files, ran a command" is a
@@ -5659,7 +5819,14 @@
     // The prompt a delegation was given, which its agent's card in the agent map shows. Not drawn on
     // the card itself: the transcript names the agent, its page shows the work.
     if (canonicalTool(ev.name) === "task" && typeof ev.args?.prompt === "string") c._agentPrompt = ev.args.prompt.slice(0, 20000);
-    const detail = [copy.target, described || ev.summary || ""].filter(Boolean).join(" · ");
+    // What a picture or video was asked for: its folded block's header names it ("1 picture · a felt purple ball").
+    if (["generate_image", "generate_video"].includes(canonicalTool(ev.name)) && typeof ev.args?.prompt === "string") {
+      c.dataset.prompt = ev.args.prompt.replace(/\s+/g, " ").trim().slice(0, 200);
+    }
+    // A batch that named no helper (its `tasks` missing): an older CLI summed it up as "0 helpers", and the failed
+    // step read "Couldn't delegate 0 helpers". It never had a helper to count; its reason is the card's output.
+    const summary = canonicalTool(ev.name) === "task" && /^0 helpers?\b/.test(String(ev.summary || "")) ? "" : ev.summary;
+    const detail = [copy.target, described || summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
     const pluginMark = pluginLogoHtml(ev.name);
     c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${pluginMark || icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
@@ -6051,9 +6218,16 @@
   }
   // `decision`: what settled the card, in words ("Allowed once"). An answered card used to keep only
   // its question, so one answered "Allow once" read like one still waiting.
+  // A plan's text folds under its header (the header opens and closes it), open while it waits for an answer and
+  // folded once answered, as a finished step folds; the buttons and feedback stay outside it.
+  function planFold(title, plan) {
+    return `<details class="plan-fold" open><summary class="q">${icon("clipboard-list")} <span class="plan-fold-title">${esc(title)}</span>`
+      + `<span class="plan-fold-chev" aria-hidden="true">${icon("chevron-down", "sm")}</span></summary><pre>${esc(plan)}</pre></details>`;
+  }
   function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved");
+    c.querySelectorAll(":scope > details.plan-fold").forEach((fold) => { fold.open = false; });
     if (!replaying) c.classList.add("motion-resolved");
     c.setAttribute("aria-disabled", "true");
     c.querySelectorAll("button, input, select, textarea")
@@ -6069,6 +6243,117 @@
   function expireOpenRequests() {
     document.querySelectorAll(".card[data-request-id]:not(.resolved)")
       .forEach((card) => resolveCard(card, "Not answered: DGC's backend stopped"));
+  }
+  // The answers a permission card offers: the event's `choices` (ready.capabilities.permission_choices), once and
+// deny always among them so a card can never be left without a way to answer; none listed, all three.
+function permissionChoices(ev) {
+    const listed = Array.isArray(ev && ev.choices) ? ev.choices.filter((c) => c === "once" || c === "always" || c === "deny") : [];
+    return listed.length ? new Set([...listed, "once", "deny"]) : new Set(["once", "always", "deny"]);
+  }
+  // A card in plain words for the steps a person decides on by what they do rather than by their arguments: a paid
+  // picture (as ChatDGC's card: the generator, how many at what size, the price, the prompt) and a look on the network.
+  // {name, title, detail, labels, edit}; null for every other tool, whose card shows its summary and arguments.
+  const ROUTER_FIND_PORTS = "11434, 8080, 1234, 8000, 30000, 8188";        // dgc/router_probe.py KNOWN_PORTS
+  /** Composio's multi-execute on a Work Allow card: each app call it makes, in plain words (media/pluginCalls.js),
+   *  with the plugin DGC calls named; null for any other tool. */
+  function pluginCalls(name, args) {
+    const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
+    if (!match || !globalThis.DgcPluginCalls) return null;
+    const plugin = match[1] === "composio" ? "Composio" : match[1];
+    const lines = globalThis.DgcPluginCalls.describe(name, args, plugin);
+    return lines ? { plugin, lines } : null;
+  }
+  /** Every app call the Allow covers; one that sends or changes something shows every input it sends under its
+   *  line, in full and with no click (an email's recipient, subject and body). All of it as sent is one click away. */
+  function pluginCallsDetail(name, args) {
+    const calls = pluginCalls(name, args);
+    const fields = (c) => c.fields.length
+      ? `<dl class="perm-call-inputs">${c.fields.map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join("")}</dl>` : "";
+    return calls ? `<ul class="perm-calls">${calls.lines.map((c) => `<li>${esc(c.line)}${fields(c)}</li>`).join("")}</ul>`
+      + `<details class="perm-brief"><summary>Inputs as sent</summary><pre>${esc(globalThis.DgcPluginCalls.sent(name, args))}</pre></details>` : "";
+  }
+  function plainPermission(name, args) {
+    const a = args && typeof args === "object" ? args : {};
+    if (name === "generate_image" && typeof a.generator === "string" && a.generator) {
+      const count = Number.isSafeInteger(a.count) && a.count > 0 ? a.count : 1;
+      const price = String(a.price || "");
+      // Into the project (save_to): where it's written, as write_file's card says what it writes.
+      const into = typeof a.saves_to === "string" && a.saves_to ? `${a.replaces ? "replaces" : "saves to"} ${a.saves_to}` : "";
+      const facts = [`${count} × ${String(a.size || "").replace("x", "×")}`, price,
+        a.this_month ? `this month ${a.this_month}` : "", into].filter(Boolean).join(" · ");
+      return { name: `Picture with ${a.generator}`,
+        title: `Make ${count === 1 ? "this image" : `these ${count} images`} with <b>${esc(a.generator)}</b>?`,
+        detail: `<p class="muted perm-facts">${esc(facts)}</p>${a.note ? `<p class="perm-note">${esc(a.note)}</p>` : ""}`
+          + (a.prompt ? `<blockquote class="perm-prompt">${esc(a.prompt)}</blockquote>` : ""),
+        labels: { once: price && price !== "free" ? `Make it · ${price.split(" (")[0]}` : "Make it", always: "Always allow", deny: "Don't" },
+        edit: typeof a.prompt === "string" ? a.prompt : null };
+    }
+    if (name === "generate_video" && a.video === true) {
+      // Every video asks (its card has no Always: that is the user's own switch in Settings). One that would pass the
+      // month's limit says so and can't be made from here.
+      const price = String(a.price || "");
+      const into = typeof a.saves_to === "string" && a.saves_to ? `${a.replaces ? "replaces" : "saves to"} ${a.saves_to}` : "";
+      const facts = [String(a.facts || ""), a.this_month ? `this month ${a.this_month}` : "", a.minutes || "", into]
+        .filter(Boolean).join(" · ");
+      return { name: `Video with ${a.generator}`, video: true, blocked: a.over_limit === true,
+        title: `Make this video with <b>${esc(a.label || a.generator)}</b>?`,
+        detail: `<p class="muted perm-facts">${esc(facts)}</p>${a.start_image ? `<p class="muted">From ${esc(a.start_image)}</p>` : ""}`
+          + `${a.note ? `<p class="perm-note">${esc(a.note)}</p>` : ""}`
+          + (a.prompt ? `<blockquote class="perm-prompt">${esc(a.prompt)}</blockquote>` : ""),
+        labels: { once: price && price !== "free" ? `Make it · ${price}` : "Make it", deny: "Don't" },
+        edit: typeof a.prompt === "string" ? a.prompt : null };
+    }
+    if (name === "router_find") {
+      return { name: "Look on the network", title: "Look for model servers on your network?",
+        detail: `<p>On this computer's network, on the ports ${ROUTER_FIND_PORTS}, once. Nothing is added until you choose.</p>`,
+        labels: {}, edit: null };
+    }
+    if (canonicalTool(name) === "task") return helpersPermission(a);
+    const mcp = /^mcp__([a-z0-9_-]+)__(.+)$/.exec(String(name || ""));
+    if (mcp && !pluginCalls(name, a)) return pluginToolPermission(mcp[1], mcp[2], a);
+    return null;
+  }
+  const plainWords = (value, limit = 160) => {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    return text.length > limit ? text.slice(0, limit - 1).trimEnd() + "…" : text;
+  };
+  // Helpers (the task tool): each one by what it's asked to do, where it runs when the model said, and its brief one
+  // click away. It read "Run task 3 helpers · … {"tasks":[…]}" (seen in testing).
+  function helpersPermission(a) {
+    const listed = Array.isArray(a.tasks) ? a.tasks.filter((t) => t && typeof t === "object" && !Array.isArray(t)).slice(0, 32) : [a];
+    const helpers = listed.map((t) => {
+      const where = [t.system, t.model].filter((v) => typeof v === "string" && v.trim()).map((v) => plainWords(v, 60)).join(" · ");
+      const facts = [typeof t.agent === "string" && t.agent && t.agent !== "worker" ? `${plainWords(t.agent, 40)} agent` : "",
+        where ? `on ${where}` : typeof t.size === "string" && t.size ? `a ${t.size} model` : "",
+        typeof t.effort === "string" && t.effort ? `thinking ${t.effort}` : ""].filter(Boolean).join(" · ");
+      return { label: plainWords(t.description, 120) || "A helper", facts, brief: typeof t.prompt === "string" ? t.prompt.slice(0, 4000) : "" };
+    });
+    const n = helpers.length;
+    const items = helpers.map((h) => `<li><b>${esc(h.label)}</b>${h.facts ? ` <span class="muted">· ${esc(h.facts)}</span>` : ""}`
+      + (h.brief ? `<details class="perm-brief"><summary>What it's asked</summary><p>${esc(h.brief)}</p></details>` : "") + "</li>").join("");
+    return { name: n === 1 ? `Helper · ${helpers[0].label}` : `${n} helpers`,
+      title: n === 1 ? "Start a helper?" : `Start ${n} helpers?`,
+      detail: `<ul class="perm-helpers">${items}</ul>`
+        + (a.background === true ? `<p class="muted perm-facts">In the background: the reply goes on without waiting for ${n === 1 ? "it" : "them"}.</p>` : ""),
+      labels: { once: n === 1 ? "Start it" : "Start them" }, edit: null, note: true };
+  }
+  // A plugin's tool that isn't Composio's multi-execute: the tool and the plugin by name. One that sends or changes
+  // something shows every input it sends, in full and with no click; a read keeps its inputs one click away, in Inputs
+  // as sent, as in ChatDGC and a Pip's chat (media/pluginCalls.js decides which). It read "Run mcp__example__get-time
+  // {}", and then cut every input at 200 characters, a read's too.
+  function pluginToolPermission(server, tool, a) {
+    const plugin = pluginNames[server] || readyPluginNames[server] || server.replace(/--.*$/, "").replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
+    const action = String(tool).replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) || "Its tool";
+    const name = `mcp__${server}__${tool}`, calls = globalThis.DgcPluginCalls;
+    // Without pluginCalls.js (never so in the panel) every input shows, as a change's would.
+    const fields = calls ? calls.tool(name, a).fields
+      : Object.entries(a).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]);
+    const detail = Object.keys(calls ? calls.shownInputs(name, a) || {} : a).length
+      ? (fields.length ? `<dl class="perm-inputs">${fields.map(([key, value]) => `<dt>${esc(String(key).replace(/[_-]+/g, " "))}</dt><dd>${esc(value)}</dd>`).join("")}</dl>` : "")
+        + `<details class="perm-brief"><summary>Inputs as sent</summary><pre>${esc(calls ? calls.sent(name, a) : JSON.stringify(a, null, 2))}</pre></details>`
+      : `<p class="muted perm-facts">No inputs.</p>`;
+    return { name: `${action} · ${plugin}`, title: `Use <b>${esc(action)}</b> from <b>${esc(plugin)}</b>?`, detail,
+      labels: {}, edit: null, note: true };
   }
   function permissionDecision(decision, rule, note) {
     if (decision === "once") return "Allowed once";
@@ -7224,6 +7509,10 @@
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
   let pluginLogos = {};
+  let pluginNames = {};                 // each plugin's own name, by the server its tools come from ("example" -> "Example")
+  // The same names as DGC gives them on start (ready.capabilities.plugin_names), before the plugin list has loaded: an
+  // Allow card for a plugin's tool names the plugin as its card does ("MCP Apps example", not "Example").
+  let readyPluginNames = {};
   const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
 
   function openSurface(kind) {
@@ -7295,8 +7584,13 @@
   // server draws that package's own mark (pluginLogoHtml, above). This is where that cache fills.
   function cachePluginLogos(items) {
     pluginLogos = {};
+    pluginNames = {};
     for (const row of Array.isArray(items) ? items : []) {
       if (row.logo) pluginLogos[row.name] = row.logo;
+      const named = typeof row.display_name === "string" ? row.display_name.trim().slice(0, 80) : "";
+      if (named) for (const server of [row.name, ...(Array.isArray(row.server_names) ? row.server_names : [])]) {
+        if (typeof server === "string") pluginNames[server] = named;
+      }
     }
   }
   function renderSkills(items) {
@@ -7523,7 +7817,7 @@
       setChatChanges({ files: [], total: 0 });
       $("changes-review").hidden = true;
     }
-    const stick = atBottom();
+    const stick = atEnd();
     // A mod's frames, and the answers to what the mods asked (media/mods.js): never a chat event of their own.
     if (ev.type !== "ready" && modsUi?.event(ev)) return;
     switch (ev.type) {
@@ -7541,6 +7835,13 @@
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
         reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         skillManagement = ev.capabilities?.skill_management === true;
+        const named = ev.capabilities?.plugin_names;
+        readyPluginNames = {};
+        if (named && typeof named === "object" && !Array.isArray(named)) {
+          for (const [server, shown] of Object.entries(named).slice(0, 256)) {
+            if (/^[a-z0-9_-]{1,128}$/.test(server) && typeof shown === "string" && shown.trim()) readyPluginNames[server] = shown.trim().slice(0, 80);
+          }
+        }
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         agentsLive = ev.capabilities?.agents === true;
@@ -7835,6 +8136,9 @@
       }
       // Images a step produced go inside that step's card (see the 0.40 images section).
       case "tool_images": imagesOnToolImages(ev); break;
+      // A video job this chat started changed (dgc/videos.py): its player figure follows it.
+      case "video_job": videoJobEvent(ev.job); return;
+      case "video_jobs": (Array.isArray(ev.jobs) ? ev.jobs : []).forEach(videoJobEvent); return;
       case "image": imagesOnAnswer(ev); break;     // a getImage answer (the host answers for a backend without one)
       case "tool_result": {
         const childId = agentIdFromCall(ev.call_id);
@@ -7895,6 +8199,7 @@
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
+          if (ev.name === "generate_video" && !ev.is_error) videoStep(c, String(ev.output || ""));
           enrichToolResult(c, ev);
           setupCards()?.toolResult(c, ev);
           if (c.classList.contains("pip-run-owned")) refreshToolGroup(c.closest(".tool-group"));
@@ -7917,13 +8222,15 @@
       }
       case "permission_decision": {
         ensureTurn();
-        const detail = ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
+        const plainDecision = plainPermission(ev.name, ev.args);
+        const detail = plainDecision ? plainDecision.detail : ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
           : Object.keys(ev.args || {}).length ? `<pre>${esc(JSON.stringify(ev.args))}</pre>` : "";
-        const c = decisionCard(`<div class="q">${icon("shield")}<span>Permission for <b>${esc(ev.name)}</b></span></div>${detail}`, "Recorded permission decision");
+        const asked = plainDecision ? plainDecision.title : `Permission for <b>${esc(ev.name)}</b>`;
+        const c = decisionCard(`<div class="q">${icon("shield")}<span>${asked}</span></div>${detail}`, "Recorded permission decision");
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
         resolveCard(c, String(ev.message || "Recorded decision"));
-        compactPermissionCard(c, ev.name);
+        compactPermissionCard(c, plainDecision ? plainDecision.name : ev.name);
         break;
       }
       case "permission_request": {
@@ -7943,29 +8250,63 @@
         // The user's own Chrome, signed in as them: say so, and name the site, not the tool's arguments.
         const signedIn = ev.name === "browser" && ev.args && ev.args.signed_in === true;
         const site = signedIn ? (() => { try { return new URL(String(ev.args.url || "")).host; } catch { return ""; } })() : "";
-        const detail = signedIn ? `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a window of its own in your Chrome, where you're signed in. It can read and act on that site as you.</p><pre>${esc(String(ev.args.url || ""))}</pre>`
+        const plain = fixAsk ? null : plainPermission(ev.name, ev.args);
+        const detail = plain ? plain.detail : signedIn ? `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a window of its own in your Chrome, where you're signed in. It can read and act on that site as you.</p><pre>${esc(String(ev.args.url || ""))}</pre>`
           : ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
-          : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
+          : ev.diff ? "" : (pluginCallsDetail(ev.name, ev.args) || pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
-        const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
+        const summary = ev.summary && !restates && !plain ? `<div class="muted">${esc(ev.summary)}</div>` : "";
         // In a fix: installing the project's dependencies in the fix copy, or copying an ignored file into it.
         const fixInstall = fixAsk && ev.name === "bash" && /:install-\d+$/.test(String(ev.call_id || ""));
         const fixFile = fixAsk && ev.name === "request_project_file";
         const fixQuestion = fixInstall ? "Install the project's dependencies in the fix copy?"
           : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
         const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
-        const title = fixQuestion || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const calls = fixAsk ? null : pluginCalls(ev.name, ev.args);
+        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        // ev.choices is exactly the answers this card takes (ready.capabilities.permission_choices): a DGC Router change
+        // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
+        // no Always allow. An older CLI sends no list (or all three): every button, as before.
+        const offered = permissionChoices(ev);
         const buttons = fixFile
           ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
-          : `<button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button>`;
-        const inner = `<div class="q">${icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>`;
+          : (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "")
+            + (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
+            + (offered.has("always") ? `<button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
+            + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "");
+        // Edit: the prompt in a box; "Ask again with this prompt" answers the card with the new prompt for the model,
+        // which asks again with it (a new card, its price), so nothing is made from words you didn't see.
+        const editor = plain?.edit != null ? `<div class="perm-edit" hidden><label class="sr-only" for="perm-edit-${esc(ev.id)}">The prompt</label>`
+          + `<textarea class="perm-edit-text" id="perm-edit-${esc(ev.id)}" rows="3">${esc(plain.edit)}</textarea>`
+          + '<button type="button" class="act primary" data-d="deny" data-edited>Ask again with this prompt</button></div>' : "";
+        // A plugin's tool wears the plugin's own logo (the one DGC calls: Composio's for Composio's tools), else the shield.
+        const logo = !fixAsk && pluginLogoHtml(ev.name);
+        // A plugin's tool whose logo this page doesn't have yet: the shield for now, and the host is asked for it.
+        const logoFor = !fixAsk && !logo ? (/^mcp__([a-z0-9_-]{1,64})__/.exec(String(ev.name || "")) || [])[1] : "";
+        if (logoFor) vscode.postMessage({ type: "pluginLogos", plugins: [logoFor] });
+        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${editor}`;
         // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
         const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
-        if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-          const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c, permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
-          compactPermissionCard(c, ev.name);
+        const logoMark = c.querySelector(".q .perm-logo");
+        if (logoMark) globalThis.DgcPluginCalls?.backdrop(logoMark.querySelector("img"), logoMark);
+        if (ev.diff) { c.querySelector(".feedback")?.before(renderDiff(String(ev.diff))); }
+        // Only the answers answer. The diff's own toggle and open button are buttons too: given this handler, collapsing
+        // the diff on a fix's Allow card sent an answer with no decision, which denied the call (0.51.0 release candidate).
+        c.querySelectorAll("button[data-d], button[data-edit-prompt]").forEach((b) => b.onclick = () => {
+          if (b.hasAttribute("data-edit-prompt")) {
+            const box = c.querySelector(".perm-edit");
+            box.hidden = !box.hidden;
+            b.setAttribute("aria-expanded", String(!box.hidden));
+            if (!box.hidden) box.querySelector("textarea").focus();
+            return;
+          }
+          const edited = b.hasAttribute("data-edited") ? (c.querySelector(".perm-edit-text")?.value || "").trim().slice(0, 2000) : "";
+          if (b.hasAttribute("data-edited") && !edited) return;
+          // Read by the model and shown in the step's row: plain words for both.
+          const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
+            : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
+          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
+          compactPermissionCard(c, plain ? plain.name : ev.name);
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
             rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
             reason: b.dataset.d === "deny" && note ? note : undefined });
@@ -7977,8 +8318,8 @@
         ensureTurn();
         imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
-        const c = requestCard(decisionCard(`<div class="q">${icon("clipboard-list")} Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+        const c = requestCard(decisionCard(`${planFold("Plan ready", ev.plan)}<textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
+        c.querySelectorAll("button[data-d]").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
           const choice = b.dataset.d;
           if (!resolveCard(c, choice === "auto" ? "Auto requested · awaiting confirmation" : planDecision(choice, feedback))) return;
@@ -8020,7 +8361,7 @@
             : "Share this generated response with the server?";
           const c = decisionCard(`<div class="q">${icon("shield")} ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
-          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
@@ -8032,7 +8373,7 @@
             ? `<div class="err">Punycode host — inspect carefully for lookalike characters.</div>` : "";
           const c = decisionCard(`<div class="q">${icon("external-link")} Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
-          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
@@ -8192,10 +8533,26 @@
         // A helper's runs (Continued, its dividers) and whether it can be asked to do more. Never in the chat.
         receiveAgentRuns(ev);
         return;
+      case "router_status": case "router_changed":
+        // DGC Router: which system each helper's worker is on (a lease's owner is its agent id). Never in the chat.
+        noteRouterLeases(ev.status);
+        return;
       case "agents":
         renderAgentsSnapshot(ev);
         for (const fix of pipFixes.values()) if (fix.agent_id) pipFixAgentChanged(fix.agent_id);
         if (stick || following) scroll();
+        return;
+      case "mcp_app_card": {
+        // A plugin's own card (MCP Apps), under the step that showed it: its page in a sandboxed frame, at the address
+        // DGC serves it from. A replay brings it back the same way (its page and whole result are asked for again).
+        if (!window.DgcMcpApps) break;
+        ensureTurn();
+        const card = window.DgcMcpApps.card(ev, { sendMessage: sendCardMessage });
+        appendTurnContent(card); breakText();
+        break;
+      }
+      case "mcp_app_reply": case "mcp_app_resource":
+        window.DgcMcpApps?.event(ev);
         return;
       case "files_ready": {
         // A file the model made, as a chip under the step that made it. Codex's model exactly:
@@ -8212,7 +8569,13 @@
           li.appendChild(PRODUCED_IMAGE.test(String(item.rel)) ? producedImage(item, row) : producedFileChip(item));
           row.appendChild(li);
         }
-        appendTurnContent(row); breakText();
+        // Pictures shown under the reply (show_file of an image) fold away as a made picture does.
+        const shownPictures = items.slice(0, 8).filter((item) => PRODUCED_IMAGE.test(String(item.rel)));
+        const shown = shownPictures.length && window.DgcPictureFold
+          ? window.DgcPictureFold.element(window.DgcPictureFold.keyOf("work", items.slice(0, 8).map((item) => String(item.rel))), row,
+            { pictures: shownPictures.length, label: shownPictures.length === 1 ? String(shownPictures[0].caption || shownPictures[0].name || String(shownPictures[0].rel).split("/").pop()) : "" })
+          : row;
+        appendTurnContent(shown); breakText();
         break;
       }
       case "agent_step": {
@@ -8297,7 +8660,7 @@
         break;
       }
       case "saved_plan":
-        if (ev.exists) decisionCard(`<div class="q">${icon("clipboard-list")} Saved plan</div><pre>${esc(ev.plan)}</pre>`);
+        if (ev.exists) decisionCard(planFold("Saved plan", ev.plan));
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "plugin_catalog": cachePluginLogos(ev.items); break;
@@ -9140,7 +9503,8 @@
   // A click is the user's follow-up request. Use the normal send path and its permission checks.
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
-    if (!button || button.closest("#pips-host")) return;
+    // Only a card in DGC's own reply in this chat sends (the Pips page answers its own).
+    if (!button || button.closest("#pips-host") || !button.closest("#log .msg.dgc .text:not(.agent-answer)")) return;
     const prompt = String(button.dataset.genuiSend || "").slice(0, 500);
     if (!prompt) return;
     if (attachments.length) { sysLine("Remove the composer attachments before sending a card choice.", true); return; }
@@ -9823,10 +10187,15 @@
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
     // Your Pips, above your sessions: the ones that need you, or a quiet row of faces.
     if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
+      let dismissed = {};
+      try { dismissed = JSON.parse(document.documentElement.dataset.pipHomeDismissed || "{}"); } catch { dismissed = {}; }
       homePips = window.DgcPips.mountHomePips({
         document, root: $("sessions-pips"),
         postMessage: (message) => vscode.postMessage({ ...message, documentId: document.documentElement.dataset.pipsDocumentId }),
         onOpen: (navigation) => openPipsAt(navigation),
+        // Dismiss all's unread, kept by the host (src/pipHomeDismiss.ts) so a reload doesn't bring the old count back.
+        dismissed,
+        onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
       });
     }
     showSessions();
@@ -9843,7 +10212,7 @@
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
-                              "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "options_resolved",
+                              "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "mcp_app_card", "options_resolved",
                               "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_files", "turn_end"]);
   function prepareCompleteHistory(items) {
     // The host may have forwarded the end of A and start of queued B while this webview was
@@ -10040,6 +10409,22 @@
     setSending(true); scroll();
     speak(`Asked DGC to fix what ${r.name} reported.`);
   }
+  // A plugin's card asked to send a message as yours (MCP Apps ui/message, labelled with its plugin): sent the way the
+  // composer sends one, so it queues behind a running turn and comes back if the backend refuses it.
+  function sendCardMessage(text) {
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Try the card again in a moment."); return false; }
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return false; }
+    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, text, []);
+    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    m.dataset.promptId = requestId;
+    pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
+    vscode.postMessage({ type: "prompt", text, requestId, restore: { text, attachments: [] }, delivery: "queue" });
+    setSending(true); scroll();
+    return true;
+  }
   // From a Pip's own chat. A page with a chat sends it here, as the card would. The side bar's Sessions home has no
   // chat: the host opens the chat the Pip reports to (or a new one) in its tab, and that chat sends it (pipAskDgc).
   function askDgcFromPips(r, session) {
@@ -10159,15 +10544,20 @@
       ? "DGC fixes it in the background, in a copy of the project, while you keep working. It never changes live data or services; Undo puts your files back."
       : "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
     const openReport = () => openPipsAt({ pip: r.pip_id, section: "runs", run: r.run_id });
+    // Acting on the card (Dismiss, its ✕ or Fix) reads its run: the Pip's unread count drops on the Pips page and the home.
+    // The host marks that run's post read (mark_pip_read, Pips API 69); an older DGC has no unread to drop.
+    const read = () => vscode.postMessage({ type: "pipReportRead", pip_id: r.pip_id, run_id: r.run_id });
+    const fix = () => { read(); askDgcToFix(r, card); };
     const dismiss = () => {
       const group = card.parentElement?.closest(".pip-report-group");
       const next = card.nextElementSibling || group?.nextElementSibling;
       card.remove();
       if (group) paintPipReportGroup(group);
       if (pipReportsLive) vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
+      read();
       (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
     };
-    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, () => askDgcToFix(r, card));
+    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, fix);
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
@@ -10187,7 +10577,7 @@
     const time1 = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-line-when");
     if (time1) line1.append(time1);
     const slimActs = el("span", "pip-report-slim-actions");
-    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, () => askDgcToFix(r, card), slimActs);
+    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
     button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
     const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
     x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
@@ -10298,7 +10688,7 @@
       if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
       return;
     }
-    const stick = atBottom();
+    const stick = atEnd();
     log.appendChild(card);
     if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
     speak(`Pip ${r.name} ${pipReportState(r)}`);
@@ -10328,6 +10718,13 @@
     const was = had?.fix_id === fix.fix_id ? had.state : "";
     const next = { ...fix, _seen: quiet || (had?.fix_id === fix.fix_id && had._seen && !(pipFixActive(had) && !pipFixActive(fix))) };
     pipFixes.set(fix.run_id, next);
+    // Its agent's Prompt in the agent map: a fix is started by its report's Fix, not by a task call, so the brief the
+    // fixer was given comes with its record (kept by agent, so a second fix of the same report keeps the first's).
+    if (/^sub-[0-9a-f]{12}$/.test(String(next.agent_id || "")) && typeof next.prompt === "string" && next.prompt) {
+      pipFixPrompts.delete(next.agent_id);
+      pipFixPrompts.set(next.agent_id, next.prompt.slice(0, 20000));
+      while (pipFixPrompts.size > 64) pipFixPrompts.delete(pipFixPrompts.keys().next().value);
+    }
     if (next.agent_id && agentLineOf(next.agent_id)?.provisional) pruneProvisionalLines();   // the card is its line
     for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, next);
     if (!quiet && was !== next.state && !pipFixActive(next) && was) speak(`${next.name || "The Pip"}'s fix ${pipFixHeadline(next).toLowerCase()}`);
@@ -10622,7 +11019,7 @@
   }
   function pipFixesReset(kind) {
     if (kind === "rewound") return;               // the same chat: its history brings each card's fix back
-    pipFixes.clear(); pipFixSteps.clear();
+    pipFixes.clear(); pipFixSteps.clear(); pipFixPrompts.clear();
     syncPipFixTick();
     agentMapChanged();
     if (pipFixLive && kind === "resumed") vscode.postMessage({ type: "listPipFixes" });
@@ -10841,7 +11238,7 @@
         } else {
           const m = el("div", "msg dgc hist archived");
           m.appendChild(el("div", "role dgc", "DGC"));
-          const text = el("div", "text", md(String(it.text || "")));
+          const text = el("div", "text", mdReply(String(it.text || "")));
           text._markdown = it.text;
           m.appendChild(text);
           (box || frag).appendChild(m);
@@ -10898,8 +11295,15 @@
     }
   });
 
+  window.DgcVideo?.host((message) => vscode.postMessage(message));
+  // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it; the setting's
+  // default is on the page from the start, and the host's kept choices follow.
+  window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
+  window.DgcPictureFold?.host((message) => vscode.postMessage(message));
   window.addEventListener("message", (e) => {
     const msg = e.data;
+    if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
+    if (window.DgcPictureFold?.message(msg)) return;   // which pictures stay folded, and the setting
     if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
     if (msg?.type === "autoModeDismiss") {
       if (msg.requestId === autoModeDialog?.id) closeAutoModePrompt();
@@ -10921,6 +11325,20 @@
       // which only the Pips box has here.)
       if (msg.from === "chat") { if (msg.type.startsWith("speak")) reader?.receive(msg); else if (msg.type !== "voiceReady") onMic(msg); }
       else if (msg.from === "pips") for (const listener of pipsListeners) listener(msg);
+      return;
+    }
+    if (msg.type === "pluginLogos") {
+      // A plugin's logo the host read for an Allow card (the catalog hadn't come yet): it replaces the card's shield.
+      for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
+        if (!/^[a-z0-9_-]{1,64}$/.test(id) || typeof src !== "string" || !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src)) continue;
+        pluginLogos[id] = src;
+        for (const mark of document.querySelectorAll(`.q [data-logo-for="${id}"]`)) {
+          const wrap = el("span", "perm-logo");
+          wrap.innerHTML = `<img class="plugin-logo" alt="" src="${esc(src)}">`;
+          mark.replaceWith(wrap);
+          globalThis.DgcPluginCalls?.backdrop(wrap.querySelector("img"), wrap);
+        }
+      }
       return;
     }
     if (msg.type === "fileThumb") {
@@ -10964,7 +11382,9 @@
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
-    if (msg.type === "pipsPluginLogos") { for (const listener of pipsListeners) listener(msg); return; }
+    // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
+    // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
+    if (["pipsPluginLogos", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);
@@ -10975,6 +11395,7 @@
       } else for (const listener of pipsListeners) listener(msg);
       return;
     }
+    if (window.DgcMcpApps?.host(msg)) return;            // a card's link, download, address or message, answered
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "chat_slots") { promptChat = String(msg.activeId || promptChat); renderChatBar(msg); }
     else if (msg.type === "chat_switched") {
@@ -11891,7 +12312,7 @@
     }
     const m = el("div", "msg user agent-prompt");
     const role = m.appendChild(el("div", "role"));
-    role.textContent = record.parent_id ? "its parent agent" : "the main agent";
+    role.textContent = record.parent_id ? "its parent agent" : pipFixPrompts.has(String(record.id)) ? "Ask DGC to fix" : "the main agent";
     const bubble = m.appendChild(el("div", "bubble"));
     fillUserBubble(bubble, prompt, []);
     stampPrompt(m, Number(record.started_at) * 1000);
@@ -11964,7 +12385,8 @@
     const working = AGENT_ACTIVE.has(record.state);
     const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
     // Where the agent worked, which the chat's "↳ isolated checkout" notice used to say.
-    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${record.isolated ? " · isolated checkout" : ""}`;
+    const where = agentWhere(record) || agentThinking(record);
+    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${where ? ` · ${where}` : ""}${record.isolated ? " · isolated checkout" : ""}`;
   }
   // The spawn's own result says whether the agent's changes reached your checkout; its line only says
   // it finished. The page says what was integrated, above the agent's report -- and says it plainly
@@ -12261,6 +12683,44 @@
     return c;
   }
 
+  // ---- where a helper ran (DGC Router, 0.51) ----
+  // agent id -> {system, model}: from router_status / router_changed, whose leases name the agent that holds each
+  // worker, and kept after it gives the worker back, so a finished helper still says where it ran. An agents snapshot
+  // carries the system's name too (`system`), which covers a helper this page never saw lease.
+  const agentSystems = new Map();
+  function noteRouterLeases(status) {
+    let changed = false;
+    for (const sys of Array.isArray(status?.systems) ? status.systems : []) {
+      for (const lease of Array.isArray(sys?.leases) ? sys.leases : []) {
+        const owner = String(lease?.owner || "");
+        if (!owner || owner === "probe" || owner === "main turn" || owner.startsWith("Pip run ")) continue;
+        const where = { system: String(sys.name || sys.id || ""), model: String(lease.model || ""), thinking: String(lease.thinking || "") };
+        const was = agentSystems.get(owner);
+        if (was && was.system === where.system && was.model === where.model && was.thinking === where.thinking) continue;
+        agentSystems.set(owner, where);
+        if (agentSystems.size > 512) agentSystems.delete(agentSystems.keys().next().value);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    agentMapChanged();
+    if (agentPageId) paintAgentPageMeta(agentPageId);
+  }
+  /** "on GPU box · qwen3:8b · thinking low", or "" for a helper the Router didn't place. */
+  function agentWhere(record) {
+    if (!record) return "";
+    const where = agentSystems.get(String(record.id || ""))
+      || (record.system ? { system: String(record.system), model: String(record.model || "") } : null);
+    if (!where || !where.system) return "";
+    const thinking = agentThinking({ thinking: where.thinking || record.thinking });
+    return `on ${where.system}${where.model ? ` · ${where.model}` : ""}${thinking ? ` · ${thinking}` : ""}`;
+  }
+  /** "thinking low": the level a helper thinks at (the agents snapshot's `thinking`, a Router lease's), else "". */
+  const AGENT_THINKING = { off: "off", low: "low", medium: "medium", high: "high", xhigh: "extra high", max: "max" };
+  function agentThinking(record) {
+    const level = AGENT_THINKING[String(record?.thinking || "")];
+    return level ? `thinking ${level}` : "";
+  }
   function agentRecordFrom(fields, receivedAt) {
     const record = { ...fields, receivedAt, order: agentOrder++ };
     delete record.type; delete record.seq; delete record.request_id;
@@ -12596,7 +13056,12 @@
       if (time) parts.push(time);
       if (Number(record.tokens || 0) > 0) parts.push(`${amTokens(record.tokens)} tokens`);
     }
-    if (record.model && record.model !== curModel) parts.push(String(record.model));
+    const where = agentWhere(record);
+    if (where) parts.push(where);
+    else {
+      if (record.model && record.model !== curModel) parts.push(String(record.model));
+      if (agentThinking(record)) parts.push(agentThinking(record));
+    }
     return parts;
   }
 
@@ -12671,6 +13136,68 @@
     text.append(desc, meta);
     row.append(dot, text);
     return { row, dot, desc, meta, tip: "", label: "" };
+  }
+  // A helper's line: its state, time and tokens, then where it ran ("on NAS · qwen3.5:9b"). Where it ran tells two
+  // helpers apart, so in a narrow row the line's start gives way and the system and model stay whole; only a row too
+  // narrow for them alone clips them. The start gives way a whole part at a time, last first (" tokens", then its
+  // number, then the time, then the state): in a 1440 px window it was cut mid-number ("Finished · 6s · 4.1… · on
+  // Workstation"). The line's text is the same either way (amFitMeta hides parts, it never changes their words).
+  function amSetMeta(meta, parts, fallback, where) {
+    const split = !!where && parts.length > 0 && parts[parts.length - 1] === where;
+    if (!split) {
+      if (meta.classList.contains("am-meta-split")) { meta.classList.remove("am-meta-split"); meta.replaceChildren(); }
+      agentsSetText(meta, parts.join(" · ") || fallback);
+      return;
+    }
+    let lead = meta.querySelector(":scope > .am-meta-lead"), sep = meta.querySelector(":scope > .am-meta-sep"),
+      place = meta.querySelector(":scope > .am-meta-where");
+    if (!meta.classList.contains("am-meta-split") || !lead || !sep || !place) {
+      meta.classList.add("am-meta-split");
+      lead = el("span", "am-meta-lead");
+      sep = el("span", "am-meta-sep");
+      place = el("span", "am-meta-where");
+      meta.replaceChildren(lead, sep, place);
+    }
+    const head = parts.slice(0, -1).join(" · ");
+    if (lead.textContent !== head) {
+      const pieces = [];
+      parts.slice(0, -1).forEach((part, i) => {
+        const text = (i ? " · " : "") + part;
+        const counted = /^(.*\S)( tokens?)$/.exec(text);
+        for (const piece of counted ? [counted[1], counted[2]] : [text]) {
+          const node = el("span", "am-meta-part");
+          node.textContent = piece;
+          pieces.push(node);
+        }
+      });
+      lead.replaceChildren(...pieces);
+    }
+    agentsSetText(sep, head ? " · " : "");
+    agentsSetText(place, where);
+    amFitMeta(meta);
+  }
+  // Shows the longest start of a helper's line that fits beside where it ran, whole parts only. A row not laid out
+  // yet (the map closed, a row not placed) is fitted once it is (agentMapChanged and the map's resize call it).
+  function amFitMeta(meta) {
+    const lead = meta.querySelector(":scope > .am-meta-lead"), sep = meta.querySelector(":scope > .am-meta-sep"),
+      place = meta.querySelector(":scope > .am-meta-where");
+    if (!lead || !sep || !place) return;
+    const pieces = [...lead.children];
+    for (const piece of pieces) piece.hidden = false;
+    lead.hidden = sep.hidden = !pieces.length;
+    const room = meta.clientWidth;
+    if (!room) return;
+    let left = room - place.scrollWidth - (pieces.length ? sep.getBoundingClientRect().width : 0), shown = 0;
+    for (const piece of pieces) {
+      const width = piece.getBoundingClientRect().width;
+      if (width > left + 0.5) break;
+      left -= width; shown += 1;
+    }
+    pieces.forEach((piece, i) => { piece.hidden = i >= shown; });
+    lead.hidden = sep.hidden = shown === 0;
+  }
+  function amFitAll() {
+    for (const meta of document.querySelectorAll("#agent-map .am-meta.am-meta-split")) amFitMeta(meta);
   }
   function amLabel(entry, label, tip) {
     if (entry.label !== label) { entry.label = label; entry.row.setAttribute("aria-label", label); }
@@ -12761,7 +13288,7 @@
     const stats = [amContinuedWords(record), ...amAgentStats(record)].filter(Boolean);
     agentsSetText(desc, name);
     // The word leads for every state but working, so no state rests on the dot's colour alone.
-    agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
+    amSetMeta(meta, record.state === "running" ? stats : [word, ...stats], word, agentWhere(record));
     const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
     const forPip = fix && pipType >= 0 ? `Pip fix for ${String(fix.name || "Pip").slice(0, 120)}` : "";
     amLabel(entry, [name, word, ...stats, forPip].filter(Boolean).join(", "),
@@ -12890,6 +13417,7 @@
       for (const [id] of agentStopping) if (!AGENT_ACTIVE.has(agentRecords.get(id)?.state)) agentStopping.delete(id);
       // Every open level stays live: the ones underneath show through the dimmed backdrop.
       paintAmMap();
+      amFitAll();                         // rows placed just now are laid out now: their lines fit
       if (amCard) paintAmCard();
       if (amTx) paintAmTranscript();
     } finally { amPainting = false; }
@@ -13426,7 +13954,9 @@
     const parent = record.parent_id ? agentRecords.get(String(record.parent_id)) : null;
     const step = (Array.isArray(parent?.log) ? parent.log : [])
       .find((ev) => ev?.type === "tool_call" && ev.call_id === record.call_id && typeof ev.args?.prompt === "string");
-    return step ? String(step.args.prompt).slice(0, 20000) : "";
+    if (step) return String(step.args.prompt).slice(0, 20000);
+    // A Pip fix's agent: no task call started it (the report's Fix did), and its record carries the fixer's brief.
+    return pipFixPrompts.get(String(record.id)) || "";
   }
   // The calls it made, from the same source its page draws: its own cards in the chat (a child's call
   // id carries its agent's id), else its step log.
@@ -13681,7 +14211,8 @@
   }
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
-    return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
+    return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "",
+      agentWhere(record) || [String(record.model || curModel || ""), agentThinking(record)].filter(Boolean).join(" · "),
       record.background ? "background" : "foreground"].filter(Boolean).join(" · ");
   }
   function amAgentNumbers(record) {
@@ -14465,7 +14996,7 @@
     const records = imageRecordsFor(ev);
     const omitted = Number.isSafeInteger(ev.omitted) && ev.omitted > 0 ? Math.min(ev.omitted, 10000) : 0;
     if (!records.length && !omitted) return;
-    const stick = atBottom();
+    const stick = atEnd();
     const owner = imageOwnerFor(ev);
     owner._images = [...(owner._images || []), ...records];
     owner._imagesOmitted = (owner._imagesOmitted || 0) + omitted;
@@ -14541,6 +15072,7 @@
     const chip = el("button", record.compact ? "image-chip prompt-att chip" : "image-chip");
     chip.type = "button";
     chip.dataset.state = record.state;
+    chip.dataset.picOpen = "";                       // a folded block's Open opens this (media/pictureFold.js)
     const dims = imageDims(record);
     const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
     chip.setAttribute("aria-label", `Open image ${index + 1} of ${count}: ${record.name}${dims ? `, ${record.width} by ${record.height}` : ""}`);

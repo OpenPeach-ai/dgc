@@ -63,6 +63,9 @@ def _imports_table(db):
         db.execute('CREATE TABLE IF NOT EXISTS pip_usage_run_models(run_id TEXT NOT NULL, model TEXT NOT NULL, provider TEXT NOT NULL, '
                    'host TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, requests INTEGER NOT NULL, '
                    'PRIMARY KEY(run_id, model, provider, host))')
+        # 0.51: the DGC Router system a routed run's requests went to (NULL otherwise), as in the requests table.
+        if 'system_id' not in {row[1] for row in db.execute('PRAGMA table_info(pip_usage_run_models)')}:
+            db.execute('ALTER TABLE pip_usage_run_models ADD COLUMN system_id TEXT')
         db.execute('COMMIT')
     except BaseException:
         db.execute('ROLLBACK')
@@ -96,9 +99,10 @@ def run_totals(run_ids, *, home=None) -> dict:
     return totals
 
 
-def run_models(run_ids, *, home=None) -> dict:
+def run_models(run_ids, *, home=None, with_system=False) -> dict:
     """{run_id: [(model, provider, host, input_tokens, output_tokens, requests)]} for runs imported
-    since runs recorded their models; an older run has none (its totals still count)."""
+    since runs recorded their models; an older run has none (its totals still count). ``with_system`` adds
+    each row's stored DGC Router system id (or None) at the end."""
     from . import config, usage_ledger as ledger
     ids = [r for r in run_ids if isinstance(r, str) and RUN_ID.fullmatch(r)]
     path = (Path(home) if home is not None else Path(config.USER_HOME)) / ledger.LEDGER_NAME
@@ -109,21 +113,35 @@ def run_models(run_ids, *, home=None) -> dict:
         with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=.2)) as db:
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='pip_usage_run_models'").fetchone() is None:
                 return {}
+            stored = 'system_id' in {row[1] for row in db.execute('PRAGMA table_info(pip_usage_run_models)')}
+            system = ',system_id' if with_system and stored else ''
             for start in range(0, len(ids), 500):
                 chunk = ids[start:start + 500]
                 marks = ",".join("?" * len(chunk))
-                for row in db.execute('SELECT run_id,model,provider,host,input_tokens,output_tokens,requests '
+                for row in db.execute(f'SELECT run_id,model,provider,host,input_tokens,output_tokens,requests{system} '
                                       f'FROM pip_usage_run_models WHERE run_id IN ({marks})', chunk):
-                    if all(isinstance(v, str) for v in row[:4]) and all(type(v) is int and v >= 0 for v in row[4:]):
-                        found.setdefault(row[0], []).append(tuple(row[1:]))
+                    counts = row[4:7]
+                    if all(isinstance(v, str) for v in row[:4]) and all(type(v) is int and v >= 0 for v in counts):
+                        entry = tuple(row[1:7])
+                        if with_system:
+                            entry += ((row[7] if system and isinstance(row[7], str) else None),)
+                        found.setdefault(row[0], []).append(entry)
     except sqlite3.Error:
         return {}
     return found
 
 
-def import_run(run_id, *, home=None):
+def import_run(run_id, *, home=None, routed=None):
+    """``routed`` is (system id, address) of the DGC Router worker the run leased: its requests to that address
+    are stored with that system's id, as the parent's own requests are (Token usage by system)."""
     from . import config, usage_ledger as ledger
+    from .usage_systems import clean_system_id
     if not isinstance(run_id,str) or not RUN_ID.fullmatch(run_id): raise ValueError('Invalid Pip usage run identity')
+    routed_id, routed_host = None, ''
+    if isinstance(routed, (tuple, list)) and len(routed) == 2:
+        routed_id, routed_host = clean_system_id(routed[0]), ledger.endpoint_host(routed[1])
+    def system_of(host):
+        return routed_id if routed_id and routed_host and host == routed_host else None
     home=Path(home) if home is not None else Path(config.USER_HOME)
     base=home/'pips'/'runs'/run_id/'worker-home'/'.dgc'
     # Refuse a worker-controlled ancestor redirect, not only the final filename.
@@ -139,8 +157,8 @@ def import_run(run_id, *, home=None):
         try:
             if db.execute('SELECT 1 FROM pip_usage_imports WHERE run_id=?',(run_id,)).fetchone():
                 db.execute('ROLLBACK');return False
-            db.executemany('INSERT INTO requests(ts,provider,host,model,source,input_tokens,output_tokens,cached_input_tokens,metered) VALUES (?,?,?,?,?,?,?,?,?)',
-                [(r[0],r[1],r[2],r[3],'pip',*r[4:]) for r in rows if r[0]>=cutoff])
+            db.executemany('INSERT INTO requests(ts,provider,host,model,source,input_tokens,output_tokens,cached_input_tokens,metered,system_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [(r[0],r[1],r[2],r[3],'pip',*r[4:],system_of(r[2])) for r in rows if r[0]>=cutoff])
             # The run's own totals too, all of its requests: what each Pip costs (pip_spend),
             # including a run that failed or timed out and so reported no usage of its own.
             db.execute('INSERT INTO pip_usage_imports(run_id,imported_at,input_tokens,output_tokens,requests) VALUES (?,?,?,?,?)',
@@ -149,8 +167,8 @@ def import_run(run_id, *, home=None):
             for r in rows:
                 entry=models.setdefault((r[3],r[1],r[2]),[0,0,0])
                 entry[0]+=r[4];entry[1]+=r[5];entry[2]+=1
-            db.executemany('INSERT INTO pip_usage_run_models(run_id,model,provider,host,input_tokens,output_tokens,requests) VALUES (?,?,?,?,?,?,?)',
-                           [(run_id,model,provider,host,*totals) for (model,provider,host),totals in models.items()])
+            db.executemany('INSERT INTO pip_usage_run_models(run_id,model,provider,host,input_tokens,output_tokens,requests,system_id) VALUES (?,?,?,?,?,?,?,?)',
+                           [(run_id,model,provider,host,*totals,system_of(host)) for (model,provider,host),totals in models.items()])
             db.execute('COMMIT')
         except BaseException:
             db.execute('ROLLBACK');raise

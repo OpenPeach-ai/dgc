@@ -231,6 +231,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "agent": _S(False), "engine": _S(False),
     },
     "request_expired": {"id": _S(), "message": _S(False)},
+    # ``choices`` (ready.capabilities.permission_choices = 1): exactly the answers this card offers, from once,
+    # always and deny. A DGC Router change (router_update) and a look on the network (router_find) send
+    # ["once", "deny"]: they are asked every time, so the card has no Always (an "always" answer counts as once).
+    # An editor draws a button per choice; an older CLI always sent all three.
     "permission_request": {
         "id": _S(), "call_id": _NS(False), "name": _S(), "args": _O(),
         "command": _NS(False), "suggested_rule": _S(), "choices": _A(),
@@ -363,6 +367,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # is still working; 300 s for a remote one) or a whole number of seconds, "0" for no limit. `between_words_s` is
     # model_idle_timeout_s, seconds of silence mid-answer, 0 for no limit.
     "model_wait_settings": {"request_id": _S(False), "first_token": _S(), "between_words_s": _I()},
+    # 0.51: how hard helpers (sub-agents) think, for Settings -> Models -> Sub-agents -> Thinking. Sent before `config`
+    # to a client whose get_config `fields` named "subagent_settings" (ready.capabilities.subagent_thinking; an older
+    # client never asks, so never sees it). `thinking` is set_config's subagent_thinking: "" (the main chat's level),
+    # off, low, medium, high or xhigh. Which level wins: a DGC Router model's own choice, then the agent file's
+    # effort:, then this, then the main chat's.
+    "subagent_settings": {"request_id": _S(False), "thinking": _S()},
     # 0.48: the prompt cache's clock for this chat, only where DGC knows it from the provider itself:
     # Anthropic (the reply's own cache read/write and the TTL it wrote) and a local Ollama (its own
     # /api/ps unload time). "unknown" hides the clock (every other provider). "warm": the cache lasts
@@ -559,7 +569,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     # machine from what each provider reported. Nothing is fetched from a provider. Nested shapes:
     #   totals   {input_tokens, output_tokens, cached_input_tokens, requests, unmetered_requests}
     #   by_model [{model, provider, host, requests, unmetered_requests, input_tokens,
-    #              output_tokens, cached_input_tokens}]  sorted by input+output tokens, at most 100
+    #              output_tokens, cached_input_tokens, system?, system_id?, system_kind?}]
+    #            sorted by input+output tokens, at most 100. Since capability usage_by_system each row
+    #            names where it ran: ``system`` a name ("NAS", "This computer", "Ollama Cloud"),
+    #            ``system_id`` its id (a DGC Router system's id; "computer:this"; "service:<name>";
+    #            "host:<host>"), ``system_kind`` "system" (a Router system) | "computer" | "service".
+    #            Keys inside the row, never new top-level fields: an Ollama cloud model is "Ollama Cloud".
     #   by_day   [{date "YYYY-MM-DD" (local), input_tokens, output_tokens, cached_input_tokens,
     #              requests}]  every local day of the range, oldest first, zero days included
     # ``timezone`` names the local time the day boundaries follow; ``error`` is set (with zero
@@ -580,7 +595,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     #            input_tokens, output_tokens, requests}] (its top 5; [] before runs recorded them)}]
     #            most tokens first, at most 200
     #   by_model [{model, provider, host, requests, unmetered_requests, input_tokens, output_tokens,
-    #             cached_input_tokens}]  the Pips' requests in the range by model, most tokens first
+    #             cached_input_tokens, system?, system_id?, system_kind?}]  the Pips' requests in the
+    #             range by model, most tokens first (system keys as in usage_report)
+    # With get_pip_usage_report.system, everything here is that system's part.
     # ``omitted`` counts Pips past that; ``error`` is set when the registry or ledger was unreadable.
     "pip_usage_report": {
         "request_id": _S(),
@@ -615,7 +632,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "duration_ms": _I(), "tool_calls": _I(), "tokens": _I(False), "message": _S(False),
     },
     # The answer to list_agents, and the snapshot after a chat changes. ``items`` <= 64 (active
-    # first, then the most recent ended); ``total`` and ``active`` are always exact.
+    # first, then the most recent ended); ``total`` and ``active`` are always exact. An item may
+    # carry ``system``: the DGC Router system it ran on (a name), restored with a reopened chat.
     "agents": {"items": _A(), "total": _I(), "active": _I(), "request_id": _S(False)},
     # One step of a PARALLEL child's work, live, while it is still working.
     #
@@ -855,7 +873,11 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_outline": {"request_id": _S()},
     "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
-    "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},
+    # saved_mode (offered as ready.capabilities.resume_saved_mode): the person reopened this chat themselves, so it
+    # comes back in the mode it was saved in, even one that asks less than the mode it replaces -- still re-checked
+    # (acceptEdits and auto only in a folder still trusted) and never over a mode named for the run. Without it a
+    # reopen only lowers the mode (an SDK app, a script).
+    "resume_session": {"path": _NS(False), "latest": _B(False), "saved_mode": _B(False), "request_id": _S(False)},
     "list_sessions": {"request_id": _S(False), "limit": _I(False), "offset": _I(False), "query": _S(False)},
     "delete_session": {"path": _S(), "request_id": _S(False)},
     "list_checkpoints": {"request_id": _S(False)},
@@ -908,14 +930,20 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "stop_troupe": {"run_id": _S(), "request_id": _S(False)},
     # ---- v13 token usage (local ledger) -------------------------------------------------------
     # Read-only and allowed while a turn runs; answered by one usage_report with this request_id.
+    # ``system`` (capability usage_by_system; send it only when ready.capabilities says so, an older
+    # CLI rejects the field): one system's usage only, a by_model row's ``system_id`` (or a system's
+    # name). Absent or "", every system.
     "get_usage": {
         "request_id": _S(),
         "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+        "system": _S(False),
     },
-    # Read-only and allowed while a turn runs; answered by one pip_usage_report.
+    # Read-only and allowed while a turn runs; answered by one pip_usage_report. ``system`` as for
+    # get_usage (capability usage_by_system).
     "get_pip_usage_report": {
         "request_id": _S(),
         "range": _f("string", enum=("today", "7d", "30d", "month", "all")),
+        "system": _S(False),
     },
     # ---- end v13 token usage -------------------------------------------------------------------
     # ---- v14 --------------------------------------------------------------------------------------
@@ -1136,6 +1164,165 @@ EVENT_FIELDS["agent_runs"] = {"items": _A(), "request_id": _S(False)}
 COMMAND_FIELDS["server_window"] = {"request_id": _S(False)}
 EVENT_FIELDS["server_window"] = {"request_id": _S(False), "model": _S(), "window": _I(),
                                   "server": _S(False), "trained": _I(False)}
+
+# ---- DGC Router (0.51, dgc/router.py) ------------------------------------------------------------
+# The user's other computers that run models ("systems"), for sub-agents and Pips. Advertised as
+# ready.capabilities.router = {version: 1, commands: [...], enabled, pips_default?, status?}: pips_default 1 when
+# set_config takes pips_model "router" / "router:<system>/<model>" (every Pip on Default runs on the Router while it is
+# on), status 2 when each system's row also carries available and the server's own room (below). Each command names
+# its request and is answered by
+# one `router_status` carrying that request_id, or by `command_rejected` (command router_*, a reason, a message):
+#   router_status {request_id, refresh?}    the status now; refresh checks every system and re-reads it first.
+#   router_update {request_id, action, ...} one change, made at once (the user made it in Settings): action is one of
+#                                           turn_on, turn_off, add_system, edit_system, remove_system, enable_system,
+#                                           disable_system, set_model, set_jobs, set_when_busy, set_key, prefer; the other
+#                                           fields as the router_update tool takes them. `key` goes only with set_key: the
+#                                           system's key, kept in secrets.json and never sent back (status says has_key).
+#                                           prefer {system?, model?} saves nothing: the next turn's helpers run there
+#                                           (an SDK run's system=), and that turn's end clears it; it is answered before
+#                                           the next command is read. The answer carries `change`, the change in words.
+#   router_probe {request_id, system, model?, checks?}  tests one system (models, speed, parallel, tools): `probe`
+#                                           (it ends with `suggest`, as router_suggestion's `suggestion`).
+#   router_find {request_id}                model servers on this computer's own /24, known ports only: `found`.
+#   router_hardware {request_id, system, url?, token?}  (0.51, part 2) sets up a system's hardware readout: url is an
+#                                           exporter's or dgc node's address (DGC detects which; "" or "off" stops
+#                                           it), token a dgc node's pairing token, kept in secrets.json bound to that
+#                                           address and never sent back (hardware.has_token says so). With neither, it
+#                                           reads the hardware now. Answered by router_status with `change`.
+#   router_suggest {request_id, system, context?}  workers per model from memory, the server and what was measured:
+#                                           answered by `router_suggestion {request_id, suggestion}`. router_update
+#                                           action apply_suggestion {system, context?} makes it the settings.
+# `status` is an open object (a client reads the keys it knows): {enabled, when_busy, workers: {total, free, busy},
+# line, systems: [{id, name, base_url, server, enabled, jobs, workers, busy, free, one_model_at_a_time, health: {state
+# (online | offline | unknown), latency_ms?, error?, offline_since?, checked?}, has_key, warning?, memory_gb?,
+# server_load?, server_slots?, server_slot_context?, server_kv_tokens?, available?: [{name, params_b?, size_class?, quant?,
+# context_max?, tools?, vision?, loaded?, loaded_context?, cloud?, kind?}] (every model its server serves, at most 64),
+# discovery_error?, hardware?, leases: [{owner, label, model, job, started, this_process}],
+# models:
+# [{name, workers, busy, free, context, note?, params_b?, size_class?, quant?, tools?, vision?, loaded?, cloud?,
+# context_max?, tokens_per_s?, ttft_ms?, speed_at?, parallel?, use?, subagents?}]}]}. A lease's `owner` is the sub-agent's
+# id (agent_started.id), "Pip run <run id>", "probe" or "main turn": the agent map's system badge comes from it. Its
+# `label` is what to show a person: the helper's description, "Pip <name>", "the main chat" or "a test". A system's
+# `hardware` (when set up) is {source: exporter | node, url, kind?, line? ("GB10 · 92 of 128 GB · 34% · 61°C"), at?,
+# gpus?: [{name, memory_total_bytes?, memory_used_bytes?, memory_used_pct?, util_pct?, temp_c?, power_w?, unified?}],
+# memory?: {total_bytes, available_bytes?}, cpu?: {cores?, load1?, util_pct?}, gpu_memory?, error?, has_token?}. A
+# `suggestion` is {system, name, context, memory: {total_gb, source, unified} | null, models: [{name, context, workers
+# (null: nothing backs a number), basis (memory | measured | slots | kv_tokens | none), line, note?, weights_gb?,
+# kv_gb_per_worker?, memory_gb?}], workers, notes, line, applicable}. Once a
+# client has sent any router command it is also sent `router_changed {status, why}` whenever the status changes (a
+# worker leased or given back, a system offline or back, the settings changed, here or by another DGC process such as
+# `dgc router` in a terminal, or a hardware reading, a server's model list or a test saved): why is leased | released |
+# offline | online | settings | state. A client that never asks is never sent one.
+COMMAND_FIELDS["router_status"] = {"request_id": _S(), "refresh": _B(False)}
+COMMAND_FIELDS["router_update"] = {
+    "request_id": _S(), "action": _S(), "system": _S(False), "name": _S(False), "base_url": _S(False),
+    "jobs": _A(False), "models": _A(False), "workers": _I(False), "one_model_at_a_time": _B(False),
+    "memory_gb": _N(False), "model": _S(False), "use": _B(False), "context": _I(False), "note": _S(False),
+    "when_busy": _S(False), "key": _S(False)}
+COMMAND_FIELDS["router_probe"] = {"request_id": _S(), "system": _S(), "model": _S(False), "checks": _A(False)}
+COMMAND_FIELDS["router_find"] = {"request_id": _S()}
+COMMAND_FIELDS["router_hardware"] = {"request_id": _S(), "system": _S(), "url": _S(False), "token": _S(False)}
+COMMAND_FIELDS["router_suggest"] = {"request_id": _S(), "system": _S(), "context": _I(False)}
+# router_thinking {request_id, system, model, thinking} (ready.capabilities.router.thinking): how hard a helper on that
+# model of that system thinks, "" for the helper's own level, else off, low, medium or high. Answered by router_status
+# with `change`. Each model row of `status` then carries `thinking` (its choice, absent for the helper's level) and
+# `thinks` (whether its server says the model can think); each lease, the level its helper uses.
+COMMAND_FIELDS["router_thinking"] = {"request_id": _S(), "system": _S(), "model": _S(), "thinking": _S()}
+EVENT_FIELDS["router_suggestion"] = {"request_id": _S(), "suggestion": _O()}
+EVENT_FIELDS["router_status"] = {"request_id": _S(False), "status": _O(), "change": _S(False), "probe": _O(False),
+                                 "found": _O(False)}
+EVENT_FIELDS["router_changed"] = {"status": _O(), "why": _S()}
+
+# ---- Image generation (0.51, dgc/images.py) ----------------------------------------------------------------------
+# The user's image generators (ComfyUI, Automatic1111, OpenAI-compatible, Gemini, Black Forest Labs, fal.ai,
+# Replicate). Advertised as ready.capabilities.images = {version: 1, commands: [...], generators: n}. Each command
+# names its request and is answered by one event carrying that request_id, or by `command_rejected` (command images_*,
+# a reason, a message):
+#   images_list {request_id, refresh?}             -> images_status: every generator; refresh tests each first.
+#   images_update {request_id, action, ...}        -> images_status with `change` (in words). action is one of
+#       add_generator, edit_generator, remove_generator, set_default, set_project_choice, set_auto_fallback,
+#       set_save_dir, set_key, test. `generator` names one (its id or name). add_generator takes provider, base_url,
+#       name, id, model, size, steps, negative_prompt, asks, good_for, enabled, monthly_limit_usd, system, default,
+#       and for ComfyUI `workflow` (API format) with `mapping`: without a mapping (or `confirm: true`) nothing is saved
+#       and the answer carries `pending` {generator, mapping, mapping_lines, notes} to show and confirm. `key` goes
+#       only with set_key, is kept in secrets.json bound to the generator's address, and is never sent back (a
+#       generator says has_key).
+#   images_generate {request_id, prompt, ...}      -> images_result: one generation outside a turn (the SDK's
+#       session.images.generate): size or aspect, count 1-4, images (project paths), mask, generator, model, seed,
+#       negative_prompt, save_to. A generator that asks before each image runs only with `approve: true`; without,
+#       the answer is ok false, error.kind "needs_approval", and `card` (provider, model, size, count, price).
+#   images_library {request_id, query?, surface?, limit?, offset?} -> images_library: every image DGC made, newest
+#       first ({path, rel, surface, generator, provider, model, prompt, seed, width, height, bytes, cost_usd,
+#       created_at, project?, session?, chat?}).
+# `status` is an open object: {generators: [{id, name, provider, provider_name, base_url, model, size, enabled, asks,
+# paid, local, price_usd, price, good_for, can: {edit, mask, text, max_side, seed}, default, has_key, key_from,
+# spent_this_month_usd, monthly_limit_usd?, workflow?, mapping?, system?, state?: {ok, kind?, detail, at}}], default,
+# auto_fallback, save_dir, project_choice, chosen, through_plugins}. `price_usd` is a picture's price; a generator
+# that makes only videos has none, and its `price` says its video price, as `video.price_per_s` does.
+# During a turn, when the model's generate_image made pictures (they show as tool_images too), the backend sends
+# `images_made {call_id, images, generator, model, cost_usd}` to a client that has sent any images_* command (an
+# older client never asked, so it is never sent one).
+COMMAND_FIELDS["images_list"] = {"request_id": _S(), "refresh": _B(False)}
+COMMAND_FIELDS["images_update"] = {
+    "request_id": _S(), "action": _S(), "generator": _S(False), "provider": _S(False), "base_url": _S(False),
+    "name": _S(False), "id": _S(False), "model": _S(False), "size": _S(False), "steps": _I(False),
+    "negative_prompt": _S(False), "asks": _B(False), "good_for": _S(False), "enabled": _B(False),
+    "monthly_limit_usd": _N(False), "system": _S(False), "default": _B(False), "workflow": _O(False),
+    "mapping": _O(False), "confirm": _B(False), "auto_fallback": _B(False), "save_dir": _S(False), "key": _S(False)}
+COMMAND_FIELDS["images_generate"] = {
+    "request_id": _S(), "prompt": _S(), "size": _S(False), "aspect": _S(False), "count": _I(False),
+    "images": _A(False), "mask": _S(False), "generator": _S(False), "model": _S(False), "seed": _I(False),
+    "negative_prompt": _S(False), "save_to": _S(False), "approve": _B(False)}
+COMMAND_FIELDS["images_library"] = {"request_id": _S(), "query": _S(False), "surface": _S(False), "limit": _I(False),
+                                    "offset": _I(False)}
+EVENT_FIELDS["images_status"] = {"request_id": _S(False), "status": _O(), "change": _S(False), "pending": _O(False),
+                                 "notes": _A(False), "tested": _O(False)}
+EVENT_FIELDS["images_result"] = {"request_id": _S(), "ok": _B(), "text": _S(), "images": _A(), "generator": _S(False),
+                                 "model": _S(False), "cost_usd": _N(False), "error": _O(False), "card": _O(False)}
+EVENT_FIELDS["images_library"] = {"request_id": _S(), "images": _A(), "total": _I(), "next_offset": _I(False)}
+EVENT_FIELDS["images_made"] = {"call_id": _NS(False), "images": _A(), "generator": _S(), "model": _S(False),
+                               "cost_usd": _N(False)}
+# A generator row in `status` also says what it makes: `makes` (images | videos | both), and for one that makes
+# videos `video`: {model, label, durations, default_duration_s, resolutions, aspects, audio (no | option | always),
+# start_image, price_per_s (words), price_usd_default, minutes, asks, pips, note?}; `key_spent_this_month_usd` is what
+# its key (every generator on the same provider and address) spent this month, which its monthly limit is read
+# against. images_update's add_generator and edit_generator take `makes`, `video_asks` (false: its videos are made
+# without a card, the user's own Settings switch) and `video_pips` (the Pips whose routines may make its videos).
+COMMAND_FIELDS["images_update"].update({"makes": _S(False), "video_asks": _B(False), "video_pips": _A(False)})
+
+# ---- Video generation (0.51, dgc/videos.py) ----------------------------------------------------------------------
+# A video is a long job: started, then made in the background, kept on disk (~/.dgc/videos/jobs) so it outlives a
+# window reload. Advertised as ready.capabilities.videos = {version: 1, commands: [...], generators: n}. Each command
+# is answered by one event carrying its request_id, or by `command_rejected`:
+#   videos_jobs {request_id, job?}       -> video_jobs: that job, or this chat's and every unfinished one. A job a
+#                                           reload left behind is polled again here.
+#   videos_stop {request_id, job}        -> video_jobs with the stopped job and `change` (what was charged, in words).
+#   videos_generate {request_id, prompt, duration_s?, aspect?, resolution?, image?, audio?, generator?, model?, seed?,
+#       negative_prompt?, save_to?, replace?, approve?}  -> video_jobs: the started job. Every video runs only with
+#       approve: true (or a generator the user set to make videos without asking); without, jobs is [] and the answer
+#       carries `card` and error.kind "needs_approval" ("over_limit" when it would pass the monthly limit: never sent).
+#   videos_library {request_id, query?, surface?, limit?, offset?} -> videos_library: every video DGC made, newest
+#       first ({kind: "video", path, rel, poster?, surface, generator, provider, model, prompt, seconds, width, height,
+#       bytes, mime, cost_usd, created_at, job, project?, session?, chat?, pip?}).
+# A job (open object): {id, state (queued | running | done | failed | cancelled), status (the provider's state in
+# words), generator, generator_name, provider, model, label, prompt, duration_s, resolution, aspect, audio,
+# estimate_usd, price, minutes, surface, started, finished, elapsed_s, can_stop, session?, call_id?, chat?, message?,
+# action?, pip?, run?, cost_usd?, charged?, result?: {path, rel, file, sidecar, poster?, bytes, mime, seconds?, width?,
+# height?}, error?: {kind, message}}. Once a client has sent any videos_* command it is also sent `video_job {job}`
+# whenever one of this chat's jobs (or one it started or asked about) changes. A client that never asks is never
+# sent one.
+COMMAND_FIELDS["videos_jobs"] = {"request_id": _S(), "job": _S(False)}
+COMMAND_FIELDS["videos_stop"] = {"request_id": _S(), "job": _S()}
+COMMAND_FIELDS["videos_generate"] = {
+    "request_id": _S(), "prompt": _S(), "duration_s": _I(False), "aspect": _S(False), "resolution": _S(False),
+    "image": _S(False), "audio": _B(False), "generator": _S(False), "model": _S(False), "seed": _I(False),
+    "negative_prompt": _S(False), "save_to": _S(False), "replace": _B(False), "approve": _B(False)}
+COMMAND_FIELDS["videos_library"] = {"request_id": _S(), "query": _S(False), "surface": _S(False), "limit": _I(False),
+                                    "offset": _I(False)}
+EVENT_FIELDS["video_job"] = {"job": _O()}
+EVENT_FIELDS["video_jobs"] = {"request_id": _S(), "jobs": _A(), "change": _S(False), "card": _O(False),
+                              "error": _O(False)}
+EVENT_FIELDS["videos_library"] = {"request_id": _S(), "videos": _A(), "total": _I(), "next_offset": _I(False)}
 
 # ---- what a turn's Edited card lists (0.48) -------------------------------------------------------
 # The files the turn's recovery point will restore, with line counts the CLI makes from each file's
@@ -1464,6 +1651,11 @@ EVENT_FIELDS.update({
     "chatdgc_turn": {"conversation_id": _S(), "state": _f("string", enum=("started", "ended")),
                      "reply_id": _S(), "request_id": _S(False)},
     "chatdgc_delta": {"conversation_id": _S(), "message_id": _S(), "text": _S(False), "thinking": _S(False)},
+    # The reply's model has been asked and hasn't started yet: which model, and how long it usually takes to start
+    # (`usual_s`, dgc/model_pace.py; 0 when DGC hasn't seen it often enough). Sent once, right after
+    # chatdgc_turn started, for a new reply; the model's first part (a delta or an activity) ends the wait. A chat
+    # opened mid-wait has the reply with `waiting` {model, usual_s, elapsed_s} in its messages.
+    "chatdgc_waiting": {"conversation_id": _S(), "message_id": _S(), "model": _S(), "usual_s": _N()},
     # What the reply is doing besides writing: `text` is the query while it searches the web.
     "chatdgc_activity": {"conversation_id": _S(), "message_id": _S(),
                          "kind": _f("string", enum=("searching", "looking", "compacting", "plugin", "making", "canvas", "analyzing")), "text": _S()},
@@ -1634,6 +1826,53 @@ EVENT_FIELDS.update({
     "mod_offer": {"id": _S(), "name": _S(), "mod": _S(), "version": _S(), "folder": _S(), "asks": _A(), "more": _B(),
                   "surface": _MOD_SURFACE},
 })
+
+# ---- MCP Apps (dgc/mcp_apps.py): a plugin's own card in the chat --------------------------------------------------
+# Offered as ready.capabilities.mcp_apps ({version, protocol}: the MCP Apps revision the bridge speaks). Nothing is sent
+# until a client says it draws cards: `watch_mcp_apps` (a Work chat's, with its chat_id; `surface` "chat" for ChatDGC's
+# screens, "pip" for Pips' chats). Then a tool whose server gave it a card (`_meta.ui.resourceUri`) shows it:
+# `mcp_app_card` is one card -- its id, the call it came from, which surface and chat it is in, the plugin, the tool and
+# its `tool_info` {name, title?, description, inputSchema}, its `ui://` address, `url` (where this process serves its
+# page: one loopback origin per plugin, behind the card's own token, with its CSP), `tool_input` and the tool's whole
+# `tool_result` {content, structuredContent?, _meta?, isError?}, the domains its page declared (`csp`, with
+# `declared_csp` false when it declared none: then it may reach nothing), the sites it opens without asking
+# (`link_hosts`, "*.x" for x and its subdomains), `permissions`, `prefers_border`, and `html` (its page) live when it
+# fits one frame, never on replay: `mcp_app_get` answers `mcp_app_resource` with the page and the exact CSP header
+# for an SDK app that draws the card itself. A Work chat's get_history replays its cards as `mcp_app_card` items; a
+# ChatDGC reply and a Pip's reply keep theirs as `apps` [{card_id, server, plugin, tool, call_id, created_at}].
+# What a card asks of its server: `mcp_app_call` (tools/call or resources/read, only on the card's own server), answered
+# by `mcp_app_reply` {result} or {error}, or first by `mcp_app_reply` {ask} -- DGC's Allow card for a change (`always`
+# false for a plugin that can move money) -- which `mcp_app_answer` decides (once, always, deny; its request_id, when
+# sent, is the call's). `mcp_app_context` is a card's
+# ui/update-model-context: the model's next turn in that chat gets it once, as untrusted plugin content. A card's
+# ui/message is the client's to send as the user's own message, labelled with the card's plugin.
+MCP_APP_SURFACES = ("work", "chat", "pip")
+_MCP_APP_SURFACE = _f("string", enum=MCP_APP_SURFACES)
+COMMAND_FIELDS.update({
+    "watch_mcp_apps": {"surface": _f("string", required=False, enum=MCP_APP_SURFACES), "request_id": _S(False)},
+    "mcp_app_call": {"request_id": _S(), "card_id": _S(), "method": _f("string", enum=("tools/call", "resources/read")),
+                     "params": _O(False)},
+    "mcp_app_answer": {"ask_id": _S(), "choice": _f("string", enum=("once", "always", "deny")),
+                       "request_id": _S(False)},
+    "mcp_app_context": {"card_id": _S(), "content": _A(False), "structured_content": _O(False),
+                        "request_id": _S(False)},
+    "mcp_app_get": {"request_id": _S(), "card_id": _S()},
+})
+EVENT_FIELDS.update({
+    "mcp_app_card": {"card_id": _S(), "call_id": _NS(False), "surface": _MCP_APP_SURFACE, "server": _S(), "plugin": _S(),
+                     "tool": _S(), "uri": _S(), "url": _S(), "tool_input": _O(), "tool_result": _O(), "tool_info": _O(),
+                     "csp": _O(), "declared_csp": _B(), "link_hosts": _A(), "created_at": _S(False),
+                     "permissions": _O(False), "prefers_border": _B(False), "conversation_id": _S(False),
+                     "message_id": _S(False), "pip_id": _S(False), "html": _S(False)},
+    # One answer per mcp_app_call: {result} or {error}; or, for a change DGC asks about first, {ask: {ask_id, card_id,
+    # plugin, server, tool, title, arguments, always, money}} -- DGC's Allow card -- and then, once mcp_app_answer
+    # decides it, a second mcp_app_reply with the same request_id and the outcome.
+    "mcp_app_reply": {"card_id": _S(), "request_id": _S(), "result": _O(False), "error": _O(False), "ask": _O(False)},
+})
+# mcp_app_get's answer: the card as mcp_app_card carries it (its whole result, never shortened) with its page and the
+# exact Content-Security-Policy header DGC serves the page with.
+EVENT_FIELDS["mcp_app_resource"] = {**{key: value for key, value in EVENT_FIELDS["mcp_app_card"].items() if key != "html"},
+                                    "request_id": _S(), "html": _S(), "csp_header": _S()}
 
 # Names the envelope owns. A payload field with any of these names would overwrite it on the wire
 # (Emitter.emit builds {"type", "seq"} and then applies the fields), so none may be declared.

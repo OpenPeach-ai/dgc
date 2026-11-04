@@ -18,7 +18,10 @@ SERVER = "microsoft--mail"
 TOOLKIT = "outlook"
 READS = {"MICROSOFT_SEARCH_MAIL": "search_mail", "MICROSOFT_READ_MAIL": "read_mail",
          "MICROSOFT_LIST_MAIL_FOLDERS": "list_mail_folders"}
-MAX_RESULT = 32768
+MAX_RESULT = 32768          # bytes of the answer a Pip is given
+# Bytes of the plugin's own answer read at all: a parse guard well above what it sends (a message body cut at
+# microsoft_graph.MAX_TEXT characters, up to 3 bytes each, pretty-printed), never the limit of what can be read.
+MAX_RAW = 1024 * 1024
 
 
 def spec(config):
@@ -30,6 +33,19 @@ def spec(config):
             or "mail" not in microsoft_graph.parse_args(found.get("args"))[0]):
         raise RegistryError("connection_unavailable", "Connect Microsoft Mail in Settings → Plugins first.")
     return found
+
+
+def ready(config) -> bool:
+    """DGC's Microsoft Mail plugin is set up (added, turned on, with mail): only then may a Pip be told Outlook Mail goes
+    through "the user's existing Microsoft plugin". Told that in a home with none, Core greeted a user with "the only
+    app connected is Outlook Mail through a Microsoft plugin" (seen in testing)."""
+    try:
+        spec(config)
+    except RegistryError:
+        return False
+    except Exception:                       # noqa: BLE001 - an unreadable plugin record is a plugin not set up
+        return False
+    return True
 
 
 def _manager(config, cancel):
@@ -58,7 +74,7 @@ def _route(manager, tool):
 def _call(manager, tool, arguments, cancel):
     raw = manager.call(_route(manager, tool), arguments, cancel=cancel,
                        input_handler=lambda *a, **kw: {"action": "cancel"})
-    if not isinstance(raw, str) or raw.startswith("ERROR:") or len(raw.encode()) > MAX_RESULT:
+    if not isinstance(raw, str) or raw.startswith("ERROR:") or len(raw.encode()) > MAX_RAW:
         raise RegistryError("app_read_failed", "Microsoft Mail did not complete the bounded read.")
     try:
         return json.loads(raw)
@@ -118,6 +134,28 @@ def _arguments(tool, arguments):
     raise RegistryError("unsupported_app_action", "Only Outlook mail search, one-message read and folder listing are available to this Pip.")
 
 
+def _text(value) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _fit(result) -> str:
+    """The answer as the Pip's JSON within MAX_RESULT. A long message's body is cut to fit, and says so: a newsletter
+    or a long thread is read, never refused."""
+    text = _text(result)
+    if len(text.encode()) <= MAX_RESULT or not isinstance(result, dict) or not isinstance(result.get("body"), str):
+        return text
+    body = result["body"]
+    cut = lambda n: {**result, "body": body[:n] + f"\n[… {len(body) - n} more characters of this message not shown]"}
+    low, high = 0, len(body)
+    while low < high:                     # the longest start of the body that fits
+        middle = (low + high + 1) // 2
+        if len(_text(cut(middle)).encode()) <= MAX_RESULT:
+            low = middle
+        else:
+            high = middle - 1
+    return _text(cut(low))
+
+
 def read(config, app, tool, arguments, *, authorize=lambda: None, manager_factory=_manager):
     route = READS.get(tool)
     if not route or app.get("server") != SERVER or app.get("toolkit") != TOOLKIT:
@@ -137,7 +175,7 @@ def read(config, app, tool, arguments, *, authorize=lambda: None, manager_factor
         result = _call(manager, route, args, cancel)
         authorize()
         # The result is untrusted mail content, projected to a bounded JSON string; no send or mutation route exists.
-        text = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        text = _fit(result)
         if len(text.encode()) > MAX_RESULT:
             raise RegistryError("app_limit", "The Outlook answer is too large. Search more narrowly.")
         from .redaction import redact_text, secret_values

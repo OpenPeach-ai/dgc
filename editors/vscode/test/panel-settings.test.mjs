@@ -293,6 +293,26 @@ test("session restoration keeps setup closed through crossed replies and changin
   assert.ok(h.posted.some(message => message.type === "session_ready" && message.sessionId === "saved-chat"));
 });
 
+test("a Work tab restored after a reload asks for the mode it had, only from a CLI that offers it", async () => {
+  // The maintainer set a chat to Auto, reloaded the window and found it in Default: a reopen only lowered the mode.
+  // saved_mode says the person reopened it (ready.capabilities.resume_saved_mode); an older CLI is never sent it.
+  const offered = restorationHarness();
+  offered.provider.lastReadyEvent = { type: "ready", capabilities: { resume_saved_mode: true } };
+  offered.provider.maybeCompleteHandshake(offered.backend);
+  assert.equal(offered.calls.length, 1);
+  assert.equal(offered.calls[0].command.type, "resume_session");
+  assert.equal(offered.calls[0].command.saved_mode, true);
+  const older = restorationHarness();
+  older.provider.lastReadyEvent = { type: "ready", capabilities: {} };
+  older.provider.maybeCompleteHandshake(older.backend);
+  assert.equal(older.calls.length, 1);
+  assert.equal("saved_mode" in older.calls[0].command, false, "an older CLI would refuse the field");
+  // Its mode chip shows the restored mode at once: the resume's mode_changed.
+  offered.complete();
+  offered.provider.onEvent({ type: "mode_changed", mode: "auto", workspace_trusted: true });
+  assert.equal(offered.provider.state.mode, "auto");
+});
+
 test("missing saved chats adopt the draft, while timed-out or stale restores release no prompts", async () => {
   const missing = restorationHarness();
   missing.provider.maybeCompleteHandshake(missing.backend);
@@ -1054,6 +1074,55 @@ test("the settings page hears the Pips default with the config, from a CLI that 
   h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
   h.provider.openEditorSettings("agents");
   assert.ok(commands.find((c) => c.type === "get_config").fields.includes("pips_settings"));
+});
+
+test("helpers' Thinking: heard with the config from a CLI that sent subagent_settings, and saved only to it", async () => {
+  const older = harness();
+  await older.provider.saveSettings(settings({ subagent_thinking: "low" }));
+  assert.equal(older.commands.some((c) => c.type === "set_config" && "subagent_thinking" in (c.values || {})), false,
+    "an older CLI refuses an unknown key, and the whole save with it");
+  for (const [chosen, sent] of [["low", "low"], ["", ""], ["xhigh", "xhigh"], ["huge", undefined]]) {
+    const { provider, commands } = harness();
+    provider.lastReadyEvent = { capabilities: { subagent_thinking: 1 } };   // a CLI that declares helpers' Thinking
+    provider.onEvent({ type: "subagent_settings", thinking: "" });
+    await provider.saveSettings(settings({ subagent_thinking: chosen }));
+    const config = commands.find((c) => c.type === "set_config");
+    assert.equal(config?.values.subagent_thinking, sent, chosen || "same as the main chat");
+  }
+  const posted = [];
+  const { provider } = harness();
+  provider.lastReadyEvent = { capabilities: { subagent_thinking: 1 } };
+  provider.settingsEditor = { webview: { postMessage: (m) => posted.push(m) } };
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.equal("subagent_thinking_settable" in posted.at(-1).event, false);
+  provider.onEvent({ type: "subagent_settings", thinking: "medium" });
+  provider.onEvent({ type: "config", model: "m", mode: "default", base_url: "https://x.invalid/v1" });
+  assert.deepEqual([posted.at(-1).event.subagent_thinking, posted.at(-1).event.subagent_thinking_settable], ["medium", true]);
+  const commands = [];
+  const h = restorationHarness();
+  h.provider.settingsEditor = { reveal() {}, webview: { postMessage() {} } };
+  h.provider.ensureBackend = () => ({ send: m => { commands.push(m); return true; } });
+  h.provider.lastReadyEvent = { capabilities: { plugin_management: true } };
+  h.provider.openEditorSettings("models");
+  assert.ok(commands.find((c) => c.type === "get_config").fields.includes("subagent_settings"));
+});
+
+test("a Router model's Thinking goes to DGC only from a CLI that declared router.thinking", async () => {
+  const replies = [];
+  for (const [capabilities, sends] of [[{ router: { version: 1, commands: ["router_status", "router_update"] } }, false],
+                                       [{ router: { version: 1, commands: ["router_status", "router_update", "router_thinking"], thinking: 1 } }, true]]) {
+    const { provider } = harness();
+    const asked = [];
+    provider.settingsEditor = { webview: { postMessage: (m) => replies.push(m) } };
+    provider.lastReadyEvent = { capabilities };
+    provider.ensureBackend = () => ({ request: async (cmd) => { asked.push(cmd); return { type: "router_status", status: { systems: [] }, change: "ok" }; },
+                                      send() { return true; } });
+    provider.noteRouterStatus = () => {};
+    await provider.routerSettingsCommand({ token: "t1", command: { type: "router_thinking", system: "nas", model: "qwen3.5:9b", thinking: "low" } });
+    assert.equal(asked.length > 0, sends);
+    if (sends) assert.deepEqual({ ...asked[0], request_id: undefined }, { type: "router_thinking", system: "nas", model: "qwen3.5:9b", thinking: "low", request_id: undefined });
+    else assert.match(replies.at(-1).error, /Update the DGC CLI/);
+  }
 });
 
 test("the host keeps up to 32 parallel sub-agents on Save, and never rewrites a stored width downward", async () => {
@@ -2482,6 +2551,28 @@ test("Token Usage's Pips view reaches get_pip_usage_report, and an older CLI is 
   assert.equal(sent.length, 2, "a CLI without the report is never sent the command");
   assert.deepEqual(posted.at(-1), { type: "pip_usage_unavailable", requestId: "pip-usage-old",
     message: "Update the DGC CLI to see token usage by Pip." });
+});
+
+test("Token usage by system: a system goes to get_usage and the Pips report only on a CLI that takes it", async () => {
+  const h = harness(), posted = [], sent = [];
+  h.provider.settingsEditor = { webview: { postMessage: m => posted.push(m) } };
+  h.provider.backend.send = command => { sent.push(command); return true; };
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true, pip_usage_report: true, usage_by_system: true } };
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "7d", requestId: "u1", system: "nas" });
+  await h.provider.onSettingsMessage({ type: "getPipUsage", range: "7d", requestId: "p1", system: "service:ollama-cloud" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "7d", requestId: "u2", system: "" });
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "7d", requestId: "u3", system: { id: "nas" } });
+  assert.deepEqual(sent, [
+    { type: "get_usage", request_id: "u1", range: "7d", system: "nas" },
+    { type: "get_pip_usage_report", request_id: "p1", range: "7d", system: "service:ollama-cloud" },
+    { type: "get_usage", request_id: "u2", range: "7d" },
+    { type: "get_usage", request_id: "u3", range: "7d" }]);
+  // An older CLI rejects the whole command for an undeclared field: it is asked for everything, as before.
+  h.provider.lastReadyEvent = { capabilities: { usage_ledger: true, pip_usage_report: true } };
+  await h.provider.onSettingsMessage({ type: "getUsage", range: "30d", requestId: "u4", system: "nas" });
+  await h.provider.onSettingsMessage({ type: "getPipUsage", range: "30d", requestId: "p2", system: "nas" });
+  assert.deepEqual(sent.slice(-2), [{ type: "get_usage", request_id: "u4", range: "30d" },
+                                    { type: "get_pip_usage_report", request_id: "p2", range: "30d" }]);
 });
 
 test("/usage typed in the editor opens Token Usage, with the range it names", async () => {

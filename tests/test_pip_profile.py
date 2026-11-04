@@ -149,8 +149,9 @@ class ProfileTests(unittest.TestCase):
         key = pip_routines.KEY + routine["id"][-16:] + "_" + "0" * 24
         sent = pip_chat.send(self.store, self.pip["id"], "It is time.", key, "local-routine", self.cfg, _intro=True)
         self.store.claim_next()
-        self.store.finish(sent["run"]["id"], result={"text": "Good morning! Three stories today."})
-        self.assertEqual(notifier.tick(self.registry), "Ava: Good morning! Three stories today.")
+        self.store.finish(sent["run"]["id"], result={"text": "Good morning!\n---\nThree stories today."})
+        self.assertEqual(notifier.tick(self.registry), "Ava: Good morning! Three stories today.",
+                         "the line between its short messages is not said")
         self.assertIsNone(notifier.tick(self.registry), "once")
         self.link(self.pip["id"], "googlecalendar", "requested", suffix="e")
         self.assertEqual(notifier.tick(self.registry), "Ava asks to use Google Calendar. Answer in its chat.")

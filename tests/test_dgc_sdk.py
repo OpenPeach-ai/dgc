@@ -461,6 +461,24 @@ class SdkTests(unittest.TestCase):
         self.assertGreater(got.window, got.used)
         self.assertEqual(got.source, "estimated")
 
+    def test_get_usage_by_system_against_the_real_backend(self):
+        """session.get_usage(system=) through a real dgc serve: every row names its system, a system keeps its own
+        usage, and an older CLI (no capabilities["usage_by_system"]) is never sent the field."""
+        with self._client() as dgc:
+            session = dgc.session(cwd=self.work, permissions={"mode": "auto", "unhandled": "deny"})
+            self.assertEqual(session.run("Summarize README. Do not edit files.", timeout=60).status, "completed")
+            self.assertIs(session.capabilities.get("usage_by_system"), True)
+            everything = session.get_usage("today")
+            here = session.get_usage("today", system="This computer")
+            elsewhere = session.get_usage("today", system="service:anthropic")
+            session.capabilities.pop("usage_by_system")
+            with self.assertRaises(DGCUnsupportedError):
+                session.get_usage("today", system="This computer")
+        self.assertGreater(everything["totals"]["requests"], 0)
+        self.assertEqual({row["system"] for row in everything["by_model"]}, {"This computer"})
+        self.assertEqual(here["totals"], everything["totals"])
+        self.assertEqual(elsewhere["totals"]["requests"], 0)
+
     def test_resume_runs_in_the_mode_it_asked_for(self):
         # DGC 0.47.0 reopens a transcript in the mode it last ran in when that asks no less than
         # the mode it replaces, so a session saved in plan and resumed asking for auto ran in

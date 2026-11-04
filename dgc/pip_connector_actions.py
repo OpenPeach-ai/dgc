@@ -185,7 +185,9 @@ def result(raw, config, name, tool):
 
 @contextmanager
 def prepared(config, payload, authorize, *, manager_factory=_manager,
-             servers_reader=apps.saved_servers, clock=time.monotonic):
+             servers_reader=apps.saved_servers, clock=time.monotonic, app_owner=None):
+    """``app_owner``: where a plugin's card (MCP Apps) goes when the tool has one ({pip_id, run_id, action_id}: the
+    Pip's reply that offered the action), as ChatDGC's Send makes one (chatdgc.plugins.run); None makes none."""
     cancel = apps.DeadlineCancellation(clock() + 30, clock=clock)
     args = arguments(payload['call'])
     name = payload['server']
@@ -218,11 +220,18 @@ def prepared(config, payload, authorize, *, manager_factory=_manager,
                 # the user they had cancelled it (1inch's swap, battle test 2026-10-09).
                 declined.append(method)
                 return {'action': 'cancel'}
-            raw = manager.call(target, args, cancel=cancel, input_handler=decline)
+            app = None
+            if name not in PROVIDERS and app_owner is not None:
+                from .chatdgc.plugins import app_capture
+                app = app_capture(manager, name, payload['call']['tool'])
+            raw = manager.call(target, args, cancel=cancel, input_handler=decline,
+                               **({'on_result': app.update_result} if app is not None else {}))
             if name not in PROVIDERS:
-                # The Pip that prepared it reads the answer next (pip_plugins.after_action).
-                from .pip_plugins import remember
-                remember(name, payload['call'], raw, config, declined=bool(declined))
+                # The Pip that prepared it reads the answer next (pip_plugins.after_action), and its card, made
+                # while the server is still connected, is kept for the reply that offered it.
+                from .pip_plugins import card_info, remember
+                card = (app.card(args, 'pip', card_info(name), app_owner), app.failed) if app is not None else None
+                remember(name, payload['call'], raw, config, declined=bool(declined), card=card)
             return result(raw, config, name, payload['call']['tool'])
         yield invoke
     finally:

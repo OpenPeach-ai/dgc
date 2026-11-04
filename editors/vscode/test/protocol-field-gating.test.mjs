@@ -158,3 +158,37 @@ test("the handshake still starts a chat on the CLI that 0.27.0 broke", () => {
     `CLI 0.41.9 answers this with "invalid command: set_workspace_roots has undeclared field `
     + `'${undeclared[0]}'" and no chat starts: ${JSON.stringify(command)}`);
 });
+
+test("helper thinking availability resets when a capable CLI is replaced by an older one", async () => {
+  const { provider, backend } = makeProvider({ capabilities: { subagent_thinking: 1 } });
+  const settings = [], commands = [];
+  provider.settingsEditor = { webview: { postMessage: (m) => { settings.push(m); return Promise.resolve(true); } } };
+  provider.requestState = async (_be, _prefix, command) => { commands.push(command); return {}; };
+  provider.applyNativeSettings = async () => {};
+  provider.watchMcpApps = () => {};
+  backend.restartProcess = () => {};
+  provider.onEvent({ type: "subagent_settings", thinking: "high" });
+  await provider.saveSettings({ subagent_thinking: "low" });
+  assert.equal(commands.find((m) => m.type === "set_config").values.subagent_thinking, "low");
+  provider.restart("test CLI change");
+  assert.equal(provider.subagentSettings, undefined, "restart invalidates the previous process's settings");
+  provider.backend = backend;
+  const ready = (capabilities) => provider.onEvent({ type: "ready", capabilities, model: "test", mode: "default",
+    think: "off", base_url: "http://example.invalid", commands: [], session_id: "test" });
+  ready({});
+  provider.onEvent({ type: "config", model: "test", mode: "default" });
+  assert.notEqual(settings.filter((m) => m.event?.type === "config").at(-1).event.subagent_thinking_settable, true);
+  // Even retained/stale settings data must not bypass the current handshake's gate.
+  provider.subagentSettings = { thinking: "high" };
+  commands.length = 0;
+  await provider.saveSettings({ subagent_thinking: "high", context_size: 24576 });
+  const saved = commands.find((m) => m.type === "set_config").values;
+  assert.equal(saved.context_size, 24576);
+  assert.equal("subagent_thinking" in saved, false);
+  ready({ subagent_thinking: 1 });
+  assert.equal(provider.subagentSettings, undefined, "a new handshake needs fresh settings too");
+  provider.onEvent({ type: "subagent_settings", thinking: "medium" });
+  commands.length = 0;
+  await provider.saveSettings({ subagent_thinking: "off" });
+  assert.equal(commands.find((m) => m.type === "set_config").values.subagent_thinking, "off");
+});

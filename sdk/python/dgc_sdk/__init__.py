@@ -1,6 +1,6 @@
 """DGC SDK for embedding the harness in applications and CI.
 
-Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Version 0.8.0 pairs with DGC CLI 0.50.0
+Install: ``pip install dgc-sdk``. Import ``dgc_sdk``. Version 0.9.0 pairs with DGC CLI 0.51.0
 (editor protocol v14). Guide and API reference: docs/SDK.md in the DGC repository.
 """
 
@@ -21,7 +21,7 @@ from .errors import (
     DGCCommandRejectedError, DGCConfigError, DGCError, DGCProtocolError, DGCRuntimeError,
     DGCTimeoutError, DGCUnsupportedError,
 )
-from .session import Artifacts, Mods, RunHandle, Session
+from .session import Artifacts, Cards, Images, Mods, Router, RunHandle, Session, Videos
 from .types import (
     AgentInfo, Artifact, ArtifactInfo, ArtifactVersion, Checkpoint, ContextBreakdown, ContextItem, ContextPart, Denial, FileChange, Goal, HookInfo,
     McpInputRequest, McpInputResponse,
@@ -38,7 +38,7 @@ __all__ = [
     "AppToolHandler", "PipApprovalRequested", "PipApprovalResolved", "PipCallContext", "PipTool", "PipToolError",
     "define_pip_tool", "PipTemplate",
     "PROTOCOL", "REQUIRES_CLI", "__version__",
-    "AgentInfo", "Artifact", "ArtifactInfo", "ArtifactVersion", "Artifacts", "AsyncDGC", "Mods", "AsyncRunHandle", "AsyncSession", "Checkpoint", "ContextBreakdown",
+    "AgentInfo", "Artifact", "ArtifactInfo", "ArtifactVersion", "Artifacts", "AsyncDGC", "Cards", "Images", "Videos", "Mods", "Router", "AsyncRunHandle", "AsyncSession", "Checkpoint", "ContextBreakdown",
     "ContextItem", "ContextPart", "DGC",
     "Denial", "Pricing", "RetryPolicy", "RuntimePolicy", "cost_usd", "redact", "redact_text",
     "DGCCommandRejectedError", "DGCConfigError", "DGCError", "DGCProtocolError",

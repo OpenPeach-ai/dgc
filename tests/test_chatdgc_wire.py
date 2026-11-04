@@ -406,7 +406,10 @@ class ServiceTests(unittest.TestCase):
         self.ended("e1")
         refreshed = self.wire.wait(lambda f: f["type"] == "chatdgc_opened" and f["request_id"] == "e1")
         self.assertTrue(refreshed["busy"])
-        self.assertEqual([m["text"] for m in refreshed["messages"]], ["Plan Old Goa"], "cut back to the edit")
+        self.assertEqual([m["text"] for m in refreshed["messages"] if "waiting" not in m], ["Plan Old Goa"],
+                         "cut back to the edit")
+        # And its new reply, waiting for the model from the start (0.51: never a gap before the first word).
+        self.assertEqual([m["id"] for m in refreshed["messages"] if "waiting" in m], [refreshed["reply_id"]])
         self.assertEqual(refreshed["messages"][0]["versions"], {"parent": "root", "index": 1, "count": 2})
         order = [f["type"] for f in self.wire.frames if f.get("request_id") == "e1"]
         self.assertLess(order.index("chatdgc_opened"), order.index("chatdgc_message"))
@@ -751,6 +754,57 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("line 39\n", final["text"])
         self.open_again(chat, "after")
         self.assertFalse(self.wire.of("chatdgc_opened")[-1]["busy"])
+
+    def test_a_new_reply_says_at_once_that_it_waits_for_its_model(self):
+        """Seen in testing: a send showed nothing until the model started, so on a slow or cold model it looked lost.
+        Right after the turn starts (and your message), the reply says it waits for its model and how long that model
+        usually takes to start; a chat opened mid-wait shows it waiting, not empty; the model's first part ends it."""
+        from dgc import model_pace
+        chat = self.new()
+        self.model.gate.clear()
+        self.model.script.append({"parts": ["Hello", " there."], "hold_at": 0})
+        with patch.object(model_pace, "usual_for", return_value=12.4) as usual:
+            self.send(chat, "Hi")
+            self.assertTrue(self.model.reached.wait(5))
+        usual.assert_called_with("fixture", "")
+        reply_id = self.wire.of("chatdgc_turn")[0]["reply_id"]
+        [waiting] = self.wire.of("chatdgc_waiting")
+        self.assertEqual((waiting["message_id"], waiting["model"], waiting["usual_s"]), (reply_id, "fixture", 12.4))
+        kinds = [f["type"] for f in self.wire.frames if f["type"].startswith("chatdgc_") and f["type"] != "chatdgc_opened"]
+        self.assertEqual(kinds[kinds.index("chatdgc_turn"):][:3], ["chatdgc_turn", "chatdgc_message", "chatdgc_waiting"],
+                         "started, your message, then the wait: before anything of the model's")
+        opened = self.open_again(chat, "mid-wait")
+        shown = opened["messages"][-1]
+        self.assertEqual((shown["id"], shown["role"], shown["text"]), (reply_id, "assistant", ""))
+        self.assertEqual((shown["waiting"]["model"], shown["waiting"]["usual_s"]), ("fixture", 12.4))
+        self.assertGreaterEqual(shown["waiting"]["elapsed_s"], 0)
+        self.model.gate.set()
+        self.ended()
+        final = self.wire.of("chatdgc_message")[-1]["message"]
+        self.assertEqual(final["text"], "Hello there.")
+        self.assertNotIn("waiting", final, "the saved reply carries no wait")
+        self.assertNotIn("waiting", self.open_again(chat, "after")["messages"][-1])
+
+    def test_a_model_that_has_started_is_no_longer_waited_for(self):
+        chat = self.new()
+        self.model.gate.clear()
+        self.model.script.append({"thinking": ["Hmm."], "parts": ["One", " two."], "hold_at": 1})
+        self.send(chat, "Count")
+        self.assertTrue(self.model.reached.wait(5))
+        time.sleep(0.2)
+        shown = self.open_again(chat, "started")["messages"][-1]
+        self.assertNotIn("waiting", shown, "thinking and words have come: it isn't waiting any more")
+        self.assertEqual(shown["thinking"], "Hmm.")
+        self.model.gate.set()
+        self.ended()
+
+    def test_the_usual_wait_is_found_whatever_api_the_model_was_asked_through(self):
+        from dgc import model_pace
+        for wait in (4.0, 5.0, 6.0, 7.0, 9.5):
+            model_pace.record("glm-5.3:cloud", "http://127.0.0.1:11434/api/chat", wait)
+        self.assertEqual(model_pace.usual_for("glm-5.3:cloud", "http://127.0.0.1:11434/v1"), 9.5)
+        self.assertEqual(model_pace.usual_for("glm-5.3:cloud", "http://gpu-box.local:11434/v1"), 0.0, "another server")
+        self.assertEqual(model_pace.usual_for("qwen3:8b", "http://127.0.0.1:11434/v1"), 0.0, "another model")
 
     def test_a_chat_opened_mid_continue_has_what_the_reply_had_and_what_it_wrote_since(self):
         chat = self.new()

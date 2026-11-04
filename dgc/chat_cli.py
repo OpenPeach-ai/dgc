@@ -198,6 +198,13 @@ class Printer:
                 self._wrote = True
                 self.out.write(str(event["text"]))
             self.out.flush()
+        elif kind == "chatdgc_waiting" and not self._wrote and not self._thinking:
+            # At once, before the model's first word: which model it waits for, and how long it usually takes.
+            usual = float(event.get("usual_s") or 0) if isinstance(event.get("usual_s"), (int, float)) else 0.0
+            said = f"· waiting for {event.get('model') or 'the model'}" + (
+                f" (it usually starts within {max(1, int(usual + 0.999))}s)" if usual > 0 else "") + "…"
+            self.out.write(self._dim(said) + "\n")
+            self.out.flush()
         elif kind == "chatdgc_activity" and event.get("text") and not self._wrote:
             self.out.write(self._dim(f"· {event['text']}") + "\n")
             self.out.flush()

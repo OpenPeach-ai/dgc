@@ -113,9 +113,10 @@ test('while a Pip answers it is in the chat at work, with its name, and its repl
  x.click(`[data-job="${gmail.id}"]`);await x.drain();
  const working=x.d.querySelector('.pip-working');assert.ok(working,'not only for its hello');assert.match(working.textContent,/Gmail · Working/);
  assert.equal(working.querySelector('.avatar').dataset.pose,'working');
- const done=setup({jobs:[gmail],messages:{[gmail.id]:[{...asked,status:'succeeded'},message('message_2','assistant','Hi!\n\nYour inbox has 3 new emails.\n\nWant a summary?',gmail.id,{created_at:'2026-10-06T10:00:05.000Z'})]}});await done.drain();
+ const done=setup({jobs:[gmail],messages:{[gmail.id]:[{...asked,status:'succeeded'},message('message_2','assistant','Hi!\n---\nYour inbox has 3 new emails.\n---\nWant a summary?',gmail.id,{created_at:'2026-10-06T10:00:05.000Z'})]}});await done.drain();
  done.click(`[data-job="${gmail.id}"]`);await done.drain();
- assert.equal(done.d.querySelectorAll('.reply-part').length,3);assert.equal(done.d.querySelector('.pip-working'),null);
+ assert.equal(done.d.querySelectorAll('.reply-part').length,3,'the short messages the Pip parted with ---');assert.equal(done.d.querySelector('.pip-working'),null);
+ assert.doesNotMatch(done.d.querySelector('.conversation-log').textContent,/---/,'the marks themselves are not shown');
  assert.equal(done.d.querySelectorAll('.chat-time').length,1,'one time mark for messages minutes apart');
 });
 

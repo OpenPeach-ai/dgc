@@ -1,7 +1,7 @@
 // Main-chat setup reviews. Tool output supplies an identity only: every actionable
 // card is loaded again from the local registry and approved by its exact digest.
 import '../media/pips/plush.js';
-import {pipSetup,pipSetupResolution,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,scheduleLabel,commandLine} from './pipsModel.js';
+import {pipSetup,pipSetupResolution,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,scheduleLabel,commandLine,pipRouter,routerChoices,defaultRunsOn} from './pipsModel.js';
 import {appReadWords} from './pipsAppPicker.js';
 import {mountRunCards} from './pipRunCards.js';
 import {mountEmailCards} from './pipEmailCards.js';
@@ -58,7 +58,7 @@ export function mountSetupCards(options) {
   // A live-data Pip (API 60): its approved read-only commands, and that nothing it runs can change anything.
   if(s.live_plan){const n=s.live_plan.commands.length;out.push(`${n} read-only ${n===1?'command':'commands'}`);}
   out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':s.live_plan?'Changes nothing':'Reads committed code');
-  out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
+  out.push(s.model_choice?.mode==='model'?s.model_choice.model:['subscription','router'].includes(s.model_choice?.mode)?modelLabel(s.model_choice):'Default model');
   return out;
  }
  const pendingTitle=s=>(s.pip_id?'Change Pip: ':'New Pip: ')+s.name;
@@ -82,14 +82,18 @@ export function mountSetupCards(options) {
    const models=node('div','pip-setup-model');
    if(entry.models){
     const label=node('label','','Model for this Pip'),select=node('select');select.setAttribute('aria-label','Model for this Pip');
-    const current=s.model_choice||{mode:'default'}, following=entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
+    const current=s.model_choice||{mode:'default'}, following=api>=70?defaultRunsOn(entry.models):entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
     for(const item of entry.models.models)choices.push({value:typeof item==='string'?item:item.id,name:typeof item==='string'?item:item.name||item.id});
     if(current.mode==='model'&&!choices.some(c=>c.value===current.model))choices.push({value:current.model,name:current.model});
     // API 55: a personal setup may run on the user's own Claude Code or Codex (pip_brain). "|" is never in a model ID.
     const subs=api>=55&&s.source_policy==='personal'?entry.models.subscriptions||[]:[];
     for(const sub of subs)choices.push({value:'subscription|'+sub.engine,name:sub.name+' · your subscription'});
-    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:entry.choice.mode==='subscription'?'subscription|'+entry.choice.engine:'';
-    select.onchange=()=>{const v=select.value;entry.choice=v.startsWith('subscription|')?{mode:'subscription',engine:v.slice(13)}:v?{mode:'model',model:v}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
+    // API 70: DGC Router, while it is on ("router|" + the choice's value; "|" is never in a model ID either).
+    const routed=api>=70?routerChoices(pipRouter(entry.models.router)):[];
+    for(const [value,name] of routed)choices.push({value:'router|'+value,name});
+    if(current.mode==='router'&&!routed.some(([v])=>v===modelValue(current)))choices.push({value:'router|'+modelValue(current),name:modelLabel(current)});
+    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:entry.choice.mode==='subscription'?'subscription|'+entry.choice.engine:entry.choice.mode==='router'?'router|'+modelValue(entry.choice):'';
+    select.onchange=()=>{const v=select.value;entry.choice=v.startsWith('subscription|')?{mode:'subscription',engine:v.slice(13)}:v.startsWith('router|')?(v==='router|router'?{mode:'router'}:{mode:'router',system:v.slice(14,v.indexOf('/')),model:v.slice(v.indexOf('/')+1)}):v?{mode:'model',model:v}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
     if(entry.choice.mode==='subscription')models.append(node('p','pip-setup-notice',subscriptionUsage(modelLabel(entry.choice))));
     if(JSON.stringify(entry.choice)!==JSON.stringify(current))models.append(button('Use this model',()=>revise(entry),'pip-setup-secondary'),node('p','pip-setup-notice','The card is saved again with this model. Nothing is created until you choose '+createLabel(s)+'.'));
    }else models.append(button('Choose model',()=>modelsFor(entry),'pip-setup-secondary'));
@@ -176,7 +180,7 @@ export function mountSetupCards(options) {
  async function revise(entry){
   const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
-   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55&&s.source_policy==='personal'?entry.models?.subscriptions||[]:[])});if(token!==epoch)return;
+   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55&&s.source_policy==='personal'?entry.models?.subscriptions||[]:[],api>=70?pipRouter(entry.models?.router):null)});if(token!==epoch)return;
    const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('This was changed or answered somewhere else. Refresh to see it.');
    remap(entry,next.id);entry.setup=next;entry.choice=next.model_choice||{mode:'default'};
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}

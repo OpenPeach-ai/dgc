@@ -3,6 +3,8 @@
 // And its widgets (a backend that keeps them says so): every interactive answer, to open beside you again or delete.
 // And its artifacts (ready.capabilities.artifacts): every document, deck, sheet, page and dashboard DGC made, wherever it
 // made it, newest first; shown by kind and by where it was made; to open, export or remove (to DGC's trash).
+// And the images DGC made in Work (images_library, 0.51): beside ChatDGC's in Images, and as "Made in Work", each to
+// open as the file it is in the project, show in its folder, or save a copy of.
 // Names are the user's words: text nodes only. Images are asked of the backend by id, as the chat screen asks.
 (function () {
   const vscode = acquireVsCodeApi();
@@ -15,11 +17,15 @@
   const TYPE_NAME = { image: "Image", pdf: "PDF", document: "Document", spreadsheet: "Spreadsheet", presentation: "Presentation", code: "Code", text: "Pasted text" };
   const TYPE_ICON = { image: "file-media", pdf: "file-pdf", document: "file-text", spreadsheet: "table", presentation: "preview", code: "file-code", text: "note" };
   const saved = (() => { try { return vscode.getState() || {}; } catch { return {}; } })();
-  const ORIGINS = [["", "All"], ["uploaded", "Uploaded"], ["made", "Made by ChatDGC"]];
+  const ORIGINS = [["", "All"], ["uploaded", "Uploaded"], ["made", "Made by ChatDGC"], ["work", "Made in Work"]];
   const state = { query: "", kind: KINDS.some(([k]) => k === saved.kind) ? saved.kind : "", files: [], total: 0, next: null, counts: {},
                   origin: ORIGINS.some(([o]) => o === saved.origin) ? saved.origin : "", origins: {}, loading: true, asking: 0,
-                  view: ["widgets", "artifacts"].includes(saved.view) ? saved.view : "files", offered: false, widgets: [], widgetsNext: null,
-                  artifactsOffered: false, artifacts: [], atype: typeof saved.atype === "string" ? saved.atype : "", made: typeof saved.made === "string" ? saved.made : "" };
+                  view: ["widgets", "artifacts", "videos"].includes(saved.view) ? saved.view : "files", offered: false, widgets: [], widgetsNext: null,
+                  artifactsOffered: false, artifacts: [], atype: typeof saved.atype === "string" ? saved.atype : "", made: typeof saved.made === "string" ? saved.made : "",
+                  // Work's images: whether the backend lists them, the ones shown, how many there are, the next page.
+                  work: { offered: false, images: [], total: 0, next: null, seq: 0, loading: false, error: "" },
+                  // The videos DGC made (videos_library, 0.51): whether the backend lists them, a page of them, where made.
+                  videos: { offered: false, seq: 0, error: "", rows: [], total: 0, next: null, made: typeof saved.vmade === "string" ? saved.vmade : "" } };
   const ATYPES = [["", "All"], ["doc", "Documents"], ["slides", "Slides"], ["sheet", "Spreadsheets"], ["page", "Pages"], ["dashboard", "Dashboards"]];
   const MADE = [["", "Anywhere"], ["chat", "Chat"], ["work", "Work"], ["pip", "Pips"]];
   const A_KIND = { doc: "Document", slides: "Slides", sheet: "Spreadsheet", page: "Page", dashboard: "Dashboard" };
@@ -28,8 +34,10 @@
   const FORMATS = { docx: "Word document (.docx)", pdf: "PDF", md: "Markdown (.md)", pptx: "PowerPoint (.pptx)", html: "Web page (.html)",
                     xlsx: "Excel workbook (.xlsx)", csv: "CSV (first sheet)", zip: "Zip of its files (.zip)" };
   const ABOUT = { files: "Every file you attached in ChatDGC or it made for you, in every chat and project. Temporary chats keep none.",
+                  filesAndWork: "Every file you attached in ChatDGC or it made for you, in every chat and project, and every image DGC made in Work. Temporary chats keep none.",
                   widgets: "Every calculator, timer or quiz ChatDGC made for you, in every chat. Open one beside you, or delete it.",
-                  artifacts: "Every document, deck, sheet, page and dashboard DGC made for you, in Chat, Work and your Pips, with every version. Open one, export it, or remove it." };
+                  artifacts: "Every document, deck, sheet, page and dashboard DGC made for you, in Chat, Work and your Pips, with every version. Open one, export it, or remove it.",
+                  videos: "Every video DGC made for you, in Work, ChatDGC and your Pips, newest first. Play one here, open it in your player, or save a copy into the project." };
   const images = new Map();
   const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
   function when(stamp) {
@@ -41,17 +49,42 @@
     if (days < 7) return `${days} days ago`;
     return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
   }
+  /** Work's images count here: the Files view, on All or Made in Work (they are images, so on All or Images). */
+  const workCounts = () => state.work.offered && state.view === "files" && (state.origin === "" || state.origin === "work");
+  const workShown = () => workCounts() && (state.kind === "" || state.kind === "image");
   function ask(offset = 0) {
     state.loading = true; state.asking = offset;       // a later page adds to the list; a new search replaces it
+    if (state.view === "videos") state.videos.error = "";
     status();
     if (state.view === "widgets") { vscode.postMessage({ type: "widgets", query: state.query, offset }); return; }
     if (state.view === "artifacts") { vscode.postMessage({ type: "artifactList" }); return; }
-    vscode.postMessage({ type: "list", query: state.query, kind: state.kind, ...(state.origin ? { origin: state.origin } : {}), offset });
+    if (state.view === "videos") {
+      vscode.postMessage({ type: "videoList", seq: ++state.videos.seq, query: state.query, offset, ...(state.videos.made ? { surface: state.videos.made } : {}) });
+      return;
+    }
+    // Made in Work is the Library's own filter: ChatDGC is asked for its counts (any origin) and shows none of its files.
+    const origin = state.origin === "work" ? "" : state.origin;
+    vscode.postMessage({ type: "list", query: state.query, kind: state.kind, ...(origin ? { origin } : {}), offset });
+    if (!offset) askWork(0);
+  }
+  function askWork(offset) {
+    if (!workCounts()) return;
+    state.work.loading = true; state.work.error = "";
+    status();
+    // Shown, a page of them; on another kind only how many there are (the Images chip's count).
+    vscode.postMessage({ type: "workImages", query: state.query, offset, limit: workShown() ? 60 : 1, seq: ++state.work.seq });
+  }
+  function more() {
+    if (state.view === "widgets") { ask(state.widgets.length); return; }
+    if (state.view === "videos") { if (!state.loading) ask(state.videos.rows.length); return; }
+    if (state.next !== null && state.next !== undefined && state.origin !== "work") ask(state.files.length);
+    if (workShown() && state.work.next !== null && state.work.next !== undefined) askWork(state.work.images.length);
   }
   function views() {
     // Files, Widgets and Artifacts, as tabs; Widgets and Artifacts only once the backend says it keeps them.
     const bar = $("lib-views");
-    const offered = [["files", "Files"], ...(state.offered ? [["widgets", "Widgets"]] : []), ...(state.artifactsOffered ? [["artifacts", "Artifacts"]] : [])];
+    const offered = [["files", "Files"], ...(state.offered ? [["widgets", "Widgets"]] : []), ...(state.artifactsOffered ? [["artifacts", "Artifacts"]] : []),
+                     ...(state.videos.offered ? [["videos", "Videos"]] : [])];
     bar.hidden = offered.length < 2;
     bar.replaceChildren();
     if (bar.hidden) return;
@@ -66,6 +99,7 @@
   }
   function show(view) {
     if (state.view === view) return;
+    ++state.videos.seq;
     state.view = view; state.query = ""; $("lib-search").value = "";
     state.files = []; state.widgets = [];
     try { vscode.setState({ ...(vscode.getState() || {}), view }); } catch {}
@@ -74,14 +108,23 @@
     ask();
   }
   function place() {
-    const noun = { files: "files", widgets: "widgets", artifacts: "artifacts" }[state.view];
-    $("lib-about").textContent = ABOUT[state.view];
+    const noun = { files: "files", widgets: "widgets", artifacts: "artifacts", videos: "videos" }[state.view];
+    $("lib-about").textContent = state.view === "files" && state.work.offered ? ABOUT.filesAndWork : ABOUT[state.view];
     $("lib-search").placeholder = `Search ${noun}`;
     $("lib-search").setAttribute("aria-label", `Search your ${noun} by name`);
     $("lib-list").setAttribute("aria-label", `Your ${noun}`);
   }
   function status() {
     const line = $("lib-status");
+    const error = state.view === "videos" ? state.videos.error : workShown() ? state.work.error : "";
+    if (error) { line.textContent = error; line.hidden = false; return; }
+    if (state.view === "videos") {
+      line.textContent = state.loading && !state.videos.rows.length ? "Loading…" : state.videos.rows.length ? ""
+        : state.query ? `No video made from words like “${state.query}”.`
+        : state.videos.made ? "None made there yet." : "Videos DGC makes for you show here.";
+      line.hidden = !line.textContent;
+      return;
+    }
     if (state.view === "artifacts") {
       const shown = artifactsShown();
       line.textContent = state.loading && !state.artifacts.length ? "Loading…" : shown.length ? ""
@@ -97,8 +140,10 @@
       line.hidden = !line.textContent;
       return;
     }
-    line.textContent = state.loading && !state.files.length ? "Loading…"
-      : state.files.length ? "" : state.query ? `No file named like “${state.query}”.`
+    const shown = listed().length;
+    line.textContent = (state.loading || state.work.loading) && !shown ? "Loading…"
+      : shown ? "" : state.query ? `No file named like “${state.query}”.`
+      : state.origin === "work" ? "Images DGC makes in Work show here."
       : state.kind ? `No ${KINDS.find(([k]) => k === state.kind)[1].toLowerCase()} yet.`
       : "Files you attach to chats, and files in your projects, show here.";
     line.hidden = !line.textContent;
@@ -107,16 +152,19 @@
     // As ChatGPT filters it: files you uploaded, or files ChatDGC made. Shown once it has made one.
     const bar = $("lib-origins");
     const made = Number(state.origins.made) || 0, uploaded = Number(state.origins.uploaded) || 0;
-    bar.hidden = !made && !state.origin;
+    const work = state.work.offered ? Number(state.work.total) || 0 : 0;
+    bar.hidden = !made && !work && !state.origin;
     bar.replaceChildren();
     if (bar.hidden) return;
     for (const [origin, label] of ORIGINS) {
+      const count = origin === "made" ? made : origin === "uploaded" ? uploaded : origin === "work" ? work : made + uploaded + work;
+      if (origin && !count && state.origin !== origin) continue;      // a filter that would show nothing isn't offered
       const chip = el("button", "lib-kind");
       chip.type = "button";
       chip.setAttribute("aria-pressed", String(state.origin === origin));
-      chip.append(el("span", "", label), el("span", "lib-kind-count", String(origin === "made" ? made : origin === "uploaded" ? uploaded : made + uploaded)));
+      chip.append(el("span", "", label), el("span", "lib-kind-count", String(count)));
       chip.addEventListener("click", () => {
-        state.origin = origin; state.files = [];
+        state.origin = origin; state.files = []; state.work.images = [];
         try { vscode.setState({ ...(vscode.getState() || {}), origin }); } catch {}
         ask();
       });
@@ -126,9 +174,12 @@
   function kinds() {
     const bar = $("lib-kinds");
     bar.replaceChildren();
-    const all = Object.values(state.counts).reduce((a, b) => a + (Number(b) || 0), 0);
+    // Made in Work: only Work's images. Otherwise ChatDGC's counts, with Work's images among the Images.
+    const counts = state.origin === "work" ? {} : { ...state.counts };
+    if (workCounts()) counts.image = (Number(counts.image) || 0) + (Number(state.work.total) || 0);
+    const all = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
     for (const [kind, label] of KINDS) {
-      const count = kind ? Number(state.counts[kind]) || 0 : all;
+      const count = kind ? Number(counts[kind]) || 0 : all;
       if (kind && !count && state.kind !== kind) continue;
       const chip = el("button", "lib-kind");
       chip.type = "button";
@@ -136,7 +187,7 @@
       chip.append(el("span", "", label), el("span", "lib-kind-count", String(count)));
       chip.title = `Show ${label.toLowerCase()}`;
       chip.addEventListener("click", () => {
-        state.kind = kind; state.files = [];
+        state.kind = kind; state.files = []; state.work.images = [];
         try { vscode.setState({ ...(vscode.getState() || {}), kind }); } catch {}
         ask();
       });
@@ -179,10 +230,60 @@
              () => vscode.postMessage({ type: "open", file })),
       action("comment", "Use in a new chat", () => vscode.postMessage({ type: "use", file })),
       action("desktop-download", "Save a copy…", () => vscode.postMessage({ type: "save", file })),
+      ...(file.type === "image" ? [action("file-symlink-file", "Save to project… (the folder open in VS Code)",
+                                         () => vscode.postMessage({ type: "saveToProject", file }))] : []),
       action("new-folder", "Add a copy to a project…", () => vscode.postMessage({ type: "toProject", file })),
       action("trash", "Delete from your Library", () => vscode.postMessage({ type: "remove", file })));
     item.append(preview(file), main, actions);
     return item;
+  }
+  // ---- Work's images: files in the project, so they open as the files they are
+  const workName = (img) => String(img.rel || img.path || "image").split(/[\\/]/).pop() || "image";
+  const projectName = (img) => String(img.project || "").split(/[\\/]/).filter(Boolean).pop() || "";
+  function workPreview(img) {
+    const box = el("span", "lib-preview");
+    const known = images.get("work:" + img.path);
+    if (!known?.error) {
+      const pic = el("img");
+      pic.alt = ""; pic.dataset.work = img.path;
+      if (known?.data && IMAGE_DATA.test(known.data)) pic.src = known.data;
+      else if (!known) { images.set("work:" + img.path, "asked"); vscode.postMessage({ type: "workImage", path: img.path }); }
+      box.append(pic);
+      return box;
+    }
+    box.append(icon("file-media"));
+    return box;
+  }
+  function workRow(img) {
+    const item = el("li", "lib-row lib-work");
+    item.dataset.work = img.path;
+    const main = el("div", "lib-main");
+    const name = el("span", "lib-name", workName(img));
+    if (img.prompt) name.title = String(img.prompt);
+    main.append(name);
+    const size = Number(img.width) > 0 && Number(img.height) > 0 ? `${Number(img.width)}×${Number(img.height)}` : "";
+    const made = ["made in Work", projectName(img)].filter(Boolean).join(" · ");
+    main.append(el("span", "lib-meta", ["Image", size, Number(img.bytes) ? sizeText(Number(img.bytes)) : "", made, img.generator_name || "", when(img.created_at)].filter(Boolean).join(" · ")));
+    const actions = el("div", "lib-actions");
+    actions.append(
+      action("go-to-file", "Open the image", () => vscode.postMessage({ type: "workImageOpen", path: img.path })),
+      action("folder-opened", "Show it in its folder", () => vscode.postMessage({ type: "workImageReveal", path: img.path })),
+      action("desktop-download", "Save a copy…", () => vscode.postMessage({ type: "workImageSave", path: img.path })),
+      action("file-symlink-file", "Save to project… (the folder open in VS Code)", () => vscode.postMessage({ type: "workImageToProject", path: img.path })));
+    item.append(workPreview(img), main, actions);
+    return item;
+  }
+  /** What the Files view lists: ChatDGC's files and Work's images, newest first. */
+  function listed() {
+    const chat = state.origin === "work" ? [] : state.files.map((file) => ({ at: Date.parse(String(file.created_at || "")) || 0, node: () => row(file) }));
+    const work = workShown() ? state.work.images.map((img) => ({ at: Date.parse(String(img.created_at || "")) || 0, node: () => workRow(img) })) : [];
+    if (!work.length) return chat;
+    const out = [];
+    let i = 0, j = 0;
+    while (i < chat.length || j < work.length) {
+      if (j >= work.length || (i < chat.length && chat[i].at >= work[j].at)) out.push(chat[i++]); else out.push(work[j++]);
+    }
+    return out;
   }
   function widgetRow(w) {
     const item = el("li", "lib-row");
@@ -261,6 +362,43 @@
     menuOpen = { menu, button };
     menu.querySelector("button")?.focus();
   }
+  const V_MADE = [["", "Anywhere"], ["work", "Work"], ["chat", "ChatDGC"], ["pip", "Pips"]];
+  const V_WHERE = { work: "made in Work", chat: "made in ChatDGC", pip: "made by a Pip", sdk: "made by an app", cli: "made in the terminal" };
+  /** A video DGC made: its poster, what it shows, its length, size and where it was made; Play (here, with the shared
+   *  player), Open (the system player), Show in folder and Save to project…. */
+  function videoRow(v) {
+    const item = el("li", "lib-row lib-video");
+    const main = el("div", "lib-main");
+    main.append(el("span", "lib-name", String(v.prompt || v.path.split(/[\\/]/).pop() || "Video").slice(0, 160)));
+    const facts = [v.seconds ? `${Math.round(Number(v.seconds))} s` : "", v.width && v.height ? `${v.width}×${v.height}` : "",
+      v.bytes ? sizeText(Number(v.bytes)) : "", v.generator_name || "", V_WHERE[v.surface] || "", when(v.created_at)].filter(Boolean);
+    main.append(el("span", "lib-meta", facts.join(" · ")));
+    const box = el("span", "lib-preview lib-video-preview");
+    if (typeof v.poster_data === "string" && IMAGE_DATA.test(v.poster_data)) {
+      const img = el("img"); img.alt = ""; img.src = v.poster_data; box.append(img);
+    } else box.append(icon("device-camera-video"));
+    const actions = el("div", "lib-actions");
+    actions.append(action("play", "Play it here", () => {
+      if (!window.DgcVideo || item.querySelector("figure.made-video")) return;
+      const fig = window.DgcVideo.figure({ id: String(v.job || "vid_library"), state: "done", resolution: "", label: v.generator_name,
+        result: { path: v.path, poster: v.poster, bytes: v.bytes, seconds: v.seconds, width: v.width, height: v.height,
+          file: String(v.path).split(/[\\/]/).pop() } });
+      item.append(fig);
+    }));
+    actions.append(action("link-external", "Open it in your player", () => vscode.postMessage({ type: "videoOpen", path: v.path })));
+    actions.append(action("folder-opened", "Show it in its folder", () => vscode.postMessage({ type: "videoReveal", path: v.path })));
+    actions.append(action("desktop-download", "Save to project…", () => vscode.postMessage({ type: "videoSave", path: v.path })));
+    item.append(box, main, actions);
+    return item;
+  }
+  function videoFilters() {
+    const counts = state.videos.counts || {};
+    chips($("lib-made"), V_MADE, state.videos.made, (m) => m ? Number(counts[m]) || 0 : Number(state.videos.total) || 0, (m) => {
+      state.videos.made = m; state.videos.rows = [];
+      try { vscode.setState({ ...(vscode.getState() || {}), vmade: m }); } catch {}
+      ask();
+    });
+  }
   function artifactRow(a) {
     const item = el("li", "lib-row lib-artifact");
     item.dataset.artifact = a.id; item.dataset.type = a.type;
@@ -285,28 +423,53 @@
 
   function render() {
     views();
-    const widgets = state.view === "widgets", artifacts = state.view === "artifacts";
-    $("lib-origins").hidden = true; $("lib-kinds").hidden = widgets; $("lib-made").hidden = !artifacts;
+    const widgets = state.view === "widgets", artifacts = state.view === "artifacts", clips = state.view === "videos";
+    $("lib-origins").hidden = true; $("lib-kinds").hidden = widgets || clips; $("lib-made").hidden = !artifacts && !clips;
     if (artifacts) artifactFilters();
+    else if (clips) videoFilters();
     else if (!widgets) { $("lib-kinds").setAttribute("aria-label", "Show"); origins(); kinds(); }
-    $("lib-list").replaceChildren(...(artifacts ? artifactsShown().map(artifactRow) : widgets ? state.widgets.map(widgetRow) : state.files.map(row)));
-    const next = artifacts ? null : widgets ? state.widgetsNext : state.next;
-    $("lib-more").hidden = next === null || next === undefined;
+    $("lib-list").replaceChildren(...(clips ? state.videos.rows.map(videoRow) : artifacts ? artifactsShown().map(artifactRow)
+      : widgets ? state.widgets.map(widgetRow) : listed().map((item) => item.node())));
+    const has = (next) => next !== null && next !== undefined;
+    const more = clips ? has(state.videos.next) : artifacts ? false : widgets ? has(state.widgetsNext)
+      : (state.origin !== "work" && has(state.next)) || (workShown() && has(state.work.next));
+    $("lib-more").hidden = !more;
     status();
   }
   let timer = 0;
   $("lib-search").addEventListener("input", (e) => {
     clearTimeout(timer);
+    if (state.view === "videos") ++state.videos.seq;  // also reject replies during the typing debounce
     timer = setTimeout(() => {
       state.query = e.target.value.trim();
       if (state.view === "artifacts") { render(); return; }       // the whole list is here: searched as it is
-      state.files = []; ask();
+      state.files = []; state.work.images = []; state.videos.rows = []; ask();
     }, 250);
   });
-  $("lib-more").addEventListener("click", () => ask(state.view === "widgets" ? state.widgets.length : state.files.length));
+  $("lib-more").addEventListener("click", () => more());
+  window.DgcVideo?.host((message) => vscode.postMessage(message));
   window.addEventListener("message", (event) => {
     const msg = event.data;
     if (!msg || typeof msg !== "object") return;
+    if (window.DgcVideo?.message(msg)) return;
+    if (msg.type === "videosOffered") {
+      const was = state.videos.offered;
+      state.videos.offered = msg.on === true;
+      if (!state.videos.offered && state.view === "videos") show("files");
+      else { if (state.videos.offered && !was && state.view === "videos") ask(); render(); }
+      return;
+    }
+    if (msg.type === "videos") {
+      if (state.view !== "videos" || msg.seq !== state.videos.seq) return;
+      state.videos.error = msg.error ? String(msg.error) : "";
+      const rows = Array.isArray(msg.videos) ? msg.videos.filter((v) => v && typeof v.path === "string") : [];
+      state.videos.rows = Number(msg.offset) > 0 ? [...state.videos.rows, ...rows] : rows;
+      state.videos.total = Number(msg.total) || 0; state.videos.next = msg.next ?? null;
+      if (msg.counts && typeof msg.counts === "object") state.videos.counts = msg.counts;
+      state.loading = false;
+      render();
+      return;
+    }
     if (msg.type === "library") {
       const files = Array.isArray(msg.files) ? msg.files : [];
       state.files = state.asking ? [...state.files, ...files] : files;
@@ -321,6 +484,28 @@
       state.widgetsNext = msg.next ?? null;
       state.loading = false;
       render();
+    } else if (msg.type === "workImagesOffered") {
+      const was = state.work.offered;
+      state.work.offered = msg.on === true;
+      if (!state.work.offered) { state.work.images = []; state.work.total = 0; state.work.next = null; state.work.loading = false; }
+      if (!state.work.offered && state.origin === "work") { state.origin = ""; ask(); }
+      else if (state.work.offered && !was) askWork(0);
+      place(); render();
+    } else if (msg.type === "workImages") {
+      if (Number(msg.seq) !== state.work.seq) return;                // an answer to a search since replaced
+      const found = Array.isArray(msg.images) ? msg.images.filter((img) => img && typeof img.path === "string") : [];
+      state.work.images = Number(msg.offset) > 0 ? [...state.work.images, ...found] : found;
+      state.work.total = Number(msg.total) || 0; state.work.next = msg.next ?? null;
+      state.work.loading = false;
+      state.work.error = msg.error ? String(msg.error) : "";
+      render();
+    } else if (msg.type === "workImageData") {
+      const ok = typeof msg.data === "string" && IMAGE_DATA.test(msg.data);
+      images.set("work:" + String(msg.path || ""), ok ? { data: msg.data } : { error: true });
+      for (const img of document.querySelectorAll("img[data-work]")) {
+        if (img.dataset.work !== String(msg.path || "")) continue;
+        if (ok) img.src = msg.data; else img.replaceWith(icon("file-media"));
+      }
     } else if (msg.type === "widgetsOffered") {
       const was = state.offered;
       state.offered = msg.on === true;
@@ -343,6 +528,7 @@
     } else if (msg.type === "view") {
       // Opened from a chat's Widgets list: the Widgets tab (the host says so only to a backend that keeps them).
       if (msg.view === "widgets" && state.offered) show("widgets");
+      if (msg.view === "videos" && state.videos.offered) show("videos");
       if ((msg.view === "artifacts" || msg.view === "artifacts-work") && state.artifactsOffered) {
         state.made = msg.view === "artifacts-work" ? "work" : "";
         try { vscode.setState({ ...(vscode.getState() || {}), made: state.made }); } catch {}
@@ -357,7 +543,7 @@
         if (ok && IMAGE_DATA.test(msg.data)) img.src = msg.data; else img.replaceWith(icon("file-media"));
       }
     } else if (msg.type === "changed") {
-      state.files = []; ask();
+      state.files = []; state.work.images = []; ask();
     } else if (msg.type === "error") {
       state.loading = false;
       const line = $("lib-status"); line.textContent = String(msg.message || "Something went wrong."); line.hidden = false;

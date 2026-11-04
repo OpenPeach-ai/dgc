@@ -32,6 +32,7 @@ MAX_MESSAGE = 500
 MAX_ACTIVITY = 80
 MAX_AGENT_TYPE = 64
 MAX_MODEL = 200
+MAX_SYSTEM = 64            # a DGC Router system's name (config: 1-64 characters)
 MAX_CALL_ID = 256
 MAX_MESSAGE_LINE = 120     # the one line a terminal row shows of a failure message
 MAX_LOG_EVENTS = 48        # display-only child tool steps kept for the inner page
@@ -110,7 +111,7 @@ class _Record:
                  "duration_ms", "tool_calls", "tokens", "isolated", "parallel", "background",
                  "message", "turn_id", "restored", "listed", "dirty", "sent_activity",
                  "sent_tool_calls", "sent_tokens", "order", "log", "face_slot", "carried_calls",
-                 "carried_tokens")
+                 "carried_tokens", "system", "thinking")
 
     def __init__(self, **fields):
         self.parent_id = None
@@ -138,6 +139,8 @@ class _Record:
         # A helper continued with its memory (dgc/helper_memory.py) counts its earlier runs' steps and tokens too.
         self.carried_calls = 0
         self.carried_tokens = 0
+        self.system = ""                # the DGC Router system it runs on ("" when the Router chose none)
+        self.thinking = ""              # the thinking level it uses ("" not known, or its model can't think)
         for key, value in fields.items():
             setattr(self, key, value)
         if not isinstance(getattr(self, "log", None), list):
@@ -158,6 +161,10 @@ class _Record:
             item["agent_type"] = self.agent_type
         if self.model:
             item["model"] = self.model
+        if self.system:
+            item["system"] = self.system
+        if self.thinking:
+            item["thinking"] = self.thinking
         if self.state == "waiting" and self.waiting_for:
             item["waiting_for"] = self.waiting_for
         if self.state in ACTIVE and self.activity:
@@ -364,6 +371,28 @@ class SubagentRegistry:
                     return
                 payload = self._updated_payload(record, model=changed_model)
             self._notify("updated", payload)
+
+    def set_system(self, id: str, system: str) -> None:
+        """Which DGC Router system the agent runs on now (a move changes it). Shown on its row; no event: the
+        editor hears it from router_status."""
+        with self._lock:
+            record = self._records.get(str(id or ""))
+            if record is not None:
+                record.system = clip(str(system or ""), MAX_SYSTEM)
+
+    def set_thinking(self, id: str, level: str) -> None:
+        """The thinking level the agent uses (Agent._helper_thinking), for its row and the agent map: "thinking low".
+        agent_updated has no field for it, so the listener is asked for a snapshot (``resync``), which carries it."""
+        level = str(level or "")
+        if level not in ("", "off", "low", "medium", "high", "xhigh", "max"):
+            level = ""
+        with self._publish:
+            with self._lock:
+                record = self._records.get(str(id or ""))
+                if record is None or record.thinking == level:
+                    return
+                record.thinking = level
+            self._notify("resync", {})
 
     def mark_background(self, id: str) -> None:
         """A foreground agent the person moved to the background (dgc/background_now.py).
@@ -602,9 +631,10 @@ class SubagentRegistry:
                       "isolated": item.get("isolated") is True, "parallel": item.get("parallel") is True,
                       "background": item.get("background") is True,
                       "tool_calls": _int(item.get("tool_calls"))}
+            # "system" is the DGC Router system it ran on, so a reopened chat says "on NAS · qwen3.5:9b" as a live one.
             for key, limit in (("description", MAX_DESCRIPTION), ("message", MAX_MESSAGE),
                                ("model", MAX_MODEL), ("agent_type", MAX_AGENT_TYPE),
-                               ("call_id", MAX_CALL_ID), ("turn_id", 128)):
+                               ("call_id", MAX_CALL_ID), ("turn_id", 128), ("system", MAX_SYSTEM), ("thinking", 16)):
                 raw = item.get(key)
                 fields[key] = clip(scrub_urls(redact(raw)), limit) if isinstance(raw, str) else ""
             for key in ("started_at", "duration_ms", "tokens"):
@@ -1065,6 +1095,10 @@ def meta_text(item: dict, *, main_model: str = "", fmt_tokens: Callable[[int], s
         parts.append(str(item["agent_type"]))
     if item.get("model") and item.get("model") != main_model:
         parts.append(str(item["model"]))
+    if item.get("system"):
+        parts.append("on " + str(item["system"]))
+    if item.get("thinking"):
+        parts.append("thinking " + {"xhigh": "extra high"}.get(str(item["thinking"]), str(item["thinking"])))
     if state in ("running", "waiting") and item.get("elapsed_ms") is not None:
         parts.append(format_elapsed(item["elapsed_ms"]))
     elif state in ENDED and item.get("duration_ms") is not None:

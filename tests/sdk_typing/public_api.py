@@ -133,6 +133,7 @@ def use_session(session: Session) -> str:
     session.get_config()
     session.get_plan()
     session.get_usage()
+    session.get_usage("7d", system="nas")
     session.list_artifacts()
     session.list_agents()
     session.clear_todos()

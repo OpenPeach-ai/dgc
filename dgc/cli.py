@@ -299,7 +299,7 @@ class UI:
         # A tool that reported progress (wait_tasks, an MCP server) or a sub-agent's forwarded
         # result left the spinner drawing on this row; the result printed after it, on the same line.
         self.stop_working()
-        out = terminal_safe_text(out)
+        out = terminal_safe_text(ui_mod.shown_output(name, out))   # no sentence written for the model alone
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -323,7 +323,8 @@ class UI:
                 continue
             width, height = int(row.get("width") or 0), int(row.get("height") or 0)
             shape = f"{width}×{height}" if width and height else ""
-            path = terminal_safe_text(str(row.get("path") or ""))
+            path = terminal_safe_text(str((row.get("source_path") if str(caption).startswith("generated image")
+                                           else "") or row.get("path") or ""))
             if path:
                 lines.append(f"  ↳ image: {path}" + (f" ({shape})" if shape else ""))
             else:
@@ -336,6 +337,19 @@ class UI:
         resume = self._pause_working()   # tool_result restarted the spinner, and storing images took time
         for line in lines:
             self.console.print(line, style=DIM, markup=False, highlight=False, soft_wrap=True)
+        if str(caption).startswith("generated image") and self.console.is_terminal and not os.environ.get("NO_COLOR") \
+                and self.console.color_system in ("truecolor", "256"):
+            # A generated image: a small half-block picture of it, where the terminal shows colour.
+            from .image_preview import ansi, cells
+            for row in (meta or [])[:4]:
+                try:
+                    with open(str(row.get("source_path") or row.get("path") or ""), "rb") as handle:
+                        picture = cells(handle.read(), 36, max_rows=18)
+                except (OSError, TypeError):
+                    picture = None
+                if picture:
+                    self.console.file.write("\n".join("    " + line for line in ansi(picture).splitlines()) + "\n")
+                    self.console.file.flush()
         if resume is not None:
             self.start_working(resume)
 
@@ -417,9 +431,16 @@ class UI:
                 safe = terminal_safe_text(self.redact(preview))
                 self.console.print(render.render_diff(safe.expandtabs(4)))
         rule = rule_for(name, args)
-        idx = menu_select("Allow this?",
-                          ["allow once", "always allow", "deny"],
-                          ["just this time", f"add rule {terminal_safe_text(rule)}", "block it"])
+        from .agent import interaction_offers_always
+        from .permissions import NO_ALWAYS_TOOLS as ALWAYS_ASK_TOOLS
+        # A DGC Router change, a look on the network, and a call the user's own ask rule asks about: asked every time.
+        if name in ALWAYS_ASK_TOOLS or not interaction_offers_always():
+            idx = menu_select("Allow this?", ["allow once", "deny"], ["just this time", "block it"])
+            idx = {0: 0, 1: 2}.get(idx, idx)
+        else:
+            idx = menu_select("Allow this?",
+                              ["allow once", "always allow", "deny"],
+                              ["just this time", f"add rule {terminal_safe_text(rule)}", "block it"])
         if idx in (0, 1):
             return {0: "once", 1: "always"}[idx]
         # denied (or esc) — capture optional feedback so the model can adjust in one step
@@ -726,6 +747,16 @@ class UI:
 
     def goal_changed(self, goal: str, status: str) -> None:
         self.info(f"standing goal → {status}: {goal[:120]}")
+
+    def video_job(self, job: dict, change: str) -> None:
+        """A video this chat started ended: its line, where it is, and how to open it."""
+        if job.get("state") not in ("done", "failed", "cancelled"):
+            return
+        from . import videos
+        self.info(videos.line(job))
+        path = (job.get("result") or {}).get("path")
+        if path:
+            self.info(f"{path} · Open: /videos open {job['id']}")
 
     def info(self, msg: str) -> None:
         self.stop_working()
@@ -1270,6 +1301,40 @@ class CLI:
                 self.console.print(terminal_safe_text(redact_text(output, secret_values(cfg))), markup=False, highlight=False)
             except (OSError, ValueError) as exc:
                 self.ui.error(str(exc))
+        elif cmd == "router":
+            from .router_cli import slash
+            import getpass
+
+            def ask_key(system_id, done, what="key"):
+                text = getpass.getpass(f"{what[:1].upper() + what[1:]} for {system_id} (not shown, blank removes it): ").strip()
+                done(text)
+                self.console.print(f"{what} saved" if text else f"{what} removed", markup=False, highlight=False)
+            body, line = slash(cfg, rest, ask_key=ask_key)
+            if body:
+                self.console.print(render.render_markdown(terminal_safe_text(redact_text(body, secret_values(cfg)))))
+            if line:
+                self.console.print(terminal_safe_text(line), markup=False, highlight=False)
+            self.agent._refresh_system()
+        elif cmd == "images":
+            from .images_cli import slash as images_slash
+            import getpass
+
+            def ask_image_key(generator_id, done):
+                text = getpass.getpass(f"Key for {generator_id} (not shown, blank removes it): ").strip()
+                done(text)
+                self.console.print("key saved" if text else "key removed", markup=False, highlight=False)
+            body, line = images_slash(cfg, rest, ask_key=ask_image_key, project_root=cfg.project_root)
+            if body:
+                self.console.print(render.render_markdown(terminal_safe_text(redact_text(body, secret_values(cfg)))))
+            if line:
+                self.console.print(terminal_safe_text(line), markup=False, highlight=False)
+        elif cmd == "videos":
+            from .videos_cli import slash as videos_slash
+            body, line = videos_slash(cfg, rest, project_root=cfg.project_root)
+            if body:
+                self.console.print(render.render_markdown(terminal_safe_text(redact_text(body, secret_values(cfg)))))
+            if line:
+                self.console.print(terminal_safe_text(line), markup=False, highlight=False)
         elif cmd == "pips":
             from .pip_cli import handle_command
             try:
@@ -1318,11 +1383,13 @@ class CLI:
         elif cmd == "usage":
             from . import usage_ledger
             try:
-                report = usage_ledger.report(usage_ledger.normalize_range(rest))
+                range_name, wanted = usage_ledger.parse_usage_args(rest)
+                report, system, systems = usage_ledger.system_report(range_name, wanted)
             except ValueError as exc:
                 self.ui.error(str(exc))
             else:
-                self.console.print(render.render_markdown(usage_ledger.format_report(report)))
+                self.console.print(render.render_markdown(usage_ledger.format_report(
+                    report, system=system, by_system=None if system else systems)))
         elif cmd == "eta":
             from .eta import format_stats
             snapshot_fn = getattr(self.agent, "eta_snapshot", None)
@@ -1609,7 +1676,8 @@ class CLI:
                 self.ui.info(f"sub-agent model: {cfg.get('subagent_model') or '(inherit main)'}  ·  "
                              f"host: {cfg.get('subagent_base_url') or '(inherit main)'}  ·  "
                              f"transport: {cfg.get('subagent_api_mode') or '(inherit/infer)'}  ·  "
-                             f"context: {subagent_window_text(cfg)}")
+                             f"context: {subagent_window_text(cfg)}  ·  "
+                             f"thinking: {cfg.get('subagent_thinking') or '(same as the main chat)'}")
             elif args[0] == "model" and len(args) > 1:
                 cfg.set("subagent_model", args[1])
                 self.ui.info(f"sub-agent model → {args[1]}")
@@ -1635,13 +1703,22 @@ class CLI:
                     return True
                 cfg.set("subagent_context_size", size)
                 self.ui.info(f"sub-agent context → {size:,} tokens" if size else "sub-agent context → the main window")
+            elif args[0] == "thinking" and len(args) == 2:
+                level = args[1].lower()
+                if level not in ("same", "off", "low", "medium", "high", "xhigh"):
+                    self.ui.error("thinking must be same (the main chat's), off, low, medium, high or xhigh")
+                    return True
+                cfg.set("subagent_thinking", "" if level == "same" else level)
+                self.ui.info("sub-agent thinking → the main chat's level" if level == "same"
+                             else f"sub-agent thinking → {level}")
             elif args[0] == "clear":
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
-                          "subagent_api_mode", "subagent_context_size"):
+                          "subagent_api_mode", "subagent_context_size", "subagent_thinking"):
                     cfg.set(k, "" if k != "subagent_context_size" else 0)
                 self.ui.info("sub-agent overrides cleared — inherits the main model/host")
             else:
-                self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | context TOKENS | clear]")
+                self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | context TOKENS | "
+                              "thinking same|off|low|medium|high|xhigh | clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)
@@ -1721,11 +1798,18 @@ class CLI:
         si = select("Resume a session", labels)
         if si is None:
             return
-        n = self.agent.load_session(items[si][0])
+        n = self.agent.load_session(items[si][0], saved_mode=True)     # the person's own pick: its own mode
         self.ui.info(f"resumed session ({n} messages)"
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
+        self._say_mode_note()
         self._show_restored_todos()
         self._check_owner()
+
+    def _say_mode_note(self) -> None:
+        """A reopened chat that ran in Auto or Accept edits, in a folder not trusted now: it is in Default, said once."""
+        note = getattr(self.agent, "take_mode_restore_note", lambda: "")()
+        if note:
+            self.ui.info(note)
 
     def _say_holder(self) -> None:
         """A resumed session another window holds: where it is open and what runs there (dgc/holder_note.py), the
@@ -1786,8 +1870,9 @@ class CLI:
                 if not ok:
                     self.ui.info(session_owner.not_now(why))
                     continue
-                agent.load_session(agent.session_file)          # as it was saved there, last
+                agent.load_session(agent.session_file, saved_mode=True)   # as it was saved there, last
                 self.ui.info("Open here: this session is in this terminal now; the other side shows it read-only.")
+                self._say_mode_note()
                 self._announce_peer()
                 return True
             if choice == 1:
@@ -2853,7 +2938,7 @@ def run_help() -> None:
     c.print("  dgc export [ID] [FILE]  save a session as Markdown")
     c.print("  dgc trust               list the folders the trust gate skips  (dgc trust revoke N|PATH|here)")
     c.print("  dgc notes [QUERY]       what this project already learned, across sessions")
-    c.print("  dgc usage               tokens counted on this machine, by model and day  (--range R, --json)")
+    c.print("  dgc usage               tokens counted on this machine, by system, model and day  (--range R, --system NAME, --json)")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
@@ -2868,30 +2953,40 @@ def run_help() -> None:
 
 
 def run_usage(argv: list[str]) -> int:
-    """`dgc usage [--range R] [--json]`: the local token ledger, read-only.
+    """`dgc usage [--range R] [--system NAME] [--json]`: the local token ledger, read-only.
 
-    It never builds a Config or an Agent: reading the ledger needs no endpoint, key or project.
+    It never builds a Config or an Agent: reading the ledger needs no endpoint, key or project. The DGC Router's
+    systems (to name each computer) are read from the user's config.json.
     """
     from . import usage_ledger
     parser = argparse.ArgumentParser(
         prog="dgc usage", allow_abbrev=False,
-        description="Tokens and requests DGC counted on this machine, by model and by day.")
+        description="Tokens and requests DGC counted on this machine, by system, by model and by day.")
     parser.add_argument("--range", dest="range_name", default="7d",
                         help="today, 7d, 30d, month or all (default 7d)")
+    parser.add_argument("--system", default="",
+                        help="one system only: a DGC Router system (NAS), This computer, or a cloud service "
+                             "(Ollama Cloud, Anthropic)")
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     try:
         args = parser.parse_args(argv)
         range_name = usage_ledger.normalize_range(args.range_name)
+        report, system, systems = usage_ledger.system_report(range_name, args.system)
     except SystemExit as exc:
         return int(exc.code or 0)
     except ValueError as exc:
         print(f"dgc usage: {exc}", file=sys.stderr)
         return 2
-    report = usage_ledger.report(range_name)
     if args.json:
-        print(json.dumps(report, indent=2))
+        # The terminal's JSON also lists every system of the range and the one it was filtered to (the editor
+        # builds its By system list from the rows).
+        out = {**report, "by_system": systems}
+        if system:
+            out["system"] = system
+        print(json.dumps(out, indent=2))
     else:
-        Console().print(render.render_markdown(usage_ledger.format_report(report, shell=True)))
+        Console().print(render.render_markdown(usage_ledger.format_report(
+            report, shell=True, system=system, by_system=None if system else systems)))
     return 1 if report.get("error") else 0
 
 
@@ -2906,7 +3001,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
     "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
     "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
-    "usage": "dgc usage [--range today|7d|30d|month|all] [--json]   tokens counted on this machine, by model and day",
+    "usage": "dgc usage [--range today|7d|30d|month|all] [--system NAME] [--json]   tokens counted on this machine, by system, model and day",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "chat": "dgc chat [QUESTION] [--resume ID] [--list [QUERY]] [--export ID [-o FILE]] [--model M] [--think L] [--search off|auto|on] [--temporary] [--file PATH] [--json]  ChatDGC in the terminal",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
@@ -2918,6 +3013,10 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
     "plugin": "dgc plugin list|search [TEXT]|install NAME [--accept-license ID]|sign-in NAME [--scopes A,B|none]|show NAME|key NAME [--remove]|installed",
     "pips": "dgc pips enable|workspaces|workspace|list|create|show|run|runs|report|cancel|pause|resume-job|archive|restore|propose|accept|reject|versions|context|session-outcome|memory|notifications|activity|serve|status|health|stop|resume  (dgc pips COMMAND --help)",
+    "router": "dgc router status|add|edit|remove|test|on|off|find|hardware|suggest [--json]  DGC Router: your other computers that run models (dgc router COMMAND --help)",
+    "node": "dgc node serve|token|stats|install-service|uninstall-service  read-only hardware stats for DGC Router on another computer",
+    "images": "dgc images list|add|edit|remove|test|default|generate [--json]  your image generators (dgc images COMMAND --help)",
+    "videos": "dgc videos list|add|make|jobs|show|stop|open|library [--json]  video generation (dgc videos COMMAND --help)",
     "mcp": "dgc mcp ...                        manage MCP servers, resources, prompts and connections",
 }
 
@@ -2940,6 +3039,13 @@ def _subcommand_help(name: str) -> int:
 
 
 
+def _stdin_is_terminal() -> bool:
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 def _serve_config() -> Config:
     """The config `dgc serve` runs on. An SDK app's isolated session runs in the mode the app asked
     for, as a mode named with `dgc --mode` does: reopening a transcript never lowers it. Published
@@ -2949,9 +3055,10 @@ def _serve_config() -> Config:
     if os.environ.get("DGC_SDK_ISOLATED") == "1":
         config.mode_explicit = True
     elif os.environ.get("DGC_EDITOR_SESSION") == "1" and config.get("mode") == "auto":
-        # 0.50.0 could persist an editor chat's Auto choice as the global
-        # default. Do not reopen that unsafe default in a new editor process.
-        # A CLI/SDK run that explicitly asks for Auto still keeps its mode.
+        # In the editor Auto is confirmed for one Work chat at a time (Settings
+        # says so), so no editor process starts in a saved Auto: one 0.50.0
+        # saved from an editor chat, or one chosen with `dgc` in a terminal.
+        # The saved value stays; a CLI/SDK run that asks for Auto keeps it.
         config.hold("mode", "default")
     return config
 
@@ -2971,6 +3078,18 @@ def main(argv: list[str] | None = None) -> int | None:
                     pips_parser().parse_args(raw_argv[1:])
                 except SystemExit as exc:
                     return int(exc.code or 0)
+            if raw_argv[0] == "router":
+                from .router_cli import main as router_main
+                return router_main(raw_argv[1:])
+            if raw_argv[0] == "node":
+                from .node import main as node_main
+                return node_main(raw_argv[1:])
+            if raw_argv[0] == "images":
+                from .images_cli import main as images_main
+                return images_main(raw_argv[1:])
+            if raw_argv[0] == "videos":
+                from .videos_cli import main as videos_main
+                return videos_main(raw_argv[1:])
             if raw_argv[0] == "chat":
                 from .chat_cli import parser as chat_parser
                 chat_parser().print_help()
@@ -3069,6 +3188,22 @@ def main(argv: list[str] | None = None) -> int | None:
         if raw_argv[0] == "pips":
             from .pip_daemon import handle_command
             return handle_command(Config(), raw_argv[1:])
+        if raw_argv[0] == "router":
+            # DGC Router (dgc/router_cli.py): no model, no session; --json for scripts.
+            from .router_cli import main as router_main
+            return router_main(raw_argv[1:])
+        if raw_argv[0] == "node":
+            # dgc node (dgc/node.py): DGC Router's read-only hardware stats, on the other computer.
+            from .node import main as node_main
+            return node_main(raw_argv[1:])
+        if raw_argv[0] == "images":
+            # Image generators (dgc/images_cli.py): no model, no session; --json for scripts.
+            from .images_cli import main as images_main
+            return images_main(raw_argv[1:])
+        if raw_argv[0] == "videos":
+            # Video generation (dgc/videos_cli.py): no model, no session; --json for scripts.
+            from .videos_cli import main as videos_main
+            return videos_main(raw_argv[1:])
         if raw_argv[0] == "mods":
             # The user's mods, and the tools for writing one (dgc/mods/cli.py).
             from .mods.cli import main as mods_main
@@ -3268,10 +3403,13 @@ def main(argv: list[str] | None = None) -> int | None:
               if args.prompt is not None and args.output_format == "json" else None)
 
     # session persistence (transcripts resume across runs)
+    # The person at the terminal reopened it (no -p, not a script on stdin): it comes back in the mode it had, even one
+    # that asks less than the default. `dgc -p --continue` only lowers it (Agent._restore_session_mode).
+    person_reopens = args.prompt is None and _stdin_is_terminal()
     if args.cont:
         p = sessions_mod.latest(config.project_root)
         if p:
-            n = cli.agent.load_session(p)
+            n = cli.agent.load_session(p, saved_mode=person_reopens)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
             cli._show_restored_todos()
             if cli.agent.own_session_soon():
@@ -3282,7 +3420,7 @@ def main(argv: list[str] | None = None) -> int | None:
     elif args.resume is not None and args.resume != "":     # `dgc --resume <id>` → load it directly
         p = sessions_mod.by_id(config.project_root, args.resume)
         if p:
-            n = cli.agent.load_session(p)
+            n = cli.agent.load_session(p, saved_mode=person_reopens)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
             cli._show_restored_todos()
             if cli.agent.own_session_soon():
@@ -3299,7 +3437,7 @@ def main(argv: list[str] | None = None) -> int | None:
                       for (pp, ts, prev, cnt, nm) in items[:20]]
             si = select("Resume a session", labels)
             if si is not None:
-                cli.agent.load_session(items[si][0])
+                cli.agent.load_session(items[si][0], saved_mode=person_reopens)
                 cli._show_restored_todos()
                 if cli.agent.own_session_soon():
                     cli.agent.compact_resumed_session()
@@ -3356,6 +3494,7 @@ def main(argv: list[str] | None = None) -> int | None:
                 # A session another DGC has open: where, what runs there, and the choices (the full screen asks
                 # in its own way, once it is up).
                 cli._check_owner()
+                cli._say_mode_note()          # the full screen says it with the history it shows
                 if not getattr(cli, "_quit_requested", False):
                     cli.repl()
             else:
@@ -3565,7 +3704,7 @@ def apply_run_flags(config, args, parser) -> None:
 def _json_oneshot_ui(config):
     """`-p --output-format json`: the `dgc serve` event stream on stdout, every blocking question
     answered on the spot — a script has nobody to ask — and a closing `result` object."""
-    from .headless import HeadlessUI
+    from .headless import HeadlessUI, permission_choices
     from .protocol import Emitter, PendingRequests
 
     class _OneShotJsonUI(HeadlessUI):
@@ -3583,7 +3722,7 @@ def _json_oneshot_ui(config):
             rule = str(rule_for(name, args))
             self.em.emit("permission_request", id=None, call_id=call_id, name=name, args=args,
                          command=(args.get("command") if name == "bash" else None),
-                         suggested_rule=rule, choices=["once", "always", "deny"],
+                         suggested_rule=rule, choices=permission_choices(name),
                          decision="deny", reason="non-interactive run")
             self.deny_reason = ("non-interactive run: permission was not granted; the user can "
                                 + _rerun_advice(rule, name, args,

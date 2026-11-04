@@ -137,3 +137,86 @@ class HostTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardConnectionShutdown(unittest.TestCase):
+    def host(self):
+        import threading
+        from types import SimpleNamespace
+        host = object.__new__(headless.Host)
+        host._chats_lock = threading.RLock()
+        host._mcp_app_lock = threading.RLock()
+        host._shutting_down = False
+        host.chats, host._queues, host._drains = {}, {}, {}
+        host._chatdgc = None
+        host.default = SimpleNamespace(config=object())
+        host.em = SimpleNamespace(emit=lambda *args, **kwargs: None)
+        return host
+
+    def test_close_releases_all_card_connections_once_and_blocks_new_owners(self):
+        from unittest.mock import Mock
+        host = self.host()
+        chat, pip = Mock(), Mock()
+        host._mcp_app_links = {"chat": chat, "pip": pip}
+        host._mcp_app_asked = {"old": object()}
+        with patch("dgc.peers.withdraw"), patch("dgc.mcp_apps.PluginLink") as make:
+            self.assertEqual(host.close(), "idle")
+            host.close()
+            self.assertEqual(host._mcp_app_owner({"surface": "chat"}), (None, None, None))
+        chat.close.assert_called_once()
+        pip.close.assert_called_once()
+        make.assert_not_called()
+        self.assertEqual(host._mcp_app_links, {})
+        self.assertEqual(host._mcp_app_asked, {})
+
+    def test_shutdown_waits_for_an_active_card_operation(self):
+        import threading
+        from unittest.mock import Mock
+        host = self.host()
+        active, release, closed = threading.Event(), threading.Event(), threading.Event()
+        link = Mock()
+        host._mcp_app_links = {"pip": link}
+        def operation():
+            active.set()
+            self.assertTrue(release.wait(2))
+            link.connected = True
+        worker = threading.Thread(target=lambda: host._run_mcp_app_operation(operation))
+        def shutdown():
+            host.close()
+            closed.set()
+        closer = threading.Thread(target=shutdown)
+        with patch("dgc.peers.withdraw"):
+            worker.start()
+            self.assertTrue(active.wait(2))
+            closer.start()
+            try:
+                self.assertFalse(closed.wait(0.05))
+                link.close.assert_not_called()
+            finally:
+                release.set()
+                worker.join(2)
+                closer.join(2)
+        self.assertTrue(closed.is_set())
+        link.close.assert_called_once()
+        self.assertEqual(host._mcp_app_links, {})
+
+    def test_queued_card_call_cannot_start_after_close(self):
+        from unittest.mock import Mock
+        host = self.host()
+        host._mcp_app_links = {"chat": Mock()}
+        scheduled = []
+        class DeferredThread:
+            def __init__(self, target, **kwargs):
+                self.target = target
+            def start(self):
+                scheduled.append(self.target)
+        with patch("dgc.headless.threading.Thread", DeferredThread), \
+             patch("dgc.mcp_apps.load_card", return_value={"surface": "chat", "card_id": "app_test"}), \
+             patch("dgc.mcp_apps.CALLS.begin", return_value={"result": {}}) as begin, \
+             patch("dgc.peers.withdraw"):
+            host._mcp_apps_command({"type": "mcp_app_call", "request_id": "test", "card_id": "app_test",
+                                    "method": "tools/call", "params": {"name": "read"}})
+            self.assertEqual(len(scheduled), 1)
+            host.close()
+            scheduled[0]()
+            begin.assert_not_called()

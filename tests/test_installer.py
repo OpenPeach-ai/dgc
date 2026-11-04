@@ -386,6 +386,7 @@ class VersionedInstallLifecycle(unittest.TestCase):
             self.assertIn("--install-extension", log, editor)
             self.assertIn("--force", log, editor)
             self.assertEqual(len(log.splitlines()), 1, f"{editor} must not be installed twice")
+        self.assertIn("Editor extension: installed into code, codium, cursor; reload its window", output(done))
 
     def test_02_dgc_update_self_locates_and_never_swaps_code_under_a_running_process(self):
         vdir_a = self.data / "versions" / "0.90.1"
@@ -1125,6 +1126,29 @@ class QaInstallerRegressions(unittest.TestCase):
         self.assertIn("DGC is installed. Next", text, "a first install still gets the guidance")
         self.assertNotIn("Editor extension", text, "DGC_SKIP_EXTENSION=1: nothing was installed")
         self.assertNotIn("dgc update --rollback", text, "nothing to roll back to")
+
+    def test_the_closing_words_never_say_the_extension_was_installed_when_it_was_not(self):
+        # Release check, 2026-11-03: with no extension at DGC_BASE_URL, nothing was installed, and the installer still
+        # ended "installed into each of 'cursor', 'code' and 'codium' found on PATH".
+        home = new_home("no-extension")
+        fake_bin = home / "fake-editors"
+        fake_bin.mkdir()
+        code = fake_bin / "code"
+        code.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{home}/code.log"\n')
+        code.chmod(0o755)
+        published = {path: SITE.files.pop(path) for path in ("/vscode/dgc.vsix", "/vscode/dgc.vsix.sha256")
+                     if path in SITE.files}
+        self.addCleanup(SITE.files.update, published)
+        env = clean_env(home)
+        env.pop("DGC_SKIP_EXTENSION")
+        env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+        SITE.publish(release("0.90.2"))
+        done = run_installer(env)
+        text = output(done)
+        self.assertEqual(done.returncode, 0, text[-3000:])
+        self.assertFalse((home / "code.log").exists(), "no editor was asked to install anything")
+        self.assertNotIn("installed into", text)
+        self.assertIn(f"Editor extension: not installed (it couldn't be downloaded). Get it at {SITE.url}/vscode/", text)
 
     def test_a_damaged_archive_with_a_matching_checksum_is_reported_as_damaged(self):
         home = new_home("damaged")

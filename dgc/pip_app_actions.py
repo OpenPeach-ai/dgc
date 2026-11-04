@@ -312,6 +312,12 @@ def accept(store, action_id, expected_digest, actor, config, *, prepare=None, by
         # Your own app: one signed POST that carries this action's id and digest (Pips API 61).
         from functools import partial
         prepare=partial(pip_sdk_apps.prepared,action_id=action_id,action_digest=value['digest'])
+    if prepare is None and payload['kind']=='connector_call' and payload['server'] not in connector.PROVIDERS:
+        # A plugin's tool with a card (MCP Apps) shows it under the Pip's reply that offered the action, as a call
+        # that runs at once does (pip_plugins.Session) and as ChatDGC's Send does.
+        from functools import partial
+        from .pip_plugins import card_owner
+        prepare=partial(adapter.prepared,app_owner=card_owner(store,payload,action_id))
     prepare=prepare or adapter.prepared
     def authorize():_current(store,payload,config)
     authorize()

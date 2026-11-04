@@ -345,15 +345,17 @@ def _mod_clash(m, plugin: str) -> str:
 def _mods_review(mods: list, plugin: str) -> tuple[list[dict], list[str]]:
     """What the install review shows of each mod: who it is, what it asks for, and whether that is new, the same as
     the user allowed before, or more; and why any can't be installed."""
-    from .mods import consent as mod_consent
+    from .mods import catalog as mod_catalog, consent as mod_consent
     from .mods.manifest import describe
     shown, clashes = [], []
     for m in mods:
         clash = _mod_clash(m, plugin)
         if clash:
             clashes.append(clash)
-        before = mod_consent.record(m.name)
-        state = 'new' if before is None else 'more' if mod_consent.missing(m) else 'same'
+        # What the user allowed the installed copy, where this one will run from; another folder's Allow isn't it.
+        at = mod_catalog.installed_root() / m.name
+        before = mod_consent.record_for(m, at=at)
+        state = 'new' if before is None else 'more' if mod_consent.missing(m, at=at) else 'same'
         shown.append({'name': m.name, 'title': m.title, 'version': m.version, 'description': m.description,
                       'asks': describe(m), 'grants': sorted(m.grants()), 'state': state})
     return shown, clashes
@@ -1883,6 +1885,31 @@ def record_servers(record: dict) -> dict:
     if 'servers' in record: return dict(record['servers'])
     url = record.get('sign_in_url')
     return {record['name']:mcp_spec(url,record.get('bearer',''))} if url else {}
+
+
+def server_display_names(limit: int = 128) -> dict:
+    """Each installed plugin's servers, by the name its tools carry (mcp__<server>__<tool>), with the plugin's name as
+    Settings → Plugins shows it ("example" -> "MCP Apps example"): what a plugin's card and the editor's Allow card for
+    one of its tools call it (ready.capabilities.plugin_names), before the editor has the plugin list. {} when the
+    installed list can't be read."""
+    from .mcp import _safe_name
+    try:
+        rows = _installed()
+    except Exception:                    # noqa: BLE001 -- no names rather than no handshake
+        return {}
+    out = {}
+    for row in rows[:64] if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not isinstance(row.get('name'), str):
+            continue
+        shown = ' '.join(str(row.get('display_name') or row['name']).split())[:80] or row['name'][:80]
+        try:
+            servers = [*record_servers(row), *(row.get('registered_specs') or {})]
+        except Exception:                # noqa: BLE001 -- a malformed record names nothing
+            continue
+        for server in servers:
+            if isinstance(server, str) and server and len(out) < limit:
+                out.setdefault(_safe_name(server), shown)
+    return out
 
 
 def _remove_owned_skill(folder: str, rows: list[dict], owner: str):

@@ -6,12 +6,43 @@
 // the 3 most urgent rows, then one line to the Pips view's Needs attention. A row that is news (failed
 // runs, new findings) has a dismiss: its news is marked seen for good (mark_pip_news_seen, Pips API 48)
 // and the Pip comes back only when it does something new. A row waiting for you needs an answer: none.
+// Unread messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all clears them from here only. Nothing is marked
+// read, and the Pips page still shows every one until its chat is opened. The home keeps, per Pip, what was unread then
+// (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
+// after. A Pip's count pill reads "Read" on hover or focus, and marks its whole chat read (mark_pip_read).
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation} from './pipAttention.js';
 
 const POLL_MS = 60000;
 const TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
-const SHOWN = 3, MAX_SEEN = 50;
+const SHOWN = 3, MAX_SEEN = 50, MAX_DISMISSED = 500;
+const PIP_ID = /^pip_[a-f0-9]{32}$/, WORKSPACE_ID = /^ws_[a-f0-9]{32}$/, FEED_ID = /^[A-Za-z0-9_|-]{1,260}$/;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// A list_pip_unread item's two feeds: its chat's replies and its runs' posts, each a count and its newest id.
+function feeds(item) {
+ const mid = typeof item.latest_message_id === 'string' ? item.latest_message_id : null;
+ const pid = typeof item.latest_post_id === 'string' ? item.latest_post_id : null;
+ if (Number.isSafeInteger(item.messages) && Number.isSafeInteger(item.posts) && item.messages >= 0 && item.posts >= 0) return {m: item.messages, mid, p: item.posts, pid};
+ return {m: item.count, mid: `${mid || ''}|${pid || ''}`, p: 0, pid: null};
+}
+function checkedSnapshot(value) {
+ const count = v => Number.isSafeInteger(v) && v >= 0 && v <= 1000000, id = v => v === null || (typeof v === 'string' && FEED_ID.test(v));
+ if (!value || typeof value !== 'object' || typeof value.w !== 'string' || !WORKSPACE_ID.test(value.w)) return null;
+ return count(value.m) && count(value.p) && id(value.mid) && id(value.pid) ? {w: value.w, m: value.m, mid: value.mid, p: value.p, pid: value.pid} : null;
+}
+// What is unread now that wasn't when it was dismissed, and the snapshot to keep (null: nothing of it is left). A feed whose
+// newest id is the same has nothing new; more of it than then is that many new; fewer means it was read since, so all of it
+// is new (its part of the snapshot goes).
+function since(snapshot, item) {
+ const now = feeds(item), next = {...snapshot};
+ const feed = (n, id, key, idKey) => {
+  if (id === snapshot[idKey]) { next[key] = n; return 0; }
+  if (n > snapshot[key]) return n - snapshot[key];
+  next[key] = 0; next[idKey] = null; return n;
+ };
+ const fresh = feed(now.m, now.mid, 'm', 'mid') + feed(now.p, now.pid, 'p', 'pid');
+ return {count: fresh >= now.m + now.p ? item.count : Math.min(item.count, fresh), next: next.m || next.mid || next.p || next.pid ? next : null};
+}
 
 export function mountHomePips(options) {
  const doc = options.document, root = options.root;
@@ -22,6 +53,14 @@ export function mountHomePips(options) {
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
  // Dismissed here: pip id → the request number after which a digest already leaves its news out.
  const hidden = new Map();
+ // Unread dismissed here (Dismiss all): pip id → its snapshot. Read with its pill: pip id → the request number after which
+ // list_pip_unread already leaves it out (Infinity while DGC hasn't answered).
+ const snapshots = new Map(), reads = new Map();
+ for (const [id, value] of Object.entries(options.dismissed && typeof options.dismissed === 'object' ? options.dismissed : {}).slice(-MAX_DISMISSED)) {
+  const snapshot = PIP_ID.test(id) ? checkedSnapshot(value) : null;
+  if (snapshot) snapshots.set(id, snapshot);
+ }
+ const keep = (set, drop) => { if (Object.keys(set).length || drop.length) options.onDismissed?.({set, drop}); };
  const node = (tag, cls, value) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (value !== undefined) e.textContent = value; return e; };
  const request = (type, fields = {}) => new Promise((resolve, reject) => {
   const id = `home-pips-${epoch}-${++sequence}`;
@@ -83,27 +122,70 @@ export function mountHomePips(options) {
    }
   }
  }
+ // The unread the home shows: what came after a Pip's dismiss, and none of a Pip being marked read.
+ function shownUnread() {
+  return unread.filter(item => !reads.has(item.pip_id) && pips.some(pip => pip.id === item.pip_id))
+   .map(item => { const snapshot = snapshots.get(item.pip_id); return {...item, count: snapshot ? since(snapshot, item).count : item.count}; })
+   .filter(item => item.count > 0);
+ }
+ // Dismiss all: the news rows as before (kept by DGC), and every unread message here only: none is marked read.
+ function dismissAll(news) {
+  const set = {};
+  for (const item of unread) {
+   const snapshot = PIP_ID.test(item.pip_id) ? checkedSnapshot({w: item.workspace_id, ...feeds(item)}) : null;
+   if (snapshot) { snapshots.set(item.pip_id, snapshot); set[item.pip_id] = snapshot; }
+  }
+  keep(set, []);
+  if (news.length) { void dismiss(news, 0); return; }
+  failure = ''; refocus = root.contains(doc.activeElement) ? 0 : null; paint();
+ }
+ // A Pip's pill: its whole chat marked read, up to the newest reply and run post the home was told of.
+ async function markRead(item, index) {
+  const pip = item.pip_id, message = typeof item.latest_message_id === 'string' ? item.latest_message_id : null;
+  const post = typeof item.latest_post_id === 'string' ? item.latest_post_id : null, token = epoch;
+  if (!message && !post) return;
+  reads.set(pip, Infinity); failure = ''; refocus = root.contains(doc.activeElement) ? index : null; paint();
+  try {
+   await request('mark_pip_read', {pip_id: pip, ...(message ? {message_id: message} : {}), ...(post ? {post_id: post} : {})});
+   if (token !== epoch) { reads.delete(pip); return; }     // a new connection: its list says
+   reads.set(pip, sequence);
+   if (snapshots.delete(pip)) keep({}, [pip]);
+   void load();
+  } catch {
+   reads.delete(pip);
+   if (token === epoch) { failure = 'That didn’t mark it read. Try again.'; paint(); }
+  }
+ }
  function paint() {
   if (disposed) return;
   const before = new Map([...root.querySelectorAll('.home-pip-item[data-pip-id]')]
    .map(item => [item.dataset.pipId, item.dataset.news]));
+  // Focus on a control here survives a repaint (a list that reloaded after a read): the same control, or Open Pips.
+  const focused = refocus === null && root.contains(doc.activeElement) ? doc.activeElement : null;
+  const held = focused ? {name: [...focused.classList].find(c => c.startsWith('home-pip')) || '',
+   pip: focused.closest('[data-pip-id]')?.dataset.pipId || ''} : null;
   cleanup?.(); cleanup = null;
   root.replaceChildren();
   if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); return; }
   root.hidden = false;
-  const rows = needing(), dismissible = rows.filter(r => r.dismissible);
+  const rows = needing(), dismissible = rows.filter(r => r.dismissible), fresh = shownUnread();
+  const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   const head = node('div', 'home-pips-head'), actions = node('span', 'home-pips-actions');
   head.append(node('h2', '', 'Pips'));
-  if (dismissible.length >= 2) {
+  if (dismissible.length >= 2 || unreadCount) {
    const clear = node('button', 'home-pips-dismiss-all', 'Dismiss all'); clear.type = 'button';
-   clear.title = 'Dismiss every failed run and new finding here. What is waiting for you stays.';
-   clear.onclick = () => { void dismiss(dismissible, 0); };
+   const unreadNote = 'Every message stays unread in Pips until you open its chat.';
+   clear.title = !unreadCount ? 'Dismiss every failed run and new finding here. What is waiting for you stays.'
+    : dismissible.length ? `Dismiss every failed run and new finding here, and the unread count. What is waiting for you stays. ${unreadNote}`
+    : `Clear the unread count here. ${unreadNote}`;
+   if (unreadCount) clear.setAttribute('aria-label', dismissible.length ? 'Dismiss all failed runs, new findings and unread Pip messages from the home page'
+    : 'Dismiss all unread Pip messages from the home page');
+   clear.onclick = () => { if (unreadCount) dismissAll(dismissible); else void dismiss(dismissible, 0); };
    actions.append(clear);
   }
   const all = node('button', 'home-pips-open', 'Open Pips'); all.type = 'button'; all.title = 'Open the Pips view';
   all.onclick = () => options.onOpen?.({overview: true});
   actions.append(all); head.append(actions);
-  const unreadCount = unread.reduce((n, item) => n + item.count, 0);
   if (unreadCount) head.querySelector('h2').textContent = `Pips · ${unreadCount} unread`;
   root.append(head);
   if (rows.length) {
@@ -138,7 +220,7 @@ export function mountHomePips(options) {
     root.append(rest);
    }
   }
-  const unreadRows = unread.filter(item => pips.some(pip => pip.id === item.pip_id)).slice(0, 2);
+  const unreadRows = fresh.slice(0, 2);
   if (unreadRows.length) {
    const list = node('ul', 'home-pips-list home-pips-unread'); list.setAttribute('aria-label', 'Latest unread Pip messages');
    for (const item of unreadRows) {
@@ -146,11 +228,17 @@ export function mountHomePips(options) {
     const row = node('button', 'home-pip-row'); row.type = 'button'; row.title = `Read ${pip.name} in Pips`;
     const copy = node('span', 'home-pip-copy'); copy.append(node('strong', '', pip.name), node('small', '', item.latest));
     row.append(face(pip, 'idle', 'row'), copy);
-    const badge = node('span', 'home-pip-badge', String(item.count)); badge.setAttribute('aria-label', `${item.count} unread`);
-    row.append(badge); row.onclick = () => options.onOpen?.({pip: pip.id}); li.append(row); list.append(li);
+    row.onclick = () => options.onOpen?.({pip: pip.id}); li.append(row);
+    // Its count, beside the row (never inside it): "Read" on hover or focus, and a click marks its whole chat read.
+    const read = node('button', 'home-pip-badge home-pip-read'); read.type = 'button';
+    read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(item.count, 'unread message')} as read`);
+    read.title = 'Mark as read, without opening its chat';
+    read.append(node('span', 'home-pip-read-count', String(item.count)), node('span', 'home-pip-read-word', 'Read'));
+    read.onclick = () => { void markRead(item, [...root.querySelectorAll('.home-pip-item')].indexOf(li)); };
+    li.append(read); list.append(li);
    }
    root.append(list);
-   if (unread.length > 2) {
+   if (fresh.length > 2) {
     const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
     more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
    }
@@ -172,11 +260,14 @@ export function mountHomePips(options) {
    root.append(row);
   }
   if (failure) { const said = node('p', 'home-pips-error', failure); said.setAttribute('role', 'status'); root.append(said); }
-  // A dismissed row's place goes to the next one: the keyboard stays there, never on the page's top.
+  // A dismissed (or read) row's place goes to the next one: the keyboard stays there, never on the page's top.
   if (refocus !== null) {
    const items = root.querySelectorAll('.home-pip-item'), item = items[Math.min(refocus, items.length - 1)];
-   (item?.querySelector('.home-pip-dismiss') || item?.querySelector('.home-pip-row') || all).focus();
+   (item?.querySelector('.home-pip-dismiss, .home-pip-read') || item?.querySelector('.home-pip-row') || all).focus();
    refocus = null;
+  } else if (held) {
+   const same = held.name ? [...root.querySelectorAll(`.${held.name}`)].find(n => (n.closest('[data-pip-id]')?.dataset.pipId || '') === held.pip) : null;
+   (same || all).focus();
   }
   cleanup = globalThis.PipConcepts?.plush?.mount?.(root) || null;
   options.onChange?.();
@@ -203,7 +294,7 @@ export function mountHomePips(options) {
    // A Pip past list_pips' first 100 that has news or a card waiting still gets its row, by its name there.
    const scope = new Set(wanted.map(w => w.id));
    unreadFailure = unseen.some((page, index) => !page || page.workspace_id !== wanted[index].id || !Array.isArray(page.pips));
-   if (!unreadFailure) unread = unseen.flatMap(page => Array.isArray(page?.pips) ? page.pips : []).filter(item => item && typeof item.pip_id === 'string' && Number.isSafeInteger(item.count) && item.count > 0 && typeof item.latest === 'string').sort((a,b) => String(b.latest_at).localeCompare(String(a.latest_at)));
+   if (!unreadFailure) unread = unseen.flatMap(page => Array.isArray(page?.pips) ? page.pips.map(item => ({workspace_id: page.workspace_id, ...item})) : []).filter(item => item && typeof item.pip_id === 'string' && Number.isSafeInteger(item.count) && item.count > 0 && typeof item.latest === 'string').sort((a,b) => String(b.latest_at).localeCompare(String(a.latest_at)));
    for (const raw of [...unread.map(item => ({id: item.pip_id, name: item.name, pip_type: item.pip_type, workspace_id: item.workspace_id})),
     ...(value?.pips || []).map(d => ({id: d.pip_id, name: d.name, pip_type: d.pip_type, status: d.status, workspace_id: d.workspace_id})),
     ...(waiting?.items || []).map(i => ({id: i.pip_id, name: i.pip_name, pip_type: i.pip_type, workspace_id: i.workspace_id}))]) {
@@ -216,6 +307,19 @@ export function mountHomePips(options) {
    personal = workspaces.find(w => w?.kind === 'personal' && typeof w.id === 'string')?.id || null;
    // A digest asked for after a dismiss was kept already leaves that news out, or it is new news.
    if (value) for (const [id, after] of hidden) if (asked > after) hidden.delete(id);
+   if (!unreadFailure) {
+    for (const [id, after] of reads) if (asked > after) reads.delete(id);
+    // A dismissed Pip with nothing unread now (read, archived or gone) or whose project is gone loses its entry; what was
+    // read since in one feed goes from it. A project this window doesn't show keeps its entries as they were.
+    const known = new Set(workspaces.map(w => w?.id)), byPip = new Map(unread.map(item => [item.pip_id, item])), set = {}, drop = [];
+    for (const [id, snapshot] of snapshots) {
+     if (known.has(snapshot.w) && !scope.has(snapshot.w)) continue;
+     const item = known.has(snapshot.w) ? byPip.get(id) : null, next = item ? since(snapshot, item).next : null;
+     if (!next) { snapshots.delete(id); drop.push(id); }
+     else if (JSON.stringify(next) !== JSON.stringify(snapshot)) { snapshots.set(id, next); set[id] = next; }
+    }
+    keep(set, drop);
+   }
    // The digest names 20 Pips, the newsiest first: when the 20th has news too, more may.
    const last = value?.pips?.at(-1);
    partial = !!(value?.omitted_pips && last && (last.runs.failed || last.new_total));

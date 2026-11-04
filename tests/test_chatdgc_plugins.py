@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from dgc.chatdgc import plugins as chat_plugins
-from dgc.chatdgc.engine import LOOK_UP, ChatEngine, ChatEngineError
+from dgc.chatdgc.engine import LOOK_UP, NAME_PROMPT, ChatEngine, ChatEngineError
 from dgc.chatdgc.store import ChatStore
 from dgc.editor_protocol import event_error
 from dgc.llm import ToolCall
@@ -72,6 +72,9 @@ class Model:
         if str(messages[0]["content"]).startswith(LOOK_UP[:60]):
             return SimpleNamespace(content="", tool_calls=[ToolCall("lu", "search_first", {"needs_search": False, "query": ""})],
                                    finish_reason="stop", thinking="", usage={})
+        if any(NAME_PROMPT in str(m.get("content")) for m in messages):
+            # Naming a chat, off the reply's thread (after a reply carried on, too): never a scripted step.
+            return SimpleNamespace(content="Plans", tool_calls=[], finish_reason="stop", thinking="", usage={})
         self.world["read"].append({"messages": messages, "tools": [t["function"]["name"] for t in tools or []]})
         step = self.world["script"].pop(0) if self.world["script"] else {"parts": ["OK."]}
         for part in step.get("parts", []):
@@ -121,9 +124,16 @@ class PluginChat(unittest.TestCase):
 
 class ReadsAndCards(PluginChat):
     def test_composio_batch_of_reviewed_reads_runs_now_but_mixed_or_sending_batches_wait(self):
+        self.composio_batches({})
+
+    def test_with_composios_own_marks_too(self):
+        # Composio's live list marks its multi-execute destructive and not read-only (2026-11-03): what runs decides.
+        self.composio_batches({"readOnlyHint": False, "destructiveHint": True})
+
+    def composio_batches(self, marks):
         spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
         tool = {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute tool calls.",
-                "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}
+                "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}, "annotations": marks}
         self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
                                                "money": False, "reads": (), "servers": {"composio": spec}}
         self.world["tools"]["composio"] = [tool]
@@ -205,11 +215,45 @@ class ReadsAndCards(PluginChat):
                           "arguments": {"title": "Lunch with Anya", "when": "Fri 13:00"}, "recurring": False,
                           "status": "waiting", "at": len("I'll set that up. ")})
         self.assertEqual(cards, [card], "shown as it's put there")
-        self.assertIn("A card for create_event in Google Calendar is under your reply. Nothing has happened", self.told()[0])
+        self.assertIn("A card for create_event in Google Calendar is in the chat now. Nothing has happened", self.told()[0])
         self.assertEqual(self.store.get(chat["id"])["messages"][-1]["actions"], [card], "kept with the reply")
         self.assertEqual(event_error({"type": "chatdgc_action", "seq": 0, "conversation_id": chat["id"],
                                       "message_id": reply["id"], "action": card}), None)
         self.assertNotIn("plugins", self.store.get(chat["id"])["messages"][-1], "a card waiting is not a plugin used")
+
+    def test_nothing_the_model_reads_says_where_a_card_is(self):
+        # 0.51: a card sits inside the reply where it was made, not under it, so the model never names its place
+        # (the release check's reply said "The card under this reply will save the note…").
+        chat, reply = self.say("Put lunch with Anya on Friday at 1 in my calendar.",
+                               {"parts": ["I'll set that up. "],
+                                "calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
+                                                           "arguments": {"title": "Lunch with Anya", "when": "Fri 13:00"}})]},
+                               {"parts": ["A card for lunch with Anya on Friday at 1pm is ready to send."]})
+        told = self.told()[0]
+        self.assertTrue(told.startswith("A card for create_event in Google Calendar is in the chat now. Nothing has "
+                                        "happened: it runs only when the user sends it, or hands it to one of their Pips. "
+                                        "Say in one sentence what it will do, and don't say where the card is."), told)
+        read = self.world["read"][0]
+        call_plugin = next(t for t in chat_plugins.schemas([{"name": "gcal"}]) if t["function"]["name"] == "call_plugin")
+        listing = chat_plugins.ChatPlugins(self.config, installed=self.world["installed"],
+                                           manager_factory=lambda server, spec: Vendor(self.world, server))
+        self.addCleanup(listing.close)
+        listing.pin()
+        tools_said = listing.call("plugin_tools", {"plugin": "gcal"})[0]
+        self.assertIn("puts a card in the chat, where you are in your answer", call_plugin["function"]["description"])
+        self.assertIn("Never say where the card is (above, below, under).", call_plugin["function"]["description"])
+        self.assertIn("shows a card in the chat for the user to send (never say where it is)",
+                      chat_plugins.instructions([{"name": "gcal"}]))
+        self.assertIn("Calling a tool marked [asks] shows a card in the chat, and it happens only when the user sends it",
+                      tools_said)
+        # The next reply reads the card back as made in this reply, not under it.
+        self.say("Thanks", {"parts": ["You're welcome."]}, chat=chat)
+        history = json.dumps(self.world["read"][-1]["messages"], ensure_ascii=False)
+        self.assertIn("[You made a card for create_event in Google Calendar in this reply; the user hasn't sent it.]", history)
+        for words in (told, call_plugin["function"]["description"], chat_plugins.instructions([{"name": "gcal"}]), tools_said,
+                      history, json.dumps(read["messages"][0], ensure_ascii=False)):
+            for place in ("under your reply", "under this reply", "under the reply", "card below", "below your reply"):
+                self.assertNotIn(place, words)
 
     def test_a_payment_plugin_always_asks_even_at_never_ask_and_a_calendar_at_never_ask_does_not(self):
         from dgc import plugins
@@ -383,6 +427,8 @@ class OnTheWire(PluginChat):
     def setUp(self):
         super().setUp()
         from dgc.chatdgc.service import ChatService
+        # No follow-ups: their model call, after a reply carries on, would take the next scripted step.
+        self.config.get = lambda key, default=None: False if key == "chatdgc_followups" else default
         self.frames = []
 
         def emit(type, **fields):
@@ -402,6 +448,27 @@ class OnTheWire(PluginChat):
                 return found[-1]
             time.sleep(0.01)
         raise AssertionError(f"no {kind}: {self.frames[-4:]}")
+
+    def test_sending_an_earlier_replys_card_ends_quietly_once_it_is_sent(self):
+        import time
+        chat, reply = self.say("Lunch Friday.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",
+                                                                            "arguments": {"title": "Lunch"}})]}, {"parts": ["Card."]})
+        card = reply["actions"][0]
+        # The user asks something else first; the card stays waiting on the earlier reply.
+        self.say("Also, what is 2+2?", {"parts": ["4."]}, chat=chat)
+        self.world["answers"]["create_event"] = '{"id":"evt_1"}'
+        before = len(self.world["read"])
+        self.service.dispatch({"type": "chatdgc_action", "request_id": "old", "conversation_id": chat["id"],
+                               "message_id": reply["id"], "action_id": card["id"], "op": "run"})
+        self.assertEqual(self.wait_for("chatdgc_action", request_id="old")["action"]["status"], "done")
+        for _ in range(500):
+            with self.service._lock:
+                if chat["id"] not in self.service._turns:
+                    break
+            time.sleep(0.01)
+        self.assertEqual([f for f in self.frames if f["type"] == "chatdgc_error"], [], "the card was sent")
+        self.assertEqual(len(self.world["read"]), before, "a newer reply isn't continued")
+        self.assertEqual(self.engine.open(chat["id"])["messages"][-1]["text"], "4.")
 
     def test_send_it_now_and_hand_it_to_a_pip_through_the_service(self):
         chat, reply = self.say("Lunch Friday.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",

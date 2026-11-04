@@ -557,6 +557,23 @@ def request(text, key, chat_options=None, images=None, files=None):
     return result
 
 
+def _answered_by(store, run) -> str:
+    """The model a reply was written by. A DGC Router run's pinned model is "router" (any Pip system) or
+    "router:<system>/<model>"; the system and model it was leased are what answered, so the reply keeps those in words,
+    "glm-5.3:cloud on Workstation (DGC Router)": the chat can say which computer answered."""
+    model = str(run["manifest"].get("model") or "")
+    if model != "router" and not model.startswith("router:"):
+        return model
+    row = store.db.execute("SELECT payload FROM workspace_events WHERE run_id=? AND event_type='pip_run_routed' "
+                           "ORDER BY seq DESC LIMIT 1", (run["id"],)).fetchone()
+    try:
+        routed = json.loads(row[0]) if row else {}
+    except (TypeError, ValueError):
+        routed = {}
+    system, name = str(routed.get("system") or "")[:80], str(routed.get("model") or "")[:200]
+    return f"{name} on {system} (DGC Router)" if system and name else model
+
+
 def _message(row):
     message = {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
                                         "status", "model", "created_at")}
@@ -659,10 +676,26 @@ INTRO = ("This message is from DGC, not the user. The user has just created you 
 CORE_INTRO = ("This message is from DGC, not the user. The user has just created you, Core, their Primary "
               "Pip. Write your first message to them. Say hello and that you are their Primary Pip: you "
               "help with everyday tasks, look after their other Pips and check in when you need them. Say "
-              "what you can see from here (their other Pips or connected apps, if your references show "
-              "any; otherwise say nothing is connected yet). End with one short question asking for the "
+              "what you can see from here: only their other Pips, the direct app links and the DGC plugins your "
+              "instructions and references name as connected or turned on now. A way to connect an app (connect_app, "
+              "Composio, a plugin the user hasn't set up) is not a connection: if nothing is connected, say nothing "
+              "is connected yet. End with one short question asking for the "
               "one thing on their plate today, and offer two or three likely answers with offer_choices. Two or "
               "three short paragraphs, no lists and no headings.")
+# How a reply reads in the chat is the Pip's to decide. The chat split every paragraph into its own bubble, so a poem
+# or an email draft came apart at each stanza (asked 2026-11-03: "leave this to the llm model to decide"). Now a reply
+# is one message, split only at a line of just --- (editors/vscode/src/pipsTranscript.js replyParts). The "short
+# message" asks in DGC's own turns ("carry on ... in a short message") are about the Pip's own words, never a piece.
+BUBBLES = ("Write the way you'd text: when separate short messages read better, put a line with only --- between them, "
+           "and each becomes its own message; anything meant to be read as a whole (a poem, a draft, an explanation, a "
+           "list, steps) goes in one message with no --- inside it, in full, as long as it needs. A rule to keep a "
+           "message short, here or in a message from DGC, is about your own words, never a piece the user asked for.")
+MESSAGE_BREAK = re.compile(r"^[ \t]*---[ \t]*$", re.M)      # the line between two messages (BUBBLES)
+
+
+def without_breaks(text: str) -> str:
+    """A reply for a place that shows it as one piece (a preview, a notification): its message breaks gone."""
+    return MESSAGE_BREAK.sub("", str(text or ""))
 
 
 def introduce(store, pip_id, actor, config):
@@ -1006,6 +1039,12 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if posts:
         # What its runs posted in this chat, as reference beside last_report: never a turn, never the user's words.
         context["run_posts"] = posts
+    try:
+        cards = card_context(store, pip["id"])
+    except Exception:                       # noqa: BLE001 -- a card's note never costs the reply
+        cards = []
+    if cards:
+        context["card_context"] = cards
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
@@ -1097,9 +1136,63 @@ def reply_plugins(db, run_id):
         return []
 
 
+def card_context(store, pip_id) -> list:
+    """What the user did in plugin cards this Pip showed lately, as each card reported it (MCP Apps
+    ui/update-model-context): [{plugin, tool, text}], the newest of each, at most four from the last ten replies. The
+    Pip reads it as the plugin's content, never as instructions."""
+    from .mcp_apps import cards_of_run
+    out = []
+    rows = store.db.execute("SELECT run_id FROM pip_chat_messages WHERE pip_id=? AND role='assistant' ORDER BY seq DESC "
+                            "LIMIT 10", (pip_id,)).fetchall()
+    for (run_id,) in rows:
+        for record in reversed(cards_of_run(run_id)):
+            said = str(record.get("context") or "").strip()
+            if said and len(out) < 4:
+                out.append({"plugin": str(record.get("plugin") or record.get("server") or "")[:80],
+                            "tool": str(record.get("tool") or "")[:128], "text": said[:4000]})
+    return out
+
+
+def _valid_card_context(value) -> None:
+    if (not isinstance(value, list) or not 1 <= len(value) <= 4 or len(_json(value).encode()) > 20000
+            or any(not isinstance(item, dict) or set(item) != {"plugin", "tool", "text"}
+                   or any(not isinstance(item[key], str) for key in item) for item in value)):
+        raise RegistryError("invalid_history", "The plugin cards' context exceeds its bounded contract.")
+
+
+def reply_apps(db, run_id):
+    """The plugin cards a reply showed (MCP Apps: [{card_id, server, plugin, tool, call_id, created_at}]), or []: its
+    run's, then those of the plugin actions it offered that ran on the user's Allow (pip_plugins.action_cards)."""
+    row = db.execute("SELECT json_extract(result,'$.apps') FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    try:
+        kept = valid_apps(json.loads(row[0]) if row and row[0] else []) or []
+    except (TypeError, ValueError, RecursionError):
+        kept = []
+    from .pip_plugins import action_cards
+    shown = {item["card_id"] for item in kept}
+    allowed = [item for item in action_cards(db, run_id) if item["card_id"] not in shown]
+    return valid_apps((kept + allowed)[-8:]) or kept
+
+
+def valid_apps(value):
+    """A reply's card summaries as the controller kept them, or None when they aren't."""
+    if not isinstance(value, list) or len(value) > 8:
+        return None
+    keys = {"card_id", "server", "plugin", "tool", "call_id", "created_at"}
+    for item in value:
+        if (not isinstance(item, dict) or set(item) != keys or not isinstance(item["card_id"], str)
+                or not re.fullmatch(r"app_[0-9a-f]{24}", item["card_id"])
+                or any(not isinstance(item[k], str) or len(item[k]) > 128 for k in ("server", "plugin", "tool", "created_at"))
+                or (item["call_id"] is not None and not isinstance(item["call_id"], str))):
+            return None
+    return value
+
+
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "apps" in result and valid_apps(result["apps"]) is None:
+        raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
     if "context" in result:
         # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
         from .pip_chat_breakdown import validate as validate_context
@@ -1155,9 +1248,13 @@ def insert_reply(store, run, result, now):
     reply_id = identifier("message")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at) "
                      "VALUES(?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
-                     "assistant", text, run["manifest"]["model"], now))
+                     "assistant", text, _answered_by(store, run), now))
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
+    from .pip_images import attach as attach_images         # images it made this run (generate_image): on its reply
+    attach_images(store, run, reply_id)
+    from .pip_videos import attach as attach_videos         # videos it started this run (generate_video): the same
+    attach_videos(store, run, reply_id)
     if "eyes" in result:
         from .pip_eyes import record_card
         record_card(store, run, result["eyes"], reply_id)
@@ -1212,12 +1309,22 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             if attached:
                 message["files"] = attached
         else:
+            pictures = message_images(store.db, row["id"])   # images the Pip made for this reply (generate_image)
+            if pictures:
+                message["images"] = pictures
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
             plugins = reply_plugins(store.db, row["run_id"])
             if plugins:
                 message["plugins"] = plugins
+            shown = reply_apps(store.db, row["run_id"])
+            if shown:
+                message["apps"] = shown         # the plugin cards it showed (MCP Apps)
+            from .pip_videos import message_videos
+            clips = message_videos(pip_id, row["id"])
+            if clips:
+                message["videos"] = clips       # API 71: the videos it started, each as its job is now
         amount = len(_json(message).encode())
         if size + amount > 96 * 1024:
             break
@@ -1333,7 +1440,7 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1344,6 +1451,8 @@ def validate_context(value):
     if "run_posts" in value:
         from .pip_run_posts import validate_recent
         validate_recent(value["run_posts"])
+    if "card_context" in value:
+        _valid_card_context(value["card_context"])
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

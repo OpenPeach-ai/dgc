@@ -2626,8 +2626,14 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
 
   send({ type: "event", event: { type: "plan_proposal", id: "plan-1", plan: "1. Change it" } });
   const plan = [...doc.querySelectorAll(".card")].at(-1);
+  const fold = plan.querySelector(":scope > details.plan-fold");
+  assert.ok(fold && fold.open, "a waiting plan shows open, under a header that folds it");
+  assert.match(fold.querySelector(":scope > summary").textContent, /Plan ready/);
+  assert.equal(fold.querySelector(":scope > pre").textContent, "1. Change it");
+  assert.equal(fold.querySelector("button, textarea"), null, "the answer and feedback stay outside the fold");
   plan.querySelector(".feedback").value = "Keep the public API compatible";
   plan.querySelector('button[data-d="reject"]').click();
+  assert.equal(fold.open, false, "an answered plan folds, as a finished step does");
   const response = posted.find((m) => m.type === "plan_response");
   assert.equal(response.id, "plan-1");
   assert.equal(response.decision, "reject");

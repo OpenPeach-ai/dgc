@@ -138,3 +138,34 @@ test("Settings' Mods section asks the active chat's backend, and hears its list 
   provider.onEvent({ seq: 3, type: "command_rejected", command: "mod_set", request_id: backend.sent[1].request_id, message: "Allow guard first." });
   assert.deepEqual(toSettings.at(-1), { type: "modsError", message: "Allow guard first." });
 });
+
+// Settings belongs to the side bar, and asked the side bar's chat while a Work tab ran the mods: Settings → Plugins →
+// Mods said "Not running" with Turn on beside a chat showing them On. It asks the chat palette commands act on (the
+// tab last worked in, else the side bar's), and shows that chat's list as it changes, never another's.
+test("Settings' Mods section shows the mods of the Work tab last worked in, not the side bar's idle chat", async () => {
+  const side = makeProvider({ capabilities: MODS }), tab = makeProvider({ capabilities: MODS });
+  const toSettings = [];
+  side.provider.settingsEditor = { webview: { postMessage: (m) => toSettings.push(m) } };
+  let current = tab.provider;
+  side.provider.places = { current: () => current, open() {}, openSessions: () => new Set(), changed() {} };
+  tab.provider.tab = { host: side.provider, places: side.provider.places, key: "k", session: "", title() {} };
+  await side.provider.onSettingsMessage({ type: "modsList" });
+  await side.provider.onSettingsMessage({ type: "modSet", name: "tally", op: "reload" });
+  assert.deepEqual(side.backend.sent, [], "the side bar's chat isn't asked");
+  assert.deepEqual(tab.backend.sent.map((c) => [c.type, c.name, c.op]), [["mods_list", undefined, undefined], ["mod_set", "tally", "reload"]]);
+  assert.ok(tab.backend.sent.every((c) => /^settings-mods-/.test(c.request_id) && dgcCommandError(c) === undefined));
+  // The tab's answer and its later changes reach Settings; the side bar's own list doesn't, while the tab is shown.
+  tab.provider.onEvent({ seq: 1, type: "mods", request_id: tab.backend.sent[0].request_id, mods: [{ name: "tally", state: "running" }], on: true });
+  side.provider.onEvent({ seq: 1, type: "mods", mods: [{ name: "tally", state: "stopped" }], on: true });
+  tab.provider.onEvent({ seq: 2, type: "mods", mods: [{ name: "tally", state: "running" }, { name: "context", state: "running" }], on: true });
+  assert.deepEqual(toSettings.map((m) => m.mods.map((x) => `${x.name} ${x.state}`).join(", ")),
+    ["tally running", "tally running, context running"]);
+  tab.provider.onEvent({ seq: 3, type: "command_rejected", command: "mod_set", request_id: tab.backend.sent[1].request_id, message: "Allow tally first." });
+  assert.deepEqual(toSettings.at(-1), { type: "modsError", message: "Allow tally first." });
+  // With no tab open, the side bar's chat is the one shown.
+  current = undefined;
+  await side.provider.onSettingsMessage({ type: "modsList" });
+  assert.equal(side.backend.sent.at(-1).type, "mods_list");
+  side.provider.onEvent({ seq: 2, type: "mods", mods: [{ name: "guard", state: "off" }], on: true });
+  assert.deepEqual(toSettings.at(-1), { type: "mods", mods: [{ name: "guard", state: "off" }], on: true });
+});

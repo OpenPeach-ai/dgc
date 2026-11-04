@@ -1285,6 +1285,29 @@ def set_name(path, name: str, project_root, *, expected_revision: int | None = N
         return False
 
 
+def set_agents(path, agents: dict, project_root, *, expected_revision: int | None = None,
+               expected_exists: bool | None = None,
+               redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
+    """Write only a chat's helper records (what its agent map lists), as set_name writes only its name. For a helper
+    that started or ended between turns (a Pip fix): only a turn's save wrote them, so after a window reload the map
+    had no row for it. The chat's place in the list ("updated") stays where its last turn put it."""
+    try:
+        p = resolve_path(project_root, path, must_exist=True)
+        from .redaction import redact_value
+        with _lock_for(p):
+            data = _load_data(p, project_root)  # the lock is re-entrant; retain it through replace
+            revision = _record_revision(data, p)
+            if not _expected_generation_matches(
+                    True, revision, expected_revision, expected_exists):
+                return False
+            data["agents"] = redact_value(agents, redact_secrets or ())
+            data["revision"] = revision + 1
+            _atomic_write(p, json.dumps(data, default=str))
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, int, str]]:
     """(path, updated_ts, first-user-message preview, message count, name), newest first.
 

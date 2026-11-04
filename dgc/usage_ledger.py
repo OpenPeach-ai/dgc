@@ -12,7 +12,10 @@ which model?". This ledger does, and nothing else:
   reported, and which part of DGC sent it (main, subagent, fallback, compaction, other);
 * a request that ended without a usage report (cancelled, interrupted, or a provider that sent
   none) is still a row, marked unmetered, so the totals never pretend it did not happen;
-* never any prompt, response, tool output, file path, session name or key.
+* never any prompt, response, tool output, file path, session name or key;
+* since 0.51, the DGC Router system that sent the request (``system_id``, NULL before and for requests no
+  system sent), so a system whose address changes keeps its history (dgc/usage_systems.py names each row's
+  system; an older row is matched by its address).
 
 Rows older than :data:`RETENTION_DAYS` are pruned with one indexed DELETE when a process first
 opens the ledger (and again once a day in a long-running backend). A ledger that cannot be opened
@@ -172,6 +175,7 @@ def _open(path: Path, *, create: bool) -> sqlite3.Connection | None:
                 db.execute("PRAGMA synchronous=NORMAL")
                 db.execute(_SCHEMA)
                 db.execute("CREATE INDEX IF NOT EXISTS requests_ts ON requests(ts)")
+                _add_system_column(db)
                 break
             except sqlite3.OperationalError as exc:
                 # Two processes creating the ledger at the same instant can both ask for WAL;
@@ -189,6 +193,19 @@ def _open(path: Path, *, create: bool) -> sqlite3.Connection | None:
     _db, _db_key = db, key
     _last_prune = 0.0
     return db
+
+
+def _add_system_column(db: sqlite3.Connection) -> None:
+    """Give a ledger from before 0.51 its nullable ``system_id`` column. An older DGC still writes to it: it names
+    its columns, so its rows get NULL. Two processes adding it at once: the second finds it there."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
+    if "system_id" in columns:
+        return
+    try:
+        db.execute("ALTER TABLE requests ADD COLUMN system_id TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
 
 
 def _prune(db: sqlite3.Connection, now: float) -> None:
@@ -237,16 +254,20 @@ def _set_aside(path: Path, exc: BaseException) -> bool:
 
 
 def record(*, provider, base_url, model, source="main", input_tokens=0, output_tokens=0,
-           cached_input_tokens=0, metered: bool | None = None,
+           cached_input_tokens=0, metered: bool | None = None, system_id=None,
            now: float | None = None, path: Path | None = None) -> bool:
-    """Append one finished request. Returns False (and never raises) when it could not be kept."""
+    """Append one finished request. Returns False (and never raises) when it could not be kept.
+
+    ``system_id`` is the DGC Router system the request went to (its id, never its address), or None."""
     global _last_error, _locked_until
+    from .usage_systems import clean_system_id
     stamp = time.time() if now is None else float(now)
     source = source if source in SOURCES else "other"
     row = (int(stamp), _text(provider, _MAX_TEXT["provider"]) or "unknown",
            endpoint_host(base_url), _text(model, _MAX_TEXT["model"]) or "unknown", source,
            _count(input_tokens), _count(output_tokens), _count(cached_input_tokens))
     metered = int(metered) if isinstance(metered, bool) else (1 if (row[5] or row[6]) else 0)
+    system_id = clean_system_id(system_id)
     target = Path(path) if path is not None else ledger_path()
     try:
         with _lock:
@@ -261,8 +282,8 @@ def record(*, provider, base_url, model, source="main", input_tokens=0, output_t
                     _prune(db, stamp)
                     db.execute(
                         "INSERT INTO requests(ts, provider, host, model, source, input_tokens, "
-                        "output_tokens, cached_input_tokens, metered) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (*row, metered))
+                        "output_tokens, cached_input_tokens, metered, system_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (*row, metered, system_id))
                     break
                 except sqlite3.DatabaseError as exc:
                     if re.search(r"locked|busy", str(exc), re.I):
@@ -319,10 +340,49 @@ def range_days(range_name: str, stamp: float) -> tuple[_dt.date, _dt.date | None
                    "month": today.replace(day=1), "all": None}[range_name]
 
 
+_GROUP_COLUMNS = ("model, provider, host, system_id, COUNT(*), COALESCE(SUM(1 - metered),0), SUM(input_tokens), "
+                  "SUM(output_tokens), SUM(cached_input_tokens)")
+
+
+def _classifier(systems):
+    from .usage_systems import Classifier, router_systems
+    return Classifier(router_systems() if systems is None else systems)
+
+
+def _model_rows(groups, classifier) -> list[dict]:
+    """GROUP BY rows (model, provider, host, system_id, ...) as by-model rows, each with the system it ran on.
+    Groups that land on the same model, provider, host and system (an older row without a stored id beside a
+    newer one with it) are one row."""
+    merged: dict[tuple, dict] = {}
+    for model, provider, host, system_id, requests, unmetered, inp, out, cached in groups:
+        where = classifier.classify(model, provider, host, system_id)
+        key = (str(model), str(provider), str(host), where["system_id"])
+        row = merged.get(key)
+        if row is None:
+            row = merged[key] = {"model": str(model), "provider": str(provider), "host": str(host),
+                                 "requests": 0, "unmetered_requests": 0, "input_tokens": 0, "output_tokens": 0,
+                                 "cached_input_tokens": 0, **where}
+        row["requests"] += int(requests or 0)
+        row["unmetered_requests"] += int(unmetered or 0)
+        row["input_tokens"] += int(inp or 0)
+        row["output_tokens"] += int(out or 0)
+        row["cached_input_tokens"] += int(cached or 0)
+    return sorted(merged.values(), key=lambda r: (-(r["input_tokens"] + r["output_tokens"]), -r["requests"],
+                                                  r["model"], r["provider"], r["host"], r["system_id"]))
+
+
+def _wanted(rows, system) -> str:
+    """The system id a filter names among ``rows`` (an id, else a name in any case), or the text itself."""
+    from .usage_systems import pick
+    text = str(system or "").strip()
+    return pick(rows, text) or text
+
+
 def by_model_for_source(source: str, range_name: str = "7d", *, now: float | None = None,
-                        path: Path | None = None) -> list[dict]:
+                        path: Path | None = None, system: str | None = None, systems=None) -> list[dict]:
     """One source's requests in a range by model (provider + host), most tokens first: the Pips
-    tab's "By model" (source "pip"). The same day boundaries as report(); [] when unreadable."""
+    tab's "By model" (source "pip"). The same day boundaries as report(); [] when unreadable.
+    Each row names its system (dgc/usage_systems.py); ``system`` keeps one system's rows only."""
     range_name = normalize_range(range_name)
     stamp = time.time() if now is None else float(now)
     today, first_day = range_days(range_name, stamp)
@@ -336,24 +396,29 @@ def by_model_for_source(source: str, range_name: str = "7d", *, now: float | Non
             if db is None:
                 return []
             db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-            rows = db.execute(
-                "SELECT model, provider, host, COUNT(*), COALESCE(SUM(1 - metered),0), SUM(input_tokens), "
-                f"SUM(output_tokens), SUM(cached_input_tokens) FROM requests {where} GROUP BY model, provider, host "
-                "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, COUNT(*) DESC, model "
-                f"LIMIT {_MAX_BY_MODEL}", args).fetchall()
+            groups = db.execute(f"SELECT {_GROUP_COLUMNS} FROM requests {where} "
+                                "GROUP BY model, provider, host, system_id", args).fetchall()
+        rows = _model_rows(groups, _classifier(systems))
     except Exception:
         return []
-    return [{"model": str(model), "provider": str(provider), "host": str(host), "requests": int(requests),
-             "unmetered_requests": int(unmetered), "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
-             "cached_input_tokens": int(cached or 0)}
-            for model, provider, host, requests, unmetered, inp, out, cached in rows]
+    if str(system or "").strip():
+        wanted = _wanted(rows, system)
+        from .usage_systems import matches
+        rows = [row for row in rows if matches(row, wanted)]
+    return rows[:_MAX_BY_MODEL]
 
 
-def report(range_name: str = "7d", *, now: float | None = None, path: Path | None = None) -> dict:
+def report(range_name: str = "7d", *, now: float | None = None, path: Path | None = None,
+           system: str | None = None, systems=None) -> dict:
     """Aggregate one range: totals, by model (provider + host), and every local day in it.
 
     Day boundaries are this machine's local midnights, so "today" and each bar in a day strip
     match the user's clock. A range with no data still lists its days, with zeros.
+
+    Every by-model row names the system it ran on (``system``, ``system_id``, ``system_kind``; see
+    dgc/usage_systems.py). ``system`` (an id, or a name in any case) keeps that system's requests only: the
+    totals, the days and the models. ``systems`` is the Router's systems to name rows by (default: the
+    user's config.json).
     """
     pip_error = ""
     if path is None:
@@ -368,7 +433,9 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     where, args = (("WHERE ts >= ? AND ts < ?",
                     (_local_midnight(first_day), _local_midnight(today + _dt.timedelta(days=1))))
                    if first_day else ("", ()))
+    filtered = bool(str(system or "").strip())
     days: dict[str, dict] = {}
+    day_groups: list = []
     try:
         with _lock:
             db = _open(Path(path) if path is not None else ledger_path(), create=False)
@@ -378,38 +445,56 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
                 # editor process records requests through its own SQLite connection.
                 db.execute("BEGIN")
                 try:
-                    total = db.execute(
-                        "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
-                        "COALESCE(SUM(cached_input_tokens),0), COUNT(*), "
-                        f"COALESCE(SUM(1 - metered),0) FROM requests {where}", args).fetchone()
-                    models = db.execute(
-                        "SELECT model, provider, host, COUNT(*), COALESCE(SUM(1 - metered),0), "
-                        "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens) "
-                        f"FROM requests {where} GROUP BY model, provider, host "
-                        "ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, COUNT(*) DESC, model "
-                        f"LIMIT {_MAX_BY_MODEL}", args).fetchall()
-                    by_day = db.execute(
-                        "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day, "
-                        "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), COUNT(*) "
-                        f"FROM requests {where} GROUP BY day", args).fetchall()
+                    groups = db.execute(f"SELECT {_GROUP_COLUMNS} FROM requests {where} "
+                                        "GROUP BY model, provider, host, system_id", args).fetchall()
+                    if filtered:
+                        total = None
+                        by_day = []
+                        day_groups = db.execute(
+                            "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day, model, provider, host, "
+                            "system_id, SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), COUNT(*) "
+                            f"FROM requests {where} GROUP BY day, model, provider, host, system_id", args).fetchall()
+                    else:
+                        total = db.execute(
+                            "SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
+                            "COALESCE(SUM(cached_input_tokens),0), COUNT(*), "
+                            f"COALESCE(SUM(1 - metered),0) FROM requests {where}", args).fetchone()
+                        by_day = db.execute(
+                            "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day, "
+                            "SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), COUNT(*) "
+                            f"FROM requests {where} GROUP BY day", args).fetchall()
                 finally:
                     db.execute("ROLLBACK")
             else:
-                total, models, by_day = (0, 0, 0, 0, 0), [], []
+                groups, total, by_day = [], (0, 0, 0, 0, 0), []
+        classifier = _classifier(systems)
+        models = _model_rows(groups, classifier)
     except Exception as exc:
         _fail(exc)
         return empty_report(range_name, now=stamp, error=_last_error)
     if pip_error:
         report["error"] = pip_error
+    if filtered:
+        from .usage_systems import matches
+        wanted = _wanted(models, system)
+        models = [row for row in models if matches(row, wanted)]
+        total = (sum(r["input_tokens"] for r in models), sum(r["output_tokens"] for r in models),
+                 sum(r["cached_input_tokens"] for r in models), sum(r["requests"] for r in models),
+                 sum(r["unmetered_requests"] for r in models))
+        summed: dict[str, list[int]] = {}
+        for day, model, provider, host, system_id, inp, out, cached, requests in day_groups:
+            if not matches(classifier.classify(model, provider, host, system_id), wanted):
+                continue
+            entry = summed.setdefault(day, [0, 0, 0, 0])
+            entry[0] += int(inp or 0)
+            entry[1] += int(out or 0)
+            entry[2] += int(cached or 0)
+            entry[3] += int(requests or 0)
+        by_day = [(day, *values) for day, values in summed.items()]
     report["totals"] = {"input_tokens": int(total[0]), "output_tokens": int(total[1]),
                         "cached_input_tokens": int(total[2]), "requests": int(total[3]),
                         "unmetered_requests": int(total[4])}
-    report["by_model"] = [
-        {"model": str(model), "provider": str(provider), "host": str(host),
-         "requests": int(requests), "unmetered_requests": int(unmetered),
-         "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
-         "cached_input_tokens": int(cached or 0)}
-        for model, provider, host, requests, unmetered, inp, out, cached in models]
+    report["by_model"] = models[:_MAX_BY_MODEL]
     for day, inp, out, cached, requests in by_day:
         if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             days[day] = {"date": day, "input_tokens": int(inp or 0), "output_tokens": int(out or 0),
@@ -432,32 +517,79 @@ def report(range_name: str = "7d", *, now: float | None = None, path: Path | Non
     return report
 
 
+def systems_in(range_name: str = "7d", *, now: float | None = None, path: Path | None = None,
+               systems=None, source: str | None = None) -> list[dict]:
+    """Every system with requests in a range (all of them, not the by-model top 100), most tokens first:
+    `dgc usage`'s "By system" block and the names `--system` takes. ``source`` keeps one source ("pip")."""
+    from .usage_systems import by_system
+    range_name = normalize_range(range_name)
+    stamp = time.time() if now is None else float(now)
+    today, first_day = range_days(range_name, stamp)
+    clauses, args = [], []
+    if source:
+        clauses.append("source = ?")
+        args.append(str(source))
+    if first_day:
+        clauses.append("ts >= ? AND ts < ?")
+        args += [_local_midnight(first_day), _local_midnight(today + _dt.timedelta(days=1))]
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    try:
+        with _lock:
+            db = _open(Path(path) if path is not None else ledger_path(), create=False)
+            if db is None:
+                return []
+            db.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            groups = db.execute(f"SELECT {_GROUP_COLUMNS} FROM requests {where} "
+                                "GROUP BY model, provider, host, system_id", tuple(args)).fetchall()
+        return by_system(_model_rows(groups, _classifier(systems)))
+    except Exception:
+        return []
+
+
 def _n(value: int) -> str:
     return f"{int(value):,}"
 
 
-def format_report(report: dict, *, shell: bool = False) -> str:
+def _share(part: int, whole: int) -> str:
+    if whole <= 0:
+        return "0%"
+    percent = part / whole * 100
+    return "<1%" if 0 < percent < 1 else f"{round(percent)}%"
+
+
+def format_report(report: dict, *, shell: bool = False, system: str = "",
+                  by_system: list[dict] | None = None) -> str:
     """Markdown for the terminal: the same aggregates the editor's Token Usage tab shows.
 
     ``shell`` is `dgc usage` run from a shell, where a hint must name that command's own flag
-    rather than the `/usage` slash command only the interactive UIs understand.
+    rather than the `/usage` slash command only the interactive UIs understand. ``system`` is the
+    name of the one system the report was filtered to. ``by_system`` (systems_in) is every system
+    of the range: with more than one, a "By system" block comes first and each model row names its
+    system instead of its address (`--json` keeps the address).
     """
+    from .usage_systems import by_system as sum_by_system
     range_name = str(report.get("range") or "7d")
     totals = report.get("totals") or {}
-    lines = [f"## Token usage · {RANGE_LABELS.get(range_name, range_name)}", ""]
+    title = f"## Token usage · {RANGE_LABELS.get(range_name, range_name)}"
+    lines = [title + (f" · {system}" if system else ""), ""]
     if report.get("error"):
         lines += [f"The usage ledger could not be read: {report['error']}", ""]
     lines.append("Counted on this machine from what each provider reports. Nothing here is sent "
                  f"anywhere. Days follow local time ({report.get('timezone') or 'local time'}).")
     lines.append("")
+    command = "dgc usage --range" if shell else "/usage"
     if not totals.get("requests"):
+        if system:
+            lines += [f"No model requests counted on {system} in this range.", ""]
+            if range_name != "all":
+                lines += [f"Try `{command} all` to see earlier requests.", ""]
+            return "\n".join(lines)
         lines += ["No model requests counted in this range yet. Each request DGC finishes (chats, "
                   "goals, sub-agents, fallbacks, compaction) will appear here with the input, "
                   "output and cached tokens its provider reported, totalled by model and by day.",
                   "",
                   "Turns delegated to a subscription CLI (Claude Code, Codex, …) are counted by "
                   "that CLI, not here.", ""]
-        command = "dgc usage --range" if shell else "/usage"
         if range_name != "all":
             lines += [f"Try `{command} all` to see earlier requests.", ""]
         lines.append(f"Other ranges: `{command} today|7d|30d|month|all`")
@@ -479,11 +611,33 @@ def format_report(report: dict, *, shell: bool = False) -> str:
                         "these totals."), ""]
     lines += ["Input counts every prompt token the provider reported, cached ones included; "
               "cached input is the part it served from its cache.", ""]
+    systems = by_system if by_system is not None else sum_by_system(report.get("by_model") or [])
+    named = len(systems) > 1 or bool(system)
+    if len(systems) > 1 and not system:
+        whole = sum(int(r.get("input_tokens") or 0) + int(r.get("output_tokens") or 0) for r in systems)
+        lines += ["### By system", "",
+                  "Each computer DGC Router sends work to, this computer, and each cloud service. An Ollama "
+                  "cloud model counts as Ollama Cloud, whichever computer it was sent through.", "",
+                  "| System | Requests | Input | Output | Share |",
+                  "| --- | ---: | ---: | ---: | ---: |"]
+        for row in systems:
+            name = str(row.get("system") or "").replace("|", "/")
+            requests = _n(row.get("requests", 0))
+            if row.get("unmetered_requests"):
+                requests += f" ({_n(row['unmetered_requests'])} unmetered)"
+            tokens = int(row.get("input_tokens") or 0) + int(row.get("output_tokens") or 0)
+            lines.append(f"| {name} | {requests} | {_n(row.get('input_tokens', 0))} | "
+                         f"{_n(row.get('output_tokens', 0))} | {_share(tokens, whole)} |")
+        flag = "dgc usage --system NAME" if shell else "/usage [range] NAME"
+        lines += ["", f"One system alone: `{flag}`.", ""]
     lines += ["### By model", "",
-              "| Model | Provider · host | Requests | Input | Output | Cached |",
+              f"| Model | {'System · provider' if named else 'Provider · host'} | Requests | Input | Output | Cached |",
               "| --- | --- | ---: | ---: | ---: | ---: |"]
     for row in report.get("by_model") or []:
-        where = " · ".join(part for part in (row.get("provider"), row.get("host")) if part)
+        if named:
+            where = " · ".join(part for part in (row.get("system") or row.get("host"), row.get("provider")) if part)
+        else:
+            where = " · ".join(part for part in (row.get("provider"), row.get("host")) if part)
         model = str(row.get("model") or "").replace("|", "\\|")
         lines.append(f"| {model} | {where.replace('|', '/')} | {_n(row.get('requests', 0))} | "
                      f"{_n(row.get('input_tokens', 0))} | {_n(row.get('output_tokens', 0))} | "
@@ -502,6 +656,47 @@ def format_report(report: dict, *, shell: bool = False) -> str:
     if quiet > 0:
         lines.append(f"\n{quiet} day{'' if quiet == 1 else 's'} in this range had no requests.")
     return "\n".join(lines)
+
+
+def parse_usage_args(rest) -> tuple[str, str]:
+    """`/usage [range] [system]` -> (range, system text). A first word that is a range is the range; the rest,
+    or the whole text when it starts with no range, names a system. Raises ValueError for a bad range only when
+    nothing is left over to be a system name."""
+    text = " ".join(str(rest or "").split())
+    if not text:
+        return "7d", ""
+    first, _, after = text.partition(" ")
+    try:
+        return normalize_range(first), after.strip()
+    except ValueError:
+        pass
+    try:
+        return normalize_range(text), ""
+    except ValueError:
+        return "7d", text
+
+
+def system_report(range_name: str = "7d", system: str = "", *, now: float | None = None,
+                  path: Path | None = None, systems=None) -> tuple[dict, str, list[dict]]:
+    """The terminal's one call: (report, the system's name or "", every system of the range).
+
+    Raises ValueError naming the systems there are when ``system`` names none of them and no Router system."""
+    from .usage_systems import router_systems
+    configured = router_systems() if systems is None else systems
+    found = systems_in(range_name, now=now, path=path, systems=configured)
+    text = str(system or "").strip()
+    if not text:
+        return report(range_name, now=now, path=path, systems=configured), "", found
+    match = next((row for row in found if row["system_id"] == text), None) or next(
+        (row for row in found if str(row["system"]).lower() == text.lower()), None)
+    if match is None:
+        router = next((s for s in configured if s["id"] == text.lower() or s["name"].lower() == text.lower()), None)
+        if router is None:
+            names = ", ".join(row["system"] for row in found) or "none in this range"
+            raise ValueError(f"no system called {text}. Systems with usage in this range: {names}")
+        return report(range_name, now=now, path=path, systems=configured, system=router["id"]), router["name"], found
+    return (report(range_name, now=now, path=path, systems=configured, system=match["system_id"]),
+            str(match["system"]), found)
 
 
 def _reset_for_tests() -> None:

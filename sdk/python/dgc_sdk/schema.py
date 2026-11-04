@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from typing import Any, Mapping
 
 from .errors import DGCConfigError
@@ -18,7 +17,6 @@ _ALLOWED = frozenset({
     "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
     "description", "title", "default",
 })
-_JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.DOTALL)
 _TYPES = frozenset({"object", "array", "string", "integer", "number", "boolean", "null"})
 _COUNTS = frozenset({"minLength", "maxLength", "minItems", "maxItems"})
 _LIMITS = frozenset({"minimum", "maximum"})
@@ -95,19 +93,43 @@ def _check_node(node: dict[str, Any], ancestors: set[int], depth: int) -> None:
         _walk(additional, ancestors, depth + 1)
 
 
+def _fenced(raw: str) -> str | None:
+    """The first fenced block (```, or ```json) whose body is a JSON object or array: a reply may show another block
+    (the commands it ran) first. The TypeScript SDK's extractJson reads the same way (tests/fixtures/sdk_extract_json.json)."""
+    at = 0
+    while True:
+        opened = raw.find("```", at)
+        if opened < 0:
+            return None
+        start = opened + 3
+        if raw[start:start + 4].lower() == "json":
+            start += 4
+        closed = raw.find("```", start)
+        if closed < 0:
+            return None
+        body = raw[start:closed].strip()
+        if body[:1] in ("{", "["):
+            return body
+        at = closed + 3
+
+
+def _not_json(name: str):
+    raise ValueError(f"{name} is not JSON")       # as JSON.parse: NaN and Infinity are no JSON
+
+
 def extract_json(text: str) -> Any:
     raw = (text or "").strip()
     if not raw:
         raise ValueError("final text is empty")
-    match = _JSON_FENCE.search(raw)
-    if match:
-        raw = match.group(1)
+    body = _fenced(raw)
+    if body is not None:
+        raw = body
     else:
         start_obj, start_arr = raw.find("{"), raw.find("[")
         starts = [index for index in (start_obj, start_arr) if index >= 0]
         if starts:
             raw = raw[min(starts):]
-    return json.loads(raw)
+    return json.loads(raw, parse_constant=_not_json)
 
 
 def validate(value: Any, schema: Mapping[str, Any], path: str = "$") -> list[str]:

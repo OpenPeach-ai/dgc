@@ -160,6 +160,46 @@ class BackgroundFixTests(FixScene):
         self.assertIn("Never change live data or services", task)
         self.assertIn("TESTS:", task)
 
+    def test_a_finished_fix_is_in_the_saved_chats_agent_list_so_a_reload_still_lists_it(self):
+        # Reported 2026-11-04 (final check): after a window reload the agent map had no row for a finished fix, so its
+        # Prompt was out of reach. Only a turn's save wrote the helper records, and a fix runs between turns.
+        backend = self.make()
+        run = self.report(backend)
+        saved_messages = json.loads(backend.agent.session_file.read_text())["messages"]
+        with patch.object(LLMClient, "chat", Script([("Fix what Pip", fixer({"app/gst.py": "fixed\n"}))])):
+            self.start(backend, run)
+            row = self.ended(run)
+        data = wait_for(lambda: (d := json.loads(backend.agent.session_file.read_text())) and any(
+            item.get("id") == row["agent_id"] and item.get("state") in ("finished", "failed", "stopped")
+            for item in (d.get("agents") or {}).get("items") or []) and d, what="the fix in the saved agent list")
+        item = next(i for i in data["agents"]["items"] if i["id"] == row["agent_id"])
+        self.assertEqual(item["description"], row.get("description") or item["description"])
+        self.assertTrue(item["description"].startswith("Fix what"), item)
+        self.assertEqual(data["messages"], saved_messages, "only the helper records were written")
+        from dgc.subagents import SubagentRegistry
+        reopened = SubagentRegistry()
+        self.assertTrue(reopened.restore_state(data["agents"]))
+        self.assertIn(row["agent_id"], [i["id"] for i in reopened.snapshot()["items"]],
+                      "a reopened chat lists the fix, so its Prompt can be shown")
+
+    def test_saving_the_helper_records_never_competes_with_a_turn_or_a_newer_save(self):
+        backend = self.make()
+        agent = backend.agent
+        before = agent.session_file.read_text()
+        with patch.object(type(agent), "_a_running_turn_saves_it", return_value=True):
+            self.assertTrue(agent.save_helper_records(), "a running turn's own save writes them")
+        self.assertEqual(agent.session_file.read_text(), before, "nothing written beside a running turn")
+        revision = agent._session_revision
+        agent._session_revision = revision + 5             # another process saved this chat since
+        self.assertFalse(agent.save_helper_records(), "never over a newer save")
+        self.assertEqual(agent.session_file.read_text(), before)
+        agent._session_revision = revision
+        self.assertTrue(agent.save_helper_records())
+        after = json.loads(agent.session_file.read_text())
+        self.assertEqual(after["messages"], json.loads(before)["messages"])
+        self.assertEqual(after["revision"], json.loads(before)["revision"] + 1)
+        self.assertEqual(agent._session_revision, revision + 1)
+
     def test_the_tests_line_is_said_only_when_the_fixer_ran_a_command(self):
         backend = self.make()
         run = self.report(backend)
@@ -487,6 +527,50 @@ class QueueAndLifecycleTests(FixScene):
         self.assertEqual([item["fix_id"] for item in listed["items"]], [row["fix_id"]])
         self.assertNotIn("owner", listed["items"][0])
         self.assertNotIn("session_id", listed["items"][0])
+
+    def test_the_record_carries_the_brief_its_fixer_was_given_live_listed_and_replayed(self):
+        # Reported on 0.51.0's release candidate: the agent map showed a fix's agent with "This agent's prompt was not
+        # kept in the chat." No task call starts a fix, so its record is where the editor reads the brief.
+        backend = self.make()
+        run = self.report(backend)
+        told = []
+
+        def route(messages, results, cancel):
+            if not results:
+                told.append(next(str(m["content"]) for m in messages if m.get("role") == "user"))
+            return fixer({"app/gst.py": "fixed\n"})(messages, results, cancel)
+        with patch.object(LLMClient, "chat", Script([("Fix what Pip", route)])):
+            self.start(backend, run)
+            row = self.ended(run)
+        brief = self.fixes(run)[0]["prompt"]
+        self.assertTrue(brief.startswith("Fix what Pip “ERP daily audit” found"), brief[:80])
+        self.assertIn("GST total skips cess", brief)
+        self.assertIn(brief, told[0], "the brief the fixer was given, as it was given")
+        self.assertTrue(all(frame["prompt"] == brief for frame in self.fixes(run)), "in every record it sends")
+        backend._flush_pip_reports()
+        [card] = [item for item in backend._history() if item.get("role") == "pip_report"]
+        self.assertEqual(card["report"]["fix"]["prompt"], brief, "a replayed card's fix carries it")
+        # A window reload lists the chat's fixes from the stored records (fixes.json), which keep it.
+        [stored] = [r for r in pip_fix.FixProject(self.root).records() if r["fix_id"] == row["fix_id"]]
+        self.assertEqual(stored["prompt"], brief)
+        backend.dispatch({"type": "list_pip_fixes", "request_id": "l"})
+        [listed] = self.wire.of("pip_fixes")
+        self.assertEqual([item["prompt"] for item in listed["items"]], [brief])
+
+    def test_a_long_brief_is_kept_to_the_agent_maps_cap(self):
+        # Sixteen findings, each with its title, evidence and check at their own caps: past 20,000 characters.
+        long = [finding(f"Finding {n} " + "x" * 250, "low", path="app/gst.py", line=1) for n in range(16)]
+        for item in long:
+            item.update(evidence="e" * 900, verification="v" * 500)
+        backend = self.make()
+        run = self.finished(findings=long)
+        backend._look_for_pip_reports(force=True)
+        with patch.object(LLMClient, "chat", Script([("Fix what Pip", lambda m, r, c: ChatResult(content="Nothing."))])):
+            self.start(backend, run)
+            self.ended(run)
+        brief = self.fixes(run)[0]["prompt"]
+        self.assertEqual(len(brief), pip_fix.PROMPT_CHARS)
+        self.assertTrue(brief.endswith("…"))
 
     def test_a_fix_whose_process_stopped_reads_as_interrupted(self):
         project = pip_fix.FixProject(self.root)

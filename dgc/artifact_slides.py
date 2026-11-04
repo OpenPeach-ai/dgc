@@ -627,9 +627,25 @@ def _image_bytes(src: str, where: str, base, resolve=None) -> tuple[bytes, str]:
     return data, mime
 
 
+# A doctype that only names the SVG DTD (the standard SVG 1.1 one) declares nothing. Any other declaration (an
+# internal subset, an entity) is refused before parsing.
+_SVG_DOCTYPE = re.compile(rb"""<!\s*DOCTYPE\s+svg"""
+                          rb"""(?:\s+(?:PUBLIC\s+(?:"[^"]*"|'[^']*')\s+|SYSTEM\s+)(?:"[^"]*"|'[^']*'))?\s*>""", re.I)
+
+
+def _css_reaches_out(text: str, css: bool) -> bool:
+    """Whether a style sheet or attribute value can load anything: @import, or url() to anything but this picture's own
+    #id. In CSS a backslash escape could spell either, so CSS with one is refused too."""
+    return ("@import" in text.lower() or re.search(r"""url\s*\(\s*(?!['"]?\s*#)""", text, re.I) is not None
+            or (css and "\\" in text))
+
+
 def _safe_svg(data: bytes) -> bool:
-    """Keep embedded SVGs passive in the HTML viewer and in exported PowerPoint files."""
-    if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", data, re.I):
+    """Keep embedded SVGs passive in the HTML viewer and in exported PowerPoint files: no scripts, no event handlers,
+    no links or style rules that load another file, no entity declarations. Plain <style> rules and the standard
+    doctype are passive and kept."""
+    data = _SVG_DOCTYPE.sub(b"", data, count=1)
+    if re.search(rb"<!\s*(?:DOCTYPE|ENTITY|ELEMENT|ATTLIST|NOTATION)\b", data, re.I):
         return False
     try:
         root = ET.fromstring(data)
@@ -639,13 +655,15 @@ def _safe_svg(data: bytes) -> bool:
         return False
     for element in root.iter():
         tag = element.tag.rsplit("}", 1)[-1].lower()
-        if tag in {"script", "foreignobject", "style", "image"}:
+        if tag in {"script", "foreignobject", "image"}:
+            return False
+        if tag == "style" and _css_reaches_out("".join(element.itertext()), True):
             return False
         for key, value in element.attrib.items():
             attr = key.rsplit("}", 1)[-1].lower()
             if attr.startswith("on") or (attr in {"href", "src"} and not value.startswith("#")):
                 return False
-            if "@import" in value.lower() or re.search(r"url\s*\(\s*[^#\s]", value, re.I):
+            if _css_reaches_out(value, attr == "style"):
                 return False
     return True
 

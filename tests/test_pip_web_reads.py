@@ -112,7 +112,7 @@ class RedirectTests(unittest.TestCase):
             headers = {"Location": "http://plain.example.com/"}
             def close(self):
                 pass
-        with patch("dgc.tools._public_destination", side_effect=lambda url: (url, "8.8.8.8")), \
+        with patch("dgc.tools._public_destination", side_effect=lambda url: (url, ("8.8.8.8",))), \
                 patch("requests.Session.get", return_value=Response()):
             with self.assertRaisesRegex(ValueError, "away from https"):
                 web._fetch_page("https://status.example.com/")
@@ -128,7 +128,7 @@ class RedirectTests(unittest.TestCase):
                 yield b"ok"
             def close(self):
                 pass
-        with patch("dgc.tools._public_destination", return_value=("https://status.example.com/today", "8.8.8.8")), \
+        with patch("dgc.tools._public_destination", return_value=("https://status.example.com/today", ("8.8.8.8",))), \
                 patch("requests.Session.get", return_value=Response()) as get:
             final, text = web._fetch_page("https://status.example.com/today")
         self.assertEqual(final, "https://status.example.com/today")
@@ -136,6 +136,64 @@ class RedirectTests(unittest.TestCase):
         self.assertEqual(get.call_args.args[0], "https://8.8.8.8/today")
         self.assertEqual(get.call_args.kwargs["headers"]["Host"], "status.example.com")
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
+
+
+class AddressTests(unittest.TestCase):
+    """A dual-stack site on a computer with no IPv6 route (WSL2's NAT, many Docker and home networks): the fetch
+    connects only to addresses it checked, and moves on to the next one when one can't be reached."""
+    V6, V4 = "2606:2800:21f:cb07:6820:80da:af6b:8b2c", "93.184.215.14"
+
+    class Response:
+        is_redirect, is_permanent_redirect = False, False
+        headers = {"Content-Type": "text/plain"}
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            yield b"ok"
+
+        def close(self):
+            pass
+
+    def fetch(self, records, unreachable=()):
+        import requests
+        import socket
+        from dgc import tools
+
+        def resolve(host, port, *args, **kwargs):
+            return [(socket.AF_INET6 if ":" in a else socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                     (a, port, 0, 0) if ":" in a else (a, port)) for a in records]
+        tried = []
+
+        def connect(session, url, **kwargs):
+            tried.append((url, kwargs["headers"]["Host"]))
+            if any(f"//{'[' + a + ']' if ':' in a else a}/" in url for a in unreachable):
+                raise requests.ConnectionError("[Errno 101] Network is unreachable")
+            return self.Response()
+        with patch.object(tools.socket, "getaddrinfo", resolve), patch.object(requests.Session, "get", connect):
+            try:
+                return tools._fetch_public_text("https://example.com/page"), tried
+            except (requests.RequestException, ValueError) as exc:
+                return exc, tried
+
+    def test_an_unreachable_ipv6_address_falls_back_to_ipv4(self):
+        result, tried = self.fetch([self.V6, self.V4], unreachable=[self.V6])
+        self.assertEqual(result, ("https://example.com/page", "ok"))
+        self.assertEqual(tried, [(f"https://[{self.V6}]/page", "example.com"), (f"https://{self.V4}/page", "example.com")])
+
+    def test_each_checked_address_is_tried_with_the_families_taking_turns(self):
+        v6b, v4b = "2606:4700::6810:84e5", "104.16.132.229"
+        result, tried = self.fetch([self.V6, v6b, self.V4, v4b], unreachable=[self.V6, self.V4, v6b, v4b])
+        self.assertIn("Network is unreachable", str(result))
+        self.assertEqual([url for url, _host in tried], [f"https://[{self.V6}]/page", f"https://{self.V4}/page",
+                                                         f"https://[{v6b}]/page", f"https://{v4b}/page"])
+
+    def test_one_private_address_still_refuses_the_whole_fetch(self):
+        result, tried = self.fetch([self.V4, "10.0.0.8"])
+        self.assertIsInstance(result, ValueError)
+        self.assertEqual(tried, [], "nothing is connected to")
 
 
 class PersonalJobTests(unittest.TestCase):
@@ -190,7 +248,7 @@ from dgc.pips import _worker_main
 import json
 
 def chat(self, messages, tools=None, **kwargs):
-    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event', 'skill', 'connect_app', 'read_app', 'web_search', 'working_notes'}, "A Personal task may only draft, load a skill's instructions, ask for and read its own connected apps, or keep its own working notes (Grok-style, reported 2026-10-07: nothing runs or sends"
+    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event', 'skill', 'connect_app', 'read_app', 'web_search', 'working_notes', 'generate_image', 'list_image_generators', 'generate_video', 'list_video_generators'}, "A Personal task may only draft, load a skill's instructions, ask for and read its own connected apps, keep its own working notes, or make images and videos with the user's generators (Grok-style, reported 2026-10-07: nothing runs or sends"
     reference = json.dumps(messages)
     assert 'Untrusted web reference data' in reference, 'Web reference envelope missing'
     assert 'PAGE_TEXT_SENTINEL' in reference and 'SEARCH_TEXT_SENTINEL' in reference, 'Read text missing'

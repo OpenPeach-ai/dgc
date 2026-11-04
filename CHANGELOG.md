@@ -4,6 +4,311 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
+## 0.51.0 — 2026-11-04
+
+- DGC Router lets DGC use the other computers on your network that run models. Add the computers that run Ollama,
+  llama.cpp, vLLM, SGLang, TGI, LM Studio or any OpenAI-compatible server, and DGC spreads sub-agents and Pips across
+  them. Each computer (a system) has its jobs (sub-agents, Pips or both), its workers, the models to use with the
+  context each always runs with, and "one model at a time" for a computer that holds one big model. The Router is off
+  by default, and while it is off DGC works exactly as before. See the DGC Router page in `/docs`.
+  - The main model sees which systems are free and with which models, and the `task` tool takes `system`, `model`
+    and `size`; when it names none, DGC picks a free worker with a fitting model. A helper always runs with its
+    model's fixed context there, so Ollama never reloads the model. When every worker is busy, a helper waits for
+    one, or runs on your usual sub-agent model if you chose that, and its result says which.
+  - When a system stops answering mid-task, the helper moves on after the usual retries: to another system with the
+    same model, else another that does sub-agent work, and its result says what moved and why. DGC checks each
+    system once a minute and marks it offline after two missed checks.
+  - Test measures a system's speed (tokens a second, time to the first token), how many requests it really runs at
+    once, and whether each model calls tools correctly. A model that can't is kept away from sub-agent work.
+  - Ask for it in plain words: "add my GPU box for sub-agents", "why are my helpers slow?" or "put Pips on the NAS
+    only". The model uses `router_status`, `router_probe`, `router_update` and `router_find`. Every change shows an
+    Allow card with the exact change, in auto mode too, and offers Allow once and Deny only. `router_find` asks first
+    and looks only on this computer's own network, on the known ports. The model's tools never read or set a key.
+  - Pips can run on the Router. A Pip's model can be "DGC Router (any Pip system)" or one system and model, and the
+    Pips default can be the Router too (`pips_model` set to `router` or `router:<system>/<model>`). A run waits in
+    the Pip queue while every such worker is busy, and a Pip's reply says which computer answered.
+    `dgc pips create --router`.
+  - You choose how hard helpers think. `subagent_thinking` (Settings, or `/subagent thinking low`) is the main chat's
+    level by default, or Off, Low, Medium, High or Extra high. On the Router each model can have its own Thinking
+    (`dgc router edit ID --model NAME --thinking low`), offered only for a model its server says can think, and the
+    model can pass `effort` to `task` for one helper. The Router model's own choice wins, then the agent file's
+    `effort:`, then the setting, then the task's `effort`, then the main chat's level. A helper's row (`/agents` in the
+    terminal, the agent map in the editor), its page, `dgc router status` and, on the Router, its result ("DGC Router:
+    ran on NAS (qwen3.5:9b, thinking low).") say the level it used.
+  - `/router` and `dgc router` (`status`, `add`, `edit`, `remove`, `test`, `on`, `off`, `find`, `hardware` and
+    `suggest`, each with `--json`). A helper's row and its result say which system it ran on, also in a reopened chat,
+    and a busy worker says what it is working on (the helper's description, or "Pip Inbox"). Several DGC windows share
+    the same workers, and a Router change made in a terminal or another window counts in every window at once and shows
+    in an open Settings within seconds. Your main model uses a worker too when it runs on one of the systems, while it
+    answers and never while the turn's own tools run. A context size can be written as 16K, 16k, 16,384 or 16384, and
+    the status says what a context costs on each system.
+- Hardware stats for each computer, if you want them. Point a system at an exporter you already run
+  (node_exporter, NVIDIA's DCGM exporter, AMD's device-metrics exporter, Glances or Netdata) and DGC detects which it
+  is, or run `dgc node` on that computer: a small read-only stats service behind a pairing token, with no shell, no
+  file access and no model access. `dgc node install-service` keeps it running as a systemd user unit or a
+  LaunchAgent, or with `--system` as a LaunchDaemon on a Mac you reach only over SSH. `/router` and
+  `dgc router status` show a line per system ("GPU box · 18 of 24 GB · 34% · 61°C"), read at most once a minute.
+  Set it up with `dgc router hardware ID ADDRESS [--token]`; the token is kept in `secrets.json`, bound to that
+  address, and the model never sees it. Routing never depends on it.
+  - Suggest works out how many workers each model can have at a context, from the model's size, the memory its
+    context takes, the computer's memory (from the hardware readout or `memory_gb`), what the server reports and
+    what Test measured, and shows the arithmetic in one line. When the memory is unknown it says so instead of
+    guessing. `dgc router suggest ID [--context N] [--apply]`, or `/router suggest`.
+- Image generation. Add your own image generators and ask for pictures in plain words, in Work, ChatDGC and Pips:
+  ComfyUI (with DGC's own workflow, or yours exported in API format, where DGC finds the prompt, seed, size and input
+  image and shows you that first) and Automatic1111-style servers (Forge, SD.Next, Draw Things) on your own
+  computers, and OpenAI's GPT Image models, xAI, Together, LocalAI, Google Gemini and Imagen, Black Forest Labs,
+  fal.ai and Replicate with your own keys. The model's `generate_image` makes new pictures and edits (1 to 4 at a
+  time, a size or shape, a seed, a mask), and `list_image_generators` tells it what each generator can do, what a
+  picture costs and whether it works right now. See the Image generation page in `/docs`.
+  - With several generators, the first time a project needs a picture and more than one fits, DGC asks you which
+    and remembers it for the project (a ChatDGC chat remembers its own). You can always name another.
+  - Pictures stay out of your project unless you want them there. Work keeps each picture and its sidecar (prompt,
+    provider, model, seed, cost) in DGC's own folder for the session (`~/.dgc/images/sessions/<session>/`), ChatDGC
+    in the chat's folder and a Pip in its own. `generate_image` puts one in the project only with `save_to`, a path
+    the model gives when you name a place or the task needs the file there, and writing it gets the same checks as
+    writing a file. A save folder you set in the Images settings still applies. A picture is kept exactly as the
+    provider sent it, with its watermarks and C2PA or SynthID metadata.
+  - When a provider says you're out of credit (Gemini's "free tier is not available", fal's "User is locked.
+    Reason: TOP_UP", OpenAI's `insufficient_quota`), DGC uses a free generator by itself and says so, or else asks
+    you, with "Don't make it" always one of the choices. It never moves to a paid generator on its own. When no
+    picture can be made, the model is told to stop and tell you what to fix (a key that wasn't accepted, credit on
+    the provider's site) and not to make the picture some other way.
+  - `/images` and `dgc images` (`list`, `add`, `edit`, `remove`, `test`, `default` and `generate`, with `--json`).
+    A key is read from the terminal or a pipe, never the command line, and kept in `secrets.json` bound to the
+    generator's address. A provider's own variable (`FAL_KEY` and the like) is used when no key is saved, and the
+    list says which one a generator uses. A key that doesn't look whole (fal's `key ID:secret`, Replicate's `r8_…`,
+    Gemini's `AIza…`) is said when you save it, without repeating it, and saved anyway, in case the provider changed
+    its format.
+  - A generated picture's step reads "Made 1 image with ComfyUI · 768×320 · free" and where it was saved, in the
+    terminal, the editor and an ACP client, and a fallback says why ("Gemini 2.5 Flash Image: needs credit. So DGC
+    used ComfyUI instead (free)."). The terminal also shows a small picture.
+  - A DGC Router system can carry the images job (a ComfyUI or Automatic1111 box, which `router_find` finds), and a
+    generator that names it holds one of its workers while it makes a picture.
+- Video generation. DGC makes short clips with your own video generators: a video model on fal.ai (Wan 2.2 5B by
+  default, about $0.15 a clip; also LTX-Video, Hailuo, Kling 2.5 Turbo, Wan 2.5 and Veo 3.1 Fast), on Gemini (Gemini
+  Omni Flash), on Replicate (Wan 2.2 fast), or a ComfyUI video workflow, also on DGC Router. A video model is a
+  generator of its own, on the same provider and key as your pictures. The Videos page in `/docs` has the prices and
+  links to each provider's page.
+  - A video is a long job that doesn't hold up the chat. `generate_video` starts it and comes back at once, the step
+    shows the provider's state, the time so far and Stop, and when the video is ready the model is told and the
+    player appears under the reply that asked for it. Jobs are kept on disk from the start (`~/.dgc/videos/jobs/`),
+    so a window reload never loses one, and a reopened chat is told of a video that finished while it was closed.
+  - Stop cancels the job at the provider where it can, and says what was charged.
+  - Videos go into DGC's own folder (`~/.dgc/videos/`, by session, chat or Pip) with a sidecar and, when ffmpeg is
+    installed, a poster frame. They go into the project only with `save_to` or Save to project. At most 300 MB a
+    file.
+  - `dgc videos` (`list`, `add`, `make` with `--yes` for a script, `jobs`, `show`, `stop`, `open` and `library`) and
+    `/videos` in the terminal app, which says "Made a 5 s video with fal Wan 2.2 5B · 720p · $0.15", its path and
+    how to open it.
+  - A Pip makes a video in its chat only after your yes, and a routine makes one only for a Pip you allowed for
+    that generator.
+- Paid pictures and videos always ask first, and your limits hold.
+  - Every paid picture shows an Allow card with the generator, model, size, how many, the price and the prompt, in
+    every mode, auto included, and no permission rule answers it. Always allow on it stops that generator asking;
+    its monthly limit still holds.
+  - Every video shows its card (generator, length and resolution, price, this month's spend and the prompt) with
+    Make it, Edit and Don't. It has no Always allow: only the generator's "Asks before each video" in Settings can
+    turn asking off.
+  - An OpenAI-compatible server outside your own network counts as paid, so it asks too.
+  - A generator's monthly limit counts everything made on its key this month, pictures and videos, including those
+    still being made, in every DGC window. It is checked again just before anything is sent, so two windows or two
+    cards can't pass it together. A picture that would pass it asks again, and a video that would pass it is never
+    sent.
+  - A price DGC doesn't know always asks under a limit, and its card says so. A Pip's yes to a known price never
+    covers it, and a routine never makes it.
+  - A model you name is charged at its own price.
+  - What the provider may have charged stays counted: a clip stopped after it started, a clip the provider
+    finished, and a picture or clip DGC couldn't download or save.
+  - A provider's key goes only to that provider's own address, and never follows a redirect to another one.
+  - A Pip never spends on its own say-so. It asks in its reply with the price, and your yes covers that generator
+    at that price.
+- Plugin cards (MCP Apps). A plugin can supply a small interactive card that appears under the step
+  that used it: in Work, in ChatDGC replies, and in a Pip's chat, where
+  a Pip keeps the cards it opened while you were away. The terminal can't draw a card, so it shows one line,
+  "Cardboard opened a card · Open it". Open it (or `/cards`) opens the card in your browser on a page DGC serves for
+  that chat alone, and the transcript gives its address, to copy when you reach the computer over SSH. Cards come
+  back when you reopen a chat. The model is told in one line that a card was shown, and never reads its page.
+  - What a card asks goes through DGC, and only to its own plugin. A read runs: a tool the plugin marks read-only,
+    or one on DGC's reviewed list of reads that the plugin doesn't mark otherwise. A tool it marks destructive is
+    never treated as a read. A change shows DGC's Allow card first, following your permission mode and rules in
+    Work and the plugin's own setting in ChatDGC and Pips. A plugin that can move money asks every time and never
+    offers Always allow. Your answer is checked again before the call runs. A card can send a message as you,
+    labelled with its plugin, and tell the model's next reply what you did in it, as the plugin's content and never
+    as instructions.
+  - Each card is fenced off. It runs in a sandboxed frame at an address of its own on this computer (one per
+    plugin), reaches only the sites its plugin declared, sees nothing of your chats or your editor, and DGC listens
+    to it only at that address. A tool a plugin keeps for its card alone is never offered to the model. DGC tells
+    MCP servers that it shows cards (the `io.modelcontextprotocol/ui` extension).
+  - A card that can't be shown is said in one plain line ("Higgsfield's card couldn't be shown: its server had a
+    temporary problem (HTTP 502)."), and the model is told to give the result in its reply. A card page that fails
+    for a moment (a 5xx or a timeout) is tried once more, and if it still fails DGC shows the last page that loaded
+    for that plugin.
+  - A Pip's plugin call that runs after your Allow shows its card under the reply that offered it.
+  - ChatDGC and Pips run a plugin's reads at once: a tool the plugin marks read-only, or one on DGC's reviewed list of
+    reads, unless you set the plugin to Always ask. Anything else asks first, as the plugin's level in Pips settings →
+    Plugins says (Ask before important actions unless you change it), and a tool the plugin doesn't mark counts as an
+    important action. A Pip's own level can answer that card for you: at Approve for me, a new Pip's level, a call whose
+    tool name says it looks something up or saves a draft (get, list, search, find, fetch, read) runs without a card,
+    and at Full access every call does. Neither ever does it for a payment, or for a plugin you set to Always ask.
+- Cardboard in Plugins: edit your footage into finished videos (highlights, vertical clips, captions, music) with
+  Cardboard's own connector. You sign in with your Cardboard account in the browser, and edits use your Cardboard
+  plan.
+- Token usage by system. Every counted request now names the system it ran on: a DGC Router system, this computer,
+  or a cloud service (Anthropic, OpenAI, DeepSeek, Ollama Cloud). An Ollama `:cloud` model counts as Ollama Cloud,
+  whichever computer it was sent through, and a Pip's run on the Router counts under the system it ran on. DGC keeps
+  the system with each request, so a renamed system, or one whose address changed, keeps its history.
+  `dgc usage --system NAME` shows one system alone (`--json` adds `by_system`), and `dgc usage` and `/usage` add a
+  By system block when the range has more than one system (`/usage 7d NAS` in the terminal app).
+- Signing in to a plugin works when your browser is on another computer (DGC over SSH, or an editor's remote
+  window). DGC waits ten minutes for such a sign-in. Where the service also takes a code (Clerk's sign-in does, so
+  Cardboard's and Higgsfield's), a remote window offers to sign in with a code on another device. If you signed in
+  but nothing happened, paste the address your browser ended on into the sign-in card and DGC finishes the sign-in
+  with it.
+- In the editor, Settings → Models now holds every model choice, with DGC Router's Systems list and the Images &
+  video block. The extension's changelog has the details.
+- ChatDGC says at once that it's waiting for the model. Right after your message, the new reply names the model and
+  how long it usually takes to start, and a chat opened mid-wait shows the reply still waiting. `dgc chat` prints
+  "· waiting for MODEL (it usually starts within 12s)…".
+- When one of your own ask rules is what asks, the Allow card offers Allow once and Deny only, in the editor, the
+  terminal and ACP clients. An allow rule never beats an ask rule, so an Always allow there used to save a rule that
+  never took effect.
+- A plugin you set to Always ask for Pips offers Allow once and Don't only on a Pip's card, with no Always allow, and
+  an Always allow you gave before choosing Always ask no longer runs its calls without asking.
+- Composio's own catalog lookups (`COMPOSIO_SEARCH_TOOLS` and `COMPOSIO_GET_TOOL_SCHEMAS`) run at once as reads in
+  ChatDGC and Pips.
+- Composio reads (Gmail fetch, Calendar find and the like) run at once in ChatDGC and Pips, even though Composio marks
+  its run-tools command as one that can change things. A batch with anything else in it, or a read of another
+  account, still asks.
+- When Composio returns a short Gmail preview and a remote file pointer, DGC retries that same reviewed read once
+  in compact form in Work, ChatDGC, Pips and the CLI. The model receives the returned list directly and says when
+  only previews are available; the remote workbench remains a separate action.
+- A batch of helpers that named none says "Couldn't delegate", never "0 helpers", live and after a reload.
+- A very large session with no name lists with its first message and its message count again, and search finds it,
+  instead of showing "Large session" with 0 messages.
+- In ChatDGC, a workbook whose sheets add up to more than 100,000 rows loads the sheets that fit and says which were
+  left out, as before 0.50, instead of loading none.
+- Exporting an artifact no longer keeps another full copy in DGC's own store each time, which made the Library say
+  the store was getting large. `dgc artifacts export` with no `--to` writes one file per title and format in the
+  artifact's exports folder again.
+- A slide deck with an SVG picture that has its own style rules or the standard SVG doctype can be edited again, and
+  such pictures can be added. Since 0.50 any edit to such a deck was refused. An SVG that runs a script or loads
+  another file is still refused.
+- In ChatDGC, Send it now on a card in an earlier reply no longer shows an error after the card was sent. The card
+  says what happened, and your next message picks it up.
+- Dismissing a Pip's report card in a Work chat after that Pip was erased no longer says the command failed, and the
+  dismissal is saved at once.
+- Approving a plan into Auto applies to that chat only, in the editor, the terminal and ACP clients. It was saved as
+  your default, so the next terminal, `dgc -p` or SDK session started in Auto. After a terminal plan approved into
+  Auto, your saved mode is the one you had before planning, short of Auto. In the editor every plan approval stays
+  with its Work chat. The chat's mode chip and the status bar in the editor, and an ACP client's mode, now show the
+  mode the approved plan runs in, Auto included; they kept saying plan.
+- A helper and a Pip fix run in their chat's mode as it is now, held for that chat or saved. A Work chat set to Auto
+  after a fix or a helper started no longer leaves it asking before each step. Back in Default it asks again, with the
+  chat in plan it asks before each change, it never goes above Default in a folder you haven't trusted, and your ask
+  and deny rules still apply.
+- A chat you reopen comes back in the mode it had. Set a Work chat to Auto, close it and open it again from the list,
+  or reload the window, and it is in Auto again, with no Allow card for an edit; a chat that was planning comes back
+  planning, and one you ran in Default comes back in Default whatever your default is. The same in the terminal with
+  `dgc --resume`, `dgc --continue` and `/resume`. It was brought back only when it asked no less than your default,
+  so a chat set to Auto reopened in Default. It is still checked again: Auto and Accept edits only in a folder that is
+  still trusted, otherwise Default, and the chat says so. It is held for that chat, never saved as your default, and
+  a new chat starts in your default. `dgc -p --continue`, an SDK app and an ACP client still only lower a session's
+  mode, and a mode named for the run (`--mode`) still wins.
+- In a short Work chat in the editor (a low window, the terminal panel open, an editor split), the prompt you sent no
+  longer pins over most of the transcript. At the end of a long answer it left only the reply's last line in view:
+  after a video's Stop woke the chat, the reply read as one line under the prompt. A prompt now pins only while it
+  takes at most 40% of the transcript, as well as 30% of the window.
+- In the editor, collapsing the diff on an Allow card, or opening its file from there, no longer answers the card. It
+  denied the call, and the chat said "DGC command violated protocol v14: permission_response.decision is required".
+- In the editor's agent map, a Pip fix's agent shows the brief its fixer was given as its Prompt, also after a window
+  reload. It said "This agent's prompt was not kept in the chat."
+- Web fetch, a skill added from a link, Pip web reads, deep research and ChatDGC's pictures work again with sites
+  that have both IPv4 and IPv6 addresses on a computer with no IPv6 route, such as DGC in WSL on Windows. DGC tries
+  each address it checked in turn, and still connects only to public ones.
+- Mods start when DGC's Python is reached through a symlink (a `.venv` that links to another folder). A mod that
+  still can't start says why in the mods list, and when a mod DGC wrote can't start, the model is told in the step's
+  result.
+- Mods start on a Mac again. A Python that DGC's installer set up there reaches its interpreter through a link in `~/.local/bin`, and macOS's sandbox couldn't follow it, so no mod could start. The sandbox now lets the mod read each link on the way to the interpreter, and nothing else in that folder.
+- The full-screen terminal with mods that draw (Context, Tally) no longer opens to "Window too small…".
+- Core's first hello names only what is really connected. It says Outlook Mail goes through the Microsoft plugin only
+  when that plugin is set up.
+- After Open here moves an idle ChatDGC chat to another window, the window that gave it up no longer says, a moment
+  later, that it still has it.
+- Opening a Pip's chat no longer makes "Too many pending Pip controls; wait and retry." appear: DGC's queue of Pip
+  controls holds as many as the editor sends at once.
+- A Pip's unread count matches its chat: a routine run counts once, and DGC's own messages and the reply after an
+  Allow don't count on their own. Runs that passed or found nothing in a row count once, as the chat shows them.
+- A Pip no longer mentions an Allow card for a plugin read that runs at once.
+- A Pip decides how its reply reads: one message, or several short ones it marks, so a poem or a draft comes as one
+  piece.
+- Deleting a Pip permanently finishes even when DGC can't read a saved Output in the Library (a half-made one from
+  a crash, say), and a deletion that can't finish yet no longer makes every later Pips command fail. DGC never
+  deletes an Output it can't identify: it leaves it in place and says which folder it is.
+- Deleting a Pip permanently no longer makes desktop notifications announce the other Pips' old alerts and
+  replies again.
+- Deleting a Pip permanently works with SQLite older than 3.37 (the Python on RHEL or Rocky 9, say), where it used to
+  answer "The Pip remained in the registry." every time.
+- Deleting a Pip permanently also erases what it kept in your memory, and the memory history's record of it (with
+  the words from its chat), so Undo can't bring it back. The Delete permanently dialog says so.
+- A mod's Allow holds only for the mod you gave it to: DGC's own, its installed copy, or the folder you allowed. A
+  mod folder DGC wrote that later takes the name of a mod you allowed gets none of that mod's permissions, can't run
+  under that name, and doesn't hide your mod. Allows you gave before keep working.
+- In the editor, a link in a mod's Markdown shows as its words and opens nothing when clicked, and its address never
+  loads. A mod has no network, and a click on its link was a way out.
+- Keep Pips running can be refreshed or turned off again after the Python an older DGC used is gone (an OS upgrade
+  removed it, or Homebrew's python@3.12 was uninstalled). DGC used to call its own service someone else's.
+- The installer no longer says "its Pips service could not be refreshed" to someone who never turned Keep Pips
+  running on.
+- Updating DGC while a Pip is queued or running no longer breaks Keep Pips running. The installer reads whether the
+  runner is busy without changing its database, a busy runner finishes its work on the previous DGC, and on Linux
+  its service already names the new one, so it never restarts into the old version again and again.
+- On Windows (DGC in WSL), updating DGC moves Keep Pips running to the new version. Its runner used to keep
+  starting the previous version after every update.
+- After an update, a Pips runner still running the previous version no longer blocks every run. When it has nothing
+  queued or running, DGC stops it and starts the new one by itself (through Keep Pips running when that is on), and
+  no Pip is paused. While it is still working, the message says so and names both versions.
+- Sites work again in a Chrome tab a Pip borrows. Its page loads its own styles, scripts, pictures, API reads and
+  frames from wherever the site keeps them. The tab still goes only to the sites on the card, and what a Pip's step
+  sends still goes only to those sites, as its level allows.
+- A Pip reads long Outlook messages (a newsletter, a long thread, a long message in Hindi or Chinese). It gets as
+  much of the body as fits, marked where it stops, instead of "Microsoft Mail did not complete the bounded read."
+- SDK 0.9.0 fixes Python `AsyncChat.stream` cancelling a reply that had already finished, TypeScript `extractJson`
+  failing on a reply that shows another block before its JSON, and the Python and TypeScript Generative UI readers
+  giving different cards for the same reply. See its [changelog](sdk/CHANGELOG.md).
+- DGC now needs ddgs 9.16.1 and pypdf 6.21.2 or newer.
+- For editor and SDK authors, new in editor protocol v14. No field was added to an existing event, and a client that
+  doesn't use these sees nothing new.
+  - DGC Router: the commands `router_status`, `router_update`, `router_probe`, `router_find`, `router_hardware`,
+    `router_suggest` and `router_thinking`, the events `router_status`, `router_changed` and `router_suggestion`,
+    and `ready.capabilities.router`. Pips API 70: a Pip's `model_choice` takes `{"mode": "router"}` or
+    `{"mode": "router", "system": id, "model": name}`.
+  - Helpers' thinking: the `subagent_settings` event, sent to a client whose `get_config` names it in `fields`, and
+    `ready.capabilities.subagent_thinking`.
+  - Pictures: the commands `images_list`, `images_update`, `images_generate` and `images_library`, the events
+    `images_status`, `images_result`, `images_library` and `images_made`, and `ready.capabilities.images`.
+  - Videos: the commands `videos_jobs`, `videos_stop`, `videos_generate` and `videos_library`, the events
+    `video_job`, `video_jobs` and `videos_library`, and `ready.capabilities.videos`; `images_update` takes `makes`,
+    `video_asks` and `video_pips`. Pips API 71: a Personal Pip's reply that started a video carries `videos`.
+  - Plugin cards: the commands `watch_mcp_apps`, `mcp_app_call`, `mcp_app_answer`, `mcp_app_context` and
+    `mcp_app_get`, the events `mcp_app_card`, `mcp_app_reply` and `mcp_app_resource`, and
+    `ready.capabilities.mcp_apps`. `ready.capabilities.plugin_names` gives each installed plugin's name by the server
+    name its tools carry.
+  - Token usage: `get_usage` and `get_pip_usage_report` take an optional `system`, each `by_model` row carries
+    `system`, `system_id` and `system_kind`, and `ready.capabilities.usage_by_system` says so.
+  - ChatDGC: the `chatdgc_waiting` event.
+  - Modes: `mode_changed` also comes when an approved plan changes the chat's mode. `resume_session` takes
+    `saved_mode: true` (`ready.capabilities.resume_saved_mode`): the person reopened the chat, so it comes back in
+    the mode it had. Without it a reopen only lowers the mode, as before.
+  - Approvals: a `permission_request`'s `choices` are exactly the answers its card offers
+    (`ready.capabilities.permission_choices`).
+  - Pip fixes: a fix's record (`pip_fix`, `pip_fixes` and a replayed card's `report.fix`) carries `prompt`, the
+    brief its fixer was given, up to 20,000 characters.
+  - Sign-in: DGC's own sign-in card may carry `_dgc_device_offer`, and the editor answers it with
+    `content: {"_dgc_device": true}` to sign in with a code.
+  - SDK 0.9.0 adds `session.router`, `session.images`, `session.videos` and `session.cards`; see its
+    [changelog](sdk/CHANGELOG.md).
+
 ## 0.50.1 — 2026-11-02
 
 - Editor Auto permission mode now stays with the Work chat that confirmed it. New editor sessions treat an Auto default saved by 0.50.0 as Default; explicit CLI and SDK modes remain available.

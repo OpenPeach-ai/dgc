@@ -18,6 +18,8 @@ GUIDANCE = (
     "readable without the card. For a project-wide status card, check this workspace's Pips with use_pips then "
     "pips_context list when those tools are available; do not label Pip status unavailable without trying that "
     "read-only path. Schema: {\"version\":\"1\",\"title\":\"...\",\"subtitle\":\"...\",\"blocks\":[...]}. "
+    "Every title, label, value, detail, description, reply, column and table cell is a short string (\"42\", not 42); "
+    "only a bar's value is a number. "
     "Blocks (up to six): metrics {type,items:[{label,value,detail}]} with up to eight items; "
     "steps {type,label,items:[{label,state,detail}]} with up to eight items and state done/running/attention/waiting; "
     "bars {type,label,items:[{label,value}]} with nonnegative numeric values; "

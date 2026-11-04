@@ -199,8 +199,37 @@ export function pipModels(value) {
     ||engine!==null&&!(record(engine)&&typeof engine.engine==='string'&&typeof engine.name==='string'&&typeof engine.available==='boolean'&&(engine.reason===undefined||typeof engine.reason==='string')))throw new Error('Models didn’t load. You can still use the same model as DGC.');
   return {...value,subscriptions,default_engine:engine};
 }
-export function modelChoice(value,models,subscriptions=[]) {
+// API 70 (DGC Router): a Pip may run on any computer with the Pips job ({mode:'router'}) or on one system and model
+// ({mode:'router',system,model}); list_pip_models' `router` lists them while the Router is on.
+const ROUTER_SYSTEM=/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/,MODEL_ID=/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
+export function routerModelChoice(m){return record(m)&&m.mode==='router'&&(Object.keys(m).join()==='mode'||Object.keys(m).sort().join()==='mode,model,system'&&typeof m.system==='string'&&ROUTER_SYSTEM.test(m.system)&&typeof m.model==='string'&&MODEL_ID.test(m.model)&&!m.model.includes('://'));}
+export function pipRouter(value){
+  if(value===undefined||value===null)return null;
+  if(!record(value)||value.enabled!==true||!Array.isArray(value.systems)||value.systems.length>32||!value.systems.every(s=>record(s)&&typeof s.id==='string'&&ROUTER_SYSTEM.test(s.id)&&typeof s.name==='string'&&Array.isArray(s.models)&&s.models.length<=64&&s.models.every(m=>record(m)&&typeof m.name==='string'&&MODEL_ID.test(m.name))))return null;
+  return {...value,pips_default:typeof value.pips_default==='string'?value.pips_default:''};
+}
+/** The Router's choices for a Pip: [value, label] for any Pip system, then each system's models. */
+export function routerChoices(router){
+  if(!router)return[];
+  return [['router','DGC Router (any Pip system)'],...router.systems.flatMap(s=>s.models.map(m=>[`router:${s.id}/${m.name}`,`${s.name} · ${m.name}${s.online===false?' (offline)':''}`]))];
+}
+/** What a Pip on Default runs on, in words, from list_pip_models: the Router when Settings -> Pips run on it (API 70:
+ * router.pips_default, "router" or "router:<system>/<model>"), else the subscription DGC's default follows, else the
+ * model. "" when unknown. A Pip menu says "Default (<this>)". */
+export function defaultRunsOn(models){
+  const router=pipRouter(models?.router),pin=router?.pips_default||'';
+  if(pin==='router')return 'DGC Router · any Pip system';
+  if(pin.startsWith('router:')){const found=routerChoices(router).find(([v])=>v===pin);return found?found[1].replace(/ \(offline\)$/,''):'DGC Router · '+pin.slice(7).replace('/',' · ');}
+  return models?.default_engine?.name||(typeof models?.default_model==='string'?models.default_model:'');
+}
+export function modelChoice(value,models,subscriptions=[],router=null) {
   if(value==='default')return{mode:'default'};
+  if(typeof value==='string'&&(value==='router'||value.startsWith('router:'))){
+    if(!router||!routerChoices(router).some(([v])=>v===value))throw new Error('Choose Default or a model from the list.');
+    if(value==='router')return{mode:'router'};
+    const rest=value.slice(7),cut=rest.indexOf('/');
+    return{mode:'router',system:rest.slice(0,cut),model:rest.slice(cut+1)};
+  }
   if(typeof value==='string'&&value.startsWith('subscription:')){
     const engine=value.slice(13);
     if(!subscriptions.some(s=>s.engine===engine))throw new Error('Choose Default or a model from the list.');
@@ -210,8 +239,8 @@ export function modelChoice(value,models,subscriptions=[]) {
   if(!id||!models.some(m=>m.id===id))throw new Error('Choose Default or a model from the list.');
   return{mode:'model',model:id};
 }
-export const modelValue=choice=>record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:'default';
-export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:'Default';
+export const modelValue=choice=>record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:routerModelChoice(choice)?(choice.system?`router:${choice.system}/${choice.model}`:'router'):'default';
+export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:routerModelChoice(value)?(value.system?`${value.model} on ${value.system} (DGC Router)`:'DGC Router (any Pip system)'):'Default';
 // Said once, where a subscription is chosen for a Pip: its scheduled runs use the user's own plan.
 export const subscriptionUsage=name=>`Its replies and routines use your ${name} plan’s usage.`;
 export function presentation(pip, runs, connected, runnerState) {
@@ -566,7 +595,7 @@ export function draftAutomationPin(manifest){
  const job=manifest.job,choice=job.model_choice;
  if(Object.keys(job).sort().join()!=='goal,model_choice,name,pip_type,source_policy,source_ref'||!committedPolicy(job.source_policy)||!sameJson(manifest.tools,['glob','grep','read_file','repo_map','todo'])||['handoff','specialists','conversation','audit_checkpoint','changes_since_checkpoint','pip_memory','main_chat_request'].some(k=>Object.hasOwn(manifest,k)))fail();
  for(const [key,max] of [['name',120],['goal',4000],['source_ref',200]])if(typeof job[key]!=='string'||!job[key]||job[key]!==job[key].trim()||[...job[key]].length>max||job[key].includes('\0'))fail();
- if(!record(choice)||!(Object.keys(choice).join()==='mode'&&choice.mode==='default'||Object.keys(choice).sort().join()==='mode,model'&&choice.mode==='model'&&typeof choice.model==='string'&&choice.model.length<=256&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]*$/.test(choice.model)&&!/[\r\n]/.test(choice.model)&&!choice.model.includes('://')))fail();
+ if(!record(choice)||!(Object.keys(choice).join()==='mode'&&choice.mode==='default'||Object.keys(choice).sort().join()==='mode,model'&&choice.mode==='model'&&typeof choice.model==='string'&&choice.model.length<=256&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]*$/.test(choice.model)&&!/[\r\n]/.test(choice.model)&&!choice.model.includes('://')||routerModelChoice(choice)))fail();
  const o=grant.occurrence;
  if(grant.trigger==='event'){
   const pin=eventRunPin(manifest);
@@ -640,7 +669,7 @@ export function pulseVerificationPin(m){
  if(!pulseKeys(job,'name,goal,source_ref,pip_type,model_choice,source_policy,verification_plan')||job.pip_type!=='pulse'||!sameJson(job.source_policy,{mode:'committed_only'})||!pulsePlan(job.verification_plan))pulseFail();
  for(const [k,max] of [['name',120],['goal',4000],['source_ref',200]])if(typeof job[k]!=='string'||!job[k]||job[k]!==job[k].trim()||[...job[k]].length>max||job[k].includes('\0')||[...job[k]].some(c=>c.length===1&&c.charCodeAt(0)>=0xd800&&c.charCodeAt(0)<=0xdfff))pulseFail();
  const choice=job.model_choice;
- if(!record(choice)||!(pulseKeys(choice,'mode')&&choice.mode==='default'||pulseKeys(choice,'mode,model')&&choice.mode==='model'&&pulseText(choice.model,256)&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]*$/.test(choice.model)&&!choice.model.includes('://'))||!sameJson(g.model,{invoked:false,choice}))pulseFail();
+ if(!record(choice)||!(pulseKeys(choice,'mode')&&choice.mode==='default'||pulseKeys(choice,'mode,model')&&choice.mode==='model'&&pulseText(choice.model,256)&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]*$/.test(choice.model)&&!choice.model.includes('://')||routerModelChoice(choice))||!sameJson(g.model,{invoked:false,choice}))pulseFail();
  for(const [k,prefix] of [['pip_id','pip'],['workspace_id','ws'],['binding_id','binding'],['runner_id','runner']])if(!pulseId(g[k],prefix)||g[k]!==m[k])pulseFail();
  if(!pulseId(g.approval_id,'approval')||!pulseInt(g.job_version,1,999999)||g.job_version!==m.job_version||!pulseInt(g.lifecycle_revision)||!['definition_digest','plan_digest','action_digest','binding_digest','digest'].every(k=>pulseHash(g[k]))||g.source_revision!==m.source_revision||m.policy_digest!==g.action_digest||g.trigger!==m.trigger) pulseFail();
  const r=g.request;
@@ -1070,7 +1099,7 @@ export function pipSetup(value,workspace,id=null) {
  if(Object.hasOwn(value,'computer')&&(value.computer!==true||value.source_policy!=='personal'))fail();
  // A setup card's only trigger (Pips API 41): a review after each new commit, instead of a schedule.
  if(Object.hasOwn(value,'event_trigger')){const t=value.event_trigger;if(value.source_policy==='personal'||value.schedule!==null||value.pip_id!==null||!record(t)||Object.keys(t).sort().join()!=='events,minimum_minutes,missed_policy'||JSON.stringify(t.events)!=='["commit_changed"]'||!Number.isSafeInteger(t.minimum_minutes)||t.minimum_minutes<5||t.minimum_minutes>1440||t.missed_policy!=='coalesce_latest'||!['scout','lens','rook','lock','quill'].includes(value.pip_type))fail();}
- if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')||m.mode==='subscription'&&value.source_policy==='personal'&&Object.keys(m).sort().join()==='engine,mode'&&Object.hasOwn(SUBSCRIPTION_NAMES,m.engine)))fail();}
+ if(value.model_choice!==undefined){const m=value.model_choice;if(!record(m)||!(m.mode==='default'&&Object.keys(m).join()==='mode'||m.mode==='model'&&Object.keys(m).sort().join()==='mode,model'&&typeof m.model==='string'&&/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/.test(m.model)&&!m.model.includes('://')||m.mode==='subscription'&&value.source_policy==='personal'&&Object.keys(m).sort().join()==='engine,mode'&&Object.hasOwn(SUBSCRIPTION_NAMES,m.engine)||routerModelChoice(m)))fail();}
  const existing=value.pip_id!==null;
  if(existing?!/^pip_[a-f0-9]{32}$/.test(value.pip_id)||!Number.isSafeInteger(value.expected_version)||value.expected_version<1||!Number.isSafeInteger(value.expected_lifecycle_revision)||value.expected_lifecycle_revision<0:value.expected_version!==null||value.expected_lifecycle_revision!==null)fail();
  const schedule=value.schedule;
@@ -1128,10 +1157,14 @@ export function pipNotifySettings(value, pip) {
     throw Error('Notification settings are invalid or belong to another Pip.');
   return value;
 }
-// Keep Pips running (API 41): the switch's state. Exact keys, since the panel words it.
+// Keep Pips running (API 41): the switch's state. Exact keys, since the panel words it. Linux, WSL and macOS also
+// send `outdated`: the service DGC wrote still starts another (older) DGC install. Where the switch can't work
+// (no systemd, another system) the status has no `outdated`.
 export function pipsKeepRunning(value) {
   const keys = ['on', 'platform', 'reason', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'];
-  if (!record(value) || Object.keys(value).sort().join() !== keys.join() || typeof value.platform !== 'string'
+  const given = record(value) ? Object.keys(value).sort().join() : '';
+  if (!record(value) || (given !== keys.join() && given !== [...keys, 'outdated'].sort().join())
+    || ('outdated' in value && typeof value.outdated !== 'boolean') || typeof value.platform !== 'string'
     || typeof value.reason !== 'string' || value.reason.length > 400
     || !['on', 'restarts_after_failure', 'starts_at_login', 'supported', 'while_logged_out'].every((key) => typeof value[key] === 'boolean')
     || (!value.supported && (value.on || !value.reason)))
