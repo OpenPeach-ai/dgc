@@ -89,7 +89,7 @@ class StubHost:
                 elif self.path.endswith("/api/tags"):
                     body = {"models": [{"name": "qwen3:8b"}, {"name": "glm-5.3:cloud"},
                                        {"name": "nomic-embed-text:latest"},
-                                       {"name": "my-embedding-alias", "details": {"family": "bert"}}]}
+                                       {"name": "mystery:latest", "details": {"family": "bert"}}]}
                 elif "/models" in self.path:
                     body = {"object": "list", "data": [{"id": "served-a", "type": "model"},
                                                        {"id": "served-b", "type": "model"},
