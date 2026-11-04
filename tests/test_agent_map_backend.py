@@ -347,10 +347,11 @@ class BackgroundShellTests(BackendCase):
         self.assertTrue(self.finished(done))
         backend.dispatch({"type": "list_background_shells", "request_id": "l2"})
         self.assertIn(done, shells(self.answer(wire, "background_shells", "l2")))
-        count = len(wire.frames)
         backend.dispatch({"type": "clear_session", "request_id": "c1"})
+        cleared = self.answer(wire, "session", "c1")
         after = wire.wait(lambda f: f["type"] == "background_shells"
-                          and wire.frames.index(f) >= count)
+                          and wire.frames.index(f) > wire.frames.index(cleared)
+                          and done not in shells(f))
         self.assertIsNotNone(after)
         self.assertEqual(list(shells(after)), [running])
 
