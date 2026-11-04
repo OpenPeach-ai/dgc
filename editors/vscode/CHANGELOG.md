@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-04
 
+- Restored Work sessions place a mid-turn prompt's “steered” status below that prompt, matching the live transcript. The two “Worked for” rows still show time before and after the update.
 - Use it with DGC CLI 0.51.0 or newer. DGC Router, pictures, videos, plugin cards and token usage by system need
   it, and stay hidden with an older CLI.
 - Settings → Models now holds every model choice in one page: Main model, Fallback, Sub-agents, Pips, Images & video

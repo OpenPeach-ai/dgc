@@ -93,3 +93,23 @@ test("the note sits under the bubble, not inside it", () => {
   assert.doesNotMatch(mainCss, /\.bubble::after/,
                       "no pseudo-element route back into the bubble either");
 });
+
+test("a restored mid-turn message keeps its status below its bubble and time", () => {
+  const p = panel();
+  p.event({ type: "ready", capabilities: { history_snapshot: true }, model: "m", mode: "default",
+            think: "off", base_url: "http://127.0.0.1:1/v1", workspace_trusted: true, commands: [],
+            custom_commands: [], goal: { text: "", status: "none" }, context_size: 1 });
+  p.event({ type: "history", complete: true, items: [
+    { type: "turn_start", turn_id: "t1", prompt: "Find the search box", kind: "prompt" },
+    { role: "time", of: "steering", at: 1762277460 },
+    { role: "steering", text: "I mean the Base prices tab" },
+    { type: "text_delta", text: "Found it." },
+    { type: "stream_end", message_id: "t1:1", phase: "answer" },
+    { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 1, final_message_id: "t1:1" },
+  ] });
+  const row = [...p.doc.querySelectorAll(".msg.user")].find((n) => n.dataset.steer === "applied");
+  assert.ok(row, "the saved steering prompt was restored");
+  const order = [...row.children].map((n) => n.classList.contains("bubble") ? "bubble"
+    : n.classList.contains("msg-time") ? "time" : n.classList.contains("steer-note") ? "note" : "other");
+  assert.deepEqual(order.filter((kind) => kind !== "other"), ["bubble", "time", "note"]);
+});

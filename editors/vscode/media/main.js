@@ -11132,7 +11132,6 @@ function permissionChoices(ev) {
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
-      setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text,
@@ -11141,6 +11140,10 @@ function permissionChoices(ev) {
         bubble.prepend(el("p", "answered-q", esc(it.answer_question)));
       node.appendChild(bubble);
       if (steeringAt !== null) { stampPrompt(node, steeringAt); steeringAt = null; }
+      // Replayed history must use the same order as a live steer: bubble, time, then
+      // status. Adding the status before the bubble put "steered" above the message
+      // after reload, where it looked attached to the previous Worked for row.
+      setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       placeSteering(node);
       return;
     }
