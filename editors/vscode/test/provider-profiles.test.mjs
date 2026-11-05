@@ -29,6 +29,18 @@ test('a provider URL cannot carry a secret or redirecting query',()=>{
  }
 });
 
+test('a signed-in CLI is a provider with no host or API key',async()=>{
+ const s=store(),ctx={globalState:s.globalState,secrets:s.secretsApi};
+ const row=await addProfile(ctx,{kind:'subscription',engine:'claude',model:''});
+ assert.equal(row.id,'subscription_claude');
+ assert.deepEqual(await profileCredential(ctx,row.id),{route:row,api_key:''});
+ await assert.rejects(addProfile(ctx,{kind:'subscription',engine:'claude'}),/already added/);
+ await assert.rejects(addProfile(ctx,{kind:'subscription',engine:'codex',api_key:'secret'}),/not an API key/);
+ assert.equal(s.secrets.size,0);
+ await removeProfile(ctx,row.id);
+ assert.deepEqual(listProfiles(ctx),[]);
+});
+
 test('the chosen default cannot be removed while future chats use it',async()=>{
  const s=store(),ctx={globalState:s.globalState,secrets:s.secretsApi};
  const first=await addProfile(ctx,{name:'Ollama',base_url:'http://localhost:11434/v1',model:'one'});

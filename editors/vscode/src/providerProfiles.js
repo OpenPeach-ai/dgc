@@ -4,11 +4,19 @@ import {randomBytes} from 'node:crypto';
 
 const STATE_KEY='dgc.modelProviders.v1', DEFAULT_KEY='dgc.defaultModelProvider.v1', MAX=12;
 const ID=/^provider_[a-f0-9]{32}$/;
+const SUBSCRIPTION_ID=/^subscription_(claude|codex)$/;
 const MODES=new Set(['auto','ollama','anthropic','chat_completions','responses']);
 const secretKey=id=>`dgc.modelProvider.${id}.apiKey`;
 
 export function validRoute(raw){
  if(!raw||typeof raw!=='object')throw Error('Choose a provider.');
+ if(raw.kind==='subscription'){
+  const engine=String(raw.engine||'');
+  if(!['claude','codex'].includes(engine))throw Error('Choose Claude Code or Codex.');
+  const model=String(raw.model||'').trim();
+  if(model.length>128||/[^A-Za-z0-9._:-]/.test(model))throw Error('Choose a valid subscription model.');
+  return {kind:'subscription',engine,name:engine==='claude'?'Claude Code':'Codex',model};
+ }
  const name=String(raw.name||'').trim(),model=String(raw.model||'').trim();
  if(!name||name.length>64||/[\x00-\x1f\x7f]/.test(name))throw Error('Use a provider name of up to 64 characters.');
  if(!model||model.length>256||/[\x00-\x1f\x7f]/.test(model))throw Error('Choose one model for this provider.');
@@ -26,7 +34,7 @@ export function listProfiles(context){
  if(!Array.isArray(rows))return [];
  const valid=[];
  for(const row of rows){
-  if(!row||!ID.test(row.id))continue;
+  if(!row||!(ID.test(row.id)||SUBSCRIPTION_ID.test(row.id)))continue;
   try{const clean=validRoute(row);if(Object.keys(clean).every(key=>clean[key]===row[key]))valid.push(row);}catch{}
  }
  return valid.slice(0,MAX);
@@ -48,10 +56,12 @@ export async function clearDefaultProfile(context){
 
 export async function addProfile(context,raw){
  const route=validRoute(raw),key=String(raw.api_key||'');
+ if(route.kind==='subscription'&&key)throw Error('A subscription uses its own signed-in CLI, not an API key.');
  if(key.length>16384||/[\x00-\x1f\x7f]/.test(key))throw Error('The API key must be a single line of at most 16 KiB.');
  const current=listProfiles(context);
  if(current.length>=MAX)throw Error('Remove a saved provider before adding another.');
- const row={id:`provider_${randomBytes(16).toString('hex')}`,...route};
+ if(route.kind==='subscription'&&current.some(row=>row.engine===route.engine))throw Error('This subscription is already added.');
+ const row={id:route.kind==='subscription'?`subscription_${route.engine}`:`provider_${randomBytes(16).toString('hex')}`,...route};
  if(key)await context.secrets.store(secretKey(row.id),key);
  try{await context.globalState.update(STATE_KEY,[...current,row]);}
  catch(error){if(key)await context.secrets.delete(secretKey(row.id));throw error;}
@@ -59,16 +69,16 @@ export async function addProfile(context,raw){
 }
 
 export async function removeProfile(context,id){
- if(!ID.test(String(id||'')))throw Error('Unknown provider.');
+ if(!(ID.test(String(id||''))||SUBSCRIPTION_ID.test(String(id||''))))throw Error('Unknown provider.');
  if(defaultProfileId(context)===id)throw Error('Choose another default before removing this provider.');
  const rows=listProfiles(context);
  if(!rows.some(row=>row.id===id))throw Error('Provider not found.');
  await context.globalState.update(STATE_KEY,rows.filter(row=>row.id!==id));
- await context.secrets.delete(secretKey(id));
+ if(ID.test(id))await context.secrets.delete(secretKey(id));
 }
 
 export async function profileCredential(context,id){
  const row=listProfiles(context).find(row=>row.id===id);
  if(!row)throw Error('Provider not found. Open Settings and add it again.');
- return {route:row,api_key:await context.secrets.get(secretKey(id))||''};
+ return {route:row,api_key:row.kind==='subscription'?'':await context.secrets.get(secretKey(id))||''};
 }

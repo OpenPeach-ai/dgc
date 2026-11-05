@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 from ..editor_protocol import command_error
@@ -35,6 +37,27 @@ PREVIEW_BYTES = 2_500_000             # an image shown in the chat: its data: UR
 FLUSH_S = 0.05
 FLUSH_CHARS = 16_000
 CLOSE_GRACE_S = 5.0
+
+
+def _provider_route(raw):
+    """A VS Code saved provider for one turn. Never persist its API key in a chat."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not re.fullmatch(r"provider_[a-f0-9]{32}", str(raw.get("id", ""))):
+        raise ChatEngineError("Choose a saved model provider in Settings.")
+    url = str(raw.get("base_url") or "")
+    key = str(raw.get("api_key") or "")
+    mode = str(raw.get("api_mode") or "auto")
+    if len(url) > 2048 or len(key) > 16_384 or mode not in ("auto", "ollama", "anthropic", "chat_completions", "responses"):
+        raise ChatEngineError("That saved model provider is invalid. Open Settings and add it again.")
+    try:
+        parts = urllib.parse.urlsplit(url)
+        valid = parts.scheme in ("http", "https") and bool(parts.hostname) and parts.port != 0
+    except ValueError:
+        valid = False
+    if not valid or parts.username or parts.password or parts.query or parts.fragment:
+        raise ChatEngineError("That saved model provider needs a plain HTTP or HTTPS host URL.")
+    return {"id": raw["id"], "base_url": url, "api_key": key, "api_mode": mode}
 
 # Open here for a chat (one window writes to a chat at a time; reported 23 Oct 2026. A window's process holds the
 # chats its tabs show and the ones it is writing, and says so in its note (dgc/peers.py, "chatdgc_held"); another
@@ -1436,7 +1459,8 @@ class ChatService:
             try:
                 self.emit("chatdgc_activity", conversation_id=conversation_id, message_id=request_id[:64],
                           kind="compacting", text=what)
-                after = work(cancel)
+                with self.engine.provider_turn(_provider_route(cmd.get("provider"))):
+                    after = work(cancel)
             except (ChatEngineError, ChatStoreError) as exc:
                 self._error(str(exc), request_id, conversation_id)
             except Exception as exc:                  # noqa: BLE001
@@ -1702,7 +1726,8 @@ class ChatService:
                         return self.engine.continue_action(conversation_id, message_id, action_id,
                                                            on_start=on_start, on_activity=activity,
                                                            cancel=cancel, **stream_for())
-                    self._turn(conversation_id, request_id, slot["cancel"], continue_run, slot)
+                    with self.engine.provider_turn(_provider_route(cmd.get("provider"))):
+                        self._turn(conversation_id, request_id, slot["cancel"], continue_run, slot)
             except (ChatEngineError, ChatStoreError) as exc:
                 self._error(str(exc), request_id, conversation_id)
             except Exception as exc:                  # noqa: BLE001 -- said, never lost
@@ -2095,6 +2120,13 @@ class ChatService:
 
     def _start(self, cmd: dict, run, *, refresh: bool = False) -> None:
         conversation_id, request_id = cmd["conversation_id"], cmd["request_id"]
+        route = _provider_route(cmd.get("provider"))
+        if route is not None:
+            original_run = run
+
+            def run(cancel, on_start, stream_for, activity):
+                with self.engine.provider_turn(route):
+                    return original_run(cancel, on_start, stream_for, activity)
         chat = self.engine.open(conversation_id)     # an unknown chat is refused here, not on the thread
         cancel = threading.Event()
         with self._lock:

@@ -2174,8 +2174,11 @@ instead, and testing that model by name (**Test it** in Settings, `dgc router te
 
 ## In the editor
 
-Settings → **Models** holds every model choice, in blocks: Main model, Fallback, Sub-agents, Pips, Images & video
-and **DGC Router**, whose switch reads **Use my other computers**. Switch it on and:
+Settings → **Models** holds every model choice, in blocks: Providers, Fallback, Sub-agents, Pips, Images & video
+and **DGC Router**. Save a model host or a signed-in subscription CLI in Providers. The first one becomes the
+default for new Work and ChatDGC chats and Pips set to Default. With several providers, choose the default there;
+Work and ChatDGC can switch providers in each chat without changing the default. A subscription needs no separate
+model host. DGC Router's switch reads **Use my other computers**. Switch it on and:
 
 - **Sub-agents** reads "Chosen by DGC Router · 3 systems · 9 workers free"; the usual sub-agent model, used when
   the Router is off (or every worker is busy and you chose so), is one click away.

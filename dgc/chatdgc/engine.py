@@ -11,6 +11,8 @@ import copy
 import json
 import re
 import threading
+import time
+from contextlib import contextmanager
 import unicodedata
 import uuid
 from typing import Callable
@@ -368,14 +370,74 @@ class ChatEngine:
         # it's announced, so they're served from here until the reply carries them.
         self._live_pictures: dict[tuple[str, str], dict] = {}
         self._lock = threading.Lock()
+        # The editor supplies a saved provider's key for this turn only. Chats persist
+        # its opaque id and model, never the URL credential pair.
+        self._provider_turn = threading.local()
+        # Naming, follow-ups and the context meter run on their own threads after
+        # the reply. Keep only recently supplied routes in this process, never in
+        # the chat or on the wire back to the editor. A restarted backend must be
+        # given the route again by the editor before it can use the provider.
+        self._provider_routes: dict[str, tuple[float, dict]] = {}
+        self._provider_routes_lock = threading.Lock()
+
+    @contextmanager
+    def provider_turn(self, route: dict | None):
+        previous = getattr(self._provider_turn, "route", None)
+        self._provider_turn.route = route
+        if route is not None:
+            with self._provider_routes_lock:
+                now = time.monotonic()
+                self._provider_routes = {key: value for key, value in self._provider_routes.items()
+                                         if value[0] > now}
+                self._provider_routes[route["id"]] = (now + 600, route.copy())
+                if len(self._provider_routes) > 32:
+                    oldest = min(self._provider_routes, key=lambda key: self._provider_routes[key][0])
+                    del self._provider_routes[oldest]
+        try:
+            yield
+        finally:
+            if route is not None:
+                with self._provider_routes_lock:
+                    cached = self._provider_routes.get(route["id"])
+                    if cached is not None and cached[1] == route:
+                        self._provider_routes[route["id"]] = (time.monotonic() + 600, cached[1])
+            self._provider_turn.route = previous
 
     # -- the model
 
     def client(self, model: str | None, *, base_url: str | None = None, api_key: str | None = None,
                api_mode: str | None = None):
         """A client for ``model`` on the configured endpoint, or on another (the sub-agent route's) when named."""
+        route = str(model or "")
+        if route.startswith("provider:"):
+            parts = route.split(":", 2)
+            chosen = getattr(self._provider_turn, "route", None)
+            if chosen is None and len(parts) == 3:
+                with self._provider_routes_lock:
+                    cached = self._provider_routes.get(parts[1])
+                    if cached is not None and cached[0] > time.monotonic():
+                        chosen = cached[1]
+            if (len(parts) != 3 or not parts[2] or not isinstance(chosen, dict)
+                    or chosen.get("id") != parts[1]):
+                raise ChatEngineError("This chat's model provider is unavailable. Open it in VS Code and choose its provider again.")
+            model = parts[2]
+            base_url = chosen["base_url"]
+            api_key = chosen["api_key"]
+            api_mode = chosen["api_mode"]
         if self._client_factory is not None:
             return self._client_factory(model)
+        if base_url is None and api_key is None and api_mode is None:
+            route = str(model or "")
+            if route.startswith("subscription:"):
+                pieces = route.split(":", 2)
+                engine = pieces[1]
+                selected = pieces[2] if len(pieces) == 3 else ""
+                from .subscription_client import SubscriptionChatClient
+                return SubscriptionChatClient(engine, selected)
+            if not route and self.config.get("subscription_engine", ""):
+                from .subscription_client import SubscriptionChatClient
+                return SubscriptionChatClient(str(self.config.get("subscription_engine")),
+                                              str(self.config.get("subscription_model", "") or ""))
         from ..llm import LLMClient, normalize_usage, usage_reported
         from .. import usage_ledger
         config = self.config
@@ -429,8 +491,11 @@ class ChatEngine:
                 raise ChatEngineError("A temporary chat isn't kept, so it can't be in a project.")
             self.store.project(project)
         stamp = now()
+        engine = str(self.config.get("subscription_engine", "") or "")
+        model = str(self.config.get("subscription_model", "") or "")
+        default = f"subscription:{engine}" + (f":{model}" if model else "") if engine else None
         chat = {"id": new_chat_id(), "title": "Temporary chat" if temporary else "New chat", "created_at": stamp,
-                "updated_at": stamp, "model": None, "thinking": None, "pinned": False, "archived": False,
+                "updated_at": stamp, "model": default, "thinking": None, "pinned": False, "archived": False,
                 "messages": []}
         chat["temporary" if temporary else "draft"] = True
         if project:
@@ -2805,7 +2870,7 @@ class ChatEngine:
                     elif call.name == "show_widget":
                         asked_for = next((str(m.get("text") or "") for m in reversed(chat["messages"]) if m["role"] == "user"), "")
                         told = self._widget(call, widgets, before + len("".join(streamed)), on_widget, widget_state,
-                                            check=lambda title, shows: self._check_widget(client, asked_for, title, shows,
+                                            check=lambda title, shows: self._check_widget(self.client(model), asked_for, title, shows,
                                                                                           widget_state, thinking, cancel))
                         usage = _add_usage(usage, widget_state.pop("usage", None) or {})
                     elif call.name == "query_data":
@@ -2896,6 +2961,8 @@ class ChatEngine:
         used = list(getattr(plugins, "used", None) or []) if plugins is not None else []
         if plugins is not None:
             plugins.close()
+        if hasattr(client, "close"):
+            client.close()
         try:
             message = self._keep_reply(chat, existing, reply_id, model, client, text, thought_text, finish, failure,
                                        usage, counted, sources, searches, questions, memory_ops, web_images,

@@ -6,6 +6,16 @@ export type ProviderProfile = {
   base_url: string;
   model: string;
   api_mode: string;
+  kind?: 'native';
+  engine?: never;
+} | {
+  id: string;
+  kind: 'subscription';
+  engine: 'claude' | 'codex';
+  name: string;
+  model: string;
+  base_url?: never;
+  api_mode?: never;
 };
 
 export function validRoute(raw: any): Omit<ProviderProfile, 'id'>;

@@ -70,17 +70,15 @@ class Choices(unittest.TestCase):
                                 model_choice={"mode": "subscription", "engine": "codex"})
         self.assertEqual(pip["model_choice"], {"mode": "subscription", "engine": "codex"})
 
-    def test_a_project_pip_keeps_its_local_or_api_model_and_says_why_in_one_line(self):
-        with self.assertRaises(RegistryError) as refused:
-            self.store.create(self.workspace["id"], "Auditor", "Inspect correctness.", "device_1",
-                              model_choice={"mode": "subscription", "engine": "codex"})
-        self.assertEqual(refused.exception.code, "unsupported_model")
-        self.assertEqual(str(refused.exception), "Project Pips need a local or API model: their source checks run only in "
-                         "DGC's own loop. Personal Pips can use your subscription.")
+    def test_project_pip_uses_subscription_with_the_same_pinned_policy(self):
+        pip = self.store.create(self.workspace["id"], "Auditor", "Inspect correctness.", "device_1",
+                                model_choice={"mode": "subscription", "engine": "codex"})
+        self.assertEqual(pip["model_choice"], {"mode": "subscription", "engine": "codex"})
         cfg = fixtures.config(self.root, subscription_engine="codex")
-        with self.assertRaises(RegistryError) as following:
-            pips._model_settings(cfg, {"mode": "default"})
-        self.assertIn("Project Pips need a local or API model", str(following.exception))
+        with patch("dgc.pip_brain.available", return_value=""):
+            settings = pips._model_settings(cfg, {"mode": "default"})
+        self.assertEqual(settings["brain"], {"engine": "codex", "model": "", "effort": ""})
+        self.assertNotIn("api_key", settings)
 
     def test_same_as_dgc_follows_a_subscription_default_with_its_model_and_effort(self):
         cfg = fixtures.config(self.root, subscription_engine="codex", subscription_model="gpt-5.5", subscription_effort="max")

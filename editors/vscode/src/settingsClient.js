@@ -49,7 +49,7 @@ const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${pat
 // "agents" opens Models at Sub-agents).
 const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
 let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
-let providerForm = {name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
+let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
@@ -351,12 +351,40 @@ function render() {
         return;
     }
     ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;
+    const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
     renderFields(section, main, draft, providers, ui);
     if(section==='models'){
+        if(savedFormOpen)main.querySelector('details[data-more="saved-providers"]').open=true;
         const form={saved_provider_name:'name',saved_provider_url:'base_url',saved_provider_model:'model',saved_provider_mode:'api_mode',saved_provider_key:'api_key'};
         for(const [id,key] of Object.entries(form))main.querySelector('#'+id)?.addEventListener('input',event=>{providerForm[key]=event.target.value;});
+        main.querySelector('#saved_provider_preset')?.addEventListener('change',event=>{
+            const id=String(event.target.value||'');
+            const chosen=providers.find(row=>row.id===id);
+            providerForm.preset=id;
+            if(id==='claude'||id==='codex'){
+                providerForm.kind='subscription';providerForm.engine=id;
+                providerForm.name=id==='claude'?'Claude Code':'Codex';
+                providerForm.base_url='';providerForm.model='';providerForm.api_mode='auto';providerForm.api_key='';
+            }else if(chosen){
+                providerForm.kind='native';providerForm.engine='';
+                providerForm.name=chosen.label;
+                providerForm.base_url=chosen.url;
+                providerForm.model='';
+                providerForm.api_mode=id==='anthropic'?'anthropic':'auto';
+                providerForm.api_key='';
+            }else if(id==='custom'){
+                providerForm.kind='native';providerForm.engine='';
+                providerForm.name='';providerForm.base_url='';providerForm.model='';providerForm.api_mode='auto';providerForm.api_key='';
+            }
+            snapshot();render();
+            // Switching presets rebuilds the form. Keep it expanded so the model
+            // and sign-in fields remain visible for the next step.
+            main.querySelector('details[data-more="saved-providers"]').open=true;
+            main.querySelector('#saved_provider_model')?.focus();
+        });
         main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
             const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
+            if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}
             send({type:'addProviderProfile',profile:{...providerForm}});
         });
         main.querySelectorAll('[data-provider-remove]').forEach(button=>button.addEventListener('click',()=>send({type:'removeProviderProfile',id:button.dataset.providerRemove})));
@@ -398,15 +426,6 @@ function render() {
         const el = $(presetId);
         if (el)
             el.onchange = () => {
-                if (presetId === 'provider' && el.value.startsWith('subscription:')) {
-                    const engine = el.value.slice('subscription:'.length);
-                    const choice = $('subscription_engine');
-                    if (choice && [...choice.options].some(option => option.value === engine)) {
-                        choice.value = engine;
-                        choice.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    return;
-                }
                 const p = providers.find(x => x.id === el.value); if (p) {
                 if (presetId === 'provider') {
                     const choice = $('subscription_engine');
@@ -1319,10 +1338,11 @@ window.addEventListener('message', event => {
     else if(msg.type==='providerProfiles'){
         savedProfiles=Array.isArray(msg.profiles)?msg.profiles:[];
         defaultProviderId=String(msg.defaultId||'');
-        if(msg.saved){providerForm={name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
+        if(msg.saved){providerForm={preset:'',kind:'native',engine:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
         if(config&&section==='models'){snapshot();render();}
     }
     else if(msg.type==='providerProfileError'){
+        const form=$('page').querySelector('details[data-more="saved-providers"]');if(form)form.open=true;
         const status=$('saved-provider-status');if(status)status.textContent=String(msg.message||'Could not save provider.');
     }
     else if (msg.type === 'plugins') {

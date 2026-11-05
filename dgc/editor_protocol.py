@@ -349,6 +349,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
     "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
+    "subscription_default_changed": {"engine": _f("string", enum=("claude", "codex")),
+        "model": _S(), "effort": _S(), "request_id": _S(False)},
     # 0.48: the prompt-cache settings, for Settings -> Models. Sent before `config` to a client whose
     # get_config `fields` named "cache_settings" (an older client never asks, so never sees it).
     # prompt_cache_ttl is the Anthropic cache-entry lifetime; ollama_keep_alive is how long a local
@@ -779,6 +781,13 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "base_url": _S(), "model": _S(), "api_key": _S(False),
         "api_mode": _f("string", enum=("auto", "ollama", "anthropic", "chat_completions", "responses")),
         "request_id": _S(False),
+    },
+    # A signed-in CLI as the default for FUTURE chats. The active Work session is unchanged.
+    # Advertised by ready.capabilities.subscription_defaults; older clients never send it.
+    "set_subscription_default": {
+        "engine": _f("string", enum=("claude", "codex")),
+        "model": _S(False), "effort": _f("string", required=False,
+            enum=("", "low", "medium", "high", "xhigh", "max")), "request_id": _S(False),
     },
     "list_models": {"request_id": _S(False)},
     "list_mcp_tools": {
@@ -1967,6 +1976,16 @@ def _message_error(value, specs: dict[str, dict[str, dict]], *, sequence: bool) 
 
 def event_error(value) -> str | None:
     return _message_error(value, EVENT_FIELDS, sequence=True)
+
+
+for _chat_turn_command in (
+    "chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
+    "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
+    "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief",
+):
+    # A saved VS Code provider's route is supplied for this turn only; the API
+    # key never enters the persisted conversation or a model-visible message.
+    COMMAND_FIELDS[_chat_turn_command]["provider"] = _O(False)
 
 
 def command_error(value) -> str | None:

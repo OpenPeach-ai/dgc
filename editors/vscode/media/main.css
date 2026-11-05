@@ -306,7 +306,7 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pip-badge { flex:none; width:32px; min-width:32px; height:20px; padding:0; border-radius:10px; display:inline-flex; align-items:center;
   justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
 /* An unread row's count is its own button beside the row: it reads "Read" on hover or focus, and marks that Pip read. */
-#sessions-host .home-pip-read { order:3; margin-right:var(--sp-1); border:0; cursor:pointer; }
+#sessions-host .home-pip-read { order:3; width:46px; min-width:46px; margin-right:var(--sp-1); border:0; cursor:pointer; }
 #sessions-host .home-pip-item .home-pip-dismiss { order:2; }
 #sessions-host .home-pip-read-word { display:none; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-count { display:none; }

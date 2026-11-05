@@ -426,6 +426,24 @@ class TheEditorIsTold(IsolatedHome):
         self.assertNotEqual(host.default.config.api_key, "new-host-only",
                             "a cloud credential must not reach a newly chosen local host")
 
+    def test_subscription_default_needs_no_api_model_and_does_not_switch_open_chat(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        active = (host.default.config.model, host.default.config.get("subscription_engine", ""))
+        with patch("dgc.pip_brain.available", return_value=""):
+            host.dispatch({"type": "set_subscription_default", "engine": "claude",
+                           "model": "sonnet", "effort": "high", "request_id": "sub-default"})
+        changed = self.frames("subscription_default_changed")[-1]
+        self.assertEqual((changed["engine"], changed["model"], changed["effort"]),
+                         ("claude", "sonnet", "high"))
+        self.assertEqual((host.default.config.model, host.default.config.get("subscription_engine", "")), active)
+        self.assertEqual(Config(project_root=self.root).get("subscription_engine"), "claude")
+        host.dispatch({"type": "new_session", "request_id": "new-sub-default"})
+        self.assertEqual(host.default.config.get("subscription_engine"), "claude")
+        with patch("dgc.pip_brain.available", return_value="Claude Code is signed out"):
+            host.dispatch({"type": "set_subscription_default", "engine": "claude",
+                           "request_id": "unavailable-sub-default"})
+        self.assertEqual(self.frames("command_rejected")[-1]["reason"], "route_unavailable")
+
     def test_new_chat_keeps_a_launch_key_bound_to_the_same_default_endpoint(self):
         with patch.dict(os.environ, {"DGC_API_KEY": "launch-only"}):
             host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")

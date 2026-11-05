@@ -398,9 +398,6 @@ def _definition(name, goal, source_ref="HEAD", schedule=None, pip_type="rook", m
     if selected_type.id == "core" and source_policy != {"mode": "personal"}:
         raise RegistryError("unavailable_pip_type", "Core is your Primary Pip, for personal work. Choose another character for project work.")
     choice = validate_model_choice(model_choice)
-    if choice["mode"] == "subscription" and source_policy != {"mode": "personal"}:
-        from .pip_brain import PROJECT_PIPS
-        raise RegistryError("unsupported_model", PROJECT_PIPS)
     schedule = validate_schedule(schedule)
     from .pip_event_triggers import validate_event_trigger
     event_trigger = validate_event_trigger(event_trigger)
@@ -575,11 +572,9 @@ def _model_settings(config, model_choice=None, *, _prepared=None, personal=False
         from .pip_models import pips_router_default
         choice = pips_router_default(config) or choice
     if is_subscription(config, choice):
-        # API 55: a Personal Pip runs on the user's own Claude Code or Codex, with DGC's tools only (pip_brain).
-        # A project Pip's audit policy lives in DGC's own loop, so it still needs a local or API model.
-        from .pip_brain import PROJECT_PIPS, label, route
-        if not personal:
-            raise RegistryError("unsupported_model", PROJECT_PIPS)
+        # The signed-in CLI is only a model transport. All tools still pass through this
+        # Pip's worker, where the pinned source, role and approval policy are enforced.
+        from .pip_brain import label, route
         brain = route(config, choice)
         from .pip_chat_options import CONTEXT_MAX, CONTEXT_MIN, inherited_context
         settings = {"model": label(brain), "brain": brain,
@@ -2761,8 +2756,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
     if isinstance(manifest.get('model_settings'), dict) and 'brain' in manifest['model_settings']:
         from . import pip_brain
         brain = pip_brain.validate_route(manifest['model_settings']['brain'])
-        if not personal or kind not in ('conversation', 'personal_task') or specialist_pin is not None:
-            raise RegistryError('unsupported_model', pip_brain.PROJECT_PIPS)
+        if specialist_pin is not None:
+            raise RegistryError('unsupported_model', 'Reviewed specialist runs need a direct model connection.')
         brain_launch = pip_brain.launch_from_env(brain)
     conversation = pip_chat.validate_context(manifest.get("conversation")) if kind == "conversation" else None
     from . import pip_chat_setup, pip_core_setup, pip_routines
@@ -3436,8 +3431,8 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
                     return "PERMISSION DENIED: " + str(exc)
             return super()._handle_call(call, **kwargs)
 
-    if config.get("subscription_engine", "") and brain is None:
-        # A native turn never hands itself to a vendor CLI's own loop and tools. A Personal Pip's subscription run
+    if config.get("subscription_engine", "") and brain is None and 'base_url' not in manifest.get('model_settings', {}):
+        # A native turn never hands itself to a vendor CLI's own loop and tools. A Pip's subscription run
         # (brain, above) is not that: its turn runs here, on DGC's tools alone.
         raise RegistryError("unsupported_model", "Delegated vendor routes cannot execute this auditor policy.")
     from .permissions import session_policy
@@ -4403,8 +4398,6 @@ def _execute_run(registry, row, config):
         # API 55: the user's own Claude Code or Codex is this run's model (pip_brain). The worker gets where the CLI
         # is, the home its login lives in, an environment without DGC's secrets and the run's own folder to run in.
         from . import pip_brain
-        if not personal or manifest.get("run_kind") not in ("conversation", "personal_task"):
-            raise RegistryError("unsupported_model", pip_brain.PROJECT_PIPS)
         worker_env["DGC_PIP_BRAIN"] = _json(pip_brain.launch_pin(brain_pin, run_dir / "brain"))
     api_key = "" if brain_pin is not None else frozen_config.get("api_key", "")
     if _router_pin_of(manifest) is not None:

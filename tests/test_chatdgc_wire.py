@@ -157,6 +157,20 @@ class ServiceTests(unittest.TestCase):
         return self.wire.wait(lambda f: f["type"] == "chatdgc_turn" and f["state"] == "ended"
                               and f.get("request_id") == request_id)
 
+    def test_saved_provider_route_reaches_chat_without_persisting_its_secret(self):
+        chat = self.new()
+        provider = "provider_" + "a" * 32
+        model = f"provider:{provider}:deepseek-v4.1-flash:cloud"
+        route = {"id": provider, "base_url": "http://127.0.0.1:11434/v1",
+                 "api_key": "test-provider-secret", "api_mode": "ollama"}
+        self.model.script = [{"parts": ["Ready."]}]
+        self.send(chat, "Say ready.", model=model, provider=route, search="off")
+        self.ended()
+        saved = self.engine.open(chat)
+        self.assertEqual(saved["model"], model)
+        self.assertNotIn(route["api_key"], json.dumps(saved))
+        self.assertEqual(saved["messages"][-1]["text"], "Ready.")
+
     def test_the_meter_asked_again_after_the_window_changed(self):
         chat = self.new()
         self.wire.wait(lambda f: f["type"] == "chatdgc_context")           # the one opening it sends

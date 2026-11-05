@@ -86,8 +86,8 @@ export function mountSetupCards(options) {
     const current=s.model_choice||{mode:'default'}, following=api>=70?defaultRunsOn(entry.models):entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
     for(const item of entry.models.models)choices.push({value:typeof item==='string'?item:item.id,name:typeof item==='string'?item:item.name||item.id});
     if(current.mode==='model'&&!choices.some(c=>c.value===current.model))choices.push({value:current.model,name:current.model});
-    // API 55: a personal setup may run on the user's own Claude Code or Codex (pip_brain). "|" is never in a model ID.
-    const subs=api>=55&&s.source_policy==='personal'?entry.models.subscriptions||[]:[];
+    // A signed-in CLI is the model transport for either Pip scope. "|" is never in a model ID.
+    const subs=api>=55?entry.models.subscriptions||[]:[];
     for(const sub of subs)choices.push({value:'subscription|'+sub.engine,name:sub.name+' · your subscription'});
     // API 70: DGC Router, while it is on ("router|" + the choice's value; "|" is never in a model ID either).
     const routed=api>=70?routerChoices(pipRouter(entry.models.router)):[];
@@ -185,7 +185,7 @@ export function mountSetupCards(options) {
  async function revise(entry){
   const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
-   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55&&s.source_policy==='personal'?entry.models?.subscriptions||[]:[],api>=70?pipRouter(entry.models?.router):null)});if(token!==epoch)return;
+   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55?entry.models?.subscriptions||[]:[],api>=70?pipRouter(entry.models?.router):null)});if(token!==epoch)return;
    const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('This was changed or answered somewhere else. Refresh to see it.');
    remap(entry,next.id);entry.setup=next;entry.choice=next.model_choice||{mode:'default'};
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}

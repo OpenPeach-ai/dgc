@@ -8,7 +8,7 @@ do not currently impose a response-byte ceiling), so this is not an allocation l
 A subscription choice names only the engine (``{"mode": "subscription", "engine": "codex"}``). Default follows the
 Pips default model (config ``pips_model``) when one is set: a model on DGC's own connection, for every Pip on Default.
 With none it is "Same as DGC": DGC's own model, or its subscription default when it has one. A subscription runs a
-Personal Pip's turns on that CLI with DGC's tools alone (pip_brain).
+Personal or Project Pip turns on that CLI with DGC's tools alone (pip_brain).
 """
 from __future__ import annotations
 
@@ -196,7 +196,7 @@ def model_window(config, model) -> int | None:
 def list_pip_models(config) -> dict:
     """Return bounded genuine model IDs; discovery failure is never a fallback model.
 
-    API 55: ``subscriptions`` lists the CLIs a Personal Pip can run on here (installed, signed in, held to DGC's
+    API 55: ``subscriptions`` lists the CLIs a Pip can run on here (installed, signed in, held to DGC's
     tools), and ``default_engine`` says which one Default follows when DGC's default is a subscription.
     ``default_model`` is what Default runs: the Pips default model (``pips_model``) when one is set, else DGC's own.
     API 66: ``pips_model`` is the Pips default as set ("" when Pips follow DGC), and each model carries
@@ -243,7 +243,11 @@ def list_pip_models(config) -> dict:
                 break
             result["models"].append(row)
     except RegistryError as exc:
-        result["error"] = {"code": exc.code, "message": str(exc)}
+        # A signed-in CLI can be the only model provider. Native discovery is
+        # optional in that case; exposing its missing host as a Pip picker error
+        # would make a working subscription look unusable.
+        if not engine:
+            result["error"] = {"code": exc.code, "message": str(exc)}
     return result
 
 

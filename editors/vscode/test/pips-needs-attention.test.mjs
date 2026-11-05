@@ -89,13 +89,13 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('list_pip_attention')[0].request)),{type:'list_pip_attention',limit:100});
 });
 
-test('Needs attention uses the current saved face and colour for each Pip',async()=>{
+test('Needs attention uses the current saved face without recolouring its accessories',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?')]);
  const x=setup({found,profiles:{[PIP]:{title:'',body:'quill',color:'lens',notify:true}}});await x.drain();
  x.click('[data-attention-more="1"]');
  const face=x.d.querySelector(`[data-attention="app_link:${LINK}"] .avatar`);
  assert.equal(face?.dataset.character,'quill');
- assert.equal(face?.dataset.tint,'lens');
+ assert.equal(face?.dataset.tint,undefined,'legacy colour data does not recolour the face or accessories');
 });
 
 test('dismissing a proposed Pip checks its fresh digest, rejects it, then removes its attention row',async()=>{

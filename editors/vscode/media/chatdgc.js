@@ -56,7 +56,7 @@
   // has no switch for it (reported 2026-10-18: "it anyway uses web, so let's not confuse users"). Settings -> Web
   // search -> Search in ChatDGC turns it off for every chat.
   const searchMode = () => "auto";
-  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", windows: [], breakdown: null,
+  const state = { conversation: null, messages: [], earlier: 0, busy: false, replyId: "", models: [], defaultModel: "", modelProfiles: [], providerModels: {}, menuProvider: "", menuProviders: false, windows: [], breakdown: null,
                   model: "", thinking: "", opened: false, unavailable: "", searching: {}, pending: [], editing: "",
                   context: null, compacting: false, editingSummary: false, picks: {},
                   research: false, planAsked: false, countdowns: {}, lastSent: null, forgotten: new Set(), planEditing: "", steerDraft: "", open: new Set(),
@@ -764,7 +764,7 @@
     return `(${waitWords(seconds)}${usual})`;
   }
   function waitingNode(message) {
-    const model = String(message.waiting.model || "").trim();
+    const model = modelName(String(message.waiting.model || "").trim());
     const line = wave(model ? `Waiting for ${model}…` : "Waiting for the model…", "div", "cd-working cd-waiting");
     line.append(" ", el("span", "cd-wait-meta", waitingMeta(message)));
     line.setAttribute("role", "status");
@@ -3520,11 +3520,22 @@
     vscode.postMessage({ type: "earlier", before: first.id });
   });
   function fillModels() {
-    const current = state.model || state.conversation?.model || state.defaultModel || "";
-    const ids = [...new Set([current, ...state.models].filter(Boolean))];
-    modelPick.replaceChildren(...ids.map((id) => { const option = el("option", "", id); option.value = id; return option; }));
+    // A fresh chat inherits the user's saved default. The backend may have
+    // created its empty draft before the editor supplied that provider.
+    const current = state.model || (state.messages.length
+      ? (state.conversation?.model || state.defaultModel || "")
+      : (state.defaultModel || state.conversation?.model || ""));
+    const ids = state.modelProfiles.length ? [current] : [current, ...state.models];
+    for (const profile of state.modelProfiles) {
+      const models = state.providerModels[profile.id] || [profile.model || ""];
+      for (const id of models) ids.push(profile.kind === "subscription"
+        ? `subscription:${profile.engine}${id ? `:${id}` : ""}`
+        : `provider:${profile.id}:${id}`);
+    }
+    const offered = [...new Set(ids.filter(Boolean))];
+    modelPick.replaceChildren(...offered.map((id) => { const option = el("option", "", id); option.value = id; return option; }));
     modelPick.value = current;
-    modelPick.hidden = !ids.length;
+    modelPick.hidden = !offered.length;
     thinkingPick.value = state.thinking || state.conversation?.thinking || "off";
     updatePill();
     if (!modelMenu.hidden) renderModelMenu();
@@ -3588,13 +3599,30 @@
     return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
   };
   function updatePill() {
-    const level = levelOf(thinkingPick.value), name = modelPick.value;
+    const level = levelOf(thinkingPick.value), name = modelName(modelPick.value);
     pill.hidden = modelPick.hidden;
     $("cd-model-name").textContent = name || "Choose a model";
     $("cd-pill-arc-fill").setAttribute("d", level ? arc(angleOf(level), 6, 8, 9) : "");
     pill.dataset.level = LEVELS[level][0];
     pill.title = `${name || "No model"} · thinking: ${LEVELS[level][1]}. Click to change`;
     pill.setAttribute("aria-label", `Model ${name || "not chosen"}, thinking ${LEVELS[level][1]}. Change model and thinking`);
+  }
+  function modelName(value) {
+    if (value.startsWith("subscription:")) {
+      const body = value.slice("subscription:".length), cut = body.indexOf(":");
+      const engine = cut < 0 ? body : body.slice(0, cut), model = cut < 0 ? "" : body.slice(cut + 1);
+      return `${engine === "claude" ? "Claude Code" : "Codex"} ${model || "default"}`;
+    }
+    if (value.startsWith("provider:")) {
+      const cut = value.indexOf(":", "provider:".length);
+      return cut < 0 ? "Model" : value.slice(cut + 1);
+    }
+    return value;
+  }
+  function providerOf(value) {
+    if (value.startsWith("provider:")) return value.split(":", 3)[1] || "";
+    if (value.startsWith("subscription:")) return `subscription_${value.split(":", 3)[1] || ""}`;
+    return "";
   }
   function setThinking(level) {
     const n = Math.max(0, Math.min(LEVELS.length - 1, level));
@@ -3657,25 +3685,55 @@
     box.dataset.level = LEVELS[level][0];
   }
   function renderModelMenu() {
-    const rows = [...modelPick.options].map((option) => {
-      const on = option.value === modelPick.value;
-      const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
-      row.type = "button";
-      row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
-      row.append(icon("zap"), el("span", "cd-menu-name", option.value), ...(on ? [icon("check")] : []));
-      row.addEventListener("click", () => {
-        modelPick.value = option.value;
-        modelPick.dispatchEvent(new Event("change"));
-        updatePill(); renderModelMenu();
-        modelMenu.querySelector(".cd-menu-row.sel")?.focus();
-      });
-      return row;
-    });
+    const currentProvider = providerOf(modelPick.value);
+    if (!state.menuProvider || !state.modelProfiles.some((p) => p.id === state.menuProvider))
+      state.menuProvider = currentProvider || state.modelProfiles[0]?.id || "";
+    const profilesOn = state.modelProfiles.length > 0;
+    const header = profilesOn && !state.menuProviders
+      ? (() => {
+          const back = el("button", "cd-menu-row cd-menu-back", "←  Providers");
+          back.type = "button";
+          back.addEventListener("click", () => { state.menuProviders = true; renderModelMenu();
+            modelMenu.querySelector(".cd-menu-row.sel")?.focus(); });
+          return back;
+        })()
+      : el("div", "cd-menu-kicker", profilesOn ? "Provider" : "Model");
+    const options = profilesOn && state.menuProviders
+      ? state.modelProfiles.map((profile) => {
+          const on = profile.id === currentProvider;
+          const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
+          row.type = "button";
+          row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
+          row.append(icon(profile.kind === "subscription" ? "terminal" : "server"),
+                     el("span", "cd-menu-name", profile.name), ...(on ? [icon("check")] : []));
+          row.addEventListener("click", () => {
+            state.menuProvider = profile.id;
+            state.menuProviders = false;
+            vscode.postMessage({ type: "models", provider: profile.id });
+            renderModelMenu();
+          });
+          return row;
+        })
+      : [...modelPick.options].filter((option) => !profilesOn || providerOf(option.value) === state.menuProvider)
+        .map((option) => {
+          const on = option.value === modelPick.value;
+          const row = el("button", `cd-menu-row${on ? " sel" : ""}`);
+          row.type = "button";
+          row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(on));
+          row.append(icon("zap"), el("span", "cd-menu-name", modelName(option.value)), ...(on ? [icon("check")] : []));
+          row.addEventListener("click", () => {
+            modelPick.value = option.value;
+            modelPick.dispatchEvent(new Event("change"));
+            updatePill(); renderModelMenu();
+            modelMenu.querySelector(".cd-menu-row.sel")?.focus();
+          });
+          return row;
+        });
     // The models scroll in a list of their own (a provider can list dozens), so the dial is always in view, by the pill.
     const list = el("div", "cd-menu-models");
     list.setAttribute("role", "menu"); list.setAttribute("aria-label", "Model");
-    list.append(...rows);
-    modelMenu.replaceChildren(el("div", "cd-menu-kicker", "Model"), list, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
+    list.append(...options);
+    modelMenu.replaceChildren(header, list, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
     showDial();
     list.querySelector(".cd-menu-row.sel")?.scrollIntoView({ block: "nearest" });
   }
@@ -3687,6 +3745,8 @@
   }
   pill.addEventListener("click", () => {
     if (!modelMenu.hidden) { closeModelMenu(false); return; }
+    state.menuProviders = false;
+    state.menuProvider = providerOf(modelPick.value);
     renderModelMenu();
     modelMenu.hidden = false;
     pill.setAttribute("aria-expanded", "true");
@@ -4239,6 +4299,8 @@
       case "models":
         state.models = Array.isArray(msg.ids) ? msg.ids.filter((id) => typeof id === "string").slice(0, 500) : [];
         state.defaultModel = typeof msg.current === "string" ? msg.current : "";
+        if (Array.isArray(msg.profiles)) state.modelProfiles = msg.profiles.filter((row) => row && typeof row.id === "string" && typeof row.name === "string").slice(0, 12);
+        if (typeof msg.providerId === "string" && msg.providerId) state.providerModels[msg.providerId] = state.models;
         fillModels();
         return;
       case "breakdown":

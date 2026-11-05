@@ -244,13 +244,14 @@ class TheChatChangesAPipsModelAndWindow(Fixture):
             self.assertIn(caught.exception.code, ("invalid_context_window",))
         self.assertIsNone(self.window(pip))
 
-    def test_a_project_pip_never_runs_on_a_subscription(self):
+    def test_a_project_pip_can_choose_a_subscription_without_changing_its_policy(self):
         pip = self.create()
-        with patch("dgc.pip_brain.available", return_value=""), \
-                patch.object(pip_proposal_tool, "WorkspaceRegistry", side_effect=AssertionError("must not open")), \
-                self.assertRaisesRegex(RegistryError, "Project Pips need a local or API model") as caught:
-            self.propose(self.change(pip, {"model_choice": {"mode": "subscription", "engine": "claude"}}))
-        self.assertEqual(caught.exception.code, "unsupported_model")
+        with patch("dgc.pip_brain.available", return_value=""):
+            result = self.propose(self.change(pip, {"model_choice": {"mode": "subscription", "engine": "claude"}}))
+        self.assertIsNotNone(result)
+        self.assertEqual(self.store.get(pip["id"])["current_version"], 2)
+        self.assertEqual(self.store.get(pip["id"])["model_choice"],
+                         {"mode": "subscription", "engine": "claude"})
 
     def test_permissions_schedules_and_commands_still_cannot_change(self):
         pip = self.create()
@@ -291,7 +292,7 @@ class APersonalPipsSubscription(Fixture):
     def test_a_personal_pip_needs_scope_personal(self):
         with self.assertRaisesRegex(RegistryError, "A Personal Pip needs scope personal"):
             self.propose(self.change(self.pip, {"context_window": 65536}))
-        with self.assertRaisesRegex(RegistryError, "For a Personal Pip, send scope personal"):
+        with self.assertRaisesRegex(RegistryError, "A Personal Pip needs scope personal"):
             self.propose(self.change(self.pip, {"model_choice": {"mode": "subscription", "engine": "claude"}},
                                      scope="project"))
         self.assertIsNone(self.window(self.pip))

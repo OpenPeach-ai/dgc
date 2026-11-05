@@ -441,7 +441,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
-    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "set_think", "set_goal", "get_goal",
+    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "set_subscription_default", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
@@ -2580,6 +2580,7 @@ class Backend:
                           # model and effort in this Work chat only, even after reload.
                           "session_model_route": True,
                           "model_defaults": True,
+                          "subscription_defaults": True,
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
@@ -8008,6 +8009,39 @@ class Backend:
                          workspace_trusted=self.workspace_trusted,
                          **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}
                             if active_engine and self._busy() else {}),
+                         **_request_fields(request_id))
+        elif t == "set_subscription_default":
+            from .config import Config
+            from .pip_brain import available as subscription_available
+            engine = str(cmd.get("engine") or "")
+            model = str(cmd.get("model") or "").strip()
+            effort = str(cmd.get("effort") or "").strip().lower()
+            if (engine not in ("claude", "codex") or len(model) > 256
+                    or any(ord(char) < 32 for char in model)
+                    or effort not in ("", "low", "medium", "high", "xhigh", "max")):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="Choose a supported subscription, model and effort.",
+                             **_request_fields(request_id))
+                return
+            reason = subscription_available(engine)
+            if reason:
+                self.em.emit("command_rejected", command=t, reason="route_unavailable",
+                             message=reason, **_request_fields(request_id))
+                return
+            try:
+                defaults = Config(project_root=self.config.project_root)
+                defaults._persist = False
+                defaults.set("subscription_engine", engine, persist=False)
+                defaults.set("subscription_model", model, persist=False)
+                defaults.set("subscription_effort", effort, persist=False)
+                defaults._persist = True
+                defaults.save()
+            except Exception:
+                self.em.emit("command_rejected", command=t, reason="defaults_save_failed",
+                             message="DGC could not save the default subscription.",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("subscription_default_changed", engine=engine, model=model, effort=effort,
                          **_request_fields(request_id))
         elif t == "set_model_defaults":
             from .sessions import _clean_native_route

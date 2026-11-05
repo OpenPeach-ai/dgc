@@ -3,14 +3,14 @@
 ## 0.35.0 — 2026-11-04
 
 - Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.
-- A message sent while a Pip is answering joins that reply without opening another run. The model picker keeps the selected provider and model for each Work session across reloads. Settings → Models can save several native hosts with their own endpoint-bound keys; the Work picker lists those hosts and subscription CLIs you configured. Setting a saved host as the default applies to new chats without switching an open chat.
+- A message sent while a Pip is answering joins that reply without opening another run. Settings → Models keeps saved model hosts and signed-in subscription CLIs in one provider list. One default starts new Work and ChatDGC chats and Pips set to Default. Work and ChatDGC can each choose another saved provider and keep that choice after reload. API keys stay bound to their endpoint. A subscription needs no separate model host.
 - Personal and Project Pips now have Workflows on their home pages. Review an exact two-to-four Pip sequence and choose review at every handoff or unattended routing; pause or remove it there. Project targets are read only. Each Pip's external action approvals remain separate. New Personal Pips start at Ask, while existing Pips keep their saved level.
 - Ask Core to set up Personal Pips. Review each proposed job in the Pips view before it is created; Core's chat can show the waiting reviews.
 - A plugin card whose page never finishes loading now replaces its spinner and empty frame with a compact message after 20 seconds. A page that loads but never starts is compact too. The card can still finish opening if its server recovers.
 - A completed mid-turn Work prompt says “Steered · 11:01 PM” on its timestamp line, in the timestamp's colour and size. Restored chats place it with the right prompt. The two “Worked for” rows still show time before and after the update.
 - Use it with DGC CLI 0.51.0 or newer. DGC Router, pictures, videos, plugin cards and token usage by system need
   it, and stay hidden with an older CLI.
-- Settings → Models now holds every model choice in one page: Main model, Fallback, Sub-agents, Pips, Images & video
+- Settings → Models now holds every model choice in one page: Providers, Fallback, Sub-agents, Pips, Images & video
   and DGC Router ("Use my other computers"). The Agents page's settings moved here. It works in a narrow tab too.
 - DGC Router in Settings. With the Router on, Sub-agents reads "Chosen by DGC Router · 3 systems · 9 workers free",
   and Systems lists each of your computers live: its status, server and address, jobs, models (use, workers, context

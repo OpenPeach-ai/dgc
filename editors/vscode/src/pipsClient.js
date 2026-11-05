@@ -342,8 +342,9 @@ async function finishCreate(result){
   creationDrafts.delete(S.createType);draft.name='';draft.goal='';draft.source_ref='HEAD';S.createType='';S.createStep='type';S.busy=false;await select(result.pip.id);await refresh(true);
 }
 function rememberCreationDraft(){if(S.createType)creationDrafts.set(S.createType,{name:draft.name,goal:draft.goal,source_ref:draft.source_ref,createModel:draft.createModel});}
-// API 55 (pip_brain): a Personal Pip may run on the user's own Claude Code or Codex, listed when signed in here.
-function subscriptionChoices(personal){return S.apiVersion>=55&&personal?S.subscriptions||[]:[];}
+// The signed-in CLI is only the model transport. Project and Personal Pip
+// tools still run through DGC's own approval and source policies.
+function subscriptionChoices(){return S.apiVersion>=55?S.subscriptions||[]:[];}
 // API 70: DGC Router, while it is on: any computer with the Pips job, or one system and model (list_pip_models' router).
 function routerOffer(){return S.apiVersion>=70?S.router:null;}
 function routerLabel(choice){const value=modelValue(choice);const found=routerChoices(S.router).find(([v])=>v===value);return found?found[1]:modelLabel(choice);}

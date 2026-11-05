@@ -2602,6 +2602,48 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "subscription_default_changed"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "engine",
+            "model",
+            "effort"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "cache_settings"
             },
             "seq": {
@@ -10344,6 +10386,48 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "set_subscription_default"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string",
+              "enum": [
+                "",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "engine"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "list_models"
             },
             "chat_id": {
@@ -14415,6 +14499,9 @@
             },
             "pip_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14611,6 +14698,9 @@
             },
             "study": {
               "type": "boolean"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14640,6 +14730,9 @@
             },
             "message_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14693,6 +14786,9 @@
                 "auto",
                 "on"
               ]
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14744,6 +14840,9 @@
                 "auto",
                 "on"
               ]
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14840,6 +14939,9 @@
                 "auto",
                 "on"
               ]
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14925,6 +15027,9 @@
                 "high",
                 "xhigh"
               ]
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -14960,6 +15065,9 @@
             },
             "write": {
               "type": "boolean"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15454,6 +15562,9 @@
             },
             "conversation_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15508,6 +15619,9 @@
             },
             "conversation_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [
@@ -15706,6 +15820,9 @@
             },
             "conversation_id": {
               "type": "string"
+            },
+            "provider": {
+              "type": "object"
             }
           },
           "required": [

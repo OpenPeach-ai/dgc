@@ -107,6 +107,43 @@ test("a new chat: the question and the box together, and a message goes out with
   } finally { await s.page.close(); }
 });
 
+test("a new ChatDGC chat uses the saved provider default and changes providers without moving Thinking", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  const nativeId = `provider_${"a".repeat(32)}`;
+  const codex = "subscription:codex";
+  const native = `provider:${nativeId}:deepseek-v4.1-flash:cloud`;
+  const profiles = [{ id: "subscription_codex", name: "Codex", kind: "subscription", engine: "codex", model: "" },
+                    { id: nativeId, name: "Ollama", kind: "native", model: "deepseek-v4.1-flash:cloud" }];
+  try {
+    await s.send({ type: "opened", conversation: conversation({ model: "old-direct-model" }), messages: [], earlier: 0, busy: false });
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: "subscription_codex",
+                   current: codex, ids: ["", "gpt-5.6-sol"] });
+    assert.equal(await s.page.locator("#cd-model").inputValue(), codex, "the saved default wins for an empty chat");
+    await s.page.locator("#cd-model-pill").click();
+    const menu = s.page.locator("#cd-model-menu");
+    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex default", "Codex gpt-5.6-sol"]);
+    const dial = menu.locator(".cd-dial-face");
+    const dialBefore = await dial.boundingBox();
+    await menu.locator(".cd-menu-back").click();
+    assert.deepEqual(await menu.locator(".cd-menu-models .cd-menu-row").allInnerTexts(), ["Codex", "Ollama"]);
+    await menu.locator(".cd-menu-row", { hasText: "Ollama" }).click();
+    assert.deepEqual((await s.posted("models")).at(-1), { type: "models", provider: nativeId });
+    await s.send({ type: "models", profiles, defaultId: "subscription_codex", providerId: nativeId,
+                   current: codex, ids: ["deepseek-v4.1-flash:cloud"] });
+    await menu.locator(".cd-menu-row", { hasText: "deepseek-v4.1-flash:cloud" }).click();
+    assert.equal(await s.page.locator("#cd-model").inputValue(), native);
+    assert.equal(await s.page.locator("#cd-model-name").textContent(), "deepseek-v4.1-flash:cloud");
+    const dialAfter = await menu.locator(".cd-dial-face").boundingBox();
+    assert.ok(Math.abs(dialBefore.y - dialAfter.y) < 2, "Thinking stays fixed while provider and model rows change");
+    await s.page.keyboard.press("Escape");
+    await s.page.locator("#cd-input").fill("Say ready.");
+    await s.page.locator("#cd-input").press("Enter");
+    assert.equal((await s.posted("send")).at(-1).model, native);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("ChatDGC Shift+Enter continues numbered prompts without sending", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();

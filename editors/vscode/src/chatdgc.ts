@@ -59,7 +59,9 @@ export interface ChatDGCHost {
   /** "sent"; "starting" while its process comes up (sent again once it's ready); "old_cli" when it
    *  has no ChatDGC. */
   chatdgcSend(cmd: Record<string, unknown>): "sent" | "starting" | "old_cli";
-  chatdgcModels(): Promise<{ ids: string[]; current: string }>;
+  chatdgcModels(providerId?: string): Promise<{ ids: string[]; current: string; providerId?: string; defaultId?: string; profiles?: any[] }>;
+  /** Resolve a saved native provider just before a model turn; its key never enters chat storage. */
+  chatdgcProviderRoute?(model: string): Promise<Record<string, string>>;
   postHome(message: Record<string, unknown>): void;
   /** Settings at a section (Memory, from "Manage memory" under a reply). */
   openSettings?(section: string): void;
@@ -1211,6 +1213,19 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
   }
 
   private deliver(asker: Asker, cmd: Record<string, unknown>): void {
+    const model = String(cmd.model || asker.tab?.summary?.model || "");
+    if (model.startsWith("provider:") && !cmd.provider && this.host?.chatdgcProviderRoute
+        && ["chatdgc_send", "chatdgc_continue", "chatdgc_edit", "chatdgc_regenerate",
+            "chatdgc_answer", "chatdgc_research", "chatdgc_research_start", "chatdgc_action",
+            "chatdgc_compact", "chatdgc_carry", "chatdgc_work_brief"].includes(String(cmd.type))) {
+      void this.host.chatdgcProviderRoute(model).then((provider) => {
+        if (!this.closing) this.deliver(asker, { ...cmd, provider });
+      }).catch((error) => {
+        this.requests.delete(String(cmd.request_id || ""));
+        if (asker.tab) this.post(asker.tab, { type: "error", message: String(error?.message || "Model provider unavailable.") });
+      });
+      return;
+    }
     // Said as late as this: a command held while the backend started learns only now what it offers.
     if (cmd.type === "chatdgc_open" && !cmd.widget_reports && this.reportsWidgets()) cmd = { ...cmd, widget_reports: true };
     const outcome = this.host ? this.host.chatdgcSend(cmd) : "starting";
@@ -2202,7 +2217,7 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
         this.openLibrary(message.view === "widgets" && this.widgetLibrary() ? "widgets" : "");
         return;
       case "models":
-        void this.models(tab);
+        void this.models(tab, typeof message.provider === "string" ? message.provider : "");
         return;
       case "research": {
         const text = typeof message.text === "string" ? message.text : "";
@@ -2340,11 +2355,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     this.post(tab, { type: "attached", items });
   }
 
-  private async models(tab: Tab): Promise<void> {
+  private async models(tab: Tab, providerId = ""): Promise<void> {
     if (!this.host) return;
     try {
-      const { ids, current } = await this.host.chatdgcModels();
-      this.post(tab, { type: "models", ids, current });
+      const { ids, current, profiles, defaultId, providerId: selected } = await this.host.chatdgcModels(providerId);
+      this.post(tab, { type: "models", ids, current,
+                       ...(profiles ? { profiles } : {}), ...(defaultId ? { defaultId } : {}),
+                       ...(selected ? { providerId: selected } : {}) });
     } catch (err: any) {
       this.post(tab, { type: "models", ids: [], current: "", error: String(err?.message || err || "") });
     }

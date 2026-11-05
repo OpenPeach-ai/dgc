@@ -66,12 +66,12 @@ function setup({ capable = true, routerStatus = status(), answers = {}, images =
     click: (s) => w.document.querySelector(s).click() };
 }
 
-test("Models holds the blocks: main model, fallback, sub-agents, Pips, images and DGC Router; Agents is gone", async () => {
+test("Models holds one provider list, fallback, sub-agents, Pips, images and DGC Router", async () => {
   const x = setup({ images: true });
   await x.settle();
   const titles = [...x.d.querySelectorAll("#page section.group > h3")].map((h) => h.textContent);
-  assert.deepEqual(titles.filter((t) => ["Main model", "Fallback", "Sub-agents", "Pips", "Images", "DGC Router"].includes(t)),
-    ["Main model", "Fallback", "Sub-agents", "Pips", "Images", "DGC Router"]);
+  assert.deepEqual(titles.filter((t) => ["Providers", "Fallback", "Sub-agents", "Pips", "Images", "DGC Router"].includes(t)),
+    ["Providers", "Fallback", "Sub-agents", "Pips", "Images", "DGC Router"]);
   assert.equal(x.d.querySelector("[data-nav=agents]"), null, "one page for every model choice");
   assert.ok(x.d.querySelector("#models-images"), "Images, from a CLI that makes them");
   const older = setup();
@@ -80,6 +80,27 @@ test("Models holds the blocks: main model, fallback, sub-agents, Pips, images an
   // An old link to Agents opens Models.
   x.message({ type: "show", section: "agents" });
   assert.equal(x.d.querySelector("[data-nav=models]").getAttribute("aria-current"), "page");
+});
+
+test("providers show the chosen subscription with no unrelated API model, and Add filters saved routes", async () => {
+  const x = setup({ extra: { subscription_engine: "claude", subscription_model: "sonnet" } });
+  await x.settle();
+  x.message({ type: "providers", providers: [
+    { id: "ollama", label: "Ollama", url: "http://localhost:11434/v1" },
+    { id: "deepseek", label: "DeepSeek", url: "https://api.deepseek.com/v1" },
+  ] });
+  x.message({ type: "providerProfiles", profiles: [{ id: "provider_" + "a".repeat(32), name: "Ollama",
+    base_url: "http://localhost:11434/v1", model: "deepseek-v4.1-flash:cloud", api_mode: "auto" },
+    { id: "subscription_claude", kind: "subscription", engine: "claude", name: "Claude Code", model: "sonnet" }],
+    defaultId: "subscription_claude" });
+  assert.match(x.d.querySelector("#page").textContent, /Claude Code/);
+  assert.match(x.d.querySelector("#page").textContent, /sonnet/);
+  const options = [...x.d.querySelector("#saved_provider_preset").options].map(option => option.value);
+  assert.equal(options.includes("ollama"), false);
+  assert.equal(options.includes("deepseek"), true);
+  assert.equal(options.includes("custom"), true);
+  assert.equal(options.includes("claude"), false);
+  assert.equal(options.includes("codex"), true);
 });
 
 test("with the Router off, Sub-agents and Pips are today's fields, and the switch says what it does", async () => {
