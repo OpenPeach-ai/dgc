@@ -208,10 +208,10 @@ class PipReviewTests(Base):
     def test_the_users_words_to_a_pip_are_looked_back_over_and_shown_under_its_reply(self):
         from dgc.shared_memory import SharedMemory
         pip = self.make()
-        self.reply(pip, "I always pay hospital bills by UPI, never by card.", "m1")
         hello = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)["run"]
         self.store.claim_next()
         self.store.finish(hello["id"], result={"text": "Hi! I keep your bills paid."})
+        self.reply(pip, "I always pay hospital bills by UPI, never by card.", "m1")
         last = self.reply(pip, "Arjun Mehta at accounts gets every receipt.", "m2")
         seen = []
         items = [{"fact": "Pays hospital bills by UPI", "kind": "preference", "from": "told"},
@@ -246,12 +246,12 @@ class PipReviewTests(Base):
         started = []
         with patch.object(pip_memory_review, "_reviews",
                           lambda directory, config: SimpleNamespace(ended=lambda key: started.append(key))):
-            run = self.reply(pip, "I always pay hospital bills by UPI, never by card.", "m1")
-            pip_memory_review.after_run(self.registry, self.cfg, run["id"])
             hello = pip_chat.introduce(self.store, pip["id"], "editor-user", self.cfg)["run"]
             self.store.claim_next()
             self.store.finish(hello["id"], result={"text": "Hi! I always pay hospital bills by UPI for you."})
             pip_memory_review.after_run(self.registry, self.cfg, hello["id"])
+            run = self.reply(pip, "I always pay hospital bills by UPI, never by card.", "m1")
+            pip_memory_review.after_run(self.registry, self.cfg, run["id"])
         self.assertEqual(started, [pip["id"]])
 
 

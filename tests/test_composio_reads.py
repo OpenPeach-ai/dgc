@@ -14,8 +14,8 @@ from tests import test_chatdgc_plugins as chat_fixtures
 from tests import test_pip_plugins as pip_fixtures
 from tests import test_pips_local as local
 
-COMPOSIO = {"transport": "remote", "url": "https://connect.composio.example/mcp",
-            "args": ["-y", "mcp-remote", "https://connect.composio.example/mcp"]}
+COMPOSIO = {"transport": "remote", "url": "https://connect.composio.dev/mcp",
+            "command": "npx", "args": ["-y", "mcp-remote", "https://connect.composio.dev/mcp"]}
 EXECUTE = {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute up to 50 tools in parallel.",
            "inputSchema": {"type": "object", "properties": {
                "tools": {"type": "array", "items": {"type": "object"}}, "thought": {"type": "string"},
@@ -40,12 +40,15 @@ OTHER_ACCOUNT = {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"ma
 REVIEWED = {"GMAIL_FETCH_EMAILS": {"max_results": 5, "user_id": "me", "include_payload": False},
             "GOOGLECALENDAR_FIND_EVENT": {"max_results": 10, "calendar_id": "primary"},
             **{tool: dict(spec["example"]) for tool, spec in DESCRIPTORS.items()}}
-CATALOG = {"composio": {"name": "composio", "display_name": "Composio", "source_kind": "preset", "upstream": "https://docs.composio.dev/docs/composio-connect"}}
+CATALOG = {"composio": {"name": "composio", "display_name": "Composio", "source_kind": "preset",
+                        "upstream": "https://docs.composio.dev/docs/composio-connect",
+                        "mcp_presets": {"composio": {"url": COMPOSIO["url"]}}}}
 
 
 def record(**changes):
     return {"name": "composio", "source_kind": "preset", "marketplace": "dgc-curated",
-            "upstream": "https://docs.composio.dev/docs/composio-connect", **changes}
+            "upstream": "https://docs.composio.dev/docs/composio-connect",
+            "registered_specs": {"composio": COMPOSIO}, **changes}
 
 
 class Classification(unittest.TestCase):
@@ -134,6 +137,9 @@ class Classification(unittest.TestCase):
                 found = pip_plugins._info(other, CATALOG)
                 self.assertFalse(found["composio"])
                 self.assertFalse(pip_plugins.composio_reads(EXECUTE, found, READ), "a package that only calls itself composio")
+        self.assertFalse(pip_plugins._info(record(registered_specs={"composio": {**COMPOSIO,
+            "url": "https://connect.composio.example/mcp"}}), CATALOG)["composio"],
+            "a same-named plugin with a different server is not the curated Composio preset")
 
     def test_with_composios_own_marks_a_batch_is_decided_by_what_it_runs_and_its_other_tools_by_their_marks(self):
         import tempfile
@@ -260,7 +266,7 @@ class InAPip(pip_fixtures.PluginWorld, unittest.TestCase):
     def setUp(self):
         local.LocalPipsTests.setUp(self)
         self.world()
-        spec = pip_fixtures.plugins.mcp_spec("https://connect.composio.example/mcp", "")
+        spec = pip_fixtures.plugins.mcp_spec(COMPOSIO["url"], "")
         self.cfg.data["mcp_servers"] = {**self.cfg.data["mcp_servers"], "composio": dict(spec)}
         rows = [record(registered_specs={"composio": spec})]
         from unittest.mock import patch
