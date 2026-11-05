@@ -835,15 +835,48 @@ def card_missing(post_data: str, content_type: str) -> bool:
     return bool(fields) and all(not str(value).strip() for _, value in fields) and not carries_card_number(text)
 
 
-def carries_card_number(post_data: str) -> bool:
-    # A browser form sends "4242 4242 …" as 4242+4242 or 4242%204242: decode before looking.
+def carries_card_number(post_data: str, *, loose: bool = False) -> bool:
+    # A Luhn-valid number alone is not evidence of a payment: analytics and session IDs can
+    # pass Luhn too. Look for it in a card field (including nested JSON), or in a form's
+    # `number` field. This also keeps unrelated telemetry from being
+    # labelled "Pay" and hiding Always allow for a Pip's routine browser requests.
     from urllib.parse import unquote_plus
     text = post_data or ""
-    for run in re.findall(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", text + "\n" + unquote_plus(text)):
-        digits = re.sub(r"\D", "", run)
-        if 13 <= len(digits) <= 19 and _luhn(digits):
+    def valid(value) -> bool:
+        if not isinstance(value, str):
+            return False
+        for run in re.findall(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", unquote_plus(value)):
+            digits = re.sub(r"\D", "", run)
+            if 13 <= len(digits) <= 19 and _luhn(digits):
+                return True
+        return False
+
+    def card_field(name: str) -> bool:
+        flat = re.sub(r"[^a-z0-9]", "", name.lower())
+        if CARD_NUMBER_FIELD.search(name) or ("card" in flat and "number" in flat):
             return True
-    return False
+        if flat in ("number", "pan", "card", "creditcard", "debitcard", "paymentcard", "cc"):
+            return True
+        return False
+
+    def structured(value) -> bool:
+        if isinstance(value, dict):
+            return any((card_field(str(key)) and valid(item))
+                       or structured(item) for key, item in value.items())
+        if isinstance(value, list):
+            return any(structured(item) for item in value)
+        return False
+
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, (dict, list)):
+        return structured(parsed) or (loose and valid(text))
+    if "=" in text and "\n" not in text[:2000]:
+        pairs = parse_qsl(text, keep_blank_values=True)
+        return any(card_field(name) and valid(value) for name, value in pairs) or (loose and valid(text))
+    return loose and valid(text)
 
 
 class BoxedBrowser(BrowserSession):
@@ -1578,7 +1611,8 @@ class BoxedBrowser(BrowserSession):
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         held = HeldWrite(request_id, session, verb, str(request.get("url", ""))[:2000],
                          _fields(post, headers.get("content-type", "")), len(post.encode("utf-8")), time.time(),
-                         payment=carries_card_number(post), card_missing=card_missing(post, headers.get("content-type", "")))
+                         payment=carries_card_number(post, loose=kind == "Document"),
+                         card_missing=card_missing(post, headers.get("content-type", "")))
         self.held[request_id] = held
         if self.on_write is not None:
             self.on_write(held)

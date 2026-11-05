@@ -89,6 +89,26 @@ test("a change to an existing Pip lists exactly what changes", async (t) => {
   await page.close();
 });
 
+test("a Pip workflow review names each pinned Pip and never offers Always allow", async (t) => {
+  if (skipOrFail(t)) return;
+  const first = "pip_" + "1".repeat(32), second = "pip_" + "2".repeat(32);
+  const { page, errors, card } = await scene({ type: "permission_request", id: "p1", name: "pips_workflow",
+    args: { scope: "personal", name: "Morning to draft", pip_ids: [first, second],
+      pip_names: ["Market research", "Blog writer"], tasks: ["Draft a sourced post."], mode: "reviewed",
+      expected_pins: [{ pip_id: first, job_version: 1, lifecycle_revision: 0 },
+        { pip_id: second, job_version: 1, lifecycle_revision: 0 }] },
+    summary: "Create personal Pip workflow · 2 Pips", suggested_rule: "PipsWorkflow", choices: ["once", "deny"] });
+  const text = await card.innerText();
+  assert.match(text, /Start\s*Market research/);
+  assert.match(text, /Step 2\s*Blog writer/);
+  assert.match(text, /Handoff task\s*Draft a sourced post/);
+  assert.match(text, /Review each handoff/);
+  assert.doesNotMatch(text, /pip_[12]{32}|expected_pins/);
+  assert.equal(await card.locator('button[data-d="always"]').count(), 0);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
 test("a Pip's new model and context window read as words, never [object Object]", async (t) => {
   // Pips API 66: the main chat changes a Pip's model and window with pips_propose, and the Pips default with
   // pips_settings. Their cards said "model choice [object Object]" and "Run pips_settings".

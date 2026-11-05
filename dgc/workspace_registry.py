@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 MAX_WORKSPACES = 256
 MAX_SESSION_ASSOCIATIONS = 100000
 MAX_EVENTS = 5000
@@ -411,6 +411,11 @@ class WorkspaceRegistry:
             # receives only that run's inbox; the chat archive keeps each message.
             from .pip_steering import SCHEMA as steering_schema
             _execute_schema(self.db, steering_schema)
+        if 41 <= version < 51:
+            # Replace the seven-colour CHECK with the eight established Pip colours.
+            # Rows and their owner-only notification choices are copied unchanged.
+            from .pip_profile import migrate_character_palette
+            migrate_character_palette(self.db)
         # Schema33 admits explicit version3 bounded additional app-read grants.
         # Schema32 adds explicit guest and finite-series semantics to calendar drafts/actions.
         # Older readers must refuse the registry instead of rendering a partial review.

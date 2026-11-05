@@ -135,8 +135,8 @@ async function openHome({ state = STATE(), dismissed = "", width = 380, height =
   const posted = () => page.evaluate(() => window.__posted);
   const requests = async (type) => (await posted()).filter((m) => m.type === "pipsRequest" && m.request.type === type).map((m) => m.request);
   const head = () => page.evaluate(() => document.querySelector("#sessions-pips .home-pips-head h2")?.textContent ?? null);
-  const unreadRows = () => page.evaluate(() => [...document.querySelectorAll("#sessions-pips .home-pips-unread .home-pip-item")]
-    .map((li) => [li.querySelector("strong").textContent, li.querySelector("small").textContent, li.querySelector(".home-pip-read")?.innerText.trim() ?? null]));
+  const unreadRows = () => page.evaluate(() => [...document.querySelectorAll("#sessions-pips .home-pip-item:has(.home-pip-read)")]
+    .map((li) => [li.querySelector("strong").textContent, li.querySelector(".home-pip-latest")?.textContent ?? li.querySelector("small").textContent, li.querySelector(".home-pip-read")?.innerText.trim() ?? null]));
   const refresh = () => page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "pipNewsRefresh" } })));
   const active = () => page.evaluate(() => { let e = document.activeElement; while (e?.shadowRoot?.activeElement) e = e.shadowRoot.activeElement;
     return e ? (e.getAttribute("aria-label") || e.textContent.trim()) : null; });
@@ -158,7 +158,7 @@ test("Dismiss all clears the home's unread count and rows, marks nothing read, a
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     assert.equal(await x.head(), "Pips · 3 unread");
     const button = x.page.locator(".home-pips-dismiss-all");
     assert.equal(await button.textContent(), "Dismiss all", "the same control as the news rows' Dismiss all");
@@ -166,7 +166,7 @@ test("Dismiss all clears the home's unread count and rows, marks nothing read, a
     assert.match(await button.getAttribute("title"), /Every message stays unread in Pips until you open its chat/);
     await button.focus();
     await x.page.keyboard.press("Enter");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pips-unread"));
+    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
     assert.equal(await x.head(), "Pips", "no count on the home");
     assert.equal(await x.page.locator(".home-pips-dismiss-all").count(), 0, "nothing left to dismiss");
     assert.equal(await x.active(), "Open Pips", "the keyboard lands on Open Pips beside it, never on the page's top");
@@ -194,13 +194,13 @@ test("something new brings the row back with only the new count, and a reload ke
   const x = await openHome();
   let attr = "";
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     await x.page.click(".home-pips-dismiss-all");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pips-unread"));
+    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
     await x.page.evaluate(([m3]) => { const u = window.__state.unread["ws_" + "1".repeat(32)][0];
       Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
     await x.refresh();
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     assert.equal(await x.head(), "Pips · 1 unread", "only the one that came after the dismiss");
     assert.deepEqual(await x.unreadRows(), [["Mail watch", "A third mail, from your bank.", "1"]]);
     // The host keeps what the page sent, and writes it into the next page it builds.
@@ -218,7 +218,7 @@ test("something new brings the row back with only the new count, and a reload ke
     await reloaded.page.evaluate(([m3]) => { const u = window.__state.unread["ws_" + "1".repeat(32)][0];
       Object.assign(u, { count: 3, messages: 3, latest: "A third mail, from your bank.", latest_message_id: m3 }); }, [M3]);
     await reloaded.refresh();
-    await reloaded.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await reloaded.page.waitForSelector("#sessions-pips .home-pip-read");
     assert.equal(await reloaded.head(), "Pips · 1 unread");
     assert.deepEqual(reloaded.errors, []);
   } finally { await reloaded.close(); }
@@ -243,9 +243,9 @@ test("opening a Pip's chat reads it as before, and clears its dismiss: its next 
   if (skipOrFail(t)) return;
   const x = await openHome();
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     await x.page.click(".home-pips-dismiss-all");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pips-unread"));
+    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
     await openPipsPage(x, "personal");
     await x.page.click(`[data-job="${MAIL}"]`);
     await x.page.waitForFunction(() => window.__posted.some((m) => m.type === "pipsRequest" && m.request.type === "mark_pip_read"));
@@ -256,7 +256,7 @@ test("opening a Pip's chat reads it as before, and clears its dismiss: its next 
     assert.deepEqual((await kept(x)).flatMap((m) => m.drop), [MAIL], "read: its dismiss goes; Billing audit's stays");
     await x.page.evaluate(([unread]) => { window.__state.unread["ws_" + "1".repeat(32)] = [unread]; }, [mailUnread(1, "One more mail.", M3, "2026-11-03T11:00:00Z")]);
     await x.refresh();
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     assert.equal(await x.head(), "Pips · 1 unread", "all of it is new since the read; Billing audit stays dismissed");
     assert.deepEqual(await x.unreadRows(), [["Mail watch", "One more mail.", "1"]]);
     assert.deepEqual(x.errors, []);
@@ -276,16 +276,16 @@ test("a Pip's count on the home reads Read on hover and focus, and marks its who
     assert.equal((await x.unreadRows())[0][2], "Read", "hover");
     await x.page.mouse.move(5, 700);
     assert.equal((await x.unreadRows())[0][2], "2");
-    await x.page.focus(".home-pips-unread .home-pip-row >> nth=0");
+    await x.page.focus(".home-pip-item:has(.home-pip-read) .home-pip-row >> nth=0");
     await x.page.keyboard.press("Tab");
     assert.equal(await x.active(), "Mark Mail watch's 2 unread messages as read", "Tab reaches it");
     assert.equal((await x.unreadRows())[0][2], "Read", "keyboard focus");
     await x.page.keyboard.press("Enter");
-    await x.page.waitForFunction(() => document.querySelectorAll("#sessions-pips .home-pips-unread .home-pip-item").length === 1);
+    await x.page.waitForFunction(() => document.querySelectorAll("#sessions-pips .home-pip-item:has(.home-pip-read)").length === 1);
     assert.equal(await x.head(), "Pips · 1 unread");
     assert.equal(await x.active(), "Mark Billing audit's 1 unread message as read", "the keyboard stays in the list, on the next one");
     await x.page.keyboard.press("Space");
-    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pips-unread"));
+    await x.page.waitForFunction(() => !document.querySelector("#sessions-pips .home-pip-read"));
     assert.deepEqual((await x.requests("mark_pip_read")).map(({ request_id, ...r }) => r),
       [{ type: "mark_pip_read", pip_id: MAIL, message_id: M2 }, { type: "mark_pip_read", pip_id: AUDIT, post_id: RUN }], "up to the newest reply or run post");
     assert.equal(await x.active(), "Open Pips");
@@ -299,7 +299,7 @@ test("the Pips page's purple count reads Read on hover and focus, Personal and P
   if (skipOrFail(t)) return;
   const x = await openHome({ width: 300 });
   try {
-    await x.page.waitForSelector("#sessions-pips .home-pips-unread");
+    await x.page.waitForSelector("#sessions-pips .home-pip-read");
     await openPipsPage(x, "personal");
     const geometry = await x.page.evaluate((id) => {
       const root = document.getElementById("pips-host").shadowRoot, b = root.querySelector(`[data-pip-read="${id}"]`), row = root.querySelector(`[data-job="${id}"]`);

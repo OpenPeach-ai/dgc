@@ -7617,6 +7617,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: "pipReportsHidden", pipIds, until });
       });
       this.pipsEditor.useUnreadRead(() => this.pipUnreadRead());
+      this.pipsEditor.useProfileChanged(() => this.pipProfileChanged());
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
@@ -7628,6 +7629,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     home.post({ type: "pipNewsRefresh" });
     home.pipsEditor?.unreadChanged();
     home.pipsTab?.unreadChanged();
+  }
+  private pipProfileChanged(): void {
+    const home = this.tab?.host || this;
+    home.post({ type: "pipNewsRefresh" });
+    home.pipsEditor?.profileChanged();
+    home.pipsTab?.profileChanged();
   }
   openPips(): void {
     if (this.tab) { this.tab.host.openPipsEditor({ overview: true }); return; }
@@ -7658,6 +7665,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: "pipReportsHidden", pipIds, until });
       });
       this.pipsTab.useUnreadRead(() => this.pipUnreadRead());
+      this.pipsTab.useProfileChanged(() => this.pipProfileChanged());
     }
     if (this.sessionReady) this.pipsTab.ready(this.lastReadyEvent?.capabilities, this.backend);
     this.pipsTab.open(navigation);

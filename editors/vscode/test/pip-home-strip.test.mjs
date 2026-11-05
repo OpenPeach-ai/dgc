@@ -55,8 +55,39 @@ test('latest unread routine results appear with the existing row geometry, even 
  assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{overview:true},'Open Pips leads to the list, not the last selected chat');
  assert.deepEqual(x.rows().map(r=>r.slice(0,2)),[['Mail watch','No new mail since the last check.'],['Daily check','Everything passed.']]);
  assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
- x.d.querySelector('.home-pips-unread .home-pip-row').click();
+ x.d.querySelector('.home-pip-row').click();
  assert.equal(x.opened.at(-1)?.pip,id(2));
+});
+test('a Pip with attention and unread appears once; its count grows in the same row and profile is current',async t=>{
+ const state={list:[pip(1,'Site traffic',{pending_review_count:2,profile:{body:'lens',color:'lens'}})],
+  digest:digest([]),unread:[{pip_id:id(1),workspace_id:P,name:'Site traffic',pip_type:'scout',count:8,
+   latest:'Traffic report finished.',latest_at:'2026-11-05T00:00:00Z',latest_message_id:'m1'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ assert.deepEqual(x.rows(),[['Site traffic','2 waiting for you',false]]);
+ assert.equal(x.d.querySelector('.home-pip-latest').textContent,'Traffic report finished.');
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'8');
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,'lens');
+ assert.match(x.d.querySelector('#home-pip-tints').textContent,/home-pip-face\[data-tint=lens\]/);
+ state.unread[0]={...state.unread[0],count:9,latest:'Another report.',latest_message_id:'m2'};
+ state.list[0]={...state.list[0],profile:{body:'quill',color:'quill'}};
+ await x.poll();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'9');
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,'quill');
+});
+test('a merged unread row still opens its pending computer approval',async t=>{
+ const item={id:`computer_action:compact_${'a'.repeat(32)}`,kind:'computer_action',card:`compact_${'a'.repeat(32)}`,
+  pip_id:id(1),pip_name:'Site traffic',pip_type:'scout',workspace_id:P,title:'Send a form',detail:'Cloudflare verification',
+  created_at:'2026-11-05T00:00:00Z',expires_at:null};
+ const state={list:[pip(1,'Site traffic')],digest:digest([]),attention:{total:1,items:[item],truncated:false,counts:{},by_pip:{[id(1)]:1}},
+  unread:[{pip_id:id(1),workspace_id:P,name:'Site traffic',pip_type:'scout',count:2,latest:'Traffic report finished.',
+   latest_at:'2026-11-05T00:00:00Z',latest_message_id:'m1'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ x.d.querySelector('.home-pip-row').click();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{pip:id(1),workspace:P,attention:true,computer:true});
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'2');
 });
 test('an unread request failure never claims all quiet, and Retry recovers the count',async t=>{
  const state={list:[pip(1,'Mail watch')],digest:digest([]),unreadFail:true,unread:[

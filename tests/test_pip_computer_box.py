@@ -150,7 +150,17 @@ class EgressPolicyTests(unittest.TestCase):
         self.assertTrue(box.carries_card_number("number=4242 4242 4242 4242&exp=12%2F30"))
         self.assertFalse(box.carries_card_number("order=1234567890123&qty=2"))      # not a Luhn number
         for encoded in ("number=4242+4242+4242+4242", "number=4242%204242%204242%204242", "number=4242-4242-4242-4242"):
-            self.assertTrue(box.carries_card_number(encoded), encoded)            # how a form sends one typed with spaces
+            self.assertTrue(box.carries_card_number(encoded), encoded)
+        for encoded in ("card_number=4242+4242+4242+4242", "number=4242%204242%204242%204242&exp=12%2F30"):
+            self.assertTrue(box.carries_card_number(encoded), encoded)
+        self.assertTrue(box.carries_card_number('{"payment":{"card":{"number":"4242 4242 4242 4242"}}}'))
+        self.assertTrue(box.carries_card_number('{"cardNumber":"4242 4242 4242 4242"}'))
+        self.assertTrue(box.carries_card_number('{"payment":{"creditCard":"4242 4242 4242 4242"}}'))
+        self.assertTrue(box.carries_card_number('credit_card=4242+4242+4242+4242'))
+        self.assertFalse(box.carries_card_number('{"data":{"sessionId":"4242 4242 4242 4242"},"name":"analytics"}'))
+        self.assertFalse(box.carries_card_number('name=pageview&zarazData=4242+4242+4242+4242'))
+        self.assertFalse(box.carries_card_number('event=pageview&properties=4242+4242+4242+4242'))
+        self.assertTrue(box.carries_card_number('name=4242+4242+4242+4242', loose=True))  # actual form submits stay guarded
         fields = box._fields("user=ada&password=hunter2&otp=123456&note=hi", "application/x-www-form-urlencoded")
         self.assertEqual(fields, [("user", "ada"), ("password", "•••"), ("otp", "•••"), ("note", "hi")])
         self.assertEqual(box._fields('{"email":"a@b.c","card":"4242"}', "application/json"),

@@ -16,6 +16,8 @@ from tests import test_pips_local as fixtures
 
 class SimpleStartTests(unittest.TestCase):
     setUp = fixtures.LocalPipsTests.setUp
+    git = fixtures.LocalPipsTests.git
+    commit = fixtures.LocalPipsTests.commit
 
     def personal_id(self):
         return self.registry.personal()["id"]
@@ -75,10 +77,25 @@ class SimpleStartTests(unittest.TestCase):
         self.assertTrue(ordinary["ok"], ordinary.get("error"))
         self.assertNotIn("intro", pip_chat.list_messages(self.store, pip["id"])["messages"][-1])
 
-    def test_a_project_pip_does_not_introduce_itself(self):
+    def test_a_project_pip_introduces_itself_without_claiming_a_run(self):
+        self.commit()
         pip = self.store.create(self.workspace["id"], "Reviewer", "Review the code", "editor-user", pip_type="rook")
         result = self.control({"type": "introduce_pip", "pip_id": pip["id"]})
-        self.assertFalse(result["ok"])
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertIn("Review the code", result["result"]["message"]["text"])
+        self.assertIn("without claiming that you have checked", result["result"]["message"]["text"])
+        again = self.control({"type": "introduce_pip", "pip_id": pip["id"]})
+        self.assertEqual(again["result"]["run"]["id"], result["result"]["run"]["id"])
+
+    def test_opening_an_existing_chat_does_not_insert_a_late_hello(self):
+        pip = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")
+        sent = self.control({"type": "send_pip_message", "pip_id": pip["id"], "text": "Check my inbox",
+                             "idempotency_key": "first-user-message"})
+        self.assertTrue(sent["ok"], sent.get("error"))
+        intro = self.control({"type": "introduce_pip", "pip_id": pip["id"]})
+        self.assertTrue(intro["ok"], intro.get("error"))
+        self.assertEqual(intro["result"], {"already_started": True})
+        self.assertEqual(len(pip_chat.list_messages(self.store, pip["id"])["messages"]), 1)
 
     def test_only_the_local_user_asks(self):
         pip = self.store.create(self.personal_id(), "Gmail", None, "editor-user", pip_type="lens")

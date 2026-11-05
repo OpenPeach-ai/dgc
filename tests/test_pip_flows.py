@@ -2,9 +2,11 @@
 import unittest
 import sqlite3
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from dgc import pip_flows, pip_handoffs, pip_chat, pip_archive, pip_purge, pips
+from dgc import pip_flows, pip_handoffs, pip_chat, pip_archive, pip_purge, pips, pip_workflow_tool, pip_context_tool, workspace_registry
+from dgc.permissions import ASK, DENY, PermissionEngine
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 import test_pips_local as fixtures
 
@@ -130,6 +132,42 @@ class PipFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, 'Only you'):
             pip_flows.set_status(self.store, self.flow['id'], 0, 'paused', 'remote-user', self.cfg)
 
+    def test_work_tool_requires_one_review_in_every_mode_and_pins_each_pip(self):
+        self.prepare()
+        from dgc import tools
+        shape = next(item['function'] for item in tools.TOOL_SCHEMAS
+                     if item['function']['name'] == 'pips_workflow')
+        self.assertEqual(shape['parameters']['required'],
+                         ['scope', 'name', 'pip_ids', 'pip_names', 'tasks', 'mode', 'expected_pins'])
+        for mode in ('default', 'acceptEdits', 'auto'):
+            self.assertEqual(PermissionEngine(mode, {}, self.root).decide('pips_workflow', {})[0], ASK)
+        self.assertEqual(PermissionEngine('plan', {}, self.root).decide('pips_workflow', {})[0], DENY)
+        pins = [{'pip_id': p['id'], 'job_version': p['current_version'],
+                 'lifecycle_revision': p['lifecycle_revision']} for p in self.pips[:2]]
+        args = {'scope': 'personal', 'name': 'Work reviewed pair', 'pip_ids': [p['id'] for p in self.pips[:2]],
+                'pip_names': [p['name'] for p in self.pips[:2]],
+                'tasks': ['Draft from the research.'], 'mode': 'unattended', 'expected_pins': pins}
+        ctx = SimpleNamespace(config=self.cfg, project_root=self.root,
+                              pip_proposal_origin=lambda: {'session_id': 'session-test',
+                                                            'workspace_id': self.workspace['id']})
+        def registry(*_args, **_kwargs):
+            return WorkspaceRegistry(self.registry.directory)
+        with patch.object(pip_workflow_tool, 'WorkspaceRegistry', registry):
+            created = json.loads(pip_workflow_tool.create(args, ctx))
+            repeated = json.loads(pip_workflow_tool.create(args, ctx))
+            self.assertEqual(created['flow']['id'], repeated['flow']['id'])
+            with self.assertRaisesRegex(RegistryError, 'Pip changed'):
+                pip_workflow_tool.create({**args, 'expected_pins': [{**pins[0], 'job_version': 999}, pins[1]]}, ctx)
+            with self.assertRaisesRegex(RegistryError, 'name changed'):
+                pip_workflow_tool.create({**args, 'pip_names': ['Wrong', args['pip_names'][1]]}, ctx)
+            with self.assertRaisesRegex(RegistryError, 'different workflow'):
+                pip_workflow_tool.create({**args, 'tasks': ['Different task.']}, ctx)
+            with self.assertRaisesRegex(RegistryError, 'outside'):
+                pip_workflow_tool.create({**args, 'scope': 'project'}, ctx)
+        with patch.object(pip_context_tool, 'WorkspaceRegistry', registry):
+            listed = json.loads(pip_context_tool.read({'action': 'workflows', 'scope': 'personal'}, ctx))
+            self.assertEqual([row['name'] for row in listed['workflows']], ['Work reviewed pair', 'Daily post'])
+
     def test_control_protocol_exposes_reviewed_flow_and_rejects_remote_management(self):
         self.prepare()
         workspace=self.registry.personal()['id']
@@ -176,7 +214,7 @@ class PipFlowTests(unittest.TestCase):
         self.assertEqual(self.registry.db.execute('PRAGMA user_version').fetchone()[0],48)
         self.assertIsNone(self.registry.db.execute("SELECT 1 FROM sqlite_master WHERE name='pip_flows'").fetchone())
         with WorkspaceRegistry(self.registry.directory) as upgraded:
-            self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0],50)
+            self.assertEqual(upgraded.db.execute('PRAGMA user_version').fetchone()[0],workspace_registry.SCHEMA_VERSION)
             self.assertEqual([tuple(row) for row in upgraded.db.execute('SELECT id,name FROM workspaces ORDER BY id')],before)
             self.assertEqual(upgraded.db.execute('SELECT count(*) FROM pip_flows').fetchone()[0],0)
             self.assertEqual(upgraded.db.execute('PRAGMA foreign_key_check').fetchall(),[])

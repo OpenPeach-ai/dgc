@@ -126,7 +126,7 @@ _DISPATCHED_OUTSIDE_EXECUTORS = frozenset({"task", "artifact", "mcp_call", "mcp_
 # Pip). Offered on every request they cost more than every other tool together; a model that
 # needs them asks for them, the way mcp_search brings in MCP tools.
 _PIPS_TOOL_NAMES = frozenset({
-    "pips_context", "pips_setup", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
+    "pips_context", "pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip",
     "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action",
     "pause_pip", "resume_pip", "attach_pip_to_session"})
 _PIPS_MUTATION_TOOL_NAMES = _PIPS_TOOL_NAMES - {"pips_context"}
@@ -5081,7 +5081,10 @@ class Agent(GoalLifecycle):
                "For a Pip that works with the user's mail, calendar or another app, set up the Personal Pip without "
                "app reads: it asks to connect the app itself, with a Connect card in its own chat. Never call the "
                "user's Composio or other connector tools yourself to set a Pip up (no account lists, no tool schemas). "
-               "Set Pips up only with these tools: `dgc pips` refuses changes from your shell."]
+               "Set Pips up only with these tools: `dgc pips` refuses changes from your shell.",
+               "- To set up a Pip team, first inspect pips_context workflows and each Pip definition, then use "
+               "pips_workflow with their exact names, versions and ordered handoff tasks. Work asks the user to review "
+               "even in Auto. Unattended means only result routing; each Pip still uses its own action permissions."]
               if pips_on else []),
             *(["- For conversational Pip setup or schedules, use pips_setup. In auto mode the Pip is created and on; "
                "otherwise it is shown to the user as a card above the chat box and created when they choose Create Pip "
@@ -10001,7 +10004,7 @@ class Agent(GoalLifecycle):
         call_id = call.id
         secrets = self._secret_values()
         display_args = redact_value(self._with_task_agent(name, args), secrets)
-        if name in ("pips_setup", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
+        if name in ("pips_setup", "pips_workflow", "pips_propose", "pips_settings", "pips_adapt", "run_pip_now", "handoff_to_pip", "draft_pip_email", "draft_pip_calendar_event", "draft_pip_connector_action", "pause_pip", "resume_pip", "attach_pip_to_session") and (self.config.get("pips_enabled", False) is not True
                                        or self.depth > 0 or getattr(self, "_monitor_turn", False)):
             reason = ("Pips are disabled in this session" if self.config.get("pips_enabled", False) is not True
                       else "Only the main user chat can request Pip changes or background work")

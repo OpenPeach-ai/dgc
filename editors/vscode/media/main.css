@@ -302,6 +302,7 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pip-copy { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
 #sessions-host .home-pip-copy strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--text); }
 #sessions-host .home-pip-copy small { color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
+#sessions-host .home-pip-copy :is(.home-pip-latest, .home-pip-unread-only small) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #sessions-host .home-pip-badge { flex:none; min-width:20px; height:20px; padding:0 6px; border-radius:10px; display:inline-flex; align-items:center;
   justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
 /* An unread row's count is its own button beside the row: it reads "Read" on hover or focus, and marks that Pip read. */
@@ -551,6 +552,24 @@ body.vscode-light .agent-mark[data-mark="6"] { --mark: #5A9E28; }
 .msg.dgc > .role + .msg.user,
 body.hide-reasoning .msg.dgc > .role + .disclosure + .reasoning + .msg.user { margin-top: var(--sp-2); }
 .user .bubble { max-width: 92%; background: var(--prompt-fill); border: var(--prompt-border); box-shadow: var(--prompt-rail); border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: normal; color: var(--text); }
+/* Static, soft grain on sent prompts. The overlay cannot intercept selection or fold controls. */
+.user .bubble {
+  position: relative;
+  background-image: radial-gradient(130% 110% at 14% 0%, rgba(174, 145, 255, .08), transparent 70%);
+}
+.user .bubble::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  opacity: .19;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='96' height='96' filter='url(%23n)' opacity='.62'/%3E%3C/svg%3E");
+}
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .user .bubble::before { content: none; }
+@media (forced-colors: active) { .user .bubble::before { content: none; } }
 /* A prompt reads at the answer's size and spacing: it inherited the page's tight default line height. */
 /* The question, inside the answer's own bubble: the card that asked it is removed as soon as the
    answer lands, so without this the transcript shows an answer to nothing. */
@@ -1489,6 +1508,27 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .composer-pill.pill-skill::before { content: "\eb29"; font-family: codicon; font-weight: normal; font-style: normal; }
 .composer-pill.pill-template::before { content: "\eb66"; font-family: codicon; font-weight: normal; font-style: normal; }
 .composer-pill.pill-file::before { content: "@"; }
+.composer-pill.pill-pip { align-items: center; color: var(--text); font-weight: var(--w-med); }
+.composer-pill.pill-pip::before { content: none; }
+.composer-pip-face, .composer-pip-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
+.composer-pip-face { align-self: center; }
+.composer-pill.pill-plugin, .composer-pill.pill-artifact { align-items: center; vertical-align: -0.12em; line-height: 1; }
+.composer-pill.pill-plugin::before, .composer-pill.pill-artifact::before { content: none; }
+.composer-pill.pill-plugin { padding: 2px 4px; color: #c5a9ff;
+  background: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);
+  background-size: 260% 100%; animation: composerPluginGlow 4.5s ease-in-out infinite; }
+.composer-pill.pill-artifact { color: #c7b5ff; background: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
+  background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: composerArtifactWords 7s ease-in-out infinite; }
+.composer-plugin-mark, .composer-artifact-mark { display: inline-flex; flex: none; align-items: center; justify-content: center;
+  width: 16px; height: 16px; line-height: 16px; }
+.composer-plugin-mark img { display: block; width: 15px; height: 15px; object-fit: contain; }
+.composer-artifact-mark { color: #b6a0ff; -webkit-text-fill-color: #b6a0ff; font-size: 14px; }
+@keyframes composerPluginGlow { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes composerArtifactWords { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@media (prefers-reduced-motion: reduce) {
+  .composer-pill.pill-plugin, .composer-pill.pill-artifact { animation: none; }
+}
 /* A link pill wears the BUNDLED globe, never a fetched favicon: an icon fetched while you are
    still typing discloses the host of a URL you may yet delete, and the codicon costs no request.
    It shows the host rather than the whole URL; the message you send draws the site's own favicon
@@ -2271,6 +2311,12 @@ body.vscode-light .prompt-rail-card { box-shadow: 0 10px 30px -10px rgba(0, 0, 0
 /* Pip mention chips are references, distinct from file attachments. */
 .pip-reference-chip { border-color: var(--vscode-textLink-foreground, #a799ec); }
 .pip-reference-chip .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.prompt-att.pip-reference-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
+  color: var(--text); font-weight: var(--w-med); padding: 0 2px; }
+.pip-reference-face, .pip-reference-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
+.pip-reference-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop .pi-pip-face, .pop .pi-pip-face .dgc-plush { display: inline-block; flex: none; width: 20px; height: 20px; }
+.pop .pi-plugin-mark img { display: block; width: 16px; height: 16px; object-fit: contain; }
 /* The By-model filter row. A free-text box rather than fixed provider buttons: the categories a
    reader wants -- ollama, vLLM, llama.cpp, a particular host -- are just values in the provider
    and host columns, and a hard-coded list of them goes stale the first time someone runs something

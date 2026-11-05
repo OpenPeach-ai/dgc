@@ -12,6 +12,7 @@
 // after. A Pip's count pill reads "Read" on hover or focus, and marks its whole chat read (mark_pip_read).
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation} from './pipAttention.js';
+import {profile, tintStyles} from './pipProfile.js';
 
 const POLL_MS = 60000;
 const TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -48,6 +49,11 @@ export function mountHomePips(options) {
  const doc = options.document, root = options.root;
  const quiet = {receive(){}, refresh(){}, dispose(){}};
  if (!root) return quiet;
+ if (!doc.getElementById('home-pip-tints')) {
+  const style = doc.createElement('style'); style.id = 'home-pip-tints';
+  style.textContent = tintStyles.replaceAll('.avatar[', '.home-pip-face[');
+  doc.head.append(style);
+ }
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
@@ -73,7 +79,7 @@ export function mountHomePips(options) {
   if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !/^pip_[a-f0-9]{32}$/.test(p.id)) return null;
   if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200 || !TYPES.includes(p.pip_type)) return null;
   if (p.status === 'archived') return null;
-  return {id: p.id, name: p.name.trim(), type: p.pip_type, reviews: pendingReviews(p), waiting: 0};
+  return {id: p.id, name: p.name.trim(), type: p.pip_type, profile: profile(p.profile), reviews: pendingReviews(p), waiting: 0};
  }
  // What is new for a Pip since you last looked, from the digest: how urgent (1 an alert, 2 failed runs,
  // 3 new findings) and a few words.
@@ -100,7 +106,9 @@ export function mountHomePips(options) {
  function face(pip, pose, size) {
   const plush = globalThis.PipConcepts?.plush, span = node('span', `home-pip-face home-pip-face-${size}`);
   span.setAttribute('aria-hidden', 'true');
-  try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
+  const look = pip.profile || profile(null);
+  if (look.color) span.dataset.tint = look.color;
+  try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(look.body || pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
   return span;
  }
  // A Pip with cards waiting opens at the newest one (its chat, its computer), as Needs attention does.
@@ -169,6 +177,18 @@ export function mountHomePips(options) {
   if (!ready || !pips || !pips.length) { root.hidden = true; options.onChange?.(); return; }
   root.hidden = false;
   const rows = needing(), dismissible = rows.filter(r => r.dismissible), fresh = shownUnread();
+  const byUnread = new Map(fresh.map(item => [item.pip_id, item]));
+  const displayed = rows.map(row => ({...row, unread: byUnread.get(row.pip.id) || null}));
+  for (const item of fresh) if (!rows.some(row => row.pip.id === item.pip_id)) {
+   const pip = pips.find(p => p.id === item.pip_id);
+   if (pip) displayed.push({pip, line: item.latest, dismissible: false, unread: item});
+  }
+  const visible = displayed.slice(0, SHOWN);
+  for (const item of fresh) {
+   if (visible.length >= SHOWN + 2) break;
+   const extra = displayed.find(row => row.pip.id === item.pip_id);
+   if (extra && !visible.some(row => row.pip.id === item.pip_id)) visible.push(extra);
+  }
   const unreadCount = fresh.reduce((n, item) => n + item.count, 0);
   const head = node('div', 'home-pips-head'), actions = node('span', 'home-pips-actions');
   head.append(node('h2', '', 'Pips'));
@@ -188,31 +208,41 @@ export function mountHomePips(options) {
   actions.append(all); head.append(actions);
   if (unreadCount) head.querySelector('h2').textContent = `Pips · ${unreadCount} unread`;
   root.append(head);
-  if (rows.length) {
+  if (displayed.length) {
    const list = node('ul', 'home-pips-list'); list.setAttribute('aria-label', 'Pips that need you');
-   for (const [index, {pip, line, dismissible: canDismiss}] of rows.slice(0, SHOWN).entries()) {
+   for (const [index, {pip, line, dismissible: canDismiss, unread: itemUnread}] of visible.entries()) {
     const item = node('li', 'home-pip-item'), row = node('button', 'home-pip-row'); row.type = 'button';
+    const needsAttention = rows.some(r => r.pip.id === pip.id);
     item.dataset.pipId = pip.id;
     item.dataset.news = line;
     if (before.has(pip.id) && before.get(pip.id) !== line) item.classList.add('motion-pip-news');
     row.title = `Open ${pip.name} in Pips`;
-    const copy = node('span', 'home-pip-copy');
+    const copy = node('span', `home-pip-copy${itemUnread && !needsAttention ? ' home-pip-unread-only' : ''}`);
     copy.append(node('strong', '', pip.name), node('small', '', line));
+    if (itemUnread && needsAttention) copy.append(node('small', 'home-pip-latest', itemUnread.latest));
     row.append(face(pip, pip.waiting ? 'waiting_approval' : 'success', 'row'), copy);
-    if (pip.waiting) { const badge = node('span', 'home-pip-badge', String(pip.waiting)); badge.setAttribute('aria-hidden', 'true'); row.append(badge); }
-    row.onclick = () => open(pip);
+    if (pip.waiting && !itemUnread) { const badge = node('span', 'home-pip-badge', String(pip.waiting)); badge.setAttribute('aria-hidden', 'true'); row.append(badge); }
+    row.onclick = () => itemUnread && !needsAttention ? options.onOpen?.({pip: pip.id}) : open(pip);
     item.append(row);
+    if (itemUnread) {
+     const read = node('button', 'home-pip-badge home-pip-read'); read.type = 'button';
+     read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(itemUnread.count, 'unread message')} as read`);
+     read.title = 'Mark as read, without opening its chat';
+     read.append(node('span', 'home-pip-read-count', String(itemUnread.count)), node('span', 'home-pip-read-word', 'Read'));
+     read.onclick = () => { void markRead(itemUnread, index); };
+     item.append(read);
+    }
     if (canDismiss) {
      const x = node('button', 'home-pip-dismiss'); x.type = 'button';
      x.setAttribute('aria-label', `Dismiss: ${pip.name} — ${line}`); x.title = `Dismiss: ${line}. It comes back if ${pip.name} has something new.`;
      const icon = node('span', 'codicon codicon-close'); icon.setAttribute('aria-hidden', 'true'); x.append(icon);
-     x.onclick = () => { void dismiss([rows[index]], index); };
+     x.onclick = () => { void dismiss([rows.find(r => r.pip.id === pip.id)], index); };
      item.append(x);
     }
     list.append(item);
    }
    root.append(list);
-   const more = rows.length - SHOWN;
+   const more = rows.filter(row => !visible.some(item => item.pip.id === row.pip.id)).length;
    if (more > 0) {
     const rest = node('button', 'home-pips-more', `${more}${partial ? '+' : ''} more need you · Show all`); rest.type = 'button';
     rest.title = 'Open Needs attention in the Pips view';
@@ -220,35 +250,16 @@ export function mountHomePips(options) {
     root.append(rest);
    }
   }
-  const unreadRows = fresh.slice(0, 2);
-  if (unreadRows.length) {
-   const list = node('ul', 'home-pips-list home-pips-unread'); list.setAttribute('aria-label', 'Latest unread Pip messages');
-   for (const item of unreadRows) {
-    const pip = pips.find(p => p.id === item.pip_id), li = node('li', 'home-pip-item');
-    const row = node('button', 'home-pip-row'); row.type = 'button'; row.title = `Read ${pip.name} in Pips`;
-    const copy = node('span', 'home-pip-copy'); copy.append(node('strong', '', pip.name), node('small', '', item.latest));
-    row.append(face(pip, 'idle', 'row'), copy);
-    row.onclick = () => options.onOpen?.({pip: pip.id}); li.append(row);
-    // Its count, beside the row (never inside it): "Read" on hover or focus, and a click marks its whole chat read.
-    const read = node('button', 'home-pip-badge home-pip-read'); read.type = 'button';
-    read.setAttribute('aria-label', `Mark ${pip.name}'s ${plural(item.count, 'unread message')} as read`);
-    read.title = 'Mark as read, without opening its chat';
-    read.append(node('span', 'home-pip-read-count', String(item.count)), node('span', 'home-pip-read-word', 'Read'));
-    read.onclick = () => { void markRead(item, [...root.querySelectorAll('.home-pip-item')].indexOf(li)); };
-    li.append(read); list.append(li);
-   }
-   root.append(list);
-   if (fresh.length > 2) {
-    const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
-    more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
-   }
+  if (fresh.some(item => !visible.some(row => row.pip.id === item.pip_id))) {
+   const more = node('button', 'home-pips-more', `See all ${unreadCount} unread updates`); more.type = 'button';
+   more.onclick = () => options.onOpen?.({overview: true}); root.append(more);
   }
   if (unreadFailure) {
    const retry = node('button', 'home-pips-open', 'Retry'); retry.type = 'button'; retry.onclick = () => { void load(); };
    const warning = node('p', 'home-pips-error', 'Couldn’t check for new Pip messages.');
    warning.setAttribute('role', 'status'); warning.append(' ', retry); root.append(warning);
   }
-  if (!rows.length && !unreadRows.length && !unreadFailure) {
+  if (!displayed.length && !unreadFailure) {
    const row = node('div', 'home-pips-quiet');
    const faces = node('span', 'home-pips-faces');
    for (const pip of pips.slice(0, 6)) {

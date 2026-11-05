@@ -98,7 +98,7 @@ function waitingMarkup(){
    // A login to save (API 56) is saved from its chat's card or its page: the form is there, never in this tab.
    ?a.summary.kind==='login'?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])} Save it from the card in its chat.</span></div><div class="pc-actions"><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
    :`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${a.summary.payment===true?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>${a.summary.payment===true?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.${a.summary.host==='dash.cloudflare.com'&&a.summary.method?.toUpperCase()==='POST'&&a.summary.path?.startsWith('/cdn-cgi/challenge-platform/h/b/precursor/')?' Always allow covers this Cloudflare verification route for this Pip, including its changing URL token.':''}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;
@@ -269,7 +269,7 @@ async function runCommand(command){
 async function decide(id,how){
  const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;render();
  try{
-  if(how==='always'){await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});S.notice='Sent, and allowed from now on for this site.';}
+  if(how==='always'){await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});S.notice='Sent, and allowed from now on for this browser request.';}
   else{const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';}
  }catch(error){S.error=errorText(error);}
  finally{S.busy=false;await loadComputer();}

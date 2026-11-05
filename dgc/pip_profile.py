@@ -19,19 +19,27 @@ CREATE TABLE IF NOT EXISTS pip_profiles (
  pip_id TEXT PRIMARY KEY REFERENCES pips(id),
  title TEXT NOT NULL DEFAULT '' CHECK(length(title)<=60),
  body TEXT CHECK(body IS NULL OR body IN ('core','scout','lens','patch','rook','pulse','lock','quill')),
- color TEXT CHECK(color IS NULL OR color IN ('peach','rose','lilac','sky','mint','sun','slate')),
+ color TEXT CHECK(color IS NULL OR color IN ('core','scout','lens','patch','rook','pulse','lock','quill','peach','rose','lilac','sky','mint','sun','slate')),
  notify INTEGER NOT NULL DEFAULT 1 CHECK(notify IN (0,1)),
  updated_at TEXT NOT NULL
 );
 """
 BODIES = ("core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill")
-COLORS = ("peach", "rose", "lilac", "sky", "mint", "sun", "slate")
+COLORS = ("core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill", "peach", "rose", "lilac", "sky", "mint", "sun", "slate")
 FIELDS = ("title", "body", "color", "notify")
 LOCAL = ("editor-user", "local-console")
 SHARED_KINDS = ("links", "media", "files")
 MAX_SHARED = 60
 SCAN_MESSAGES = 400                 # links are found in the newest messages only
 URL = re.compile(r"https?://[^\s<>()\[\]{}\"'`]+", re.I)
+
+
+def migrate_character_palette(db) -> None:
+    """Widen the old seven-colour CHECK while preserving every saved profile."""
+    db.execute(SCHEMA.replace("pip_profiles (", "pip_profiles_new (").replace("IF NOT EXISTS pip_profiles_new", "pip_profiles_new"))
+    db.execute("INSERT INTO pip_profiles_new SELECT pip_id,title,body,color,notify,updated_at FROM pip_profiles")
+    db.execute("DROP TABLE pip_profiles")
+    db.execute("ALTER TABLE pip_profiles_new RENAME TO pip_profiles")
 
 
 def default() -> dict:

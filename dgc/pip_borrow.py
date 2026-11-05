@@ -786,7 +786,7 @@ class BorrowedTab(UserChromeSession):
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         fields = _fields(post, headers.get("content-type", ""))
         cues = {"method": verb, "host": host, "path": (parts.path or "/") + (("?" + parts.query) if parts.query else ""),
-                "fields": [name for name, _ in fields], "payment": carries_card_number(post), "target": self.target,
+                "fields": [name for name, _ in fields], "payment": carries_card_number(post, loose=document), "target": self.target,
                 "upload": "", "values": {name: str(value)[:300] for name, value in fields if name in ("operationName", "query")}}
         found = pip_levels.classify(cues)
         if found["verdict"] == "payment":

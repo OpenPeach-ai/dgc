@@ -246,12 +246,43 @@
   // that pin "Review  after" are asserting exactly that. The attribute's PRESENCE marks a pill;
   // its value is what the model reads. contenteditable=false makes it one object to the caret, so
   // the browser steps over it and selects it whole.
-  function pillElement(kind, label, wire = "") {
+  function pillElement(kind, label, wire = "", identity = "") {
     const pill = document.createElement("span");
     pill.className = `composer-pill pill-${kind}`;
     pill.setAttribute("contenteditable", "false");
     pill.setAttribute("data-pill", wire);
     pill.dataset.kind = kind;
+    if (kind === "pip") {
+      pill.dataset.pipId = identity;
+      const type = attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type;
+      const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(type);
+      const face = document.createElement("span"); face.className = "composer-pip-face"; face.setAttribute("aria-hidden", "true");
+      if (index >= 0 && window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
+        { index, name: label }, "idle", `composerPip${Math.random().toString(36).slice(2, 12)}`);
+      else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
+      pill.append(face, document.createTextNode(label));
+      pill.title = `${label} · Pip reference`;
+      return pill;
+    }
+    if (kind === "plugin") {
+      pill.dataset.pluginId = identity;
+      const mark = document.createElement("span"); mark.className = "composer-plugin-mark"; mark.setAttribute("aria-hidden", "true");
+      const logo = pluginLogos[identity];
+      if (logo) { const img = document.createElement("img"); img.alt = ""; img.src = logo; mark.appendChild(img); }
+      else mark.innerHTML = '<span class="codicon codicon-plug"></span>';
+      pill.append(mark, document.createTextNode(label));
+      pill.title = `${label} · connected plugin`;
+      return pill;
+    }
+    if (kind === "artifact") {
+      pill.dataset.artifactKind = identity;
+      const glyph = OUTPUT_CHOICES.find(([value]) => value === identity)?.[3] || "output";
+      const mark = document.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${glyph}`;
+      mark.setAttribute("aria-hidden", "true");
+      pill.append(mark, document.createTextNode(label));
+      pill.title = `${label} · Artifact format`;
+      return pill;
+    }
     if (kind === "link") {
       // NO FAVICON HERE, and that is the whole point. Setting img.src fetches from Google's icon
       // service the instant the element is built -- on a DETACHED node, before insertComposerPill
@@ -277,15 +308,15 @@
   // A null `start` puts the pill at the caret as it stands. Text offsets cannot say which side of
   // a pill whose wire text is "" they mean, so a paste that rebuilds several pills in a row places
   // each one where the last left the caret.
-  function insertComposerPill(start, end, kind, label, wire = "") {
-    return recordComposerEdit(() => placeComposerPill(start, end, kind, label, wire));
+  function insertComposerPill(start, end, kind, label, wire = "", identity = "") {
+    return recordComposerEdit(() => placeComposerPill(start, end, kind, label, wire, identity));
   }
-  function placeComposerPill(start, end, kind, label, wire) {
+  function placeComposerPill(start, end, kind, label, wire, identity = "") {
     // Through execCommand still, because insertHTML is what puts the caret, the selection and the
     // surrounding text right; the undo step itself is the composer's own (recordComposerEdit).
     input.focus({ preventScroll: true });
     if (start != null) setComposerRange(start, end);
-    const built = pillElement(kind, label, wire);
+    const built = pillElement(kind, label, wire, identity);
     // Tag it so the caret repair below can find exactly the node just inserted, rather than
     // guessing at "the last pill" -- there may already be others, in any order.
     const stamp = `p${Math.random().toString(36).slice(2, 10)}`;
@@ -339,7 +370,7 @@
     // Skills surface has no pill and must not be governed by one; reconcilePills() below only
     // withdraws the ones that came in this way.
     const owner = attachments.find((a) => (kind === "file" ? a.label === label && a.resource
-      : a[kind] === label));
+      : kind === "pip" ? a.pipReference?.pip_id === identity : a[kind] === label));
     if (owner) owner.fromPill = true;
     // The row was drawn before this pill existed -- attachInvocation renders it, then the pill is
     // inserted -- so redraw now that there is something inline to defer to.
@@ -391,9 +422,11 @@
     for (let i = attachments.length - 1; i >= 0; i--) {
       const a = attachments[i];
       if (!a.fromPill) continue;
-      const kind = a.skill ? "skill" : a.template ? "template" : (a.resource ? "file" : "");
-      const name = kind === "file" ? a.label : a[kind];
-      if (kind && !shown.has(`${kind}\u0000${name}`)) { attachments.splice(i, 1); dropped = true; }
+      const kind = a.skill ? "skill" : a.template ? "template" : a.resource ? "file" : a.pipReference ? "pip" : "";
+      const name = kind === "file" ? a.label : kind === "pip" ? a.pipReference.name : a[kind];
+      const present = kind === "pip" ? [...input.querySelectorAll('[data-kind="pip"]')]
+        .some(pill => pill.dataset.pipId === a.pipReference.pip_id) : shown.has(`${kind}\u0000${name}`);
+      if (kind && !present) { attachments.splice(i, 1); dropped = true; }
     }
     if (dropped) { renderAtts(); scheduleDraftSave(); }
   }
@@ -408,9 +441,11 @@
     // with no skills at all. Only the last pill standing for a selection gives it back. Files are
     // exempt: the @file branch pushes unconditionally, so those are already one-to-one.
     if (kind !== "file" && [...input.querySelectorAll(".composer-pill")].some((other) =>
-      other !== pill && other.dataset.kind === kind && other.textContent === name)) return;
+      other !== pill && other.dataset.kind === kind && (kind === "pip"
+        ? other.dataset.pipId === pill.dataset.pipId : other.textContent === name))) return;
     const index = attachments.findIndex((a) => (
-      kind === "file" ? a.label === name && a.resource : a[kind] === name));
+      kind === "file" ? a.label === name && a.resource
+        : kind === "pip" ? a.pipReference?.pip_id === pill.dataset.pipId : a[kind] === name));
     if (index >= 0) { attachments.splice(index, 1); renderAtts(); }
   }
 
@@ -782,7 +817,7 @@
   function pillToken(pill) {
     const kind = pill.dataset.kind, name = pill.textContent;
     if (kind === "link") return pill.dataset.pill || pill.title || name;
-    return (kind === "skill" ? "$" : kind === "file" ? "@" : "/") + name;
+    return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact"].includes(kind) ? "@" : "/") + name;
   }
   function copyComposerSelection(event) {
     const sel = window.getSelection();
@@ -802,9 +837,12 @@
       marked.split(PILL_MARK).forEach((piece, i) => {
         if (i) {
           const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pill.textContent;
-          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent) : null;
+          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent)
+            : kind === "pip" ? attachments.find((a) => a.pipReference?.pip_id === pill.dataset.pipId) : null;
           parts.push({ kind, label, wire: pill.dataset.pill || "", token: pillToken(pill),
-            resource: att ? { ...att.resource } : null });
+            identity: kind === "plugin" ? pill.dataset.pluginId : kind === "artifact" ? pill.dataset.artifactKind : "",
+            resource: att?.resource ? { ...att.resource } : null,
+            pipReference: att?.pipReference ? { ...att.pipReference } : null });
         }
         if (piece) parts.push(piece);
       });
@@ -825,15 +863,24 @@
       if (sel && sel.rangeCount && !sel.isCollapsed) deleteComposerSelection();
       for (const part of parts) {
         if (typeof part === "string") { insertComposerText(part); continue; }
-        const { kind, label, wire, token, resource } = part;
+        const { kind, label, wire, token, resource, pipReference, identity } = part;
         let ok = true;
         if (kind === "skill" || kind === "template") ok = attachInvocation(kind, label);
         else if (kind === "file") {
           // One selection per @file pill, as the picker makes them: releasePill relies on it.
           ok = !!resource && canAttach();
           if (ok) attachments.push({ label, resource: { ...resource }, fromPill: true });
+        } else if (kind === "pip") {
+          ok = validPipReference(pipReference) && canAttach()
+            && !attachments.some(a => a.pipReference?.pip_id === pipReference.pip_id);
+          if (ok) attachments.push({ label: pipReferenceLabel(pipReference), pipReference: { ...pipReference }, fromPill: true });
+        } else if (kind === "plugin") {
+          ok = pluginRows.some(row => row.name === identity && row.connected === true
+            && (row.display_name || row.name) === label && wire === label);
+        } else if (kind === "artifact") {
+          ok = offeredOutputs().some(([value, name]) => value === identity && name === label && wire === label);
         } else if (kind === "command") ok = !input.querySelector('[data-kind="command"]');   // one per prompt
-        if (ok) insertComposerPill(null, null, kind, label, wire);
+        if (ok) insertComposerPill(null, null, kind, label, wire, pipReference?.pip_id || identity || "");
         else insertComposerText(token);
       }
       reconcilePills();
@@ -3614,7 +3661,13 @@
   function promptAttachmentChip(item, images, bubble) {
     if (item.pipReference) {
       const chip = el("span", "prompt-att chip pip-reference-chip");
-      chip.textContent = pipReferenceLabel(item.pipReference);
+      const ref = item.pipReference;
+      const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(ref.pip_type);
+      const face = el("span", "pip-reference-face"); face.setAttribute("aria-hidden", "true");
+      if (index >= 0 && window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
+        { index, name: ref.name }, "idle", `sentPip${Math.random().toString(36).slice(2, 12)}`, { paused: true });
+      else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
+      chip.append(face, el("span", "pip-reference-name", ref.name.replace(/\s+/g," ").trim()));
       chip.title = `${item.pipReference.pip_id} · ${item.pipReference.status} · lifecycle ${item.pipReference.lifecycle_revision} · Reference only`;
       return chip;
     }
@@ -6271,6 +6324,16 @@
       return `<dl class="pip-permission">${row("Model for Pips", String(args.default_model || "") || "Same as DGC")}${row("Why", args.reason)}</dl>`
         + `<div class="muted pip-permission-note">Allow saves it in Settings, Agents, Pips: every Pip on Default uses it from its next run. A Pip with a model of its own keeps it.</div>`;
     }
+    if (name === "pips_workflow") {
+      const ids = Array.isArray(args.pip_ids) ? args.pip_ids : [];
+      const names = Array.isArray(args.pip_names) ? args.pip_names : [];
+      const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+      return `<dl class="pip-permission">${row("Workflow", args.name)}${row("Pips", `${ids.length} ${args.scope || ""}`)}`
+        + ids.map((id, i) => row(i ? `Step ${i + 1}` : "Start", `${names[i] || "Pip"} · ${id.slice(-8)}`)
+          + (i ? row("Handoff task", tasks[i - 1]) : "")).join("")
+        + `${row("Routing", args.mode === "unattended" ? "Unattended handoffs" : "Review each handoff")}</dl>`
+        + `<div class="muted pip-permission-note">Allow turns on this exact workflow. It routes results only; every Pip keeps its own approval rules. This choice cannot be set to Always allow.</div>`;
+    }
     if (name !== "pips_setup") return "";
     const reads = args.web_plan && Array.isArray(args.web_plan.reads) ? args.web_plan.reads : [];
     const readText = reads.map((r) => (r && r.kind === "search" ? `Search: ${r.query || ""}` : String((r && r.url) || ""))).join("\n");
@@ -7581,6 +7644,8 @@ function permissionChoices(ev) {
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
   let pluginLogos = {};
+  let pluginRows = [];
+  let pluginListRequestedAt = 0;
   let pluginNames = {};                 // each plugin's own name, by the server its tools come from ("example" -> "Example")
   // The same names as DGC gives them on start (ready.capabilities.plugin_names), before the plugin list has loaded: an
   // Allow card for a plugin's tool names the plugin as its card does ("MCP Apps example", not "Example").
@@ -7657,12 +7722,18 @@ function permissionChoices(ev) {
   function cachePluginLogos(items) {
     pluginLogos = {};
     pluginNames = {};
+    pluginRows = (Array.isArray(items) ? items : []).filter(row => row && typeof row.name === "string"
+      && /^[a-z0-9_-]{1,64}$/.test(row.name) && row.connected === true);
     for (const row of Array.isArray(items) ? items : []) {
       if (row.logo) pluginLogos[row.name] = row.logo;
       const named = typeof row.display_name === "string" ? row.display_name.trim().slice(0, 80) : "";
       if (named) for (const server of [row.name, ...(Array.isArray(row.server_names) ? row.server_names : [])]) {
         if (typeof server === "string") pluginNames[server] = named;
       }
+    }
+    if ((popMode === "@" || popAwaitingPlugins) && !pipPicker.active) {
+      popAwaitingPlugins = false;
+      onInput();
     }
   }
   function renderSkills(items) {
@@ -8335,7 +8406,7 @@ function permissionChoices(ev) {
           : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
         const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
         const calls = fixAsk ? null : pluginCalls(ev.name, ev.args);
-        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_workflow" ? "Set up a Pip workflow" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
         // ev.choices is exactly the answers this card takes (ready.capabilities.permission_choices): a DGC Router change
         // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
         // no Always allow. An older CLI sends no list (or all three): every button, as before.
@@ -9253,6 +9324,7 @@ function permissionChoices(ev) {
       if (kind === "skill" && a.skill === name) return true;
       if (kind === "template" && a.template === name) return true;
       if (kind === "file" && a.resource && a.label === name) return true;
+      if (kind === "pip" && a.pipReference?.pip_id === pill.dataset.pipId) return true;
     }
     return false;
   }
@@ -9306,6 +9378,7 @@ function permissionChoices(ev) {
 
   // ---- @file / slash popover ----
   let popAwaitingFiles = false;   // an "@" opened before the workspace file list had arrived
+  let popAwaitingPlugins = false; // the connected-plugin catalog may arrive after the first "@"
   function hidePop() { clearPipPicker(); pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
   function showPop(items) {
     popItems = items; popIdx = 0;
@@ -9316,7 +9389,13 @@ function permissionChoices(ev) {
     // is a rendering change only.
     const rowIcon = (it) => (it.skill ? "codicon-package"
       : it.template ? "codicon-symbol-snippet" : it.modCommand || it.action === "mods" ? "codicon-extensions" : "codicon-terminal");
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => { const ref=it.pipReference,index=ref?["core","scout","lens","patch","rook","pulse","lock","quill"].indexOf(ref.pip_type):-1;
+      const logo = it.pluginId && pluginLogos[it.pluginId];
+      const icon=index>=0&&window.PipConcepts?.plush?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:ref.name},"idle",`pickerPip${i}`)}</span>`
+        : logo ? `<span class="pi-icon pi-plugin-mark" aria-hidden="true"><img src="${esc(logo)}" alt=""></span>`
+        : it.artifactKind ? `<span class="pi-icon codicon codicon-${esc(it.artifactGlyph)}" aria-hidden="true"></span>`
+        :`<span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>`;
+      return `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${icon}${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`; }).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
@@ -9380,7 +9459,18 @@ function permissionChoices(ev) {
       if(attachments.some(a=>a.pipReference?.pip_id===it.pipReference.pip_id)){sysLine("This Pip is already referenced.");return;}
       if(attachments.filter(a=>a.pipReference).length>=8){sysLine("Reference at most eight Pips in one message.",true);return;}
       if(!canAttach())return;
-      attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});renderAtts();replacePopToken();hidePop();input.focus();return;
+      attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});
+      insertComposerPill(popStart,popEnd,"pip",it.pipReference.name.replace(/\s+/g," ").trim(),"",it.pipReference.pip_id);
+      hidePop();input.focus();return;
+    }
+    if (it.pluginId || it.artifactKind) {
+      const name = String(it.label || "").trim();
+      const valid = it.pluginId ? pluginRows.some(row => row.name === it.pluginId && row.connected === true
+        && (row.display_name || row.name) === name)
+        : offeredOutputs().some(([value, label]) => value === it.artifactKind && label === name);
+      if (!valid) { hidePop(); return; }
+      insertComposerPill(popStart, popEnd, it.pluginId ? "plugin" : "artifact", name, name, it.pluginId || it.artifactKind);
+      hidePop();input.focus();return;
     }
     if (it.skill || it.template) {
       const kind = it.skill ? "skill" : "template";
@@ -9643,7 +9733,8 @@ function permissionChoices(ev) {
     popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
     popMode = token[2][0];
     const query = token[2].slice(1).toLowerCase();
-    if(pipPicker.active){if(query!==pipPicker.query)requestPromptPips(query);else renderPipPicker();return;}
+    if(pipPicker.active){const search=query==="pip"?"":query.startsWith("pip:")?query.slice(4):query;
+      if(search!==pipPicker.query)requestPromptPips(search);else renderPipPicker();return;}
     // Codex turns the complete `/goal` token into a pinned composer choice immediately. Requiring
     // a second Enter or Tab leaves it as highlighted inline text and gives no visible draft state.
     // A pasted `/goal pause` still remains a management command because its final token is `pause`.
@@ -9670,15 +9761,31 @@ function permissionChoices(ev) {
       showPop(matches);
     }
     else if (popMode === "@") {
+      if(query==="pip"&&pipReferencesSupported){pipPicker.active=true;requestPromptPips("");return;}
+      if (Date.now() - pluginListRequestedAt > 30000) {
+        pluginListRequestedAt = Date.now();
+        popAwaitingPlugins = true;
+        vscode.postMessage({ type: "requestPlugins" });
+      }
       // The list is fetched lazily, so the FIRST "@" in a fresh panel has nothing to show. Note
       // that a picker is waiting before showPop runs: with no items showPop calls hidePop, which
       // clears popMode, and the retry in the "files" handler was guarded on popMode === "@" --
       // so the list arrived and nothing reopened. You typed "@", saw nothing, and only got the
       // picker by typing another character.
       if (files.length === 0) { popAwaitingFiles = true; vscode.postMessage({ type: "reqFiles" }); }
-      const candidates=files.filter((f) => f.label.toLowerCase().includes(query)).slice(0,30);
+      const candidates = [];
+      for (const row of pluginRows) {
+        const label = String(row.display_name || row.name).trim().slice(0, 80);
+        if (label && `${label} ${row.name}`.toLowerCase().includes(query))
+          candidates.push({ label, kind: "Plugin", detail: "Connected", pluginId: row.name });
+      }
+      if (outputOffered) for (const [value, label, , glyph] of offeredOutputs()) {
+        if (value !== "auto" && `${label} ${value}`.toLowerCase().includes(query))
+          candidates.push({ label, kind: "Artifact", detail: `Create ${label.toLowerCase()}`, artifactKind: value, artifactGlyph: glyph });
+      }
+      candidates.push(...files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
       if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This chat’s workspace · no work starts",pipPicker:true});
-      showPop(candidates);
+      showPop(candidates.slice(0, 40));
     } else hidePop();
   }
   input.addEventListener("input", onInput);

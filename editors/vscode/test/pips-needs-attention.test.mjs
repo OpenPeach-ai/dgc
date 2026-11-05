@@ -24,7 +24,7 @@ const page=(items,extra={})=>({as_of:new Date().toISOString(),total:items.length
 const link={id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:'Gmail',reason:'To read your new mail.',status:'requested',label:null,error:null,created_at:ago(9),updated_at:new Date().toISOString()};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
+function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profiles={}}={}){
  // embedded: the side bar's Pips view (main.js mounts it in a shadow root and navigates it from the Sessions home).
  const dom=new JSDOM(embedded?'<!doctype html><html><body><div id="pips-host"></div></body></html>':viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
@@ -41,7 +41,7 @@ function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
  const answer=(m,result,ok=true)=>{answered.add(m.id);message({type:'pipsReply',id:m.id,ok,...(ok?{result}:{error:{message:result}})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
  const runner={runner_id:'runner',status:'running',online:true,paused:false,counts:{queued:0,running:0,cancelling:0}};
- const pips=[pip(PIP,'Ava'),pip(MAX,'Max')];
+ const pips=[pip(PIP,'Ava',{profile:profiles[PIP]}),pip(MAX,'Max',{profile:profiles[MAX]})];
  const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'}],current_workspace_id:PW}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),
   list_pips:()=>({pips,total:pips.length,next_offset:null}),get_pip:()=>({pip:pips.find(p=>p.id===r.pip_id)}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
@@ -85,6 +85,14 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  assert.match(x.d.querySelector(`[data-job="${PIP}"]`).textContent,/2 waiting for you/);
  assert.match(x.d.querySelector(`[data-job="${MAX}"]`).textContent,/1 waiting for you/);
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('list_pip_attention')[0].request)),{type:'list_pip_attention',limit:100});
+});
+
+test('Needs attention uses the current saved face and colour for each Pip',async()=>{
+ const found=page([item('app_link',LINK,PIP,'Connect Gmail?')]);
+ const x=setup({found,profiles:{[PIP]:{title:'',body:'quill',color:'lens',notify:true}}});await x.drain();
+ const face=x.d.querySelector(`[data-attention="app_link:${LINK}"] .avatar`);
+ assert.equal(face?.dataset.character,'quill');
+ assert.equal(face?.dataset.tint,'lens');
 });
 
 test('a row opens its Pip at the card: the chat scrolls to the Connect card; a held submit opens its computer',async()=>{

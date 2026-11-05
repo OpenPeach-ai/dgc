@@ -214,6 +214,23 @@ test('a read that overlaps the prompt box saving its own choice never takes the 
  assert.equal(x.control('#chat-context').value,'131072');
 });
 
+test('rapid Pip option changes save in order and the last thinking level survives a reload',async()=>{
+ const x=setup({api:66,chatControls:{...controls(),context_max:1048576}});await x.select('a');
+ const hold={set_pip_chat_options:()=>undefined};
+ x.choose('#chat-context','65536');await x.drain(hold);
+ x.choose('#chat-thinking','high');await x.drain(hold);
+ assert.equal(x.requests('set_pip_chat_options').length,1,'the newer choice waits for the first save');
+ const first=x.requests('set_pip_chat_options')[0];
+ x.answer(first,{chat_controls:{...controls({context_size:65536,thinking:'off'}),context_max:1048576}});
+ await x.drain(hold);
+ const second=x.requests('set_pip_chat_options')[1];
+ assert.equal(second.request.chat_options.thinking,'high');
+ x.answer(second,{chat_controls:{...controls({context_size:65536,thinking:'high'}),context_max:1048576}});
+ await x.drain();
+ x.receive({type:'pipsVisibility',visible:true});await x.drain({list_pip_messages:()=>({pip_id:'a',workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0,continuity:null,chat_controls:{...controls({context_size:65536,thinking:'high'}),context_max:1048576}})});
+ assert.equal(x.d.querySelector('#chat-thinking').value,'3');
+});
+
 test('before API 47 a choice is for the next reply only and nothing is saved',async()=>{
  const x=setup({api:46,chatControls:{...controls(),context_max:1048576}});await x.select('a');
  x.choose('#chat-context','65536');

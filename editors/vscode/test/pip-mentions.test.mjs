@@ -12,12 +12,14 @@ function answer(p,request,rows=[row],cursor=null){p.send({type:'event',event:{ty
 function select(p){answer(p,open(p));key(p,'Enter');}
 test('Pip picker uses keyboard, sends only exact reference pins, and never attaches a session',()=>{
  const p=panel();select(p);assert.equal(p.doc.getElementById('input').value,'Explain ');
- assert.match(p.doc.getElementById('attachments').textContent,/@Rook review · Pip v2/);key(p,'Enter');
+ assert.match(p.doc.querySelector('#input .pill-pip')?.textContent||'',/Rook review/);
+ assert.equal(p.doc.querySelectorAll('#attachments .pip-reference-chip').length,0,'the selected Pip is inline');key(p,'Enter');
  const sent=p.posted.filter(m=>m.type==='prompt').at(-1);assert.deepEqual(JSON.parse(JSON.stringify(sent.pip_references)),[{pip_id:ID,expected_version:2,expected_lifecycle_revision:4}]);
  assert.equal(sent.context,undefined);assert.equal(p.posted.some(m=>m.type==='attach_pip_to_session'||m.type==='pipsRequest'),false);
+ assert.match(p.doc.querySelector('#log .pip-reference-chip')?.textContent||'',/Rook review/);
 });
 test('file mention named pip remains independently selectable beside Pip category',()=>{
- const p=panel();p.send({type:'files',files:[{label:'pips.txt',path:'/ws/pips.txt',uri:'file:///ws/pips.txt',relative_path:'pips.txt',workspace:'ws'}]});type(p,'Read @pip');key(p,'ArrowDown');key(p,'Enter');key(p,'Enter');
+ const p=panel();p.send({type:'files',files:[{label:'pips.txt',path:'/ws/pips.txt',uri:'file:///ws/pips.txt',relative_path:'pips.txt',workspace:'ws'}]});type(p,'Read @pips.txt');key(p,'Enter');key(p,'Enter');
  const sent=p.posted.filter(m=>m.type==='prompt').at(-1);assert.equal(sent.pip_references,undefined);assert.equal(sent.context[0].type,'file_mention');assert.equal(sent.context[0].path,'/ws/pips.txt');
 });
 test('late query and session replies never populate the active picker',()=>{
@@ -42,5 +44,41 @@ test('standing goal refuses reference chips without discarding draft',()=>{
  const p=panel();select(p);type(p,'/goal explain this');key(p,'Enter');assert.equal(p.posted.some(m=>m.type==='startGoal'),false);assert.equal(p.doc.getElementById('input').value,'/goal explain this');assert.match(p.doc.getElementById('attachments').textContent,/Rook/);
 });
 test('an unregistered workspace is an honest empty state and multiline names stay inert',()=>{
- const p=panel(),r=open(p);p.send({type:'event',event:{type:'prompt_pips',request_id:r.request_id,workspace_id:'',pips:[],next_cursor:null}});assert.match(p.doc.getElementById('pop').textContent,/No Pips are registered/);key(p,'Escape');const next=open(p);answer(p,next,[{...row,name:'Rook\n\t<script>bad</script>'}]);assert.equal(p.doc.querySelector('#pop script'),null);key(p,'Enter');assert.match(p.doc.getElementById('attachments').textContent,/Rook <script>bad<\/script>/);
+ const p=panel(),r=open(p);p.send({type:'event',event:{type:'prompt_pips',request_id:r.request_id,workspace_id:'',pips:[],next_cursor:null}});assert.match(p.doc.getElementById('pop').textContent,/No Pips are registered/);key(p,'Escape');const next=open(p);answer(p,next,[{...row,name:'Rook\n\t<script>bad</script>'}]);assert.equal(p.doc.querySelector('#pop script'),null);key(p,'Enter');assert.match(p.doc.querySelector('#input .pill-pip')?.textContent||'',/Rook <script>bad<\/script>/);
+});
+test('typing @pip opens the Pip list directly and the face stays with the inline reference',()=>{
+ const p=panel();type(p,'Ask @pip');p.advance(120);const r=p.posted.filter(m=>m.type==='list_prompt_pips').at(-1);
+ assert.ok(r,'the picker requests the Pip list without a category click');answer(p,r);key(p,'Enter');
+ const pill=p.doc.querySelector('#input .pill-pip');assert.equal(pill?.dataset.pipId,ID);
+ assert.ok(pill.querySelector('.composer-pip-face'),'the face slot is inline');
+});
+test('connected plugin mention waits for catalog, keeps its logo, and sends plain words',()=>{
+ const p=panel(),input=type(p,'Ask @composio');
+ assert.ok(p.posted.some(m=>m.type==='requestPlugins'));
+ p.send({type:'event',event:{type:'plugin_catalog',items:[
+   {name:'composio',display_name:'Composio',connected:true,logo:'data:image/png;base64,AAAA'},
+   {name:'notion',display_name:'Notion',connected:false,logo:'data:image/png;base64,AAAA'}]}});
+ assert.match(p.doc.getElementById('pop').textContent,/Composio/);
+ assert.doesNotMatch(p.doc.getElementById('pop').textContent,/Notion/);
+ key(p,'Enter');
+ const pill=input.querySelector('.pill-plugin');
+ assert.equal(pill?.dataset.pluginId,'composio');
+ assert.ok(pill.querySelector('.composer-plugin-mark img'));
+ assert.equal(pill?.dataset.pill,'Composio');
+ key(p,'Enter');
+ const sent=p.posted.filter(m=>m.type==='prompt').at(-1);
+ assert.equal(sent.text,'Ask Composio');
+ assert.equal(sent.context,undefined);
+});
+test('Artifact mentions use their distinct picker icons and send without the sigil',()=>{
+ const p=makeDom({clock:true});p.send(ready(0));p.send({type:'event',event:{type:'ready',capabilities:{artifacts:{version:1,outputs:['slides','dashboard','page']}},model:'m',mode:'default',think:'off',base_url:'http://localhost:1/v1',workspace_trusted:true,commands:[],custom_commands:[],goal:{text:'',status:'none'},context_size:1}});p.send({type:'session_ready',sessionId:'chat-a'});
+ const input=type(p,'Make @dashboard');
+ const row=[...p.doc.querySelectorAll('#pop .pi')].find(n=>n.textContent.includes('Dashboard'));
+ assert.ok(row?.querySelector('.codicon-dashboard'));
+ key(p,'Enter');
+ const pill=input.querySelector('.pill-artifact');
+ assert.equal(pill?.dataset.artifactKind,'dashboard');
+ assert.ok(pill.querySelector('.codicon-dashboard'));
+ key(p,'Enter');
+ assert.equal(p.posted.filter(m=>m.type==='prompt').at(-1).text,'Make Dashboard');
 });

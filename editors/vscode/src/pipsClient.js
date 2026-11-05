@@ -172,6 +172,7 @@ function dictatedToPip(text,send){
 S.workspaces=[];S.currentWorkspaceId=null;S.folderOpen=true;S.projectEmpty=false;S.switching=false;S.showArchived=false;S.emailDrafts=[];S.emailDraftError="";S.calendarDrafts=[];S.calendarDraftError="";let emailDraftSeq=0,calendarDraftSeq=0;
 S.composerPanel='';S.chatControls=null;S.continuity=null;
 const chatPreferences=new Map();
+const chatPreferenceQueues=new Map(),chatPreferenceVersions=new Map();
 // The prompt box's saves of a Pip's own window and thinking (API 47) that haven't answered yet, and a count that moves
 // when one starts or ends: a conversation read that overlapped a save never takes its choice back.
 const chatOptionsSaving=new Set();let chatOptionsEpoch=0;
@@ -443,12 +444,28 @@ function fitChatInput(){const input=$('chatText');if(!input)return;const sendBut
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
 // its own, saved at once); before, only the next reply.
 function choiceScope(){return S.apiVersion>=47?'For this Pip: its replies and the work it does on its own.':'For the next reply.';}
-async function saveChatPreference(pip,options){
+function saveChatPreference(pip,options){
  if(S.apiVersion<47||remoteHost)return;
- const token=scope();chatOptionsSaving.add(pip);chatOptionsEpoch++;
- try{const v=await send('set_pip_chat_options',{pip_id:pip,chat_options:options});if(token!==scope()||S.selected!==pip||!record(v))return;S.chatControls=checkedChatControls(v.chat_controls);render();}
- catch(error){if(token===scope()&&S.selected===pip)setError(error);}
- finally{chatOptionsSaving.delete(pip);chatOptionsEpoch++;}
+ const token=scope(),version=(chatPreferenceVersions.get(pip)||0)+1;
+ chatPreferenceVersions.set(pip,version);chatOptionsSaving.add(pip);chatOptionsEpoch++;
+ // A quick effort change after a window change must not let an older response write last.
+ const previous=chatPreferenceQueues.get(pip);
+ const perform=async()=>{
+  const v=await send('set_pip_chat_options',{pip_id:pip,chat_options:options});
+  if(token!==scope()||S.selected!==pip||version!==chatPreferenceVersions.get(pip))return;
+  if(!record(v))throw Error('DGC did not confirm the saved Pip options.');
+  S.chatControls=checkedChatControls(v.chat_controls);render();
+ };
+ const pending=(previous?previous.catch(()=>{}).then(perform):perform()).catch(error=>{
+  if(token===scope()&&S.selected===pip&&version===chatPreferenceVersions.get(pip)){
+   chatPreferences.delete(pip);setError(error);void loadMessages();
+  }
+ }).finally(()=>{
+  if(version===chatPreferenceVersions.get(pip)){
+   chatPreferenceQueues.delete(pip);chatOptionsSaving.delete(pip);chatOptionsEpoch++;
+  }
+ });
+ chatPreferenceQueues.set(pip,pending);
 }
 function updateChatPreference(kind,value){
  if(S.apiVersion<24||!S.chatControls||!S.selected||!usable()||S.busy||archived())return;
@@ -745,6 +762,20 @@ async function toggleChatActivity(runId){
   catch(error){if(token===scope()&&chatActivities.get(runId)===value)value.error=errorText(error);}
   finally{if(token===scope()&&chatActivities.get(runId)===value){value.loading=false;render();}}
 }
+// Opening an empty chat starts the Pip's own first turn. The backend uses one reserved
+// idempotency key and refuses a late hello once a person has already spoken; this local
+// guard prevents the four-second refresh from repeatedly asking while that turn queues.
+const firstOpenRequested=new Set();
+async function introduceOnFirstOpen(id){
+ if(firstOpenRequested.has(id)||remoteHost||S.apiVersion<43||!S.runner?.online||S.runner.paused)return;
+ firstOpenRequested.add(id);
+ try{
+  await send('introduce_pip',{pip_id:id});
+  if(S.selected===id&&S.tab==='chat')void loadMessages();
+ }catch(error){
+  if(S.selected===id){S.messagesError=`${S.pip?.name||'This Pip'} could not start its first message: ${errorText(error)}`;render();}
+ }
+}
 async function loadMessages(more=false){
  if(!more){void loadEmailDrafts();void loadAppLinks();void loadPlugins();void loadBorrows();void loadRoutines();void loadNotes();void loadWorkingNotes();void loadDailyLog();void refreshComputer();if(personalPip()&&!S.models.length&&!S.defaultModel)void loadModels();}
   if(!S.selected||!usable()||(more&&(!S.messageCursor||S.messagesLoading||S.messages.length>=200)))return;
@@ -758,6 +789,7 @@ async function loadMessages(more=false){
     if(more){if(page.next_before_id===before||page.messages.some(m=>S.messages.some(p=>p.id===m.id)))throw new Error('Conversation history did not advance. Refresh before retrying.');S.messages=[...page.messages,...S.messages].slice(-200);S.messageCursor=page.next_before_id;}
     else{const existing=new Map(S.messages.map((m,i)=>[m.id,i]));const next=[...S.messages];for(const m of page.messages){if(existing.has(m.id))next[existing.get(m.id)]=m;else next.push(m);}if(!S.messagesLoaded)S.messageCursor=page.next_before_id;S.messages=next.slice(-200);}
     S.messagesLoaded=true;S.messagesError='';S.chatActiveRun=page.active_run;S.omitted=page.history_context_omitted_count;S.continuity=chatContinuity(page.continuity,id,S.workspace.id);syncRoutineLive();
+    if(!more&&S.tab==='chat'&&!S.messages.length&&!page.active_run&&S.pip?.id===id&&S.pip.status==='active')void introduceOnFirstOpen(id);
     if(!more)voiceMode?.check(!!page.active_run);
     if(!page.active_run){streamSeq++;streamLoading=false;S.stream=null;}else if(!S.stream||S.stream.runId!==page.active_run.id){streamSeq++;streamLoading=false;S.stream={runId:page.active_run.id,cursor:0,text:'',limited:false,error:'',truncated:false};}
     if(page.active_run)void loadChatStream();
@@ -1332,7 +1364,10 @@ async function openComputerAction(id){
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;
  }
- openReview({title:'Send this once?',description:`${S.pip?.name||'The Pip'} wants to send a form to ${s.host}. Nothing has been sent.`,
+ const challenge=s.host==='dash.cloudflare.com'&&s.method?.toUpperCase()==='POST'&&s.path?.startsWith('/cdn-cgi/challenge-platform/h/b/precursor/');
+ openReview({title:challenge?'Cloudflare browser verification?':'Send this once?',description:challenge
+  ?`${S.pip?.name||'The Pip'} is sending a Cloudflare verification request. Nothing has been sent. Always allow covers this verification route on dash.cloudflare.com for this Pip, including its changing URL token. Other browser requests still ask separately.`
+  :`${S.pip?.name||'The Pip'} wants to send a form to ${s.host}. Nothing has been sent.`,
   body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
   confirm:'Send once',always:s.payment!==true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
@@ -2047,7 +2082,8 @@ function prepareStarter(review){
  })();
 }
 function setupsMarkup(){
- if(S.apiVersion>=23&&!S.overview&&!S.create&&S.tab==='chat')return setupRows.length||setupError?`<div class="chat-setup-banner">${button('chat-review-setups',setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`)}</div>`:'';
+ // Setups for other Pips belong to the Pips overview, never another Pip's conversation.
+ if(S.apiVersion>=23&&!S.overview&&!S.create&&S.tab==='chat')return '';
  if(S.apiVersion<23||!setupRows.length&&!setupError&&(S.create||S.selected&&!S.overview))return '';
  return `<section class="setup-inbox" aria-label="Pip setup reviews"><details data-details="setup-inbox"${setupError?' open':''}><summary class="setup-inbox-toggle">${setupRows.length?`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`:'Set up a Pip with DGC'}<span>Review</span></summary><div class="section-head"><h2>New Pips${setupRows.length?' · '+setupRows.length:''}</h2>${button('refresh-setups',setupLoading?'Checking…':'Check again',setupLoading||S.busy||!usable())}</div>${errorMarkup(setupError)}${setupRows.map(s=>`<article class="setup-card">${avatar('waiting_approval',S.types.find(t=>t.id===s.pip_type),`setup-${s.id}`)}<div class="setup-card-copy"><span class="badge">Waiting for you</span><h3>${esc(s.name)}</h3><p class="goal">${esc(s.goal)}</p><p class="muted">${esc(s.source_policy==='personal'?'Personal · across your projects':s.project_root)} · ${esc((s.event_trigger?`After each new commit to ${s.source_ref}`:scheduleLabel(s.schedule)))}${s.run_now?' · also runs once now':''}</p></div><div class="actions"><button type="button" data-setup="${esc(s.id)}"${S.busy||!usable()?' disabled':''}>Review…</button><button type="button" data-reject-setup="${esc(s.id)}"${S.busy||!usable()?' disabled':''}>Reject</button></div></article>`).join('')}${setupRows.length>=5?'<p class="muted">Showing 5. Answer one to see more.</p>':''}${!setupRows.length&&!setupError?'<p class="muted">Ask the DGC chat for a new Pip. It appears above the chat box for you to create.</p>':''}</details></section>`;
 }
@@ -2194,7 +2230,9 @@ async function loadAttention(){
  catch{/* the home still lists every Pip; the next refresh tries again */}
 }
 function attentionHomeMarkup(){
- const face=i=>i.pip_id?pipAvatar({id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id},'waiting_approval',`attn-${i.card}`,characterType(i.pip_type)):'<span class="attention-mark" aria-hidden="true">+</span>';
+ const face=i=>{if(!i.pip_id)return '<span class="attention-mark" aria-hidden="true">+</span>';
+  const current=S.jobs.find(p=>p.id===i.pip_id),pip=current||{id:i.pip_id,name:i.pip_name,pip_type:i.pip_type,workspace_id:i.workspace_id};
+  return pipAvatar(pip,'waiting_approval',`attn-${i.card}`,characterType(pip.pip_type));};
  return attentionMarkup(S.attention,{esc,face,expanded:attentionExpanded,busy:!usable()});
 }
 // What it remembers (#6): its notes about you, on its page and under the reply that kept them.
@@ -2695,11 +2733,9 @@ function runNowMarkup(){
  const blocked=runBlocked();
  return `<button type="button" id="pip-run-now" class="topbar-icon" aria-label="${esc(action.label)}" title="${esc(blocked||action.title)}"${blocked?' disabled':''}>${simpleIcon('play')}</button>`;
 }
-// Keep pending Pip setup reviews in sight when a user opens any Pip chat.
 function pipSetupNotes(){
- const setups=S.apiVersion>=23&&(setupRows.length||setupError)?`<div class="pip-setup-strip"><button type="button" id="chat-review-setups" class="pip-setup-open"><span>${setupError?'Check new Pips':`${setupRows.length} new ${setupRows.length===1?'Pip':'Pips'} waiting for you`}</span><span class="pip-setup-review" aria-hidden="true">Review</span></button></div>`:'';
  const unknown=S.pip&&!pipType(S.pip,S.types)?'<p class="notice error simple-note">This editor doesn’t know this kind of Pip. You can still read its reports; update the DGC extension to use it.</p>':'';
- return setups+unknown;
+ return unknown;
 }
 function simplePipHeader(){
  const p=S.pip,type=pipType(p,S.types)||characterType(p.pip_type),pose=presentation(p,S.runs,usable(),S.runner),onChat=S.tab==='chat';
@@ -4082,7 +4118,6 @@ document.addEventListener('click',event=>{
     case 'pip-run-open':{const id=target.dataset.runId;S.tab='runs';S.overview=false;rememberView();render();void loadSelected(false).then(()=>{if(id&&S.tab==='runs')return loadRun(id);});break;}
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
-    case 'chat-review-setups':S.overview=true;rememberView();render();if(simpleMode()){const box=document.querySelector('[data-details="setup-inbox"]');if(box){box.open=true;box.scrollIntoView?.({block:'start'});}}break;
     case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.composerNoteOpen=false;draft.chatModelSearch='';render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
     case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;render();(S.modelListOpen?$('chatModelSearch'):$('chat-model-summary'))?.focus();break;
     case 'chat-model-close':S.composerPanel='';render();$('chat-model')?.focus();break;
@@ -4322,6 +4357,7 @@ const stopMessages=options.onMessage(message=>{
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
   if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
+  if(message.type==='pipsProfileChanged'){void refresh(false);return;}
   if(message.type==='pipsModelsChanged'){if(usable()&&(S.models.length||S.defaultModel||S.router)&&!S.modelsLoading)void loadModels();return;}
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){

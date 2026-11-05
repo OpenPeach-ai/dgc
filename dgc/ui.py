@@ -225,6 +225,10 @@ def _pip_change_words(key, value) -> str:
 
 
 def _pip_call_summary(name: str, args: dict) -> str:
+    if name == "pips_workflow":
+        count = len(args.get("pip_ids", [])) if isinstance(args.get("pip_ids"), list) else 0
+        return (f"Create {args.get('scope', '')} Pip workflow “{args.get('name', '')}” · "
+                f"{count} Pips · {args.get('mode', '')} handoffs")
     if name == "pips_propose":
         changes = args.get("changes") if isinstance(args.get("changes"), dict) else {}
         from .pip_proposal_tool import display_name
@@ -270,7 +274,7 @@ def arg_summary(name: str, args: dict, root=None) -> str:
     if name == "task" and isinstance(args, dict) and "tasks" in args:
         value = task_batch_summary(args).replace("\n", " ")
         return value[:120] + ("…" if len(value) > 120 else "")
-    if name in ("pips_setup", "pips_propose", "pips_settings") and isinstance(args, dict):
+    if name in ("pips_setup", "pips_workflow", "pips_propose", "pips_settings") and isinstance(args, dict):
         # What allowing it does, in the user's words: the permission is the approval.
         value = _pip_call_summary(name, args).replace("\n", " ")
         return value[:160] + ("…" if len(value) > 160 else "")

@@ -209,8 +209,8 @@ def core_suggestions(store, workspace_id):
     return suggestions
 
 
-def create(store, name, pip_ids, tasks, mode, actor, config):
-    if actor not in LOCAL:
+def create(store, name, pip_ids, tasks, mode, actor, config, *, expected_pins=None, unique_name=False):
+    if actor not in (*LOCAL, 'work-reviewed'):
         _fail('Only you can create a Pip workflow on this computer.', 'local_only')
     name = _text(name, 'Workflow name', 120)
     if mode not in MODES:
@@ -220,6 +220,21 @@ def create(store, name, pip_ids, tasks, mode, actor, config):
     if redact_value({'name': name, 'tasks': tasks}, secret_values(config)) != {'name': name, 'tasks': tasks}:
         _fail('Remove credentials from workflow names and tasks.', 'secret_detected')
     with store.registry.transaction():
+        if expected_pins is not None:
+            if (not isinstance(expected_pins, list) or len(expected_pins) != len(definition['pips'])
+                    or any(type(expected) is not dict or set(expected) != {'pip_id', 'job_version', 'lifecycle_revision'}
+                           or any(expected.get(key) != actual[key] for key in expected)
+                           for expected, actual in zip(expected_pins, definition['pips']))):
+                _fail('A Pip changed since Work inspected it. Read its definition again.', 'conflict')
+        if unique_name:
+            prior = store.db.execute("SELECT id FROM pip_flows WHERE workspace_id=? AND name=? AND status!='retired'",
+                                     (workspace, name)).fetchall()
+            for row in prior:
+                flow = get(store, row['id'])
+                if flow['mode'] == mode and flow['definition'] == definition:
+                    return flow
+            if prior:
+                _fail('A different workflow with this name already exists. Read workflows and choose a new name.', 'conflict')
         if store.db.execute("SELECT count(*) FROM pip_flows WHERE workspace_id=? AND status!='retired'",
                             (workspace,)).fetchone()[0] >= MAX_FLOWS:
             _fail('This workspace already has twenty workflows.', 'flow_limit')

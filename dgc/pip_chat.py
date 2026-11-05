@@ -682,6 +682,12 @@ CORE_INTRO = ("This message is from DGC, not the user. The user has just created
               "is connected yet. End with one short question asking for the "
               "one thing on their plate today, and offer two or three likely answers with offer_choices. Two or "
               "three short paragraphs, no lists and no headings.")
+PROJECT_INTRO = ("This message is from DGC, not the user. The user has opened your chat for the first time. "
+                 "Your name is \"{name}\" and your reviewed goal is: {goal}. Introduce yourself by that name "
+                 "in one or two short sentences. Say what you can help inspect or prepare within your existing "
+                 "instructions, without claiming that you have checked the repository or run a job yet. "
+                 "Do not run tools, make a card, or change anything in this first message. "
+                 "End with one short question asking what the user wants to start with.")
 # How a reply reads in the chat is the Pip's to decide. The chat split every paragraph into its own bubble, so a poem
 # or an email draft came apart at each stanza (asked 2026-11-03: "leave this to the llm model to decide"). Now a reply
 # is one message, split only at a line of just --- (editors/vscode/src/pipsTranscript.js replyParts). The "short
@@ -699,12 +705,19 @@ def without_breaks(text: str) -> str:
 
 
 def introduce(store, pip_id, actor, config):
-    """Queue the Pip's first message once; asking again returns the same one."""
+    """Queue one hidden first turn when the chat is empty; never interrupt an existing conversation."""
     pip = store._job(pip_id)
-    if pip["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "Only Personal Pips introduce themselves.")
     key = INTRO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", pip_id)[:100]
-    text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=pip["name"][:120].replace('"', "'"))
+    first = store.db.execute("SELECT request_key FROM pip_chat_messages WHERE pip_id=? ORDER BY seq LIMIT 1",
+                             (pip_id,)).fetchone()
+    if first and first["request_key"] != key:
+        return {"already_started": True}
+    name = pip["name"][:120].replace('"', "'")
+    if pip["source_policy"] == {"mode": "personal"}:
+        text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=name)
+    else:
+        goal = str(pip.get("goal") or "Help with this project").replace('"', "'")[:500]
+        text = PROJECT_INTRO.format(name=name, goal=goal)
     return send(store, pip_id, text, key, actor, config, _intro=True)
 
 

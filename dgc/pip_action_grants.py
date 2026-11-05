@@ -113,10 +113,13 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
     require_can_always(payload)
     pins = _pins(payload)
     with store.registry.transaction():
-        for existing in list_grants(store.registry, pip_id):
+        existing_grants = list_grants(store.registry, pip_id)
+        for existing in existing_grants:
             if all(existing[k] == v for k, v in pins.items()):
                 return existing
-        if len(list_grants(store.registry, pip_id)) >= MAX_PER_PIP:
+        existing_grants = _reclaim_legacy_challenge_grants(
+            store.registry, pip_id, payload["source"]["workspace_id"], existing_grants)
+        if len(existing_grants) >= MAX_PER_PIP:
             raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
         grant_id = identifier("grant")
         from . import pip_sdk_apps
@@ -144,10 +147,12 @@ def grant_app_tool(registry, pip_id, workspace_id, server, tool, connection_dige
                "call": {"tool": tool["name"], "arguments": {}}}
     require_can_always(payload)
     pins = _pins(payload)
-    for existing in list_grants(registry, pip_id):
+    existing_grants = list_grants(registry, pip_id)
+    for existing in existing_grants:
         if all(existing[k] == v for k, v in pins.items()):
             return existing
-    if len(list_grants(registry, pip_id)) >= MAX_PER_PIP:
+    existing_grants = _reclaim_legacy_challenge_grants(registry, pip_id, workspace_id, existing_grants)
+    if len(existing_grants) >= MAX_PER_PIP:
         raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
     from . import pip_sdk_apps
     grant_id = identifier("grant")
@@ -336,15 +341,61 @@ def _hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def computer_pins(pip_id, summary) -> dict:
-    method, host, path = str(summary["method"]).upper(), str(summary["host"]), str(summary["path"])
+_CLOUDFLARE_CHALLENGE = "/cdn-cgi/challenge-platform/h/b/precursor/"
+
+
+def _reclaim_legacy_challenge_grants(registry, pip_id, workspace_id, grants, *, force=False):
+    """Discard per-token approvals for expired Cloudflare verification URLs.
+
+    This removes authority; it never turns an old exact approval into a route-wide
+    one. A new route grant still requires an explicit Always allow decision.
+    """
+    if len(grants) < MAX_PER_PIP and not force:
+        return grants
+    old = [g for g in grants if g["kind"] == "computer_submit" and g["server"] == "dash.cloudflare.com"
+           and str(g["tool"]).startswith("POST " + _CLOUDFLARE_CHALLENGE)
+           and g["tool"] != "POST " + _CLOUDFLARE_CHALLENGE + "*"]
+    for grant in old:
+        registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, grant["id"]),))
+    if old:
+        registry.event(workspace_id, "pip_action_grants_reclaimed", pip_id=pip_id,
+                       payload={"kind": "computer_submit", "host": "dash.cloudflare.com", "count": len(old)})
+    return [g for g in grants if g not in old]
+
+
+def _computer_grant_path(method: str, host: str, path: str) -> str:
+    """Cloudflare rotates a token in this browser verification URL on each visit.
+
+    An explicit Always allow for that route covers only the same verification family,
+    on the same host, for this Pip. All other browser writes retain exact-path grants.
+    """
+    if (method == "POST" and host == "dash.cloudflare.com"
+            and path.startswith(_CLOUDFLARE_CHALLENGE)
+            and len(path) > len(_CLOUDFLARE_CHALLENGE)):
+        return _CLOUDFLARE_CHALLENGE + "*"
+    return path
+
+
+def computer_pins(pip_id, summary, *, exact=False) -> dict:
+    method, host = str(summary["method"]).upper(), str(summary["host"]).lower()
+    path = str(summary["path"])
+    if not exact:
+        path = _computer_grant_path(method, host, path)
     return {"kind": "computer_submit", "server": host, "connection_digest": _hash("dgc.pip.computer\0" + pip_id),
             "account": "browser", "schema_digest": _hash(f"{method} {host}{path}"), "tool": f"{method} {path}"[:160]}
 
 
 def computer_grant_for(registry, pip_id, summary):
     pins = computer_pins(pip_id, summary)
-    return next((g for g in list_grants(registry, pip_id) if all(g[k] == v for k, v in pins.items())), None)
+    found = list_grants(registry, pip_id)
+    matching = lambda p: next((g for g in found if all(g[k] == v for k, v in p.items())), None)
+    grant = matching(pins)
+    if grant:
+        return grant
+    # Old exact approvals remain effective for the URL the person approved. A newly
+    # rotated token asks once for the explicit route-scoped approval.
+    exact = computer_pins(pip_id, summary, exact=True)
+    return matching(exact) if exact != pins else None
 
 
 def add_computer_grant(registry, action_id, actor) -> dict:
@@ -356,13 +407,22 @@ def add_computer_grant(registry, action_id, actor) -> dict:
         raise RegistryError("not_found", "That computer action does not exist.")
     summary = json.loads(row["summary"])
     pins = computer_pins(row["pip_id"], summary)
-    for existing in list_grants(registry, row["pip_id"]):
+    existing_grants = list_grants(registry, row["pip_id"])
+    for existing in existing_grants:
         if all(existing[k] == v for k, v in pins.items()):
             return existing
-    if len(list_grants(registry, row["pip_id"])) >= MAX_PER_PIP:
+    # Old per-token approvals would otherwise exhaust this Pip's 20-grant limit.
+    # Reclaim them even for another action when the limit is full; they are expired
+    # exact URLs, and reclaiming them grants no new access.
+    existing_grants = _reclaim_legacy_challenge_grants(
+        registry, row["pip_id"], row["workspace_id"], existing_grants,
+        force=pins["tool"] == "POST " + _CLOUDFLARE_CHALLENGE + "*")
+    if len(existing_grants) >= MAX_PER_PIP:
         raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
     grant_id = identifier("grant")
-    label = f"Submit in its browser to {summary['host']}{summary['path']}"[:200]
+    label = ("Cloudflare browser verification on dash.cloudflare.com"
+             if pins["tool"] == "POST " + _CLOUDFLARE_CHALLENGE + "*"
+             else f"Submit in its browser to {summary['host']}{summary['path']}")[:200]
     record = {**pins, "label": label, "created_at": registry.clock(), "created_by": actor, "from_action": action_id}
     registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(row["pip_id"], grant_id), json.dumps(record, ensure_ascii=False)))
     registry.event(row["workspace_id"], "pip_action_granted", pip_id=row["pip_id"],

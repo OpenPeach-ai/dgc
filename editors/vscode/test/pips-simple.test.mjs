@@ -167,6 +167,19 @@ test('the chat never shows DGC\'s introduction turn as yours, and shows the Pip 
  assert.equal(later.d.querySelector('#chatText').getAttribute('placeholder'),'Ask Gmail');
 });
 
+test('opening a Pip created from Work starts one hello; reopening and existing chats do not',async()=>{
+ const fresh=pip('pip_'+'f'.repeat(32),'Site traffic','scout');
+ const x=setup({jobs:[fresh]});await x.drain();
+ x.click(`[data-job="${fresh.id}"]`);await x.drain();
+ assert.equal(x.requests('introduce_pip').length,1);
+ x.click('#simple-back');await x.drain();
+ x.click(`[data-job="${fresh.id}"]`);await x.drain();
+ assert.equal(x.requests('introduce_pip').length,1,'a reopened empty view does not queue a second hello');
+ const existing=setup({jobs:[fresh],messages:{[fresh.id]:[message('message_1','assistant','Hello!',fresh.id)]}});await existing.drain();
+ existing.click(`[data-job="${fresh.id}"]`);await existing.drain();
+ assert.equal(existing.requests('introduce_pip').length,0,'history is never interrupted by a late introduction');
+});
+
 test('while a Pip answers it is in the chat at work, with its name, and its reply shows as short bubbles',async()=>{
  const gmail=pip('pip_'+'g'.repeat(32),'Gmail','scout');
  const asked=message('message_1','user','Can you check my inbox?',gmail.id,{status:'running',created_at:'2026-10-06T10:00:00.000Z'});

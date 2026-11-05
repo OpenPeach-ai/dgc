@@ -34,6 +34,7 @@ MODE_DESCRIPTIONS = {
 DISPLAY = {
     "use_pips": "UsePips",
     "pips_context": "PipsContext",
+    "pips_workflow": "PipsWorkflow",
     "pips_propose": "PipsPropose",
     "pips_settings": "PipsSettings",
     "pips_setup": "PipsSetup",
@@ -64,6 +65,7 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 # which argument a rule's pattern is matched against
 RULE_ARG = {
     "pips_context": "action",
+    "pips_workflow": "name",
     "pips_propose": "pip_id",
     "pips_settings": "default_model",
     "pips_setup": "target_root",
@@ -126,7 +128,7 @@ READ_ONLY_TOOLS = {"read_file", "view_image", "show_file", "glob", "grep", "repo
                    "list_video_generators"}
 # A change to the DGC Router's settings, and a look for model servers on the user's network: the user's call in
 # every mode, auto included, with the exact change on the card. A deny rule still wins; an allow rule never skips it.
-ALWAYS_ASK_TOOLS = frozenset({"router_update", "router_find"})
+ALWAYS_ASK_TOOLS = frozenset({"router_update", "router_find", "pips_workflow"})
 # A card with no Always: these and every video (an Always for videos is the user's own switch in Settings, per
 # generator, never a card's button).
 NO_ALWAYS_TOOLS = ALWAYS_ASK_TOOLS | {"generate_video"}
@@ -656,6 +658,7 @@ class PermissionEngine:
 
         if policy_tool in ALWAYS_ASK_TOOLS:
             return ASK, ("DGC Router changes are the user's to allow, in every mode" if policy_tool == "router_update"
+                         else "a Pip workflow's routing needs your review, in every mode" if policy_tool == "pips_workflow"
                          else "looking on the user's network is theirs to allow, in every mode")
 
         if signed_in:

@@ -87,6 +87,9 @@ export class PipsEditor implements vscode.Disposable {
   /** A Pip's messages were marked read here (mark_pip_read answered): the home's count and the other Pips pages follow. */
   private unreadRead?: () => void;
   useUnreadRead(notify: () => void): void { this.unreadRead = notify; }
+  private profileChangeNotice?: () => void;
+  useProfileChanged(notify: () => void): void { this.profileChangeNotice = notify; }
+  profileChanged(): void { this.post({ type: 'pipsProfileChanged' }); }
   /** A video's Stop from a Pip's chat: the window's backend (videos_stop), set by the panel. */
   videoStop?: (job: string) => Promise<Record<string, unknown> | undefined>;
   /** A Pip reply's running video: the window's backend polls (or watches) it, so one a restart left on disk ends. */
@@ -273,6 +276,7 @@ export class PipsEditor implements vscode.Disposable {
       this.newsDismissed?.(owner.newsDismiss.pipIds, owner.newsDismiss.until);
     }
     if (owner.command === 'mark_pip_read' && event.type === 'pips_result' && event.ok === true) this.unreadRead?.();
+    if (owner.command === 'set_pip_profile' && event.type === 'pips_result' && event.ok === true) this.profileChangeNotice?.();
     this.post({ type: 'pipsReply', id: owner.client,
       ok: event.type !== 'command_rejected' && (event.type === 'pips_status' || event.ok === true),
       result: event.type === 'pips_status' ? event : event.result,

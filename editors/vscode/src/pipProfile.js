@@ -4,8 +4,19 @@
 import { pickerMarkup } from './pipPicker.js';
 
 export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
-// A colour is a tint over the plush: grey it, warm it (sepia), turn the hue, then saturate.
+// The eight swatches match the existing Pip characters. Keep the old tint IDs readable for
+// profiles saved before 0.51, but offer only the character palette to new edits.
 export const COLORS = [
+  ['core', 'Core violet', '#A787D4', 'grayscale(1) sepia(1) hue-rotate(205deg) saturate(1.9) brightness(1.03)'],
+  ['scout', 'Scout mint', '#80C6A2', 'grayscale(1) sepia(1) hue-rotate(95deg) saturate(1.5) brightness(1.03)'],
+  ['lens', 'Lens blue', '#8BB7E9', 'grayscale(1) sepia(1) hue-rotate(168deg) saturate(1.6) brightness(1.03)'],
+  ['patch', 'Patch peach', '#E9A684', 'grayscale(1) sepia(1) hue-rotate(-16deg) saturate(1.6) brightness(1.03)'],
+  ['rook', 'Rook periwinkle', '#A8AAE4', 'grayscale(1) sepia(1) hue-rotate(188deg) saturate(1.4) brightness(1.03)'],
+  ['pulse', 'Pulse gold', '#E4C778', 'grayscale(1) sepia(1) hue-rotate(8deg) saturate(1.5) brightness(1.03)'],
+  ['lock', 'Lock teal', '#72C5BD', 'grayscale(1) sepia(1) hue-rotate(125deg) saturate(1.5) brightness(1.03)'],
+  ['quill', 'Quill pink', '#ECA1B5', 'grayscale(1) sepia(1) hue-rotate(-52deg) saturate(1.6) brightness(1.03)'],
+];
+const LEGACY_COLORS = [
   ['peach', 'Peach', '#F2A07B', 'grayscale(1) sepia(1) hue-rotate(-18deg) saturate(2.2) brightness(1.05)'],
   ['rose', 'Rose', '#E58BA8', 'grayscale(1) sepia(1) hue-rotate(-62deg) saturate(2.3) brightness(1.02)'],
   ['lilac', 'Lilac', '#A98BE8', 'grayscale(1) sepia(1) hue-rotate(218deg) saturate(2.1) brightness(1.04)'],
@@ -22,11 +33,11 @@ export function profile(value) {
   if (!record(value)) return { title: '', body: null, color: null, notify: true };
   const title = typeof value.title === 'string' && value.title.length <= 60 ? value.title : '';
   return { title, body: BODIES.includes(value.body) ? value.body : null,
-    color: COLORS.some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
+    color: [...COLORS, ...LEGACY_COLORS].some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
 }
 
 /** The CSS for the colour tints: one rule per colour, on the plush's picture only (its eyes keep theirs). */
-export const tintStyles = COLORS.map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-rig image{filter:${filter}}`).join('');
+export const tintStyles = [...COLORS, ...LEGACY_COLORS].map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-rig image{filter:${filter}}`).join('');
 
 export function sharedPage(value, pip, kind) {
   const fail = () => { throw new Error('This list didn’t load. Refresh to try again.'); };
