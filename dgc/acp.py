@@ -28,7 +28,7 @@ from .agent import Agent
 from .attachments import validate_image_data_uris
 from .commands import custom_command_names
 from .config import Config
-from .permissions import ALWAYS_ASK_TOOLS, MODE_DESCRIPTIONS, MODES, rule_for
+from .permissions import NO_ALWAYS_TOOLS, MODE_DESCRIPTIONS, MODES, rule_for
 from .protocol import strict_json_loads
 from .redaction import redact_text, redact_value, secret_values, sensitive_name
 from .ui import arg_summary, shown_output, split_diff, tool_output_is_error
@@ -739,7 +739,7 @@ class _ACPUi:
                    {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]
         from .agent import interaction_offers_always
-        if name in ALWAYS_ASK_TOOLS or not interaction_offers_always():
+        if name in NO_ALWAYS_TOOLS or not interaction_offers_always():
             # A DGC Router change, a look on the network, and a call the user's own ask rule asks about: asked every time.
             options = [option for option in options if option["optionId"] != "always"]
         res = self.s.request("session/request_permission", {

@@ -91,7 +91,7 @@ class Acp(unittest.TestCase):
         return [option["optionId"] for option in sent[0]["options"]], verdict
 
     def test_session_request_permission_has_no_allow_always_for_a_router_change(self):
-        for name in ("router_update", "router_find"):
+        for name in ("router_update", "router_find", "generate_video"):
             with self.subTest(name=name):
                 options, _ = self.options(name)
                 self.assertEqual(options, ["once", "deny"])
