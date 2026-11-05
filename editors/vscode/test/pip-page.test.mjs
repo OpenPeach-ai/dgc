@@ -132,23 +132,22 @@ test('the chat composer opens the same routine controls without leaving the conv
  assert.ok(x.d.querySelector('#chat-form'));
 });
 
-test('its face and colour: choose, Save, and Reset to default',async()=>{
+test('its face: choose, Save, and Reset to default without recolouring accessories',async()=>{
  const x=setup();await openPage(x);
  x.click('[data-pip-page="character"]');await flush();
  // Its face is picked as New Pip picks a character: the big face and a dropdown of the faces.
  assert.equal(x.d.querySelectorAll('#pip-face-list [role=option]').length,8,'the eight Pip faces');
  assert.ok(x.d.querySelector('[data-pip-character-save]').disabled,'nothing to save yet');
- assert.deepEqual([...x.d.querySelectorAll('[data-pip-color]')].map(e=>e.dataset.pipColor),['','core','scout','lens','patch','rook','pulse','lock','quill'],'its own colour and the eight Pip colours');
- x.click('#pip-face');x.click('#pip-face-list [data-pick="lens"]');x.click('[data-pip-color="scout"]');
- assert.equal(x.d.querySelector('.pip-character .pip-picker-face .avatar').dataset.tint,'scout');
+ assert.equal(x.d.querySelector('[data-pip-color]'),null,'no colour filter that can tint accessories');
+ x.click('#pip-face');x.click('#pip-face-list [data-pick="lens"]');
  assert.equal(x.d.querySelector('.pip-character .pip-picker-face .avatar').dataset.character,'lens');
  x.click('[data-pip-character-save]');await flush();
- assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'lens',color:'scout'});
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'lens'});
  x.state.row=pip({profile:{title:'',body:'lens',color:'scout',notify:true}});
  x.answer(x.requests('set_pip_profile')[0],{pip_id:PIP,profile:{title:'',body:'lens',color:'scout',notify:true}});await x.drain();
- assert.equal(x.d.querySelector('.pip-pill .avatar').dataset.tint,'scout','its face changes everywhere');
+ assert.equal(x.d.querySelector('.pip-pill .avatar').dataset.tint,undefined,'a saved old colour does not tint the face');
  x.click('[data-pip-page="character"]');x.click('[data-pip-character-reset]');x.click('[data-pip-character-save]');await flush();
- assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[1].request.changes)),{body:null,color:null});
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[1].request.changes)),{body:null});
 });
 
 test('its face is picked as New Pip picks a character: the big face, a dropdown of the faces, and the keys',async()=>{
@@ -160,8 +159,7 @@ test('its face is picked as New Pip picks a character: the big face, a dropdown 
  assert.equal(x.d.querySelector('#pip-face-label').textContent,'Face');
  assert.deepEqual([...list.querySelectorAll('[role=option]')].map(o=>o.textContent),['Core','Scout','Lens','Patch','Rook','Pulse','Lock','Quill'],'the names, each with its small face');
  assert.equal(x.d.querySelector('#pip-face-value').textContent,'Scout','its own face, chosen');
- x.click('[data-pip-color="pulse"]');
- assert.ok([...x.d.querySelectorAll('#pip-face-list .avatar')].every(a=>a.dataset.tint==='pulse'),'the faces in the list wear the colour chosen');
+ assert.ok([...x.d.querySelectorAll('#pip-face-list .avatar')].every(a=>a.dataset.tint===undefined),'the faces keep their original colours');
  const key=k=>x.d.activeElement.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
  x.d.querySelector('#pip-face').focus();key('ArrowDown');
  assert.equal(x.d.querySelector('#pip-face-list').getAttribute('aria-activedescendant'),'pip-face-scout');
@@ -173,7 +171,7 @@ test('its face is picked as New Pip picks a character: the big face, a dropdown 
  assert.equal(x.d.querySelector('#pip-face-value').textContent,'Quill','Esc picks nothing');
  assert.equal(x.d.querySelector('#pip-face-list').hidden,true);
  x.click('[data-pip-character-save]');await flush();
- assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'quill',color:'pulse'});
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('set_pip_profile')[0].request.changes)),{body:'quill'});
 });
 
 test('an Always allow you gave is on its page, and Stop allowing takes it back',async()=>{

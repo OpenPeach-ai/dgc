@@ -4,8 +4,8 @@
 import { pickerMarkup } from './pipPicker.js';
 
 export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
-// The eight swatches match the existing Pip characters. Keep the old tint IDs readable for
-// profiles saved before 0.51, but offer only the character palette to new edits.
+// Older profiles can contain a colour. Keep reading it for data compatibility, but the
+// editor no longer offers CSS recolouring: its filter also changed parts of accessories.
 export const COLORS = [
   ['core', 'Core violet', '#A07ABD', 'grayscale(1) sepia(1) hue-rotate(205deg) saturate(1.9) brightness(1.03)'],
   ['scout', 'Scout mint', '#7CB08C', 'grayscale(1) sepia(1) hue-rotate(95deg) saturate(1.5) brightness(1.03)'],
@@ -35,9 +35,6 @@ export function profile(value) {
   return { title, body: BODIES.includes(value.body) ? value.body : null,
     color: [...COLORS, ...LEGACY_COLORS].some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
 }
-
-/** Only the body-mask copy is recoloured. The original atlas keeps every accessory and eye untouched. */
-export const tintStyles = [...COLORS, ...LEGACY_COLORS].map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-tint{display:block;filter:${filter}}`).join('');
 
 export function sharedPage(value, pip, kind) {
   const fail = () => { throw new Error('This list didn’t load. Refresh to try again.'); };
@@ -109,15 +106,12 @@ export function instructionsMarkup({ esc, goal, busy = false, error = '', pipNam
     + `<div class="actions"><button type="submit" class="primary pill"${off}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-setup-chat${off}>Change it in the chat instead</button></div></form>`;
 }
 
-/** Choose its face (one of the eight Pips) and a colour; Reset to default puts both back. The face is picked as New Pip
- * picks a Personal Pip's character: its big face, in the colour chosen, and a dropdown of the faces with their names. */
-export function characterMarkup({ esc, avatarFor, body, color, busy = false, changed = false }) {
+/** Choose one of the eight original Pip faces. */
+export function characterMarkup({ esc, avatarFor, body, busy = false, changed = false }) {
   const off = busy ? ' disabled' : '';
-  const faces = pickerMarkup({ id: 'pip-face', label: 'Face', value: body, size: 'large', disabled: busy, face: avatarFor(body, color, 'face-preview', 'listening'),
-    options: BODIES.map(id => ({ value: id, label: id[0].toUpperCase() + id.slice(1), face: avatarFor(id, color, `face-${id}`) })) });
-  const swatches = [['', 'Its own', '', ''], ...COLORS].map(([id, label, swatch]) => `<button type="button" class="swatch" role="radio" aria-checked="${(color || '') === id}" data-pip-color="${id}" title="${label}" aria-label="${label}"${off}><span style="${swatch ? `background:${swatch}` : ''}"${swatch ? '' : ' class="swatch-own"'}></span></button>`).join('');
+  const faces = pickerMarkup({ id: 'pip-face', label: 'Face', value: body, size: 'large', disabled: busy, face: avatarFor(body, 'face-preview', 'listening'),
+    options: BODIES.map(id => ({ value: id, label: id[0].toUpperCase() + id.slice(1), face: avatarFor(id, `face-${id}`) })) });
   return `<section class="pip-character" aria-label="Edit its face">${faces}`
-    + `<h3 class="pip-page-label">Colour</h3><div class="swatches" role="radiogroup" aria-label="Colour">${swatches}</div>`
     + `<div class="actions"><button type="button" class="primary pill" data-pip-character-save${off || !changed ? ' disabled' : ''}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-pip-character-reset${off}>Reset to default</button></div></section>`;
 }
 

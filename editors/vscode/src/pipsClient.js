@@ -35,7 +35,7 @@ import {templatePage,templateMarkup} from './pipTemplates.js';
 import {borrowsPage,borrowResult,shownBorrows,borrowActive,borrowMarkup} from './pipBorrow.js';
 import {routinesPage,routineDraft,routineFromDraft,shownRoutineCards,routineCardMarkup,routinesMarkup,routineFormMarkup,shortDate} from './pipRoutines.js';
 import {pickerMarkup,createPicker} from './pipPicker.js';
-import {profile,tintStyles,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES,COLORS} from './pipProfile.js';
+import {profile,sharedPage,computersPage,appsPage,headMarkup,pageTabsMarkup,infoMarkup,instructionsMarkup,characterMarkup,linksMarkup,mediaMarkup,filesMarkup,computersMarkup,appsMarkup as appsSettingsMarkup,BODIES} from './pipProfile.js';
 import {pipSetup,pipSetups,pipSetupPrompt,pipSetupResolution,appReadPlan,webReadPlan,webReadLabel,SEVERITIES,pipNotifySettings,pipOutcomes,githubReadPlan,githubReadLabel,pipsKeepRunning,pipsDesktopNotifications,pipUsage,pipFeedback,actionGrants,actionGrant,pipComputer,pipComputerDesktop,pipComputerAction,pipComputerView,pipComputerFrame,pipComputerFrames,pipComputerFiles,pipComputerPointer,pipEyes} from './pipsModel.js';
 import '../media/pips/plush.js';
 import {ownAppsPage,ownAppForServer,ownAppsMarkup,isOwnApp,ownAppDecision,ownAppDecisionNotice,ownAppDecisionMarkup} from './pipOwnApps.js';
@@ -224,10 +224,10 @@ const canLifecycle=()=>S.apiVersion>=16&&lifecycleRevision(S.pip)!==null&&lifecy
 const scope = () => `${S.epoch}:${S.workspace?.id || ''}:${S.selected}:${selectionGeneration}`;
 const date = value => value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString() : 'Time unavailable';
 const button = (id,text,disabled=false,kind='') => `<button type="button" id="${id}" class="${kind}"${disabled?' disabled':''}>${esc(text)}</button>`;
-function avatar(state='idle',type={id:'rook',character_index:4,name:'Rook'},key='welcome',tint='') {
+function avatar(state='idle',type={id:'rook',character_index:4,name:'Rook'},key='welcome') {
   if(!avatarIds.has(key))avatarIds.set(key,++avatarSequence);
   const id=`editor-pip-${avatarIds.get(key)}`;
-  return `<span class="avatar" data-avatar-key="${esc(key)}" data-character="${esc(type?.id||'unsupported')}" data-pose="${esc(state)}"${tint?` data-tint="${esc(tint)}"`:''} aria-hidden="true">${type?window.PipConcepts.plush.markup({index:type.character_index,name:type.name},state,id,{includeStyles:false}):'<span class="unknown-avatar">?</span>'}</span>`;
+  return `<span class="avatar" data-avatar-key="${esc(key)}" data-character="${esc(type?.id||'unsupported')}" data-pose="${esc(state)}" aria-hidden="true">${type?window.PipConcepts.plush.markup({index:type.character_index,name:type.name},state,id,{includeStyles:false}):'<span class="unknown-avatar">?</span>'}</span>`;
 }
 function observeAvatars() {
   if(!characterCleanup)characterCleanup=window.PipConcepts.plush.mount?.(document);
@@ -2829,7 +2829,7 @@ function render() {
   }
   reader?.sync();talkBar?.refresh();voiceBar?.refresh();
   const parts=document.querySelector('.pip-ctx-breakdown');if(parts&&S.chatContext?.breakdown&&window.DgcBreakdown)parts.replaceChildren(window.DgcBreakdown.render(S.chatContext.breakdown));
-  for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose&&(old.dataset.tint||'')===(node.dataset.tint||''))node.replaceWith(old);}
+  for(const node of document.querySelectorAll('[data-avatar-key]')){const old=previousAvatars.get(node.dataset.avatarKey);if(old&&old!==node&&old.dataset.character===node.dataset.character&&old.dataset.pose===node.dataset.pose)node.replaceWith(old);}
   observeAvatars();fitChatInput();hydrateMessageImages();hydrateMessageVideos();hydratePluginLogos();
   // A card Needs attention opened stays shown as the chat redraws while its drafts and apps load.
   if(cardFlash.selector&&Date.now()<cardFlash.until)for(const el of document.querySelectorAll(cardFlash.selector))el.classList.add('attention-flash');
@@ -3055,10 +3055,9 @@ S.pipPage='info';S.routines=null;S.routinesError='';
 let routineSeq=0,routineEditing='',routineBusy='',routineError='',pageNameDirty=false,lookDirty=false,profileBusy=false;
 const shared={pip:'',kind:'',items:null,error:'',loading:false,seq:0,desk:null};
 const pipsSettings={view:'',computers:null,computersError:'',apps:null,appsError:'',plugins:null,pluginsError:'',confirmReset:'',seq:0,busy:false};
-Object.assign(draft,{pipPageName:'',pipPageTitle:'',pipInstructions:'',lookBody:'',lookColor:''},routineDraft(null,defaultZone));
-const tintStyle=document.createElement('style');tintStyle.textContent=tintStyles;document.head.append(tintStyle);
+Object.assign(draft,{pipPageName:'',pipPageTitle:'',pipInstructions:'',lookBody:''},routineDraft(null,defaultZone));
 // A Personal Pip's chosen face and colour; any other Pip keeps the face its type gives it.
-function pipAvatar(p,state,key,type){const look=profile(p?.profile),own=personalPip(p);return avatar(state,own&&look.body?characterType(look.body):type,key,own?look.color||'':'');}
+function pipAvatar(p,state,key,type){const look=profile(p?.profile),own=personalPip(p);return avatar(state,own&&look.body?characterType(look.body):type,key);}
 function sameJson(a,b){const norm=v=>Array.isArray(v)?v.map(norm):record(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,norm(v[k])])):v;return JSON.stringify(norm(a))===JSON.stringify(norm(b));}
 async function loadRoutines(){
  if(remoteHost||S.apiVersion<43||!personalPip()||!usable())return;
@@ -3160,7 +3159,7 @@ function pipPageMarkup(){
  if(S.pipPage==='instructions')return instructionsMarkup({esc,goal:draft.pipInstructions,busy:off,pipName:p.name});
  if(S.pipPage==='character'){
   const own=SIMPLE_CHARACTERS.includes(p.pip_type)?p.pip_type:'core',body=draft.lookBody||own;
-  return characterMarkup({esc,body,color:draft.lookColor,busy:off,changed:lookDirty,avatarFor:(id,color,key,state='idle')=>avatar(state,characterType(id||own),`${key}-${p.id}`,color||'')});
+  return characterMarkup({esc,body,busy:off,changed:lookDirty,avatarFor:(id,key,state='idle')=>avatar(state,characterType(id||own),`${key}-${p.id}`)});
  }
  const head=headMarkup({esc,avatar:pipAvatar(p,'idle',`page-${p.id}`,pipType(p,S.types)||characterType(p.pip_type)),name:p.name,title:look.title,nameDraft:draft.pipPageName,titleDraft:draft.pipPageTitle,busy:off,dirty:pageNameDirty});
  const tab=['links','media','files'].includes(S.pipPage)?S.pipPage:'info';
@@ -3926,12 +3925,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.routineCancel!==undefined){routineEditing='';routineError='';render();return;}
   if(target.dataset.routineDelete){const id=target.dataset.routineDelete;void routineCall('delete_pip_routine',{routine_id:id},id,'Routine deleted.').then(r=>{if(r){routineEditing='';render();}});return;}
   if(target.dataset.routineLegacy!==undefined){S.legacyOpen=!S.legacyOpen;render();return;}
-  if(target.dataset.pipPage){const v=target.dataset.pipPage;if(v==='instructions')draft.pipInstructions=S.pip?.goal||'';if(v==='character'){const look=profile(S.pip?.profile);draft.lookBody=look.body||'';draft.lookColor=look.color||'';lookDirty=false;}S.pipPage=v;render();if(v==='instructions')$('pipInstructions')?.focus();if(v==='info')void loadRoutines();return;}
+  if(target.dataset.pipPage){const v=target.dataset.pipPage;if(v==='instructions')draft.pipInstructions=S.pip?.goal||'';if(v==='character'){const look=profile(S.pip?.profile);draft.lookBody=look.body||'';lookDirty=false;}S.pipPage=v;render();if(v==='instructions')$('pipInstructions')?.focus();if(v==='info')void loadRoutines();return;}
   if(target.dataset.pipPageTab){S.pipPage=target.dataset.pipPageTab;routineEditing='';render();if(S.pipPage==='info')void loadRoutines();else void loadShared(S.pipPage);return;}
   if(target.dataset.pipShare!==undefined){document.querySelectorAll('details[data-details="pip-menu"]').forEach(d=>d.removeAttribute('open'));void exportPipFile();return;}
-  if(target.dataset.pipColor!==undefined){const c=target.dataset.pipColor;if(c===''||COLORS.some(x=>x[0]===c)){draft.lookColor=c;lookDirty=true;render();}return;}
-  if(target.dataset.pipCharacterReset!==undefined){draft.lookBody='';draft.lookColor='';lookDirty=true;render();return;}
-  if(target.dataset.pipCharacterSave!==undefined){const own=S.pip?.pip_type,body=draft.lookBody&&draft.lookBody!==own?draft.lookBody:null;void setProfile({body,color:draft.lookColor||null},'Saved. That’s its face now.').then(ok=>{if(ok){lookDirty=false;S.pipPage='info';render();}});return;}
+  if(target.dataset.pipCharacterReset!==undefined){draft.lookBody='';lookDirty=true;render();return;}
+  if(target.dataset.pipCharacterSave!==undefined){const own=S.pip?.pip_type,body=draft.lookBody&&draft.lookBody!==own?draft.lookBody:null;void setProfile({body},'Saved. That’s its face now.').then(ok=>{if(ok){lookDirty=false;S.pipPage='info';render();}});return;}
   if(target.dataset.pipNameCancel!==undefined){draft.pipPageName=S.pip?.name||'';draft.pipPageTitle=profile(S.pip?.profile).title;pageNameDirty=false;render();return;}
   if(target.dataset.openLink){vscode.postMessage({type:'openExternal',url:target.dataset.openLink});return;}
   if(target.dataset.openComputerFiles!==undefined){if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();return;}

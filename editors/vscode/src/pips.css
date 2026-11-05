@@ -508,13 +508,8 @@ button.routine-open:hover .routine-words strong{text-decoration:underline}
 .routine-when #routineQuery,.routine-when #routineAt{flex:1 1 200px;width:auto}
 .routine-legacy-edit{padding:4px 14px 12px}
 .routine-card .routine-prompt{margin:0;font-size:12px;line-height:1.5;color:var(--vscode-foreground);white-space:pre-wrap;overflow-wrap:anywhere;max-height:7.5em;overflow:auto}
-/* Its face: the eight Pips and a colour. */
+/* Its face: one of the eight original Pips. */
 .pip-character{display:flex;flex-direction:column;gap:8px}
-.swatches{display:flex;flex-wrap:wrap;gap:10px;padding:2px 0 6px}
-.swatch{width:32px;height:32px;min-height:32px;padding:3px;border-radius:50%;border:2px solid transparent;background:transparent}
-.swatch span{display:block;width:100%;height:100%;border-radius:50%}
-.swatch .swatch-own{background:conic-gradient(#F2A07B,#E58BA8,#A98BE8,#79B4E8,#7CCFA8,#EBC85A,#F2A07B)}
-.swatch[aria-checked=true]{border-color:var(--pip-accent)}
 .pip-character .actions,.pip-instructions .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
 .pip-instructions{display:flex;flex-direction:column;gap:8px}
 .pip-instructions h2{margin:0}

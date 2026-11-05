@@ -27,7 +27,7 @@ function patchNode(current, next) {
   // Plush rigs have live eye tracking and animation classes. Their markup is
   // deterministic for a given pose, so leave the running rig intact.
   if (current.hasAttribute('data-avatar-key') &&
-      ['data-avatar-key', 'data-character', 'data-pose', 'data-tint'].every(
+      ['data-avatar-key', 'data-character', 'data-pose'].every(
         name => current.getAttribute(name) === next.getAttribute(name))) return;
   if (current.outerHTML === next.outerHTML) return;
   for (const attr of [...current.attributes]) {

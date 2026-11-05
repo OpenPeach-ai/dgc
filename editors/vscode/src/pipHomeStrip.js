@@ -13,7 +13,7 @@
 // news together (mark_pip_read, then mark_pip_news_seen). Pending approvals still need an answer.
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation} from './pipAttention.js';
-import {profile, tintStyles} from './pipProfile.js';
+import {profile} from './pipProfile.js';
 
 const POLL_MS = 60000;
 const TYPES = ['core','scout','lens','patch','rook','pulse','lock','quill'];
@@ -50,11 +50,6 @@ export function mountHomePips(options) {
  const doc = options.document, root = options.root;
  const quiet = {receive(){}, refresh(){}, dispose(){}};
  if (!root) return quiet;
- if (!doc.getElementById('home-pip-tints')) {
-  const style = doc.createElement('style'); style.id = 'home-pip-tints';
-  style.textContent = tintStyles.replaceAll('.avatar[', '.home-pip-face[');
-  doc.head.append(style);
- }
  const pending = new Map(), setTimer = options.setInterval || setInterval, clearTimer = options.clearInterval || clearInterval;
  let generation = 0, epoch = 0, sequence = 0, ready = false, loading = false, timer = null, disposed = false;
  let pips = null, digest = null, attention = null, unread = [], unreadFailure = false, apiVersion = 0, cleanup = null, personal = null, partial = false, failure = '', refocus = null;
@@ -108,7 +103,6 @@ export function mountHomePips(options) {
   const plush = globalThis.PipConcepts?.plush, span = node('span', `home-pip-face home-pip-face-${size}`);
   span.setAttribute('aria-hidden', 'true');
   const look = pip.profile || profile(null);
-  if (look.color) span.dataset.tint = look.color;
   try { if (plush) span.innerHTML = plush.markup({index: TYPES.indexOf(look.body || pip.type), name: pip.name}, pose, `home-${pip.id}`, {includeStyles: false}); } catch { span.replaceChildren(); }
   return span;
  }

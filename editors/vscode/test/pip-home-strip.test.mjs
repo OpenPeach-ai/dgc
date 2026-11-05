@@ -78,14 +78,13 @@ test('a Pip with attention and unread appears once; its count grows in the same 
  assert.deepEqual(x.rows(),[['Site traffic','2 waiting for you',false]]);
  assert.equal(x.d.querySelector('.home-pip-latest').textContent,'Traffic report finished.');
  assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'8');
- assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,'lens');
- assert.match(x.d.querySelector('#home-pip-tints').textContent,/home-pip-face\[data-tint=lens\]/);
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined,'old saved colours no longer tint accessories');
  state.unread[0]={...state.unread[0],count:9,latest:'Another report.',latest_message_id:'m2'};
  state.list[0]={...state.list[0],profile:{body:'quill',color:'quill'}};
  await x.poll();
  assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
  assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'9');
- assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,'quill');
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined);
 });
 test('Read removes the unread Pip and its old digest news while leaving a pending approval alone',async t=>{
  const state={list:[pip(1,'Company inbox')],digest:digest([failed(1,'Company inbox')]),
