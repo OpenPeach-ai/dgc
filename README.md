@@ -15,6 +15,10 @@ DGC is an interactive coding agent that lives in your terminal and points at **t
 
 It can also hand each turn to a coding subscription you already pay for (Claude Code, Codex, Qwen Code, Kimi or GitHub Copilot) through the vendor's official CLI, and the same harness sits in VS Code and Cursor, beside **ChatDGC**, a chat for everything else, and **DGC Pips**, for the work you come back to.
 
+![DGC builds and tests an invoicing app from one prompt](.github/assets/dgc-demo-readme.gif)
+
+<sub>One prompt in the editor: DGC builds an invoicing app, runs its tests, and opens the result.</sub>
+
 ![Vibe DGC — the CLI welcome screen](docs/welcome.png)
 
 <sub>The welcome screen, pointed at your own local model — the `///` mark, the session menu, and the **mode · model** status line.</sub>
