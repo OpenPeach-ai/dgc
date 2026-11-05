@@ -164,6 +164,22 @@ test('a rejected Always allow shows the backend reason even after computer statu
  assert.match(x.d.querySelector('.pc-error').textContent,/Remove an old allowed action/);
 });
 
+test('an older computer poll cannot restore a card after Always allow succeeds',async()=>{
+ const x=setup({status:computer({pending:1,actions:[hold]})});await x.drain();
+ for(const timer of x.timers.filter(t=>t.live))timer.fn();
+ const stale=x.requests('get_pip_computer').at(-1);
+ x.click(`[data-always="${actionId}"]`);
+ const approval=x.requests('always_allow_pip_computer_action').at(-1);
+ x.setState(computer());
+ x.answer(approval,{action:{...hold,status:'approved'},grant:{id:'grant_'+'1'.repeat(32)}});await flush();
+ const fresh=x.requests('get_pip_computer').at(-1);
+ assert.notEqual(fresh.id,stale.id);
+ x.answer(fresh,{computer:computer()});await flush();
+ x.answer(stale,{computer:computer({pending:1,actions:[hold]})});await flush();
+ assert.equal(x.d.querySelector(`[data-always="${actionId}"]`),null);
+ assert.match(x.d.body.textContent,/Sent, and allowed from now on/);
+});
+
 test('a payment waits with Send once and Reject, never Always allow',async()=>{
  const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
  assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));

@@ -303,10 +303,11 @@ body.vscode-light .project-icon[data-color="green"] { color:#16A34A; } body.vsco
 #sessions-host .home-pip-copy strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:var(--w-med) var(--t-sm)/1.3 var(--sans); color:var(--text); }
 #sessions-host .home-pip-copy small { color:var(--muted); font:var(--w-reg) var(--t-xs)/1.3 var(--sans); }
 #sessions-host .home-pip-copy :is(.home-pip-latest, .home-pip-unread-only small) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#sessions-host .home-pip-badge { flex:none; min-width:20px; height:20px; padding:0 6px; border-radius:10px; display:inline-flex; align-items:center;
+#sessions-host .home-pip-badge { flex:none; width:32px; min-width:32px; height:20px; padding:0; border-radius:10px; display:inline-flex; align-items:center;
   justify-content:center; background:var(--accent-fill); color:#fff; font:var(--w-semi) var(--t-xs)/1 var(--sans); font-variant-numeric:tabular-nums; }
 /* An unread row's count is its own button beside the row: it reads "Read" on hover or focus, and marks that Pip read. */
-#sessions-host .home-pip-read { margin-right:var(--sp-1); border:0; cursor:pointer; }
+#sessions-host .home-pip-read { order:3; margin-right:var(--sp-1); border:0; cursor:pointer; }
+#sessions-host .home-pip-item .home-pip-dismiss { order:2; }
 #sessions-host .home-pip-read-word { display:none; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-count { display:none; }
 #sessions-host .home-pip-read:is(:hover, :focus-visible) .home-pip-read-word { display:inline; }
