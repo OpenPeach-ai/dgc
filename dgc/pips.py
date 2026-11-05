@@ -4358,6 +4358,8 @@ def _execute_run(registry, row, config):
             app_socket.said = str(manifest['conversation'].get('text') or '')
             app_socket.images.user_turn = True          # a priced image it asked about may be made in this turn
             app_socket.videos.user_turn = True          # and a video it asked about
+            app_socket.images.user_message = app_socket.said
+            app_socket.videos.user_message = app_socket.said
         if taint is not None:
             app_socket.on_read = taint.add                     # what it reads from apps, for careful mode
         if manifest.get('run_kind') == 'conversation':

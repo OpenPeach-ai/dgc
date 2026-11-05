@@ -48,10 +48,11 @@ class PipVideos(unittest.TestCase):
     def send(self, text, key):
         return pip_chat.send(self.store, self.job["id"], text, key, "device_1", self.cfg)
 
-    def session(self, run_id, *, user_turn=True, unattended=False):
+    def session(self, run_id, *, user_turn=True, unattended=False, user_message="Yes, make it"):
         session = pip_videos.Session(self.registry.directory, self.cfg, self.job["id"], self.job["workspace_id"],
                                      run_id, unattended=unattended)
         session.user_turn = user_turn
+        session.user_message = user_message if user_turn else ""
         return session
 
     def reply(self):
@@ -92,11 +93,25 @@ class PipVideos(unittest.TestCase):
         said = self.session(sent["run"]["id"], user_turn=False, unattended=True).call(
             "generate_video", {"prompt": "x", "confirm": True})
         self.assertIn("A routine makes a video only for a Pip the user allowed", said)
+        self.assertFalse(self.session(sent["run"]["id"])._pending_path().exists(),
+                         "an unattended run cannot leave a pending yes")
         self.assertEqual(self.fal_posts(), [])
         self.generators(video_pips=[self.job["id"]])
         said = self.session(sent["run"]["id"], user_turn=False, unattended=True).call("generate_video", {"prompt": "x"})
         self.assertTrue(said.startswith("Started a 5 s video"), said)
         self.assertEqual(len(self.fal_posts()), 1)
+
+    def test_video_confirmation_requires_yes_and_exact_request(self):
+        self.generators()
+        first = self.send("Make a clip", "m1")
+        self.session(first["run"]["id"]).call("generate_video", {"prompt": "a felt ball rolls"})
+        refused = self.session("run_" + "5" * 32, user_message="No").call(
+            "generate_video", {"prompt": "a felt ball rolls", "confirm": True})
+        self.assertIn("did not explicitly say yes", refused)
+        changed = self.session("run_" + "6" * 32).call(
+            "generate_video", {"prompt": "a blue ball rolls", "confirm": True})
+        self.assertIn("video request changed", changed)
+        self.assertEqual(self.fal_posts(), [])
 
     def test_a_yes_to_a_price_never_covers_one_dgc_doesnt_know(self):
         # The user was asked about a $0.15 clip; the Pip then makes it with a model DGC has no price for, under a $0

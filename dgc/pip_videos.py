@@ -17,7 +17,7 @@ import json
 import time
 from pathlib import Path
 
-from . import image_tools, video_tools, videos
+from . import image_tools, video_tools, videos, pip_media_confirmation
 
 TOOLS = ("generate_video", "list_video_generators")
 PENDING_S = 30 * 60
@@ -57,6 +57,7 @@ class Session:
         self.pip_id, self.workspace_id, self.run_id = pip_id, workspace_id, run_id
         self.unattended = unattended
         self.user_turn = False
+        self.user_message = ""
         self.started: list[str] = []
         self.calls = 0
         try:
@@ -82,16 +83,17 @@ class Session:
             return {}
 
     def _ask(self, plan) -> str:
-        self._pending_path().parent.mkdir(parents=True, exist_ok=True)
-        self._pending_path().write_text(json.dumps({
-            "run_id": self.run_id, "generator": plan.generator["id"], "prompt": _digest(plan.request.prompt),
-            "total": plan.estimate, "model": videos.model_of(plan.generator, plan.request.model), "at": time.time(),
-            "card": plan.card()}), encoding="utf-8")
         note = f" {plan.card()['note']}" if plan.unpriced else ""
         if self.unattended:
             return (f"Not made: {plan.summary()}.{note} A routine makes a video only for a Pip the user allowed for "
                     "this generator (Settings → Models → Images & video → its Pips), and only at a price DGC knows; "
                     "nobody is here to ask. Tell the user what you'd make and its price; they can ask you in your chat.")
+        self._pending_path().parent.mkdir(parents=True, exist_ok=True)
+        self._pending_path().write_text(json.dumps({
+            "run_id": self.run_id, "generator": plan.generator["id"], "prompt": _digest(plan.request.prompt),
+            "request": pip_media_confirmation.request_identity(plan),
+            "total": plan.estimate, "model": videos.model_of(plan.generator, plan.request.model), "at": time.time(),
+            "card": plan.card()}), encoding="utf-8")
         return (f"Not made yet: {plan.summary()}, {plan.card()['minutes']}. It costs money, so ask the user in your reply "
                 f"whether to make it, with that price.{' Tell them too:' + note if note else ''} If they answer yes, "
                 "call generate_video again with the same prompt and confirm: true. Don't make it otherwise.")
@@ -104,6 +106,8 @@ class Session:
             return False, "only your reply to the user's own message can make a video"
         if pending.get("run_id") in (None, self.run_id):
             return False, "the user hasn't answered yet: ask in your reply, with the price, and wait for their yes"
+        if not pip_media_confirmation.user_said_yes(self.user_message):
+            return False, "the user's message did not explicitly say yes to making the video"
         if time.time() - float(pending.get("at") or 0) >= PENDING_S:
             return False, "that question was too long ago: ask again, with the price"
         if pending.get("generator") != plan.generator["id"]:
@@ -124,6 +128,8 @@ class Session:
                 return False, "DGC can't hold this to this month's limit, which the user wasn't told: ask again"
         elif plan.estimate > float(allowed) + 1e-9:
             return False, f"this costs more than what the user said yes to ({videos.money(allowed)}): ask again"
+        if pending.get("request") != pip_media_confirmation.request_identity(plan):
+            return False, "the video request changed since the user was asked: ask again for this exact video"
         return True, ""
 
     def call(self, op: str, args: dict) -> str:

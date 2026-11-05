@@ -42,10 +42,11 @@ class PipImages(unittest.TestCase):
     def send(self, text, key):
         return pip_chat.send(self.store, self.job["id"], text, key, "device_1", self.cfg)
 
-    def session(self, run_id, *, user_turn=True, unattended=False):
+    def session(self, run_id, *, user_turn=True, unattended=False, user_message="Yes please"):
         session = pip_images.Session(self.registry.directory, self.cfg, self.job["id"], self.job["workspace_id"],
                                      run_id, unattended=unattended)
         session.user_turn = user_turn
+        session.user_message = user_message if user_turn else ""
         return session
 
     def reply(self):
@@ -92,22 +93,45 @@ class PipImages(unittest.TestCase):
         self.assertTrue(made.startswith("Made 1 image with fal FLUX schnell"), made)
         self.assertEqual(len(self.fal_calls()), 1)
 
-    def test_a_yes_covers_that_price_and_generator_only_and_a_routine_never_spends(self):
+    def test_a_yes_covers_only_the_exact_request_and_a_routine_never_spends(self):
         self.generators("fal")
         first = self.send("Make me a logo", "m1")
         self.session(first["run"]["id"]).call("generate_image", {"prompt": "a minimal fox logo"})
         later = self.session("run_" + "e" * 32)
         more = later.call("generate_image", {"prompt": "a minimal fox logo", "count": 2, "confirm": True})
         self.assertIn("costs more than what the user said yes to (about $0.003)", more)
+        routine_pending = pip_images.folder(self.job["id"]) / "pending.json"
+        pending_before = routine_pending.read_text()
         routine = self.session("run_" + "f" * 32, user_turn=False, unattended=True)
         said = routine.call("generate_image", {"prompt": "a minimal fox logo", "confirm": True})
         self.assertIn("only your reply to the user's own message", said)
+        self.assertEqual(routine_pending.read_text(), pending_before,
+                         "an unattended run cannot create or change a pending yes")
         self.assertEqual(self.fal_calls(), [])
         self.assertEqual(len(self.fal_calls()), 0)
         third = self.session("run_" + "9" * 32)
         reworded = third.call("generate_image", {"prompt": "minimal geometric fox logo", "confirm": True})
-        self.assertTrue(reworded.startswith("Made 1 image"), "a reworded prompt at the same price is what they said yes to")
-        self.assertEqual(len(self.fal_calls()), 1)
+        self.assertIn("image request changed", reworded)
+        self.assertEqual(len(self.fal_calls()), 0)
+
+    def test_no_or_unrelated_reply_never_confirms_an_image(self):
+        self.generators("fal")
+        first = self.send("Make me a logo", "m1")
+        self.session(first["run"]["id"]).call("generate_image", {"prompt": "a fox logo"})
+        for index, reply in enumerate(("No", "Yes, but not yet", "Maybe", "", "yes to a different question")):
+            said = self.session("run_" + str(index) * 32, user_message=reply).call(
+                "generate_image", {"prompt": "a fox logo", "confirm": True})
+            self.assertIn("did not explicitly say yes", said)
+        self.assertEqual(self.fal_calls(), [])
+
+    def test_same_price_but_changed_image_options_need_another_yes(self):
+        self.generators("fal")
+        first = self.send("Make me a logo", "m1")
+        self.session(first["run"]["id"]).call("generate_image", {"prompt": "a fox logo"})
+        said = self.session("run_" + "c" * 32).call(
+            "generate_image", {"prompt": "a fox logo", "size": "512x512", "confirm": True})
+        self.assertIn("image request changed", said)
+        self.assertEqual(self.fal_calls(), [])
 
     def test_a_yes_given_within_the_limit_never_passes_it(self):
         # The user said yes to a picture within this month's limit; another one filled it before the Pip made it.

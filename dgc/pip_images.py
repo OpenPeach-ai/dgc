@@ -21,7 +21,7 @@ import os
 import time
 from pathlib import Path
 
-from . import image_tools
+from . import image_tools, pip_media_confirmation
 from . import images as images_mod
 
 TOOLS = ("generate_image", "list_image_generators")
@@ -60,6 +60,7 @@ class Session:
         self.pip_id, self.workspace_id, self.run_id = pip_id, workspace_id, run_id
         self.unattended = unattended
         self.user_turn = False            # set by the controller: this run answers the user's own message
+        self.user_message = ""             # exact text of that message, never a model-authored paraphrase
         self.made: list[dict] = []
         self.calls = 0
 
@@ -79,16 +80,16 @@ class Session:
             return {}
 
     def _ask(self, plan) -> str:
-        folder(self.pip_id).mkdir(parents=True, exist_ok=True)
-        self._pending_path().write_text(json.dumps({
-            "run_id": self.run_id, "generator": plan.generator["id"], "prompt": _digest(plan.request.prompt),
-            "total": plan.total, "count": plan.request.count, "model": plan.card()["model"], "at": time.time(),
-            "card": plan.card()}),
-            encoding="utf-8")
         if self.unattended:
             return (f"Not made: {plan.summary()}. It costs money and asks first, and nobody is here to answer in this "
                     "run. Tell the user what you'd make and its price; they can ask you in your chat, or allow that "
                     "generator in DGC (Always allow on its card).")
+        folder(self.pip_id).mkdir(parents=True, exist_ok=True)
+        self._pending_path().write_text(json.dumps({
+            "run_id": self.run_id, "generator": plan.generator["id"], "prompt": _digest(plan.request.prompt),
+            "request": pip_media_confirmation.request_identity(plan),
+            "total": plan.total, "count": plan.request.count, "model": plan.card()["model"], "at": time.time(),
+            "card": plan.card()}), encoding="utf-8")
         note = f" Tell them too: {plan.card()['note']}" if plan.card().get("note") else ""
         return (f"Not made yet: {plan.summary()}. It costs money, so ask the user in your reply whether to make it, "
                 f"with that price.{note} If they answer yes, call generate_image again with the same prompt and "
@@ -104,6 +105,8 @@ class Session:
             return False, "only your reply to the user's own message can make a paid image"
         if pending.get("run_id") in (None, self.run_id):
             return False, "the user hasn't answered yet: ask in your reply, with the price, and wait for their yes"
+        if not pip_media_confirmation.user_said_yes(self.user_message):
+            return False, "the user's message did not explicitly say yes to making the image"
         if time.time() - float(pending.get("at") or 0) >= PENDING_S:
             return False, "that question was too long ago: ask again, with the price"
         if pending.get("generator") != plan.generator["id"]:
@@ -127,6 +130,8 @@ class Session:
             return False, "this would now pass this month's limit, which the user wasn't asked about: ask again"
         if plan.unpriced and not (pending.get("card") or {}).get("price_unknown"):
             return False, "DGC can't hold this to this month's limit, which the user wasn't told: ask again"
+        if pending.get("request") != pip_media_confirmation.request_identity(plan):
+            return False, "the image request changed since the user was asked: ask again for this exact image"
         return True, ""
 
     def call(self, op: str, args: dict) -> str:
