@@ -117,8 +117,13 @@ def _info(record, catalog) -> dict:
                          and record.get("source_pin") == entry.get("sha")) else frozenset(),
             # DGC's own Composio (its catalog preset, not another package that calls itself "composio"): its
             # multi-execute tool counts as a read when every app call inside it is one DGC reviewed (composio_reads).
-            "composio": (record["name"] == "composio" and record.get("source_kind") == "preset"
-                         and entry.get("source_kind") == "preset" and record.get("upstream") == entry.get("upstream"))}
+            "composio": (record["name"] == "composio" and record.get("marketplace") == "dgc-curated"
+                         and record.get("source_kind") == "preset" and entry.get("source_kind") == "preset"
+                         and record.get("upstream") == entry.get("upstream")
+                         and isinstance(record.get("registered_specs"), dict)
+                         and isinstance(record["registered_specs"].get("composio"), dict)
+                         and record["registered_specs"]["composio"].get("url")
+                         == (entry.get("mcp_presets", {}).get("composio") or {}).get("url"))}
 
 
 def owner(server):
@@ -611,9 +616,9 @@ COMPOSIO_GMAIL_TIP = ("For a Gmail summary, fetch the requested count now with G
 
 
 def _composio(info) -> bool:
-    """DGC's own Composio plugin (0.51 marks it ``composio``; 0.50.1 matched it by name: both are honoured)."""
+    """Only DGC's catalog-pinned Composio preset, never another server with that name."""
     info = info or {}
-    return bool(info.get("composio")) or info.get("plugin") == "composio"
+    return info.get("composio") is True
 
 
 def composio_calls(arguments) -> list[dict] | None:

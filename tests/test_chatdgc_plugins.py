@@ -134,7 +134,7 @@ class ReadsAndCards(PluginChat):
         spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
         tool = {"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute tool calls.",
                 "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}, "annotations": marks}
-        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+        self.world["installed"]["composio"] = {"display_name": "Composio", "composio": True, "about": "your connected apps",
                                                "money": False, "reads": (), "servers": {"composio": spec}}
         self.world["tools"]["composio"] = [tool]
         self.world["answers"]["COMPOSIO_MULTI_EXECUTE_TOOL"] = json.dumps({"emails": ["first", "second"]})
@@ -158,7 +158,7 @@ class ReadsAndCards(PluginChat):
 
     def test_malformed_composio_execution_is_rejected_before_card_then_model_can_retry_read(self):
         spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
-        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+        self.world["installed"]["composio"] = {"display_name": "Composio", "composio": True, "about": "your connected apps",
                                                "money": False, "reads": (), "servers": {"composio": spec}}
         self.world["tools"]["composio"] = [{"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute tool calls.",
                                                "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}]
@@ -178,7 +178,7 @@ class ReadsAndCards(PluginChat):
 
     def test_legacy_or_edited_malformed_composio_card_cannot_run(self):
         spec = {"transport": "remote", "url": "https://mcp.composio.example/mcp"}
-        self.world["installed"]["composio"] = {"display_name": "Composio", "about": "your connected apps",
+        self.world["installed"]["composio"] = {"display_name": "Composio", "composio": True, "about": "your connected apps",
                                                "money": False, "reads": (), "servers": {"composio": spec}}
         self.world["tools"]["composio"] = [{"name": "COMPOSIO_MULTI_EXECUTE_TOOL", "description": "Execute app tools.",
                                                "inputSchema": {"type": "object", "properties": {"tools": {"type": "array"}}}}]

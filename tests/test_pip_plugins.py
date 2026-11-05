@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -179,7 +180,7 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
     def composio_batches(self, row):
         from types import SimpleNamespace
         spec = {"transport": "remote", "url": "https://mcp.composio.dev/mcp"}
-        info = {"plugin": "composio", "display_name": "Composio", "money": False, "reads": (),
+        info = {"plugin": "composio", "composio": True, "display_name": "Composio", "money": False, "reads": (),
                 "servers": {"composio": spec}}
         seen = []
         manager = SimpleNamespace(call=lambda route, args, **kw: seen.append(args) or '{"emails":["first"]}')
@@ -207,6 +208,26 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
                 self.assertEqual(len(seen), 1)
         self.assertFalse(pip_plugins.read_only({**row, "annotations": {"readOnlyHint": True}}, info,
                                                {"tools": [send]}), "a vendor hint cannot turn an inner send into a read")
+
+    def test_composio_read_shortcut_requires_the_catalog_preset_and_its_real_server(self):
+        entry = next(item for item in json.loads((Path(__file__).resolve().parents[1] / "dgc" / "plugin_catalog.json").read_text())["plugins"]
+                     if item["name"] == "composio")
+        record = {"name": "composio", "marketplace": "dgc-curated", "source_kind": "preset",
+                  "upstream": entry["upstream"], "registered_specs": {
+                      "composio": {"url": entry["mcp_presets"]["composio"]["url"]}}}
+        trusted = pip_plugins._info(record, {"composio": entry})
+        self.assertTrue(pip_plugins._composio(trusted))
+        row = {"name": pip_plugins.COMPOSIO_EXECUTE}
+        read = {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": 5}}]}
+        self.assertTrue(pip_plugins.read_only(row, trusted, read))
+        for untrusted in ({**record, "marketplace": "third-party"},
+                          {**record, "registered_specs": {"composio": {"url": "https://other.example/mcp"}}},
+                          {"name": "composio", "source_kind": "preset", "upstream": entry["upstream"]}):
+            info = pip_plugins._info(untrusted, {"composio": entry})
+            self.assertFalse(pip_plugins._composio(info))
+            self.assertFalse(pip_plugins.read_only(row, info, read))
+            self.assertTrue(pip_plugins.asks("composio", {**info, "plugin": "composio"}, row,
+                                              unattended=False, arguments=read))
 
     def test_the_reply_records_each_plugin_it_read_once_never_a_failed_read_or_a_card(self):
         # "Used Airtable" under the reply: what the controller saw it read, in order, each once.

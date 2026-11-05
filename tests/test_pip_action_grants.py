@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dgc import pip_action_grants as grants, pip_app_actions as actions, pip_app_sends as sends
+from dgc import pip_action_grants as grants, pip_app_actions as actions, pip_app_sends as sends, pip_computer
 from dgc import pip_message_drafts as drafts, pips
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests import test_pip_app_actions as fixtures
@@ -21,6 +21,30 @@ class ActionGrantTests(unittest.TestCase):
     propose = fixtures.AppActionTests.propose
     prepare = fixtures.AppActionTests.prepare
     sends = fixtures.AppActionTests.sends
+
+    def test_browser_always_allow_releases_matching_cards_already_waiting(self):
+        first = {"method": "POST", "host": "dash.cloudflare.com",
+                 "path": "/cdn-cgi/challenge-platform/h/b/precursor/one"}
+        rotated = {**first, "path": "/cdn-cgi/challenge-platform/h/b/precursor/two"}
+        unrelated = {**first, "host": "other.example"}
+        payment = {**first, "payment": True}
+        for action_id, summary in (("first", first), ("rotated", rotated),
+                                   ("unrelated", unrelated), ("payment", payment)):
+            self.registry.db.execute(
+                "INSERT INTO pip_computer_actions (id,pip_id,workspace_id,host_id,request_ref,summary,digest,"
+                "status,created_at,expires_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)",
+                (action_id, self.source["id"], self.source["workspace_id"], "host-one", action_id,
+                 json.dumps(summary), pip_computer._digest(summary), self.registry.clock(), "2027-01-01T00:00:00.000Z"))
+        # list_actions sorts by timestamp; select the requested card explicitly.
+        first_action = next(a for a in pip_computer.list_actions(self.registry, self.source["id"])
+                            if a["id"] == "first")
+        sent, grant = pip_computer.approve_always(self.registry, "first", first_action["digest"], "editor-user")
+        self.assertEqual(sent["status"], "approved")
+        cards = {a["id"]: a for a in pip_computer.list_actions(self.registry, self.source["id"])}
+        self.assertEqual(cards["rotated"]["status"], "approved")
+        self.assertEqual(cards["rotated"]["resolved_by"], "pip-grant:" + grant["id"])
+        self.assertEqual(cards["unrelated"]["status"], "pending")
+        self.assertEqual(cards["payment"]["status"], "pending")
 
     def test_cloudflare_verification_grant_covers_rotating_token_only_on_same_route(self):
         base = {"method": "POST", "host": "dash.cloudflare.com"}

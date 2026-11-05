@@ -1583,9 +1583,9 @@ def decide(registry, action_id: str, expected_digest: str, approve: bool, actor:
 
 
 def approve_always(registry, action_id: str, expected_digest: str, actor: str) -> tuple:
-    """Send this held write, and always allow its Pip the same submit (site, method and path): one
-    decision, so a grant that cannot be made leaves the action waiting rather than half-approved."""
-    from .pip_action_grants import add_computer_grant
+    """Send this held write and allow the same route for this Pip. The grant also releases
+    already-waiting requests it covers; those must not leave duplicate cards behind."""
+    from .pip_action_grants import add_computer_grant, computer_pins
     if actor not in ("editor-user", "local-console"):
         raise RegistryError("local_only", "Approve a Pip's computer actions on this computer.")
     summary = json.loads(_row(registry, action_id)["summary"])
@@ -1603,6 +1603,22 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
     with registry.transaction():
         _decide(registry, action_id, expected_digest, True, actor)
         grant = add_computer_grant(registry, action_id, actor)
+        pins = {key: grant[key] for key in ("kind", "server", "connection_digest", "account", "schema_digest", "tool")}
+        siblings = registry.db.execute("SELECT * FROM pip_computer_actions WHERE pip_id=? AND status='pending'",
+                                       (_row(registry, action_id)["pip_id"],)).fetchall()
+        for sibling in siblings:
+            if _now() >= sibling["expires_at"]:
+                continue
+            other = json.loads(sibling["summary"])
+            if other.get("kind") in CAREFUL_KINDS or other.get("payment") is True:
+                continue
+            if computer_pins(sibling["pip_id"], other) != pins:
+                continue
+            registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
+                                "WHERE id=? AND status='pending'", (_now(), "pip-grant:" + grant["id"], sibling["id"]))
+            registry.event(sibling["workspace_id"], "pip_computer_action_decided", pip_id=sibling["pip_id"],
+                           run_id=sibling["run_id"], payload={"action_id": sibling["id"], "approved": True,
+                                                              "grant_id": grant["id"]})
     return projection(_row(registry, action_id)), grant
 
 
