@@ -373,6 +373,14 @@ class Asks(_Card):
         self.assertIn("could not save Always allow", done["error"]["message"])
         self.assertFalse(self.requests_sent("tools/call"))
 
+    def test_failed_rule_save_does_not_leave_an_in_memory_allow(self):
+        config = _config(self.root)
+        config.permissions = {"allow": [], "ask": [], "deny": []}
+        with patch.object(config, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                mcp_apps._remember_rule(config, self.card(), "move")
+        self.assertEqual(config.permissions["allow"], [])
+
     def test_an_answer_for_another_card_cannot_spend_its_question(self):
         first, second = self.card(), self.card()
         ask = mcp_apps.CALLS.begin(first, _Link(self.server), "tools/call",

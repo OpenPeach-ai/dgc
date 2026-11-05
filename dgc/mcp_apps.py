@@ -870,7 +870,11 @@ def _remember_rule(config, record: dict, tool: str) -> None:
     allow = config.permissions.setdefault("allow", [])
     if rule not in allow:
         allow.append(rule)
-        config.save()
+        try:
+            config.save()
+        except Exception:
+            allow.remove(rule)
+            raise
 
 
 class WorkLink(Link):
