@@ -121,7 +121,9 @@ def _info(record, catalog) -> dict:
                          and record.get("source_kind") == "preset" and entry.get("source_kind") == "preset"
                          and record.get("upstream") == entry.get("upstream")
                          and isinstance(record.get("registered_specs"), dict)
+                         and set(record["registered_specs"]) == {"composio"}
                          and isinstance(record["registered_specs"].get("composio"), dict)
+                         and record["registered_specs"]["composio"].get("transport") == "remote"
                          and record["registered_specs"]["composio"].get("url")
                          == (entry.get("mcp_presets", {}).get("composio") or {}).get("url"))}
 

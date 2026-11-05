@@ -214,13 +214,15 @@ class PluginAccessTests(PluginWorld, unittest.TestCase):
                      if item["name"] == "composio")
         record = {"name": "composio", "marketplace": "dgc-curated", "source_kind": "preset",
                   "upstream": entry["upstream"], "registered_specs": {
-                      "composio": {"url": entry["mcp_presets"]["composio"]["url"]}}}
+                      "composio": {"transport": "remote", "url": entry["mcp_presets"]["composio"]["url"]}}}
         trusted = pip_plugins._info(record, {"composio": entry})
         self.assertTrue(pip_plugins._composio(trusted))
         row = {"name": pip_plugins.COMPOSIO_EXECUTE}
         read = {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"max_results": 5}}]}
         self.assertTrue(pip_plugins.read_only(row, trusted, read))
         for untrusted in ({**record, "marketplace": "third-party"},
+                          {**record, "registered_specs": {**record["registered_specs"], "other": {"transport": "remote"}}},
+                          {**record, "registered_specs": {"composio": {"transport": "stdio", "url": entry["mcp_presets"]["composio"]["url"]}}},
                           {**record, "registered_specs": {"composio": {"url": "https://other.example/mcp"}}},
                           {"name": "composio", "source_kind": "preset", "upstream": entry["upstream"]}):
             info = pip_plugins._info(untrusted, {"composio": entry})
