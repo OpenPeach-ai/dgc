@@ -52,6 +52,15 @@ def _arguments(plan, args: dict) -> dict:
             **({"image": str(args.get("image"))} if args.get("image") else {})}
 
 
+def _quote(plan) -> dict:
+    """The effective clip and exact estimate the user reviewed, apart from editable prompt text."""
+    shown = plan.card()
+    return {"generator": plan.generator["id"], "provider": plan.generator["provider"],
+            "model": shown["model"], "duration_s": plan.request.duration_s,
+            "resolution": plan.request.resolution, "aspect": plan.request.aspect,
+            "audio": bool(plan.request.audio), "estimate_usd": plan.estimate}
+
+
 def call(engine, chat: dict, tool_call, at: int, actions: list, on_action, message_id: str = "") -> str:
     """One generate_video or list_video_generators call in a reply: what the model is told."""
     from .store import now
@@ -65,6 +74,7 @@ def call(engine, chat: dict, tool_call, at: int, actions: list, on_action, messa
         return f"error: {exc}"
     card = {"kind": "video", "plugin": "videos", "plugin_name": plan.generator["name"], "money": True,
             "tool": "generate_video", "price": plan.card()["price"], "card": plan.card(),
+            "quote": _quote(plan),
             "arguments": _arguments(plan, args), "recurring": False, "status": "waiting",
             "id": "act_" + uuid.uuid4().hex, "at": at, "created_at": now()}
     if not plan.asks:
@@ -97,6 +107,9 @@ def run_card(engine, chat: dict, card: dict, arguments: dict | None, message_id:
         plan = video_tools.prepare(engine.config, args, place)
     except video_tools.Refused as exc:
         return {"status": "failed", "error": str(exc)}
+    if card.get("quote") != _quote(plan):
+        return {"status": "failed", "error": "Not made: the video options or price changed since this card was "
+                "shown. Ask again to review a new card before spending."}
     if plan.unpriced and not (card.get("card") or {}).get("price_unknown"):
         return {"status": "failed", "error": f"Not made: DGC doesn't know what {plan.label} charges, and its card "
                 "didn't say so. Ask again to see the new card."}

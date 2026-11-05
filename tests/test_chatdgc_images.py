@@ -129,6 +129,26 @@ class ImagesInChat(unittest.TestCase):
         self.assertIn("would now pass this month's limit", done["error"])
         self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [], "nothing sent")
 
+    def test_a_card_does_not_spend_on_changed_count_or_estimate(self):
+        self.setup("fal")
+        chat, reply = self.say("Make me a logo.", {"calls": [("generate_image", {"prompt": "a fox logo"})]},
+                               {"parts": ["A card."]})
+        [card] = reply["actions"]
+        self.assertEqual(card["quote"]["count"], 1)
+        changed = self.engine.act(chat["id"], reply["id"], card["id"], "run", arguments={"count": 2})
+        self.assertEqual(changed["status"], "failed")
+        self.assertIn("review a new card", changed["error"])
+        self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
+
+        another, later = self.say("Make another.", {"calls": [("generate_image", {"prompt": "a blue fox"})]},
+                                  {"parts": ["A card."]}, chat=chat)
+        [second] = later["actions"]
+        with patch("dgc.images.price_for", return_value=0.5):
+            changed_price = self.engine.act(another["id"], later["id"], second["id"], "run")
+        self.assertEqual(changed_price["status"], "failed")
+        self.assertIn("review a new card", changed_price["error"])
+        self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
+
     def test_a_card_that_didnt_say_its_price_is_unknown_makes_nothing_under_a_limit(self):
         self.setup("fal")
         chat, reply = self.say("Make me a logo.", {"calls": [("generate_image", {"prompt": "a fox logo",

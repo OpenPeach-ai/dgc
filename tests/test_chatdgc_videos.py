@@ -142,6 +142,24 @@ class VideosInChat(unittest.TestCase):
                 time.sleep(0.02)
         self.assertEqual(self.card_now(chat["id"], reply["id"])["status"], "done")
 
+    def test_a_card_does_not_start_on_changed_aspect_or_estimate(self):
+        chat, reply = self.say("Make a clip.", {"calls": [("generate_video", {"prompt": "waves", "duration_s": 5})]},
+                               {"parts": ["A card."]})
+        [card] = reply["actions"]
+        changed = self.engine.act(chat["id"], reply["id"], card["id"], "run", arguments={"aspect": "9:16"})
+        self.assertEqual(changed["status"], "failed")
+        self.assertIn("review a new card", changed["error"])
+        self.assertEqual(self.fake.requests, [])
+
+        another, later = self.say("Make another.", {"calls": [("generate_video", {"prompt": "rain", "duration_s": 5})]},
+                                  {"parts": ["A card."]}, chat=chat)
+        [second] = later["actions"]
+        with patch("dgc.videos.price", return_value=2.0):
+            changed_price = self.engine.act(another["id"], later["id"], second["id"], "run")
+        self.assertEqual(changed_price["status"], "failed")
+        self.assertIn("review a new card", changed_price["error"])
+        self.assertEqual(self.fake.requests, [])
+
     def test_stop_ends_the_card(self):
         self.fake.steps = 10_000
         chat, reply = self.say("Make a clip.", {"calls": [("generate_video", {"prompt": "slow"})]},

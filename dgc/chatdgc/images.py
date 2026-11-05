@@ -57,6 +57,14 @@ def surface(engine, chat: dict) -> image_tools.Surface:
                                owner=f"images for chat {chat['id']}")
 
 
+def _quote(plan) -> dict:
+    """The effective image and exact estimate the user reviewed, apart from editable prompt text."""
+    shown = plan.card()
+    return {"generator": plan.generator["id"], "provider": plan.generator["provider"],
+            "model": shown["model"], "size": shown["size"], "count": plan.request.count,
+            "total_usd": plan.total}
+
+
 def _keep(engine, chat: dict, result, at: int, files: list, on_file) -> list[dict]:
     """Each image kept with the chat as a file it made (the Library lists it), and its card under the reply."""
     from . import attachments as attached
@@ -96,6 +104,7 @@ def call(engine, chat: dict, tool_call, files: list, at: int, on_file, actions: 
     if plan.asks:
         card = {"kind": "image", "plugin": "images", "plugin_name": plan.generator["name"], "money": True,
                 "tool": "generate_image", "price": plan.card()["price"], "card": plan.card(),
+                "quote": _quote(plan),
                 "arguments": {"prompt": plan.request.prompt, "generator": plan.generator["id"],
                               "size": f"{plan.request.width}x{plan.request.height}", "count": plan.request.count,
                               **({"seed": plan.request.seed} if plan.request.seed is not None else {}),
@@ -126,6 +135,9 @@ def run_card(engine, chat: dict, card: dict, arguments: dict | None) -> dict:
         plan = image_tools.prepare(engine.config, args, place)
     except image_tools.Refused as exc:
         return {"status": "failed", "error": str(exc)}
+    if card.get("quote") != _quote(plan):
+        return {"status": "failed", "error": "Not made: the image options or price changed since this card was "
+                "shown. Ask again to review a new card before spending."}
     if plan.unpriced and not (card.get("card") or {}).get("price_unknown"):
         return {"status": "failed", "error": f"Not made: DGC doesn't know what {plan.generator['name']} charges, and "
                 "its card didn't say so. Ask again to see the new card."}
