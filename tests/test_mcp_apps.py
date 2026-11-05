@@ -150,6 +150,19 @@ class _Fixture(unittest.TestCase):
 
 
 class ToolsList(_Fixture):
+    def test_app_only_tools_count_toward_the_catalog_limit_across_pages(self):
+        from dgc.mcp import MCPServer
+        catalog = MCPServer("bounded-apps", sys.executable)
+        catalog.protocol_era = "legacy"
+        def page(start, end, cursor=None):
+            return {"tools": [{"name": f"app-{index}", "inputSchema": {"type": "object"},
+                                "_meta": {"ui": {"visibility": ["app"]}}}
+                               for index in range(start, end)], "nextCursor": cursor}
+        pages = iter([(page(0, 400, "second"), None), (page(400, 513), None)])
+        catalog._request = lambda *_args, **_kwargs: next(pages)
+        self.assertFalse(catalog._load_tools(1.0))
+        self.assertIn("exceeded 512 tools", catalog.error)
+
     def test_a_tools_card_address_and_who_may_call_it_survive_tools_list(self):
         meta = self.server.tool_meta
         self.assertEqual(meta["show_board"]["uri"], "ui://board/card.html")

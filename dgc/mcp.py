@@ -910,7 +910,9 @@ class MCPServer:
             raw_tools = page.get("tools")
             if not isinstance(raw_tools, list):
                 return fail("tools/list did not return a tools array")
-            if len(tools) + len(raw_tools) > _MAX_TOOLS:
+            # App-only tools are hidden from the model but still occupy catalog memory.
+            # Count every accepted name across earlier pages, not only exposed tools.
+            if len(names) + len(raw_tools) > _MAX_TOOLS:
                 return fail(f"tools/list exceeded {_MAX_TOOLS} tools")
             for raw_tool in raw_tools:
                 try:
