@@ -267,7 +267,7 @@ async function runCommand(command){
  finally{S.terminal.running=false;render();$('pc-command')?.focus();}
 }
 async function decide(id,how){
- const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;S.error='';S.actionError=false;render();
+ const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;S.error='';S.actionError=false;S.notice='';render();
  try{
   if(how==='always'){await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});S.notice='Sent, and allowed from now on for this browser request.';}
   else{const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';}
