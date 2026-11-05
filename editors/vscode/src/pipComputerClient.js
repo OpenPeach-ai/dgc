@@ -12,7 +12,7 @@ const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
 // The computer opens on its desktop with nothing open, like a computer you switch on (a user:
 // "show default OS screen, with nothing opened"). The browser comes up when you open it from the
 // dock, or by itself when the Pip starts using it, so you can watch.
-const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',notice:'',
+const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',actionError:false,notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
  terminal:{entries:[],error:'',running:false,draft:''},busy:false,
  // What you are typing in the address bar. Every new frame redraws the bar with the page's address,
@@ -211,7 +211,7 @@ function render(){
 
 async function loadComputer(){
  if(!S.pip||!S.connected)return;
- try{S.computer=pipComputer((await send('get_pip_computer',{pip_id:S.pip.id})).computer,S.pip.id);S.error='';}
+ try{S.computer=pipComputer((await send('get_pip_computer',{pip_id:S.pip.id})).computer,S.pip.id);if(!S.actionError)S.error='';}
  catch(error){S.error=errorText(error);}
  render();
  void loadApps();
@@ -267,11 +267,11 @@ async function runCommand(command){
  finally{S.terminal.running=false;render();$('pc-command')?.focus();}
 }
 async function decide(id,how){
- const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;render();
+ const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;S.error='';S.actionError=false;render();
  try{
   if(how==='always'){await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});S.notice='Sent, and allowed from now on for this browser request.';}
   else{const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';}
- }catch(error){S.error=errorText(error);}
+ }catch(error){S.error=errorText(error);S.actionError=true;}
  finally{S.busy=false;await loadComputer();}
 }
 function screenPoint(event){

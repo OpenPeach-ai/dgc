@@ -151,6 +151,19 @@ test('what the Pip would submit waits at the top with Send once, Always allow an
  assert.match(x.d.body.textContent,/Approved/);
 });
 
+test('a rejected Always allow shows the backend reason even after computer status refreshes',async()=>{
+ const x=setup({status:computer({pending:1,actions:[hold]})});await x.drain();
+ x.click(`[data-always="${actionId}"]`);
+ const request=x.requests('always_allow_pip_computer_action')[0];
+ assert.ok(request);
+ x.answer(request,{code:'limit',message:'Remove an old allowed action before adding another.'},false);
+ await x.drain();
+ assert.match(x.d.querySelector('.pc-error').textContent,/Remove an old allowed action/);
+ assert.ok(x.d.querySelector(`[data-always="${actionId}"]`),'the action remains available to retry');
+ await x.tick();
+ assert.match(x.d.querySelector('.pc-error').textContent,/Remove an old allowed action/);
+});
+
 test('a payment waits with Send once and Reject, never Always allow',async()=>{
  const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
  assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));
