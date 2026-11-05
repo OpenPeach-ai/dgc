@@ -3,7 +3,7 @@
 This page is for integrators who drive `dgc serve` over the editor protocol. Pips add
 a few commands and events to **protocol v14**; the protocol version does not change.
 The Pips controls themselves are versioned separately as the **Pips API** (currently
-71). The authoritative declarations are in `dgc/editor_protocol.py`, which also
+73). The authoritative declarations are in `dgc/editor_protocol.py`, which also
 generates the JSON schemas and the extension's `protocol.generated.ts`.
 
 The SDKs wrap the same controls as `session.pips`; see [sdk/PIPS.md](../sdk/PIPS.md).
@@ -293,6 +293,10 @@ pins the choice, not an address: a worker is leased when the run leaves the queu
 take it is busy the run stays `queued`. While the Router is on, `list_pip_models` adds `router`: `{enabled, systems:
 [{id, name, online, models: [{name, context_window}]}]}` (no address and no key); while it is off the list is exactly
 API 69's. A run whose Router was turned off after it was queued fails with `model_changed`.
+
+**Workflows and mid-turn messages** (API 72–73). API 72 adds reviewed local workflow controls for two to four Pips
+of one workspace and kind. API 73 lets a new text message join a running Personal Pip conversation; it stays in that
+run's history and does not start another reply. The existing `send_pip_message` command returns the live run ID.
 
 **Saved logins** (API 56). Four `pips_control` requests: `list_pip_logins {pip_id?}`,
 `save_pip_login {pip_id, username, password, totp?, pips?: "only" | "all", site | action_id +

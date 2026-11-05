@@ -2,7 +2,7 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.9.0** | **v14, Pips API 71** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04)** |
+| **0.9.0** | **v14, Pips API 73** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04)** |
 | 0.8.0 | v14, Pips API 69 | 0.50.0 | ≥ 3.10 | ≥ 22 | Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04) |
 | 0.7.0 | v14 | 0.48.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.10 | v14 | 0.47.0 | ≥ 3.10 | ≥ 22 | Linux |

@@ -9,7 +9,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | DGC CLI | 0.51.0 |
 | VS Code extension | 0.35.0 |
 | SDK (Python and TypeScript) | 0.9.0 |
-| Pips API | 71 |
+| Pips API | 73 |
 | Editor protocol | v14 |
 | Pips registry schema | 48 |
 
@@ -2254,3 +2254,5 @@ Clients check it before using a newer control.
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |
 | 70 | DGC Router for Pips: `model_choice` takes `{"mode": "router"}` (any of the user's systems with the Pips job) and `{"mode": "router", "system": id, "model": name}` (that one; a Pip pinned to a system waits for it). A run takes its worker when it leaves the queue, and waits there while every worker that could take it is busy. While the Router is on, `list_pip_models` carries `router` (`enabled`, and each system with its models); with the Router off the list is as in API 69 |
 | 71 | Videos in a Personal Pip's chat: a reply that started a video carries `videos`, each the video's job as DGC last saw it (state, length, resolution, price and, once made, the file). No command is added |
+| 72 | Reviewed local Personal and Project Pip workflow controls: list, get, create and set status. Two to four Pips of one workspace and kind can pass exact results or a committed-source finding through reviewed or unattended routing; each Pip keeps its own external-action permissions. |
+| 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. |
