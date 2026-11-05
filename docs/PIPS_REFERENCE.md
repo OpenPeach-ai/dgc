@@ -11,7 +11,7 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 | SDK (Python and TypeScript) | 0.9.0 |
 | Pips API | 73 |
 | Editor protocol | v14 |
-| Pips registry schema | 48 |
+| Pips registry schema | 51 |
 
 ## Security model
 
