@@ -214,7 +214,7 @@ def _path(job_id: str) -> Path:
 def load(job_id: str) -> dict | None:
     try:
         value = json.loads(_path(job_id).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -227,7 +227,9 @@ def save(job: dict) -> bool:
     with _LOCK:
         try:
             disk = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
+            disk = {}
+        if not isinstance(disk, dict):
             disk = {}
         if disk.get("state") in TERMINAL and job.get("state") != disk.get("state"):
             job.update({k: disk[k] for k in ("state", "status", "finished", "charged", "result", "error", "cost_usd",
@@ -252,11 +254,16 @@ def all_jobs(*, limit: int = 200) -> list[dict]:
     for path in jobs_dir().glob("vid_*.json"):
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
-        if isinstance(value, dict) and value.get("id"):
+        if isinstance(value, dict) and value.get("id") == path.stem:
             rows.append(value)
-    rows.sort(key=lambda row: float(row.get("started") or 0), reverse=True)
+    def started(row):
+        try:
+            return float(row.get("started") or 0)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+    rows.sort(key=started, reverse=True)
     return rows[:limit]
 
 
@@ -750,6 +757,9 @@ class Jobs:
         # The provider made it: from here it is charged, whether or not DGC manages to keep the file.
         try:
             mime = adapter.fetch(generator, key, job.get("handle") or {}, status, temp, cancel=cancel)
+            latest = load(job["id"]) or {}
+            if cancel.is_set() or latest.get("cancel_requested") or latest.get("state") == "cancelled":
+                return             # Stop won while the provider's file was arriving; leave no saved artifact
             result = keep(job, temp, mime, status.seed if status.seed is not None else job.get("seed"))
         except P.ImageError as error:
             if error.kind == "cancelled":

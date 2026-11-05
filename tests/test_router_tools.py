@@ -128,6 +128,20 @@ class Status(ToolsCase):
 
 
 class Update(ToolsCase):
+    def test_untrusted_discovery_hints_cannot_break_model_suggestions(self):
+        found = {"models": [{"name": "good", "loaded": True, "loaded_context": "NaN",
+                             "context_max": "Infinity", "params_b": "NaN"},
+                            {"name": "small", "loaded": True, "loaded_context": -1,
+                             "context_max": 1024, "params_b": "Infinity"},
+                            {"name": ["invalid"], "loaded": True}]}
+        self.assertEqual(T.model_choices(found), ["good", "small"])
+        suggested = T.suggest_models(found)
+        self.assertEqual([row["context"] for row in suggested], [T.ROUTER_DEFAULT_CONTEXT, 2048])
+        self.assertTrue(all("params_b" not in row for row in suggested))
+        self.assertEqual(T._ago(float("inf")), "")
+        with self.assertRaises(T.UpdateError):
+            T.context_tokens("9" * 300)
+
     def test_every_action_plans_a_valid_change_with_its_diff(self):
         harness = self.harness({"enabled": False, "systems": [
             {"id": "nas", "name": "NAS", "base_url": "http://nas.local:11434", "server": "ollama",

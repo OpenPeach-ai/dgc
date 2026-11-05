@@ -2,7 +2,7 @@
 interactive terminal), and only when that asks no less than the mode it replaces for a script or an app.
 
 Mode is per chat -- a risky refactor sits in default while a scratch chat runs auto -- so it belongs
-to the conversation, the way Codex keeps it per thread. Reopening is re-checked rather than trusted
+to the conversation. Reopening is re-checked rather than trusted
 from the file, never rewrites the user's own default and never overrides a mode named for the run. A
 script, an SDK app or an ACP client never raises the mode: a session last run in auto, reopened by
 `dgc -p --mode plan --continue`, ran in auto. The person does: a chat they set to Auto, closed and

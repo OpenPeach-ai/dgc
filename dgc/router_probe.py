@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import re
 import socket
 import threading
@@ -67,6 +68,24 @@ def _read(response) -> bytes:
         if len(body) > MAX_BODY:
             raise ProbeError("the server's answer is too large")
     return body
+
+
+def _stream_lines(response, started: float, timeout: float):
+    """Bound a streamed probe even if a server sends bytes forever without a newline."""
+    pending = bytearray()
+    total = 0
+    for chunk in response.iter_content(65536):
+        if time.monotonic() - started > timeout:
+            raise ProbeError("the reply took too long")
+        total += len(chunk)
+        if total > MAX_BODY:
+            raise ProbeError("the server's answer is too large")
+        pending.extend(chunk)
+        while (end := pending.find(b"\n")) >= 0:
+            yield bytes(pending[:end])
+            del pending[:end + 1]
+    if pending:
+        yield bytes(pending)
 
 
 def http_get(url: str, key: str = "", *, timeout: float = READ_TIMEOUT) -> tuple[int, object]:
@@ -215,7 +234,7 @@ def parse_params(text) -> float | None:
     value = float(match.group(1))
     scale = {"K": 1e-6, "M": 1e-3, "B": 1.0, "T": 1000.0, "": 1e-9}[match.group(2)]
     params = value * scale
-    return round(params, 3) if params > 0 else None
+    return round(params, 3) if math.isfinite(params) and params > 0 else None
 
 
 def params_from_name(name: str) -> float | None:
@@ -225,7 +244,8 @@ def params_from_name(name: str) -> float | None:
     if not match:
         return None
     value = float(match.group(1))
-    return round(value / 1000 if match.group(2) == "m" else value, 3) or None
+    params = value / 1000 if match.group(2) == "m" else value
+    return round(params, 3) if math.isfinite(params) and params > 0 else None
 
 
 def params_from_file(size_bytes, quant: str = "") -> float | None:
@@ -235,7 +255,7 @@ def params_from_file(size_bytes, quant: str = "") -> float | None:
         size = float(size_bytes)
     except (TypeError, ValueError):
         return None
-    if size < 50_000_000:
+    if not math.isfinite(size) or size < 50_000_000:
         return None                       # a cloud stub, or nothing
     low = str(quant or "").lower()
     per = next((value for word, value in _BYTES_PER_PARAM if word in low), 0.6)
@@ -248,7 +268,7 @@ def size_class(params_b) -> str:
         value = float(params_b)
     except (TypeError, ValueError):
         return ""
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         return ""
     return "small" if value <= 12 else "medium" if value <= 40 else "large"
 
@@ -264,10 +284,11 @@ def _ollama_show(base: str, key: str, name: str) -> dict:
     if status != 200 or not isinstance(body, dict):
         return {}
     info = body.get("model_info") if isinstance(body.get("model_info"), dict) else {}
-    arch = str(info.get("general.architecture") or (body.get("details") or {}).get("family") or "")
+    details = body.get("details") if isinstance(body.get("details"), dict) else {}
+    arch = str(info.get("general.architecture") or details.get("family") or "")
     out: dict = {"capabilities": [str(c) for c in body.get("capabilities") or [] if isinstance(c, str)]}
     count = info.get("general.parameter_count")
-    if isinstance(count, (int, float)) and count > 0:
+    if isinstance(count, (int, float)) and not isinstance(count, bool) and math.isfinite(count) and count > 0:
         out["params_b"] = round(count / 1e9, 3)
     details = body.get("details") if isinstance(body.get("details"), dict) else {}
     if not out.get("params_b"):
@@ -279,7 +300,7 @@ def _ollama_show(base: str, key: str, name: str) -> dict:
     for field in ("context_length", "block_count", "attention.head_count_kv", "attention.key_length",
                   "attention.value_length", "embedding_length", "attention.head_count", "full_attention_interval"):
         value = info.get(f"{arch}.{field}") if arch else None
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
             out[field.replace("attention.", "")] = int(value)
     kv = kv_bytes_per_token(out)
     if kv:
@@ -389,7 +410,7 @@ def _prometheus(text) -> dict[str, float]:
             value = float(match.group(3))
         except ValueError:
             continue
-        if value != value:
+        if not math.isfinite(value):
             continue
         values[match.group(1)] = values.get(match.group(1), 0.0) + value
     return values
@@ -818,7 +839,7 @@ class Target:
                 if response.status_code != 200:
                     raise ProbeError(f"the model answered HTTP {response.status_code}: "
                                      f"{_read(response).decode('utf-8', 'replace')[:200]}")
-                for raw in response.iter_lines():
+                for raw in _stream_lines(response, started, timeout):
                     if time.monotonic() - started > timeout:
                         raise ProbeError("the reply took too long")
                     line = raw.decode("utf-8", "replace").strip() if raw else ""

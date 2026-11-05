@@ -1970,7 +1970,8 @@ class ChatEngine:
             session = chat_plugins.ChatPlugins(self.config, taint=self._taint(chat), said=said)
         return session if session is not None and session.pin() else None
 
-    def act(self, chat_id: str, message_id: str, action_id: str, op: str, *, arguments=None, pip: dict | None = None) -> dict:
+    def act(self, chat_id: str, message_id: str, action_id: str, op: str, *, arguments=None, pip: dict | None = None,
+            cancel=None) -> dict:
         """The user's choice on a card: "run" sends it now (as they edited it), "dismiss" doesn't, "handed" records that
         a Pip took it on (the service sends it there). Returns the card as it is now."""
         if op not in ("run", "dismiss", "handed"):
@@ -2008,7 +2009,7 @@ class ChatEngine:
                             self._save(fresh)
             elif card.get("kind") == "image":
                 # An image card (chat_images): sending it is the user's yes to that price; the pictures join the reply.
-                outcome = chat_images.run_card(self, chat, card, arguments)
+                outcome = chat_images.run_card(self, chat, card, arguments, cancel=cancel)
                 made = outcome.pop("files", [])
                 change = {"status": outcome["status"], **{k: outcome[k] for k in ("answer", "error") if outcome.get(k)}}
                 if made:
@@ -2907,7 +2908,7 @@ class ChatEngine:
                         if on_activity is not None and call.name == "generate_image":
                             on_activity("making", "an image")
                         told = chat_images.call(self, chat, call, files, before + len("".join(streamed)), on_file,
-                                                actions, on_action)
+                                                actions, on_action, cancel=cancel)
                     elif call.name == "make_file":
                         if on_activity is not None:
                             on_activity("making", str((call.arguments or {}).get("name") or "")[:80] if isinstance(

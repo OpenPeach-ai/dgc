@@ -7,13 +7,14 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from image_fakes import FakeImages  # noqa: E402
 
-from dgc import images, pip_chat, pip_images  # noqa: E402
+from dgc import image_providers, images, pip_chat, pip_images  # noqa: E402
 from tests import test_pips_local as fixtures  # noqa: E402
 
 
@@ -71,6 +72,34 @@ class PipImages(unittest.TestCase):
         self.assertEqual(len(kept), 1, "its own folder, with a sidecar")
         self.assertTrue(kept[0].with_suffix(".json").exists())
         self.assertEqual(images.library(surface="pip")["total"], 1)
+
+    def test_stopping_a_pip_before_image_generation_sends_no_request(self):
+        self.generators("comfy")
+        sent = self.send("Draw me a fox", "m1")
+        session = self.session(sent["run"]["id"])
+        session.cancel.set()
+        said = session.call("generate_image", {"prompt": "a red fox"})
+        self.assertIn("Stopped: no image was made", said)
+        self.assertEqual(self.fake.requests, [])
+        self.assertEqual(images.library(surface="pip")["total"], 0)
+
+    def test_stopping_after_provider_answer_keeps_charge_but_saves_no_image(self):
+        self.generators("comfy")
+        sent = self.send("Draw me a fox", "m1")
+        session = self.session(sent["run"]["id"])
+        adapter = image_providers.adapter_for("comfyui", workflow_reader=images.read_workflow)
+
+        class StopAtAnswer:
+            def generate(self, *args, **kwargs):
+                answer = adapter.generate(*args, **kwargs)
+                session.cancel.set()
+                return answer
+
+        with mock.patch("dgc.images.P.adapter_for", return_value=StopAtAnswer()):
+            said = session.call("generate_image", {"prompt": "a red fox"})
+        self.assertIn("Stopped: no image was made", said)
+        self.assertTrue(any(item["path"] == "/prompt" for item in self.fake.requests))
+        self.assertEqual(images.library(surface="pip")["total"], 0)
 
     def test_a_paid_one_waits_for_the_users_own_yes_in_a_later_turn(self):
         self.generators("fal")

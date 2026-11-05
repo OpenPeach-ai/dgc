@@ -1,5 +1,5 @@
 """Where a picture DGC makes is saved (reported 2026-11-02: a picture and its sidecar went into a company repository's
-assets/generated/). As Codex keeps its pictures in its own home folder, one folder per session, DGC keeps them in
+assets/generated/). DGC keeps generated pictures in its own home folder, one folder per session:
 ~/.dgc/images/sessions/<session>/ and puts one in the project only when the call names a place there (save_to), with
 write_file's checks: inside the project, never .git or .dgc, no replacing a file without asking, and in Work the same
 permission a write of that path gets. The Images setting's save folder still overrides the default for anyone who

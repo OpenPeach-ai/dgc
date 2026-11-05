@@ -89,6 +89,20 @@ class SessionImages(unittest.TestCase):
         with self.assertRaises(DGCConfigError):
             images.generate("x", count=9)
 
+    def test_add_uses_the_saved_id_when_the_requested_id_was_taken(self):
+        class CollidingIdWire(Wire):
+            def request(self, payload, response, **kwargs):
+                answer = super().request(payload, response, **kwargs)
+                if payload["type"] == "images_update" and payload["action"] == "add_generator":
+                    answer["status"] = {"generators": [{"id": "fal"}, {"id": "fal-2"}]}
+                return answer
+
+        wire = CollidingIdWire()
+        images = session(wire, {"images": {"version": 1}}).images
+        images.add("fal", id="fal", key="id:secret")
+        saved = [payload for payload, _ in wire.calls if payload.get("action") == "set_key"]
+        self.assertEqual(saved[0]["generator"], "fal-2")
+
     def test_async_parity(self):
         wire = Wire()
         async_session = AsyncSession(session(wire, {"images": {"version": 1}}))

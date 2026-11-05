@@ -90,12 +90,13 @@ class Surface:
     progress: object = None
     remember: object = None
     inputs: object = None
+    cancel: object = None
     unattended: bool = False
     where: dict = field(default_factory=dict)
     save_dir: str = ""            # a chat's own folder ("" = the project's images.save_dir)
     owner: str = ""
     # DGC's own folder for this surface's pictures (~/.dgc/images/sessions/<session>): where they go unless save_to
-    # (or the Images setting's save folder) puts them in the project, as Codex keeps its pictures in its home.
+    # (or the Images setting's save folder) puts them in the project.
     home: Path | None = None
     # DGC's own folder for this surface's videos (~/.dgc/videos/sessions/<session>, chats/<chat>, pips/<pip>).
     video_home: Path | None = None
@@ -296,10 +297,10 @@ def _args(args) -> dict:
     if "replace" in args and not isinstance(args["replace"], bool):
         raise Refused("replace is true or false")
     count = args.get("count", 1)
-    if isinstance(count, bool) or not isinstance(count, (int, float)) or not 1 <= int(count) <= images.MAX_COUNT:
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= images.MAX_COUNT:
         raise Refused(f"count is 1 to {images.MAX_COUNT}")
     seed = args.get("seed")
-    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, (int, float))):
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
         raise Refused("seed is a whole number")
     paths = args.get("images") or []
     if isinstance(paths, str):
@@ -489,7 +490,8 @@ def execute(config, plan: Plan, surface: Surface) -> Outcome:
             # limit (its card said so) may pass it; any other finds the room still there, or isn't sent.
             result = images.generate(config, current.generator, _fresh(current.request), folder=current.folder,
                                      root=surface.root, surface=surface.name, where=surface.where,
-                                     progress=_progress(surface, current.generator), owner=surface.owner,
+                                     progress=_progress(surface, current.generator), cancel=surface.cancel,
+                                     owner=surface.owner,
                                      name=current.name, replace=current.replace,
                                      may_pass=current.over_limit or current.unpriced)
             text = _made_text(result, surface)

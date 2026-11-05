@@ -5,13 +5,13 @@ written in plain words, and keeps it: reviewing a project's committed code every
 morning, drafting documentation when a folder changes, running a fixed set of test
 commands on a schedule, or helping you plan your week.
 
-Pips are careful by design. Everything a Pip does that matters, from its own setup
-to a file fix or an email, is a proposal that you review first. The model drafts;
-you approve.
+Pips work within the access level and action rules you set. Actions outside those
+rules wait for your review. An unattended workflow can pass a result between Pips,
+but it does not grant either Pip new tool permissions.
 
-Pips ship in DGC CLI 0.51.0 (`dgc pips …` and the main chat's Pips tools), the VS
-Code extension 0.35.0 (the Pips view, setup cards and review dialogs) and SDK 0.9.0
-(`session.pips`). For contracts and limits in detail, see
+Pips were introduced in DGC CLI 0.50.0, VS Code extension 0.34.0, and SDK 0.8.0.
+This guide covers the 0.51.0 CLI, 0.35.0 extension, and 0.9.0 SDK (`session.pips`).
+For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
 
 ### Personal Pip workflows

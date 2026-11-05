@@ -64,7 +64,7 @@ def read(name: str) -> dict:
         if stamp is not None and cached is not None and cached[0] == stamp:
             return copy.deepcopy(cached[1])
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return {}
     value = value if isinstance(value, dict) else {}
     if stamp is None:

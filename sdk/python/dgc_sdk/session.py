@@ -712,7 +712,9 @@ class Images:
         if key is not None and not out.get("pending"):
             added = (out.get("status") or {}).get("generators") or []
             if added:
-                self.set_key(fields.get("id") or added[-1]["id"], key)
+                # The CLI appends the saved generator and may suffix a requested id that is already taken.
+                # Bind the key to the id it actually saved, never the caller's unallocated suggestion.
+                self.set_key(added[-1]["id"], key)
                 out["status"] = self.generators()
         return out
 

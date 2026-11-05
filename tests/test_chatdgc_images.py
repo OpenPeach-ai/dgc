@@ -113,6 +113,19 @@ class ImagesInChat(unittest.TestCase):
         self.assertEqual(len(message["files"]), 1, "the picture joined the reply")
         self.assertEqual(len([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")]), 1)
 
+    def test_stopping_a_sent_image_card_prevents_the_provider_request(self):
+        import threading
+        self.setup("fal")
+        chat, reply = self.say("Make a logo.", {"calls": [("generate_image", {"prompt": "a fox logo"})]},
+                               {"parts": ["The image card is ready."]})
+        [card] = reply["actions"]
+        cancel = threading.Event()
+        cancel.set()
+        done = self.engine.act(chat["id"], reply["id"], card["id"], "run", cancel=cancel)
+        self.assertEqual(done["status"], "failed")
+        self.assertIn("Stopped", done["error"])
+        self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
+
     def test_a_card_sent_after_the_limit_filled_up_makes_nothing(self):
         # The card was for a picture within this month's limit; another picture used that room before Send.
         self.setup("fal")

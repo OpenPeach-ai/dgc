@@ -60,3 +60,12 @@ test('corrupted saved metadata cannot reach the model picker or secret lookup',a
  assert.deepEqual(listProfiles(ctx),[]);
  await assert.rejects(profileCredential(ctx,'provider_'+'a'.repeat(32)),/not found/);
 });
+
+test('saved provider metadata is projected to reviewed fields before reaching the webview',async()=>{
+ const s=store(),ctx={globalState:s.globalState,secrets:s.secretsApi};
+ const row=await addProfile(ctx,{name:'Ollama',base_url:'http://localhost:11434/v1',model:'one'});
+ const expected={...row};
+ s.state.get('dgc.modelProviders.v1')[0].api_key='unexpected-secret';
+ assert.deepEqual(listProfiles(ctx),[expected]);
+ assert.doesNotMatch(JSON.stringify(listProfiles(ctx)),/unexpected-secret/);
+});

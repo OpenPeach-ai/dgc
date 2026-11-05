@@ -172,12 +172,16 @@ class FakeImages:
         if path.startswith("/v1beta/models") and method == "GET":
             if self.mode.get("gemini") == "bad_key":
                 return h._send(400, GEMINI_BAD_KEY)
-            return h._send(200, {"models": [{"name": "models/gemini-2.5-flash-image"},
+            return h._send(200, {"models": [{"name": "models/gemini-3.1-flash-image"},
+                                            {"name": "models/gemini-2.5-flash-image"},
                                             {"name": "models/gemini-3.1-flash-image-preview"},
                                             {"name": "models/imagen-4.0-generate-001"},
                                             {"name": "models/gemini-2.5-pro"}]})
-        if path.startswith("/v1beta/models/") and path.endswith(":generateContent"):
+        if path.startswith(("/v1/models/", "/v1beta/models/")) and path.endswith(":generateContent"):
             mode = self.mode.get("gemini", "ok")
+            if mode == "second_empty" and sum(":generateContent" in row["path"] for row in self.requests) > 1:
+                return h._send(200, {"candidates": [{"content": {"parts": [{"text": "No image made."}]},
+                                                       "finishReason": "STOP"}]})
             if mode == "no_billing":
                 return h._send(403, GEMINI_NO_BILLING)
             if mode == "bad_key":
@@ -257,12 +261,16 @@ class FakeImages:
     def _websocket(self, h):
         key = h.headers.get("Sec-WebSocket-Key", "")
         accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC525B11").encode()).digest())
+        if self.mode.get("comfyui") == "bad_ws_accept":
+            accept = b"wrong"
         h.send_response(101)
         h.send_header("Upgrade", "websocket")
         h.send_header("Connection", "Upgrade")
         h.send_header("Sec-WebSocket-Accept", accept.decode())
         h.end_headers()
         h.wfile.flush()
+        if self.mode.get("comfyui") == "bad_ws_accept":
+            return
         import time
         for _ in range(100):                          # wait for the prompt to be queued
             if getattr(self, "comfy_prompt", None):

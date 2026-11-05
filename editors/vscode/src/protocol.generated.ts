@@ -455,6 +455,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": false
+    },
+    "display_mentions": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "turn_end": {
@@ -7452,6 +7458,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     },
     "pip_references": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "display_mentions": {
       "types": [
         "array"
       ],

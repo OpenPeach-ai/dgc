@@ -24,6 +24,7 @@ import getpass
 import hashlib
 import hmac
 import json
+import math
 import os
 import platform
 import plistlib
@@ -155,7 +156,7 @@ def _number(text) -> float | None:
         value = float(raw)
     except ValueError:
         return None
-    return value if value == value else None
+    return value if math.isfinite(value) and abs(value) <= 1e18 else None
 
 
 def _clean(gpu: dict) -> dict:

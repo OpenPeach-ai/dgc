@@ -7,6 +7,8 @@ import socket
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from image_fakes import FakeImages, png  # noqa: E402
 
 from dgc import image_providers as P  # noqa: E402
+from dgc import images as I  # noqa: E402
 
 
 def generator(provider, base, **extra):
@@ -66,6 +69,25 @@ class OpenAICompatible(Fakes):
         with self.assertRaises(P.ImageError) as caught:
             P.download(f"{self.fake.url}/files/redirect-private", provider="localai", base=self.fake.url)
         self.assertIn("outside its own address", caught.exception.message)
+
+    def test_a_local_generator_download_uses_the_checked_address_even_if_dns_changes(self):
+        port = urlsplit(self.fake.url).port
+        base = f"http://generator.example.test:{port}"
+        real_lookup = socket.getaddrinfo
+        looked_up = 0
+
+        def changing_dns(host, requested_port, *args, **kwargs):
+            nonlocal looked_up
+            if host == "generator.example.test":
+                looked_up += 1
+                address = "127.0.0.1" if looked_up <= 2 else "8.8.8.8"
+                return real_lookup(address, requested_port, *args, **kwargs)
+            return real_lookup(host, requested_port, *args, **kwargs)
+
+        with patch.object(socket, "getaddrinfo", side_effect=changing_dns):
+            picture = P.download(f"{base}/files/a.png", provider="localai", base=base)
+        self.assertEqual(picture.mime, "image/png")
+        self.assertEqual(looked_up, 2, "the actual download never resolves the provider name again")
 
     def test_an_edit_goes_to_images_edits_as_multipart_with_its_mask(self):
         request = P.Request("make it blue", images=[P.InputImage(png(), "image/png", "in.png")],
@@ -163,6 +185,15 @@ class ComfyUIWorkflows(unittest.TestCase):
 
 
 class ComfyUIServer(Fakes):
+    def test_websocket_rejects_a_false_handshake_and_an_oversized_frame(self):
+        self.fake.mode["comfyui"] = "bad_ws_accept"
+        with self.assertRaisesRegex(OSError, "handshake was not accepted"):
+            P._WebSocket(self.fake.url.replace("http://", "ws://") + "/ws", timeout=2)
+        sock = P._WebSocket.__new__(P._WebSocket)
+        sock.buffer = bytes([0x81, 127]) + (P._WebSocket._MAX_FRAME + 1).to_bytes(8, "big")
+        with self.assertRaisesRegex(OSError, "too large"):
+            sock.recv()
+
     def test_default_workflow_queues_follows_progress_and_fetches_the_result(self):
         gen = generator("comfyui", self.fake.url, model="sd_xl_turbo_1.0_fp16.safetensors", size="512x512")
         steps = []
@@ -231,6 +262,13 @@ class Automatic1111(Fakes):
 
 
 class GoogleGemini(Fakes):
+    def test_current_default_uses_supported_model(self):
+        self.assertEqual(I.DEFAULT_MODELS["gemini"], "gemini-3.1-flash-image")
+        self.assertEqual(I.price_for(generator("gemini", self.fake.url), 1024, 1024), 0.067)
+        P.adapter_for("gemini").generate(generator("gemini", self.fake.url, model=""), "g-key", P.Request("x"))
+        self.assertEqual("/v1/models/gemini-3.1-flash-image:generateContent",
+                         self.last(":generateContent")["path"])
+
     def test_generate_content_returns_the_image_part(self):
         gen = generator("gemini", self.fake.url, model="gemini-2.5-flash-image")
         pictures = P.adapter_for("gemini").generate(gen, "g-key", P.Request("x", 1280, 720,
@@ -240,6 +278,11 @@ class GoogleGemini(Fakes):
         self.assertEqual(sent["headers"]["X-Goog-Api-Key"], "g-key")
         self.assertEqual(sent["json"]["generationConfig"]["imageConfig"]["aspectRatio"], "16:9")
         self.assertIn("inline_data", sent["json"]["contents"][0]["parts"][1])
+
+    def test_a_later_gemini_answer_without_an_image_does_not_silently_shorten_the_batch(self):
+        self.fake.mode["gemini"] = "second_empty"
+        with self.assertRaisesRegex(P.ImageError, "answered without an image"):
+            P.adapter_for("gemini").generate(generator("gemini", self.fake.url), "k", P.Request("x", count=2))
 
     def test_imagen_has_its_own_call(self):
         gen = generator("gemini", self.fake.url, model="imagen-4.0-generate-001")
@@ -259,6 +302,7 @@ class GoogleGemini(Fakes):
     def test_check_is_a_free_listing(self):
         found = P.adapter_for("gemini").check(generator("gemini", self.fake.url), "k")
         self.assertTrue(found["ok"])
+        self.assertIn("gemini-3.1-flash-image", found["models"])
         self.assertIn("gemini-2.5-flash-image", found["models"])
         self.assertNotIn("gemini-2.5-pro", found["models"])
 

@@ -124,6 +124,16 @@ class RouterValidation(unittest.TestCase):
                 _block, problems = C.validate_router(value)
                 self.assertTrue(any(word in problem for problem in problems), problems)
 
+    def test_nonfinite_worker_and_context_values_are_validation_problems(self):
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=invalid):
+                block, problems = C.validate_router({"systems": [{"id": "nas", "base_url": "nas.local",
+                    "workers": invalid, "models": [{"name": "qwen3:8b", "context": invalid}]}]})
+                self.assertEqual(block["systems"][0]["workers"], 1)
+                self.assertEqual(block["systems"][0]["models"][0]["context"], C.ROUTER_DEFAULT_CONTEXT)
+                self.assertTrue(any("workers must be a whole number" in problem for problem in problems))
+                self.assertTrue(any("context must be a whole number" in problem for problem in problems))
+
     def test_reading_leaves_out_what_cannot_be_used(self):
         block, problems = C.validate_router({"enabled": True, "systems": [
             {"id": "ok", "base_url": "nas.local", "models": ["qwen3:8b", {"name": "bad name!"}]},

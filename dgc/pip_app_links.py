@@ -664,6 +664,7 @@ class RunSocket:
 
     def close(self) -> None:
         self._stopped.set()
+        self.images.cancel.set()
         if self.borrow is not None:
             try:
                 self.borrow.close()          # the run is over: the user's Chrome is given back now

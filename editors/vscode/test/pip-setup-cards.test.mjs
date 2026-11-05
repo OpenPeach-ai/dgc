@@ -192,3 +192,26 @@ test('five accepted Pips, including a late long result, share one expandable dis
  group.querySelector('.pip-setup-batch-dismiss').click();
  assert.equal(group.hidden,true);assert.deepEqual([...state.ids].sort(),proposals.map(s=>s.id).sort());
 });
+
+test('a revised Pip keeps its place and new identity in a grouped setup card',async t=>{
+ const state={ids:[]},x=harness(t,{dismissedState:state,api:70}),block=x.d.querySelector('#turn');
+ const first=setup(),second={...setup(),id:'setup_'+'5'.repeat(32),name:'Second Pip'};
+ await x.loaded(first);
+ const card=x.d.querySelector('.tool').cloneNode(true);card.className='tool';card.removeAttribute('data-pip-setup');card.querySelector('.body').replaceChildren();block.append(card);
+ x.cards.toolResult(card,{name:'pips_setup',output:JSON.stringify({setup:{id:second.id}})});
+ x.answer(x.requests('get_pip_setup').at(-1),{setup:second});await flush();
+ x.cards.finish(block);
+ const group=block.querySelector('.pip-setup-batch');assert.ok(group);
+ const line=[...group.querySelectorAll('.pip-setup-card')].find(el=>el.dataset.setupId===first.id);
+ [...line.querySelectorAll('button')].find(el=>el.textContent==='Choose model').click();
+ x.answer(x.requests('list_pip_models').at(-1),{default_model:'base',models:[{id:'local-large',name:'Local large'}]});await flush();
+ const choice=line.querySelector('select');choice.value='local-large';choice.dispatchEvent(new x.w.Event('change'));
+ [...line.querySelectorAll('button')].find(el=>el.textContent==='Use this model').click();
+ const next={...first,id:'setup_'+'4'.repeat(32),digest:'b'.repeat(64),model_choice:{mode:'model',model:'local-large'}};
+ x.answer(x.requests('revise_pip_setup').at(-1),{setup:next});await flush();
+ assert.deepEqual(group.dataset.setupIds.split(','),[next.id,second.id]);
+ assert.equal(group.querySelector('.pip-setup-batch-label').textContent,'2 Pip setups');
+ assert.equal(group.querySelectorAll('.pip-setup-batch-face .dgc-plush').length,2);
+ group.querySelector('.pip-setup-batch-toggle').click();
+ assert.equal([...group.querySelectorAll('.pip-setup-card')].find(el=>el.dataset.setupId===next.id).querySelector('select').value,'local-large');
+});

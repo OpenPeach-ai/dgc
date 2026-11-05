@@ -1078,7 +1078,7 @@ plugin's own page in Settings → Plugins and choose **Save**, then **Connect**;
 the key is made and says what permissions it needs. DGC keeps the key with your sign-ins (the system
 keychain, or the owner-only file) and the page only ever shows **Saved**, never the key; **Remove**
 deletes it, and so does uninstalling the plugin. `dgc plugin key NAME` does the same in a terminal.
-A key in the environment DGC starts with (`GITHUB_PAT_TOKEN`, as Codex uses) still works; a saved
+A key in the environment DGC starts with (`GITHUB_PAT_TOKEN`) still works; a saved
 key is used instead of it. A key saved for a server is only ever sent to that server's address.
 
 **Sign in with GitHub.** GitHub's sign-in server admits only apps registered with it and still
@@ -1765,7 +1765,7 @@ workflow), a default size, and a short "good for" that DGC fills in and you can 
 | ComfyUI | any model you run in ComfyUI (FLUX.2, Qwen-Image, SDXL, Z-Image…), with your own workflow | free, on your computer |
 | Automatic1111-compatible | Automatic1111, Forge, reForge, SD.Next, and Draw Things' HTTP API | free, on your computer |
 | OpenAI-compatible | OpenAI's GPT Image models, xAI, Together, LocalAI, and any server with `/v1/images/generations` | per image, or free locally |
-| Google Gemini | the Gemini image models (generation and editing) and Imagen | per image |
+| Google Gemini | Gemini image models for generation and editing | per image |
 | Black Forest Labs | FLUX.2, FLUX 1.1 Pro and Kontext editing | per image |
 | fal.ai, Replicate | one key, hundreds of models (FLUX, Seedream, Qwen-Image, Ideogram, Recraft, Imagen…) | per image |
 
@@ -1780,7 +1780,7 @@ In plain words: *"add my ComfyUI at gpu-box.local:8188"*. Or from a terminal:
 ```
 dgc images add comfyui gpu-box.local:8188 --name "ComfyUI on gpu-box"
 dgc images add fal --key            # the key is read from the terminal or a pipe, never the command line
-dgc images add gemini --model gemini-2.5-flash-image --key
+dgc images add gemini --model gemini-3.1-flash-image --key
 dgc images add a1111 mac.local:7860
 dgc images test
 ```
@@ -1836,8 +1836,8 @@ same way. A refusal by the provider's policy is said as it is.
 
 ## Where the images go
 
-- **Work:** into DGC's own folder, one per session (`~/.dgc/images/sessions/<session>/`), as Codex keeps its pictures
-  in its home: nothing lands in your project unless you want it there. The picture shows under the reply and in the
+- **Work:** into DGC's own folder, one per session (`~/.dgc/images/sessions/<session>/`): nothing lands in your project
+  unless you want it there. The picture shows under the reply and in the
   Library either way. Each image has a sidecar `NAME.json` beside it: the prompt, provider, model, seed, size and
   cost.
   - **Into the project when it's wanted:** the model gives `save_to`, a path in the project, when you name a place or
@@ -2726,7 +2726,7 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
 
 DGC opens on your project's **Sessions** in the side bar: every saved session of this project,
 newest first, with when it was last used and how many messages it has. **Open in Editor**, a
-double-click or Enter opens one in an editor tab of its own, the way Claude Code does; **New
+double-click or Enter opens one in an editor tab of its own; **New
 session**, *DGC: New Session* and the **+** in a session's tab start a new one in a new tab. A
 session already open says **Open in a tab**, and opening it again brings that tab forward. Each tab
 is a full chat, named by its session's name or else its first prompt, with a `dgc serve` of its own
@@ -2822,7 +2822,7 @@ a pulsing dot means that chat is mid-turn, a square amber dot means it is waitin
 only you can make, and a number is how much it has said since you last looked. Click a tab to
 switch, the **×** to close one. *DGC: Switch Chat* does the same from the command palette.
 
-All of them run in one `dgc serve`, the way Codex runs its threads: one process, each chat in its
+All of them run in one `dgc serve`: one process, each chat in its
 own folder. Each still starts the MCP servers its own folder configures. What one chat does stays
 in that chat — a Stop ends only its own turn and its own approval cards, and a slow command in one
 (a compaction, a rewind, reconnecting MCP servers) never holds another chat's Stop or approvals.
@@ -3443,9 +3443,8 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. Its Python and TypeScript
-suites passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04).
-Native Windows is experimental. The guide and API reference are in
+**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. The release targets Linux,
+Apple-silicon macOS and Windows through WSL 2. Native Windows is experimental. The guide and API reference are in
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
 [PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)
 for the published version before installing.

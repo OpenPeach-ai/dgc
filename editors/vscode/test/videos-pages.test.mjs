@@ -249,4 +249,12 @@ test("Library host echoes video request sequence on success and failure", async 
   await chat.libraryVideos(panel, { seq: 12, query: "new" });
   assert.equal(sent.at(-1).seq, 12);
   assert.equal(sent.at(-1).error, "read failed");
+  const movie = join(scratch, "library-outside.mp4"), poster = join(scratch, "library-outside.jpg");
+  writeFileSync(movie, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  writeFileSync(poster, Buffer.alloc(2_000_001));
+  chat.host.videosLibrary = async () => ({ videos: [{ path: movie, poster }], total: 1 });
+  await chat.libraryVideos(panel, { seq: 13, query: "outside" });
+  assert.equal(sent.at(-1).videos[0].poster_data, undefined, "an oversized poster is not read into the webview");
+  await chat.fromLibrary(panel, { type: "videoData", requestId: "outside", path: movie });
+  assert.equal(sent.at(-1).mime, "video/mp4", "a backend-listed saved video can play outside DGC's home folder");
 });

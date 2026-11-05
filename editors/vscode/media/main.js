@@ -246,7 +246,16 @@
   // that pin "Review  after" are asserting exactly that. The attribute's PRESENCE marks a pill;
   // its value is what the model reads. contenteditable=false makes it one object to the caret, so
   // the browser steps over it and selects it whole.
-  function pillElement(kind, label, wire = "", identity = "") {
+  function ensurePlushStyles() {
+    const plush = window.PipConcepts?.plush;
+    if (plush?.styles && !document.getElementById("dgc-composer-plush-styles")) {
+      const style = document.createElement("style");
+      style.id = "dgc-composer-plush-styles";
+      style.textContent = plush.styles;
+      document.head.appendChild(style);
+    }
+  }
+  function pillElement(kind, label, wire = "", identity = "", pipType = "") {
     const pill = document.createElement("span");
     pill.className = `composer-pill pill-${kind}`;
     pill.setAttribute("contenteditable", "false");
@@ -254,13 +263,18 @@
     pill.dataset.kind = kind;
     if (kind === "pip") {
       pill.dataset.pipId = identity;
-      const type = attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type;
+      const type = pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type;
       const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(type);
       const face = document.createElement("span"); face.className = "composer-pip-face"; face.setAttribute("aria-hidden", "true");
-      if (index >= 0 && window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
-        { index, name: label }, "idle", `composerPip${Math.random().toString(36).slice(2, 12)}`);
+      if (index >= 0 && window.PipConcepts?.plush) {
+        ensurePlushStyles();
+        face.innerHTML = window.PipConcepts.plush.markup(
+          { index, name: label }, "idle", `composerPip${Math.random().toString(36).slice(2, 12)}`,
+          { includeStyles: false });
+      }
       else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
-      pill.append(face, document.createTextNode(label));
+      const name = document.createElement("span"); name.className = "composer-pip-name"; name.textContent = label;
+      pill.append(face, name);
       pill.title = `${label} · Pip reference`;
       return pill;
     }
@@ -270,7 +284,8 @@
       const logo = pluginLogos[identity];
       if (logo) { const img = document.createElement("img"); img.alt = ""; img.src = logo; mark.appendChild(img); }
       else mark.innerHTML = '<span class="codicon codicon-plug"></span>';
-      pill.append(mark, document.createTextNode(label));
+      const name = document.createElement("span"); name.className = "composer-plugin-name"; name.textContent = label;
+      pill.append(mark, name);
       pill.title = `${label} · connected plugin`;
       return pill;
     }
@@ -279,7 +294,8 @@
       const glyph = OUTPUT_CHOICES.find(([value]) => value === identity)?.[3] || "output";
       const mark = document.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${glyph}`;
       mark.setAttribute("aria-hidden", "true");
-      pill.append(mark, document.createTextNode(label));
+      const name = document.createElement("span"); name.className = "composer-artifact-name"; name.textContent = label;
+      pill.append(mark, name);
       pill.title = `${label} · Artifact format`;
       return pill;
     }
@@ -814,8 +830,12 @@
   // panel's memory of its last copy, and only when the clipboard still holds that exact text.
   const PILL_MARK = "";
   var composerCopy = null;
+  function pillLabel(pill) {
+    // Plush faces include a scoped <style>. textContent on the whole Pip pill copies that CSS.
+    return pill.dataset.kind === "pip" ? pill.querySelector(".composer-pip-name")?.textContent || pill.lastChild?.textContent || "" : pill.textContent;
+  }
   function pillToken(pill) {
-    const kind = pill.dataset.kind, name = pill.textContent;
+    const kind = pill.dataset.kind, name = pillLabel(pill);
     if (kind === "link") return pill.dataset.pill || pill.title || name;
     return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact"].includes(kind) ? "@" : "/") + name;
   }
@@ -836,7 +856,7 @@
       const parts = [];
       marked.split(PILL_MARK).forEach((piece, i) => {
         if (i) {
-          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pill.textContent;
+          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pillLabel(pill);
           const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent)
             : kind === "pip" ? attachments.find((a) => a.pipReference?.pip_id === pill.dataset.pipId) : null;
           parts.push({ kind, label, wire: pill.dataset.pill || "", token: pillToken(pill),
@@ -1340,10 +1360,10 @@
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
-  // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
+  // Work | Chat: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
-  let homeTab = (() => { try { return vscode.getState()?.homeTab === "work" ? "work" : "chat"; } catch { return "chat"; } })();
+  let homeTab = (() => { try { return vscode.getState()?.homeTab === "chat" ? "chat" : "work"; } catch { return "work"; } })();
   function homeTabs() {
     const bar = $("home-tabs"), panels = { chat: $("chats-home"), work: $("work-home") };
     if (!bar || !panels.chat || !panels.work) return;
@@ -1359,7 +1379,7 @@
       else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", name === "chat" ? "chats-title" : "sessions-title"); }
     }
   }
-  // ChatDGC was here last time: Chat | Work show at once, rather than when this window's backend has started. Its
+  // ChatDGC was here last time: Work | Chat show at once, rather than when this window's backend has started. Its
   // answer still decides (renderChats): a CLI without ChatDGC takes the tabs away again.
   if (chatPlace === "home" && document.documentElement.dataset.chatdgcSeen === "1") {
     chatsAvailable = true;
@@ -1395,7 +1415,7 @@
     $(`home-tab-${name}`)?.addEventListener("keydown", (e) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
       e.preventDefault();
-      showHomeTab(e.key === "Home" ? "chat" : e.key === "End" ? "work" : homeTab === "chat" ? "work" : "chat", true);
+      showHomeTab(e.key === "Home" ? "work" : e.key === "End" ? "chat" : homeTab === "chat" ? "work" : "chat", true);
     });
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
@@ -1447,6 +1467,7 @@
   let continueAgentLive = false;
   const agentRuns = new Map(), agentMore = new Map();
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
+  let displayMentionsVersion = 0;       // display-only inline marks replayed in sent prompts
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
   const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
@@ -2387,6 +2408,35 @@
       }
     });
     return parts;
+  }
+  function promptDisplayMentions(text) {
+    const parts = draftParts();
+    if (!parts || parts.length > 49) return [];
+    const rich = displayMentionsVersion >= 2;
+    const raw = parts.map(part => typeof part === "string" ? part : part.wire).join("");
+    if (raw.trim() !== text) return [];
+    const leading = Array.from(raw.slice(0, raw.length - raw.trimStart().length)).length;
+    let offset = -leading;
+    const mentions = [];
+    for (const part of parts) {
+      if (typeof part === "string") { offset += Array.from(part).length; continue; }
+      if (["plugin", "artifact", "pip"].includes(part.kind)
+          || (rich && ["skill", "template", "file", "command"].includes(part.kind)
+              && part.label.length <= 120)) {
+        // References and selected attachments contribute no prompt text. A trailing space before
+        // one is removed by submit(), so anchor an end-of-prompt mark at the trimmed text's end.
+        const entry = {start: ["pip", "skill", "template", "file"].includes(part.kind)
+          ? Math.min(offset, Array.from(text).length) : offset,
+          kind: part.kind, label: part.label, identity: part.identity || part.kind};
+        if (part.kind === "pip") {
+          const ref = attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference;
+          if (ref?.pip_type) entry.pip_type = ref.pip_type;
+        }
+        mentions.push(entry);
+      }
+      offset += Array.from(part.wire).length;
+    }
+    return mentions.length <= 24 && mentions.every(m => m.start >= 0) ? mentions : [];
   }
   function restoreDraftParts(parts, text) {
     if (!parts?.length) return;
@@ -3625,9 +3675,24 @@
     }
     renderToLatest();   // the Latest pill while away; following again once back at the end
   }
-  function fillUserBubble(bubble, text, attachments) {
+  function fillUserBubble(bubble, text, attachments, displayMentions = []) {
     bubble.replaceChildren();
-    const items = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    const body = String(text || "");
+    // Only move an attachment into the sentence when every saved position is usable.
+    // A malformed mark must leave its ordinary attachment chip visible.
+    const marks = validPromptMentions(body, displayMentions) ? displayMentions : [];
+    const pipIds = new Set(marks
+      .filter(m => m?.kind === "pip").map(m => m.identity));
+    const attached = Array.isArray(attachments) ? attachments : [];
+    const inline = new Map(), inlineIndexes = new Set();
+    for (const mark of marks) {
+      if (!["skill", "template", "file"].includes(mark?.kind)) continue;
+      const i = attached.findIndex((item, index) => item && (mark.kind !== "file" || !inlineIndexes.has(index)) &&
+        (mark.kind === "file" ? item.resource && item.label === mark.label : item[mark.kind] === mark.label));
+      if (i >= 0) { inline.set(mark, attached[i]); inlineIndexes.add(i); }
+    }
+    const items = attached.filter((item, index) => item && !inlineIndexes.has(index) &&
+      !(item.pipReference && pipIds.has(item.pipReference.pip_id)));
     if (items.length) {
       const row = el("ul", "prompt-atts");
       row.setAttribute("role", "list");
@@ -3641,8 +3706,69 @@
       if (images.length) bubble._images = images;
       bubble.appendChild(row);
     }
-    const body = String(text || "");
-    if (body || !items.length) bubble.appendChild(promptText(body));
+    if (body || !items.length) bubble.appendChild(promptTextWithMentions(body, marks, inline));
+  }
+  function validPromptMentions(body, mentions) {
+    if (!Array.isArray(mentions) || mentions.length > 24) return false;
+    const chars = Array.from(body);
+    let at = 0;
+    for (const mention of mentions) {
+      const {start, kind, label, identity, pip_type: pipType} = mention || {};
+      if (!Number.isInteger(start) || start < at || start > chars.length ||
+          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) ||
+          typeof label !== "string" || typeof identity !== "string" ||
+          (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) return false;
+      const end = start + (["pip", "skill", "template", "file"].includes(kind)
+        ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
+      if (end > chars.length || (end > start && chars.slice(start, end).join("") !==
+          (kind === "command" ? "/" + label : label))) return false;
+      at = end;
+    }
+    return true;
+  }
+  function promptTextWithMentions(body, mentions, inline = new Map()) {
+    if (!Array.isArray(mentions) || !mentions.length || mentions.length > 24) return promptText(body);
+    const chars = Array.from(body), host = el("div", "prompt-text");
+    let at = 0;
+    for (const mention of mentions) {
+      const { start, kind, label, identity, pip_type: pipType } = mention || {};
+      if (!Number.isInteger(start) || start < at || start > chars.length ||
+          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) || typeof label !== "string" ||
+          typeof identity !== "string" || (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) {
+        return promptText(body);
+      }
+      const zeroWidth = ["pip", "skill", "template", "file"].includes(kind);
+      const end = start + (zeroWidth ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
+      if (end > chars.length || (!zeroWidth && chars.slice(start, end).join("") !==
+          (kind === "command" ? "/" + label : label))) return promptText(body);
+      host.append(...promptText(chars.slice(at, start).join("")).childNodes);
+      const pill = pillElement(kind, label, "", identity, pipType);
+      // History can contain a plugin mention even when the composer is empty after a reload.
+      // Fetch its logo once for the whole batch of restored prompts, then upgrade the mark in place.
+      if (kind === "plugin" && !pluginLogos[identity] &&
+          (!pluginListRequestedAt || Date.now() - pluginListRequestedAt > 30000)) {
+        pluginListRequestedAt = Math.max(1, Date.now());
+        vscode.postMessage({ type: "requestPlugins" });
+      }
+      if (kind === "command") pill.textContent = "/" + label;
+      pill.classList.add("sent-mention");
+      pill.removeAttribute("contenteditable");
+      pill.removeAttribute("data-pill");
+      const item = inline.get(mention);
+      if (item) {
+        pill.classList.add("sent-attachment");
+        pill.setAttribute("role", "button"); pill.tabIndex = 0;
+        pill.setAttribute("aria-label", `Open attachment ${item.label || label}`);
+        pill.onclick = event => { event.stopPropagation(); openPromptAttachment(item); };
+        pill.onkeydown = event => { if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault(); event.stopPropagation(); openPromptAttachment(item);
+        } };
+      }
+      host.appendChild(pill);
+      at = end;
+    }
+    host.append(...promptText(chars.slice(at).join("")).childNodes);
+    return host;
   }
   // A URL the user typed is a link they can open, not grey text to select and copy by hand.
   //
@@ -3974,7 +4100,7 @@
   }
   // The row that heads a turn (0.47 pinned prompt): the one this panel already drew for it, or one
   // drawn now, or null for a turn with nothing to show.
-  function echoPrompt(text, requestId = "", savedAttachments = [], answerQuestion = "") {
+  function echoPrompt(text, requestId = "", savedAttachments = [], answerQuestion = "", displayMentions = []) {
     // The row drawn for this request -- the composer's, a goal's, an answer to a question, a queued
     // message put back after a reload -- found by its id whether or not prompt_accepted came first.
     // It used to be found only as "the last bubble", and only while still pending: turn_start comes
@@ -4004,7 +4130,8 @@
     // included. (Comparing with the last bubble on the page dropped the second of two.)
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments);
+    fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments,
+      displayMentions);
     if (answerQuestion) bubble.prepend(el("p", "answered-q", esc(answerQuestion)));
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
@@ -4128,7 +4255,7 @@
     renderTurnMeta();
   }
   // `requestId`: the id turn_start carries for a prompt someone sent (its row is found by it).
-  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "") {
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "", displayMentions = []) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -4169,7 +4296,7 @@
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
-      head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion);
+      head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion, displayMentions);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
     if (!replaying) block.classList.add("motion-arrive");
@@ -7789,7 +7916,7 @@ function permissionChoices(ev) {
     }
     // A saved inline mention can be restored before the catalog arrives. Upgrade its fallback
     // mark in place so the draft keeps both its caret and the plugin's actual logo.
-    for (const pill of input.querySelectorAll('.composer-pill.pill-plugin')) {
+    for (const pill of document.querySelectorAll('.composer-pill.pill-plugin')) {
       const logo = pluginLogos[pill.dataset.pluginId], mark = pill.querySelector('.composer-plugin-mark');
       if (!logo || !mark || mark.querySelector('img')) continue;
       const img = document.createElement('img'); img.alt = ''; img.src = logo; mark.replaceChildren(img);
@@ -8074,6 +8201,7 @@ function permissionChoices(ev) {
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        displayMentionsVersion = Number(ev.capabilities?.display_mentions) || 0;
         if (input.querySelector('.composer-pill.pill-plugin')) vscode.postMessage({type: 'requestPlugins'});
         artifactsOffered(ev.capabilities?.artifacts);
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
@@ -8174,7 +8302,8 @@ function permissionChoices(ev) {
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id),
           typeof ev.request_id === "string" ? ev.request_id : "",
           Array.isArray(ev.attachments) ? ev.attachments : [],
-          typeof ev.answer_question === "string" ? ev.answer_question : "");
+          typeof ev.answer_question === "string" ? ev.answer_question : "",
+          Array.isArray(ev.display_mentions) ? ev.display_mentions : []);
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         // The next message moves on from a troupe that has ended; its own wake-up turn (a monitor turn) does not.
@@ -9243,6 +9372,7 @@ function permissionChoices(ev) {
     // model receives exactly what was pasted.
     const pastes = attachments.filter((a) => a.pasted);
     const typed = composerText().trim();
+    const displayMentions = pastes.length ? [] : promptDisplayMentions(typed);
     const text = pastes.length
       ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
       : typed;
@@ -9314,7 +9444,7 @@ function permissionChoices(ev) {
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, typed, attachments);
+    fillUserBubble(bubble, typed, attachments, displayMentions);
     m.appendChild(bubble); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     m.dataset.promptId = requestId;        // which request this row is: its turn_start finds it by this
@@ -9332,6 +9462,7 @@ function permissionChoices(ev) {
       attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
+      ...(displayMentions.length ? {display_mentions: displayMentions} : {}),
       ...(references.length ? {pip_references: references.map(a => ({pip_id:a.pipReference.pip_id,expected_version:a.pipReference.job_version,expected_lifecycle_revision:a.pipReference.lifecycle_revision}))} : {}),
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       ...(outputOffered && outputPick !== "auto" ? { output: outputPick } : {}),

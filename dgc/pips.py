@@ -4420,6 +4420,8 @@ def _execute_run(registry, row, config):
     timed_out = threading.Event()
     state_unavailable = threading.Event()
     execution_cancel = threading.Event()
+    if app_socket is not None:
+        app_socket.images.cancel = execution_cancel
     bounded = int((manifest.get("limits") or {}).get("wall_seconds") or 0) > 0
     model_deadline = deadline if bounded else float("inf")
 

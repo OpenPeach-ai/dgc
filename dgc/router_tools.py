@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import difflib
 import json
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -163,15 +164,17 @@ def _cloud(row: dict) -> bool:
 
 def _params(row: dict) -> float:
     try:
-        return float(row.get("params_b") or 0) or float("inf")
-    except (TypeError, ValueError):
+        value = float(row.get("params_b") or 0)
+        return value if math.isfinite(value) and value > 0 else float("inf")
+    except (TypeError, ValueError, OverflowError):
         return float("inf")
 
 
 def model_choices(found: dict) -> list[str]:
     """Every chat model a found server serves, what the user chooses from when DGC chose none (never an embedding
     model): the ones it has loaded first, then the smallest, cloud models last."""
-    rows = [m for m in found.get("models") or [] if isinstance(m, dict) and m.get("name")
+    rows = [m for m in found.get("models") or [] if isinstance(m, dict)
+            and isinstance(m.get("name"), str) and m["name"].strip()
             and m.get("kind") != "embedding"]
     return [m["name"] for m in sorted(rows, key=lambda m: (not m.get("loaded"), _cloud(m), _params(m)))]
 
@@ -191,7 +194,8 @@ def suggest_models(found: dict, wanted=None, *, limit: int = 8) -> list[dict]:
     there would load it on that computer, and a computer serving many models (some of them big) may be running other
     work. Never a cloud model (Ollama runs those elsewhere) or an embedding model. Nothing loaded: none, and the user
     chooses (model_choices)."""
-    rows = [m for m in found.get("models") or [] if isinstance(m, dict) and m.get("name")]
+    rows = [m for m in found.get("models") or [] if isinstance(m, dict)
+            and isinstance(m.get("name"), str) and m["name"].strip()]
     if wanted:
         by_name = {m["name"].lower(): m for m in rows}
         picked = []
@@ -206,12 +210,13 @@ def suggest_models(found: dict, wanted=None, *, limit: int = 8) -> list[dict]:
     slots = found.get("slots") if isinstance(found.get("slots"), int) else 0
     out = []
     for row in picked:
-        context = row.get("loaded_context") or min(int(row.get("context_max") or ROUTER_DEFAULT_CONTEXT),
-                                                   ROUTER_DEFAULT_CONTEXT)
-        context = max(2_048, int(context))
+        loaded = _discovered_context(row.get("loaded_context"))
+        maximum = _discovered_context(row.get("context_max"))
+        context = loaded or min(maximum or ROUTER_DEFAULT_CONTEXT, ROUTER_DEFAULT_CONTEXT)
         model = {"name": row["name"], "workers": max(1, min(64, slots or 1)), "context": context}
-        if row.get("params_b"):
-            model["params_b"] = row["params_b"]
+        params = _params(row)
+        if math.isfinite(params):
+            model["params_b"] = params
         if row.get("tools") is False:
             model["tools"] = False
         out.append(model)
@@ -219,6 +224,15 @@ def suggest_models(found: dict, wanted=None, *, limit: int = 8) -> list[dict]:
 
 
 CONTEXT_MIN, CONTEXT_MAX = 2048, 16_777_216
+
+
+def _discovered_context(value) -> int | None:
+    """A server's optional context hint is data, not an integer conversion that can break an Add card."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return max(CONTEXT_MIN, min(number, CONTEXT_MAX)) if number > 0 else None
 
 
 def context_tokens(value) -> int:
@@ -237,6 +251,8 @@ def context_tokens(value) -> int:
             raise UpdateError("a context is a number of tokens, like 16384 or 16K")
         if scale == 1 and "." in digits:
             raise UpdateError("a context is a whole number of tokens, like 16384 or 16K")
+        if len(digits) > 32:
+            raise UpdateError("a context is between 2,048 and 16,777,216 tokens (2K and up)")
         tokens = round(float(digits) * scale)
     if not CONTEXT_MIN <= tokens <= CONTEXT_MAX:
         raise UpdateError("a context is between 2,048 and 16,777,216 tokens (2K and up)")
@@ -567,7 +583,7 @@ def thinking_words(level: str) -> str:
 def _ago(at) -> str:
     try:
         seconds = max(0, int(time.time() - float(at)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return ""
     return f"{seconds} s ago" if seconds < 120 else f"{seconds // 60} min ago" if seconds < 7200 else \
         f"{seconds // 3600} h ago"

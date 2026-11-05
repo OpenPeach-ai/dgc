@@ -5,8 +5,8 @@ key you already use for pictures), or a ComfyUI video workflow on a computer of 
 ChatDGC or in a Pip's chat, and the model makes it with `generate_video`. Nothing is set up by default.
 
 A clip costs real money (about $0.10 to $2, against a fraction of a cent for a picture) and takes from half a minute
-to several minutes. So every video shows its card with the price before anything is sent, and DGC makes one at a time
-unless you ask for more.
+to several minutes. By default, DGC shows a card with the price before sending it; you can turn asking off for an
+individual generator in Settings. DGC makes one at a time unless you ask for more.
 
 ## Generators
 
@@ -61,7 +61,7 @@ counts. DGC shows "about".
 
 ## The card
 
-Every video shows its card first: the generator, the length and resolution, the price ("5 s · 720p · about $0.15"),
+When asking is on, the video card shows the generator, the length and resolution, the price ("5 s · 720p · about $0.15"),
 this month's spend against the generator's limit, and the prompt. Its buttons are **Make it · about $0.15**, **Edit**
 (change the prompt and it asks again) and **Don't**. There is no Always allow on the card: in Settings each video
 generator has **Asks before each video**, on by default; turning it off there is the only way to make videos without

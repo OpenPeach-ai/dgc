@@ -28,9 +28,9 @@ const comfy = { id: "comfy", name: "ComfyUI on gpu-box", provider: "comfyui", pr
 const fal = { id: "fal", name: "fal FLUX schnell", provider: "fal", provider_name: "fal.ai", base_url: "https://fal.run", model: "fal-ai/flux/schnell",
   size: "1024x1024", enabled: true, asks: true, paid: true, local: false, price_usd: 0.003, price: "about $0.003", good_for: "", default: false,
   has_key: true, key_from: "env:FAL_KEY", spent_this_month_usd: 0.012, monthly_limit_usd: 5, state: { ok: true, detail: "", at: NOW } };
-const gemini = { id: "gemini", name: "Gemini 2.5 Flash Image", provider: "gemini", provider_name: "Google Gemini",
-  base_url: "https://generativelanguage.googleapis.com", model: "gemini-2.5-flash-image", size: "1024x1024", enabled: true, asks: true, paid: true,
-  local: false, price_usd: 0.039, price: "about $0.04", good_for: "", default: false, has_key: true, key_from: "saved", spent_this_month_usd: 0,
+const gemini = { id: "gemini", name: "Gemini 3.1 Flash Image", provider: "gemini", provider_name: "Google Gemini",
+  base_url: "https://generativelanguage.googleapis.com", model: "gemini-3.1-flash-image", size: "1024x1024", enabled: true, asks: true, paid: true,
+  local: false, price_usd: 0.067, price: "about $0.067", good_for: "", default: false, has_key: true, key_from: "saved", spent_this_month_usd: 0,
   state: { ok: false, kind: "needs_credit", detail: "The Gemini API free tier is not available for this project.", at: NOW } };
 function status(over = {}) {
   return { generators: [comfy, fal, gemini].map((g) => structuredClone(g)), default: "comfy", auto_fallback: false, save_dir: "assets/generated",
@@ -88,7 +88,7 @@ test("an older CLI shows no Images; one that makes them lists each generator wit
   await x.settle();
   assert.deepEqual(x.commands()[0], { type: "images_list" }, "the list, read once");
   const names = [...x.d.querySelectorAll("#models-images .router-name")].map((n) => n.textContent);
-  assert.deepEqual(names, ["ComfyUI on gpu-box", "fal FLUX schnell", "Gemini 2.5 Flash Image"]);
+  assert.deepEqual(names, ["ComfyUI on gpu-box", "fal FLUX schnell", "Gemini 3.1 Flash Image"]);
   const comfyCard = x.card("comfy"), falCard = x.card("fal"), geminiCard = x.card("gemini");
   assert.equal(comfyCard.querySelector(".images-badge").textContent, "Default");
   assert.equal(falCard.querySelector(".images-badge"), null, "one default");
@@ -111,7 +111,7 @@ test("an older CLI shows no Images; one that makes them lists each generator wit
   assert.match(x.$("#models-images .images-plugins").textContent, /^Runway and Higgsfield work through their plugins\./);
   assert.equal(x.$("#images-project").value, "");
   assert.deepEqual([...x.$("#images-project").options].map((o) => o.textContent),
-    ["Ask me when several fit", "ComfyUI on gpu-box", "fal FLUX schnell", "Gemini 2.5 Flash Image"]);
+    ["Ask me when several fit", "ComfyUI on gpu-box", "fal FLUX schnell", "Gemini 3.1 Flash Image"]);
   assert.equal(x.$("#images-fallback").getAttribute("aria-checked"), "false");
   assert.equal(x.$("#images-save-dir").value, "assets/generated");
 });

@@ -143,6 +143,23 @@ class Sizes(unittest.TestCase):
         self.assertEqual([P.size_class(v) for v in (4, 12, 13, 40, 70)],
                          ["small", "small", "medium", "medium", "large"])
 
+    def test_nonfinite_server_numbers_are_not_reported_as_model_facts(self):
+        self.assertIsNone(P.parse_params("9" * 400))
+        self.assertIsNone(P.params_from_file(float("inf")))
+        self.assertEqual(P.size_class(float("nan")), "")
+        self.assertEqual(P._prometheus("queue 2\nload +Inf\nbad NaN"), {"queue": 2.0})
+
+
+class BoundedStream(unittest.TestCase):
+    def test_a_server_cannot_send_an_unbounded_line_without_newlines(self):
+        class EndlessLine:
+            def iter_content(self, _size):
+                yield b"x" * P.MAX_BODY
+                yield b"x"
+
+        with self.assertRaisesRegex(P.ProbeError, "too large"):
+            list(P._stream_lines(EndlessLine(), time.monotonic(), 10))
+
 
 class Probes(unittest.TestCase):
     def setUp(self):

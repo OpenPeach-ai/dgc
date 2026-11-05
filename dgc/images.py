@@ -45,7 +45,7 @@ PROVIDER_LABELS = {"comfyui": "ComfyUI", "a1111": "Automatic1111-compatible", "o
                    "OpenAI-compatible", "gemini": "Google Gemini", "bfl": "Black Forest Labs", "fal": "fal.ai",
                    "replicate": "Replicate"}
 DEFAULT_MODELS = {"openai": "gpt-image-1", "xai": "grok-2-image", "together": "black-forest-labs/FLUX.1-schnell",
-                  "ollama": "x/z-image-turbo", "gemini": "gemini-2.5-flash-image", "bfl": "flux-pro-1.1",
+                  "ollama": "x/z-image-turbo", "gemini": "gemini-3.1-flash-image", "bfl": "flux-pro-1.1",
                   "fal": "fal-ai/flux/schnell", "replicate": "black-forest-labs/flux-schnell"}
 # What a generator is good for, filled in from the provider and model; the user can edit it.
 _GOOD_FOR = (
@@ -70,6 +70,7 @@ PRICES = {
     ("fal", "fal-ai/imagen4/preview"): ("image", 0.05), ("fal", "fal-ai/qwen-image"): ("mp", 0.02),
     ("openai", "gpt-image-1"): ("image", 0.042), ("openai", "gpt-image-1-mini"): ("image", 0.011),
     ("openai", "dall-e-3"): ("image", 0.04), ("openai", "dall-e-2"): ("image", 0.02),
+    ("gemini", "gemini-3.1-flash-image"): ("image", 0.067),
     ("gemini", "gemini-2.5-flash-image"): ("image", 0.039), ("gemini", "gemini-2.5-flash-image-preview"): ("image", 0.039),
     ("gemini", "gemini-3-pro-image-preview"): ("image", 0.134), ("gemini", "gemini-3-pro-image"): ("image", 0.134),
     ("gemini", "imagen-4.0-generate-001"): ("image", 0.04), ("gemini", "imagen-4.0-fast-generate-001"): ("image", 0.02),
@@ -829,6 +830,8 @@ def generate(config, generator: dict, request: P.Request, *, folder: Path, root:
     """Make the images, save them with their sidecars, add the estimate to this month's spend, and remember how the
     generator answered. Its estimate is held against the monthly limit from just before it is sent (``may_pass``:
     the user said yes to passing it). Raises ImageError with its kind ("over_limit" when the limit has no room)."""
+    if cancel is not None and cancel.is_set():
+        raise P.ImageError("cancelled", "stopped before the image was made")
     model = request.model or generator.get("model") or DEFAULT_MODELS.get(generator["provider"], "")
     request.model = model
     adapter = P.adapter_for(generator["provider"], workflow_reader=read_workflow)
@@ -866,6 +869,9 @@ def generate(config, generator: dict, request: P.Request, *, folder: Path, root:
     took = round(time.monotonic() - started, 1)
     cost = None if each is None else round(each * len(pictures), 4)
     settle(token, generator["id"], cost)
+    if cancel is not None and cancel.is_set():
+        # The provider may have charged, but a stopped Pip run must not publish a late image.
+        raise P.ImageError("cancelled", "stopped before the image was saved")
     saved = save(pictures, folder=folder, root=root, prompt=request.prompt, generator=generator, model=model,
                  cost=cost, surface=surface, request=request, where=where, name=name, replace=replace)
     record_check(generator["id"], {"ok": True, "detail": f"made {len(saved)} image{'s' if len(saved) != 1 else ''}"})
@@ -1029,7 +1035,7 @@ def listing_text(listing_value: dict) -> str:
 
 
 def model_words(model: str) -> str:
-    """A model id as a name: "fal-ai/flux/schnell" -> "FLUX Schnell", "gemini-2.5-flash-image" -> "Gemini 2.5 Flash Image"."""
+    """A model id as a name: "fal-ai/flux/schnell" -> "FLUX Schnell", "gemini-3.1-flash-image" -> "Gemini 3.1 Flash Image"."""
     parts = [p for p in str(model or "").split("/") if p and p not in ("fal-ai", "black-forest-labs")]
     words = " ".join(parts[-2:]).replace("-", " ").replace("_", " ").split()
     out = []

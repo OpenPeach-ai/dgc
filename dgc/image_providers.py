@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
+import hashlib
 import ipaddress
 import json
 import os
@@ -32,9 +33,10 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import requests
 from dataclasses import dataclass, field
 from http.client import HTTPException
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 KINDS = ("needs_credit", "rate_limited", "bad_key", "server_down", "refused", "bad_request", "failed", "cancelled",
          "over_limit")
@@ -180,17 +182,72 @@ def own_address(url: str, base: str, *, family: bool = False) -> bool:
             and (host == domain or host.endswith("." + domain)))
 
 
-def _local_base(base: str) -> bool:
-    """A user-configured local generator; it may return images from its own origin only."""
+def _local_addresses(base: str) -> tuple[str, ...]:
+    """Resolve a local generator once, rejecting mixed public and private answers."""
     scheme, host, port = origin(base)
     if scheme not in ("http", "https") or not host or not port:
-        return False
+        return ()
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        found = [ipaddress.ip_address(item[4][0].split("%", 1)[0]) for item in addresses if item[4]]
+        found = tuple(dict.fromkeys(item[4][0].split("%", 1)[0] for item in addresses if item[4]))
+        parsed = [ipaddress.ip_address(address) for address in found]
     except (OSError, ValueError):
-        return False
-    return bool(found) and all(not address.is_global for address in found)
+        return ()
+    return found if found and all(not address.is_global for address in parsed) else ()
+
+
+def _fetch_local_image(url: str, base: str, addresses: tuple[str, ...], *, headers=None, cancel=None) -> bytes:
+    """Fetch from a configured local generator, pinned to its initially checked addresses.
+
+    The provider may redirect only within its own origin. A second DNS lookup must never decide where the image
+    request goes, and neither a proxy nor a redirect may receive the generator's credentials.
+    """
+    from .tools import _PublicAddressAdapter
+
+    session = requests.Session()
+    session.trust_env = False
+    session.mount(f"{urlsplit(base).scheme}://", _PublicAddressAdapter(urlsplit(base).hostname))
+    current = url
+    try:
+        for redirect_n in range(5):
+            _check_cancel(cancel)
+            parsed = urlsplit(current)
+            if not same_origin(current, base) or parsed.username is not None or parsed.password is not None:
+                raise ValueError("the image redirected outside its own address")
+            for n, address in enumerate(addresses):
+                literal = f"[{address}]" if ":" in address else address
+                pinned = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
+                try:
+                    response = session.get(pinned, timeout=(10, 120), allow_redirects=False, stream=True,
+                                           headers={"User-Agent": USER_AGENT, **(headers or {}), "Host": parsed.netloc})
+                    break
+                except requests.ConnectionError:
+                    if n == len(addresses) - 1:
+                        raise
+            try:
+                if response.is_redirect or response.is_permanent_redirect:
+                    location = response.headers.get("Location")
+                    if not location or redirect_n == 4:
+                        raise ValueError("too many or invalid image redirects")
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                declared = response.headers.get("Content-Length", "")
+                if declared and int(declared) > MAX_IMAGE_BYTES:
+                    raise ValueError("image response is too large")
+                chunks, size = [], 0
+                for chunk in response.iter_content(chunk_size=16_384):
+                    _check_cancel(cancel)
+                    size += len(chunk)
+                    if size > MAX_IMAGE_BYTES:
+                        raise ValueError("image response is too large")
+                    chunks.append(chunk)
+                return b"".join(chunks)
+            finally:
+                response.close()
+    finally:
+        session.close()
+    raise ValueError("too many image redirects")
 
 
 _KEPT_ON_REDIRECT = frozenset({"user-agent", "accept", "accept-encoding", "accept-language"})
@@ -207,19 +264,6 @@ class _KeysStayHome(urllib.request.HTTPRedirectHandler):
                               if name.lower() in _KEPT_ON_REDIRECT}
             follow.unredirected_hdrs = {}
         return follow
-
-
-class _LocalImageRedirect(urllib.request.HTTPRedirectHandler):
-    """A local generator's image stays at the exact configured origin, through every redirect."""
-
-    def __init__(self, base: str):
-        self.base = base
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        target = urlsplit(newurl)
-        if target.username is not None or target.password is not None or not same_origin(newurl, self.base):
-            raise ImageError("failed", "the local generator pointed to an image outside its own address")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 OPENER = urllib.request.build_opener(_KeysStayHome())
@@ -253,7 +297,7 @@ def _may_have_charged() -> None:
 
 
 def http(method: str, url: str, *, headers=None, body: bytes | None = None, payload=None, timeout: float = 60.0,
-         provider: str = "", limit: int = MAX_IMAGE_BYTES, cancel=None, opener=None) -> Answer:
+         provider: str = "", limit: int = MAX_IMAGE_BYTES, cancel=None) -> Answer:
     """One request. A connection that can't be made is ``server_down``; any HTTP answer comes back as it is."""
     _check_cancel(cancel)
     head = {"User-Agent": USER_AGENT, **(headers or {})}
@@ -262,7 +306,7 @@ def http(method: str, url: str, *, headers=None, body: bytes | None = None, payl
         head.setdefault("Content-Type", "application/json")
     request = urllib.request.Request(url, data=body, headers=head, method=method)
     try:
-        with (opener or OPENER).open(request, timeout=timeout) as response:
+        with OPENER.open(request, timeout=timeout) as response:
             if method != "GET" and 200 <= response.status < 300:
                 _may_have_charged()            # the provider took the job
             data = response.read(limit + 1)
@@ -304,16 +348,15 @@ def download(url: str, *, headers=None, provider: str = "", cancel=None, base: s
     try:
         _public_destination(url)
     except ValueError as exc:
-        if not (base and same_origin(url, base) and _local_base(base)):
+        addresses = _local_addresses(base) if base and same_origin(url, base) else ()
+        if not addresses:
             raise ImageError("failed", f"the provider sent an unsafe image address ({exc})", provider=provider) from None
-        # LocalAI and other user-run generators can serve their own images. No proxy, no credential and no redirect
-        # to a different origin; the configured local server is the only exception to the public-address rule.
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _LocalImageRedirect(base))
-        answer = http("GET", url, headers=headers, timeout=120, provider=provider, cancel=cancel, opener=opener)
-        if answer.status != 200:
-            raise ImageError("failed", f"the image couldn't be downloaded (HTTP {answer.status})",
-                             status=answer.status, provider=provider)
-        data = answer.body
+        try:
+            data = _fetch_local_image(url, base, addresses, headers=headers, cancel=cancel)
+        except ImageError:
+            raise
+        except (ValueError, requests.RequestException) as error:
+            raise ImageError("failed", f"the image couldn't be downloaded safely ({error})", provider=provider) from None
     else:
         from requests import RequestException
         try:
@@ -713,30 +756,43 @@ def _set(workflow: dict, address: str, value) -> None:
 class _WebSocket:
     """Just enough of a websocket client for ComfyUI's /ws progress messages (text frames; binary previews skipped)."""
 
+    _MAX_FRAME = 1 << 20
+
     def __init__(self, url: str, timeout: float):
         parts = urlsplit(url)
         port = parts.port or (443 if parts.scheme == "wss" else 80)
         raw = socket.create_connection((parts.hostname, port), timeout=timeout)
-        if parts.scheme == "wss":
-            raw = ssl.create_default_context().wrap_socket(raw, server_hostname=parts.hostname)
-        self.sock = raw
-        key = base64.b64encode(os.urandom(16)).decode()
-        path = parts.path + (f"?{parts.query}" if parts.query else "")
-        request = (f"GET {path} HTTP/1.1\r\nHost: {parts.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                   f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: {USER_AGENT}\r\n\r\n")
-        self.sock.sendall(request.encode())
-        head = b""
-        while b"\r\n\r\n" not in head:
-            chunk = self.sock.recv(4096)
-            if not chunk:
-                raise OSError("websocket closed during handshake")
-            head += chunk
-            if len(head) > 65536:
-                raise OSError("websocket handshake too long")
-        status_line = head.split(b"\r\n", 1)[0]
-        if b" 101 " not in status_line + b" ":
-            raise OSError(f"websocket refused: {status_line[:80]!r}")
-        self.buffer = head.split(b"\r\n\r\n", 1)[1]
+        try:
+            if parts.scheme == "wss":
+                raw = ssl.create_default_context().wrap_socket(raw, server_hostname=parts.hostname)
+            self.sock = raw
+            key = base64.b64encode(os.urandom(16)).decode()
+            path = parts.path + (f"?{parts.query}" if parts.query else "")
+            request = (f"GET {path} HTTP/1.1\r\nHost: {parts.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                       f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: {USER_AGENT}\r\n\r\n")
+            self.sock.sendall(request.encode())
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    raise OSError("websocket closed during handshake")
+                head += chunk
+                if len(head) > 65536:
+                    raise OSError("websocket handshake too long")
+            header, self.buffer = head.split(b"\r\n\r\n", 1)
+            lines = header.split(b"\r\n")
+            expected = base64.b64encode(hashlib.sha1(
+                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC525B11").encode()).digest())
+            fields = dict(line.split(b":", 1) for line in lines[1:] if b":" in line)
+            normalized = {name.strip().lower(): value.strip() for name, value in fields.items()}
+            if (b" 101 " not in lines[0] + b" " or normalized.get(b"sec-websocket-accept") != expected
+                    or normalized.get(b"upgrade", b"").lower() != b"websocket"
+                    or b"upgrade" not in (part.strip() for part in
+                                         normalized.get(b"connection", b"").lower().split(b","))):
+                raise OSError("websocket handshake was not accepted")
+        except Exception:
+            raw.close()
+            raise
 
     def _read(self, count: int) -> bytes:
         while len(self.buffer) < count:
@@ -754,6 +810,8 @@ class _WebSocket:
             length = struct.unpack("!H", self._read(2))[0]
         elif length == 127:
             length = struct.unpack("!Q", self._read(8))[0]
+        if length > self._MAX_FRAME:
+            raise OSError("websocket progress frame is too large")
         mask = self._read(4) if second & 0x80 else b""
         payload = self._read(length)
         if mask:
@@ -1104,7 +1162,8 @@ class Gemini(Adapter):
     provider = "gemini"
 
     def _url(self, generator, model, verb):
-        return generator["base_url"].rstrip("/") + f"/v1beta/models/{quote(model, safe='-._')}:{verb}"
+        version = "v1" if model == "gemini-3.1-flash-image" else "v1beta"
+        return generator["base_url"].rstrip("/") + f"/{version}/models/{quote(model, safe='-._')}:{verb}"
 
     def check(self, generator, key):
         if not key:
@@ -1123,7 +1182,7 @@ class Gemini(Adapter):
                 "models": images[:40]}
 
     def generate(self, generator, key, request, *, progress=None, cancel=None):
-        model = request.model or generator.get("model") or "gemini-2.5-flash-image"
+        model = request.model or generator.get("model") or "gemini-3.1-flash-image"
         if not key:
             raise ImageError("bad_key", "no key for Gemini", provider="gemini")
         if model.startswith("imagen"):
@@ -1136,6 +1195,7 @@ class Gemini(Adapter):
                                         "imageConfig": {"aspectRatio": aspect_of(request.width, request.height)}}}
         out = []
         for _ in range(request.count):                  # one image an answer
+            before = len(out)
             answer = http("POST", self._url(generator, model, "generateContent"), headers={"x-goog-api-key": key},
                           payload=payload, timeout=TIMEOUT_S, provider="gemini", cancel=cancel)
             if answer.status != 200:
@@ -1154,10 +1214,10 @@ class Gemini(Adapter):
                     elif isinstance(part.get("text"), str):
                         said += part["text"]
                 reason = (candidate or {}).get("finishReason")
-                if reason in _GEMINI_BLOCKS and not out:
+                if reason in _GEMINI_BLOCKS and len(out) == before:
                     raise ImageError("refused", f"Gemini didn't make it ({reason})" + (f": {said[:200]}" if said else ""),
                                      provider="gemini")
-            if not out:
+            if len(out) == before:
                 raise ImageError("failed", "Gemini answered without an image" + (f": {said[:300]}" if said else ""),
                                  provider="gemini")
         return out

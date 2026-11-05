@@ -108,6 +108,10 @@ class Choosing(ToolsCase):
         self.assertIn("no image generator is set up", str(caught.exception))
         self.setup("comfy")
         for args, words in (({"prompt": ""}, "say what the image shows"), ({"prompt": "x", "count": 9}, "count"),
+                            ({"prompt": "x", "count": 1.9}, "count"),
+                            ({"prompt": "x", "count": float("nan")}, "count"),
+                            ({"prompt": "x", "seed": 1.5}, "seed"),
+                            ({"prompt": "x", "seed": float("inf")}, "seed"),
                             ({"prompt": "x", "images": ["../../etc/passwd"]}, "outside"),
                             ({"prompt": "x", "images": ["missing.png"]}, "no image at"),
                             ({"prompt": "x", "generator": "nope"}, "no image generator 'nope'"),
@@ -299,6 +303,19 @@ class ChargesStay(ToolsCase):
 
 
 class Making(ToolsCase):
+    def test_stop_before_generation_sends_no_request_and_saves_no_image(self):
+        import threading
+        self.setup("fal")
+        stopped = threading.Event()
+        surface = self.surface(cancel=stopped)
+        plan = T.prepare(self.config, {"prompt": "a fox"}, surface)
+        stopped.set()
+        outcome = T.execute(self.config, plan, surface)
+        self.assertIsNone(outcome.result)
+        self.assertEqual(outcome.error.kind, "cancelled")
+        self.assertEqual([r for r in self.fake.requests if r["path"].startswith("/fal-ai/")], [])
+        self.assertEqual(images.library()["total"], 0)
+
     def test_saved_with_a_sidecar_in_the_project_and_listed(self):
         self.setup("comfy")
         steps = []

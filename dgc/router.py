@@ -20,6 +20,7 @@ With the Router off (the default) nothing here is consulted: every route is 0.50
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -76,10 +77,6 @@ class Route:
         if self.api_mode:
             return self.api_mode
         return "ollama" if self.server == "ollama" else "auto"
-
-    def label(self) -> str:
-        return f"{self.system_name} · {self.model}"
-
 
 # ---- reading the settings -----------------------------------------------------------------------------------------
 def settings(config) -> dict:
@@ -234,12 +231,18 @@ class Router:
         for lease in value.get("leases") or []:
             if not isinstance(lease, dict) or not lease.get("id"):
                 continue
-            pid = int(lease.get("pid") or 0)
+            try:
+                pid = int(lease.get("pid") or 0)
+                heartbeat = float(lease.get("heartbeat") or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(heartbeat):
+                continue
             if pid == self.pid:
                 if lease["id"] in self._held:
                     leases.append(lease)
                 continue                       # this process's own, released or from a forked parent: gone
-            if not _alive(pid) or now - float(lease.get("heartbeat") or 0) > LEASE_STALE_S:
+            if not _alive(pid) or now - heartbeat > LEASE_STALE_S:
                 continue
             leases.append(lease)
         return leases
@@ -713,7 +716,7 @@ def _memory_facts(model) -> dict:
     if weights:
         out["weights_bytes"] = int(weights)
     kv = model.get("kv_bytes_per_token")
-    if isinstance(kv, (int, float)) and not isinstance(kv, bool) and kv > 0:
+    if isinstance(kv, (int, float)) and not isinstance(kv, bool) and math.isfinite(kv) and kv > 0:
         out["kv_bytes_per_token"] = int(kv)
     return out
 
@@ -891,14 +894,18 @@ def subagent_route(agent, hint: dict, *, owner: str, cancel=None, registry=None,
 def client_for(agent, route: Route):
     """An LLMClient for ``route``, built like every other client of ``agent``, with the worker's fixed context."""
     from .agent import Agent
-    client = Agent._new_client(agent, route.client_url, route.key, route.model, api_mode=route.client_api_mode,
-                               source="subagent")
-    client.context_size = int(route.context)
-    # Another computer's server keeps its own residency: a model it keeps loaded for good stays so (-1), and
-    # otherwise DGC sends no keep_alive at all, so that server's own default applies, not this computer's setting.
-    client.keep_alive = route.keep_alive if route.keep_alive is not None else ""
-    client._router_route = route
-    return client
+    try:
+        client = Agent._new_client(agent, route.client_url, route.key, route.model, api_mode=route.client_api_mode,
+                                   source="subagent")
+        client.context_size = int(route.context)
+        # Another computer's server keeps its own residency: a model it keeps loaded for good stays so (-1), and
+        # otherwise DGC sends no keep_alive at all, so that server's own default applies, not this computer's setting.
+        client.keep_alive = route.keep_alive if route.keep_alive is not None else ""
+        client._router_route = route
+        return client
+    except Exception:
+        ROUTER.release(route)
+        raise
 
 
 def move(agent, error_text: str, *, cancel=None, attempts: int | None = None):

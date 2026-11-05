@@ -20,7 +20,16 @@ export function mountSetupCards(options) {
  const emails=mountEmailCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'})});
  const runs=mountRunCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'}),onChange:options.onRunsChange});
  function repaint(entry){for(const view of entry.views){if(view.root.isConnected){paint(entry,view);const group=view.root.closest('.pip-setup-batch');if(group)paintGroup(group);}}if(dockView?.entry===entry&&entry.setup?.status==='pending')paintDock(dockView);else refreshDock();}
- function remap(entry,id){for(const view of entry.views){const tool=view.root.closest('[data-pip-setup]');if(tool)tool.dataset.pipSetup=id;view.root.dataset.setupId=id;}entries.delete(entry.id);entry.id=id;entries.set(id,entry);}
+ function remap(entry,id){
+  const old=entry.id;
+  for(const view of entry.views){
+   const tool=view.root.closest('[data-pip-setup]');if(tool)tool.dataset.pipSetup=id;
+   view.root.dataset.setupId=id;
+   const group=view.root.closest('.pip-setup-batch');
+   if(group)group.dataset.setupIds=String(group.dataset.setupIds||'').split(',').map(value=>value===old?id:value).join(',');
+  }
+  entries.delete(old);entry.id=id;entries.set(id,entry);
+ }
  function load(entry){
   if(entry.loading||entry.busy||!connected||!supported)return;
   entry.loading=true;entry.error='';repaint(entry);const token=epoch;
@@ -71,7 +80,7 @@ export function mountSetupCards(options) {
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
-  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
+  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:['subscription','router'].includes(s.model_choice?.mode)?modelLabel(s.model_choice):'Default model');
   if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
   if(s.live_plan){detail(facts,'Runs','These exact commands · its model summarizes what they print');for(const line of s.live_plan.commands)detail(facts,'Command',line,'pip-setup-command');}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);

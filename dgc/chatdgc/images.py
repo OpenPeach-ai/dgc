@@ -47,12 +47,12 @@ def _inputs(engine, chat):
     return find
 
 
-def surface(engine, chat: dict) -> image_tools.Surface:
+def surface(engine, chat: dict, cancel=None) -> image_tools.Surface:
     def remember(generator_id: str) -> None:
         chat["image_generator"] = generator_id
     return image_tools.Surface(name="chat", root=folder(chat["id"]), project_root=None,
                                chat_choice=str(chat.get("image_generator") or ""), interactive=False,
-                               remember=remember, inputs=_inputs(engine, chat), save_dir=".",
+                               remember=remember, inputs=_inputs(engine, chat), cancel=cancel, save_dir=".",
                                where={"chat": chat["id"], "chat_title": str(chat.get("title") or "")[:120]},
                                owner=f"images for chat {chat['id']}")
 
@@ -89,12 +89,12 @@ def _keep(engine, chat: dict, result, at: int, files: list, on_file) -> list[dic
     return kept
 
 
-def call(engine, chat: dict, tool_call, files: list, at: int, on_file, actions: list, on_action) -> str:
+def call(engine, chat: dict, tool_call, files: list, at: int, on_file, actions: list, on_action, cancel=None) -> str:
     """One generate_image or list_image_generators call in a reply: what the model is told."""
     from .store import now
     import uuid
     args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
-    place = surface(engine, chat)
+    place = surface(engine, chat, cancel)
     if tool_call.name == "list_image_generators":
         return image_tools.list_text(engine.config, args, place)
     try:
@@ -125,12 +125,12 @@ def call(engine, chat: dict, tool_call, files: list, at: int, on_file, actions: 
     return outcome.text + " Don't paste a link or the path."
 
 
-def run_card(engine, chat: dict, card: dict, arguments: dict | None) -> dict:
+def run_card(engine, chat: dict, card: dict, arguments: dict | None, cancel=None) -> dict:
     """The user sent an image card: make it now. {status, answer | error, files}."""
     args = dict(card.get("arguments") or {})
     if isinstance(arguments, dict):
         args.update({key: value for key, value in arguments.items() if key in ("prompt", "size", "count", "seed")})
-    place = surface(engine, chat)
+    place = surface(engine, chat, cancel)
     try:
         plan = image_tools.prepare(engine.config, args, place)
     except image_tools.Refused as exc:

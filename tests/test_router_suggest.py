@@ -48,6 +48,20 @@ class SuggestCase(unittest.TestCase):
 
 
 class Arithmetic(SuggestCase):
+    def test_malformed_discovery_and_probe_numbers_do_not_break_a_suggestion(self):
+        config = self.config(self.system([{"name": "qwen3:8b", "context": 32768}], memory_gb=16))
+        router_state.save_discovery("nas", {"models": [{"name": "qwen3:8b", "context_max": "NaN",
+                                                        "size_bytes": 10 ** 400, "params_b": "Infinity",
+                                                        "kv_bytes_per_token": "bad"}]})
+        router_state.save_probe("nas", "qwen3:8b", {"parallel": {"ok": True, "runs": -2,
+                                                                 "context": "Infinity"}})
+        result = suggest(config, "nas")
+        self.assertIsNone(result["models"][0]["workers"])
+        self.assertIn("can't back a number yet", result["models"][0]["line"])
+        with self.assertRaises(SuggestError):
+            suggest(config, "nas", context="Infinity")
+        self.assertEqual(suggest(config, "nas", context="16K")["models"][0]["context"], 16384)
+
     def test_memory_weights_and_context_in_one_line(self):
         config = self.config(self.system([{"name": "qwen3:8b", "context": 32768}], memory_gb=16))
         router_state.save_discovery("nas", {"models": [QWEN8]})

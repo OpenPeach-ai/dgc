@@ -25,15 +25,15 @@ import random
 import re
 import socket
 import ssl
-import urllib.error
-import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from http.client import HTTPException
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
-from .image_providers import (_CREDIT, _POLICY, OPENER, USER_AGENT, ComfyUI, ImageError, InputImage, _bearer, _set,
+import requests
+
+from .image_providers import (_CREDIT, _POLICY, USER_AGENT, ComfyUI, ImageError, InputImage, _bearer, _set,
                               classify, detect_mapping, http, load_workflow, same_origin)
 
 # A file DGC keeps of one video: 300 MB. A 5-10 s clip from these providers is 2-30 MB (1080p H.264 near 8 Mbit/s
@@ -174,42 +174,95 @@ def _not_made(words: str, error: ImageError) -> Status:
 
 
 def download_to(url: str, dest: Path, *, headers=None, provider: str = "", cancel=None,
-                limit: int = VIDEO_MAX_BYTES) -> str:
+                limit: int = VIDEO_MAX_BYTES, base: str = "") -> str:
     """Stream a finished video to ``dest`` (through a temporary file beside it), at most ``limit`` bytes. Returns its
     type; ImageError when it isn't a video or is too large."""
-    if urlsplit(url).scheme not in ("https", "http"):
-        raise ImageError("failed", "the provider sent a video address DGC won't open", provider=provider)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
+    from .image_providers import _local_addresses
+    from .tools import _PublicAddressAdapter, _public_destination
+
+    request_headers = dict(headers or {})
+    current = url
+    local_addresses = _local_addresses(base) if base and same_origin(url, base) else ()
+    session = requests.Session()
+    session.trust_env = False
     dest.parent.mkdir(parents=True, exist_ok=True)
     temp = dest.with_name(f".{dest.name}.{os.getpid()}.{uuid.uuid4().hex[:6]}.part")
     try:
-        with OPENER.open(request, timeout=120) as response, temp.open("wb") as out:
-            total, head = 0, b""
-            while True:
-                if cancel is not None and cancel.is_set():
-                    raise ImageError("cancelled", "stopped while the video was downloading", provider=provider)
-                chunk = response.read(1 << 20)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > limit:
+        for redirect_n in range(6):
+            if cancel is not None and cancel.is_set():
+                raise ImageError("cancelled", "stopped while the video was downloading", provider=provider)
+            parsed = urlsplit(current)
+            if local_addresses:
+                if not same_origin(current, base) or parsed.username is not None or parsed.password is not None:
+                    raise ValueError("a local video download redirected outside its configured generator")
+                addresses = local_addresses
+            else:
+                current, addresses = _public_destination(current)
+                parsed = urlsplit(current)
+            adapter = _PublicAddressAdapter(parsed.hostname)
+            session.mount(f"{parsed.scheme.lower()}://", adapter)
+            response = None
+            try:
+                for index, address in enumerate(addresses):
+                    literal = f"[{address}]" if ":" in address else address
+                    pinned = parsed._replace(netloc=literal + (f":{parsed.port}" if parsed.port else "")).geturl()
+                    try:
+                        response = session.get(
+                            pinned, timeout=(10, 120), allow_redirects=False, stream=True,
+                            headers={"User-Agent": USER_AGENT, **request_headers, "Host": parsed.netloc})
+                        break
+                    except requests.ConnectionError:
+                        if index == len(addresses) - 1:
+                            raise
+                if response.is_redirect or response.is_permanent_redirect:
+                    if redirect_n == 5 or not response.headers.get("Location"):
+                        raise ValueError("too many or invalid video redirects")
+                    next_url = urljoin(current, response.headers["Location"])
+                    if not same_origin(current, next_url):
+                        request_headers = {}  # a provider key never travels to a CDN or another host
+                    current = next_url
+                    continue
+                response.raise_for_status()
+                declared = response.headers.get("Content-Length", "")
+                if declared and declared.isdecimal() and int(declared) > limit:
                     raise ImageError("failed", f"the video is larger than {limit // (1024 * 1024)} MB, DGC's limit "
                                      "for one file", provider=provider)
-                if len(head) < 16:
-                    head += chunk[:16]
-                out.write(chunk)
+                with temp.open("wb") as out:
+                    total, head = 0, b""
+                    for chunk in response.iter_content(chunk_size=1 << 20):
+                        if cancel is not None and cancel.is_set():
+                            raise ImageError("cancelled", "stopped while the video was downloading", provider=provider)
+                        total += len(chunk)
+                        if total > limit:
+                            raise ImageError("failed", f"the video is larger than {limit // (1024 * 1024)} MB, DGC's "
+                                             "limit for one file", provider=provider)
+                        if len(head) < 16:
+                            head += chunk[:16 - len(head)]
+                        out.write(chunk)
+                break
+            finally:
+                if response is not None:
+                    response.close()
+                adapter.close()
+        else:
+            raise ValueError("too many video redirects")
         mime = sniff_video(head)
         if not mime:
             raise ImageError("failed", "the provider sent something that isn't a video", provider=provider)
         os.replace(temp, dest)
         return mime
-    except urllib.error.HTTPError as exc:
-        raise ImageError("failed", f"the video couldn't be downloaded (HTTP {exc.code})", status=exc.code,
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        raise ImageError("failed", f"the video couldn't be downloaded (HTTP {status})", status=status,
                          provider=provider) from None
-    except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, ssl.SSLError, HTTPException) as exc:
+    except ValueError as exc:
+        raise ImageError("failed", f"the provider sent an unsafe video address ({exc})", provider=provider) from None
+    except (requests.RequestException, socket.timeout, TimeoutError, ConnectionError, ssl.SSLError,
+            HTTPException) as exc:
         raise ImageError("server_down", f"{urlsplit(url).netloc} didn't send the video ({getattr(exc, 'reason', exc)})",
                          provider=provider) from None
     finally:
+        session.close()
         try:
             temp.unlink()
         except OSError:
@@ -259,7 +312,7 @@ class VideoAdapter:
             return write_bytes(base64.b64decode(status.result["data_b64"]), dest, provider=self.provider)
         if not url:
             raise ImageError("failed", "the provider said done but sent no video", provider=self.provider)
-        return download_to(url, dest, provider=self.provider, cancel=cancel)
+        return download_to(url, dest, provider=self.provider, cancel=cancel, base=str(generator.get("base_url") or ""))
 
     def cancel(self, generator: dict, key: str, handle: dict) -> str:
         """"stopped" (the provider stopped it), "finished" (too late) or "unsupported"."""
@@ -514,7 +567,7 @@ class GeminiVideo(VideoAdapter):
         # elsewhere is fetched as any address is, without it.
         own = same_origin(url, self._base(generator))
         return download_to(url, dest, headers={"x-goog-api-key": key} if own else None, provider="gemini",
-                           cancel=cancel)
+                           cancel=cancel, base=self._base(generator) if own else "")
 
     def cancel(self, generator, key, handle):
         path = (f"/v1beta/{handle['operation']}:cancel" if handle.get("operation")
@@ -745,7 +798,8 @@ class ComfyVideo(VideoAdapter):
     def fetch(self, generator, key, handle, status, dest, cancel=None):
         base = generator["base_url"].rstrip("/")
         query = urlencode({k: status.result.get(k, "") for k in ("filename", "subfolder", "type")})
-        return download_to(base + "/view?" + query, dest, headers=_bearer(key), provider="comfyui", cancel=cancel)
+        return download_to(base + "/view?" + query, dest, headers=_bearer(key), provider="comfyui", cancel=cancel,
+                           base=base)
 
     def cancel(self, generator, key, handle):
         base = generator["base_url"].rstrip("/")

@@ -17,6 +17,7 @@ what the server reports or what was measured instead; with neither, it suggests 
 """
 from __future__ import annotations
 
+import math
 import re
 
 from . import router as router_mod
@@ -51,7 +52,9 @@ def _k(tokens: int) -> str:
 def _size(params_b) -> str:
     try:
         value = float(params_b)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if not math.isfinite(value) or value <= 0:
         return ""
     return f"{value:.0f}B" if value >= 10 else f"{value:.1f}".rstrip("0").rstrip(".") + "B"
 
@@ -63,6 +66,14 @@ def _quant(quant: str) -> str:
 
 def _workers(n: int) -> str:
     return f"{n} worker" + ("" if n == 1 else "s")
+
+
+def _number(value, maximum: float) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and 0 < number <= maximum else None
 
 
 def memory(system: dict) -> dict:
@@ -85,24 +96,28 @@ def memory(system: dict) -> dict:
 
 def _found(system_id: str) -> tuple[dict, dict]:
     found = router_state.discovery(system_id)
-    models = {m.get("name"): m for m in found.get("models") or [] if isinstance(m, dict) and m.get("name")}
+    models = {m["name"]: m for m in found.get("models") or [] if isinstance(m, dict)
+              and isinstance(m.get("name"), str) and m["name"].strip()}
     return found, models
 
 
 def _weights(row: dict) -> float | None:
     from .router_probe import bits_for
-    size = row.get("size_bytes")
-    if isinstance(size, (int, float)) and size >= 50_000_000:
-        return float(size)
-    if row.get("params_b"):
-        return float(row["params_b"]) * 1e9 * bits_for(row.get("quant", "")) / 8
+    size = _number(row.get("size_bytes"), 1e18)
+    if size is not None and size >= 50_000_000:
+        return size
+    params = _number(row.get("params_b"), 1e6)
+    if params is not None:
+        return params * 1e9 * bits_for(row.get("quant", "")) / 8
     return None
 
 
 def _measured(system_id: str, name: str) -> dict:
     probe = router_state.probes(system_id).get(name, {})
     parallel = probe.get("parallel") if isinstance(probe.get("parallel"), dict) else {}
-    return parallel if parallel.get("ok") and isinstance(parallel.get("runs"), int) else {}
+    runs = parallel.get("runs")
+    return parallel if parallel.get("ok") and isinstance(runs, int) and not isinstance(runs, bool) \
+        and 1 <= runs <= ROUTER_MAX_WORKERS else {}
 
 
 def _fit_context(budget: float, kv_per_token: float) -> int:
@@ -119,8 +134,10 @@ def _plan_model(system: dict, found: dict, row: dict, name: str, context: int, m
     server = system.get("server", "")
     out: dict = {"name": name, "context": context, "workers": None, "basis": "none"}
     label = " ".join(bit for bit in (_size(row.get("params_b")), _quant(row.get("quant", ""))) if bit) or name
-    if row.get("context_max") and context > int(row["context_max"]):
-        out["context"] = context = int(row["context_max"])
+    from .router_tools import _discovered_context
+    context_max = _discovered_context(row.get("context_max"))
+    if context_max and context > context_max:
+        out["context"] = context = context_max
         out["note"] = f"{name} takes at most {_k(context)}"
     measured = _measured(system["id"], name)
     if row.get("kind") == "embedding":
@@ -135,10 +152,13 @@ def _plan_model(system: dict, found: dict, row: dict, name: str, context: int, m
             out["line"] = f"{name}: a cloud model (no memory here); Test measures how many run at once"
         return out
     # Servers that set their memory aside up front: what they say is the answer.
-    slots = found.get("slots") if isinstance(found.get("slots"), int) and found["slots"] > 0 else 0
-    kv_tokens = found.get("kv_tokens") if isinstance(found.get("kv_tokens"), int) and found["kv_tokens"] > 0 else 0
+    slots = min(found["slots"], ROUTER_MAX_WORKERS) if isinstance(found.get("slots"), int) \
+        and not isinstance(found["slots"], bool) and found["slots"] > 0 else 0
+    kv_tokens = found.get("kv_tokens") if isinstance(found.get("kv_tokens"), int) \
+        and not isinstance(found["kv_tokens"], bool) and 0 < found["kv_tokens"] <= 1_000_000_000 else 0
     if server == "llamacpp" and slots:
-        slot_context = int(found.get("slot_context") or row.get("loaded_context") or 0)
+        slot_context = (_discovered_context(found.get("slot_context"))
+                        or _discovered_context(row.get("loaded_context")) or 0)
         if slot_context and context != slot_context:
             out["context"] = slot_context
             out["note"] = (f"llama-server was started with {_k(slot_context)} per slot; a bigger context needs its "
@@ -166,7 +186,7 @@ def _plan_model(system: dict, found: dict, row: dict, name: str, context: int, m
         return out
     # Ollama, LM Studio and the rest: the memory arithmetic, and what the parallel test measured.
     weights = _weights(row)
-    kv_per_token = row.get("kv_bytes_per_token")
+    kv_per_token = _number(row.get("kv_bytes_per_token"), 1e12)
     fit = None
     arithmetic = ""
     if mem and weights is not None and kv_per_token:
@@ -193,7 +213,7 @@ def _plan_model(system: dict, found: dict, row: dict, name: str, context: int, m
     if fit is not None and row.get("kv_upper_bound"):
         arithmetic += "; its context is counted high (the server doesn't say its KV heads)"
     runs = measured.get("runs") if measured else None
-    same_context = bool(measured) and int(measured.get("context") or 0) == context
+    same_context = bool(measured) and _discovered_context(measured.get("context")) == context
     if fit is None and runs is None:
         missing = []
         if not mem:
@@ -235,8 +255,12 @@ def suggest(config, system_name: str, *, context: int | None = None) -> dict:
     system = router_mod.find_system(block, system_name)
     if system is None:
         raise SuggestError(f"there is no system {system_name!r}")
-    if context is not None and not 2048 <= int(context) <= 16_777_216:
-        raise SuggestError("context must be between 2,048 and 16,777,216 tokens")
+    if context is not None:
+        from .router_tools import UpdateError, context_tokens
+        try:
+            context = context_tokens(context)
+        except UpdateError as exc:
+            raise SuggestError(str(exc)) from None
     found, rows = _found(system["id"])
     used = [entry for entry in system["models"] if entry.get("use") is not False]
     if not used:

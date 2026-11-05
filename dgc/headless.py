@@ -2642,6 +2642,7 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
+                          "display_mentions": 2,
                           # A finished Pip run reaches the chats it reports to as a card in the
                           # transcript (pip_report events, {role: "pip_report"} history markers),
                           # once the client sends watch_pip_reports; pip_report_dismiss removes one.
@@ -2764,7 +2765,8 @@ class Backend:
         self._router_watch()
 
         def reject(reason: str, message: str) -> None:
-            self.em.emit("command_rejected", command=t, reason=reason, message=message, request_id=request_id)
+            self.em.emit("command_rejected", command=t, reason=reason,
+                         message=redact_value(message, secret_values(self.config)), request_id=request_id)
 
         if t == "router_update" and cmd.get("action") == "prefer":
             # The next turn's helpers run here (an SDK run with system=). Answered at once, in order, so the prompt
@@ -3032,7 +3034,8 @@ class Backend:
                 if t == "videos_library":
                     found = videos_mod.library(query=str(cmd.get("query") or ""), surface=str(cmd.get("surface") or ""),
                                                limit=int(cmd.get("limit") or 60), offset=max(0, int(cmd.get("offset") or 0)))
-                    self.em.emit("videos_library", request_id=request_id, videos=found["videos"], total=found["total"],
+                    self.em.emit("videos_library", request_id=request_id,
+                                 videos=redact_value(found["videos"], secrets), total=found["total"],
                                  **({"next_offset": found["next_offset"]} if found["next_offset"] is not None else {}))
                     return
                 if t == "videos_jobs":
@@ -3064,10 +3067,12 @@ class Backend:
                     return
                 if t == "videos_stop":
                     job = videos_mod.JOBS.stop(config, str(cmd.get("job") or ""))
-                    self.em.emit("video_jobs", request_id=request_id, jobs=[videos_mod.view(job)],
-                                 change=videos_mod.line(job))
+                    self.em.emit("video_jobs", request_id=request_id,
+                                 jobs=[redact_value(videos_mod.view(job), secrets)],
+                                 change=redact_value(videos_mod.line(job), secrets))
                     return
-                self.em.emit("video_jobs", request_id=request_id, **self._videos_generate(cmd))
+                self.em.emit("video_jobs", request_id=request_id,
+                             **redact_value(self._videos_generate(cmd), secrets))
             except ValueError as exc:
                 return reject("invalid_change", str(exc))
             except Exception as exc:               # noqa: BLE001 -- said, never a dead backend
@@ -3652,7 +3657,8 @@ class Backend:
         return lock
 
     def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
-                    request_id="", kind: str = "prompt", pip_references=None) -> tuple[str, int]:
+                    request_id="", kind: str = "prompt", pip_references=None,
+                    display_mentions=None) -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         if kind in ("prompt", "continue"):
             self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
@@ -3664,6 +3670,10 @@ class Backend:
         payload = (text, images, context, kind, request_id or "")
         if pip_references:
             payload += (pip_references,)
+        if display_mentions:
+            if not pip_references:
+                payload += (None,)
+            payload += (display_mentions,)
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
@@ -4033,6 +4043,7 @@ class Backend:
                     turn_kind = item[3] if len(item) > 3 else "prompt"
                     turn_request = item[4] if len(item) > 4 and isinstance(item[4], str) else ""
                     pip_references = item[5] if len(item) > 5 else None
+                    display_mentions = item[6] if len(item) > 6 else None
                     notification = None
                     agent_notice = None
                     if turn_kind == "monitor":
@@ -4062,6 +4073,7 @@ class Backend:
                     self.agent.cancelled.clear()
 
                 self.agent._pending_images = images
+                self.agent._prompt_display_mentions = display_mentions or []
                 # The Output chip's choice for this prompt (empty for Auto, and for every turn DGC starts itself).
                 turn_output = (self.__dict__.get("_turn_outputs", {}).pop(turn_request, "")
                                if turn_kind == "prompt" else "")
@@ -4112,6 +4124,8 @@ class Backend:
                 self.em.emit("turn_start", turn_id=tid,
                              prompt=turn_prompt,
                              kind=turn_kind,
+                             **({"display_mentions": display_mentions}
+                                if display_mentions and turn_kind == "prompt" and turn_prompt == text else {}),
                              **({"request_id": turn_request} if turn_request else {}))
                 # The note says "working" now, not at its next minute: another window's Open here line reads it.
                 self._announce_peer("working")
@@ -5996,7 +6010,7 @@ class Backend:
             turn = None
 
         def open_turn(prompt: str, kind: str, attachments: list | None = None,
-                      answer_question: str = "") -> None:
+                      answer_question: str = "", display_mentions=None) -> None:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
@@ -6008,6 +6022,8 @@ class Backend:
                 started["attachments"] = attachments
             if answer_question:
                 started["answer_question"] = answer_question
+            if display_mentions:
+                started["display_mentions"] = display_mentions
             items.append(started)
 
         def answered_question(text: str) -> tuple[str, str]:
@@ -6249,7 +6265,9 @@ class Backend:
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 question, answer = answered_question(text)
-                open_turn(answer, "prompt", image_items, question)
+                from .prompt_display import checked_mentions
+                open_turn(answer, "prompt", image_items, question,
+                          checked_mentions(m.get("_dgc_display_mentions"), answer))
                 sent_at = _history_written_at(m)
                 if sent_at is not None:
                     items.append({"role": "time", "of": "prompt", "at": sent_at})
@@ -7372,6 +7390,9 @@ class Backend:
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))
+            display_text = text
+            from .prompt_display import checked_mentions
+            display_mentions = checked_mentions(cmd.get("display_mentions"), text)
             pip_references = None
             if "pip_references" in cmd:
                 from .pip_references import resolve
@@ -7523,12 +7544,16 @@ class Backend:
                     self.em.emit("mode_changed", mode=self.agent.mode,
                                  workspace_trusted=self.workspace_trusted)
                     state, count = self._start_turn(text, images, context,
-                        **({"pip_references": pip_references} if pip_references else {}))
+                        **({"pip_references": pip_references} if pip_references else {}),
+                        **({"display_mentions": display_mentions}
+                           if display_mentions and text == display_text else {}))
             else:
                 # The request id travels with a queued prompt so close() can hand it back if the
                 # backend stops before it runs; the delivery mode only when the editor chose one.
                 state, count = self._start_turn(text, images, context,
                     **({"pip_references": pip_references} if pip_references else {}),
+                    **({"display_mentions": display_mentions}
+                       if display_mentions and text == display_text else {}),
                     **({"request_id": request_id} if request_id else {}),
                     **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
@@ -10766,7 +10791,8 @@ class Host:
         from . import mcp_apps
         surface = record.get("surface")
         if surface == "work":
-            chats = list(self.chats.values())
+            with self._chats_lock:
+                chats = list(self.chats.values())
             chat = next((c for c in chats if record["card_id"] in getattr(c.ui, "__dict__", {}).get("_mcp_app_cards", ())),
                         None)
             if chat is None:

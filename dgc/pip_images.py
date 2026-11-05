@@ -18,6 +18,7 @@ import copy
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -63,11 +64,12 @@ class Session:
         self.user_message = ""             # exact text of that message, never a model-authored paraphrase
         self.made: list[dict] = []
         self.calls = 0
+        self.cancel = threading.Event()
 
     def _surface(self) -> image_tools.Surface:
         return image_tools.Surface(name="pip", root=folder(self.pip_id), project_root=None, interactive=False,
                                    save_dir=".", where={"pip": self.pip_id, "run": self.run_id},
-                                   owner=f"images for Pip run {self.run_id}")
+                                   owner=f"images for Pip run {self.run_id}", cancel=self.cancel)
 
     def _pending_path(self) -> Path:
         return folder(self.pip_id) / "pending.json"

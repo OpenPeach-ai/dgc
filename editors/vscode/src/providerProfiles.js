@@ -35,7 +35,7 @@ export function listProfiles(context){
  const valid=[];
  for(const row of rows){
   if(!row||!(ID.test(row.id)||SUBSCRIPTION_ID.test(row.id)))continue;
-  try{const clean=validRoute(row);if(Object.keys(clean).every(key=>clean[key]===row[key]))valid.push(row);}catch{}
+  try{const clean=validRoute(row);if(Object.keys(clean).every(key=>clean[key]===row[key]))valid.push({id:row.id,...clean});}catch{}
  }
  return valid.slice(0,MAX);
 }

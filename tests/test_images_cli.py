@@ -6,10 +6,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import struct
 import sys
 import tempfile
 import time
 import unittest
+import zlib
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -178,6 +180,18 @@ class Preview(unittest.TestCase):
     def test_what_it_cant_read_is_none(self):
         with patch.object(image_preview, "_pillow", lambda data: None):
             self.assertIsNone(image_preview.cells(b"\xff\xd8\xff" + b"\x00" * 64))
+
+    def test_png_preview_rejects_oversized_or_broken_decoding_without_pillow_fallback(self):
+        def chunk(kind, body):
+            return struct.pack("!I", len(body)) + kind + body + struct.pack("!I", zlib.crc32(kind + body))
+
+        header = chunk(b"IHDR", struct.pack("!IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        bomb = (b"\x89PNG\r\n\x1a\n" + header + chunk(b"IDAT", zlib.compress(b"\0" * 1_000_000))
+                + chunk(b"IEND", b""))
+        with patch.object(image_preview, "_pillow", side_effect=AssertionError("invalid PNG used Pillow")):
+            self.assertIsNone(image_preview.cells(bomb))
+            self.assertIsNone(image_preview.cells(png(0, 1)))
+            self.assertIsNone(image_preview.cells(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDRx"))
 
     def test_the_tui_row_reads_a_plain_line_not_the_models(self):
         from test_image_views_tui import bare_tui

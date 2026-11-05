@@ -12,6 +12,7 @@ image and for ``save_to``. What differs is the money and the time:
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,13 +156,17 @@ def _args(args) -> dict:
         raise Refused(f"the prompt is longer than {videos.MAX_PROMPT:,} characters")
     duration = args.get("duration_s")
     if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float))
-                                 or not 1 <= int(duration) <= 60):
+                                 or isinstance(duration, float) and (not math.isfinite(duration)
+                                                                     or not duration.is_integer())
+                                 or not 1 <= duration <= 60):
         raise Refused("duration_s is a length in seconds, 1-60")
     for key, allowed in (("aspect", ASPECTS), ("resolution", RESOLUTIONS + ("580p", "768p", "4k"))):
         if args.get(key) not in (None, "") and args[key] not in allowed:
             raise Refused(f"{key} is one of {', '.join(allowed[:3])}")
     seed = args.get("seed")
-    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, (int, float))):
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, (int, float))
+                             or isinstance(seed, float) and (not math.isfinite(seed) or not seed.is_integer())
+                             or not -(2**63) <= seed <= 2**63 - 1):
         raise Refused("seed is a whole number")
     if args.get("audio") is not None and not isinstance(args.get("audio"), bool):
         raise Refused("audio is true or false")

@@ -95,6 +95,14 @@ class VideoCase(unittest.TestCase):
 
 
 class Fal(VideoCase):
+    def test_a_broken_job_record_does_not_hide_valid_jobs(self):
+        folder = videos.jobs_dir()
+        (folder / "vid_aaaaaaaaaaaa.json").write_text("[]")
+        (folder / "vid_bbbbbbbbbbbb.json").write_text('{"id":"vid_bbbbbbbbbbbb","started":"bad"}')
+        (folder / "vid_cccccccccccc.json").write_text('{"id":"vid_other","started":999}')
+        self.assertEqual([job["id"] for job in videos.all_jobs()], ["vid_bbbbbbbbbbbb"])
+        self.assertIsNone(videos.load("vid_aaaaaaaaaaaa"))
+
     def test_queue_submit_status_result_and_the_file_with_its_sidecar(self):
         self.setup("fal", "fal-wan")
         plan, started, job = self.run_job({"prompt": "a felt ball rolls across a desk", "duration_s": 5})
@@ -284,6 +292,15 @@ class TwoDGCs(VideoCase):
 
 
 class Plans(VideoCase):
+    def test_invalid_numeric_video_arguments_are_refused_before_a_provider_call(self):
+        self.setup("fal-wan")
+        for field, values in (("duration_s", (float("nan"), float("inf"), 1.5, True, 0, 61)),
+                              ("seed", (float("nan"), float("-inf"), 1.5, True, 2**80))):
+            for value in values:
+                with self.subTest(field=field, value=value), self.assertRaises(T.Refused):
+                    T.prepare(self.config, {"prompt": "a safe clip", field: value}, self.surface())
+        self.assertFalse(self.fake.requests)
+
     def test_the_card_has_length_resolution_price_spend_and_the_prompt(self):
         self.setup("fal", "fal-wan", **{"fal-wan": {"monthly_limit_usd": 5}})
         images.add_spend("fal", 0.2)                       # pictures on the same key
@@ -579,6 +596,7 @@ class Charges(VideoCase):
             _plan, _started, job = self.run_job({"prompt": "x"})
         self.assertEqual(job["state"], "cancelled", "the Stop came first, and stands")
         self.assertCounted(0.15)
+        self.assertEqual(videos.library()["total"], 0, "a stopped download must not enter the Library")
 
     def test_a_job_the_provider_says_failed_frees_its_room(self):
         self.setup("rep", **{"rep": {"monthly_limit_usd": 0.1}})
@@ -726,34 +744,45 @@ class ProviderKeys(VideoCase):
         generator = images.find(images.settings(self.config), "omni")
         return {**generator, "base_url": base or generator["base_url"]}
 
-    def test_a_gemini_video_at_another_address_is_fetched_without_the_key(self):
+    def test_a_gemini_video_at_another_private_address_is_blocked_without_the_key(self):
         generator, other = self.gemini(), self.elsewhere()
         dest = self.root / "clip.mp4"
-        mime = V.GeminiVideo().fetch(generator, "gemini-key", {}, V.Status("done", result={"url": other.url + "/collect"}),
-                                     dest)
-        self.assertEqual((mime, dest.read_bytes()), ("video/mp4", self.fake.video))
-        [seen] = other.requests
-        self.assertNotIn("x-goog-api-key", seen["headers"])
+        with self.assertRaisesRegex(P.ImageError, "unsafe video address"):
+            V.GeminiVideo().fetch(generator, "gemini-key", {},
+                                  V.Status("done", result={"url": other.url + "/collect"}), dest)
+        self.assertFalse(other.requests, "a provider result must never reach a second local service")
+        self.assertFalse(dest.exists())
         V.GeminiVideo().fetch(generator, "gemini-key", {}, V.Status("done", result={
             "url": self.fake.url + "/v1beta/files/abc123:download?alt=media"}), self.root / "own.mp4")
         self.assertEqual(self.fake.requests[-1]["headers"].get("x-goog-api-key"), "gemini-key",
                          "Gemini's own file download still carries it")
 
-    def test_a_redirect_to_another_address_drops_the_key(self):
+    def test_a_local_download_redirect_to_another_address_is_blocked(self):
         other = self.elsewhere()
         door = self.elsewhere(to=other.url)
         generator = self.gemini(base=door.url)
-        V.GeminiVideo().fetch(generator, "gemini-key", {}, V.Status("done", result={
-            "url": door.url + "/v1beta/files/abc:download?alt=media"}), self.root / "clip.mp4")
+        with self.assertRaisesRegex(P.ImageError, "redirected outside"):
+            V.GeminiVideo().fetch(generator, "gemini-key", {}, V.Status("done", result={
+                "url": door.url + "/v1beta/files/abc:download?alt=media"}), self.root / "clip.mp4")
         self.assertEqual(door.requests[0]["headers"].get("x-goog-api-key"), "gemini-key", "to its own address")
-        self.assertEqual(other.requests[0]["path"], "/landed/v1beta/files/abc:download?alt=media")
-        self.assertNotIn("x-goog-api-key", other.requests[0]["headers"], "never along the redirect")
-        self.assertIn("user-agent", other.requests[0]["headers"])
+        self.assertFalse(other.requests, "a redirect must not reach a second local service")
         # Every provider's requests (image_providers.http): a poll redirected elsewhere loses its Authorization.
-        from dgc import image_providers as P
         P.http("GET", door.url + "/status", headers={"Authorization": "Key fal-key"})
         self.assertNotIn("authorization", other.requests[-1]["headers"])
         self.assertEqual(door.requests[-1]["headers"].get("authorization"), "Key fal-key")
+
+    def test_a_public_download_redirect_drops_the_providers_key(self):
+        # The fake servers use loopback. Substitute only the public-address validator's checked
+        # address so this exercises the production redirect and pinned-connection path locally.
+        from dgc import tools
+        other = self.elsewhere()
+        door = self.elsewhere(to=other.url)
+        with patch.object(tools, "_public_destination", side_effect=lambda url: (url, ("127.0.0.1",))):
+            mime = V.download_to(door.url + "/video", self.root / "redirect.mp4",
+                                 headers={"x-goog-api-key": "gemini-key"}, provider="gemini")
+        self.assertEqual(mime, "video/mp4")
+        self.assertEqual(door.requests[0]["headers"].get("x-goog-api-key"), "gemini-key")
+        self.assertNotIn("x-goog-api-key", other.requests[0]["headers"])
 
     def test_a_redirect_on_the_same_address_keeps_it(self):
         door = self.elsewhere()

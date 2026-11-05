@@ -16,6 +16,7 @@ load1?, util_pct?}, unified_memory?}``. ``line()`` says it in one line: "RTX 409
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +37,27 @@ KINDS = {"node_exporter": "node_exporter", "dcgm": "NVIDIA DCGM exporter", "amd"
 
 class HardwareError(Exception):
     pass
+
+
+def _number(value) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return abs(value) <= 1e18
+    return isinstance(value, float) and math.isfinite(value) and abs(value) <= 1e18
+
+
+def _clean(value, depth: int = 0):
+    """Keep a node's optional stats usable even when a remote exporter sends NaN or an oversized value."""
+    if depth > 8:
+        return None
+    if isinstance(value, dict):
+        return {str(key): _clean(item, depth + 1) for key, item in list(value.items())[:64]}
+    if isinstance(value, list):
+        return [_clean(item, depth + 1) for item in value[:32]]
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value if _number(value) else None
+    return value if isinstance(value, (str, bool)) or value is None else None
 
 
 def _get(url: str, token: str = "", *, timeout: float = READ_TIMEOUT):
@@ -62,7 +84,7 @@ def samples(text) -> list[tuple[str, dict, float]]:
             value = float(match.group(3))
         except ValueError:
             continue
-        if value != value or value in (float("inf"), float("-inf")):
+        if not _number(value):
             continue
         labels = dict(re.findall(r'(\w+)="((?:[^"\\]|\\.)*)"', match.group(2) or ""))
         out.append((match.group(1), labels, value))
@@ -204,17 +226,17 @@ def from_glances(base: str, token: str = "") -> dict:
         raise HardwareError("Glances didn't answer at " + base)
     out: dict = {"kind": "glances", "gpus": []}
     mem = reads["mem"]
-    if isinstance(mem.get("total"), (int, float)):
+    if _number(mem.get("total")):
         out["memory"] = {"total_bytes": int(mem["total"])}
-        if isinstance(mem.get("available"), (int, float)):
+        if _number(mem.get("available")):
             out["memory"]["available_bytes"] = int(mem["available"])
     cpu: dict = {}
-    if isinstance(reads["cpu"], dict) and isinstance(reads["cpu"].get("total"), (int, float)):
+    if isinstance(reads["cpu"], dict) and _number(reads["cpu"].get("total")):
         if reads["cpu"].get("time_since_update", 1) and reads["cpu"].get("total") is not None:
             cpu["util_pct"] = round(float(reads["cpu"]["total"]), 1)
         if isinstance(reads["cpu"].get("cpucore"), int):
             cpu["cores"] = reads["cpu"]["cpucore"]
-    if isinstance(reads["load"], dict) and isinstance(reads["load"].get("min1"), (int, float)):
+    if isinstance(reads["load"], dict) and _number(reads["load"].get("min1")):
         cpu["load1"] = round(float(reads["load"]["min1"]), 2)
         cpu.setdefault("cores", reads["load"].get("cpucore"))
     if cpu:
@@ -224,7 +246,7 @@ def from_glances(base: str, token: str = "") -> dict:
             continue
         gpu = {"name": str(row.get("name") or "GPU")}
         for source, field in (("proc", "util_pct"), ("temperature", "temp_c"), ("mem", "memory_used_pct")):
-            if isinstance(row.get(source), (int, float)):
+            if _number(row.get(source)):
                 gpu[field] = float(row[source])
         out["gpus"].append(gpu)
     return out
@@ -242,7 +264,7 @@ def _netdata_last(base: str, chart: str, token: str = "") -> dict[str, float]:
     if not isinstance(labels, list) or not isinstance(data, list) or not data or not isinstance(data[0], list):
         return {}
     return {str(label): float(value) for label, value in zip(labels, data[0])
-            if label != "time" and isinstance(value, (int, float))}
+            if label != "time" and _number(value)}
 
 
 def from_netdata(base: str, token: str = "") -> dict:
@@ -259,7 +281,7 @@ def from_netdata(base: str, token: str = "") -> dict:
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="dgc-hw-netdata") as pool:
         cpu_now, load, available = pool.map(lambda chart: _netdata_last(base, chart, token),
                                             ("system.cpu", "system.load", "mem.available"))
-    if total:
+    if total and abs(total) <= 1e18:
         out["memory"] = {"total_bytes": total}
         if "avail" in available:
             out["memory"]["available_bytes"] = int(available["avail"] * 1048576)
@@ -334,6 +356,7 @@ def read(url: str, source: str, token: str = "") -> dict:
         if status != 200 or not isinstance(body, str):
             raise HardwareError(_why(status, body, "the exporter"))
         snapshot = from_prometheus(body)
+    snapshot = _clean(snapshot)
     snapshot.update(source=source, at=time.time(), took_ms=int((time.monotonic() - started) * 1000))
     snapshot["gpus"] = [gpu for gpu in snapshot.get("gpus") or [] if isinstance(gpu, dict)][:16]
     return snapshot
@@ -425,22 +448,24 @@ def short_name(name: str) -> str:
 def memory_of(snapshot: dict) -> dict:
     """What the GPU(s) can hold, together: {"total_bytes", "used_bytes"?, "unified"}, or {} when unknown. A
     computer whose GPU shares its memory and reports none of its own (GB10, Apple) counts the computer's."""
-    gpus = [gpu for gpu in snapshot.get("gpus") or [] if isinstance(gpu, dict)]
-    totals = [gpu for gpu in gpus if gpu.get("memory_total_bytes")]
+    gpus = [gpu for gpu in snapshot.get("gpus") or [] if isinstance(gpu, dict)] if isinstance(
+        snapshot.get("gpus"), list) else []
+    totals = [gpu for gpu in gpus if _number(gpu.get("memory_total_bytes")) and gpu["memory_total_bytes"] > 0]
     if totals:
         total = sum(int(gpu["memory_total_bytes"]) for gpu in totals)
         used = [gpu.get("memory_used_bytes") for gpu in totals]
         out = {"total_bytes": total, "unified": any(gpu.get("unified") for gpu in totals)}
-        if all(value is not None for value in used):
+        if all(_number(value) for value in used):
             out["used_bytes"] = int(sum(used))
-        limit = [gpu.get("memory_limit_bytes") for gpu in totals if gpu.get("memory_limit_bytes")]
+        limit = [gpu.get("memory_limit_bytes") for gpu in totals if _number(gpu.get("memory_limit_bytes"))]
         if limit:
             out["limit_bytes"] = int(sum(limit))
         return out
-    memory = snapshot.get("memory") or {}
-    if memory.get("total_bytes") and (snapshot.get("unified_memory") or any(gpu.get("unified") for gpu in gpus)):
+    memory = snapshot.get("memory") if isinstance(snapshot.get("memory"), dict) else {}
+    if (_number(memory.get("total_bytes")) and memory["total_bytes"] > 0 and
+            (snapshot.get("unified_memory") or any(gpu.get("unified") for gpu in gpus))):
         out = {"total_bytes": int(memory["total_bytes"]), "unified": True}
-        if memory.get("available_bytes") is not None:
+        if _number(memory.get("available_bytes")):
             out["used_bytes"] = int(memory["total_bytes"] - memory["available_bytes"])
         return out
     return {}
@@ -451,7 +476,8 @@ def line(snapshot: dict) -> str:
     computer's memory and CPU when it reports no GPU."""
     if not isinstance(snapshot, dict):
         return ""
-    gpus = [gpu for gpu in snapshot.get("gpus") or [] if isinstance(gpu, dict)]
+    gpus = [gpu for gpu in snapshot.get("gpus") or [] if isinstance(gpu, dict)] if isinstance(
+        snapshot.get("gpus"), list) else []
     bits = []
     if gpus:
         names = [short_name(gpu.get("name") or "GPU") for gpu in gpus]
@@ -461,34 +487,34 @@ def line(snapshot: dict) -> str:
         if memory.get("total_bytes"):
             used = memory.get("used_bytes")
             bits.append((f"{_gb(used)} of " if used is not None else "") + f"{_gb(memory['total_bytes'], total=True)} GB")
-        elif all(gpu.get("memory_used_pct") is not None for gpu in gpus):
+        elif all(_number(gpu.get("memory_used_pct")) for gpu in gpus):
             bits.append(f"memory {max(gpu['memory_used_pct'] for gpu in gpus):g}% used")
-        elif (snapshot.get("memory") or {}).get("total_bytes"):
+        elif isinstance(snapshot.get("memory"), dict) and _number(snapshot["memory"].get("total_bytes")):
             # The exporter doesn't say the GPU's memory (a GB10's is the computer's): the computer's, named as such.
             ram = snapshot["memory"]
-            available = ram.get("available_bytes")
+            available = ram.get("available_bytes") if _number(ram.get("available_bytes")) else None
             bits.append("RAM " + (f"{_gb(ram['total_bytes'] - available)} of " if available is not None else "")
                         + f"{_gb(ram['total_bytes'], total=True)} GB")
-        utils = [gpu["util_pct"] for gpu in gpus if gpu.get("util_pct") is not None]
+        utils = [gpu["util_pct"] for gpu in gpus if _number(gpu.get("util_pct"))]
         if utils:
             bits.append(f"{sum(utils) / len(utils):.0f}%")
-        temps = [gpu["temp_c"] for gpu in gpus if gpu.get("temp_c") is not None]
+        temps = [gpu["temp_c"] for gpu in gpus if _number(gpu.get("temp_c"))]
         if temps:
             bits.append(f"{max(temps):.0f}°C")
-        power = [gpu["power_w"] for gpu in gpus if gpu.get("power_w") is not None]
+        power = [gpu["power_w"] for gpu in gpus if _number(gpu.get("power_w"))]
         if power:
             bits.append(f"{sum(power):.0f} W")
     else:
         bits.append("no GPU reported")
-        memory = snapshot.get("memory") or {}
-        if memory.get("total_bytes"):
-            available = memory.get("available_bytes")
+        memory = snapshot.get("memory") if isinstance(snapshot.get("memory"), dict) else {}
+        if _number(memory.get("total_bytes")) and memory["total_bytes"] > 0:
+            available = memory.get("available_bytes") if _number(memory.get("available_bytes")) else None
             bits.append((f"{_gb(memory['total_bytes'] - available)} of " if available is not None else "")
                         + f"{_gb(memory['total_bytes'], total=True)} GB memory")
-    cpu = snapshot.get("cpu") or {}
-    if not gpus and cpu.get("util_pct") is not None:
+    cpu = snapshot.get("cpu") if isinstance(snapshot.get("cpu"), dict) else {}
+    if not gpus and _number(cpu.get("util_pct")):
         bits.append(f"CPU {cpu['util_pct']:.0f}%")
-    elif not gpus and cpu.get("load1") is not None:
+    elif not gpus and _number(cpu.get("load1")):
         bits.append(f"load {cpu['load1']:g}")
     return " · ".join(bits)
 
@@ -503,16 +529,20 @@ def public(snapshot: dict) -> dict:
 
 def _with_cpu_rate(snapshot: dict, previous: dict) -> dict:
     """node_exporter counts CPU seconds; two readings a minute apart give how busy it was between them."""
-    now = (snapshot.get("cpu") or {}).get("_counters")
-    before = (previous.get("cpu") or {}).get("_counters") if isinstance(previous, dict) else None
+    cpu = snapshot.get("cpu") if isinstance(snapshot.get("cpu"), dict) else {}
+    old_cpu = previous.get("cpu") if isinstance(previous, dict) and isinstance(previous.get("cpu"), dict) else {}
+    now = cpu.get("_counters")
+    before = old_cpu.get("_counters")
     if (isinstance(now, list) and isinstance(before, list) and len(now) == len(before) == 2
-            and now[1] > before[1] and "util_pct" not in snapshot["cpu"]):
-        snapshot["cpu"]["util_pct"] = round(100.0 * (now[0] - before[0]) / (now[1] - before[1]), 1)
+            and all(_number(value) for value in now + before)
+            and now[1] > before[1] and "util_pct" not in cpu):
+        cpu["util_pct"] = round(100.0 * (now[0] - before[0]) / (now[1] - before[1]), 1)
     return snapshot
 
 
 def saved(system_id: str) -> dict:
-    return router_state.read("hardware").get(system_id, {})
+    value = router_state.read("hardware").get(system_id, {})
+    return value if isinstance(value, dict) else {}
 
 
 def read_system(config, system: dict, *, max_age: float = HARDWARE_EVERY_S) -> dict:
@@ -523,16 +553,19 @@ def read_system(config, system: dict, *, max_age: float = HARDWARE_EVERY_S) -> d
     if source not in ("exporter", "node") or not url:
         return {}
     previous = saved(system["id"])
-    if previous.get("url") == url and time.time() - float(previous.get("checked") or 0) < max_age:
+    checked = previous.get("checked")
+    if previous.get("url") == url and _number(checked) and time.time() - checked < max_age:
         return previous
     token = token_for(config, system["id"])
     try:
         snapshot = read(url, source, token)
         snapshot = _with_cpu_rate(snapshot, previous if previous.get("url") == url else {})
         snapshot.update(url=url, checked=snapshot["at"])
-    except HardwareError as exc:
+    except (HardwareError, ValueError, TypeError, OverflowError, AttributeError, KeyError) as exc:
         snapshot = {**({k: v for k, v in previous.items() if k != "error"} if previous.get("url") == url else {}),
-                    "url": url, "source": source, "error": str(exc), "checked": time.time()}
+                    "url": url, "source": source,
+                    "error": str(exc) if isinstance(exc, HardwareError) else "malformed hardware response",
+                    "checked": time.time()}
 
     def change(value):
         value[system["id"]] = snapshot

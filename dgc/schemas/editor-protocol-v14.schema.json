@@ -567,6 +567,9 @@
             },
             "attachments": {
               "type": "array"
+            },
+            "display_mentions": {
+              "type": "array"
             }
           },
           "required": [
@@ -9889,6 +9892,9 @@
               ]
             },
             "pip_references": {
+              "type": "array"
+            },
+            "display_mentions": {
               "type": "array"
             },
             "spooled_images": {

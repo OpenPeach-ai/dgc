@@ -5304,8 +5304,13 @@ class TUI:
             from .image_preview import cells
             for entry, path in entries:
                 try:
+                    preview_limit = 32 * 1024 * 1024
                     with open(path, "rb") as handle:
-                        entry["rows"] = cells(handle.read(), 36, max_rows=18) or []
+                        data = handle.read(preview_limit + 1)
+                    # The terminal preview is optional. Keep the path visible without reading an
+                    # arbitrarily large file into memory before the decoder can inspect it.
+                    if len(data) <= preview_limit:
+                        entry["rows"] = cells(data, 36, max_rows=18) or []
                 except OSError:
                     entry["rows"] = []
             self._invalidate()

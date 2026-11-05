@@ -4,7 +4,7 @@ Release notes for the `dgc` command-line tool and `dgc serve`. The VS Code exten
 [changelog](editors/vscode/CHANGELOG.md), and so does the SDK ([sdk/CHANGELOG.md](sdk/CHANGELOG.md)).
 Earlier releases are listed at <https://vibedgc.com/changelog>.
 
-## 0.51.0 — 2026-11-04
+## 0.51.0 — 2026-11-06
 
 - A text message sent while a Personal Pip is answering joins that active reply, like steering in Work. If its answer finishes first, DGC keeps the message and tells you to send it as a new turn.
 - Work and ChatDGC chats keep their selected native or subscription provider, model and effort on reload; a new chat starts from the default set in Settings. Settings can keep several native hosts and signed-in subscription CLIs ready, with API keys bound to each endpoint. Changing the default leaves open chats on their selected routes. Pips set to Default follow the shared default, including a signed-in subscription. A model's context window stays with its chat.
@@ -61,10 +61,11 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 - Image generation. Add your own image generators and ask for pictures in plain words, in Work, ChatDGC and Pips:
   ComfyUI (with DGC's own workflow, or yours exported in API format, where DGC finds the prompt, seed, size and input
   image and shows you that first) and Automatic1111-style servers (Forge, SD.Next, Draw Things) on your own
-  computers, and OpenAI's GPT Image models, xAI, Together, LocalAI, Google Gemini and Imagen, Black Forest Labs,
+  computers, and OpenAI's GPT Image models, xAI, Together, LocalAI, Google Gemini, Black Forest Labs,
   fal.ai and Replicate with your own keys. The model's `generate_image` makes new pictures and edits (1 to 4 at a
   time, a size or shape, a seed, a mask), and `list_image_generators` tells it what each generator can do, what a
   picture costs and whether it works right now. See the Image generation page in `/docs`.
+  - New Gemini generators use Google's `gemini-3.1-flash-image` model; the older 2.5 image default has reached its [published shutdown date](https://ai.google.dev/gemini-api/docs/deprecations).
   - With several generators, the first time a project needs a picture and more than one fits, DGC asks you which
     and remembers it for the project (a ChatDGC chat remembers its own). You can always name another.
   - Pictures stay out of your project unless you want them there. Work keeps each picture and its sidecar (prompt,
@@ -107,10 +108,10 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
     how to open it.
   - A Pip makes a video in its chat only after your yes, and a routine makes one only for a Pip you allowed for
     that generator.
-- Paid pictures and videos always ask first, and your limits hold.
-  - Every paid picture shows an Allow card with the generator, model, size, how many, the price and the prompt, in
-    every mode, auto included, and no permission rule answers it. Always allow on it stops that generator asking;
-    its monthly limit still holds.
+- Paid pictures and videos ask before use until you explicitly change that generator's setting, and your limits hold.
+  - A paid picture shows an Allow card with the generator, model, size, how many, the price and the prompt, in
+    every mode, auto included, and no general permission rule answers it. Always allow on that card stops that
+    generator asking; its monthly limit still holds.
   - Every video shows its card (generator, length and resolution, price, this month's spend and the prompt) with
     Make it, Edit and Don't. It has no Always allow: only the generator's "Asks before each video" in Settings can
     turn asking off.
@@ -152,7 +153,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
   - ChatDGC and Pips run a plugin's reads at once: a tool the plugin marks read-only, or one on DGC's reviewed list of
     reads, unless you set the plugin to Always ask. Anything else asks first, as the plugin's level in Pips settings →
     Plugins says (Ask before important actions unless you change it), and a tool the plugin doesn't mark counts as an
-    important action. A Pip's own level can answer that card for you: at Approve for me, a new Pip's level, a call whose
+    important action. A Pip's own level can answer that card for you: at Approve for me, if you chose that level, a call whose
     tool name says it looks something up or saves a draft (get, list, search, find, fetch, read) runs without a card,
     and at Full access every call does. Neither ever does it for a payment, or for a plugin you set to Always ask.
 - Cardboard in Plugins: edit your footage into finished videos (highlights, vertical clips, captions, music) with

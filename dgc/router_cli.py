@@ -188,13 +188,6 @@ def main(argv: list[str]) -> int:
         return _apply(config, args, {"action": "remove_system", "system": args.system})
     if command == "edit":
         status = 0
-        if args.key or args.remove_key:
-            system = router_mod.find_system(router_mod.settings(config), args.system)
-            if system is None:
-                print(f"dgc router: there is no system {args.system!r}", file=sys.stderr)
-                return 1
-            config.set_router_key(system["id"], "" if args.remove_key else _read_key())
-            print(("Removed the key for " if args.remove_key else "Saved the key for ") + system["name"] + ".")
         change = {"action": "edit_system", "system": args.system}
         for key, value in (("name", args.name), ("base_url", args.address), ("workers", args.workers),
                            ("one_model_at_a_time", args.one_model), ("memory_gb", args.memory_gb)):
@@ -215,6 +208,17 @@ def main(argv: list[str]) -> int:
             status = _apply(config, args, model_change) or status
         if args.when_busy:
             status = _apply(config, args, {"action": "set_when_busy", "when_busy": args.when_busy}) or status
+        if (args.key or args.remove_key) and status == 0:
+            system = router_mod.find_system(router_mod.settings(config), args.system)
+            if system is None:
+                print(f"dgc router: there is no system {args.system!r}", file=sys.stderr)
+                return 1
+            try:
+                config.set_router_key(system["id"], "" if args.remove_key else _read_key())
+            except ValueError as exc:
+                print(f"dgc router: {exc}", file=sys.stderr)
+                return 1
+            print(("Removed the key for " if args.remove_key else "Saved the key for ") + system["name"] + ".")
         if len(change) <= 2 and not args.model and not args.when_busy and not (args.key or args.remove_key):
             print("dgc router edit: nothing to change", file=sys.stderr)
             return 2

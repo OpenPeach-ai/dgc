@@ -10,7 +10,7 @@ import { holderFacts, holderLine, type HolderLine } from "./holderWords";
 import type { Dictation, DictationOwner, ReadAloud } from "./voice";
 import { mcpAppsHost } from "./mcpApps";
 import { ARTIFACT_ID, outputChoice, type Artifacts } from "./artifacts";
-import { allowFromJobs, allowVideoPath, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
+import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { promises as fs } from "fs";
 
@@ -107,8 +107,7 @@ function allowChatVideos(value: any, depth = 0): void {
   if (Array.isArray(value)) { for (const item of value.slice(0, 400)) allowChatVideos(item, depth + 1); return; }
   if (value.kind === "video") {
     allowFromJobs(value.job_view);
-    allowVideoPath(value.video?.path);
-    allowVideoPath(value.video?.poster);
+    allowFromJobs(value.video);
     return;
   }
   for (const key of ["action", "actions", "message", "messages", "chat"]) {
@@ -547,9 +546,12 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
     try {
       const ev = await this.host.videosLibrary({ ...(query ? { query } : {}), ...(surface ? { surface } : {}), limit: 30, offset });
       const rows = Array.isArray(ev?.videos) ? ev.videos.filter((v: any) => v && typeof v.path === "string") : [];
+      allowFromJobs(rows);
       for (const row of rows) {
         if (typeof row.poster !== "string") continue;
         try {
+          const info = await fs.stat(row.poster);
+          if (info.size > 2_000_000) continue;
           const data = await fs.readFile(row.poster);
           if (data.length <= 2_000_000) row.poster_data = `data:image/jpeg;base64,${data.toString("base64")}`;
         } catch { /* no poster: the row shows a mark */ }

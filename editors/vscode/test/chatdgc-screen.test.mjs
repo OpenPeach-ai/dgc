@@ -863,7 +863,7 @@ test("it fits a narrow editor and a wide one, in both themes", async (t) => {
   }
 });
 
-test("the home shows Chat | Work at once when ChatDGC was here last time; a CLI without it takes them away", async (t) => {
+test("the home shows Work | Chat at once when ChatDGC was here last time; a CLI without it takes them away", async (t) => {
   if (skipOrFail(t)) return;
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
@@ -881,7 +881,7 @@ test("the home shows Chat | Work at once when ChatDGC was here last time; a CLI 
     }, [mainJs, markdownJs]);
     const send = (d) => page.evaluate((x) => window.dispatchEvent(new MessageEvent("message", { data: x })), d);
     await send({ type: "sessions_list", items: [{ id: "20261006-101500-a1", name: "Fix login", when: "2026-10-06 10:15", count: 4 }], searchable: true });
-    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, true, false],
+    assert.deepEqual([await shown(page, "#home-tabs"), await shown(page, "#chats-home"), await shown(page, "#work-home")], [true, false, true],
                      "the tabs, before the backend has said anything");
     assert.equal(await page.locator("#chats-status").textContent(), "Loading your chats…");
     assert.equal(await page.locator("#sessions-title").textContent(), "Work");
@@ -895,7 +895,7 @@ test("the home shows Chat | Work at once when ChatDGC was here last time; a CLI 
   } finally { await page.close(); }
 });
 
-test("the home: Chat and Work as tabs (a long list never hides the other), one search over both", async (t) => {
+test("the home: Work and Chat as tabs (a long list never hides the other), one search over both", async (t) => {
   if (skipOrFail(t)) return;
   const { html, mainJs, markdownJs } = panelHtml();
   const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
@@ -922,8 +922,11 @@ test("the home: Chat and Work as tabs (a long list never hides the other), one s
       { id: `chat_${"b".repeat(32)}`, title: "Goa trip", updated_at: "2026-01-02T10:00:00.000Z", preview: "Enjoy.",
         match: "…then the **Dudhsagar** falls on day three." }] });
     const tab = (name) => page.locator(`#home-tab-${name}`);
-    assert.deepEqual([await shown(page, "#home-tabs"), await tab("chat").getAttribute("aria-selected"), await shown(page, "#chats-home"),
-                      await shown(page, "#work-home")], [true, "true", true, false], "Chat first, on its own");
+    assert.deepEqual([await shown(page, "#home-tabs"), await tab("work").getAttribute("aria-selected"), await shown(page, "#chats-home"),
+                      await shown(page, "#work-home")], [true, "true", false, true], "Work starts selected");
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("#home-tabs .home-tab")].map((tab) => tab.id)),
+                     ["home-tab-work", "home-tab-chat"], "Work is left of Chat");
+    await tab("chat").click();
     assert.equal(await page.locator("#chats-home").getAttribute("role"), "tabpanel");
     assert.equal(await page.locator("#chats-list .chat-preview").nth(1).textContent(), "…then the Dudhsagar falls on day three.",
       "found by something said in it: the words around that");
@@ -1286,6 +1289,7 @@ test("the home's projects: a New project, each project's chats under it, and a c
     const now = new Date().toISOString(), P = `proj_${"c".repeat(32)}`, C = `chat_${"b".repeat(32)}`;
     await send({ type: "chatdgc_list", available: true, total: 1, items: [{ id: C, title: "Beach ideas", updated_at: now, preview: "Baga." }] });
     await send({ type: "chatdgc_projects", projects: [] });
+    await page.locator("#home-tab-chat").click();
     assert.equal(await page.locator("#projects-home").isVisible(), true);
     assert.equal(await page.locator("#chats-sub").isHidden(), true, "no projects: no need to split your chats");
     await page.locator(".project-start").click();

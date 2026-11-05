@@ -156,11 +156,10 @@ _WAITS_ON_USER_CALLS = {"propose_options", "present_plan"}   # saved before they
 # and the 7th aborts the whole turn with "It is looping, not working", which is a fan-out the model
 # can never finish. `list_tasks` is exempt for the same reason.
 _LOOP_EXEMPT_CALLS = {"bash_output", "list_tasks", "wait_tasks"}
-# `wait_tasks` bounds. Codex's own defaults are 30s / 10s min / 1h max (core/src/config/mod.rs);
-# DGC keeps the 30s default, drops the floor to 5s because a local child is often quick, and caps
-# at 600s rather than an hour because a running turn refuses every mutation command the editor
-# sends (headless.py, _BUSY_MUTATIONS) -- an hour-long wait makes the panel look wedged. Out-of
-# range values are clamped, never refused, exactly as Codex clamps them.
+# `wait_tasks` uses a 30s default, a 5s floor because a local child is often quick, and a
+# 600s cap because a running turn refuses every mutation command the editor sends
+# (headless.py, _BUSY_MUTATIONS); an hour-long wait makes the panel look wedged. Out-of
+# range values are clamped, never refused.
 _WAIT_TASKS_DEFAULT_S, _WAIT_TASKS_MIN_S, _WAIT_TASKS_MAX_S = 30, 5, 600
 _WAIT_TASKS_MAX_RESULTS = 4      # finished children handed back in one call (each one's text is
                                  # large; the rest wait for the next call and are announced)
@@ -3595,8 +3594,8 @@ class Agent(GoalLifecycle):
         `task` only if the regex behind the `delegate` intent matched its brief, so "delegate the
         search to a sub-agent" could nest and "split this across helpers" could not, and the depth
         of the tree came down to the parent's choice of words. Whether a tool EXISTS is not a
-        thing to infer from phrasing -- Codex keeps `spawn_agent` present at every depth under its
-        cap and puts the restraint in the tool's own description, for the model to weigh.
+        thing to infer from phrasing. Keep `task` present at every depth under the cap and put
+        the restraint in the tool's own description, for the model to weigh.
         """
         if self.mode == "plan":
             return False
@@ -3723,10 +3722,10 @@ class Agent(GoalLifecycle):
         return Surface(name="work", root=root, project_root=root, interactive=interactive,
                        ask=(lambda title, options, recommended: self._image_ask(title, options, recommended, call_id))
                        if interactive else None,
-                       approve=approve, progress=progress, unattended=not interactive,
+                       approve=approve, progress=progress, cancel=self.cancelled, unattended=not interactive,
                        where={"project": str(root), **({"session": session} if session else {})},
                        owner=f"images for {session or 'Work'}",
-                       # DGC's own folder, one per session (as Codex keeps its pictures), unless the call names a
+                       # DGC's own folder, one per session, unless the call names a
                        # place in the project (save_to) or the Images setting has a save folder.
                        home=session_folder(session or "work"))
 
@@ -4637,7 +4636,7 @@ class Agent(GoalLifecycle):
         return origin is not None and origin is not config and is_trusted(origin, origin.project_root)
 
     def _restore_session_mode(self, record: dict, *, saved_mode: bool = False) -> None:
-        """Reopen a session in the mode it ran in -- mode is per chat, as Codex keeps it per thread.
+        """Reopen a session in the mode it ran in; mode belongs to each chat.
 
         ``saved_mode``: the person reopened this chat themselves -- the editor (a chat opened from
         its list, a Work tab restored after a window reload, a closed chat opened again) or the
@@ -6699,7 +6698,12 @@ class Agent(GoalLifecycle):
                         self._record_usage(turn_result["usage"], "user_turn")
                     return turn_result
                 finally:
-                    self.messages.append({"role": "user", "content": prompt, "_dgc_at": _written_at()})
+                    saved_prompt = {"role": "user", "content": prompt, "_dgc_at": _written_at()}
+                    display_mentions = getattr(self, "_prompt_display_mentions", None)
+                    if display_mentions:
+                        saved_prompt["_dgc_display_mentions"] = display_mentions
+                        self._prompt_display_mentions = []
+                    self.messages.append(saved_prompt)
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
                         self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"])),
                                               "_dgc_at": _written_at()})
@@ -8226,6 +8230,10 @@ class Agent(GoalLifecycle):
             else:
                 content = prompt_text
             prompt_message = {"role": "user", "content": content, "_dgc_at": _written_at()}
+            display_mentions = getattr(self, "_prompt_display_mentions", None)
+            if display_mentions:
+                prompt_message["_dgc_display_mentions"] = display_mentions
+                self._prompt_display_mentions = []
             if pip_setup_notice is not None:
                 prompt_message["_dgc_pip_setup"] = dict(pip_setup_notice)
             self.messages.append(prompt_message)
@@ -10022,7 +10030,7 @@ class Agent(GoalLifecycle):
         # into the reply text is parsed into a real call, so any content the model reads could ask
         # for a tool the user had switched off. Refuse rather than drop, so the model is told why
         # and the transcript keeps a result for every call it made.
-        # Belt and braces, as Codex, Claude Code, opencode and Grok Build all do it: `task` is
+        # Belt and braces: `task` is
         # withheld from the catalog past the cap AND refused if it is called anyway. This sits
         # ahead of the generic "not offered" answer because it is the more useful one -- it tells
         # the model where in the tree it actually is and what the user would change.

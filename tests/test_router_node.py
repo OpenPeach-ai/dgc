@@ -40,6 +40,15 @@ class Home(unittest.TestCase):
 
 
 class Parsers(unittest.TestCase):
+    def test_nonfinite_hardware_values_are_ignored(self):
+        self.assertIsNone(node._number("Inf"))
+        self.assertIsNone(node._number("1e309"))
+        self.assertEqual(node.parse_loadavg("NaN 0.1 0.2"), None)
+        card = node.parse_nvidia_smi("GPU, Infinity, 1, NaN, 40, 100")
+        self.assertEqual(len(card), 1)
+        self.assertNotIn("memory_total_bytes", card[0])
+        self.assertNotIn("util_pct", card[0])
+
     def test_nvidia_smi_a_card_and_a_gb10(self):
         cards = node.parse_nvidia_smi(F.NVIDIA_SMI_CARDS)
         self.assertEqual(cards[0], {"name": "NVIDIA GeForce RTX 4090", "vendor": "nvidia", "util_pct": 34.0,

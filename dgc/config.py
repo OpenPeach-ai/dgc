@@ -5,6 +5,7 @@ import copy
 import hashlib
 import contextlib
 import json
+import math
 import os
 import re
 import stat
@@ -812,7 +813,8 @@ def router_hardware_url(value) -> tuple[str, str]:
 def _router_int(value, low: int, high: int, default: int, what: str, problems: list[str]) -> int:
     if value is None:
         return default
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())):
         problems.append(f"{what} must be a whole number")
         return default
     value = int(value)
@@ -1067,8 +1069,8 @@ IMAGE_PROVIDER_URLS = {
 IMAGE_PAID_PROVIDERS = frozenset({"openai", "xai", "together", "gemini", "bfl", "fal", "replicate"})
 IMAGE_KEY_PREFIX = "image_key_"
 IMAGES_MAX_GENERATORS = 32
-# Where pictures go: "" is DGC's own folder (~/.dgc/images/<kind>/<session or chat>/), as Codex keeps its pictures in
-# its home; a folder here puts them in the project. 0.51's first builds wrote "assets/generated" as the default into
+# Where pictures go: "" is DGC's own folder (~/.dgc/images/<kind>/<session or chat>/);
+# a folder here puts them in the project. 0.51's first builds wrote "assets/generated" as the default into
 # every images block: without save_dir_set (written only when someone chooses a folder) that value is read as "".
 IMAGES_DEFAULT_DIR = ""
 IMAGES_OLD_DEFAULT_DIR = "assets/generated"

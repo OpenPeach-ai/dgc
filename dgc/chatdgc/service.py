@@ -1703,7 +1703,8 @@ class ChatService:
         def run():
             try:
                 if op == "run":
-                    done = self.engine.act(conversation_id, message_id, action_id, "run", arguments=arguments)
+                    done = self.engine.act(conversation_id, message_id, action_id, "run", arguments=arguments,
+                                           cancel=slot["cancel"])
                 else:
                     done = self._hand(conversation_id, message_id, action_id, pip_id)
                 self.emit("chatdgc_action", conversation_id=conversation_id, message_id=message_id, action=done,

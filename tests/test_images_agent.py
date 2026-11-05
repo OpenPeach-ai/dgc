@@ -84,7 +84,7 @@ class Running(AgentCase):
         # (items, with each image's ref, come with a saved session; this harness has none)
         self.assertEqual(shown[0]["caption"], "generated image")
         self.assertTrue(shown[0]["images"][0].startswith("data:image/png;base64,"))
-        # In DGC's own folder, one per session (as Codex keeps its pictures), not in the project.
+        # In DGC's own folder, one per session, outside the project.
         from dgc import images
         saved = list((images.directory() / "sessions" / "work").glob("*.png"))
         self.assertEqual(len(saved), 1)

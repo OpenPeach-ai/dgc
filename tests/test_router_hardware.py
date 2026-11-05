@@ -29,6 +29,23 @@ GIB = 1024 ** 3
 
 
 class Readers(unittest.TestCase):
+    def test_malformed_exporter_numbers_do_not_break_a_readout(self):
+        self.assertEqual(H.samples('node_memory_MemTotal_bytes 1e308\nnode_load1 NaN\n'), [])
+        bad = {"dgc_node": True, "gpus": [{"name": "GPU", "memory_total_bytes": float("nan"),
+                                            "util_pct": float("inf")}],
+               "memory": {"total_bytes": float("nan")}, "cpu": {"load1": float("nan")}}
+        with patch.object(H, "_get", return_value=(200, bad)):
+            snap = H.read("http://127.0.0.1:8577", "node")
+        self.assertIsNone(snap["gpus"][0]["memory_total_bytes"])
+        self.assertEqual(H.line(snap), "GPU")
+        with patch.object(H, "_get", side_effect=lambda url, token="", **_kw: (200, {
+                "mem": {"total": float("nan")}, "cpu": {"total": float("inf")},
+                "load": {"min1": float("nan")}, "gpu": [{"name": "GPU", "mem": float("nan")}],
+                "quicklook": {}}[url.rsplit("/", 1)[-1]])):
+            glances = H.from_glances("http://127.0.0.1:61208/api/4")
+        self.assertNotIn("memory", glances)
+        self.assertEqual(glances["gpus"], [{"name": "GPU"}])
+
     def test_node_exporter_memory_load_and_cpu(self):
         snap = H.from_prometheus(F.NODE_EXPORTER)
         self.assertEqual(snap["kind"], "node_exporter")

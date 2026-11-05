@@ -70,6 +70,30 @@ class RouterCase(unittest.TestCase):
         return harness.config
 
 
+class RouterStateFiles(RouterCase):
+    def test_route_without_a_task_label_defaults_to_plain_text(self):
+        route = R.Route("lease", "nas", "NAS", "qwen3", "http://nas.local:11434", "ollama", "ollama", 8192)
+        self.assertEqual(route.label, "")
+
+    def test_deeply_nested_saved_discovery_does_not_break_router_status(self):
+        folder = router_state.directory()
+        folder.mkdir(parents=True)
+        (folder / "discovery.json").write_text("[" * 1500 + "]" * 1500)
+        self.assertEqual(router_state.read("discovery"), {})
+
+    def test_bad_saved_lease_numbers_do_not_break_router_status(self):
+        router_state.write("leases", {"leases": [
+            {"id": "bad-pid", "pid": "oops", "heartbeat": time.time()},
+            {"id": "bad-heartbeat", "pid": 123, "heartbeat": "oops"},
+            {"id": "nan-heartbeat", "pid": 123, "heartbeat": float("nan")},
+        ]})
+        self.assertEqual(self.router.leases(), [])
+        self.assertEqual(router_state.read("leases"), {"leases": []})
+
+    def test_discovery_with_nonfinite_memory_does_not_break_status(self):
+        self.assertEqual(R._memory_facts({"kv_bytes_per_token": float("inf")}), {})
+
+
 class RouterOffIs050(RouterCase):
     """Off (or never set up), every route, prompt and schema is what 0.50 had."""
 
@@ -115,6 +139,16 @@ class RouterOffIs050(RouterCase):
 class Leases(RouterCase):
     def block(self, **kwargs):
         return {"enabled": True, "when_busy": kwargs.pop("when_busy", "wait"), "systems": kwargs.pop("systems")}
+
+    def test_failed_routed_client_creation_releases_its_worker(self):
+        config = self.config(self.block(systems=[
+            system("box", "http://box.local:11434", [model("qwen3", workers=1)])]))
+        route, _ = self.router.acquire(config, "subagents", wait=False)
+        self.assertIsNotNone(route)
+        with patch.object(Agent, "_new_client", side_effect=RuntimeError("bad model route")):
+            with self.assertRaisesRegex(RuntimeError, "bad model route"):
+                R.client_for(self.harness.agent, route)
+        self.assertEqual(self.router.leases(), [])
 
     def test_system_and_model_ceilings(self):
         config = self.config(self.block(systems=[

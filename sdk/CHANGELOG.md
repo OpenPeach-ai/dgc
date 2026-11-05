@@ -1,12 +1,12 @@
 # DGC SDK changelog
 
-## 0.9.0 — 2026-11-04
+## 0.9.0 — 2026-11-06
 
 - Pips API 72 adds local Personal and Project Pip workflow list, detail, create and status controls in both SDKs. A workflow routes exact Personal results or a Project finding through two to four Pips in reviewed or unattended mode without granting the receiving Pip any new external action permission.
 - Pips API 73 accepts a text message during one running Personal Pip conversation as a mid-turn update. It stays in that run's history; no second reply starts.
 - A message to the Primary Core Pip can propose up to three Personal Pip setup cards. Apps use the existing Pips API 23 `list_pip_setups`, `get_pip_setup`, `accept_pip_setup` and `reject_pip_setup` operations to present and decide them; no new SDK mutation or implicit approval is added.
-Pairs with CLI 0.51.0. The Python and TypeScript SDK suites passed on Linux, macOS 26.5.1
-(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04). Native Windows remains experimental.
+Pairs with CLI 0.51.0. Linux, macOS (Apple silicon), and Windows through WSL 2 are the
+release test targets. Native Windows remains experimental.
 
 - The protocol copy has `resume_session`'s `saved_mode` (`ready.capabilities.resume_saved_mode`), which an editor
   sends when the person reopens a chat. The SDK never sends it, so an app's resume still brings back a session's mode

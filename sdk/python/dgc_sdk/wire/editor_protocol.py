@@ -111,7 +111,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
                               enum=("prompt", "resume", "continue", "monitor", "wake", "pip_setup")),
                    "request_id": _S(False),
                    "answer_question": _S(False),
-                   "attachments": _A(False)},
+                   "attachments": _A(False), "display_mentions": _A(False)},
     # ``final_message_id`` names the prose block this turn designates as its answer, so the panel
     # stops guessing from position. Rule: the last ``stream_end`` of the turn
     # whose phase was "answer"; else -- only because turn_end is terminal -- the last one whose
@@ -703,6 +703,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet", "page",
                                                           "dashboard")),
                "answers": _NA(False), "pip_references": _A(False),
+               "display_mentions": _A(False),
                # Images handed over as files in the backend's spool rather than inlined as base64.
                # Only sent by a client that saw capabilities.image_spool, so an older backend is
                # never offered a field it would reject as undeclared.

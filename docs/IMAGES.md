@@ -14,7 +14,7 @@ workflow), a default size, and a short "good for" that DGC fills in and you can 
 | ComfyUI | any model you run in ComfyUI (FLUX.2, Qwen-Image, SDXL, Z-Image…), with your own workflow | free, on your computer |
 | Automatic1111-compatible | Automatic1111, Forge, reForge, SD.Next, and Draw Things' HTTP API | free, on your computer |
 | OpenAI-compatible | OpenAI's GPT Image models, xAI, Together, LocalAI, and any server with `/v1/images/generations` | per image, or free locally |
-| Google Gemini | the Gemini image models (generation and editing) and Imagen | per image |
+| Google Gemini | Gemini image models for generation and editing | per image |
 | Black Forest Labs | FLUX.2, FLUX 1.1 Pro and Kontext editing | per image |
 | fal.ai, Replicate | one key, hundreds of models (FLUX, Seedream, Qwen-Image, Ideogram, Recraft, Imagen…) | per image |
 
@@ -29,7 +29,7 @@ In plain words: *"add my ComfyUI at gpu-box.local:8188"*. Or from a terminal:
 ```
 dgc images add comfyui gpu-box.local:8188 --name "ComfyUI on gpu-box"
 dgc images add fal --key            # the key is read from the terminal or a pipe, never the command line
-dgc images add gemini --model gemini-2.5-flash-image --key
+dgc images add gemini --model gemini-3.1-flash-image --key
 dgc images add a1111 mac.local:7860
 dgc images test
 ```
@@ -85,8 +85,8 @@ same way. A refusal by the provider's policy is said as it is.
 
 ## Where the images go
 
-- **Work:** into DGC's own folder, one per session (`~/.dgc/images/sessions/<session>/`), as Codex keeps its pictures
-  in its home: nothing lands in your project unless you want it there. The picture shows under the reply and in the
+- **Work:** into DGC's own folder, one per session (`~/.dgc/images/sessions/<session>/`): nothing lands in your
+  project unless you want it there. The picture shows under the reply and in the
   Library either way. Each image has a sidecar `NAME.json` beside it: the prompt, provider, model, seed, size and
   cost.
   - **Into the project when it's wanted:** the model gives `save_to`, a path in the project, when you name a place or

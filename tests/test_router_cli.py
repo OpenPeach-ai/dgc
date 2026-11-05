@@ -88,6 +88,18 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(refused.returncode, 2)
             self.assertIn("between 2,048 and 16,777,216", refused.stderr)
 
+    def test_editing_address_and_key_binds_the_key_to_the_new_address(self):
+        with FakeServer("ollama") as first, FakeServer("ollama") as second:
+            self.assertEqual(self.dgc("add", first.url, "--name", "GPU box", "--models", "qwen3:8b").returncode, 0)
+            edited = self.dgc("edit", "gpu-box", "--address", second.url, "--key", stdin="new-key\n")
+            self.assertEqual(edited.returncode, 0, edited.stderr)
+            from dgc.config import _router_identity
+            secrets = json.loads((self.home / ".dgc" / "secrets.json").read_text())
+            self.assertEqual(secrets["router_key_gpu-box"], "new-key")
+            self.assertEqual(secrets["router_identity"]["gpu-box"],
+                             _router_identity(self.config()["router"], "gpu-box"))
+            self.assertEqual(self.config()["router"]["systems"][0]["base_url"], second.url)
+
     def test_errors_are_plain_and_exit_one(self):
         bad = self.dgc("add", "http://127.0.0.1:9")
         self.assertEqual(bad.returncode, 1)

@@ -357,7 +357,8 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
         if (!a.address) { a.error = 'Type its address first.'; paint(); return; }
         a.state = 'looking'; a.error = ''; paint();
         const before = new Set(systems().map(s => s.id));
-        const reply = await command({ type: 'router_update', action: 'add_system', base_url: a.address, ...(a.name ? { name: a.name } : {}) });
+        // Add with no jobs atomically: a new system must not receive work while this form is still being filled in.
+        const reply = await command({ type: 'router_update', action: 'add_system', base_url: a.address, jobs: [], ...(a.name ? { name: a.name } : {}) });
         if (!reply.ok) { a.state = ''; a.error = reply.error || 'DGC couldn\'t add it.'; paint(); return; }
         const added = systems().find(s => !before.has(s.id));
         if (!added) { a.state = ''; a.error = 'DGC added nothing.'; paint(); return; }

@@ -27,9 +27,13 @@ def decode_png(data: bytes):
     pos, idat, palette, header = 8, [], None, None
     while pos + 8 <= len(data):
         length, kind = struct.unpack("!I4s", data[pos:pos + 8])
+        if pos + 12 + length > len(data):
+            return None
         body = data[pos + 8:pos + 8 + length]
         pos += 12 + length
         if kind == b"IHDR":
+            if len(body) != 13 or header is not None:
+                return None
             header = struct.unpack("!IIBBBBB", body)
         elif kind == b"PLTE":
             palette = [tuple(body[i:i + 3]) for i in range(0, len(body) - 2, 3)]
@@ -40,24 +44,28 @@ def decode_png(data: bytes):
     if header is None:
         return None
     width, height, depth, color, _comp, _filter, interlace = header
-    if interlace or depth not in (8, 16) or width * height > MAX_PIXELS:
+    if not width or not height or interlace or depth not in (8, 16) or width * height > MAX_PIXELS:
         return None
     channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color)
-    if channels is None or (color == 3 and not palette):
+    if channels is None or (color == 3 and (not palette or depth != 8)):
         return None
     step = channels * (depth // 8)
     stride = width * step
+    expected = (stride + 1) * height
     try:
-        raw = zlib.decompress(b"".join(idat))
+        inflater = zlib.decompressobj()
+        raw = inflater.decompress(b"".join(idat), expected + 1)
     except zlib.error:
         return None
-    if len(raw) < (stride + 1) * height:
+    if len(raw) != expected or not inflater.eof or inflater.unconsumed_tail or inflater.unused_data:
         return None
     rows = []
     previous = bytearray(stride)
     for y in range(height):
         start = y * (stride + 1)
         kind, line = raw[start], bytearray(raw[start + 1:start + 1 + stride])
+        if kind > 4:
+            return None
         if kind == 1:
             for i in range(step, stride):
                 line[i] = (line[i] + line[i - step]) & 0xFF
@@ -103,7 +111,10 @@ def _pillow(data: bytes):
     except ImportError:
         return None
     try:
-        image = Image.open(io.BytesIO(data)).convert("RGB")
+        image = Image.open(io.BytesIO(data))
+        if not image.width or not image.height or image.width * image.height > MAX_PIXELS:
+            return None
+        image = image.convert("RGB")
     except Exception:                              # noqa: BLE001 -- no picture, the path still shows
         return None
     width, height = image.size
@@ -113,7 +124,7 @@ def _pillow(data: bytes):
 
 def cells(data: bytes, columns: int = 24, *, max_rows: int = 14):
     """Rows of (top, bottom) "#rrggbb" pairs, ``columns`` wide at most, or None when DGC can't draw it."""
-    decoded = decode_png(data) or _pillow(data)
+    decoded = decode_png(data) if data.startswith(b"\x89PNG\r\n\x1a\n") else _pillow(data)
     if decoded is None:
         return None
     width, height, pixel = decoded

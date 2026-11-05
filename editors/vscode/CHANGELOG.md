@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.35.0 — 2026-11-04
+## 0.35.0 — 2026-11-06
 
 - Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.
 - A message sent while a Pip is answering joins that reply without opening another run. Settings → Models keeps saved model hosts and signed-in subscription CLIs in one provider list. One default starts new Work and ChatDGC chats and Pips set to Default. Work and ChatDGC can each choose another saved provider and keep that choice after reload. API keys stay bound to their endpoint. A subscription needs no separate model host.

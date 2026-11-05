@@ -39,7 +39,7 @@ const KEYED = new Set(['openai', 'xai', 'together', 'gemini', 'bfl', 'fal', 'rep
 const ADDRESS_HINT = { comfyui: 'http://localhost:8188', a1111: 'http://localhost:7860', localai: 'http://localhost:8080',
     ollama: 'http://localhost:11434', openai_compatible: 'http://gpu-box.local:8000/v1' };
 const MODEL_HINT = { openai: 'gpt-image-1', xai: 'grok-2-image', together: 'black-forest-labs/FLUX.1-schnell', ollama: 'x/z-image-turbo',
-    gemini: 'gemini-2.5-flash-image', bfl: 'flux-pro-1.1', fal: 'fal-ai/flux/schnell', replicate: 'black-forest-labs/flux-schnell',
+    gemini: 'gemini-3.1-flash-image', bfl: 'flux-pro-1.1', fal: 'fal-ai/flux/schnell', replicate: 'black-forest-labs/flux-schnell',
     comfyui: 'The server\'s first checkpoint', a1111: 'The model it has loaded', localai: 'Its default', openai_compatible: 'Its default' };
 /** A plain warning when a key doesn't look like a whole key of its provider (only where the shape is documented), else
  *  ''. The same rule as dgc/images_admin.key_shape_note: a fal key pasted in part was saved and every picture then

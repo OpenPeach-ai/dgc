@@ -258,7 +258,7 @@ test("+ Add system: find its models, not used until Save; Cancel takes it back o
   x.click("[data-router-add-look]");
   for (let i = 0; i < 10; i++) await x.settle();
   assert.deepEqual(x.routerSent().slice(1, 3), [
-    { type: "router_update", action: "add_system", base_url: "mac.local:1234", name: "Mac" },
+    { type: "router_update", action: "add_system", base_url: "mac.local:1234", jobs: [], name: "Mac" },
     { type: "router_update", action: "disable_system", system: "mac" }]);
   const form = x.d.querySelector("[data-router-system=mac] .router-form");
   assert.ok(form, "the new system opens in its form");
