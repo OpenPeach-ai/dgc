@@ -1055,12 +1055,16 @@ class Calls:
         except CardError as exc:
             return {"error": {"code": -32000, "message": str(exc)}}
 
-    def answer(self, ask_id: str, choice: str) -> tuple[dict | None, dict]:
+    def answer(self, ask_id: str, choice: str, *, card_id: str | None = None) -> tuple[dict | None, dict]:
         """(the ask it answered or None, the outcome) for the user's choice on an Allow card: once, always, deny.
         Allowed, it is decided again first (_recheck): a deny rule added, the plugin turned off, the tool hidden from
         cards or changed, a new connection or an old question runs nothing."""
         with self._lock:
-            held = self._asks.pop(ask_id, None) if isinstance(ask_id, str) else None
+            held = self._asks.get(ask_id) if isinstance(ask_id, str) else None
+            if held is not None and card_id is not None and held["ask"]["card_id"] != card_id:
+                return None, {"error": {"code": -32000, "message": "not this card's question"}}
+            if held is not None:
+                self._asks.pop(ask_id, None)
         if held is None:
             return None, {"error": {"code": -32000, "message": "that question was already answered"}}
         ask = held["ask"]
@@ -1072,11 +1076,13 @@ class Calls:
             refused, why, server = self._recheck(held)
             if refused:
                 return ask, {"error": {"code": -32000, "message": _words(refused, 300)}}
-            if choice == "always" and ask["always"] and why not in ("money", "a rule"):
+            if choice == "always":
+                if not ask["always"] or why in ("money", "a rule"):
+                    return ask, {"error": {"code": -32000, "message": "Always allow is not available for this request. Ask again and choose Allow once."}}
                 try:
                     held["link"].allow_always(held["record"], ask["tool"])
-                except Exception:                            # noqa: BLE001 -- it still runs once
-                    pass
+                except Exception:                            # noqa: BLE001 -- do not expose save errors or pretend the rule holds
+                    return ask, {"error": {"code": -32000, "message": "DGC could not save Always allow. Nothing ran; ask again and choose Allow once."}}
             return ask, self._run(held["record"], held["link"], "tools/call", held["params"], server=server)
         except CardError as exc:
             return ask, {"error": {"code": -32000, "message": str(exc)}}
@@ -1316,9 +1322,8 @@ def _host_handler(cards: CardServer):
             if kind == "rpc":
                 out = CALLS.begin(record, owner["link"], str(body.get("method") or ""), body.get("params"))
             elif kind == "answer":
-                ask, out = CALLS.answer(str(body.get("ask_id") or ""), str(body.get("choice") or ""))
-                if ask is not None and ask["card_id"] != record["card_id"]:
-                    out = {"error": {"code": -32000, "message": "not this card's question"}}
+                _ask, out = CALLS.answer(str(body.get("ask_id") or ""), str(body.get("choice") or ""),
+                                         card_id=record["card_id"])
             elif kind == "message":
                 text = message_text(record, message_words(body.get("params")))
                 if text and callable(owner.get("message")):

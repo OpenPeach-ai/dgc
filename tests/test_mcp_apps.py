@@ -365,12 +365,33 @@ class Asks(_Card):
         mcp_apps.CALLS.answer(ask["ask_id"], "always")
         self.assertEqual(link.always, ["move"])
 
+    def test_failed_always_allow_does_not_run_or_claim_a_saved_rule(self):
+        link = _Link(self.server)
+        ask = self.call(link, "move")["ask"]
+        with patch.object(link, "allow_always", side_effect=OSError("disk full")):
+            _asked, done = mcp_apps.CALLS.answer(ask["ask_id"], "always")
+        self.assertIn("could not save Always allow", done["error"]["message"])
+        self.assertFalse(self.requests_sent("tools/call"))
+
+    def test_an_answer_for_another_card_cannot_spend_its_question(self):
+        first, second = self.card(), self.card()
+        ask = mcp_apps.CALLS.begin(first, _Link(self.server), "tools/call",
+                                   {"name": "move", "arguments": {"to": "b2"}})["ask"]
+        _wrong, refused = mcp_apps.CALLS.answer(ask["ask_id"], "once", card_id=second["card_id"])
+        self.assertIn("not this card's question", refused["error"]["message"])
+        self.assertFalse(self.requests_sent("tools/call"))
+        self.assertEqual(len(mcp_apps.CALLS.pending(first["card_id"])), 1)
+        _right, done = mcp_apps.CALLS.answer(ask["ask_id"], "once", card_id=first["card_id"])
+        self.assertEqual(done["result"]["structuredContent"]["tool"], "move")
+
     def test_a_payment_plugin_asks_every_time_and_never_offers_always(self):
         link = _Link(self.server, money=True, rules={"allow": ["McpCall(mcp__board__move)"], "ask": [], "deny": []})
         ask = self.call(link, "move")["ask"]
         self.assertFalse(ask["always"])
         self.assertTrue(ask["money"])
-        mcp_apps.CALLS.answer(ask["ask_id"], "always")
+        _asked, refused = mcp_apps.CALLS.answer(ask["ask_id"], "always")
+        self.assertIn("not available", refused["error"]["message"])
+        self.assertFalse(self.requests_sent("tools/call"))
         self.assertEqual(link.always, [], "Always is never saved for a payment plugin")
 
     def test_auto_mode_and_an_allow_rule_let_a_work_change_through(self):
@@ -1089,6 +1110,16 @@ class TerminalLine(_Fixture):
         read = post("rpc", {"method": "tools/call", "params": {"name": "show_board", "arguments": {}}})
         self.assertEqual(read["result"]["structuredContent"]["tool"], "show_board")
         ask = post("rpc", {"method": "tools/call", "params": {"name": "move", "arguments": {"to": "b1"}}})["ask"]
+        other = mcp_apps.make_card(server=self.server, tool="show_board", arguments={}, result={"content": []},
+                                   surface="work", plugin="Board")
+        cards.owned(token, other["card_id"])
+        cross = urllib.request.Request(cards.page_url(token, other["card_id"]) + "/answer",
+                                       data=json.dumps({"ask_id": ask["ask_id"], "choice": "once"}).encode(),
+                                       headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(cross, timeout=5) as response:
+            refused = json.loads(response.read())
+        self.assertIn("not this card's question", refused["error"]["message"])
+        self.assertEqual(len(mcp_apps.CALLS.pending(record["card_id"])), 1)
         self.assertEqual(post("answer", {"ask_id": ask["ask_id"], "choice": "once"})["result"]["structuredContent"]["tool"], "move")
         post("message", {"params": {"role": "user", "content": [{"type": "text", "text": "Make it bigger"}]}})
         self.assertEqual(sent, ["From Board's card: Make it bigger"])
