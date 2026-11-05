@@ -1509,11 +1509,11 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
 .composer-pill.pill-skill::before { content: "\eb29"; font-family: codicon; font-weight: normal; font-style: normal; }
 .composer-pill.pill-template::before { content: "\eb66"; font-family: codicon; font-weight: normal; font-style: normal; }
 .composer-pill.pill-file::before { content: "@"; }
-.composer-pill.pill-pip { align-items: center; color: var(--text); font-weight: var(--w-med); }
+.composer-pill.pill-pip { align-items: center; color: var(--text); font-weight: var(--w-med); vertical-align: .12em; }
 .composer-pill.pill-pip::before { content: none; }
 .composer-pip-face, .composer-pip-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
 .composer-pip-face { align-self: center; }
-.composer-pill.pill-plugin, .composer-pill.pill-artifact { align-items: center; vertical-align: -0.12em; line-height: 1; }
+.composer-pill.pill-plugin, .composer-pill.pill-artifact { align-items: center; vertical-align: -.26em; line-height: 1; }
 .composer-pill.pill-plugin::before, .composer-pill.pill-artifact::before { content: none; }
 .composer-pill.pill-plugin { padding: 2px 4px; color: #c5a9ff;
   background: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);

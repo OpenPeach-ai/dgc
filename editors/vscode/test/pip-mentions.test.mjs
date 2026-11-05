@@ -52,6 +52,13 @@ test('typing @pip opens the Pip list directly and the face stays with the inline
  const pill=p.doc.querySelector('#input .pill-pip');assert.equal(pill?.dataset.pipId,ID);
  assert.ok(pill.querySelector('.composer-pip-face'),'the face slot is inline');
 });
+test('Pip picker labels Personal and Project Pips without changing their reference identities',()=>{
+ const p=panel(), request=open(p), personal={...row,pip_id:'pip_'+'c'.repeat(32),workspace_id:'ws_'+'d'.repeat(32),name:'Core',pip_type:'core',scope:'personal'};
+ answer(p,request,[{...row,workspace_id:WS,scope:'project'},personal]);
+ const labels=[...p.doc.querySelectorAll('#pop .pi')].map(e=>e.textContent);
+ assert.ok(labels.some(s=>s.includes('Project · v2')));
+ assert.ok(labels.some(s=>s.includes('Personal · v2')));
+});
 test('connected plugin mention waits for catalog, keeps its logo, and sends plain words',()=>{
  const p=panel(),input=type(p,'Ask @composio');
  assert.ok(p.posted.some(m=>m.type==='requestPlugins'));
@@ -81,4 +88,22 @@ test('Artifact mentions use their distinct picker icons and send without the sig
  assert.ok(pill.querySelector('.codicon-dashboard'));
  key(p,'Enter');
  assert.equal(p.posted.filter(m=>m.type==='prompt').at(-1).text,'Make Dashboard');
+});
+test('mixed inline Pip, plugin and Artifact mentions survive a webview reload as inline mentions',()=>{
+ const p=panel(), input=type(p,'Ask @pip');p.advance(120);
+ answer(p,p.posted.filter(m=>m.type==='list_prompt_pips').at(-1));key(p,'Enter');
+ const append=s=>{const node=p.doc.createTextNode(s);input.append(node);const range=p.doc.createRange();range.setStart(node,s.length);range.collapse(true);const selection=p.dom.window.getSelection();selection.removeAllRanges();selection.addRange(range);input.dispatchEvent(new p.dom.window.Event('input',{bubbles:true}));};
+ append(' with @composio');
+ p.send({type:'event',event:{type:'plugin_catalog',items:[{name:'composio',display_name:'Composio',connected:true,logo:'data:image/png;base64,AAAA'}]}});
+ key(p,'Enter');
+ p.send({type:'event',event:{type:'ready',capabilities:{pip_references:1,artifacts:{version:1,outputs:['page']}},model:'m',mode:'default',think:'off',base_url:'http://localhost:1/v1',workspace_trusted:true,commands:[],custom_commands:[],goal:{text:'',status:'none'},context_size:1}});
+ append(' and @page');key(p,'Enter');
+ assert.ok(input.querySelector('.pill-artifact'));
+ p.advance(250);const state=p.savedState();assert.ok(state?.entries?.length);
+ const q=makeDom({clock:true,state});q.send(ready(1));q.send({type:'session_ready',sessionId:'chat-a'});
+ assert.equal(q.doc.querySelectorAll('#input .composer-pill').length,3);
+ assert.equal(q.doc.querySelectorAll('#attachments .pip-reference-chip').length,0);
+ assert.match(q.doc.querySelector('#input .pill-pip')?.textContent||'',/Rook review/);
+ assert.match(q.doc.querySelector('#input .pill-plugin')?.textContent||'',/Composio/);
+ assert.match(q.doc.querySelector('#input .pill-artifact')?.textContent||'',/Page/);
 });

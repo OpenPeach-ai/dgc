@@ -107,12 +107,12 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.deepEqual(projectChat, personalChat, "the same chat");
   assert.equal(project.you.color, "rgb(255, 255, 255)", "your message: white on the accent");
   assert.equal(project.you.backgroundColor, "rgb(109, 73, 232)");
-  assert.equal(project.reply.borderTopLeftRadius, "18px", "its reply: short rounded bubbles");
+  assert.equal(project.reply.borderTopLeftRadius, "17px", "its reply: short rounded bubbles");
   assert.equal(project.parts, 2, "a bubble for each short message the Pip parted with ---");
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");
   assert.equal(project.time, 1, "the time shows without it");
   assert.equal(project.whatItDid.display, "none", "What it did is one click away, in the reply's details");
-  assert.equal(project.box.borderTopLeftRadius, "22px");
+  assert.equal(project.box.borderTopLeftRadius, "19px");
   assert.equal(project.hint.display, "none");
 });
 

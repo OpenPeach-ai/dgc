@@ -182,6 +182,7 @@ STATIC_MEMBERS = {
     "extension/media/pips/plush.js": "media/pips/plush.js",
     "extension/media/pips/wordmark.css": "media/pips/wordmark.css",
     "extension/media/pips/plush-bodies.webp": "media/pips/plush-bodies.webp",
+    "extension/media/pips/plush-body-mask.png": "media/pips/plush-body-mask.png",
     "extension/dist/canvas.js": "dist/canvas.js",
     "extension/dist/pips.js": "dist/pips.js",
     "extension/dist/pips.css": "dist/pips.css",

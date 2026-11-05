@@ -411,7 +411,22 @@ button.pill{border-radius:999px;padding:6px 16px}
 .app-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
 .app-list small{color:var(--vscode-descriptionForeground);margin-left:6px}
 /* Grok's Allow card: an email the Pip wrote, with Send / Always allow / Edit / Don't send. */
-.allow-card{display:flex;flex-direction:column;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid var(--pip-edge);border-radius:12px;max-width:560px;background:color-mix(in srgb,var(--pip-accent) 5%,transparent)}
+.allow-card{display:flex;flex-direction:column;gap:7px;margin:9px 0;padding:10px 12px;border:1px solid var(--pip-edge);border-radius:13px;max-width:560px;background:color-mix(in srgb,var(--pip-accent) 6%,var(--vscode-editor-background))}
+.allow-card .app-link-head{gap:8px;align-items:flex-start}
+.allow-card .app-link-mark{width:26px;height:26px;border-radius:8px;font-size:12px}
+.allow-card .app-link-words strong{font-size:13px;line-height:1.3}
+.allow-card .app-link-words small{font-size:11px;line-height:1.35}
+.allow-card .app-link-actions{gap:6px}
+.allow-card .app-link-actions button{min-height:26px;padding:3px 9px;border-radius:8px;font-size:11px}
+.allow-details{min-width:0;font-size:11px}
+.allow-details>summary{display:flex;gap:8px;align-items:center;list-style:none;cursor:pointer;color:var(--vscode-descriptionForeground);min-width:0}
+.allow-details>summary::-webkit-details-marker{display:none}
+.allow-details>summary .allow-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.allow-details>summary>span:last-child{flex:none;color:var(--vscode-textLink-foreground,#b9a1ff)}
+.allow-details>summary>span:last-child::after{content:'⌄';margin-left:3px}
+.allow-details[open]>summary>span:last-child::after{content:'⌃'}
+.allow-details[open]{border-top:1px solid var(--pip-edge);padding-top:8px}
+.allow-details[open]>summary{margin-bottom:8px}
 .allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
 .allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:14em;overflow:auto}
 .allow-calls .allow-meta{margin:2px 0 4px 8px}
@@ -625,9 +640,10 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .allow-fields{display:grid;gap:8px;font-size:12px}.allow-fields label{margin:0;gap:3px;color:var(--vscode-descriptionForeground)}.allow-fields input,.allow-fields textarea{font-size:12px;color:var(--vscode-input-foreground)}.allow-fields textarea{min-height:0;resize:vertical;line-height:1.5}
 .allow-card[data-editing]{border-color:var(--vscode-focusBorder)}.allow-error{margin:0;font-size:12px;color:var(--vscode-errorForeground)}
 /* Needs attention (#8): every card your Pips wait on you for, above Your Pips on the home. */
-.attention{margin:0 0 18px}.attention h2{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 8px}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:var(--vscode-badge-background);color:var(--vscode-badge-foreground);text-align:center}
+.attention{margin:0 0 18px}.attention-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:5px 0;margin:0 0 8px;background:transparent;text-align:left;font-size:13px;font-weight:600}.attention-toggle:hover{background:transparent;color:#b9a1ff}.attention-toggle .codicon{margin-left:auto;font-size:12px;color:var(--muted)}.attention-count{font-size:11px;font-weight:600;min-width:18px;padding:1px 6px;border-radius:9px;background:#7952f6;color:#fff;text-align:center}
 .attention-list{list-style:none;margin:0;padding:0;display:grid;gap:2px}.attention-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:7px 8px;color:inherit}
 .attention-row:hover{background:var(--vscode-list-hoverBackground)}.attention-row .avatar,.attention-row .pip-avatar{width:34px;height:34px;flex:none}.attention-copy{display:grid;gap:1px;min-width:0}.attention-copy strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.attention-item{display:flex;align-items:center;gap:8px}.attention-item .attention-row{min-width:0;flex:1}.attention-dismiss{background:transparent;color:#b9a1ff;flex:none;font-size:12px;padding:2px 6px}.attention-dismiss:hover{background:color-mix(in srgb,#7952f6 14%,transparent)}
 .attention-detail{font-size:12px;color:var(--vscode-foreground);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attention-copy small{font-size:11px}.attention-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface);border:1px solid var(--line)}
 .attention-more{margin:4px 0 0 52px;font-size:12px}.attention-cut{font-size:11px;margin:4px 0 0 52px}
 .attention-flash{animation:attention-flash 2.4s ease-out 1}@keyframes attention-flash{0%,30%{box-shadow:0 0 0 2px var(--vscode-focusBorder)}100%{box-shadow:0 0 0 0 transparent}}@media(prefers-reduced-motion:reduce){.attention-flash{animation:none;outline:2px solid var(--vscode-focusBorder)}}
@@ -730,3 +746,36 @@ button.link.last-run:focus-visible{outline:2px solid var(--pip-focus,var(--vscod
 .pic-fold-open[hidden], .pic-fold-body[hidden] { display: none; }
 .pic-fold-body > .made-files { margin-top: var(--sp-1, 4px); }
 @media (prefers-reduced-motion: reduce) { .pic-fold-chev { transition: none; } }
+
+/* Pip conversation: calm, spatially consistent surfaces. Keep the character's
+   existing plush animation; only the surrounding conversation chrome changes. */
+.simple-pips.chat-open .simple-content.chat{max-width:800px;padding:0 16px 14px}
+.simple-pips.chat-open .simple-content.chat .conversation-log{margin-right:-16px;padding:10px 16px 4px 0;scroll-padding-block:12px}
+.simple-pips.chat-open .pip-topbar{border-bottom:1px solid color-mix(in srgb,var(--pip-edge) 70%,transparent)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.msg{margin-bottom:20px;gap:5px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user{margin-top:7px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble{max-width:min(86%,620px);padding:10px 14px;border-radius:17px 17px 6px 17px;line-height:1.55;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split{gap:7px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:min(90%,640px);padding:10px 14px;border:1px solid color-mix(in srgb,var(--vscode-foreground) 6%,transparent);border-radius:17px 17px 17px 6px;background:var(--pip-bubble);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.simple-pips.chat-open .pip-conversation.chat-style .message-body{line-height:1.55}
+.simple-pips.chat-open .pip-conversation.chat-style .message-body p{margin-bottom:10px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .response-actions{min-height:22px;margin-top:2px;gap:3px}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .msg-time{font-variant-numeric:tabular-nums}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:scale(.97)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer{border-radius:19px;border-color:color-mix(in srgb,var(--vscode-foreground) 16%,transparent);box-shadow:0 3px 14px rgba(0,0,0,.08)}
+.simple-pips.chat-open .pip-conversation.chat-style .pip-composer:focus-within{border-color:var(--vscode-focusBorder,#7c5cff);box-shadow:0 0 0 1px color-mix(in srgb,var(--vscode-focusBorder,#7c5cff) 30%,transparent)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card,
+.simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=waiting],
+.simple-pips.chat-open .pip-conversation.chat-style .app-link[data-state=needs]{max-width:min(100%,540px);border:1px solid color-mix(in srgb,var(--pip-accent) 22%,var(--pip-edge));border-radius:14px;background:color-mix(in srgb,var(--pip-accent) 5%,var(--vscode-editor-background));box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-words strong{letter-spacing:-.005em}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card:not([data-editing]) .app-link-words small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary{min-height:23px;border-radius:5px}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .allow-details>summary:hover{color:var(--vscode-foreground)}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions{padding-top:2px}
+.simple-pips.chat-open .pip-conversation.chat-style .allow-card .app-link-actions button{min-height:28px}
+.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-details>summary,.app-link-actions button,.ract):focus-visible{outline:2px solid var(--vscode-focusBorder,#7c5cff);outline-offset:2px}
+@container(max-width:390px){.simple-pips.chat-open .simple-content.chat{padding-inline:10px}.simple-pips.chat-open .simple-content.chat .conversation-log{margin-right:-10px;padding-right:10px}.simple-pips.chat-open .pip-conversation.chat-style .pip-message.user .bubble,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer.split .reply-part,.simple-pips.chat-open .pip-conversation.chat-style .pip-message.assistant .answer:not(.split){max-width:93%}}
+@media(prefers-reduced-motion:reduce){.simple-pips.chat-open .pip-conversation.chat-style .pip-message .ract:active,.simple-pips.chat-open .pip-conversation.chat-style .allow-card button:active{transform:none}}
+@media(prefers-contrast:more){.simple-pips.chat-open .pip-conversation.chat-style :is(.allow-card,.app-link[data-state=waiting],.app-link[data-state=needs],.pip-message.assistant .answer){border-color:var(--vscode-foreground)}}

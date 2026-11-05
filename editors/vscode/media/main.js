@@ -2325,6 +2325,7 @@
     return p && typeof p === "object" && !Array.isArray(p)
       && typeof p.pip_id === "string" && /^pip_[a-f0-9]{32}$/.test(p.pip_id) && p.pip_id.length === 36
       && typeof p.workspace_id === "string" && /^ws_[a-f0-9]{32}$/.test(p.workspace_id) && p.workspace_id.length === 35
+      && (p.scope === undefined || p.scope === "project" || p.scope === "personal")
       && typeof p.name === "string" && p.name.length > 0 && [...p.name].length <= 160 && new TextEncoder().encode(p.name).length <= 640
       && ["core","scout","lens","patch","rook","pulse","lock","quill"].includes(p.pip_type)
       && ["active","paused","archived"].includes(p.status)
@@ -2366,6 +2367,44 @@
   let backendExitNotice = null;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
+  function draftParts() {
+    const pills = [...input.querySelectorAll('[data-pill]')];
+    if (!pills.length) return null;
+    const marker = [...Array(32)].map((_, i) => String.fromCharCode(0xe000 + i))
+      .find(c => !composerText().includes(c));
+    if (!marker) return null;
+    const marked = walk(input, null, 0, () => marker)[0].split(marker);
+    if (marked.length !== pills.length + 1) return null;
+    const parts = [];
+    marked.forEach((words, i) => {
+      if (words) parts.push(words);
+      if (i < pills.length) {
+        const pill = pills[i], kind = pill.dataset.kind;
+        const label = kind === 'link' ? pill.title : pill.lastChild?.textContent || '';
+        const identity = kind === 'pip' ? pill.dataset.pipId
+          : kind === 'plugin' ? pill.dataset.pluginId : kind === 'artifact' ? pill.dataset.artifactKind : '';
+        parts.push({kind, label, wire: pill.dataset.pill || '', identity: identity || ''});
+      }
+    });
+    return parts;
+  }
+  function restoreDraftParts(parts, text) {
+    if (!parts?.length) return;
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        part.split('\n').forEach((line, i) => { if (i) frag.appendChild(document.createElement('br')); if (line) frag.appendChild(document.createTextNode(line)); });
+      } else {
+        frag.appendChild(pillElement(part.kind, part.label, part.wire, part.identity));
+        const a = attachments.find(item => part.kind === 'pip' ? item.pipReference?.pip_id === part.identity
+          : item.label === part.label);
+        if (a) a.fromPill = true;
+      }
+    }
+    if (text.endsWith('\n')) frag.appendChild(document.createElement('br'));
+    input.replaceChildren(frag);
+    markComposerEmpty();
+  }
   function cleanDraft(value) {
     if (!value || typeof value !== "object" || typeof value.text !== "string" || value.text.length > 1_000_000
         || !Array.isArray(value.attachments) || value.attachments.length > 64) return null;
@@ -2399,12 +2438,28 @@
       const end = Math.max(start, Math.min(text.length, Number(value.end) || start));
       const clean = { text, attachments: items, start, end,
         updated: Number(value.updated) || Date.now() };
+      if (Array.isArray(value.parts) && value.parts.length <= 256) {
+        const parts = [], allowed = new Set(['pip','plugin','artifact','skill','template','file','link','command']);
+        for (const part of value.parts) {
+          if (typeof part === 'string' && part.length <= 1_000_000) { parts.push(part); continue; }
+          if (!part || typeof part !== 'object' || !allowed.has(part.kind)
+              || typeof part.label !== 'string' || part.label.length > 8192
+              || typeof part.wire !== 'string' || part.wire.length > 8192
+              || typeof part.identity !== 'string' || part.identity.length > 128) { parts.length = 0; break; }
+          if (part.kind === 'pip' && (!/^pip_[a-f0-9]{32}$/.test(part.identity)
+              || !items.some(a => a.pipReference?.pip_id === part.identity))) { parts.length = 0; break; }
+          if (part.kind === 'plugin' && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(part.identity)) { parts.length = 0; break; }
+          if (part.kind === 'artifact' && !OUTPUT_CHOICES.some(([id, label]) => id === part.identity && label === part.label)) { parts.length = 0; break; }
+          parts.push({kind: part.kind, label: part.label, wire: part.wire, identity: part.identity});
+        }
+        if (parts.length && parts.map(p => typeof p === 'string' ? p : p.wire).join('') === text) clean.parts = parts;
+      }
       if (value.goal === true) clean.goal = true;
       return clean;
     } catch { return null; }
   }
   function captureDraft() {
-    return { text: composerText(), attachments: [...attachments], start: composerSelection()[0],
+    return { text: composerText(), parts: draftParts(), attachments: [...attachments], start: composerSelection()[0],
       end: composerSelection()[1], goal: goalDraftArmed, updated: Date.now() };
   }
   function persistDraft() {
@@ -2477,6 +2532,7 @@
       || { text: "", attachments: [], start: 0, end: 0, goal: false };
     restoringDraft = true;
     setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
+    restoreDraftParts(draft.parts, draft.text);
     setGoalDraftArmed(draft.goal);
     // Another chat gets its own undo history: Ctrl+Z in a new chat must not bring back the prompt
     // sent in the chat that was left, nor that chat's draft.
@@ -2510,7 +2566,7 @@
       const draft = draftEntries.get(draftSession);
       if (draft) {
         restoringDraft = true;
-        setComposerValue(draft.text); attachments.push(...draft.attachments);
+        setComposerValue(draft.text); attachments.push(...draft.attachments); restoreDraftParts(draft.parts, draft.text);
         setGoalDraftArmed(draft.goal);
         setComposerRange(draft.start, draft.end);
         renderAtts(); autosizeComposer();
@@ -2530,7 +2586,7 @@
         if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
         // One step, so Cmd+Z puts the box back as it was before the restore.
         recordComposerEdit(() => {
-          setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
+          setComposerValue(row.draft.text); attachments.push(...row.draft.attachments); restoreDraftParts(row.draft.parts, row.draft.text);
           setGoalDraftArmed(row.draft.goal);
         });
         unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
@@ -7731,6 +7787,13 @@ function permissionChoices(ev) {
         if (typeof server === "string") pluginNames[server] = named;
       }
     }
+    // A saved inline mention can be restored before the catalog arrives. Upgrade its fallback
+    // mark in place so the draft keeps both its caret and the plugin's actual logo.
+    for (const pill of input.querySelectorAll('.composer-pill.pill-plugin')) {
+      const logo = pluginLogos[pill.dataset.pluginId], mark = pill.querySelector('.composer-plugin-mark');
+      if (!logo || !mark || mark.querySelector('img')) continue;
+      const img = document.createElement('img'); img.alt = ''; img.src = logo; mark.replaceChildren(img);
+    }
     if ((popMode === "@" || popAwaitingPlugins) && !pipPicker.active) {
       popAwaitingPlugins = false;
       onInput();
@@ -8011,6 +8074,7 @@ function permissionChoices(ev) {
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        if (input.querySelector('.composer-pill.pill-plugin')) vscode.postMessage({type: 'requestPlugins'});
         artifactsOffered(ev.capabilities?.artifacts);
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
           && Number(ev.capabilities?.pips_api_version) >= 41;
@@ -9401,7 +9465,7 @@ function permissionChoices(ev) {
   }
   function renderPipPicker() {
     if (!pipPicker.active) return;
-    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.status} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
+    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.scope === "personal" ? "Personal" : "Project"} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
     if (pipPicker.loading) items.push({label:"Loading Pips…",disabled:true});
     else if (pipPicker.error) items.push({label:pipPicker.error,disabled:true},{label:"Retry Pip list",pipRetry:true});
     else if (pipPicker.cursor && pipPicker.rows.length < 100) items.push({label:"Load more Pips",pipMore:true});
@@ -9423,7 +9487,7 @@ function permissionChoices(ev) {
     if(!pipPicker.active || ev.request_id!==pipPicker.id) return;
     clearTimeout(pipPicker.timeout);pipPicker.loading=false;
     if(ev.workspace_id===""&&Array.isArray(ev.pips)&&!ev.pips.length&&ev.next_cursor===null&&!pipPicker.workspace){pipPicker.rows=[];pipPicker.cursor=null;pipPicker.emptyLabel="No Pips are registered for this chat’s workspace.";renderPipPicker();return;}
-    const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:ev.workspace_id})):null;
+    const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:p.workspace_id||ev.workspace_id})):null;
     if(!rows||rows.length>20||!rows.every(validPipReference)||new Set(rows.map(p=>p.pip_id)).size!==rows.length
       ||typeof ev.workspace_id!=="string"||!/^ws_[a-f0-9]{32}$/.test(ev.workspace_id)||ev.workspace_id.length!==35
       ||(pipPicker.workspace&&pipPicker.workspace!==ev.workspace_id)

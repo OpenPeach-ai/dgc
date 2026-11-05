@@ -9,7 +9,8 @@
 // Unread messages (reported 2026-11-03, "Pips · 116 unread"): Dismiss all clears them from here only. Nothing is marked
 // read, and the Pips page still shows every one until its chat is opened. The home keeps, per Pip, what was unread then
 // (each feed's count and newest id; the host keeps it over a reload, src/pipHomeDismiss.ts) and counts only what came
-// after. A Pip's count pill reads "Read" on hover or focus, and marks its whole chat read (mark_pip_read).
+// after. A Pip's count pill reads "Read" on hover or focus, and clears its unread chat and finished-run
+// news together (mark_pip_read, then mark_pip_news_seen). Pending approvals still need an answer.
 import {pipDigest, pendingReviews} from './pipsModel.js';
 import {attentionPage, attentionNavigation} from './pipAttention.js';
 import {profile, tintStyles} from './pipProfile.js';
@@ -115,9 +116,9 @@ export function mountHomePips(options) {
  function open(pip) { const first = attention?.items.find(i => i.pip_id === pip.id); options.onOpen?.(first ? attentionNavigation(first) : {pip: pip.id}); }
  // Show all: the Pips view's home at Needs attention, open in full; your Pips are listed under it.
  function openAll() { options.onOpen?.(apiVersion >= 44 && personal ? {attention: true, all: true, workspace: personal} : {overview: true}); }
- async function dismiss(rows, index) {
+ async function dismiss(rows, index, seenUntil = digest?.until) {
   if (!digest || !rows.length) return;
-  const until = digest.until, ids = rows.map(r => r.pip.id), token = epoch;
+  const until = seenUntil, ids = rows.map(r => r.pip.id), token = epoch;
   for (const id of ids) hidden.set(id, Infinity);
   failure = ''; refocus = root.contains(doc.activeElement) ? index : null; paint();
   for (let i = 0; i < ids.length; i += MAX_SEEN) {
@@ -152,15 +153,22 @@ export function mountHomePips(options) {
   const pip = item.pip_id, message = typeof item.latest_message_id === 'string' ? item.latest_message_id : null;
   const post = typeof item.latest_post_id === 'string' ? item.latest_post_id : null, token = epoch;
   if (!message && !post) return;
+  const newsRow = needing().find(row => row.pip.id === pip && row.dismissible);
+  const newsUntil = digest?.until;
+  // Remove the whole completed-update row immediately. Restore it on a refused
+  // read or news dismissal, so the home never claims an action was saved when it was not.
+  if (newsRow) hidden.set(pip, Infinity);
   reads.set(pip, Infinity); failure = ''; refocus = root.contains(doc.activeElement) ? index : null; paint();
   try {
    await request('mark_pip_read', {pip_id: pip, ...(message ? {message_id: message} : {}), ...(post ? {post_id: post} : {})});
-   if (token !== epoch) { reads.delete(pip); return; }     // a new connection: its list says
+   if (token !== epoch) { reads.delete(pip); if (newsRow) hidden.delete(pip); return; } // a new connection: its list says
    reads.set(pip, sequence);
    if (snapshots.delete(pip)) keep({}, [pip]);
+   if (newsRow) await dismiss([newsRow], index, newsUntil);
    void load();
   } catch {
    reads.delete(pip);
+   if (newsRow) hidden.delete(pip);
    if (token === epoch) { failure = 'That didn’t mark it read. Try again.'; paint(); }
   }
  }
@@ -232,7 +240,10 @@ export function mountHomePips(options) {
      read.onclick = () => { void markRead(itemUnread, index); };
      item.append(read);
     }
-    if (canDismiss) {
+    // An unread Pip already has a Read control in this row. It clears the old
+    // run news too, so a second × beside its count is redundant and shifts
+    // that count away from the common right edge.
+    if (canDismiss && !itemUnread) {
      const x = node('button', 'home-pip-dismiss'); x.type = 'button';
      x.setAttribute('aria-label', `Dismiss: ${pip.name} — ${line}`); x.title = `Dismiss: ${line}. It comes back if ${pip.name} has something new.`;
      const icon = node('span', 'codicon codicon-close'); icon.setAttribute('aria-hidden', 'true'); x.append(icon);

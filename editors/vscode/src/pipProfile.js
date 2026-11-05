@@ -7,14 +7,14 @@ export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock'
 // The eight swatches match the existing Pip characters. Keep the old tint IDs readable for
 // profiles saved before 0.51, but offer only the character palette to new edits.
 export const COLORS = [
-  ['core', 'Core violet', '#A787D4', 'grayscale(1) sepia(1) hue-rotate(205deg) saturate(1.9) brightness(1.03)'],
-  ['scout', 'Scout mint', '#80C6A2', 'grayscale(1) sepia(1) hue-rotate(95deg) saturate(1.5) brightness(1.03)'],
-  ['lens', 'Lens blue', '#8BB7E9', 'grayscale(1) sepia(1) hue-rotate(168deg) saturate(1.6) brightness(1.03)'],
-  ['patch', 'Patch peach', '#E9A684', 'grayscale(1) sepia(1) hue-rotate(-16deg) saturate(1.6) brightness(1.03)'],
-  ['rook', 'Rook periwinkle', '#A8AAE4', 'grayscale(1) sepia(1) hue-rotate(188deg) saturate(1.4) brightness(1.03)'],
-  ['pulse', 'Pulse gold', '#E4C778', 'grayscale(1) sepia(1) hue-rotate(8deg) saturate(1.5) brightness(1.03)'],
-  ['lock', 'Lock teal', '#72C5BD', 'grayscale(1) sepia(1) hue-rotate(125deg) saturate(1.5) brightness(1.03)'],
-  ['quill', 'Quill pink', '#ECA1B5', 'grayscale(1) sepia(1) hue-rotate(-52deg) saturate(1.6) brightness(1.03)'],
+  ['core', 'Core violet', '#A07ABD', 'grayscale(1) sepia(1) hue-rotate(205deg) saturate(1.9) brightness(1.03)'],
+  ['scout', 'Scout mint', '#7CB08C', 'grayscale(1) sepia(1) hue-rotate(95deg) saturate(1.5) brightness(1.03)'],
+  ['lens', 'Lens blue', '#759CCE', 'grayscale(1) sepia(1) hue-rotate(168deg) saturate(1.6) brightness(1.03)'],
+  ['patch', 'Patch peach', '#D19875', 'grayscale(1) sepia(1) hue-rotate(-16deg) saturate(1.6) brightness(1.03)'],
+  ['rook', 'Rook periwinkle', '#7482B7', 'grayscale(1) sepia(1) hue-rotate(188deg) saturate(1.4) brightness(1.03)'],
+  ['pulse', 'Pulse gold', '#D4B36A', 'grayscale(1) sepia(1) hue-rotate(8deg) saturate(1.5) brightness(1.03)'],
+  ['lock', 'Lock teal', '#7AAFAD', 'grayscale(1) sepia(1) hue-rotate(125deg) saturate(1.5) brightness(1.03)'],
+  ['quill', 'Quill pink', '#D3909F', 'grayscale(1) sepia(1) hue-rotate(-52deg) saturate(1.6) brightness(1.03)'],
 ];
 const LEGACY_COLORS = [
   ['peach', 'Peach', '#F2A07B', 'grayscale(1) sepia(1) hue-rotate(-18deg) saturate(2.2) brightness(1.05)'],
@@ -36,8 +36,8 @@ export function profile(value) {
     color: [...COLORS, ...LEGACY_COLORS].some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
 }
 
-/** The CSS for the colour tints: one rule per colour, on the plush's picture only (its eyes keep theirs). */
-export const tintStyles = [...COLORS, ...LEGACY_COLORS].map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-rig image{filter:${filter}}`).join('');
+/** Only the body-mask copy is recoloured. The original atlas keeps every accessory and eye untouched. */
+export const tintStyles = [...COLORS, ...LEGACY_COLORS].map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-tint{display:block;filter:${filter}}`).join('');
 
 export function sharedPage(value, pip, kind) {
   const fail = () => { throw new Error('This list didn’t load. Refresh to try again.'); };

@@ -11120,6 +11120,7 @@ def test_extension_vsix_guard():
         "extension/media/pips/plush.js",
         "extension/media/pips/wordmark.css",
         "extension/media/pips/plush-bodies.webp",
+        "extension/media/pips/plush-body-mask.png",
         "extension/dist/canvas.js",
         "extension/dist/pips.js",
         "extension/dist/pips.css",

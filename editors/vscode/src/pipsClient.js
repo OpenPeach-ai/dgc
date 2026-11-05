@@ -2104,6 +2104,28 @@ async function openSetup(id,reject=false){
  openReview({setup:JSON.parse(JSON.stringify(s)),title:reject?'Reject this setup?':s.pip_id?`Change ${s.name}?`:`Create ${s.name}?`,description:reject?'Nothing is created or changed.':'Check it does what you asked.',body,confirm:reject?'Reject setup':s.pip_id?(s.run_now?'Save and run once':'Save changes'):s.run_now?'Create and run once':'Create Pip',expiresAt:s.expires_at,request:{type:reject?'reject_pip_setup':'accept_pip_setup',setup_id:s.id,expected_digest:s.digest}});
  }catch(error){if(token===scope()&&sequence===setupDetailSeq)setError(error);}
 }
+async function dismissSetupFromAttention(item){
+ if(item?.kind!=='setup'||S.busy||!usable())return;
+ // The attention list can include a Personal setup while the Project tab is selected.
+ if(item.workspace_id!==S.workspace?.id){
+  const personal=S.workspaces.find(w=>w.id===item.workspace_id&&w.kind==='personal');
+  if(!personal){setError('This Pip setup is unavailable here. Refresh Pips and try again.');return;}
+  await enterWorkspace(personal);
+ }
+ if(S.busy||!usable())return;
+ const token=scope();S.busy=true;render();
+ try{
+  const answer=await send('get_pip_setup',{setup_id:item.card});
+  if(token!==scope())return;
+  const setup=pipSetup(answer.setup,S.workspace.id,item.card);
+  if(setup.status!=='pending')throw Error('This setup was already answered. Refresh Pips.');
+  await send('reject_pip_setup',{setup_id:setup.id,expected_digest:setup.digest});
+  if(token!==scope())return;
+  setupRows=setupRows.filter(row=>row.id!==setup.id);
+  S.notice=setup.pip_id?'Dismissed. That Pip was not changed.':'Dismissed. No Pip was created.';
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();void loadSetups();void loadAttention();}}
+}
 async function resolveSetup(review){
  if(S.busy||review!==S.review||review.scope!==scope()||!usable())return;
  if(reviewBlocked(review)){review.error='This expired. Ask DGC again.';renderReview();return;}
@@ -2481,7 +2503,7 @@ async function navigateAttention(value){
  // The Sessions home's "N more need you · Show all": this home at Needs attention, open in full, your Pips under it.
  if(value.all===true){
   if(S.pipSearch){S.pipSearch='';draft.pipSearch='';jobsExtra=[];S.jobsNext=null;}
-  clearSelection();S.selected='';S.create=false;S.overview=true;attentionExpanded=true;rememberView();await refresh(false);await loadAttention();render();
+  clearSelection();S.selected='';S.create=false;S.overview=true;attentionExpanded=2;rememberView();await refresh(false);await loadAttention();render();
   (document.querySelector('.attention')||document.querySelector('.simple-home'))?.scrollIntoView?.({block:'start'});return;
  }
  if(typeof setup==='string'){
@@ -3922,6 +3944,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.computerReset){void pipsSettingsCall('reset_pip_computer',{pip_id:target.dataset.computerReset},r=>r?.reset?'Its computer is fresh: signed out, no history. Its Files are still there.':'Resetting its computer: it is fresh the next time it opens. Its Files stay.');return;}
   if(target.dataset.appRemove){void pipsSettingsCall('disconnect_pip_app_link',{pip_id:target.dataset.appRemovePip,link_id:target.dataset.appRemove},'Removed. That Pip no longer uses the account.');return;}
   if(target.dataset.attention){const item=S.attention?.items.find(i=>i.id===target.dataset.attention);if(item)void navigateFromHost(attentionNavigation(item)).catch(setError);return;}
+  if(target.dataset.attentionDismiss){
+   const item=S.attention?.items.find(i=>i.id===target.dataset.attentionDismiss);
+   if(item?.kind==='setup')void dismissSetupFromAttention(item);
+   return;
+  }
   if(target.dataset.eyesSwitch){const model=target.dataset.eyesSwitch,choice={mode:'model',model};void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${model}, which can see.`).then(ok=>{if(ok)void loadEyes();});return;}
   if(target.dataset.levelAsk!==undefined){void setLevel('ask');return;}
   if(target.dataset.dashboardRemove){const id=target.dataset.dashboardRemove;if(artifactsState.value){const list=artifactsState.value.dashboards.filter(d=>d!==id),known=!artifactsState.dashboards||artifactsState.dashboards.some(d=>d.id===id);void setArtifacts({dashboards:dashboardsToSave(list)},known?`${S.pip?.name||'It'} no longer refreshes “${dashboardTitle(id)}”.${goneNote(list)}`:`Removed. ${S.pip?.name||'It'} refreshes ${list.length?'the others':'no dashboards'} now.`);}return;}
@@ -3932,7 +3959,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.sitesAll){sitesAll=true;render();return;}
   if(target.dataset.noteForget){const n=(S.notes||[]).find(x=>x.id===target.dataset.noteForget);void noteCall('forget_pip_note',{note_id:target.dataset.noteForget},()=>n?`Forgotten: ${n.text}`:'Forgotten.');return;}
   if(target.dataset.noteForgetAll){if(target.dataset.noteForgetAll==='ask'){noteConfirmAll=true;render();}else if(target.dataset.noteForgetAll==='no'){noteConfirmAll=false;render();}else void noteCall('forget_pip_note',{all:true},()=>{noteConfirmAll=false;return 'Forgotten. It remembers nothing about you now.';});return;}
-  if(target.dataset.attentionMore!==undefined){attentionExpanded=target.dataset.attentionMore==='1';render();return;}
+  if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;render();return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
   if(target.dataset.pipRead){markPipRead(target.dataset.pipRead);return;}

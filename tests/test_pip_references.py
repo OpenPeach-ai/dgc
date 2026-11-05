@@ -33,7 +33,8 @@ class PipReferenceTests(unittest.TestCase):
         listed = refs.discover(self.cfg, self.session)
         pinned = refs.resolve(self.cfg, self.session, [self.pin()])
         self.assertEqual(listed["pips"], pinned["pips"])
-        self.assertEqual(set(listed["pips"][0]), {"pip_id", "name", "pip_type", "status", "job_version", "lifecycle_revision"})
+        self.assertEqual(set(listed["pips"][0]), {"pip_id", "name", "pip_type", "status", "job_version", "lifecycle_revision", "scope", "workspace_id"})
+        self.assertEqual(listed["pips"][0]["scope"], "project")
         self.assertNotIn("goal", json.dumps(pinned))
         self.assertEqual(list(self.registry.db.iterdump()), before)
         self.assertEqual(self.registry.path.stat().st_mode, mode)
@@ -56,6 +57,21 @@ class PipReferenceTests(unittest.TestCase):
         with patch.object(refs, "_project", side_effect=AssertionError("must not decode")):
             with self.assertRaisesRegex(RegistryError, "not in this chat"):
                 refs.resolve(self.cfg, self.session, [self.pin(other)])
+
+    def test_personal_pip_is_visible_and_pinned_without_exposing_other_projects(self):
+        personal = self.registry.personal()
+        own = self.store.create(personal["id"], "Personal Scout", "Private goal", "user")
+        other_root = self.base / "other"; other_root.mkdir()
+        foreign = self.registry.resolve(other_root)
+        other = self.store.create(foreign["id"], "Other project", "Foreign goal", "user")
+        listed = refs.discover(self.cfg, self.session)
+        self.assertEqual({p["pip_id"] for p in listed["pips"]}, {self.pip["id"], own["id"]})
+        self.assertEqual(next(p for p in listed["pips"] if p["pip_id"] == own["id"])["scope"], "personal")
+        pinned = refs.resolve(self.cfg, self.session, [self.pin(own)])
+        self.assertEqual(pinned["pips"][0]["workspace_id"], personal["id"])
+        self.assertEqual(pinned["pips"][0]["scope"], "personal")
+        with self.assertRaisesRegex(RegistryError, "not in this chat"):
+            refs.resolve(self.cfg, self.session, [self.pin(other)])
 
     def test_existing_session_cannot_change_bound_workspace(self):
         root = self.base / "other"; root.mkdir(); self.registry.resolve(root)

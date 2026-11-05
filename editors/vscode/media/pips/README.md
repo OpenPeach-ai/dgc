@@ -6,6 +6,10 @@ draws in, so the felt stays sharp on high-density screens). Eyes are SVG
 paths drawn over the atlas; Lens's eyes are clipped inside its glasses. There is no
 WebGL, canvas, remote asset or per-character timer.
 
+`plush-body-mask.png` marks only the fabric in that atlas. Profile colour choices
+tint a masked copy of the body while the original accessories stay unchanged.
+Rebuild the mask from the original atlas with `python3 scripts/build-pip-body-mask.py`.
+
 The renderer has no dependencies and does no DOM work on import. It registers
 `globalThis.PipConcepts.plush` with:
 

@@ -86,7 +86,7 @@ test("the Pips that need you sit above your sessions, each with its face, what i
       return { rows: [...root.querySelectorAll(".home-pip-row")].map((r) => [r.querySelector("strong").textContent, r.querySelector("small").textContent,
         r.querySelector(".home-pip-badge")?.textContent || "", r.querySelector(".dgc-plush")?.dataset.character || "", r.querySelector(".dgc-plush")?.dataset.state || ""]),
         above: root.getBoundingClientRect().bottom <= head.getBoundingClientRect().top + 1,
-        faceLoaded: [...root.querySelectorAll(".dgc-plush image")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp") };
+        faceLoaded: [...root.querySelectorAll(".dgc-plush-rig > image:first-child")].every((i) => new URL(i.getAttribute("href"), document.baseURI).pathname === "/ext/media/pips/plush-bodies.webp") };
     });
     assert.deepEqual(m.rows, [["India Market Brief", "2 waiting for you", "2", "quill", "waiting_approval"],
       ["Core", "3 new findings", "", "core", "success"]],

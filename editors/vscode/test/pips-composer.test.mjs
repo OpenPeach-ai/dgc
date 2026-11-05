@@ -175,7 +175,7 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
   const sprite=`data:image/webp;base64,${readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url)).toString('base64')}`;
   const control=x.d.querySelector('.composer-effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);
   await page.setContent(`<style>${plush}\n${css}</style><main class="pip-app-root" style="width:330px;padding:12px"><div class="composer-model-menu" style="position:relative;bottom:auto">${control}</div></main>`);
-  await page.locator('.composer-effort-face image').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
+  await page.locator('.composer-effort-face .dgc-plush-rig > image:first-child').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
   for(const step of [0,2,4]){
    await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.style.setProperty('--effort',`${value*25}%`);control.style.setProperty('--face-offset',`${18-value*9}px`);},step);
    const bounds=await page.evaluate(()=>{const a=document.querySelector('.composer-effort-face').getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect();return{face:a.x+a.width/2,trackLeft:s.x,trackRight:s.right};});

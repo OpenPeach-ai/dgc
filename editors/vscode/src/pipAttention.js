@@ -54,15 +54,17 @@ const ago = (iso, now) => {
 /** The Pips home's list. `face(item)` draws the Pip's face (the home's own avatars). */
 export function attentionMarkup(page, {esc, face, expanded = false, now = Date.now(), busy = false}) {
   if (!page || !page.total) return '';
-  const shown = expanded ? page.items : page.items.slice(0, SHOWN), more = page.total - shown.length;
-  const rows = shown.map(i => `<li><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
+  const shown = expanded === 2 ? page.items : expanded ? page.items.slice(0, SHOWN) : [];
+  const rows = shown.map(i => `<li class="attention-item"><button type="button" class="attention-row" data-attention="${esc(i.id)}"${busy ? ' disabled' : ''}>`
     + `${face(i)}<span class="attention-copy"><strong>${esc(i.title)}</strong>${i.detail ? `<span class="attention-detail">${esc(i.detail)}</span>` : ''}`
-    + `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small></span></button></li>`).join('');
-  const toggle = more > 0 && page.items.length > shown.length
-    ? `<button type="button" class="link attention-more" data-attention-more="1">Show all ${page.total.toLocaleString('en-US')}</button>`
-    : expanded && page.items.length > SHOWN ? '<button type="button" class="link attention-more" data-attention-more="0">Show fewer</button>' : '';
+    + `<small>${esc(i.pip_name || 'DGC')} · ${LABELS[i.kind]} · ${esc(ago(i.created_at, now))}</small></span></button>`
+    + (i.kind === 'setup' ? `<button type="button" class="attention-dismiss" data-attention-dismiss="${esc(i.id)}" aria-label="Dismiss ${esc(i.title)}"${busy ? ' disabled' : ''}>Dismiss</button>` : '')
+    + '</li>').join('');
+  const toggle = expanded && page.items.length > SHOWN
+    ? `<button type="button" class="link attention-more" data-attention-more="${expanded === 2 ? 1 : 2}">${expanded === 2 ? 'Show fewer' : `Show all ${page.total.toLocaleString('en-US')}`}</button>` : '';
   const cut = page.truncated && expanded ? `<p class="muted attention-cut">The newest ${page.items.length} of ${page.total.toLocaleString('en-US')}. Each Pip’s chat has the rest.</p>` : '';
-  return `<section class="attention" aria-label="Needs attention"><h2>Needs attention <span class="attention-count">${page.total.toLocaleString('en-US')}</span></h2><ul class="attention-list">${rows}</ul>${toggle}${cut}</section>`;
+  return `<section class="attention" aria-label="Needs attention"><button type="button" class="attention-toggle" data-attention-more="${expanded ? '0' : '1'}" aria-expanded="${Boolean(expanded)}" aria-controls="attention-list">Needs attention <span class="attention-count">${page.total.toLocaleString('en-US')}</span><span class="codicon codicon-chevron-${expanded ? 'up' : 'down'}" aria-hidden="true"></span></button>`
+    + `<ul class="attention-list" id="attention-list"${expanded ? '' : ' hidden'}>${rows}</ul>${toggle}${cut}</section>`;
 }
 
 /** The chat card a row points at, for scrolling to it once the chat has drawn it. */

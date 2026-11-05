@@ -125,8 +125,11 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const calls = globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.describe(a.call.tool, args, plugin.name) : null;
   const title = calls ? `Do this in ${esc(plugin.name)}?` : `Run ${esc(a.call.tool)} in ${esc(plugin.name)}?`;
   // A call that sends or changes something shows every input it sends under its line (pluginCalls.js fields).
-  const shown = (calls ? `<ul class="allow-calls">${calls.map(c => `<li>${esc(c.line)}${c.fields.length ? inputs(esc, c.fields) : ''}</li>`).join('')}</ul>` : inputs(esc, args))
-    + sentInputs(esc, a.call.tool, args);
+  const summary = calls?.length ? `${esc(calls[0].line)}${calls.length > 1 ? ` · ${calls.length - 1} more` : ''}`
+    : `${esc(a.call.tool)} · ${esc(plugin.name)}`;
+  const shown = `<details class="allow-details"><summary><span class="allow-preview">${summary}</span><span>Details</span></summary>`
+    + (calls ? `<ul class="allow-calls">${calls.map(c => `<li>${esc(c.line)}${c.fields.length ? inputs(esc, c.fields) : ''}</li>`).join('')}</ul>` : inputs(esc, args))
+    + sentInputs(esc, a.call.tool, args) + '</details>';
   return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${calls ? title.replace(/<[^>]*>/g, '') : esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
