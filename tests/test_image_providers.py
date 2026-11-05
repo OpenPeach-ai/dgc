@@ -56,6 +56,17 @@ class OpenAICompatible(Fakes):
         pictures = P.adapter_for("localai").generate(generator("localai", self.fake.url), "", P.Request("x"))
         self.assertEqual(pictures[0].mime, "image/png")
 
+    def test_a_provider_cannot_point_an_image_download_at_another_local_service(self):
+        with self.assertRaises(P.ImageError) as caught:
+            P.download(f"{self.fake.url}/files/a.png", provider="openai", base="https://api.example.test/v1")
+        self.assertIn("unsafe image address", caught.exception.message)
+        self.assertFalse(any(row["path"] == "/files/a.png" for row in self.fake.requests))
+
+    def test_a_local_generator_image_cannot_redirect_to_another_local_service(self):
+        with self.assertRaises(P.ImageError) as caught:
+            P.download(f"{self.fake.url}/files/redirect-private", provider="localai", base=self.fake.url)
+        self.assertIn("outside its own address", caught.exception.message)
+
     def test_an_edit_goes_to_images_edits_as_multipart_with_its_mask(self):
         request = P.Request("make it blue", images=[P.InputImage(png(), "image/png", "in.png")],
                             mask=P.InputImage(png(), "image/png", "mask.png"))

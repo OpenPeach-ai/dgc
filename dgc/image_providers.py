@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
+import ipaddress
 import json
 import os
 import random
@@ -179,6 +180,19 @@ def own_address(url: str, base: str, *, family: bool = False) -> bool:
             and (host == domain or host.endswith("." + domain)))
 
 
+def _local_base(base: str) -> bool:
+    """A user-configured local generator; it may return images from its own origin only."""
+    scheme, host, port = origin(base)
+    if scheme not in ("http", "https") or not host or not port:
+        return False
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        found = [ipaddress.ip_address(item[4][0].split("%", 1)[0]) for item in addresses if item[4]]
+    except (OSError, ValueError):
+        return False
+    return bool(found) and all(not address.is_global for address in found)
+
+
 _KEPT_ON_REDIRECT = frozenset({"user-agent", "accept", "accept-encoding", "accept-language"})
 
 
@@ -193,6 +207,19 @@ class _KeysStayHome(urllib.request.HTTPRedirectHandler):
                               if name.lower() in _KEPT_ON_REDIRECT}
             follow.unredirected_hdrs = {}
         return follow
+
+
+class _LocalImageRedirect(urllib.request.HTTPRedirectHandler):
+    """A local generator's image stays at the exact configured origin, through every redirect."""
+
+    def __init__(self, base: str):
+        self.base = base
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urlsplit(newurl)
+        if target.username is not None or target.password is not None or not same_origin(newurl, self.base):
+            raise ImageError("failed", "the local generator pointed to an image outside its own address")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 OPENER = urllib.request.build_opener(_KeysStayHome())
@@ -226,7 +253,7 @@ def _may_have_charged() -> None:
 
 
 def http(method: str, url: str, *, headers=None, body: bytes | None = None, payload=None, timeout: float = 60.0,
-         provider: str = "", limit: int = MAX_IMAGE_BYTES, cancel=None) -> Answer:
+         provider: str = "", limit: int = MAX_IMAGE_BYTES, cancel=None, opener=None) -> Answer:
     """One request. A connection that can't be made is ``server_down``; any HTTP answer comes back as it is."""
     _check_cancel(cancel)
     head = {"User-Agent": USER_AGENT, **(headers or {})}
@@ -235,7 +262,7 @@ def http(method: str, url: str, *, headers=None, body: bytes | None = None, payl
         head.setdefault("Content-Type", "application/json")
     request = urllib.request.Request(url, data=body, headers=head, method=method)
     try:
-        with OPENER.open(request, timeout=timeout) as response:
+        with (opener or OPENER).open(request, timeout=timeout) as response:
             if method != "GET" and 200 <= response.status < 300:
                 _may_have_charged()            # the provider took the job
             data = response.read(limit + 1)
@@ -262,23 +289,44 @@ def http(method: str, url: str, *, headers=None, body: bytes | None = None, payl
         raise ImageError("server_down", f"{host} didn't answer ({words})", provider=provider) from None
 
 
-def download(url: str, *, headers=None, provider: str = "", cancel=None) -> Picture:
+def download(url: str, *, headers=None, provider: str = "", cancel=None, base: str = "") -> Picture:
     if url.startswith("data:"):
         match = re.match(r"data:([a-z0-9.+/-]+)?(;base64)?,(.*)\Z", url, re.IGNORECASE | re.DOTALL)
         if not match or not match.group(2):
             raise ImageError("failed", "the provider sent an image DGC can't read", provider=provider)
         data = base64.b64decode(match.group(3))
         return Picture(data, sniff(data) or (match.group(1) or ""))
-    if urlsplit(url).scheme not in ("https", "http"):
+    target = urlsplit(url)
+    if target.scheme not in ("https", "http") or target.username is not None or target.password is not None:
         raise ImageError("failed", "the provider sent an image address DGC won't open", provider=provider)
-    answer = http("GET", url, headers=headers, timeout=120, provider=provider, cancel=cancel)
-    if answer.status != 200:
-        raise ImageError("failed", f"the image couldn't be downloaded (HTTP {answer.status})", status=answer.status,
-                         provider=provider)
-    mime = sniff(answer.body)
+    _check_cancel(cancel)
+    from .tools import _public_destination, _fetch_public
+    try:
+        _public_destination(url)
+    except ValueError as exc:
+        if not (base and same_origin(url, base) and _local_base(base)):
+            raise ImageError("failed", f"the provider sent an unsafe image address ({exc})", provider=provider) from None
+        # LocalAI and other user-run generators can serve their own images. No proxy, no credential and no redirect
+        # to a different origin; the configured local server is the only exception to the public-address rule.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _LocalImageRedirect(base))
+        answer = http("GET", url, headers=headers, timeout=120, provider=provider, cancel=cancel, opener=opener)
+        if answer.status != 200:
+            raise ImageError("failed", f"the image couldn't be downloaded (HTTP {answer.status})",
+                             status=answer.status, provider=provider)
+        data = answer.body
+    else:
+        from requests import RequestException
+        try:
+            _final, _type, data, _encoding = _fetch_public(
+                url, max_bytes=MAX_IMAGE_BYTES,
+                binary_types=frozenset({"image/png", "image/jpeg", "image/webp", "image/gif", "application/octet-stream"}))
+        except (RequestException, ValueError) as exc:
+            raise ImageError("failed", f"the provider's image couldn't be downloaded safely ({exc})",
+                             provider=provider) from None
+    mime = sniff(data)
     if not mime:
         raise ImageError("failed", "the provider sent something that isn't an image", provider=provider)
-    return Picture(answer.body, mime)
+    return Picture(data, mime)
 
 
 def _message(answer: Answer) -> str:
@@ -403,7 +451,7 @@ class OpenAIImages(Adapter):
             payload["negative_prompt"] = request.negative
         answer = http("POST", self._url(generator, "/images/generations"), headers=_bearer(key), payload=payload,
                       timeout=TIMEOUT_S, provider=provider, cancel=cancel)
-        return self._pictures(answer, provider, request.seed, cancel)
+        return self._pictures(answer, provider, request.seed, cancel, generator["base_url"])
 
     def _edit(self, generator, key, request, model, cancel):
         provider = generator["provider"]
@@ -424,9 +472,9 @@ class OpenAIImages(Adapter):
         body, kind = _multipart(fields)
         answer = http("POST", self._url(generator, "/images/edits"), headers={**_bearer(key), "Content-Type": kind},
                       body=body, timeout=TIMEOUT_S, provider=provider, cancel=cancel)
-        return self._pictures(answer, provider, request.seed, cancel)
+        return self._pictures(answer, provider, request.seed, cancel, generator["base_url"])
 
-    def _pictures(self, answer, provider, seed, cancel):
+    def _pictures(self, answer, provider, seed, cancel, base):
         if answer.status != 200:
             error = classify(answer, provider)
             if answer.status == 404 and provider == "ollama":
@@ -446,7 +494,7 @@ class OpenAIImages(Adapter):
                 data = base64.b64decode(row.get("b64_json") or row.get("b64"))
                 picture = Picture(data, sniff(data))
             elif isinstance(row.get("url"), str):
-                picture = download(row["url"], provider=provider, cancel=cancel)
+                picture = download(row["url"], provider=provider, cancel=cancel, base=base)
             else:
                 continue
             picture.seed = seed
@@ -1182,11 +1230,11 @@ class BFL(Adapter):
             polling = str(value.get("polling_url") or "")
             if not own_address(polling, base, family=True):       # the key goes to Black Forest Labs' hosts only
                 polling = f"{base}/v1/get_result?id={quote(str(value.get('id') or ''))}"
-            out.append(self._poll(polling, key, request, progress, cancel))
+            out.append(self._poll(polling, key, request, progress, cancel, base))
             out[-1].seed = payload.get("seed")
         return out
 
-    def _poll(self, url, key, request, progress, cancel) -> Picture:
+    def _poll(self, url, key, request, progress, cancel, base) -> Picture:
         deadline = time.monotonic() + TIMEOUT_S
         tick = 0
         while time.monotonic() < deadline:
@@ -1200,7 +1248,7 @@ class BFL(Adapter):
                 sample = (value.get("result") or {}).get("sample")
                 if not isinstance(sample, str):
                     raise ImageError("failed", "Black Forest Labs said ready but sent no image", provider="bfl")
-                return download(sample, provider="bfl", cancel=cancel)
+                return download(sample, provider="bfl", cancel=cancel, base=base)
             if status in ("Request Moderated", "Content Moderated"):
                 raise ImageError("refused", f"Black Forest Labs: {status.lower()}", provider="bfl")
             if status in ("Error", "Task not found", "Failed"):
@@ -1269,7 +1317,7 @@ class Fal(Adapter):
                 continue
             if index < len(flags) and flags[index] is True:
                 continue                                 # its safety checker blacked this one out
-            picture = download(row["url"], provider="fal", cancel=cancel)
+            picture = download(row["url"], provider="fal", cancel=cancel, base=base)
             picture.seed = value.get("seed") if isinstance(value.get("seed"), int) else request.seed
             out.append(picture)
         if not out:
@@ -1338,7 +1386,7 @@ class Replicate(Adapter):
         out = []
         for url in urls[:request.count]:
             if isinstance(url, str):
-                picture = download(url, provider="replicate", cancel=cancel)
+                picture = download(url, provider="replicate", cancel=cancel, base=base)
                 picture.seed = request.seed
                 out.append(picture)
         if not out:

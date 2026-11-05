@@ -92,6 +92,12 @@ class FakeImages:
                               "body": body if payload is None else b""})
         b64 = base64.b64encode(self.picture).decode()
         # --- files the providers point at
+        if path == "/files/redirect-private":
+            h.send_response(302)
+            h.send_header("Location", "http://127.0.0.1:1/private")
+            h.send_header("Content-Length", "0")
+            h.end_headers()
+            return
         if path.startswith("/files/"):
             return h._send(200, raw=self.picture, kind="image/png")
         # --- OpenAI-compatible
