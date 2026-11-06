@@ -188,6 +188,12 @@ def secret_values(config=None) -> tuple[str, ...]:
             for pair in list(router_keys.values())[:64]:
                 if isinstance(pair, tuple) and pair:
                     add(pair[0])
+        # Saved providers a Pip runs on (secrets.json saved_providers): each one's key, wherever it turns up.
+        saved_providers = getattr(config, "_saved_providers", None)
+        if isinstance(saved_providers, dict):
+            for record in list(saved_providers.values())[:64]:
+                if isinstance(record, dict):
+                    add(record.get("api_key", ""))
         # Image generators' keys (secrets.json image_key_<id>), and a provider's key taken from the environment.
         image_keys = getattr(config, "_image_keys", None)
         if isinstance(image_keys, dict):

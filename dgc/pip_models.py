@@ -9,6 +9,10 @@ A subscription choice names only the engine (``{"mode": "subscription", "engine"
 Pips default model (config ``pips_model``) when one is set: a model on DGC's own connection, for every Pip on Default.
 With none it is "Same as DGC": DGC's own model, or its subscription default when it has one. A subscription runs a
 Personal or Project Pip turns on that CLI with DGC's tools alone (pip_brain).
+
+API 74: a provider saved in Settings -> Models is chosen by its id and a model (``{"mode": "provider", "provider":
+"provider_<32 hex>", "model": ...}``). The Pip keeps only those two; the address and key stay in secrets.json
+(Config.saved_provider), and the run pins the address and reads the key when it starts (provider_view).
 """
 from __future__ import annotations
 
@@ -29,6 +33,9 @@ MAX_LIST_BYTES = 64 * 1024
 _MODEL_ID = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}\Z")
 _API_MODES = frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"})
 _ROUTER_ID = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
+_PROVIDER_ID = re.compile(r"provider_[a-f0-9]{32}\Z")
+PROVIDER_REMOVED = ("The provider this Pip runs on was removed from Settings → Models. Choose another model for this "
+                    "Pip, or add the provider again and choose it.")
 
 
 def _model_id(value):
@@ -60,7 +67,12 @@ def validate_model_choice(value) -> dict:
         if not isinstance(system, str) or not _ROUTER_ID.fullmatch(system):
             raise RegistryError("invalid_model_choice", "Choose a DGC Router system by its id.")
         return {"mode": "router", "system": system, "model": _model_id(value["model"])}
-    raise RegistryError("invalid_model_choice", "A Pip model choice accepts only mode and, for an explicit choice, model, engine, or a DGC Router system and model.")
+    # API 74: a provider saved in Settings -> Models, by its id. The Pip's own data holds this and nothing more.
+    if value.get("mode") == "provider" and set(value) == {"mode", "provider", "model"}:
+        if not isinstance(value["provider"], str) or not _PROVIDER_ID.fullmatch(value["provider"]):
+            raise RegistryError("invalid_model_choice", "Choose a provider saved in Settings → Models.")
+        return {"mode": "provider", "provider": value["provider"], "model": _model_id(value["model"])}
+    raise RegistryError("invalid_model_choice", "A Pip model choice accepts only mode and, for an explicit choice, model, engine, a saved provider and model, or a DGC Router system and model.")
 
 
 def pips_default(config) -> str:
@@ -147,6 +159,32 @@ def saved_route_view(config):
         return config
     follow_saved_route(view)
     return view
+
+
+def provider_view(config, choice):
+    """A private view of ``config`` on the saved provider ``choice`` names: its address, API and key, and no other's.
+    Everything that talks to a Pip's model takes this view, so the default connection's key can't reach this host, nor
+    this key another. Refuses in plain words when the provider was removed, and never falls back to another one."""
+    reader = getattr(config, "saved_provider", None)
+    record = reader(choice["provider"]) if callable(reader) else None
+    if record is None:
+        raise RegistryError("model_not_available", PROVIDER_REMOVED)
+    from .config import _provider_secret_identity
+    view = config.clone_for_root(config.project_root)
+    view.data.update(base_url=record["base_url"], api_mode=record["api_mode"], api_key=record["api_key"],
+                     model=str(choice.get("model") or record["model"]), subscription_engine="", subscription_model="",
+                     subscription_effort="")
+    view._provider_secret_identity = {**view._provider_secret_identity,
+                                      "api_key": _provider_secret_identity(view.data, "api_key")}
+    return view
+
+
+def run_view(config, settings):
+    """``config`` as a run with these pinned settings talks to its model: the saved provider's view for a Pip on one,
+    else ``config`` itself."""
+    if isinstance(settings, dict) and "provider" in settings:
+        return provider_view(config, {"provider": settings["provider"], "model": settings.get("model")})
+    return config
 
 
 def _connection(config):
@@ -352,6 +390,15 @@ def resolve_model_choice(config, choice) -> str:
     if choice["mode"] == "router":
         router_pin(config, choice)
         return router_label(choice)
+    if choice["mode"] == "provider":
+        view = provider_view(config, choice)
+        _connection(view)
+        model = _safe_model_id(choice["model"], secret_values(view))
+        # The model saved with the provider is what Work runs on it, whatever the host lists (some list none).
+        saved = view.saved_provider(choice["provider"])
+        if not saved or (model != saved["model"] and model not in _catalog(view)):
+            raise RegistryError("model_not_available", "This provider doesn't offer the selected model now. Refresh models and choose another for this Pip.")
+        return model
     if is_subscription(config, choice):
         from .pip_brain import label, route
         return label(route(config, choice))
@@ -391,6 +438,22 @@ def validate_pinned_connection(config, settings) -> None:
         reason = available(brain["engine"])
         if reason:
             raise RegistryError("model_changed", reason)
+        return
+    if isinstance(settings, dict) and "provider" in settings:
+        # A saved provider's run: never the default connection. A provider removed since it was queued stops it, in words.
+        if not isinstance(settings["provider"], str) or not _PROVIDER_ID.fullmatch(settings["provider"]):
+            raise RegistryError("model_changed", "The run has no valid pinned model connection. Start a new run.")
+        try:
+            view = run_view(config, settings)
+        except RegistryError:
+            raise RegistryError("model_changed", PROVIDER_REMOVED) from None
+        try:
+            same = _connection(view) == _connection(settings)
+            _model_id(settings.get("model"))
+        except RegistryError:
+            raise RegistryError("model_changed", "The run has no valid pinned model connection. Start a new run.") from None
+        if not same:
+            raise RegistryError("model_changed", "This Pip's provider changed after the run was queued. Start a new run.")
         return
     # A pin is made from the route Settings saved (pips._model_settings), so that is what it is checked against: whoever
     # asks can be on another, a chat that switched provider or a runner started before the default changed.

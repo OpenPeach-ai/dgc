@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- A Pip can run on any provider saved in Settings → Models, with its models, as a Work session can (Pips API 74, `model_choice` `{"mode": "provider", "provider": id, "model": id}`). The Pip keeps only the id and the model; the key is kept in `secrets.json` and read when a run starts. New command `save_model_provider`, answered by `model_provider_saved`, offered as `ready.capabilities.saved_model_providers`. A removed provider stops the Pip's next run in plain words, and never falls back to another.
 - `dgc update` targets the launcher that is running, including a launcher that is a script rather than a link. It ignores an install record naming a temporary folder or another install, and it no longer reports success while the `dgc` on your PATH is a different one it did not change.
 - A Pip run is pinned to the saved model connection, not the route of the chat that queued it. Before, a chat on another provider made every Pip message it sent fail with `model_changed`. The checks when a run is queued and when it starts compare against that same saved connection, and a runner started before the default changed follows it, with its key.
 - A queued message can be removed or moved before its turn starts (`queue_remove`, `queue_reorder`, offered as `ready.capabilities.queue_edit`, answered by the `queue_changed` event).

@@ -287,6 +287,14 @@ context window (the Pip's own chat options, as its prompt box saves them with `s
 the Pips default, or a new Pip's pick on its setup card. The Pip's page shows a window the chat set the
 next time it reads the Pip's messages (at most every 4 seconds while its chat is open).
 
+**Saved providers** (API 74). `model_choice` also takes `{mode: "provider", provider: "provider_<32 hex>", model}`, a
+provider saved in Settings → Models. The saved list belongs to the editor, so its host adds `providers` (`[{id, name,
+default, models}]`, no address and no key) to its own `list_pip_models` answer. Before a request carrying such a choice,
+the host sends the new top-level command `save_model_provider` (`id`, `name`, `base_url`, `model`, `api_mode`, `api_key`,
+offered as `ready.capabilities.saved_model_providers`, answered by `model_provider_saved`), and with `remove: true` when
+the provider is removed. The run pins the address, API and id, and reads the key when it starts. A removed provider is
+refused with `model_not_available` when a run is queued and `model_changed` when a queued run starts, in plain words.
+
 **DGC Router** (API 70). No new request and no event changes. `model_choice` also takes `{mode: "router"}` (any of
 the user's systems with the Pips job) and `{mode: "router", system, model}` (that one system and model). The run
 pins the choice, not an address: a worker is leased when the run leaves the queue, and while every worker that could

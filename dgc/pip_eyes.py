@@ -208,7 +208,7 @@ def _pip_model(store, pip_id: str, config) -> str:
     from .pip_models import _model_id, default_model
     pip = store._job(pip_id)
     choice = pip.get("model_choice") or {"mode": "default"}
-    return _model_id(choice["model"] if choice.get("mode") == "model" else default_model(config))
+    return _model_id(choice["model"] if choice.get("mode") in ("model", "provider") else default_model(config))
 
 
 def status(store, pip_id: str, config) -> dict:
@@ -349,9 +349,12 @@ def answer(store, pip_id: str, text, actor: str, config) -> dict | None:
     vision = str(asked.get("vision_model") or "")
     if which == "switch":
         from .pip_models import resolve_model_choice
-        choice = {"mode": "model", "model": vision}
-        resolve_model_choice(config, choice)
         pip = store._job(pip_id)
+        held = pip.get("model_choice") or {}
+        # A Pip on a saved provider stays on it: the model that can see was found there.
+        choice = ({"mode": "provider", "provider": held["provider"], "model": vision}
+                  if held.get("mode") == "provider" else {"mode": "model", "model": vision})
+        resolve_model_choice(config, choice)
         proposal = store.propose(pip_id, pip["current_version"], {"model_choice": choice}, actor,
                                  "Switched to a model that can see, from the Pip's chat.")
         store.accept(pip_id, proposal["id"], pip["current_version"], actor)

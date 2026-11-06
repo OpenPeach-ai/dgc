@@ -197,11 +197,20 @@ export function pipModels(value) {
   const subscriptions=value.subscriptions===undefined?[]:value.subscriptions,engine=value.default_engine===undefined?null:value.default_engine;
   if(!Array.isArray(subscriptions)||subscriptions.length>8||!subscriptions.every(s=>record(s)&&Object.hasOwn(SUBSCRIPTION_NAMES,s.engine)&&typeof s.name==='string'&&s.name)
     ||engine!==null&&!(record(engine)&&typeof engine.engine==='string'&&typeof engine.name==='string'&&typeof engine.available==='boolean'&&(engine.reason===undefined||typeof engine.reason==='string')))throw new Error('Models didn’t load. You can still use the same model as DGC.');
-  return {...value,subscriptions,default_engine:engine};
+  return {...value,subscriptions,default_engine:engine,providers:value.providers===undefined?undefined:pipProviders(value.providers)};
 }
 // API 70 (DGC Router): a Pip may run on any computer with the Pips job ({mode:'router'}) or on one system and model
 // ({mode:'router',system,model}); list_pip_models' `router` lists them while the Router is on.
 const ROUTER_SYSTEM=/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/,MODEL_ID=/^[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}$/;
+// API 74: a provider saved in Settings -> Models ({mode:'provider',provider,model}). The editor adds `providers` to the
+// list_pip_models answer: names and model ids, never an address or a key.
+const PROVIDER_ID=/^provider_[a-f0-9]{32}$/;
+export function providerModelChoice(m){return record(m)&&m.mode==='provider'&&Object.keys(m).sort().join()==='mode,model,provider'&&typeof m.provider==='string'&&PROVIDER_ID.test(m.provider)&&typeof m.model==='string'&&MODEL_ID.test(m.model)&&!m.model.includes('://');}
+export function pipProviders(value){
+  if(!Array.isArray(value))return[];
+  return value.filter(p=>record(p)&&typeof p.id==='string'&&PROVIDER_ID.test(p.id)&&typeof p.name==='string'&&p.name&&Array.isArray(p.models)).slice(0,16)
+    .map(p=>({id:p.id,name:p.name,default:p.default===true,models:p.models.filter(id=>typeof id==='string'&&MODEL_ID.test(id)&&!id.includes('://')).slice(0,500)}));
+}
 export function routerModelChoice(m){return record(m)&&m.mode==='router'&&(Object.keys(m).join()==='mode'||Object.keys(m).sort().join()==='mode,model,system'&&typeof m.system==='string'&&ROUTER_SYSTEM.test(m.system)&&typeof m.model==='string'&&MODEL_ID.test(m.model)&&!m.model.includes('://'));}
 export function pipRouter(value){
   if(value===undefined||value===null)return null;
@@ -222,8 +231,13 @@ export function defaultRunsOn(models){
   if(pin.startsWith('router:')){const found=routerChoices(router).find(([v])=>v===pin);return found?found[1].replace(/ \(offline\)$/,''):'DGC Router · '+pin.slice(7).replace('/',' · ');}
   return models?.default_engine?.name||(typeof models?.default_model==='string'?models.default_model:'');
 }
-export function modelChoice(value,models,subscriptions=[],router=null) {
+export function modelChoice(value,models,subscriptions=[],router=null,providers=[]) {
   if(value==='default')return{mode:'default'};
+  if(typeof value==='string'&&value.startsWith('provider:')){
+    const cut=value.indexOf(':',9),provider=value.slice(9,cut),model=value.slice(cut+1);
+    if(cut<0||!providers.some(p=>p.id===provider&&p.models.includes(model)))throw new Error('Choose Default or a model from the list.');
+    return{mode:'provider',provider,model};
+  }
   if(typeof value==='string'&&(value==='router'||value.startsWith('router:'))){
     if(!router||!routerChoices(router).some(([v])=>v===value))throw new Error('Choose Default or a model from the list.');
     if(value==='router')return{mode:'router'};
@@ -239,8 +253,8 @@ export function modelChoice(value,models,subscriptions=[],router=null) {
   if(!id||!models.some(m=>m.id===id))throw new Error('Choose Default or a model from the list.');
   return{mode:'model',model:id};
 }
-export const modelValue=choice=>record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:routerModelChoice(choice)?(choice.system?`router:${choice.system}/${choice.model}`:'router'):'default';
-export const modelLabel=value=>record(value)&&value.mode==='model'&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:routerModelChoice(value)?(value.system?`${value.model} on ${value.system} (DGC Router)`:'DGC Router (any Pip system)'):'Default';
+export const modelValue=choice=>providerModelChoice(choice)?`provider:${choice.provider}:${choice.model}`:record(choice)&&choice.mode==='model'?'model:'+choice.model:record(choice)&&choice.mode==='subscription'?'subscription:'+choice.engine:routerModelChoice(choice)?(choice.system?`router:${choice.system}/${choice.model}`:'router'):'default';
+export const modelLabel=value=>record(value)&&['model','provider'].includes(value.mode)&&typeof value.model==='string'?value.model:record(value)&&value.mode==='subscription'&&Object.hasOwn(SUBSCRIPTION_NAMES,value.engine)?SUBSCRIPTION_NAMES[value.engine]:routerModelChoice(value)?(value.system?`${value.model} on ${value.system} (DGC Router)`:'DGC Router (any Pip system)'):'Default';
 // Said once, where a subscription is chosen for a Pip: its scheduled runs use the user's own plan.
 export const subscriptionUsage=name=>`Its replies and routines use your ${name} plan’s usage.`;
 export function presentation(pip, runs, connected, runnerState) {

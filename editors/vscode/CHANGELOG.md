@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A Pip's model menu lists every provider saved in Settings → Models, by name, with its models, as a Work session's does. The Pip keeps its choice after a reload. If you remove that provider, its prompt box and its next run say so. The menu now looks and works as Work's: plain rows with a check on the chosen one, and "Add provider in Settings…". Its search box is gone, and Refresh models stays only for a list that failed to load.
 - A Pip always runs on the provider Settings saved. A message sent from a chat that had switched provider, or that was open when the default changed, no longer fails with "the configured endpoint changed".
 - Settings → Models: with one provider it is simply the default; with several, each has a Default checkbox. A saved subscription whose CLI has gone or signed out says so and how to fix it.
 - Updating the CLI from the editor runs from a neutral folder, so a folder named `dgc` in your home can't break it.
