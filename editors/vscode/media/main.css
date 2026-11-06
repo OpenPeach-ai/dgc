@@ -1726,6 +1726,11 @@ body.vscode-light .cache-clock[data-cache-window="unknown"] { opacity: .6; }
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
   box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); z-index: 20; }
 #modelmenu { width: min(260px, calc(100vw - 20px)); min-width: min(240px, calc(100vw - 20px)); }
+#modelmenu:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
+#modelmenu .reasoning-card { flex: none; }
+#modelmenu .model-options:not([hidden]) { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+#modelmenu .model-options > .mrow, #modelmenu .model-options > .mhead { flex: none; }
+#modelmenu .model-list-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .reasoning-card { padding: 0; }
 .model-summary-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-summary > .codicon:first-child { color: var(--accent); }

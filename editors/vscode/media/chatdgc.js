@@ -3735,7 +3735,8 @@
     list.append(...options);
     modelMenu.replaceChildren(header, list, el("div", "cd-menu-sep"), el("div", "cd-menu-kicker", "Thinking"), dialNode());
     showDial();
-    list.querySelector(".cd-menu-row.sel")?.scrollIntoView({ block: "nearest" });
+    const selected = list.querySelector(".cd-menu-row.sel");
+    if (selected) list.scrollTop = Math.max(0, selected.offsetTop - list.offsetTop - list.clientHeight / 2);
   }
   function closeModelMenu(focusPill) {
     if (modelMenu.hidden) return;

@@ -401,7 +401,7 @@ function continuityMarkup(){
 // effort, its menu is the reasoning card (slider; the model list one click deeper), and the context
 // chip shows how full the window is, with the same meter in its menu.
 const EFFORT_NAME={off:'Off',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high'};
-S.modelListOpen=false;S.composerNoteOpen=false;S.chatContext=null;let chatContextSeq=0;
+S.modelListOpen=false;S.modelProviderView=false;S.modelProviderChoice='';S.composerNoteOpen=false;S.chatContext=null;let chatContextSeq=0;
 function composerNote(text){
  const long=text.length>160;
  return `<p class="composer-note${long&&!S.composerNoteOpen?' clamped':''}">${esc(text)}</p>${long?`<button type="button" class="composer-more" data-composer-more aria-expanded="${S.composerNoteOpen}">${S.composerNoteOpen?'Show less':'Show more'}</button>`:''}`;
@@ -416,6 +416,34 @@ async function loadChatContext(){
   S.chatContext={...v,breakdown:parts};render();}
  catch{if(token===scope()&&sequence===chatContextSeq){S.chatContext=null;render();}}
 }
+function currentChatProvider(value){
+ if(value.startsWith('subscription:'))return value;
+ if(value==='router'||value.startsWith('router:'))return 'router';
+ if(value==='default'&&routerOffer()?.pips_default)return 'router';
+ if(value==='default'&&S.defaultEngine?.available)return 'subscription:'+S.defaultEngine.engine;
+ return 'connection';
+}
+function chatModelListMarkup(selected,locked,reviewed,current,subs,usage){
+ const routed=routerChoices(routerOffer());
+ const providers=[{key:'connection',label:'DGC connection'},...(routed.length?[{key:'router',label:'DGC Router'}]:[]),
+  ...subs.map(x=>({key:'subscription:'+x.engine,label:x.name}))];
+ const provider=providers.some(x=>x.key===S.modelProviderChoice)?S.modelProviderChoice:currentChatProvider(selected);
+ const matches=s=>s.toLowerCase().includes(draft.chatModelSearch.toLowerCase());
+ if(S.modelProviderView)return `<div class="composer-model-list"><p class="composer-scope">Provider</p><div class="composer-model-options" role="listbox" aria-label="Providers">${providers.map(x=>`<button type="button" role="option" data-chat-provider="${esc(x.key)}" aria-selected="${provider===x.key}">${esc(x.label)}</button>`).join('')}</div></div>`;
+ let rows='';
+ if(provider==='connection'){
+  rows=(currentChatProvider('default')==='connection'?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
+   S.models.filter(m=>matches(m.name+' '+m.id)).map(m=>`<button type="button" role="option" data-chat-model="model:${esc(m.id)}" aria-selected="${selected==='model:'+m.id}"${locked?' disabled':''}>${esc(m.name)}${m.name!==m.id?`<small>${esc(m.id)}</small>`:''}</button>`).join('');
+ }else if(provider==='router'){
+  rows=(currentChatProvider('default')==='router'?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
+   routed.filter(([,label])=>matches(label)).map(([value,label])=>`<button type="button" role="option" data-chat-model="${esc(value)}" aria-selected="${selected===value}"${locked?' disabled':''}>${esc(label)}${value==='router'?'<small>Any computer with the Pips job</small>':''}</button>`).join('');
+ }else{
+  const sub=subs.find(x=>'subscription:'+x.engine===provider);
+  rows=(currentChatProvider('default')===provider?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
+   (sub&&matches(sub.name)?`<button type="button" role="option" data-chat-model="${esc(provider)}" aria-selected="${selected===provider}"${locked?' disabled':''}>${esc(sub.name)}<small>Your signed-in subscription</small></button>`:'');
+ }
+ return `<div class="composer-model-list"><button type="button" id="chat-model-providers" class="composer-model-back">← Providers</button><label class="sr-only" for="chatModelSearch">Search models</label><input id="chatModelSearch" data-draft="chatModelSearch" value="${esc(draft.chatModelSearch)}" placeholder="Search models" autocomplete="off">${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models">${rows}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError&&provider==='connection'?errorMarkup(S.modelsError):''}${current&&provider==='connection'&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${usage&&provider.startsWith('subscription:')?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${button('chat-refresh-models','Refresh models',S.modelsLoading||locked)}</div>`;
+}
 function chatControlsMarkup(canSend,busy){
  // Dictating: the bottom row is the voice bar (media/voicebar.js), which draws itself into whatever is rendered here.
  if(voiceMode?.active)return `<div class="composer-controls pip-voice">${talkBar.markup('conversation')}</div>`;
@@ -425,10 +453,10 @@ function chatControlsMarkup(canSend,busy){
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
  const effortLabel=o?EFFORT_NAME[o.thinking]||o.thinking:'';
  const effortStep=Math.max(0,chatThinkingLevels.indexOf(o?.thinking));
- const effort=o?`<div class="composer-effort-control" style="--effort:${effortStep*25}%;--face-offset:${18-effortStep*9}px"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
+ const effort=o?`<div class="composer-effort-control" style="--effort:${effortStep*25}%;--face-offset:${18-effortStep*9}px"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${S.modelListOpen?'':composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
  const reviewed=!personalPip();
- const list=`<div class="composer-model-list"><label class="sr-only" for="chatModelSearch">Search models</label><input id="chatModelSearch" data-draft="chatModelSearch" value="${esc(draft.chatModelSearch)}" placeholder="Search models" autocomplete="off">${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models"><button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>${routerChoices(routerOffer()).filter(([,l])=>l.toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(([v,l],i)=>`${i===0?'<p class="composer-scope" role="presentation">DGC Router</p>':''}<button type="button" role="option" data-chat-model="${esc(v)}" aria-selected="${selected===v}"${locked?' disabled':''}>${esc(l)}${v==='router'?'<small>Any computer with the Pips job</small>':''}</button>`).join('')}${subs.length?`<p class="composer-scope" role="presentation">Your subscriptions</p>${subs.filter(x=>x.name.toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(x=>`<button type="button" role="option" data-chat-model="subscription:${esc(x.engine)}" aria-selected="${selected==='subscription:'+x.engine}"${locked?' disabled':''}>${esc(x.name)}<small>Your own ${esc(x.name)}</small></button>`).join('')}${usage?`<p class="muted" data-usage-line role="presentation">${esc(usage)}</p>`:''}<p class="composer-scope" role="presentation">Models from your DGC connection</p>`:''}${S.models.filter(m=>(m.name+' '+m.id).toLowerCase().includes(draft.chatModelSearch.toLowerCase())).map(m=>`<button type="button" role="option" data-chat-model="model:${esc(m.id)}" aria-selected="${selected==='model:'+m.id}"${locked?' disabled':''}>${esc(m.name)}${m.name!==m.id?`<small>${esc(m.id)}</small>`:''}</button>`).join('')}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?errorMarkup(S.modelsError):''}${current&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${button('chat-refresh-models','Refresh models',S.modelsLoading||locked)}</div>`;
- const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${S.modelListOpen?list:effort}</div>`:'';
+ const list=chatModelListMarkup(selected,locked,reviewed,current,subs,usage);
+ const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${effort}${S.modelListOpen?list:''}</div>`:'';
  const sizes=o?[...new Set([2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,o.context_size])].filter(n=>n<=S.chatControls.context_max).sort((a,b)=>a-b):[];
  const ctx=o&&S.chatContext&&S.chatContext.pip_id===S.selected&&S.chatContext.context_size===o.context_size?S.chatContext:null,pct=ctx?Math.min(100,Math.round(ctx.used_tokens/ctx.context_size*100)):null;
  const meter=ctx?`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span><strong>${ctx.used_tokens.toLocaleString('en-US')} / ${ctx.context_size.toLocaleString('en-US')}</strong></div><span class="ctx-pct">${pct}%</span></div>${ctx.breakdown?`<div class="pip-ctx-breakdown" data-sig="${esc(ctx.breakdown.used+':'+ctx.breakdown.categories.map(c=>c.id+'='+c.tokens).join(','))}"></div>`:`<div class="ctx-track" aria-hidden="true"><span style="width:${pct}%"></span></div><div class="ctx-split"><span>${Math.max(0,ctx.context_size-ctx.used_tokens).toLocaleString('en-US')} free</span><span>${ctx.recent_messages} recent message${ctx.recent_messages===1?'':'s'}${ctx.summarized_messages?` · ${ctx.summarized_messages} in its brief`:''}</span></div>`}`:`<div class="ctx-head"><div><span class="ctx-kicker">Context window</span></div></div>`;
@@ -4006,6 +4034,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.handoffFinding!==undefined){
     try{if(currentTree()||!handoffSourceAllowed(S.run?.manifest))throw new Error('Handoffs need committed code. Switch this Pip to committed code in Settings, under Advanced.');const c=runCheckpoint(S.run?.checkpoint,{id:S.runId,pip_id:S.selected,workspace_id:S.workspace.id}),index=Number(target.dataset.handoffFinding),f=c?.findings[index];if(!f)return;S.handoffDraft={runId:S.runId,index,finding:f,sourceName:S.pip.name};draft.handoffTask='Investigate: '+f.title;draft.handoffTarget='';draft.handoffPaths=f.path;draft.handoffTests='[]';draft.specialistExplorer=false;draft.specialistCritic=false;draft.specialistWorker=false;draft.specialistCalls='1';S.tab='handoffs';S.error='';render();void loadHandoffs();}catch(error){setError(error);}return;
   }
+  if(target.dataset.chatProvider){S.modelProviderChoice=target.dataset.chatProvider;S.modelProviderView=false;draft.chatModelSearch='';render();$('chatModelSearch')?.focus();return;}
   if(target.dataset.chatModel){reviewChatModel(target.dataset.chatModel);return;}
   if(target.dataset.setup){void openSetup(target.dataset.setup);return;}
   if(target.dataset.rejectSetup){void openSetup(target.dataset.rejectSetup,true);return;}
@@ -4157,8 +4186,9 @@ document.addEventListener('click',event=>{
     case 'pip-run-open':{const id=target.dataset.runId;S.tab='runs';S.overview=false;rememberView();render();void loadSelected(false).then(()=>{if(id&&S.tab==='runs')return loadRun(id);});break;}
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
-    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.composerNoteOpen=false;draft.chatModelSearch='';render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
-    case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;render();(S.modelListOpen?$('chatModelSearch'):$('chat-model-summary'))?.focus();break;
+    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.modelProviderView=false;S.modelProviderChoice=currentChatProvider(modelValue(S.pip?.model_choice));S.composerNoteOpen=false;draft.chatModelSearch='';render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
+    case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;S.modelProviderView=false;render();(S.modelListOpen?$('chatModelSearch'):$('chat-model-summary'))?.focus();break;
+    case 'chat-model-providers':S.modelProviderView=true;draft.chatModelSearch='';render();[...document.querySelectorAll('[data-chat-provider]')].find(node=>node.dataset.chatProvider===S.modelProviderChoice)?.focus();break;
     case 'chat-model-close':S.composerPanel='';render();$('chat-model')?.focus();break;
     case 'chat-context-toggle':S.composerPanel=S.composerPanel==='context'?'':'context';S.composerNoteOpen=false;render();if(S.composerPanel){void loadChatContext();$('chat-context')?.focus();}break;
     case 'chat-context-close':S.composerPanel='';render();$('chat-context-toggle')?.focus();break;

@@ -1969,7 +1969,12 @@
     const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
     bindNote(card);
     const options = el("div", "model-options"); options.hidden = true;
-    [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
+    const list = el("div", "model-list-scroll");
+    [...mm.children].filter(node => node !== card).forEach(node => {
+      if (node.classList.contains("mhead")) options.appendChild(node);
+      else list.appendChild(node);
+    });
+    options.appendChild(list);
     mm.appendChild(options);
     // Thinking is a primary control of this menu. The model-list disclosure must never hide it.
     card.querySelector(".effort-control").hidden = false;
@@ -2013,14 +2018,14 @@
     const choices = (Array.isArray(routes) ? routes : [{ key: "native", label: "Current host" }])
       .filter(row => row && row.key);
     // Keep the same model/effort control mounted while only the lower list changes.
-    options.innerHTML = `<div class="mhead"><span>Provider</span></div>`
+    options.innerHTML = `<div class="mhead"><span>Provider</span></div><div class="model-list-scroll">`
       + choices.map((row, i) => {
         const selected = row.key === currentRouteKey;
         const note = row.installed === false ? " · install CLI first"
           : row.auth_state === "signed_out" ? " · sign in first" : "";
         return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key).split(" (")[0] + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
       }).join("")
-      + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button>`;
+      + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button></div>`;
     options.hidden = false;
     mm.querySelector(".model-summary")?.setAttribute("aria-expanded", "true");
     options.querySelectorAll("[data-provider-i]").forEach(button => button.onclick = (event) => {

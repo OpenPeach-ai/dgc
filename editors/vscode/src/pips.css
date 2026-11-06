@@ -534,7 +534,7 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .pip-menu .tabs-menu button.danger-text{color:var(--vscode-errorForeground)}
 /* The prompt box's menus, as DGC's own: the reasoning card (model row, effort slider, a short note
    with Show more; the model list one click deeper) and the context meter. */
-.composer-reasoning{padding:4px}
+.composer-reasoning{padding:4px;overflow:hidden}
 .composer-model-summary{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--vscode-foreground);font-size:12px;text-align:left}
 .composer-model-summary:hover{background:var(--vscode-list-hoverBackground)}
 .composer-model-summary svg{flex:none}
@@ -546,6 +546,8 @@ button.pip-shared-row:hover{background:var(--pip-wash)}
 .composer-more{display:block;align-self:flex-start;margin:0 4px 6px;padding:0;min-height:0!important;border:0;background:none;color:var(--vscode-textLink-foreground,#a78bfa);font-size:11px;cursor:pointer}
 .composer-more:hover{text-decoration:underline;background:none}
 .composer-model-list{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
+.composer-model-back{flex:none;align-self:flex-start;border:0;background:transparent;color:var(--vscode-foreground);font-size:12px;padding:5px 8px;border-radius:6px}
+.composer-model-back:hover{background:var(--vscode-list-hoverBackground)}
 .composer-model-list>input{font-size:12px;flex:none;margin:4px 0}
 .composer-model-list>#chat-refresh-models{flex:none;margin-top:4px;font-size:11px;align-self:flex-start;background:transparent}
 .composer-context-menu{left:0;right:auto;padding:12px}

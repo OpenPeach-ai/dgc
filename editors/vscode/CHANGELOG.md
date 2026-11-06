@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- Model pickers keep Thinking in view while only the provider or model list scrolls. ChatDGC keeps its provider step, and a Pip's model picker now groups its DGC connection, Router and signed-in subscriptions before showing models, with its face on the effort slider.
 - Opening a Pip from a home notification reveals its waiting card inside the chat history without moving the entire view or lifting the composer away from the editor bottom.
 - Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.
 - A message sent while a Pip is answering joins that reply without opening another run. Settings → Models keeps saved model hosts and signed-in subscription CLIs in one provider list. One default starts new Work and ChatDGC chats and Pips set to Default. Work and ChatDGC can each choose another saved provider and keep that choice after reload. API keys stay bound to their endpoint. A subscription needs no separate model host.

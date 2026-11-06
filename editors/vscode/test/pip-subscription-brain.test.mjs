@@ -38,12 +38,14 @@ function setup({api=55,job=pip(),kind='personal',catalog={default_model:'local-d
  return{w,d:w.document,requests,drain,click,select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
 const openList=async x=>{x.click('#chat-model');await x.drain();x.click('#chat-model-summary');};
+const chooseProvider=(x,key)=>{x.click('#chat-model-providers');x.click(`[data-chat-provider="${key}"]`);};
 
 test('a Personal Pip picks its own Codex, and is told once that its runs use that plan',async()=>{
  const x=setup();await x.select();await openList(x);
+ chooseProvider(x,'subscription:codex');
  const menu=x.d.querySelector('.composer-model-menu');
- assert.match(menu.textContent,/Your subscriptions/);
- assert.ok(x.d.querySelector('[data-chat-model="subscription:claude"]'));
+ assert.match(menu.textContent,/Codex/);
+ assert.ok(x.d.querySelector('[data-chat-model="subscription:codex"]'));
  assert.equal(x.d.querySelector('[data-usage-line]'),null,'no usage line until a subscription is chosen');
  x.click('[data-chat-model="subscription:codex"]');await x.drain();
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'subscription',engine:'codex'}});
@@ -65,8 +67,9 @@ test('Default names the subscription DGC follows',async()=>{
 test('a project Pip can choose a subscription, while an older backend cannot',async()=>{
  for(const [api,job,kind] of [[54,pip(),'personal'],[55,pip({source_policy:{mode:'committed_only'},pip_type:'rook'}),'project']]){
   const x=setup({api,job,kind});await x.select();await openList(x);
-  assert.equal(!!x.d.querySelector('[data-chat-model^="subscription:"]'),api>=55,`api ${api}`);
-  if(api<55)assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Your subscriptions/);
+  x.click('#chat-model-providers');
+  assert.equal(!!x.d.querySelector('[data-chat-provider="subscription:codex"]'),api>=55,`api ${api}`);
+  if(api<55)assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Codex/);
  }
  for(const api of [54,55]){
   const sent=[],posted=[];
