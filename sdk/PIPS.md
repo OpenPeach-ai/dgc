@@ -352,7 +352,7 @@ Revising replaces the card with a new pending card that uses another model.
 | `get_pip_run` | R | `run_id` |
 | `list_pip_run_activity` | R | `run_id`, `after?` |
 | `list_pip_checkpoints` | R | `pip_id`, `before_id?`, `limit?` |
-| `list_pip_messages` | R | `pip_id`, `before_id?`, `limit?` |
+| `list_pip_messages` | R | `pip_id`, `before_id?`, `limit?` Replies also list `waiting` (API 74): messages sent as a reply ended, in the order they'll be answered. |
 | `send_pip_message` | M | `pip_id`, `text`, `idempotency_key`, `chat_options?`, `images?` (API 43: up to 4 image data URIs, 2 MB in all; `text` may then be empty), `files?` (API 43: up to 4 `{name, data}`, sharing the 2 MB budget with the images), `spooled_images?` (API 52: up to 64 `{name, media_type}` naming files in the image spool; 8 MB a photo, 32 MB in all; `image/heic` and `image/heif` are kept as JPEG), `spooled_files?` (API 52: up to 16 `{name, spool}`; a document 16 MB, a text or code file 1 MB, 32 MB in all) |
 | `introduce_pip` | M | `pip_id`; a Personal Pip's first message, queued once (API 43) |
 | `get_pip_message_image` | R | `pip_id`, `message_id`, `index`, `as_file?`; one image from a chat message as `image`, a data URI (API 43), or with `as_file: true` where its kept file is, `{path, mime, bytes}` (API 52) |
