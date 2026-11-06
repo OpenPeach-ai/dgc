@@ -4575,8 +4575,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.backend?.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
       }
       // The chat's marks (@Composio) draw a connected plugin's own logo, and that page takes logos only as data: URIs.
-      const items = (ev as any).items.map((item: any) => ({ ...item,
-        logo: item?.connected === true ? pluginLogoData(this.context.extensionUri, item) : this.pluginLogo(item, this.view?.webview) }));
+      const items = (ev as any).items.map((item: any) => ({ ...item, logo: this.pluginLogo(item, this.view?.webview, item?.connected === true) }));
       if (this.view) this.post({ type: "event", event: { ...ev, items } });
       const editorItems = (ev as any).items.map((item: any) => ({
         ...item, logo: this.pluginLogo(item, this.settingsEditor?.webview),
@@ -8129,8 +8128,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await markDefaultProfile(this.context, id);
   }
 
-  private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview): string {
+  private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview, inline = false): string {
     if (!webview) return "";
+    if (inline) return pluginLogoData(this.context.extensionUri, item);
     const found = pluginLogoSource(this.context.extensionUri, item);
     return found.data ?? (found.file ? webview.asWebviewUri(found.file).toString() : "");
   }

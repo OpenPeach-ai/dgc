@@ -389,7 +389,7 @@ for (const embedded of [true, false]) {
       const sent = await p.page.evaluate(() => window.__sent[0]);
       assert.equal(sent.text, "Use Composio and ask Core now");
       assert.deepEqual(sent.display_mentions.map((m) => [m.start, m.kind, m.label]), [[4, "plugin", "Composio"], [21, "pip", "Core"]]);
-      await p.$(".pip-message.user .sent-mention").first().waitFor({ state: "visible" });
+      await p.$('.pip-message.user[data-message="u1"] .sent-mention').first().waitFor({ state: "visible" });   // the saved message, not the local one it replaces
       assert.equal(await p.$(".pip-message.user .sent-mention .composer-pip-face .dgc-plush").count(), 1, "its face in the bubble");
       assert.equal(await p.$(".pip-message.user .sent-mention .composer-plugin-mark img").count(), 1, "its logo too");
       assert.equal(await pipValue(p.page), "", "the box is clear");
