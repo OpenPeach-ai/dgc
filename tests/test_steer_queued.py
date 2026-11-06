@@ -97,10 +97,28 @@ class SteerQueuedTests(unittest.TestCase):
         bad._dispatch({"type": "steer_queued", "request_ids": "q1"})
         self.assertEqual([e["reason"] for e in bad.events if e["type"] == "command_rejected"], ["invalid_command"], "the protocol check refuses a malformed request first")
 
+    def test_remove_and_reorder_answer_through_the_protocol(self):
+        b = backend([prompt("q1", "one"), prompt("q2", "two"), prompt("q3", "three")])
+        b._dispatch({"type": "queue_reorder", "order": ["q3", "q1", "q2"]})
+        self.assertEqual([item[4] for item in b._queue], ["q3", "q1", "q2"])
+        self.assertIn({"type": "queue_changed", "order": ["q3", "q1", "q2"], "count": 3}, b.events)
+        b._dispatch({"type": "queue_remove", "queued_id": "q1"})
+        self.assertEqual([item[4] for item in b._queue], ["q3", "q2"])
+        self.assertIn({"type": "queue_changed", "order": ["q3", "q2"], "removed": "q1", "count": 2}, b.events)
+        b._dispatch({"type": "queue_remove", "queued_id": "q1"})
+        self.assertEqual([e for e in b.events if e["type"] == "command_rejected"][-1]["reason"], "not_queued")
+        for bad in ({"type": "queue_remove", "queued_id": ""}, {"type": "queue_reorder", "order": "q1"},
+                    {"type": "queue_reorder", "order": []}):
+            b._dispatch(bad)
+            self.assertIn([e for e in b.events if e["type"] == "command_rejected"][-1]["reason"],
+                          ("invalid_request", "invalid_command"))
+        self.assertEqual([item[4] for item in b._queue], ["q3", "q2"])
+
     def test_ready_offers_steer_queued(self):
         import inspect
         from dgc import headless
         self.assertIn('"steer_queued": True', inspect.getsource(headless.Backend))
+        self.assertIn('"queue_edit": True', inspect.getsource(headless.Backend))
 
 
 if __name__ == "__main__":

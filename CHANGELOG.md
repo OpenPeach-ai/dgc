@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- `dgc update` targets the launcher that is running, including a launcher that is a script rather than a link. It ignores an install record naming a temporary folder or another install, and it no longer reports success while the `dgc` on your PATH is a different one it did not change.
+- A queued message can be removed or moved before its turn starts (`queue_remove`, `queue_reorder`, offered as `ready.capabilities.queue_edit`, answered by the `queue_changed` event).
 - A text message sent while a Personal Pip is answering joins that active reply, like steering in Work. If its answer finishes first, DGC keeps the message and tells you to send it as a new turn.
 - Work and ChatDGC chats keep their selected native or subscription provider, model and effort on reload; a new chat starts from the default set in Settings. Settings can keep several native hosts and signed-in subscription CLIs ready, with API keys bound to each endpoint. Changing the default leaves open chats on their selected routes. Pips set to Default follow the shared default, including a signed-in subscription. A model's context window stays with its chat.
 - Pip workflows pass an exact Personal result, or a Project Pip's first source checked finding, through two to four Pips of the same kind. Reviewed mode asks at every handoff; unattended mode routes within the reviewed sequence, up to three starts per day. Project targets are read only; neither mode grants app sends, publishing, paid generation, file edits or computer actions. New Personal Pips start at Ask; existing levels remain as saved.

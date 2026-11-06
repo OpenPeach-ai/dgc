@@ -275,6 +275,10 @@ def run_update(args: list[str] | None = None) -> int:
         env["DGC_INSTALL_VERSION"] = str(requested)
     launcher = location.bin_dir / "dgc"
     before = os.path.realpath(launcher) if os.path.lexists(launcher) else None
+    # Whoever named this launcher, by DGC_BIN or by running it, keeps any other dgc on PATH as it is.
+    # Asked now: the install is about to point that launcher at another version.
+    chosen = bool(os.environ.get("DGC_BIN")) or (
+        L._launcher_from_argv0(L._real(sys.prefix), sys.argv[0] if sys.argv else None) == location.bin_dir)
     with tempfile.TemporaryDirectory(prefix="dgc-update-") as scratch:
         script = os.path.join(scratch, "install.sh")
         try:
@@ -296,9 +300,6 @@ def run_update(args: list[str] | None = None) -> int:
     after = os.path.realpath(launcher) if os.path.lexists(launcher) else None
     if code == 0:
         other = _other_dgc_on_path(launcher)
-        # Whoever named this launcher, by DGC_BIN or by running it, keeps any other dgc on PATH as it is.
-        chosen = bool(os.environ.get("DGC_BIN")) or (
-            L._launcher_from_argv0(L._real(sys.prefix), sys.argv[0] if sys.argv else None) == location.bin_dir)
         if other and chosen:
             c.print(f"\nInstalled to {escape(str(launcher))}. Note: `dgc` on your PATH is {escape(other)}, "
                     "which was not changed.", highlight=False, soft_wrap=True)

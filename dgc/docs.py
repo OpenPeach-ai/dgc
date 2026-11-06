@@ -200,7 +200,7 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 - **/mode MODE** — change native permission decisions during work; explicit ask/deny rules remain
 
 Unconsumed terminal follow-ups remain queued after interruption; a new prompt continues the queue.
-In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
+In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn, which waits above the prompt box until it starts: drag it to reorder it, steer it in, remove it or copy it. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
 A queued message ("you · queued") has **Steer now**: it goes into the running turn the way Enter
 does, and the model reads it at its next step instead of after the turn. **Steer all**, beside
