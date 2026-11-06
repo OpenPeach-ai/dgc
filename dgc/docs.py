@@ -3553,6 +3553,14 @@ models), `session.images` and `session.videos` make pictures and videos with you
 (one that asks first runs only when your code passes `approve=True`), and `session.cards` shows a
 plugin's own cards. Each checks that the CLI offers it first; docs/SDK.md has the details.
 
+## One session, another provider
+
+`session.set_model(model, base_url=, api_key=, api_mode=)` and `session.set_thinking(level)` move one session to another
+model or provider from its next request. It comes back when the session is reopened, your settings and other sessions
+don't change, and a key goes only to its own address. `cancel()` on a follow-up still waiting takes it out of the queue,
+so it never starts. A ChatDGC reply's `trace` holds what it did, step by step, and `chats.mentions()` lists what a message
+can name with `@`.
+
 Product page: [vibedgc.com/sdk](https://vibedgc.com/sdk/). Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
 """.strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
