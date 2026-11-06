@@ -1061,7 +1061,7 @@ class QaInstallerRegressions(unittest.TestCase):
 
     def test_a_group_writable_umask_still_installs_files_only_you_can_change(self):
         # Ubuntu's default umask 0002 left all of a release group-writable (4,810 of 4,815 files on
-        # a user's .111), and Keep Pips running refused it: "DGC service entry points must be
+        # a user's test machine), and Keep Pips running refused it: "DGC service entry points must be
         # trusted regular files".
         home = new_home("umask-002")
         env = clean_env(home)

@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A Pip always runs on the provider Settings saved. A message sent from a chat that had switched provider, or that was open when the default changed, no longer fails with "the configured endpoint changed".
 - Settings → Models: with one provider it is simply the default; with several, each has a Default checkbox. A saved subscription whose CLI has gone or signed out says so and how to fix it.
 - Updating the CLI from the editor runs from a neutral folder, so a folder named `dgc` in your home can't break it.
 - Completed Work answers have a plain Trace action beside their existing response controls. It replays recorded model and tool spans with play and scrub controls, measured timing, reported token counts, and tool-specific details. Older turns without enough timing do not offer a guessed trace.

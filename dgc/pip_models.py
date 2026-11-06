@@ -111,6 +111,33 @@ def is_subscription(config, choice) -> bool:
         and bool(str(config.get("subscription_engine", "") or "").strip()))
 
 
+# What decides which model a chat talks to. A chat can switch these for itself, unsaved.
+_ROUTE_KEYS = ("base_url", "api_mode", "model", "subscription_engine", "subscription_model", "subscription_effort")
+
+
+def follow_saved_route(config) -> None:
+    """Put the model route Settings saved into this private view of a chat's configuration.
+
+    A Pip runs on the saved default, never on a route one chat switched to. A run is pinned to the
+    connection of the configuration that queues it and the Pips runner checks that pin against the
+    saved one, so a message sent from a chat on another provider, or from one opened before the
+    default changed, failed at once with "the configured endpoint or API mode changed after enqueue".
+    A home with nothing saved has nothing to follow: the view is left as it is."""
+    from .config import Config, USER_CONFIG
+    try:
+        if not USER_CONFIG.exists():
+            return
+        saved = Config(project_root=config.project_root)
+    except Exception:                       # noqa: BLE001 - the chat's own view still works
+        return
+    for key in _ROUTE_KEYS:
+        config.data[key] = saved.data.get(key)
+    config.data["api_key"] = saved.data.get("api_key", "")
+    config._stored_secrets = dict(saved._stored_secrets)
+    config._stored_provider_identity = dict(saved._stored_provider_identity)
+    config._provider_secret_identity = dict(saved._provider_secret_identity)
+
+
 def _connection(config):
     base = config.get("base_url", "")
     mode = config.get("api_mode", "auto")

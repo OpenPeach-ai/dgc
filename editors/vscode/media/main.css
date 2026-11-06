@@ -1368,6 +1368,8 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .queue-head #queue-steer-all { margin-left: auto; font-size: var(--t-xs); }
 #queue-list { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; overscroll-behavior: contain; }
 .queue-waiting { color: var(--faint); }
+/* Inside the Queue pill's popover the popover's own title already says it. */
+#rail-pop .queue-head .rail-icon, #rail-pop .queue-head #queue-title { display: none; }
 .rail-main { min-width: 0; min-height: 28px; flex: 1; display: flex; align-items: center; gap: var(--sp-2);
   padding: 0; border: 0; background: transparent; color: var(--faint); cursor: pointer;
   text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }

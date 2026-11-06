@@ -8988,7 +8988,7 @@ class Agent(GoalLifecycle):
                     self._activity("continuing", "Finishing open todos")
                     continue
                 # A row parked as `blocked` never drew a reminder, so once the user unblocked it and the turn
-                # did the work, nothing asked for it to be ticked: a session on .111 deployed what its list
+                # did the work, nothing asked for it to be ticked: a session on a test machine deployed what its list
                 # still called "BLOCKED ON YOUR APPROVAL", and the Tasks row said so for days after. Once a
                 # turn, after real work, the model is shown its blocked rows and settles any it resolved.
                 blocked = [t for t in self.ctx.todos if isinstance(t, dict) and t.get("status") == "blocked"]

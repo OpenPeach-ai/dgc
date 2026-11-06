@@ -555,5 +555,52 @@ class AnOpenSettingsPageShowsIt(unittest.TestCase):
         self.assertEqual(len(self.frames("pips_settings")), told, "a refused change says nothing new")
 
 
+class SavedRouteTests(unittest.TestCase):
+    """A chat can switch provider for itself. A Pip's run is pinned to what Settings saved, because the runner checks
+    the pin against the saved connection: a pin from the chat's route failed every message sent from that chat."""
+
+    def _config(self, saved):
+        import json, tempfile
+        from pathlib import Path
+        from unittest import mock
+        from dgc import config as config_module
+        folder = Path(tempfile.mkdtemp())
+        path = folder / "config.json"
+        if saved is not None:
+            path.write_text(json.dumps(saved))
+        patcher = mock.patch.object(config_module, "USER_CONFIG", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return config_module.Config(project_root=folder)
+
+    def test_a_run_pins_the_saved_connection_not_the_route_a_chat_switched_to(self):
+        from dgc import pip_models, pips
+        config = self._config({"base_url": "http://saved.example/v1", "model": "saved-model", "api_mode": "auto"})
+        session = config.clone_for_root(config.project_root)
+        session.data.update(base_url="http://session.example/v1", model="session-model", subscription_engine="claude")
+        settings = pips._model_settings(session)
+        self.assertEqual(settings["base_url"], "http://saved.example/v1")
+        self.assertEqual(settings["model"], "saved-model")
+        self.assertNotIn("brain", settings, "a chat on a subscription does not move its Pips onto it")
+        pip_models.validate_pinned_connection(self._config({"base_url": "http://saved.example/v1"}), settings)
+        self.assertEqual(session.data["base_url"], "http://session.example/v1", "the chat keeps its own route")
+
+    def test_a_saved_subscription_default_is_followed_from_a_chat_on_a_host(self):
+        from dgc import pip_models
+        config = self._config({"base_url": "http://saved.example/v1", "subscription_engine": "codex"})
+        view = config.clone_for_root(config.project_root)
+        view.data.update(base_url="http://session.example/v1", subscription_engine="")
+        pip_models.follow_saved_route(view)
+        self.assertEqual(view.data["subscription_engine"], "codex")
+
+    def test_nothing_saved_leaves_the_view_alone(self):
+        from dgc import pip_models
+        config = self._config(None)
+        view = config.clone_for_root(config.project_root)
+        view.data.update(base_url="http://only.example/v1")
+        pip_models.follow_saved_route(view)
+        self.assertEqual(view.data["base_url"], "http://only.example/v1")
+
+
 if __name__ == "__main__":
     unittest.main()

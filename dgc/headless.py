@@ -7001,6 +7001,8 @@ class Backend:
         # or supervisor startup work runs after releasing it.
         with self._dispatch_guard():
             config = self.config.clone_for_root(self.config.project_root)
+        from .pip_models import follow_saved_route
+        follow_saved_route(config)
         if cmd["type"] == "pips_runtime":
             from .pip_runtime import start_runtime
             runner = start_runtime(config, resume=cmd["action"] == "resume")

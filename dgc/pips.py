@@ -564,7 +564,10 @@ def _output_budget(config) -> int:
 
 
 def _model_settings(config, model_choice=None, *, _prepared=None, personal=False):
-    from .pip_models import is_subscription, resolve_model_choice, validate_model_choice, validate_pinned_connection
+    from .pip_models import follow_saved_route, is_subscription, resolve_model_choice, validate_model_choice, validate_pinned_connection
+    # The pin is the saved connection, whichever chat or tool is queueing this run (see follow_saved_route).
+    config = config.clone_for_root(config.project_root)
+    follow_saved_route(config)
     choice = validate_model_choice(model_choice if model_choice is not None else {"mode": "default"})
     if choice["mode"] == "default":
         # Settings -> Models -> Pips on DGC Router (pips_model "router" or "router:<system>/<model>"): a Pip on Default

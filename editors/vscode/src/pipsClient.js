@@ -1015,7 +1015,9 @@ function queueChatMessage(){
  if(text.length>4000){setError('That message is too long. Keep it under 4,000 characters. Nothing was queued.');return;}
  const list=chatQueue();if(list.length>=MAX_CHAT_QUEUE){setError(`${MAX_CHAT_QUEUE} messages are already waiting: send them first, or remove one.`);return;}
  setChatQueue([...list,{id:`q${Date.now()}-${++chatQueueSeq}`,text}]);
- chatEdit(()=>{draft.chatText='';chatDrafts.set(S.selected,'');rememberView();render();});
+ // The page's markup still says what the box said when it was last drawn, so a redraw alone can leave the words there.
+ chatEdit(()=>{draft.chatText='';const box=$('chatText');if(box)box.value='';chatDrafts.set(S.selected,'');rememberView();render();});
+ fitChatInput();
 }
 function chatQueueSendText(text){
  const saved=draft.chatText;draft.chatText=text;void sendChat();
