@@ -8,7 +8,10 @@
 // editing, the serializer would be wrong.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { makeDom, mainCss } from "./support/webview-dom.mjs";
+
+const mentionsCss = readFileSync(new URL("../media/mentions.css", import.meta.url), "utf8");
 
 function panelWithSkill() {
   const h = makeDom();
@@ -90,19 +93,19 @@ test("a pill is shorter than the line it sits on, and never wraps mid-label", ()
   // holding one was taller than a line of plain text AND pills on adjacent lines sat 1px apart.
   // jsdom has no layout, so the real check is the measured one in composer-pills-live.test.mjs;
   // this pins the relationship in the source so the two values cannot drift back together.
-  const pillLine = /\.composer-pill \{[^}]*\/([\d.]+) var\(--sans\)/.exec(mainCss);
+  const pillLine = /\.composer-pill \{[^}]*\/([\d.]+) var\(--sans\)/.exec(mentionsCss);
   const inputLine = /#input \{[^}]*\/([\d.]+) var\(--sans\)/.exec(mainCss);
   assert.ok(pillLine && inputLine, "both line-heights are declared");
   assert.ok(Number(pillLine[1]) < Number(inputLine[1]),
     `pill line-height ${pillLine[1]} must be below the composer's ${inputLine?.[1]}`);
-  assert.match(mainCss, /\.composer-pill \{[^}]*white-space: nowrap/,
+  assert.match(mentionsCss, /\.composer-pill \{[^}]*white-space: nowrap/,
     "and never wraps mid-label");
 });
 
 test("high contrast gets a visible pill border", () => {
   // A pill carries no border of its own any more (Codex's treatment: a mark and the name in the
   // accent colour), so forced colours must supply the WHOLE border, not recolour one.
-  assert.match(mainCss, /forced-colors: active\) \{ \.composer-pill \{ border: 1px solid CanvasText/);
+  assert.match(mentionsCss, /forced-colors: active\) \{ \.composer-pill \{ border: 1px solid CanvasText/);
 });
 
 // ---- link pills ------------------------------------------------------------------------------

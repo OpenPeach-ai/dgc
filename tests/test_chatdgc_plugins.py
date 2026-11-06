@@ -486,6 +486,59 @@ class OnTheWire(PluginChat):
             time.sleep(0.01)
         raise AssertionError(f"no {kind}: {self.frames[-4:]}")
 
+    def test_the_box_can_name_the_plugins_a_reply_can_use_and_your_personal_pips(self):
+        ids = "pip_" + "a" * 32
+        pips = {"list_workspaces": {"workspaces": [{"id": "ws_" + "p" * 32, "kind": "personal"}]},
+                "list_pips": {"pips": [{"id": ids, "name": "Ava", "goal": "Plans", "status": "active", "pip_type": "scout"},
+                                       {"id": "pip_" + "b" * 32, "name": "Gone", "goal": "", "status": "archived", "pip_type": "rook"}]}}
+        self.service._pips_call = lambda request: pips[request["type"]]
+        self.service.dispatch({"type": "chatdgc_mentions", "request_id": "m1"})
+        said = self.wait_for("chatdgc_mentions", request_id="m1")
+        self.assertEqual(sorted(p["id"] for p in said["plugins"]), sorted(self.world["installed"]))
+        self.assertEqual(said["pips"], [{"id": ids, "name": "Ava", "goal": "Plans", "pip_type": "scout"}])
+        self.assertNotIn("error", said)
+
+    def test_pips_off_still_lists_the_plugins_and_says_why(self):
+        def off(request):
+            raise RuntimeError("Enable Pips first.")
+        self.service._pips_call = off
+        self.service.dispatch({"type": "chatdgc_mentions", "request_id": "m2"})
+        said = self.wait_for("chatdgc_mentions", request_id="m2")
+        self.assertTrue(said["plugins"])
+        self.assertEqual((said["pips"], said["error"]), ([], "Enable Pips first."))
+
+    def test_a_marked_message_keeps_clean_words_and_the_model_is_told_which_pip_it_names(self):
+        ids = "pip_" + "a" * 32
+        pips = {"list_workspaces": {"workspaces": [{"id": "ws_" + "p" * 32, "kind": "personal"}]},
+                "list_pips": {"pips": [{"id": ids, "name": "Ava", "goal": "Plans my day", "status": "active", "pip_type": "scout"}]}}
+        self.service._pips_call = lambda request: pips[request["type"]]
+        self.world["script"] += [{"parts": ["Ava plans your day."]}, {"parts": ["Noted."]}]
+        chat = self.engine.open()
+        text = "What does Ava do? Use Composio"
+        marks = [{"start": 10, "kind": "pip", "label": "Ava", "identity": ids, "pip_type": "scout", "wired": True},
+                 {"start": 22, "kind": "plugin", "label": "Composio", "identity": "composio"}]
+        self.service.dispatch({"type": "chatdgc_send", "request_id": "s1", "conversation_id": chat["id"], "text": text, "display_mentions": marks})
+        self.wait_for("chatdgc_turn", request_id="s1", state="ended")
+        saved = self.engine.open(chat["id"])["messages"]
+        self.assertEqual(saved[0]["text"], text, "the words are the words")
+        self.assertEqual(saved[0]["display_mentions"], marks, "a reload draws the marks again")
+        asked = self.world["read"][0]["messages"][-1]["content"]
+        self.assertIn(text, str(asked))
+        self.assertIn("Plans my day", str(asked), "what the Pip is, beside the words")
+        self.assertNotIn(ids, str(asked), "never its id")
+        # The next message is told of nothing: the note was that reply's, and the saved words never held it.
+        self.service.dispatch({"type": "chatdgc_send", "request_id": "s2", "conversation_id": chat["id"], "text": "Thanks"})
+        self.wait_for("chatdgc_turn", request_id="s2", state="ended")
+        self.assertNotIn("Plans my day", str(self.world["read"][1]["messages"]))
+
+    def test_marks_that_dont_fit_the_words_are_left_out(self):
+        self.world["script"] += [{"parts": ["Ok."]}]
+        chat = self.engine.open()
+        self.service.dispatch({"type": "chatdgc_send", "request_id": "s3", "conversation_id": chat["id"], "text": "Plain words",
+                               "display_mentions": [{"start": 0, "kind": "plugin", "label": "Composio", "identity": "composio"}]})
+        self.wait_for("chatdgc_turn", request_id="s3", state="ended")
+        self.assertNotIn("display_mentions", self.engine.open(chat["id"])["messages"][0])
+
     def test_sending_an_earlier_replys_card_ends_quietly_once_it_is_sent(self):
         import time
         chat, reply = self.say("Lunch Friday.", {"calls": [("call_plugin", {"plugin": "gcal", "tool": "create_event",

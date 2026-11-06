@@ -721,6 +721,23 @@ test("a plugin's key goes to dgc serve once, only to a CLI that keeps keys, and 
   assert.match(settings.at(-1).error, /can't keep a plugin's key yet\. Update it/);
 });
 
+test("a connected plugin reaches the chat's marks with its logo as data, the only kind that page takes", async () => {
+  const chat = [];
+  const { provider } = catalogHarness([]);
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  provider.post = m => chat.push(m);
+  provider.view = { webview: { asWebviewUri: () => "https://file.vscode-resource.invalid/logo.ico" } };
+  provider.context = { ...provider.context, extensionUri: { fsPath: new URL("..", import.meta.url).pathname } };
+  const uri = vs.Uri;
+  vs.Uri = { ...uri, joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join("/") }) };
+  try {
+    provider.onEvent({ type: "plugin_catalog", items: [{ name: "composio", connected: true }, { name: "n8n" }] });
+  } finally { vs.Uri = uri; }
+  const [connected, other] = chat.findLast(m => m.event?.type === "plugin_catalog").event.items;
+  assert.match(connected.logo, /^data:image\/svg\+xml;base64,/);
+  assert.equal(other.logo, "https://file.vscode-resource.invalid/logo.ico", "the rest of the catalog stays as cheap as it was");
+});
+
 test("What DGC may do on GitHub: the choice and Sign in again go to dgc serve, only one that offers them, answered on the page", async () => {
   const settings = [], chat = [], commands = [];
   const { provider } = catalogHarness([]);

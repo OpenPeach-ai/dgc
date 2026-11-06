@@ -89,7 +89,7 @@ test("Alt+Enter while a Pip answers queues above the box; the queue edits and dr
   await type(p, "second", "Alt+Enter");
   await type(p, "third", "Alt+Enter");
   assert.deepEqual(await words(p), ["first", "second", "third"]);
-  assert.equal(await p.inputValue("#chatText"), "", "the box is clear");
+  assert.equal(await p.evaluate(() => document.getElementById("chatText").value), "", "the box is clear");
   assert.deepEqual(await p.evaluate(() => window.__sent), [], "nothing is sent while it waits");
   assert.match(await p.locator(".chat-queue-head").textContent(), /^3 queued messages$/);
   // The queue sits above the box, not in the transcript.

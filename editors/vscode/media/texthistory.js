@@ -1,4 +1,4 @@
-// window.DgcTextHistory: undo and redo for a plain-text box -- ChatDGC's and a Pip's -- the way the Work chat's prompt
+// window.DgcTextHistory: undo and redo for a box that isn't Work's -- ChatDGC's and a Pip's -- the way the Work chat's prompt
 // box has them (main.js, "undo and redo"), and the way Codex's composer has them: Mod-z, Mod-Shift-z and Mod-y, a
 // typing run broken by a pause, and every edit the page makes itself a step of its own.
 //
@@ -59,9 +59,12 @@
     const capture = () => {
       const el = box();
       return { value: el ? el.value : "", start: el ? el.selectionStart : 0, end: el ? el.selectionEnd : 0,
+        // A box that holds marks (media/mentions.js): a step keeps its nodes, pills and all.
+        rich: el?.mentionBox ? el.mentionBox.capture() : null,
         items: list ? list.get().slice() : [] };
     };
-    const same = (a, b) => a.value === b.value && a.items.length === b.items.length && a.items.every((item, i) => item === b.items[i]);
+    const same = (a, b) => a.value === b.value && (a.rich?.markup ?? "") === (b.rich?.markup ?? "")
+      && a.items.length === b.items.length && a.items.every((item, i) => item === b.items[i]);
     const push = (state) => { done.push(state); if (done.length > DEPTH) done.shift(); undone.length = 0; };
     function continues(kind) {
       const el = box();
@@ -97,7 +100,8 @@
     }
     function restore(state) {
       const el = box();
-      if (el) {
+      if (el?.mentionBox && state.rich) el.mentionBox.restore(state.rich);
+      else if (el) {
         el.value = state.value;
         el.focus({ preventScroll: true });
         el.setSelectionRange(state.start, state.end);

@@ -69,7 +69,7 @@ function loadAssets() {
   if (assets) return assets;
   const panelSrc = readFileSync(join(root, "src/panel.ts"), "utf8");
   const css = readFileSync(join(root, "media/main.css"), "utf8");
-  const mainJs = readFileSync(join(root, "media/main.js"), "utf8");
+  const mainJs = readFileSync(join(root, "media/mentions.js"), "utf8") + "\n" + readFileSync(join(root, "media/main.js"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8")
