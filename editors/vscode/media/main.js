@@ -1724,7 +1724,14 @@
 
   // in-composer model menu (rendered from the `models` message the extension posts)
   function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
-  function hideContextMenu() { $("ctxmenu").hidden = true; $("btn-ctx").setAttribute("aria-expanded", "false"); }
+  // Every other menu's toggle closes the context details through here, so the clock's popup closes with them too.
+  function hideContextMenu() { $("ctxmenu").hidden = true; $("btn-ctx").setAttribute("aria-expanded", "false"); hideCacheMenu(); }
+  function hideCacheMenu() {
+    const menu = $("cachemenu");
+    if (!menu) return;
+    menu.hidden = true;
+    $("cache-clock")?.setAttribute("aria-expanded", "false");
+  }
   function fmtTokens(n) { return Number(n || 0).toLocaleString(); }
   function compactionLabel(strategy) {
     return ({ provider_native: "Provider-native", model_summary: "Model summary",
@@ -1771,7 +1778,7 @@
     const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
     const thresholdPct = Math.round(threshold * 100);
     $("ctx-auto").textContent = `auto at ${thresholdPct}%`;
-    // What the provider reported, cached included: where the cache clock's click lands when it can't time the cache.
+    // What the provider reported, cached included.
     // Each figure stays with its word ("0 cached", never "0" / "cached"): a narrow details box wraps between them.
     const requests = Number(contextState.requests || 0);
     const usage = [`${fmtTokens(contextState.input_tokens)} in`, `${fmtTokens(contextState.output_tokens)} out`,
@@ -1945,10 +1952,51 @@
     // tooltip beside it (the panel's state and config, which name the provider, arrive at any time).
     hoverTip.retitle(node, tip);
     node.setAttribute("aria-label", tip);
+    if ($("cachemenu") && !$("cachemenu").hidden) renderCacheMenu();
     // The next change is the next whole minute (or the moment it runs out): one wake-up, never a tick.
     if (win.kind === "warm" && !win.kept) {
       cacheClockTimer = setTimeout(renderCacheClock, win.msLeft - (win.minutesLeft - 1) * 60000 + 50);
     }
+  }
+  // The clock's own popup: how long the cache lasts, what the next message costs, and what the provider reported.
+  function cacheHeadline(win) {
+    if (win.kind === "warm") {
+      if (win.kept) return "Warm";
+      const m = win.minutesLeft;
+      return m < 60 ? `${m} min left` : `${Math.floor(m / 60)} h ${m % 60} min left`;
+    }
+    if (win.kind === "cold") return win.reason === "compacted" ? "Starts again" : "Expired";
+    return "No timer";
+  }
+  function renderCacheMenu() {
+    const win = cacheWindow();
+    $("cache-state").textContent = cacheHeadline(win);
+    $("cache-said").textContent = win.kind === "unknown" ? cacheUnknownTip() : cacheTooltip(win);
+    const next = $("cache-next"), note = cacheReopenNote(win);
+    next.textContent = note;
+    next.hidden = !note;
+    // Each figure stays with its word, as in the context details: a narrow box wraps between them, never inside one.
+    const parts = [`${fmtTokens(contextState.cached_input_tokens)} cached`, `${fmtTokens(contextState.input_tokens)} in`];
+    const usage = $("cache-usage");
+    usage.replaceChildren(...parts.flatMap((part, at) => {
+      const piece = document.createElement("span");
+      piece.className = "context-usage-part";
+      piece.textContent = part;
+      return at ? [document.createTextNode(" · "), piece] : [piece];
+    }));
+  }
+  function toggleCacheMenu() {
+    const menu = $("cachemenu");
+    if (!menu.hidden) { hideCacheMenu(); return; }
+    hideModelMenu(); hideModeMenu(); hideOutputMenu(); hideContextMenu(); hideAgentsMenu(); hoverTip.hide();
+    renderCacheMenu();
+    menu.style.left = "";
+    menu.hidden = false;
+    $("cache-clock").setAttribute("aria-expanded", "true");
+    // The clock sits right of the meter: in a narrow panel the popup moves left to stay inside it.
+    const over = menu.getBoundingClientRect().right - (window.innerWidth - 10);
+    if (over > 0) menu.style.left = `${-Math.ceil(over)}px`;
+    menu.focus();
   }
   function onCacheClock(ev) {
     cacheClock = { ...ev };
@@ -1961,13 +2009,15 @@
   function cacheClockOnSessionReset() { cacheClock = null; renderCacheClock(); }
   // A cold clock's "idle" is read when you look at it, not counted on screen.
   $("cache-clock")?.addEventListener("mouseenter", () => { if (cacheWindow().kind === "cold") renderCacheClock(); });
-  // A click opens the context meter's details beside it (the tokens the provider reported as cached). A mouse
-  // shortcut: the meter itself is the keyboard's way there, one Tab stop, so the clock adds none.
-  $("cache-clock")?.addEventListener("click", (e) => { e.stopPropagation(); toggleContextMenu(); });
+  // A click, Enter or Space opens the clock's own popup. The context details open only from the meter.
+  $("cache-clock")?.addEventListener("click", (e) => { e.stopPropagation(); toggleCacheMenu(); });
+  $("cachemenu")?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); hideCacheMenu(); $("cache-clock").focus(); }
+  });
   function toggleContextMenu() {
     const menu = $("ctxmenu");
     if (!menu.hidden) { hideContextMenu(); return; }
-    hideModelMenu(); hideModeMenu(); hideAgentsMenu(); renderContextMenu();
+    hideModelMenu(); hideModeMenu(); hideAgentsMenu(); hideCacheMenu(); renderContextMenu();
     menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
     vscode.postMessage({ type: "contextBreakdown" });            // what fills it, part by part, as it opens
     $("ctx-compact").focus();
@@ -8298,6 +8348,7 @@ function permissionChoices(ev) {
         renderContext();
         agentMapChanged();                       // the map's root says how much is in context
         if (!$("ctxmenu").hidden) vscode.postMessage({ type: "contextBreakdown" });     // the parts, as the window changes
+        if ($("cachemenu") && !$("cachemenu").hidden) renderCacheMenu();
         break;
       }
       case "history":
@@ -10630,6 +10681,7 @@ function permissionChoices(ev) {
     if (!$("outputmenu").hidden && !$("btn-output").contains(e.target) && !$("outputmenu").contains(e.target)) hideOutputMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
     if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
+    if ($("cachemenu") && !$("cachemenu").hidden && !$("cache-clock").contains(e.target) && !$("cachemenu").contains(e.target)) hideCacheMenu();
     hideAgentsMenu(e);
   });
 

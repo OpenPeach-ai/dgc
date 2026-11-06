@@ -1678,6 +1678,9 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
    figures, the clock alone in the error colour once the cache has gone. No hover fill: a click opens the
    meter's details beside it, so the meter's own button is the control. */
 .cache-clock { cursor: pointer; gap: 2px; }
+.cmenu.cache-menu { width: min(260px, calc(100vw - 20px)); }
+.cache-menu:focus { outline: none; }
+.cache-said { margin: var(--sp-2) 0 0; color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .cache-clock:hover, .cache-clock:active { background: transparent; }
 .cache-clock svg { display: block; width: 16px; height: 16px; flex: none; }
 .cache-clock .cache-clock-left { display: inline-block; font-variant-numeric: tabular-nums; }

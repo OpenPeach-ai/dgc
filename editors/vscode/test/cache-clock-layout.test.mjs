@@ -1,7 +1,7 @@
 // The prompt cache's clock in the real Work panel, in Chromium (0.48.3): where DGC can't time the cache it stays in
 // the footer, dimmed, with no minutes, in the same box a cold clock takes, so the footer doesn't move as you change
 // models; it can still be seen in the dark and light themes, and comes up to full strength when pointed at; warm and
-// cold are drawn as in 0.48.0; and a click opens the context meter's details beside it. jsdom has no layout or
+// cold are drawn as in 0.48.0; and a click opens the clock's own popup. jsdom has no layout or
 // cascade, so cache-clock.test.mjs can't say any of this.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -152,28 +152,29 @@ test("changing models never moves the footer: an untimed clock takes a cold cloc
   }
 });
 
-test("a click on the clock opens the context meter's details beside it, with the tokens the provider reported as cached", async (t) => {
+test("a click on the clock opens its own popup inside the panel, at every width, and never the context details", async (t) => {
   if (skipOrFail(t)) return;
-  const s = await openPanel({ width: 420 });
-  try {
-    await s.go("ollama-cloud");
-    await s.event({ type: "context", used: 9000, size: 65536, compact_threshold: .85, input_tokens: 1234567, output_tokens: 98765,
-                    cached_input_tokens: 1100000, reasoning_tokens: 0, requests: 1234 });
-    await s.page.locator("#cache-clock").click();
-    const menu = s.page.locator("#ctxmenu");
-    assert.equal(await menu.isVisible(), true, "the meter's details open");
-    assert.equal(await s.page.locator("#ctx-usage").textContent(), "1,234,567 in · 98,765 out · 1,100,000 cached · 1,234 requests");
-    const fit = await s.page.evaluate(() => { const m = document.getElementById("ctxmenu").getBoundingClientRect(), u = document.getElementById("ctx-usage");
-      return { inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0, usage: u.scrollWidth <= u.clientWidth,
-               split: [...u.querySelectorAll(".context-usage-part")].filter((p) => p.getClientRects().length > 1).map((p) => p.textContent) }; });
-    assert.deepEqual(fit, { inside: true, usage: true, split: [] }, "inside the panel, the numbers not cut off, each figure on one line with its word");
-    await s.event({ type: "context", used: 8114, size: 65536, compact_threshold: .85, input_tokens: 7515, output_tokens: 8,
-                    cached_input_tokens: 0, reasoning_tokens: 0, requests: 1 });
-    assert.equal(await s.page.locator("#ctx-usage").textContent(), "7,515 in · 8 out · 0 cached · 1 request");
-    await s.page.locator("#cache-clock").click();
-    assert.equal(await menu.isVisible(), false, "and a second click closes them");
-    assert.deepEqual(s.errors, []);
-  } finally { await s.page.close(); }
+  for (const width of [300, 420, 900]) {
+    const s = await openPanel({ width });
+    try {
+      await s.go("ollama-cloud");
+      await s.event({ type: "context", used: 9000, size: 65536, compact_threshold: .85, input_tokens: 1234567, output_tokens: 98765,
+                      cached_input_tokens: 1100000, reasoning_tokens: 0, requests: 1234 });
+      await s.page.locator("#cache-clock").click();
+      const menu = s.page.locator("#cachemenu");
+      assert.equal(await menu.isVisible(), true, "its popup opens");
+      assert.equal(await s.page.locator("#ctxmenu").isVisible(), false, "the context details stay shut");
+      assert.equal(await s.page.locator("#cache-usage").textContent(), "1,100,000 cached · 1,234,567 in");
+      const fit = await s.page.evaluate(() => { const m = document.getElementById("cachemenu").getBoundingClientRect(), u = document.getElementById("cache-usage");
+        return { inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0, usage: u.scrollWidth <= u.clientWidth,
+                 split: [...u.querySelectorAll(".context-usage-part")].filter((p) => p.getClientRects().length > 1).map((p) => p.textContent) }; });
+      assert.deepEqual(fit, { inside: true, usage: true, split: [] }, `${width}px: inside the panel, numbers not cut off, each figure on one line with its word`);
+      if (process.env.CACHE_POPUP_SHOT) await s.page.screenshot({ path: `${process.env.CACHE_POPUP_SHOT}-${width}.png` });
+      await s.page.locator("#cache-clock").click();
+      assert.equal(await menu.isVisible(), false, "and a second click closes it");
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
 });
 
 test("pointed at, the dimmed clock's label names the provider, in the panel's own hover label, and keeps up as the model changes", async (t) => {

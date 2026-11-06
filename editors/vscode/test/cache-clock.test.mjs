@@ -5,7 +5,7 @@
 // tooltip. Reopening a chat whose cache went cold adds one note to the transcript. unknown (0.48.3) ->
 // the clock still there, dimmed, no minutes, its tooltip naming the provider that doesn't say how long
 // it caches (it was hidden, and a user, on Ollama Cloud, took the missing clock for a broken one).
-// A click opens the context meter's details, with the tokens the provider reported as cached.
+// A click opens the clock's own popup: the time left, what the next message does, and the tokens reported as cached.
 // Main DGC only: ChatDGC and Pips never show it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -39,8 +39,8 @@ test("a warm Anthropic cache shows the whole minutes left, changed only at minut
   assert.equal(x.left(), "5m", "4 min 30 s left reads 5m: whole minutes, rounded up, never seconds");
   assert.equal(x.node.title, "Prompt cache warm, about 5 min left.");
   assert.equal(x.node.getAttribute("aria-label"), "Prompt cache warm, about 5 min left.");
-  assert.equal(x.node.getAttribute("role"), "status");
-  assert.equal(x.node.getAttribute("aria-live"), "off", "never announced as it counts");
+  assert.equal(x.node.getAttribute("role"), null, "a button that opens its popup");
+  assert.equal(x.node.getAttribute("aria-live"), null, "no live region: never announced as it counts");
   assert.equal(x.node.classList.contains("cold"), false);
   x.tick(29000);
   assert.equal(x.left(), "5m", "nothing moves inside a minute");
@@ -198,27 +198,52 @@ test("before the backend says anything the clock is already there, and a model c
   assert.deepEqual(y.errors, []);
 });
 
-test("a click on the clock opens the context meter's details, which say how much the provider reported as cached", () => {
+test("a click on the clock opens its own popup, never the context details, and says what the provider reported as cached", () => {
   const x = clockDom();
   route(x, { model: "deepseek-v4.1-flash:cloud", base_url: "http://127.0.0.1:11434/v1" });
   x.event({ type: "cache_clock", state: "unknown" });
   x.event({ type: "context", used: 9000, size: 65536, compact_threshold: .85, input_tokens: 41000, output_tokens: 900,
             cached_input_tokens: 38400, reasoning_tokens: 0, requests: 3 });
-  const menu = x.doc.getElementById("ctxmenu"), meter = x.doc.getElementById("btn-ctx");
+  const menu = x.doc.getElementById("cachemenu"), context = x.doc.getElementById("ctxmenu");
+  const text = (id) => x.doc.getElementById(id).textContent;
+  assert.equal(x.node.tagName, "BUTTON", "the keyboard can reach it");
   assert.equal(menu.hidden, true);
   x.node.click();
   assert.equal(menu.hidden, false, "the click opened it (and the page's outside-click didn't close it again)");
-  assert.equal(meter.getAttribute("aria-expanded"), "true", "the meter says its details are open");
-  assert.equal(x.doc.getElementById("ctx-usage").textContent, "41,000 in · 900 out · 38,400 cached · 3 requests");
-  assert.ok(x.posted.some((m) => m.type === "contextBreakdown"), "and asked what fills the window, as the meter does");
+  assert.equal(context.hidden, true, "the context details stay shut");
+  assert.equal(x.doc.getElementById("btn-ctx").getAttribute("aria-expanded"), "false");
+  assert.equal(x.node.getAttribute("aria-expanded"), "true");
+  assert.equal(x.posted.some((m) => m.type === "contextBreakdown"), false);
+  assert.equal(text("cache-state"), "No timer");
+  assert.match(text("cache-said"), /Ollama Cloud may cache your prompt/);
+  assert.equal(text("cache-usage"), "38,400 cached · 41,000 in");
   x.node.click();
   assert.equal(menu.hidden, true, "a second click closes it");
-  // Warm and cold open it too: one place for the cache's numbers, whatever the clock shows.
-  x.event({ type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", anchor_ms: T0 - 12 * 60000 });
+  // Warm: the time left, and it follows the provider's next report while open.
+  x.event({ type: "cache_clock", state: "warm", source: "anthropic", anchor_ms: T0, expires_ms: T0 + 4 * 60000, ttl_s: 300 });
   x.node.click();
-  assert.equal(menu.hidden, false);
+  assert.equal(text("cache-state"), "4 min left");
+  assert.equal(x.doc.getElementById("cache-next").hidden, true);
+  x.event({ type: "context", used: 9000, size: 65536, compact_threshold: .85, input_tokens: 50000, output_tokens: 900,
+            cached_input_tokens: 45000, reasoning_tokens: 0, requests: 4 });
+  assert.equal(text("cache-usage"), "45,000 cached · 50,000 in");
+  // Cold: what the next message does. A click elsewhere closes it.
+  x.event({ type: "cache_clock", state: "cold", reason: "expired", source: "anthropic", tokens: 45000, anchor_ms: T0 - 12 * 60000 });
+  assert.equal(text("cache-state"), "Expired");
+  assert.match(text("cache-next"), /next message will re-cache about 45k tokens/);
   x.doc.body.click();
-  assert.equal(menu.hidden, true, "a click elsewhere closes it, as for the meter");
+  assert.equal(menu.hidden, true, "a click elsewhere closes it");
+  // The meter still opens the context details, and that closes the popup.
+  x.node.click();
+  x.doc.getElementById("btn-ctx").click();
+  assert.equal(context.hidden, false);
+  assert.equal(menu.hidden, true, "only one of them at a time");
+  x.doc.body.click();
+  // Escape closes it and returns to the clock.
+  x.node.click();
+  menu.dispatchEvent(new x.doc.defaultView.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(menu.hidden, true);
+  assert.equal(x.doc.activeElement, x.node);
   assert.deepEqual(x.errors, []);
 });
 
@@ -235,5 +260,5 @@ test("dimmed is the unknown state's alone: warm and cold keep 0.48.0's look", ()
   const rest = dim.find((r) => !/:hover/.test(r.selector));
   assert.match(rest.body, /opacity:\s*\.5/, "half strength, as the agreed mockup");
   assert.match(mainCss, /\.cache-clock\.cold\s*\{[^}]*color:\s*var\(--vscode-errorForeground/, "cold: the error colour, as before");
-  assert.doesNotMatch(panelSrc.match(/<span id="cache-clock"[^>]*>/)[0], /\shidden/, "no longer hidden in the markup");
+  assert.doesNotMatch(panelSrc.match(/<button type="button" id="cache-clock"[^>]*>/)[0], /\shidden/, "no longer hidden in the markup");
 });
