@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { build, buildSync } from "esbuild";
 import { THEMES, panelHtml } from "./support/options-scene.mjs";
+import { chatdgcFixtureHtml } from "./support/chatdgc-html.mjs";
 
 let chromium;
 try { ({ chromium } = await import("@playwright/test")); } catch { chromium = null; }
@@ -505,7 +506,7 @@ test("Work's transcript already leaves its scrollbar room: your bubble stays cle
 function chatdgcHtml() {
   const root = fileURLToPath(new URL("..", import.meta.url)), source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
   const page = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
-  const doc = page.replace(/<link [^>]*>/g, "").replace(/<script\b[^>]*><\/script\s*>/gi, "").replace(/\$\{[^}]*\}/g, "");
+  const doc = chatdgcFixtureHtml(page);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
   const js = [...page.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;

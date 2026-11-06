@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import struct
 import threading
 import uuid
@@ -264,6 +265,8 @@ class Elsewhere:
     ``to`` answers a request with a 302 to ``to`` + "/landed" + its path (served there, so ``to`` may be itself)."""
 
     def __init__(self, video: bytes = b"", to: str = ""):
+        if to and not re.fullmatch(r"http://127\.0\.0\.1:[0-9]{1,5}", to):
+            raise ValueError("fake redirect target must be a local test server")
         self.requests: list[dict] = []
         self.video, self.to = video or mp4(), to
         fake = self
