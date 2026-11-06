@@ -180,7 +180,7 @@ if(Mentions){
  chatPop=owner.createElement('div');chatPop.id='chat-pop';chatPop.className='pop pop-over';chatPop.setAttribute('role','listbox');chatPop.setAttribute('aria-label','Suggestions');chatPop.setAttribute('data-dom-own','1');
  chatBox=Mentions.box(el,{maxLength:4000,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,
   pasteBack:part=>part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity):part.kind==='file'&&!personalPip()});
- chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'Its fellow Pips · no work starts',
+ chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
   refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}},
   face:(it,i)=>{const index=it.pipRow?Mentions.PIP_TYPES.indexOf(it.pipRow.pip_type):-1;return index>=0?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:it.pipRow.name},'idle',`pickerPip${i}`,{includeStyles:false})}</span>`:'';},
   icon:it=>{if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},

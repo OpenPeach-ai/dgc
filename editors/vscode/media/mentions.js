@@ -883,9 +883,9 @@
    *  and `pipPart(row)` and `plainFile`: how those become marks; `icon(it)`: a row's own icon markup, `logo(id)`. */
   function picker(field, pop, opts) {
     const el = field.el;
-    let items = [], index = 0, start = 0, end = 0, open = false, pipMode = false;
+    let items = [], index = 0, start = 0, end = 0, open = false, pipMode = false, awaiting = false;
     const hide = () => {
-      pipMode = false; items = [];
+      pipMode = false; items = []; awaiting = false;
       pop.style.display = "none"; pop.replaceChildren();
       // Only this list's: a page's other list on the same box (ChatDGC's mods menu) answers for itself.
       if (open) { el.setAttribute("aria-expanded", "false"); el.removeAttribute("aria-activedescendant"); }
@@ -893,8 +893,9 @@
     };
     const show = (rows) => {
       items = rows; index = 0;
-      if (!rows.length) { const keep = pipMode; hide(); pipMode = keep; return; }
-      open = true;
+      // Nothing to show yet may be a catalog still on its way: the first "@comp" in a new tab is typed before it comes.
+      if (!rows.length) { const keep = pipMode; hide(); pipMode = keep; awaiting = true; return; }
+      open = true; awaiting = false;
       pop.innerHTML = rows.map((it, i) => rowMarkup(it, i, { esc, face: opts.face, icon: opts.icon })).join("");
       for (const row of pop.querySelectorAll(".pi")) {
         // The box keeps its caret while a row is chosen with the mouse.
@@ -985,7 +986,7 @@
     el.addEventListener("blur", () => { setTimeout(() => { if (!el.matches(":focus")) hide(); }, 0); });
     hide();
     // The sources changed under an open list (a catalog arriving): the list is drawn again where it stands.
-    return { refresh: () => { if (open || pipMode) refresh(); }, hide };
+    return { refresh: () => { if (open || pipMode || awaiting) refresh(); }, hide };
   }
 
   globalThis.DgcMentions = {

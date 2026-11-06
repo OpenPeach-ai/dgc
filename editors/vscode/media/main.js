@@ -9252,7 +9252,10 @@ function permissionChoices(ev) {
       if(attachments.filter(a=>a.pipReference).length>=8){sysLine("Reference at most eight Pips in one message.",true);return;}
       if(!canAttach())return;
       attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});
-      insertComposerPill(popStart,popEnd,"pip",it.pipReference.name.replace(/\s+/g," ").trim(),"",it.pipReference.pip_id);
+      // Its name is in the words the model reads, beside the reference: "ask  to look" read as a sentence with a hole.
+      // A backend from before takes no mark that stands on words.
+      const pipName=it.pipReference.name.replace(/\s+/g," ").trim();
+      insertComposerPill(popStart,popEnd,"pip",pipName,displayMentionsVersion>=3?pipName:"",it.pipReference.pip_id);
       hidePop();input.focus();return;
     }
     if (it.pluginId || it.artifactKind) {

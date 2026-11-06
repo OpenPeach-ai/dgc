@@ -3433,6 +3433,8 @@
       if (!typed && item.parts) field.writeParts(item.parts); else input.value = typed ? `${typed}\n\n${item.text}` : item.text;
       state.pending = [...state.pending, ...item.pending];
     });
+    // After a reload the host has forgotten what was let through; a marked file is let through again.
+    for (const pending of item.pending) if (pending.fromPill && pending.path) vscode.postMessage({ type: "mentionFile", path: pending.path });
     chips();
     if (item.research && !typed) researchMode(true);
     grow(); saveDraft(); controls();

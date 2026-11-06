@@ -100,6 +100,19 @@ test("ChatDGC: @ lists its Pips, plugins, Outputs and files, and a mark goes in 
   } finally { await s.page.close(); }
 });
 
+test("ChatDGC: the first @ in a new tab finds the plugins that arrive after it was typed", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat();
+  try {
+    await s.send({ type: "mentionSources", offered: true, plugins: [], pips: [], error: "" });
+    await s.box().click();
+    await s.page.keyboard.type("@comp");
+    assert.deepEqual(await rows(s.page), [], "nothing to list yet");
+    await s.send(SOURCES);
+    assert.deepEqual(await rows(s.page), ["Composio"], "it opens by itself when they come");
+  } finally { await s.page.close(); }
+});
+
 test("ChatDGC: a sent prompt carries clean words and its marks; the bubble keeps logo and icon with the @ text in grey", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openChat();
@@ -134,6 +147,20 @@ test("ChatDGC: a sent prompt carries clean words and its marks; the bubble keeps
     await s.send({ type: "opened", conversation: CONVERSATION, models: ["m"], messages: [{ id: `msg_${"2".repeat(32)}`, role: "user", text: "Something else", created_at: "2026-11-06T10:00:00Z", display_mentions: sent.display_mentions }] });
     assert.equal(await s.page.locator(".cd-user .sent-mention").count(), 0);
     assert.equal(await s.page.locator(".cd-user .cd-bubble").textContent(), "Something else");
+  } finally { await s.page.close(); }
+});
+
+test("ChatDGC on a light theme: the marks can be read, in the box and in the bubble", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat({ theme: "light-modern" });
+  try {
+    const dark = (rgb) => { const [r, g, b] = rgb.match(/[\d.]+/g).map(Number); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
+    await s.box().click();
+    await s.page.keyboard.type("Make @slid");
+    await s.page.keyboard.press("Tab");
+    assert.ok(dark(await s.page.locator("#cd-input .composer-artifact-name").evaluate((n) => getComputedStyle(n).color)) < 0.45, "a word in the box is no pale lilac on white");
+    await s.page.keyboard.press("Enter");
+    assert.ok(dark(await s.page.locator(".cd-user .sent-mention .composer-artifact-name").evaluate((n) => getComputedStyle(n).color)) < 0.5, "nor the bubble's grey on its lilac");
   } finally { await s.page.close(); }
 });
 

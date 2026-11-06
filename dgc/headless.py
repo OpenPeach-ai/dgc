@@ -2647,7 +2647,8 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
-                          "display_mentions": 2,
+                          # 3: a mark whose name is the words of the text (`wired`), a Pip's or a file's.
+                          "display_mentions": 3,
                           # send_pip_message takes display_mentions: a Pip's chat draws its marks in the bubble.
                           "pip_display_mentions": 1,
                           # A finished Pip run reaches the chats it reports to as a card in the

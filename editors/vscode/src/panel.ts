@@ -9685,6 +9685,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${toolInsightsScript}"></script>
+<script nonce="${nonce}" src="${mentionsJs}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>
@@ -9693,7 +9694,6 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${pluginCallsJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
 <script nonce="${nonce}" src="${numberedListJs}"></script>
-<script nonce="${nonce}" src="${mentionsJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${traceJs}"></script>

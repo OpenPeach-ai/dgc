@@ -21,6 +21,7 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
   --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);
 }
 .pip-message.user .bubble .prompt-text {
+  --mark-logo-filter: none;
   --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
   --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
 }

@@ -40,7 +40,7 @@ function screenHtml() {
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
-  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
+  const own = readFileSync(join(root, "media/mentions.css"), "utf8") + readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
   // The page's own scripts, in the order chatdgc.ts loads them: a list kept here by hand misses the next one added.
   const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.equal(scripts.at(-1), "chatdgc.js");
