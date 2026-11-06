@@ -10992,6 +10992,7 @@ def test_extension_vsix_guard():
         "extension/dist/dgc-voice.vsix",
         "extension/media/main.js", "extension/media/main.css",
         "extension/media/trace.js",
+        "extension/media/trace.css",
         "extension/media/messagequeue.js",
         "extension/media/messagequeue.css",
         "extension/media/numbered-list.js",

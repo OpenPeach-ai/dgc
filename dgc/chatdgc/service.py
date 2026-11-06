@@ -228,7 +228,7 @@ def fit(message: dict, budget: int = PAGE_BYTES) -> dict:
     cut["partial"] = True
     # Attachments, images and widget data can outweigh the text. Preserve ordinary
     # message metadata and as much text as fits; the saved message remains complete.
-    for key in ("attachments", "images", "widgets", "canvases", "actions", "files", "questions", "research", "sources"):
+    for key in ("trace", "attachments", "images", "widgets", "canvases", "actions", "files", "questions", "research", "sources"):
         if _size(cut) <= budget:
             break
         cut.pop(key, None)

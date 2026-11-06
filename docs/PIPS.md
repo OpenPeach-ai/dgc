@@ -869,6 +869,12 @@ and apply to its replies and to everything it does on its own (schedules, routin
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
+**Trace.** Under a finished reply, and under a post of a run it finished on its own, **Trace** replays what the Pip did,
+as in Work and ChatDGC: each model round with the tokens the provider reported, each tool with its own time, a search with
+its hits. Play it or scrub its timeline. A run keeps its steps beside its result (`pip_run_traces`), so they survive a
+reload and go when the Pip is deleted. `list_pip_reply_stats` says `has_trace` for each run, and brings the steps as
+`trace` when asked about one run. A run that failed or was stopped, and one from before steps were recorded, has no Trace.
+
 You can send a Personal Pip photos and files with a message, as in the main chat: use the attach
 button, paste, or drop them on the message box. Images (PNG, JPEG, GIF, WebP, BMP), text and code
 files, and PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted. The

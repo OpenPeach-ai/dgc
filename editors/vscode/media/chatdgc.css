@@ -261,6 +261,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-action { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm);
   padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .cd-action:hover { background: var(--surface2); color: var(--text); }
+.cd-trace { width: auto; padding-inline: 7px; font: var(--w-med, 500) 11px/1 var(--sans); }
 .cd-meta { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); padding-left: var(--sp-1); }
 
 .cd-foot { flex: none; padding-bottom: var(--sp-2); }

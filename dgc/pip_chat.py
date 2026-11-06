@@ -9,6 +9,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from . import reply_trace
 from .workspace_registry import RegistryError, identifier
 
 MAX_USER_BYTES = 8192
@@ -1582,8 +1583,54 @@ def _instant(text):
         return None
 
 
+# What a run did, step by step, for the Trace under its reply (dgc/reply_trace.py). Beside the run, not in its result: a
+# result is checked per run kind and read by much that has no use for this. Made the first time a run has one. Named by
+# run_id and pip_id, which is how deleting a Pip finds it (pip_purge).
+TRACE_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS pip_run_traces (
+ run_id TEXT PRIMARY KEY,
+ pip_id TEXT NOT NULL,
+ trace TEXT NOT NULL CHECK(length(CAST(trace AS BLOB)) <= {reply_trace.MAX_BYTES})
+);
+"""
+
+
+def keep_trace(db, run, value) -> None:
+    """Keep a finished run's measured steps. Inside the run's own transaction, and it never costs the run."""
+    steps = reply_trace.validated(value)
+    if steps is None:
+        return
+    try:
+        from .workspace_registry import _execute_schema
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_run_traces'").fetchone() is None:
+            _execute_schema(db, TRACE_SCHEMA)
+        db.execute("INSERT OR REPLACE INTO pip_run_traces(run_id,pip_id,trace) VALUES(?,?,?)",
+                   (run["id"], run["pip_id"], _json(steps)))
+    except sqlite3.Error:
+        pass
+
+
+def _traces(db, pip_id, run_ids, *, full=False) -> dict:
+    """The runs of these that have a trace: run id to its steps (``full``) or to True."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_run_traces'").fetchone() is None:
+        return {}
+    marks = ",".join("?" * len(run_ids))
+    found = {}
+    for row in db.execute(f"SELECT run_id,trace FROM pip_run_traces WHERE pip_id=? AND run_id IN ({marks})",
+                          (pip_id, *run_ids)).fetchall():
+        try:
+            steps = reply_trace.validated(json.loads(row["trace"]))
+        except (ValueError, RecursionError):
+            steps = None
+        if steps is not None:
+            found[row["run_id"]] = steps if full else True
+    return found
+
+
 def reply_stats(store, pip_id, run_ids) -> dict:
-    """What each reply took, for the line under it in the chat: its time and its tokens."""
+    """What each reply took, for the line under it in the chat: its time and its tokens. Each says whether it has a
+    Trace (``has_trace``). Asked about one reply, it also brings that Trace (``trace``): a page of 50 of them would
+    not fit one answer, and it is read only when someone opens it."""
     if (not isinstance(run_ids, list) or not 1 <= len(run_ids) <= 50
             or any(not isinstance(r, str) or not re.fullmatch(r"run_[a-f0-9]{32}", r) for r in run_ids)):
         raise RegistryError("invalid_request", "Name 1–50 of this Pip's replies.")
@@ -1605,4 +1652,12 @@ def reply_stats(store, pip_id, run_ids) -> dict:
                       "seconds": round((end - start).total_seconds(), 1) if start and end and end >= start else None,
                       "input_tokens": count("input_tokens"), "output_tokens": count("output_tokens"),
                       "requests": count("requests")})
+    wanted = sorted(set(run_ids))
+    traced = _traces(store.db, pip_id, wanted, full=len(wanted) == 1)
+    for item in stats:
+        steps = traced.get(item["run_id"])
+        if steps:
+            item["has_trace"] = True
+            if isinstance(steps, dict):
+                item["trace"] = steps
     return {"pip_id": pip_id, "stats": stats}

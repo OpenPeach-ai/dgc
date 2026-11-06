@@ -40,7 +40,7 @@ function screenHtml() {
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
-  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
+  const own = readFileSync(join(root, "media/trace.css"), "utf8") + readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
   // The page's own scripts, in the order chatdgc.ts loads them: a list kept here by hand misses the next one added.
   const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.equal(scripts.at(-1), "chatdgc.js");
@@ -72,6 +72,42 @@ async function openScreen({ width = 900, height = 700, theme = "dark-modern", st
 }
 const shown = (page, selector) => page.evaluate((s) => { const n = document.querySelector(s); return !!n && n.checkVisibility(); }, selector);
 const conversation = (extra = {}) => ({ id: ID, title: "New chat", model: null, thinking: null, pinned: false, archived: false, temporary: false, ...extra });
+
+test("Trace: the word beside a reply's icons, only when it recorded its steps, and the same dialog as Work", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const at = "2026-11-06T10:00:00.000Z";
+    const trace = { v: 1, ms: 3000, steps: [
+      { kind: "model", label: "model.response", start: 0, end: 1200, tokens: 13537 },
+      { kind: "tool", label: "aave.get_markets", detail: "Card", start: 1200, end: 1500 },
+      { kind: "tool", label: "web_search", detail: "kings", hits: 3, start: 1500, end: 1800, error: true },
+      { kind: "model", label: "model.response", start: 1800, end: 3000, tokens: 13596 }] };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Old", created_at: at },
+      { id: M(2), role: "assistant", text: "An old reply.", created_at: at, finish: "stop", model: "m" },
+      { id: M(3), role: "user", text: "New", created_at: at },
+      { id: M(4), role: "assistant", text: "A new reply.", created_at: at, finish: "stop", model: "deepseek", trace }] });
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(2)}"] .cd-trace`).count(), 0, "an old chat's reply shows no Trace");
+    const word = s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-actions .cd-trace`);
+    assert.equal(await word.textContent(), "Trace");
+    const row = await s.page.evaluate((id) => [...document.querySelector(`.cd-assistant[data-id="${id}"] .cd-actions`).children].map((n) => n.className.split(" ")[0] + (n.classList.contains("cd-trace") ? ":trace" : "")), M(4));
+    assert.equal(row.at(-2), "cd-action:trace", "after the icons, before the model's name");
+    assert.equal(row.at(-1), "cd-meta");
+    const copy = await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-actions [aria-label="Copy"]`).boundingBox(), box = await word.boundingBox();
+    assert.equal(box.height, copy.height, "as tall as the icons beside it");
+    assert.equal(box.y, copy.y, "on their line");
+    await word.click();
+    const dialog = s.page.locator("body > .dgc-trace-backdrop .dgc-trace-dialog");
+    assert.equal(await dialog.locator(".dgc-trace-head strong").textContent(), "msg_444444");
+    assert.equal(await dialog.locator(".dgc-trace-model").textContent(), "deepseek · 4 spans");
+    assert.deepEqual(await dialog.locator(".dgc-trace-row .dgc-trace-meta span:first-child").allTextContents(), ["13,537 tk", "Card", "Failed", "13,596 tk"]);
+    assert.equal(await dialog.locator(".dgc-trace-scrub").getAttribute("max"), "3000");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await dialog.count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
 
 test("a new chat: the question and the box together, and a message goes out with its model and thinking", async (t) => {
   if (skipOrFail(t)) return;

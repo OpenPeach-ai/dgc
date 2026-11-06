@@ -1875,6 +1875,9 @@ class _SubUI:
         # parent reply through __getattr__, which would label the wrong model span.
         pass
 
+    def trace_model_start(self) -> None:
+        pass
+
     def turn_activity(self, state, label, detail=""):
         # The parent chat shows the chip / agents pill, not the child's "Working" line.
         return None
@@ -4468,6 +4471,9 @@ class Agent(GoalLifecycle):
                         client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
                     try:
                         sent_at = time.time()       # a cache entry lives from the request's start
+                        trace_start = getattr(self.ui, "trace_model_start", None)
+                        if callable(trace_start):
+                            trace_start()
                         result = client.chat(safe_messages, tools=tools, reasoning_effort=effort,
                                              on_text=emit_text, on_thinking=emit_thinking,
                                              cancel=gate)
@@ -8772,9 +8778,10 @@ class Agent(GoalLifecycle):
             trace_tokens = trace_usage["input_tokens"] + trace_usage["output_tokens"]
             if trace_tokens:
                 assistant["_dgc_trace_tokens"] = trace_tokens
-                trace_usage_hook = getattr(self.ui, "trace_usage", None)
-                if callable(trace_usage_hook):
-                    trace_usage_hook(trace_tokens)
+            # Said with no tokens too: that this request ended is itself what a Pip's Trace measures.
+            trace_usage_hook = getattr(self.ui, "trace_usage", None)
+            if callable(trace_usage_hook):
+                trace_usage_hook(trace_tokens)
             splice = _thinking_splice_marker(result, assistant["content"])
             if splice:
                 assistant["_dgc_think_splice"] = splice

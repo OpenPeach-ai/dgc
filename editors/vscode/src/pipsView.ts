@@ -30,9 +30,9 @@ const decodedBytes = (b64: string) => Math.floor(b64.length * 3 / 4) - (b64.ends
 const KEPT_PHOTO = /^[0-9a-f]{64}\.(png|jpg|gif|webp|bmp)$/;
 const KEPT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
 const attr = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
-export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = ''): string {
+export function pipsDocument(scriptUri = '', styleUri = '', cspSource = '', markdownUri = '', cardsUri = '', cardsStyleUri = '', videoUri = '', codiconUri = ''): string {
   // frame-src: only a plugin's card (MCP Apps), at the loopback address DGC's backend serves it from.
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}"><link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data:; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)};${codiconUri ? ` font-src ${attr(cspSource)};` : ''}${videoUri ? ' media-src blob:;' : ''}${cardsUri ? ' frame-src http://127.0.0.1:* http://localhost:*;' : ''}">${codiconUri ? `<link rel="stylesheet" href="${attr(codiconUri)}">` : ''}<link rel="stylesheet" href="${attr(styleUri)}">${cardsStyleUri ? `<link rel="stylesheet" href="${attr(cardsStyleUri)}">` : ''}<title>DGC Pips</title></head><body><main id="app"><p role="status">Connecting to local DGC…</p></main><div id="review-root"></div>${cardsUri ? `<script src="${attr(cardsUri)}"></script>` : ''}${videoUri ? `<script src="${attr(videoUri)}"></script>` : ''}${markdownUri ? `<script src="${attr(markdownUri)}"></script>` : ''}<script src="${attr(scriptUri)}"></script></body></html>`;
 }
 
 /** A Pip's computer in an editor tab: its Browser, Files and Terminal. */
@@ -178,7 +178,7 @@ export class PipsEditor implements vscode.Disposable {
     const asset = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', name)).toString();
     const media = (name: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', name)).toString();
     panel.webview.html = pipsDocument(asset('pips.js'), asset('pips.css'), panel.webview.cspSource, asset('markdown.js'),
-                                      media('mcpApps.js'), media('mcpApps.css'), media('videoPlayer.js'));
+                                      media('mcpApps.js'), media('mcpApps.css'), media('videoPlayer.js'), media('codicon.css'));
     this.connect();
   }
   ready(capabilities: any, backendIdentity?: object): void {
