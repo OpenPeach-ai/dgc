@@ -19,7 +19,7 @@ those systems while the Router is on. A run on the Router waits in the Pip queue
 is busy; see `session.router` in [docs/SDK.md](../docs/SDK.md). From API 71 a Personal Pip's chat reply that
 started a video carries `videos`, each video's job as DGC last saw it.
 
-It pairs with DGC CLI 0.51.0, which advertises **Pips API 73** over editor protocol
+It pairs with DGC CLI 0.51.0, which advertises **Pips API 74** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
 the security model and limits, see [docs/PIPS_REFERENCE.md](../docs/PIPS_REFERENCE.md).
 
@@ -143,7 +143,7 @@ The backend's own validation is authoritative; it also checks required fields.
 ### Capability gates
 
 Each command has a minimum Pips API. The SDK refuses a command, or a parameter that
-needs a newer API, before sending it. CLI 0.51.0 is API 73; Pip computers need API 42. Starter Pips (API
+needs a newer API, before sending it. CLI 0.51.0 is API 74; Pip computers need API 42. Starter Pips (API
 41) are a Pips view and CLI convenience the SDK does not wrap: a host creates the same
 job with `create_pip` and a reviewed update.
 
@@ -205,6 +205,7 @@ job with `create_pip` and a reviewed update.
 | 71 | No new command. A Personal Pip's chat reply that started a video carries `videos`: each video's job as DGC last saw it (its state, price and, once it is made, its file). Read it only from a runtime advertising 71. |
 | 72 | Local Pip workflow controls: `list_pip_flows {workspace_id}` and `get_pip_flow {flow_id}` (R); `create_pip_flow {name, pip_ids, tasks, mode}` and `set_pip_flow {flow_id, expected_revision, status}` (M). `list_pip_flows` also returns `core_suggestions`: ordered Pips created from one Core reply, for prefilling a separate human review; suggestions never authorize routing. Mode is `reviewed` or `unattended`; status is `on`, `paused` or `retired`. Exactly two to four distinct Pips of one workspace and kind, one bounded task per handoff, at most three starts per day. Personal workflows share the exact prior result. Project workflows hand the first source checked finding to a read only Pip on committed source. Unattended only accepts the route; each Pip keeps its own action approvals. |
 | 73 | A new text message can join one running Personal Pip conversation as a mid-turn update; it stays in that run's history and does not start a competing reply. |
+| 74 | A provider saved in the editor's Settings → Models: `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. The Pip keeps only those; the key stays with the CLI. |
 | 58 | How much a Personal Pip asks: `get_pip_level {pip_id}` (R: `level`, `default`, `levels` [{level, name, says}], `on_its_own` [{at, what, level, unattended, kind}]) and `set_pip_level {pip_id, level}` (M, local only; `ask`, `approve` or `full`). What a level let through is a computer action already `sent` by `pip-level:<level>` or an app action resolved by it; a payment asks at every level. |
 | 57 | A Personal Pip's own working notes: `get_pip_working_notes {pip_id}` (R: `lines`, `text`, `revision`, `max_lines`, `max_bytes`, `bytes`, `updated_at`) and `set_pip_working_notes {pip_id, text, expected_revision}` (M, local only, never a secret); `list_pip_daily_log {pip_id, before?, limit?}` (R): what it did each day, `{days: [{day, lines, more}], next_before}`. The Pip keeps its notes itself with a `working_notes` tool and starts every run with them; the log is never given to a run. |
 

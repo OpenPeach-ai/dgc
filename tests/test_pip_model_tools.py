@@ -585,6 +585,41 @@ class SavedRouteTests(unittest.TestCase):
         pip_models.validate_pinned_connection(self._config({"base_url": "http://saved.example/v1"}), settings)
         self.assertEqual(session.data["base_url"], "http://session.example/v1", "the chat keeps its own route")
 
+    def test_a_pin_is_checked_against_what_settings_saved_not_the_askers_route(self):
+        from dgc import pip_models, pips
+        config = self._config({"base_url": "http://saved.example/v1", "model": "saved-model", "api_mode": "auto"})
+        settings = pips._model_settings(config)
+        for url in ("http://a-chat-that-switched.example/v1", "http://a-runner-started-before-the-change.example/v1"):
+            asker = config.clone_for_root(config.project_root)
+            asker.data.update(base_url=url, api_mode="chat_completions")
+            pip_models.validate_pinned_connection(asker, settings)      # the old check refused every one of these
+
+    def test_a_run_queued_on_the_old_default_is_still_refused_once_settings_moved(self):
+        from dgc import pip_models, pips
+        from dgc.workspace_registry import RegistryError
+        config = self._config({"base_url": "http://old.example/v1", "model": "saved-model", "api_mode": "auto"})
+        settings = pips._model_settings(config)
+        moved = self._config({"base_url": "http://new.example/v1", "model": "saved-model", "api_mode": "auto"})
+        with self.assertRaises(RegistryError) as refused:
+            pip_models.validate_pinned_connection(moved, settings)
+        self.assertEqual(refused.exception.code, "model_changed")
+
+    def test_with_nothing_saved_the_askers_own_route_is_what_counts(self):
+        from dgc import pip_models, pips
+        from dgc.workspace_registry import RegistryError
+        config = self._config(None)
+        config.data.update(base_url="http://only.example/v1", api_mode="auto", model="only-model")
+        settings = pips._model_settings(config)
+        self.assertEqual(settings["base_url"], "http://only.example/v1")
+        config.data["base_url"] = "http://moved.example/v1"
+        with self.assertRaises(RegistryError):
+            pip_models.validate_pinned_connection(config, settings)
+
+    def test_a_light_configuration_with_no_private_view_is_used_as_it_is(self):
+        from dgc import pip_models
+        light = {"model": "m", "base_url": "http://light.example/v1", "api_mode": "auto"}
+        self.assertIs(pip_models.saved_route_view(light), light)
+
     def test_a_saved_subscription_default_is_followed_from_a_chat_on_a_host(self):
         from dgc import pip_models
         config = self._config({"base_url": "http://saved.example/v1", "subscription_engine": "codex"})

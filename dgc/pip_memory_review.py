@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 
 from . import memory_review, shared_memory
+from .workspace_registry import RegistryError
 
 MARK = "memory_reviewed:"          # metadata: the last user message (its seq) looked back over, per Pip
 MAX_ROWS = 50
@@ -91,6 +92,14 @@ def _client(registry, config, run_id):
         if not str(config.get("model", "") or "").strip():
             return None
         return memory_review.client_for(config)
+    if "provider" in settings:
+        # A saved provider's run: its own key for its own host, and no look back once it was removed.
+        from .pip_models import run_view
+        try:
+            config = run_view(config, settings)
+        except RegistryError:
+            return None
+        return memory_review.client_for(config, model=str(settings["model"]))
     return memory_review.client_for(config, model=str(settings["model"]), base_url=str(settings.get("base_url") or "")
                                     or None, api_mode=str(settings.get("api_mode") or "") or None)
 

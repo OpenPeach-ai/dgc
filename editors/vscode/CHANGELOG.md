@@ -3,6 +3,8 @@
 ## 0.35.0 — 2026-11-06
 
 - The cache clock in Work's prompt box opens its own small popup, with the time left, what your next message will do, and the tokens reported as cached. It no longer opens the context window details, and the keyboard can reach it.
+- Cloudflare in Settings → Plugins, with its logo and sign-in. It only reads, so a daily traffic Pip needs no approval and no browser.
+- A Pip's model menu lists every provider saved in Settings → Models, by name, with its models, as a Work session's does. The Pip keeps its choice after a reload. If you remove that provider, its prompt box and its next run say so. The menu now looks and works as Work's: plain rows with a check on the chosen one, and "Add provider in Settings…". Its search box is gone, and Refresh models stays only for a list that failed to load.
 - A Pip always runs on the provider Settings saved. A message sent from a chat that had switched provider, or that was open when the default changed, no longer fails with "the configured endpoint changed".
 - Settings → Models: with one provider it is simply the default; with several, each has a Default checkbox. A saved subscription whose CLI has gone or signed out says so and how to fix it.
 - Updating the CLI from the editor runs from a neutral folder, so a folder named `dgc` in your home can't break it.

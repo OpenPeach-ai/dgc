@@ -2634,6 +2634,40 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "model_provider_saved"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "removed": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "id",
+            "removed"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "subscription_default_changed"
             },
             "seq": {
@@ -10456,6 +10490,48 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "save_model_provider"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "id": {
+              "type": "string"
+            },
+            "remove": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "api_mode": {
+              "type": "string"
+            },
+            "api_key": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
           ],
           "additionalProperties": false
         },

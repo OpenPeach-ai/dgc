@@ -352,6 +352,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
     "model_defaults_changed": {"base_url": _S(), "model": _S(), "request_id": _S(False)},
+    "model_provider_saved": {"id": _S(), "removed": _B(), "request_id": _S(False)},
     "subscription_default_changed": {"engine": _f("string", enum=("claude", "codex")),
         "model": _S(), "effort": _S(), "request_id": _S(False)},
     # 0.48: the prompt-cache settings, for Settings -> Models. Sent before `config` to a client whose
@@ -788,6 +789,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     # The default for FUTURE chats. This does not alter the active chat's route.
     # Advertised by ready.capabilities.model_defaults.
+    "save_model_provider": {
+        "id": _S(), "remove": _B(False), "name": _S(False), "base_url": _S(False), "model": _S(False),
+        "api_mode": _S(False), "api_key": _S(False), "request_id": _S(False),
+    },
     "set_model_defaults": {
         "base_url": _S(), "model": _S(), "api_key": _S(False),
         "api_mode": _f("string", enum=("auto", "ollama", "anthropic", "chat_completions", "responses")),

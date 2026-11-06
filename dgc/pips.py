@@ -564,10 +564,9 @@ def _output_budget(config) -> int:
 
 
 def _model_settings(config, model_choice=None, *, _prepared=None, personal=False):
-    from .pip_models import follow_saved_route, is_subscription, resolve_model_choice, validate_model_choice, validate_pinned_connection
+    from .pip_models import is_subscription, resolve_model_choice, saved_route_view, validate_model_choice, validate_pinned_connection
     # The pin is the saved connection, whichever chat or tool is queueing this run (see follow_saved_route).
-    config = config.clone_for_root(config.project_root)
-    follow_saved_route(config)
+    config = saved_route_view(config)
     choice = validate_model_choice(model_choice if model_choice is not None else {"mode": "default"})
     if choice["mode"] == "default":
         # Settings -> Models -> Pips on DGC Router (pips_model "router" or "router:<system>/<model>"): a Pip on Default
@@ -600,6 +599,11 @@ def _model_settings(config, model_choice=None, *, _prepared=None, personal=False
         if _prepared is not None and (type(_prepared) is not dict or _prepared.get('settings') != settings):
             raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
         return settings
+    if choice.get("mode") == "provider":
+        # API 74: a provider saved in Settings -> Models. This run pins that provider's address and API, and the rest
+        # of this function reads them from its view. The key stays out of the pin: the runner reads it at the start.
+        from .pip_models import provider_view
+        config = provider_view(config, choice)
     if _prepared is None:
         model = resolve_model_choice(config, choice)
     else:
@@ -612,7 +616,7 @@ def _model_settings(config, model_choice=None, *, _prepared=None, personal=False
         validate_pinned_connection(config, _prepared['settings'])
         model = _prepared['settings'].get('model')
         from .pip_models import default_model
-        if model != (choice['model'] if choice['mode'] == 'model' else default_model(config)):
+        if model != (choice['model'] if choice['mode'] in ('model', 'provider') else default_model(config)):
             raise RegistryError('conflict', 'The model changed after preparing this Pip setup. Review it again.')
     base = _text(config.get("base_url", ""), "configured model endpoint", 2048)
     url = urlsplit(base)
@@ -624,6 +628,8 @@ def _model_settings(config, model_choice=None, *, _prepared=None, personal=False
             "context_size": min(CONTEXT_MAX, max(CONTEXT_MIN, inherited_context(config))),
             "thinking": "off", "max_tokens": _output_budget(config), "max_turns": STEPS,
             "turn_budget_s": 0}
+    if choice.get("mode") == "provider":
+        settings["provider"] = choice["provider"]
     if _prepared is not None and settings != _prepared['settings']:
         raise RegistryError('conflict', 'The model settings changed after preparing this Pip setup. Review it again.')
     return settings
@@ -3913,7 +3919,7 @@ def _worker_main():
     config._persist = False
     settings = payload["manifest"]["model_settings"]
     for key, value in settings.items():
-        if key != "brain":                  # a subscription run's CLI (pip_brain), not a DGC setting
+        if key not in ("brain", "provider"):    # a subscription's CLI (pip_brain) or a saved provider's id: not DGC settings
             config.set(key, value, persist=False)
     for key, value in {
         "api_key": payload.get("api_key", ""), "mode": "default", "subscription_engine": "",
@@ -4152,8 +4158,14 @@ def _execute_run(registry, row, config):
         raise RegistryError('source_changed', 'The workspace binding no longer matches this queued run.')
     # Credential never crosses to a different endpoint after an unattended queue delay.
     frozen_config = config.clone_for_root(Path(binding["canonical_root"]))
-    from .pip_models import validate_pinned_connection
+    # Checked against the route Settings saved, and this run's key comes from it: a runner started before the default
+    # changed must neither refuse a run pinned to the new one nor send it the old key.
+    from .pip_models import follow_saved_route, validate_pinned_connection
+    follow_saved_route(frozen_config)
     validate_pinned_connection(frozen_config, manifest["model_settings"])
+    # A Pip on a saved provider: from here on this run knows that provider's address and key, and no other's.
+    from .pip_models import run_view
+    frozen_config = run_view(frozen_config, manifest["model_settings"])
     run_dir = registry.directory / "runs" / row["id"]
     current_tree = source['source_policy']['mode'] == 'current_tree'
     personal = source["source_policy"]["mode"] == "personal"

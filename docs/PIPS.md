@@ -203,6 +203,13 @@ when they end. While every such worker is busy, the run waits in the queue; `pip
 how many Pip runs go at once. From the CLI: `dgc pips models` lists the systems, and
 `dgc pips create NAME --goal ... --router` (or `--router nas/qwen3.5:9b`) chooses one.
 
+A Pip's model menu offers every provider saved in **Settings → Models**, with its models, as a Work session's does.
+The choice belongs to that Pip and stays after a reload or a runner restart. The Pip keeps only the provider's id and
+the model. The provider's address and key go to `~/.dgc/secrets.json` (owner-only) when a Pip is first set to it,
+because a routine runs with no window open, and only that provider's key does. Each run uses that provider alone,
+whichever provider other chats use. Removing the provider in Settings removes that copy too: the Pip's next run stops
+and says so, and its model menu asks you to choose another. It never moves to another provider by itself.
+
 ## Images (Personal Pips)
 
 A Personal Pip makes images with your image generators (see Image generation in `/docs`), in its chat and its
@@ -1217,6 +1224,8 @@ the default gets one with **Give this Pip a computer…**, or `dgc pips computer
 a job change like any other. Ask the main chat for a Pip without a computer and it makes one
 without.
 
+  When a plugin can read what a Pip's job needs, the Pip reads it there rather than driving a browser on its computer:
+  a read needs no approval. **Cloudflare** is the example: its plugin only reads, so a daily traffic Pip runs unattended.
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
 - **It copes with how pages behave.** It waits for results a page is still loading, follows a link that opens a new

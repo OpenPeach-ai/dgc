@@ -92,6 +92,7 @@ STATIC_MEMBERS = {
     "extension/media/plugin-logos/calendar.png": "media/plugin-logos/calendar.png",
     "extension/media/plugin-logos/canva.png": "media/plugin-logos/canva.png",
     "extension/media/plugin-logos/cardboard.png": "media/plugin-logos/cardboard.png",
+    "extension/media/plugin-logos/cloudflare.png": "media/plugin-logos/cloudflare.png",
     "extension/media/plugin-logos/coda.png": "media/plugin-logos/coda.png",
     "extension/media/plugin-logos/composio.svg": "media/plugin-logos/composio.svg",
     "extension/media/plugin-logos/contacts.png": "media/plugin-logos/contacts.png",

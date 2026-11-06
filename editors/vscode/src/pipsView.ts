@@ -70,8 +70,12 @@ export class PipsEditor implements vscode.Disposable {
   private readonly mic: DictationOwner = { post: (message) => this.post({ ...message, from: 'pips' }) };
   useDictation(dictation: () => Dictation, readAloud?: () => ReadAloud): void { this.dictation = dictation; this.readAloud = readAloud; }
   /** A plugin's logo by its id (a data: URI), for a reply's "Used Aave" line; "" when it has none. */
+  private savedProviders?: { list: () => Promise<unknown[]>; save: (id: string) => Promise<void> };
   private pluginLogo?: (plugin: string) => string;
   usePluginLogos(lookup: (plugin: string) => string): void { this.pluginLogo = lookup; }
+  /** Providers saved in Settings: the host lists them for a Pip's model menus, and saves one (with its key, which never
+   *  comes here) before a Pip is set to it. */
+  useSavedProviders(list: () => Promise<unknown[]>, save: (id: string) => Promise<void>): void { this.savedProviders = { list, save }; }
   /** The artifacts (Pips API 67): a Pip's page lists the person's dashboards to refresh, and opens its report's
    *  document or sheet and its dashboards in the artifact panel. */
   private artifacts?: () => PipArtifactsHub | undefined;
@@ -269,6 +273,11 @@ export class PipsEditor implements vscode.Disposable {
     }
     if (owner.command === 'start_pip_app_link' && event.type === 'pips_result' && event.ok === true) {
       void this.openSignIn(owner.client, event.result, owner.surface);
+      return true;
+    }
+    if (owner.command === 'list_pip_models' && event.type === 'pips_result' && event.ok === true && this.savedProviders) {
+      void this.savedProviders.list().catch(() => [] as unknown[]).then(providers =>
+        this.post({ type: 'pipsReply', id: owner.client, ok: true, result: { ...event.result, providers } }, owner.surface));
       return true;
     }
     if (event.type === 'pips_status') this.state.enabled = event.enabled === true;
@@ -557,6 +566,15 @@ export class PipsEditor implements vscode.Disposable {
     if (this.pending.size >= 64) { fail('DGC is busy. Reconnect and try again.'); return; }
     const request = message.request;
     if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.type !== 'string') return;
+    // A Pip set to a saved provider: the host saves that provider first, so the choice's check and its runs find it.
+    const chosen = request.model_choice ?? request.changes?.model_choice;
+    if (chosen?.mode === 'provider' && message.providerSaved !== true) {
+      if (!this.savedProviders) { fail('Update DGC to run a Pip on a saved provider.'); return; }
+      void this.savedProviders.save(String(chosen.provider)).then(
+        () => this.receive({ ...message, providerSaved: true }, surface),
+        (error: unknown) => fail(error instanceof Error && error.message ? error.message : 'DGC could not save this provider for your Pips.'));
+      return;
+    }
     if ((request.type === 'learn_skill' || request.type === 'save_skill') && !computer) {
       // /learn in a Pip's chat: not a Pip control but the editor's own command (the draft is shown before anything is
       // written, and Save writes a personal skill, ~/.dgc/skills).
