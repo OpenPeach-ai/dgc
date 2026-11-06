@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- Opening a Pip from a home notification reveals its waiting card inside the chat history without moving the entire view or lifting the composer away from the editor bottom.
 - Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.
 - A message sent while a Pip is answering joins that reply without opening another run. Settings → Models keeps saved model hosts and signed-in subscription CLIs in one provider list. One default starts new Work and ChatDGC chats and Pips set to Default. Work and ChatDGC can each choose another saved provider and keep that choice after reload. API keys stay bound to their endpoint. A subscription needs no separate model host.
 - Personal and Project Pips now have Workflows on their home pages. Review an exact two-to-four Pip sequence and choose review at every handoff or unattended routing; pause or remove it there. Project targets are read only. Each Pip's external action approvals remain separate. New Personal Pips start at Ask, while existing Pips keep their saved level.

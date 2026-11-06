@@ -681,7 +681,7 @@ function liveMarkup(markdown){
 }
 // To a run in the chat: its live post while it runs, else its post.
 async function jumpToRun(runId){
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');el.scrollIntoView?.({block:'center'});el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
   if(go())return;
   await Promise.all([loadMessages(),loadPosts()]);
   if(!go())openPostReport(runId);
@@ -740,7 +740,7 @@ function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();rend
 // The status under its name: to its post in the chat, which says what it found.
 function jumpToPost(runId){
   S.tab='chat';S.overview=false;rememberView();render();
-  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');el.scrollIntoView?.({block:'center'});el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
+  const go=()=>{const el=document.querySelector(`[data-run-post="${runId}"]`)||document.querySelector(`[data-streak-run="${runId}"]`);if(!el)return false;el.closest('details')?.setAttribute('open','');revealInChat(el);el.focus?.({preventScroll:true});el.classList.add('run-post-flash');window.setTimeout(()=>el.classList.remove('run-post-flash'),1600);return true;};
   if(!go())void loadMessages().then(()=>{if(!go())openPostReport(runId);});
 }
 function askDgcAbout(runId){
@@ -2519,11 +2519,24 @@ async function navigateAttention(value){
 }
 // The chat draws its cards as they load (drafts, plugins, apps): look for a few seconds, then show it.
 const cardFlash={selector:'',until:0};
+// Only the transcript should scroll when a card or run is opened. scrollIntoView can move the
+// entire embedded webview upward and leave the composer stranded in the middle of the editor.
+function revealInChat(el,block='center'){
+ const log=el.closest('.conversation-log');
+ if(!log){el.scrollIntoView?.({block});return;}
+ const target=el.getBoundingClientRect(),viewport=log.getBoundingClientRect();
+ if(block==='nearest'){
+  if(target.top<viewport.top)log.scrollTop+=target.top-viewport.top;
+  else if(target.bottom>viewport.bottom)log.scrollTop+=target.bottom-viewport.bottom;
+  return;
+ }
+ log.scrollTop+=target.top-viewport.top-(viewport.height-Math.min(target.height,viewport.height))/2;
+}
 async function revealCard(selector){
  const token=scope(),pip=S.selected;
  for(let i=0;i<30;i++){
   const el=document.querySelector(selector);
-  if(el){el.scrollIntoView?.({block:'center'});cardFlash.selector=selector;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
+  if(el){revealInChat(el);cardFlash.selector=selector;cardFlash.until=Date.now()+2400;el.classList.add('attention-flash');(el.querySelector('button:not([disabled])')||el).focus?.({preventScroll:true});return true;}
   await new Promise(r=>window.setTimeout(r,150));if(token!==scope()||S.selected!==pip)return false;
  }
  return false;
@@ -4331,7 +4344,7 @@ document.addEventListener('click',event=>{const img=event.target.closest?.('#com
 document.addEventListener('click',event=>{const server=event.target.closest?.('[data-app-connection]')?.dataset.appConnection;if(server)void chooseAppAccount(server);});
 // A reply's details open below it. At the bottom of the conversation that is out of sight, so the panel comes into view
 // (only as far as it must). A click, not the toggle: each redraw opens the panels left open, and must not scroll.
-document.addEventListener('click',event=>{const details=event.target.closest?.('details.message-details > summary')?.parentElement;if(!details)return;requestAnimationFrame(()=>{if(details.open)details.querySelector('.message-provenance')?.scrollIntoView({block:'nearest'});});});
+document.addEventListener('click',event=>{const details=event.target.closest?.('details.message-details > summary')?.parentElement;if(!details)return;requestAnimationFrame(()=>{const provenance=details.open&&details.querySelector('.message-provenance');if(provenance)revealInChat(provenance,'nearest');});});
 document.addEventListener('change',event=>{if(event.target.id==='app-window-mode'){const relative=event.target.value==='calendar_days';$('app-relative-window').hidden=!relative;$('app-fixed-window').hidden=relative;}if(event.target.id==='app-account'&&S.review?.appPicker){const choice=S.review.appPicker.choices[Number(event.target.value)];$('app-calendar-window').hidden=event.target.value===''||choice?.toolkit!=='googlecalendar';const extra=extraReadTools.includes(choice?.tool);$('app-query').placeholder=({googledrive:'File name, for example Budget',notion:'Page title, for example Reading',googlecontacts:'Name, for example Alex',googlecalendar:'Optional event search',gmail:'For example: is:unread'})[choice?.toolkit]||'';$('app-query-label').textContent=extra?'Name or title to search (required)':'Search query (optional)';$('app-read-notice').textContent=appReadNotices[choice?.toolkit]||'';$('app-query').required=extra;}});
 async function enable(){
   if(!S.connected||!S.supported||S.busy)return;const epoch=S.epoch;S.busy=true;render();

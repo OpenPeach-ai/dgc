@@ -51,6 +51,7 @@ const { PipsEditor } = await load("pipsView.ts");
 
 const P = "ws_" + "1".repeat(32), Q = "ws_" + "2".repeat(32);
 const MAIL = "pip_" + "a".repeat(32), AUDIT = "pip_" + "b".repeat(32), RUN = "run_" + "c".repeat(32);
+const LINK = "applink_" + "d".repeat(32);
 const M1 = "message_" + "1".repeat(32), M2 = "message_" + "2".repeat(32), M3 = "message_" + "3".repeat(32), M4 = "message_" + "4".repeat(32);
 const base = { source_ref: "HEAD", status: "active", current_version: 1, lifecycle_revision: 0, policy: "read_only", trigger: "manual", schedule: null,
   proposals: [], pending_review_count: 0, latest_run: null };
@@ -63,7 +64,7 @@ const auditUnread = { pip_id: AUDIT, workspace_id: Q, name: "Billing audit", pip
 const reply = (id, text, minutes) => ({ id, pip_id: MAIL, workspace_id: P, role: "assistant", text, run_id: "run_" + id.slice(-32), status: "succeeded",
   model: "m", created_at: new Date(Date.UTC(2026, 10, 3, 9, minutes)).toISOString() });
 const STATE = () => ({ list: { [P]: [mail], [Q]: [audit] }, unread: { [P]: [mailUnread(2, "Two new mails from OKX.", M2)], [Q]: [auditUnread] },
-  messages: { [MAIL]: [reply(M1, "Your first mail is here.", 1), reply(M2, "Two new mails from OKX.", 2)] } });
+  messages: { [MAIL]: [reply(M1, "Your first mail is here.", 1), reply(M2, "Two new mails from OKX.", 2)] }, attention: null, appLinks: {} });
 
 // The side bar's Sessions home, its embedded Pips page and a DGC that answers from window.__state (the test changes it).
 async function openHome({ state = STATE(), dismissed = "", width = 380, height = 760, theme = "dark-modern", using = browser } = {}) {
@@ -107,7 +108,8 @@ async function openHome({ state = STATE(), dismissed = "", width = 380, height =
       get_workspace_context: (r) => ({ context: { workspace_id: r.workspace_id, revision: 0, entries: [] } }),
       get_pip_digest: () => ({ digest: { schema_version: 1, since: "2026-11-03T00:00:00.000Z", until: "2026-11-03T12:00:00.000Z", first: false, due: false, reason: null,
         headline: "Your Pips", pips: [], omitted_pips: 0, failed_runs: 0, pending_reviews: 0, pending_setups: 0, truncated: false } }),
-      list_pip_attention: () => ({ as_of: new Date().toISOString(), total: 0, items: [], truncated: false, counts: {}, by_pip: {} }),
+      list_pip_attention: () => S().attention || ({ as_of: new Date().toISOString(), total: 0, items: [], truncated: false, counts: {}, by_pip: {} }),
+      list_pip_app_links: (r) => ({ pip_id: r.pip_id, links: S().appLinks[r.pip_id] || [], composio: true }),
       list_pip_unread: (r) => { const pips = S().unread[r.workspace_id] || []; return { workspace_id: r.workspace_id, pips, total: pips.reduce((n, p) => n + p.count, 0) }; },
       // DGC's mark_read: everything up to the ids named is read (here: the Pip's unread goes, as nothing newer came).
       mark_pip_read: (r) => { for (const w of Object.keys(S().unread)) S().unread[w] = S().unread[w].filter((p) => p.pip_id !== r.pip_id);
@@ -154,6 +156,42 @@ async function openPipsPage(x, tab) {
 }
 const pill = (x, pip) => x.page.evaluate((id) => { const b = document.getElementById("pips-host").shadowRoot.querySelector(`[data-pip-read="${id}"]`);
   return b ? { text: b.innerText.trim(), label: b.getAttribute("aria-label") } : null; }, pip);
+
+test("opening an unread Pip from home keeps its composer at the bottom of the editor", async (t) => {
+  if (skipOrFail(t)) return;
+  const state = STATE();
+  state.messages[MAIL] = Array.from({length:36}, (_, index) => reply(
+    `message_${String(index + 1).padStart(32, "0")}`, `A scheduled report ${index + 1}: ${"Read the latest results. ".repeat(18)}`, index + 1));
+  state.attention = { as_of: new Date().toISOString(), total: 1, truncated: false, counts: {}, by_pip: { [MAIL]: 1 }, items: [{
+    id: `app_link:${LINK}`, kind: "app_link", card: LINK, pip_id: MAIL, pip_name: "Mail watch", pip_type: "scout", workspace_id: P,
+    title: "Link Gmail to Mail watch", detail: "Read inbox on schedule.", created_at: "2026-11-03T10:00:00Z", expires_at: null }] };
+  state.appLinks[MAIL] = [{ id: LINK, pip_id: MAIL, toolkit: "gmail", app: "Gmail", reason: "Read inbox on schedule.", status: "requested",
+    label: null, error: null, updated_at: "2026-11-03T10:00:00Z" }];
+  const x = await openHome({ state, width: 1266, height: 760 });
+  try {
+    await x.page.waitForSelector(`#sessions-pips .home-pip-item[data-pip-id="${MAIL}"] .home-pip-row`);
+    await x.page.click(`#sessions-pips .home-pip-item[data-pip-id="${MAIL}"] .home-pip-row`);
+    await x.page.waitForFunction(() => !!document.getElementById("pips-host")?.shadowRoot?.querySelector(".pip-composer"));
+    await x.page.waitForSelector(`#pips-host [data-app-link="${LINK}"]`);
+    await x.page.setViewportSize({ width: 1266, height: 1590 });
+    await x.page.waitForSelector(`#pips-host [data-app-link="${LINK}"].attention-flash`);
+    const geometry = await x.page.evaluate(() => {
+      const host = document.getElementById("pips-host");
+      const root = host.shadowRoot.querySelector(".pip-app-root");
+      const app = root.querySelector("#app");
+      const composer = root.querySelector(".pip-composer");
+      const log = root.querySelector(".conversation-log");
+      const box = element => { const r = element.getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:r.height}; };
+      return {viewport:innerHeight,host:box(host),root:box(root),app:box(app),composer:box(composer),logScroll:log.scrollTop};
+    });
+    assert.ok(geometry.logScroll > 0, `the notification should reveal the card inside the transcript: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.host.top >= 0, `the Pip view must not scroll above DGC's header: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.host.bottom - geometry.composer.bottom <= 28, JSON.stringify(geometry));
+    assert.ok(geometry.viewport - geometry.composer.bottom <= 28, `the composer must stay at the editor bottom: ${JSON.stringify(geometry)}`);
+    if (process.env.DGC_PIP_LAYOUT_SHOT) await x.page.screenshot({ path: process.env.DGC_PIP_LAYOUT_SHOT });
+    assert.deepEqual(x.errors, []);
+  } finally { await x.close(); }
+});
 
 test("Dismiss all clears the home's unread count and rows, marks nothing read, and the Pips page still shows every message unread", async (t) => {
   if (skipOrFail(t)) return;

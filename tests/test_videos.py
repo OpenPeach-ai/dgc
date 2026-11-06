@@ -40,8 +40,26 @@ class VideoCase(unittest.TestCase):
         self.jobs_ctx = videos.fresh_jobs()
         self.jobs = self.jobs_ctx.__enter__()
         self.addCleanup(self.jobs_ctx.__exit__, None, None, None)
+        # A polling job can outlive the assertion that starts it. Keep the test's
+        # DGC_HOME in place until its thread exits, or a later case can count a
+        # previous case's pending spend against its own fresh budget.
+        self.addCleanup(self._drain_jobs)
         self.heard: list = []
         self.jobs.add_listener(lambda job, change: self.heard.append((job["id"], change, job.get("state"))))
+
+    def _drain_jobs(self):
+        with self.jobs._lock:
+            entries = list(self.jobs._running.values())
+        for entry in entries:
+            entry["cancel"].set()
+        for entry in entries:
+            deadline = time.monotonic() + 5
+            while entry.get("thread") is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            thread = entry.get("thread")
+            self.assertIsNotNone(thread, "video polling thread was never started")
+            thread.join(max(0, deadline - time.monotonic()))
+            self.assertFalse(thread.is_alive(), "video polling thread outlived its isolated test home")
 
     def setup(self, *names, **extra):
         rows = {
@@ -167,7 +185,9 @@ class Fal(VideoCase):
         plan, _started, job = self.run_job({"prompt": "intro", "save_to": "assets/intro.mp4"})
         self.assertTrue(plan.into_project)
         self.assertEqual(plan.card()["saves_to"], "assets/intro.mp4")
-        self.assertEqual(Path(job["result"]["path"]), self.root / "assets" / "intro.mp4")
+        # macOS reports /private/var for files created under /var; both names
+        # refer to the same file after resolving that system symlink.
+        self.assertEqual(Path(job["result"]["path"]).resolve(), (self.root / "assets" / "intro.mp4").resolve())
         self.assertEqual(job["result"]["rel"], "assets/intro.mp4")
         (self.root / "assets" / "outro.mp4").write_bytes(b"x")
         with self.assertRaises(T.Refused) as said:
