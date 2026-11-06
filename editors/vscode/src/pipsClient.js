@@ -3,6 +3,8 @@ import {connectorDraft,connectorDraftsPage,connectorCall,connectorInspection,act
 import './pips.css';
 import '../media/messagequeue.js';
 import '../media/messagequeue.css';
+import '../media/trace.js'; // window.DgcTrace: a reply's steps replayed, the same dialog as Work and ChatDGC
+import '../media/trace.css';
 import '../media/genui.css';
 import {accountChoices,accountReadPlan,appLabels,appReadNotices,appReadWords,extraReadTools,combineReadPlans} from './pipsAppPicker.js';
 import './pipsTranscript.css';
@@ -590,7 +592,7 @@ function chatMarkup(){
   const items=postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m}));
   const context=postsShown()?postContext():null;
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
-    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id)});};
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true});};
   const messages=items.map(i=>i.message?drawMessage(i.message):drawPost(i)).join('');
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
@@ -765,7 +767,7 @@ async function loadPosts(more=false){
     S.posts=mergePosts(S.postsPip===id?S.posts:[],page.posts);S.postsPip=id;
     if(more||!S.postsLoaded)S.postsCursor=page.next_before_id;S.postsLoaded=true;S.postsError='';
   }catch(error){if(token===scope()&&sequence===postsSeq)S.postsError=errorText(error);}
-  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();}}
+  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();void loadReplyStats();}}
 }
 // Open full report: the run, under History, at its report.
 function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();render();void loadRun(runId).then(()=>document.querySelector('section[aria-label="Run report"],section[aria-label="Pulse command receipt"],section[aria-label="Documentation draft"]')?.scrollIntoView?.({block:'start'}));}
@@ -834,13 +836,29 @@ async function loadMessages(more=false){
 const replyStats=new Map();let replyStatsSeq=0;
 async function loadReplyStats(){
   if(remoteHost||S.apiVersion<44||!usable())return;
-  const pip=S.selected,token=scope(),sequence=++replyStatsSeq;
-  const runs=[...new Set(S.messages.filter(m=>m.role==='assistant'&&m.status==='succeeded'&&/^run_[a-f0-9]{32}$/.test(m.run_id||'')&&!replyStats.has(m.run_id)).map(m=>m.run_id))].slice(-50);
+  const pip=S.selected,token=scope();
+  const posted=postsShown()&&Array.isArray(S.posts)?S.posts.map(p=>p.run_id):[];   // a run's post has its Trace too
+  const runs=[...new Set([...posted,...S.messages.filter(m=>m.role==='assistant'&&m.status==='succeeded').map(m=>m.run_id)].filter(r=>/^run_[a-f0-9]{32}$/.test(r||'')&&!replyStats.has(r)))].slice(-50);
   if(!runs.length)return;
+  const sequence=++replyStatsSeq;
   try{const v=await send('list_pip_reply_stats',{pip_id:pip,run_ids:runs});if(token!==scope()||S.selected!==pip||sequence!==replyStatsSeq||!record(v)||v.pip_id!==pip||!Array.isArray(v.stats))return;
    for(const s of v.stats.slice(0,50))if(record(s)&&runs.includes(s.run_id)&&(s.seconds===null||Number.isFinite(s.seconds))&&[s.input_tokens,s.output_tokens,s.requests].every(n=>Number.isSafeInteger(n)&&n>=0))replyStats.set(s.run_id,s);
    render();}
   catch{/* the line is left out */}
+}
+// Its Trace: the steps are read when it's opened, one reply's at a time (list_pip_reply_stats with just its run).
+async function openReplyTrace(run,model){
+  const pip=S.selected,token=scope();
+  let trace=null;
+  try{
+    const v=await send('list_pip_reply_stats',{pip_id:pip,run_ids:[run]});
+    if(token!==scope()||S.selected!==pip)return;
+    const item=record(v)&&Array.isArray(v.stats)?v.stats.find(s=>record(s)&&s.run_id===run):null;
+    trace=globalThis.DgcTrace?.fromSaved(item?.trace,String(run).slice(0,10),model)||null;
+  }catch{/* said below */}
+  if(token!==scope()||S.selected!==pip)return;
+  if(trace)globalThis.DgcTrace.open(trace);
+  else{S.notice="This reply's trace couldn't be read.";render();}
 }
 // While a reply runs, its stream is read every 400 ms (the chat's own refresh is every 4 s), so it
 // reads as it is written, with DGC's working row: what it is doing, its clock and its tokens.
@@ -3978,9 +3996,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.removeImage!==undefined){const i=Number(target.dataset.removeImage),images=[...pendingImages()];if(Number.isInteger(i)&&i>=0&&i<images.length){images.splice(i,1);images.length?chatImages.set(S.selected,images):chatImages.delete(S.selected);render();$('chatText')?.focus();}return;}
   if(target.id==='pin-pips-sidebar'){S.sidebarPinned=!S.sidebarPinned;rememberView();render();return;}
   if(target.dataset.chatActivity){void toggleChatActivity(target.dataset.chatActivity);return;}
+  if(target.dataset.postTrace){void openReplyTrace(target.dataset.postTrace,'');return;}
   if(target.dataset.chatAction){
     const m=S.messages.find(m=>m.id===target.dataset.messageId);if(!m)return;
     if(target.dataset.chatAction==='read'){reader?.toggle(m.id,m.text);return;}
+    if(target.dataset.chatAction==='trace'){void openReplyTrace(m.run_id,m.model);return;}
     if(target.dataset.chatAction==='copy'){vscode.postMessage({type:'copy',text:m.text});target.innerHTML=transcriptIcon('check')+'<span class="sr-only">Copied</span>';target.title='Copied';target.setAttribute('aria-label','Copied');const status=target.parentElement.querySelector('.copy-feedback');if(status)status.textContent='Copied';return;}
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id);if(!prompt||archived()||!usable())return;
     if(draft.chatText.trim()&&draft.chatText!==prompt.text){S.notice='You have an unsent message in the box. Send or copy it first, then edit this one.';render();return;}

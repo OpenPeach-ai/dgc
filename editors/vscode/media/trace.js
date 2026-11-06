@@ -38,7 +38,7 @@
     if (start == null || trace.rows.length >= 512) { trace.incomplete = true; return; }
     const id = clean(event.call_id || `${event.name}:${trace.rows.length}`, 100);
     const summary = clean(event.summary, 110);
-    const search = /(?:^|\s)(?:rg|grep)(?:\s|$)/i.test(summary);
+    const search = event.name === "grep" || /(?:^|\s)(?:rg|grep)(?:\s|$)/i.test(summary);
     const row = { kind: "tool", label: search ? "grep" : clean(event.name, 72) || "tool", detail: summary,
       search,
       start, end: null, error: false, id };
@@ -56,7 +56,8 @@
     else if (row.error) row.detail = "Failed";
     else if (event.is_diff) row.detail = "Changed files";
     else if (row.search) {
-      const lines = String(event.output || "").trim().split("\n").filter(Boolean).length;
+      const found = String(event.output || "").trim();
+      const lines = /^no matches/i.test(found) ? 0 : found.split("\n").filter(Boolean).length;
       row.detail = `${lines} ${lines === 1 ? "hit" : "hits"}`;
     } else if (!row.detail) {
       const lines = String(event.output || "").trim().split("\n").filter(Boolean).length;
@@ -76,6 +77,24 @@
     trace.end = Math.max(trace.start, end);
     return !trace.incomplete && trace.rows.length && trace.end > trace.start ? trace : null;
   }
+  // A reply's steps as ChatDGC and a Pip save them (dgc/reply_trace.py): times from its first step, each measured. Anything
+  // that isn't whole gives no Trace, never a guess.
+  function fromSaved(saved, id, model) {
+    if (saved?.v !== 1 || !Number.isSafeInteger(saved.ms) || saved.ms <= 0
+      || !Array.isArray(saved.steps) || !saved.steps.length || saved.steps.length > 512) return null;
+    const rows = [];
+    for (const step of saved.steps) {
+      const { start, end, kind } = step || {};
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > saved.ms) return null;
+      if (kind !== "model" && kind !== "tool") return null;
+      const hits = Number.isSafeInteger(step.hits) && step.hits >= 0 ? step.hits : null;
+      const detail = step.denied === true ? "Denied" : step.error === true ? "Failed"
+        : hits !== null ? `${hits} ${hits === 1 ? "hit" : "hits"}` : clean(step.detail, 110);
+      rows.push({ kind, label: clean(step.label, 72) || kind, detail, start, end, error: step.error === true,
+        tokens: Number.isSafeInteger(step.tokens) && step.tokens > 0 ? step.tokens : null });
+    }
+    return { start: 0, end: saved.ms, id: clean(id, 40), model: clean(model, 80), rows };
+  }
   function open(trace) {
     if (!trace?.rows?.length) return;
     document.querySelector(".dgc-trace-backdrop")?.remove();
@@ -86,7 +105,7 @@
     const header = document.createElement("header"); header.className = "dgc-trace-head";
     const title = document.createElement("strong"); title.textContent = trace.id || "Response trace";
     const model = document.createElement("span"); model.className = "dgc-trace-model";
-    model.textContent = [trace.model, `${trace.rows.length} spans`].filter(Boolean).join(" · ");
+    model.textContent = [trace.model, `${trace.rows.length} ${trace.rows.length === 1 ? "span" : "spans"}`].filter(Boolean).join(" · ");
     const state = document.createElement("span"); state.className = "dgc-trace-state"; state.textContent = "Complete";
     const close = document.createElement("button"); close.type = "button"; close.className = "dgc-trace-close";
     close.setAttribute("aria-label", "Close trace"); close.textContent = "×";
@@ -112,7 +131,7 @@
       bar.style.left = `${Math.max(0, (row.start - trace.start) / duration * 100)}%`;
       bar.style.width = `${Math.max(.35, (row.end - row.start) / duration * 100)}%`; lane.appendChild(bar);
       const meta = document.createElement("span"); meta.className = "dgc-trace-meta";
-      const detail = document.createElement("span"); detail.textContent = row.kind === "model" && row.tokens ? `${row.tokens.toLocaleString()} tk` : row.detail || "";
+      const detail = document.createElement("span"); detail.textContent = row.tokens && !row.error ? `${row.tokens.toLocaleString()} tk` : row.detail || "";
       const time = document.createElement("span"); time.textContent = fmt(row.end - row.start);
       meta.append(detail, time); item.append(label, lane, meta); body.appendChild(item);
     }
@@ -140,14 +159,17 @@
     play.onclick = () => { if (frame) { stop(); return; } if (position >= duration) position = 0;
       last = 0; play.textContent = "Ⅱ"; play.setAttribute("aria-label", "Pause trace"); frame = requestAnimationFrame(tick); };
     scrub.oninput = () => { position = Number(scrub.value); paint(); };
-    const previous = document.activeElement;
-    const dismiss = () => { stop(); backdrop.remove(); document.removeEventListener("keydown", keydown); previous?.focus?.(); };
-    const keydown = (event) => { if (event.key === "Escape") dismiss();
+    // A Pip's chat is inside a shadow root: what had the keyboard is the element in there, not its host.
+    let previous = document.activeElement;
+    while (previous?.shadowRoot?.activeElement) previous = previous.shadowRoot.activeElement;
+    const dismiss = () => { stop(); backdrop.remove(); document.removeEventListener("keydown", keydown, true); previous?.focus?.(); };
+    // First, so Esc closes this and nothing behind it hears it (a Pip's chat, a running reply's Stop).
+    const keydown = (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); return; }
       if (event.key === "Tab") { const controls = [close, play, scrub];
         const index = controls.indexOf(document.activeElement); if (event.shiftKey && index === 0) { event.preventDefault(); scrub.focus(); }
         else if (!event.shiftKey && index === controls.length - 1) { event.preventDefault(); close.focus(); } } };
     close.onclick = dismiss; backdrop.onclick = (event) => { if (event.target === backdrop) dismiss(); };
-    document.body.appendChild(backdrop); document.addEventListener("keydown", keydown); paint(); close.focus();
+    document.body.appendChild(backdrop); document.addEventListener("keydown", keydown, true); paint(); close.focus();
   }
-  window.DgcTrace = { create, modelEnd, modelUsage, toolStart, toolEnd, finish, open };
+  window.DgcTrace = { create, modelEnd, modelUsage, toolStart, toolEnd, finish, fromSaved, open };
 })();

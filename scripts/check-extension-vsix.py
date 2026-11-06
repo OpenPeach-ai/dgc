@@ -26,6 +26,7 @@ STATIC_MEMBERS = {
     "extension/media/walkthrough.md": "media/walkthrough.md",
     "extension/media/main.js": "media/main.js",
     "extension/media/trace.js": "media/trace.js",
+    "extension/media/trace.css": "media/trace.css",
     "extension/media/messagequeue.js": "media/messagequeue.js",
     "extension/media/messagequeue.css": "media/messagequeue.css",
     "extension/media/numbered-list.js": "media/numbered-list.js",

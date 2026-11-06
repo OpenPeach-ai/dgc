@@ -909,6 +909,8 @@
     button.addEventListener("click", () => reader.toggle(message.id, message.text || ""));
     return button;
   }
+  /** "msg_7c41f2…" as Trace's title names it: the same short id a run has there. */
+  const shortId = (id) => { const [kind, rest] = String(id || "").split("_"); return rest ? `${kind}_${rest.slice(0, 6)}` : String(id || ""); };
   function action(icon, label, onClick) {
     const button = el("button", "cd-action");
     button.type = "button"; button.title = label; button.setAttribute("aria-label", label);
@@ -1605,6 +1607,14 @@
       actions.append(idleOnly(again));
       const branch = branchAction(message);
       if (branch) actions.append(branch);
+      // The word Trace after the icons, as in Work: only for a reply that recorded its steps (dgc/reply_trace.py).
+      const trace = window.DgcTrace?.fromSaved(message.trace, shortId(message.id), message.model);
+      if (trace) {
+        const replay = el("button", "cd-action cd-trace", "Trace");
+        replay.type = "button"; replay.title = "Replay response trace"; replay.setAttribute("aria-label", "Replay response trace");
+        replay.addEventListener("click", () => window.DgcTrace.open(trace));
+        actions.append(replay);
+      }
       if (message.model) actions.append(el("span", "cd-meta", String(message.model)));
       // When it was written, first in the row, where the reply begins (media/msgtime.js).
       const writtenAt = window.DgcTime?.node(Date.parse(message.created_at), "cd-time");

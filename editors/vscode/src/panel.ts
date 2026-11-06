@@ -9391,6 +9391,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const traceJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "trace.js"));
+    const traceCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "trace.css"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
     const breakdownScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "breakdown.js"));
@@ -9449,6 +9450,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${css}">
 <link rel="stylesheet" href="${genuiCss}">
 <link rel="stylesheet" href="${queueCss}">
+<link rel="stylesheet" href="${traceCss}">
 <link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 <link rel="stylesheet" href="${mcpAppsCss}">

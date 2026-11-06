@@ -6,6 +6,8 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- ChatDGC and Pip replies keep what they did, step by step, for Trace: model rounds with their reported tokens, plugin calls, cards, searches with their hits, a Pip's tools and its routine runs. A ChatDGC reply holds them as `trace` on its message; a Pip's run keeps them beside its result, and `list_pip_reply_stats` says `has_trace`, with the steps themselves as `trace` when asked about one run. A reply that stopped or failed has none.
+- ChatDGC no longer lets the model repeat the app's own notes about an earlier reply ("[You edited the canvas … here.]"): the prompt says not to write one, and a line that is exactly one never reaches the reply.
 - `dgc update` targets the launcher that is running, including a launcher that is a script rather than a link. It ignores an install record naming a temporary folder or another install, and it no longer reports success while the `dgc` on your PATH is a different one it did not change.
 - A Pip run is pinned to the saved model connection, not the route of the chat that queued it. Before, a chat on another provider made every Pip message it sent fail with `model_changed`.
 - A queued message can be removed or moved before its turn starts (`queue_remove`, `queue_reorder`, offered as `ready.capabilities.queue_edit`, answered by the `queue_changed` event).

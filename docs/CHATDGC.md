@@ -17,6 +17,10 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Trace.** Under a finished reply, **Trace** beside its icons replays what the reply did, as in Work: each
+  model round with the tokens the provider reported, plugin calls, cards, searches with their hits, and a card
+  you sent later, without the wait before you sent it. Play it or scrub its timeline; it's saved with the reply,
+  so it survives a reload. A reply that stopped or failed, and one from before steps were recorded, has no Trace.
 - **Through a reload.** Reload the window, close it, or lose a Remote SSH connection while a reply is being
   written: the reply carries on, and when the window comes back its tab shows it finished or still streaming,
   with nothing lost or shown twice, and your queued messages still waiting. With no window it saves and stops by
@@ -438,6 +442,9 @@ Chats are stored in `~/.dgc/chat/`:
 
 - each chat is one file, `chats/<id>.json`, holding its title, times, model, thinking level, pinned and
   archived state, and messages;
+- a reply's measured steps are in its message as `trace`, `{"v": 1, "ms", "steps": [{"kind", "label", "start",
+  "end", "tokens"?, "detail"?, "hits"?, "error"?, "denied"?}]}`, in whole milliseconds from its first step; the model
+  never reads them;
 - `index.sqlite3` keeps the list fast and holds what each chat says for search (with SQLite's FTS5 where available).
 
 Every file is owner-only and written atomically. A lock file keeps two windows from writing a chat at
