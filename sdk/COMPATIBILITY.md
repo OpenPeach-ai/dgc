@@ -2,7 +2,7 @@
 
 | SDK | Protocol | CLI | Python | Node | Host proven |
 | --- | --- | --- | --- | --- | --- |
-| **0.9.0** | **v14, Pips API 73** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04)** |
+| **0.9.0** | **v14, Pips API 74** | **0.51.0** | **≥ 3.10** | **≥ 22** | **Linux** |
 | 0.8.0 | v14, Pips API 69 | 0.50.0 | ≥ 3.10 | ≥ 22 | Linux, macOS 26.5.1 (Apple silicon), Windows 11 via WSL 2 (Ubuntu 24.04) |
 | 0.7.0 | v14 | 0.48.0 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.6.10 | v14 | 0.47.0 | ≥ 3.10 | ≥ 22 | Linux |
@@ -19,10 +19,10 @@
 | 0.5.3 | v14 | 0.41.6 | ≥ 3.10 | ≥ 22 | Linux |
 | 0.5.2 | v14 | 0.41.5 | ≥ 3.10 | ≥ 22 (source only, strip-types) | Linux |
 
-SDK 0.9.0's Python and TypeScript suites passed against CLI 0.51.0 on Linux, macOS 26.5.1
-(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04). The full Python product suite
-also passed on Linux and macOS; the WSL product suite is tracked separately from this SDK proof.
-These checks do not cover every macOS or WSL version.
+SDK 0.9.0 as released has been tested on Linux only. Its Python and TypeScript suites passed on
+macOS 26.5.1 (Apple silicon) and on Windows 11 through WSL 2 (Ubuntu 24.04) for an earlier 0.9.0
+candidate on 2026-11-04, before the last additions in its changelog, so those two hosts are not
+listed above. They remain release test targets.
 
 The 0.8.0 host proofs are release dry runs with isolated CLI 0.50.0 installs, package builds,
 the full Python and Node SDK suites. They do not cover every macOS or WSL version.

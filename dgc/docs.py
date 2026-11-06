@@ -807,7 +807,12 @@ The editor owns the browsing surface. **Settings ▸ Plugins** has three lanes:
 
 - **Plugins** — what is installed, with its state: *Installed*, *Setup required*, or *Connected*.
 - **Apps** — the individual services those packages reach, each naming the plugin behind it.
-- **MCPs** — the servers themselves, the same catalog as `/mcp`.
+- **Mods** — your own mods, as `/mods` lists them.
+
+**Settings ▸ MCP servers** holds the servers themselves, the same catalog as `/mcp`.
+
+**Cloudflare** is one of them: its own hosted analytics server with its own browser sign-in, granted read access only, so
+a Pip can read a site's traffic with no approval.
 
 **Browse directory** opens the curated catalog. Every entry names its licence and, separately, what
 DGC actually *verified* — which is often less than "it works": a package whose structure was checked
@@ -1727,7 +1732,7 @@ panel). Hover it to read how many are working. Click it for the list:
 - a summary such as **2 agents · 2 working**;
 - one row per visible agent with the same facts the terminal shows, updated as it works;
 - click a row or a coloured chip in the transcript to open that agent's page;
-- **Sub-agent settings** opens Settings ▸ Agents, where the sub-agent model and host are chosen.
+- **Sub-agent settings** opens Settings ▸ Models ▸ Sub-agents, where the sub-agent model and host are chosen.
 
 The list is for looking. **Stop** ends the whole turn, including every agent. When the chat is
 reopened, saved tool steps retain earlier results without repopulating the prompt area with completed
@@ -3443,8 +3448,8 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. The release targets Linux,
-Apple-silicon macOS and Windows through WSL 2. Native Windows is experimental. The guide and API reference are in
+**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. This version has been tested on Linux only;
+macOS and Windows through WSL 2 passed for an earlier candidate. Native Windows is experimental. The guide and API reference are in
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
 [PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)
 for the published version before installing.
@@ -3548,6 +3553,14 @@ models), `session.images` and `session.videos` make pictures and videos with you
 (one that asks first runs only when your code passes `approve=True`), and `session.cards` shows a
 plugin's own cards. Each checks that the CLI offers it first; docs/SDK.md has the details.
 
+## One session, another provider
+
+`session.set_model(model, base_url=, api_key=, api_mode=)` and `session.set_thinking(level)` move one session to another
+model or provider from its next request. It comes back when the session is reopened, your settings and other sessions
+don't change, and a key goes only to its own address. `cancel()` on a follow-up still waiting takes it out of the queue,
+so it never starts. A ChatDGC reply's `trace` holds what it did, step by step, and `chats.mentions()` lists what a message
+can name with `@`.
+
 Product page: [vibedgc.com/sdk](https://vibedgc.com/sdk/). Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
 """.strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
@@ -3570,7 +3583,17 @@ CLI; the extension updates through your editor.
 
 ## The composer
 
-- **@** attaches a file, **/** opens the command palette, **$** applies a skill.
+- **@** names what this box can use: a file, a plugin (its logo and name), an Output (its icon and name)
+  or a Pip (its face and name). Work, ChatDGC and a Pip's chat each list only what they can really use,
+  and the sent bubble keeps the marks after a reload. The model reads plain words, so a message without
+  `@` works the same. **/** opens the command palette, **$** applies a skill.
+- **Alt+Enter** keeps a later message above the box until its turn begins, in Work, ChatDGC and a Pip's
+  chat. Drag it or use the arrow keys to reorder it, steer it in, remove it, copy it or move it to the top.
+- The **model button** lists the providers saved in **Settings → Models**, then their models, with the
+  thinking slider fixed at the top. The choice belongs to this chat and survives a reload. Add providers
+  with **+ Add provider** in Settings: a host with its key, or a signed-in Claude Code or Codex. With one
+  provider it is the default; with several, a checkbox picks the default for new chats and for Pips on
+  Default. A chat already open stays on what it chose.
 - A picked skill, template or file becomes a **pill** where you typed it, not a rewritten line: it
   carries its own sigil, you can remove it with Backspace or the mouse, and the model receives the
   text it stands for. Two pills of the same skill are two selections. Anything the pill does not
@@ -3592,6 +3615,10 @@ CLI; the extension updates through your editor.
 
 ## What an answer can show
 
+- **Trace.** The word beside a finished answer's icons, in Work, ChatDGC and a Pip's chat. It replays what
+  the answer did: each model round with the tokens the provider reported, tools with their own time, a search
+  with its hits, cards and plugin calls. Play it or scrub its timeline; it survives a reload. An answer that
+  stopped or failed, and an older one with no recorded steps, has no Trace, and no number is ever guessed.
 - **Diagrams.** A ```mermaid fence renders as the diagram it describes, drawn in the panel's own
   colours and type. The source stays underneath behind **Show source**, so Copy still gives you
   the markup. A diagram DGC cannot parse keeps its code block rather than being replaced by an
@@ -3742,10 +3769,16 @@ coding sessions) and from Pips. The full guide is
 
 ## Using it
 
-The DGC side bar has two tabs, **Chat** and **Work**. **New chat** opens a chat in an editor tab, as
+The DGC side bar has two tabs, **Work** and **Chat**. Work comes first and opens by default; after that it
+remembers the one you used last. **New chat** opens a chat in an editor tab, as
 does **DGC: New Chat (ChatDGC)** in the Command Palette. One search box finds a chat by its name or
 anything said in it. Enter sends, Shift+Enter adds a line, Esc stops a reply. A message you send
-while a reply is still being written waits above the box and goes when the reply finishes. A reply
+while a reply is still being written waits above the box and goes when the reply finishes: drag it
+to reorder it, remove it, copy it or move it to the top. The model button lists the providers saved
+in **Settings → Models**, then their models, and the chat keeps its choice. Type **@** for what this
+chat can use: your plugins, the Outputs, your Personal Pips and this window's files. The model reads
+plain words, so a message without `@` works the same. **Trace** beside a finished reply's icons replays what
+it did: each model round with its tokens, plugin calls, cards, searches with their hits. A reply
 keeps going through a window reload or a closed window, and its tab shows it again when the window
 comes back; closing the tab mid-reply asks once whether to keep it running. A chat open in another
 VS Code window shows read-only with **Open here**, which brings that chat to this window, its reply
@@ -3836,6 +3869,17 @@ window DGC starts it with), or to change one: a Pip's model or context window, a
 your own Claude Code or Codex, or the model every Pip on **Default** uses. It asks you before each
 change, and a model or window never changes what a Pip may do. A new Pip it sets up gets a model and
 window that fit its job, with one line on why; change them on the card or the Pip's page.
+
+## Talking to a Pip
+
+A new Personal Pip says hello and sets itself up in its chat the first time you open it. Its box works like
+Work's: **@** lists the plugins it can use and your other Pips (a Project Pip: its fellow Pips and the project's
+files), Alt+Enter keeps a later message above the box, and a text message you send while a Personal Pip is
+answering joins that reply. **Trace** beside a reply replays what the Pip did, and a post of a run it finished on
+its own has one too. Its model button lists every provider saved in **Settings → Models**, with its models, as
+a Work session's does. A Pip keeps its choice; if you remove that provider, its next run stops and says so, and it
+never moves to another by itself. New Personal Pips start at **Ask**; existing Pips keep the level you chose. A Pip
+reads with a plugin rather than driving a browser when it can, and a plugin's read needs no card.
 
 ## They keep going
 
@@ -4614,6 +4658,16 @@ actually serves.
 `/connect openai | anthropic | openrouter | groq | deepseek | together | mistral`
 prompt for the provider's key and use its native auth contract. See **Subscriptions**
 to instead run your own Claude/Codex/Qwen/Kimi/Copilot plan through its official CLI.
+
+## In the editor
+
+**Settings → Models → + Add provider** lists the providers you have not added: a host with its address and key,
+or a signed-in Claude Code or Codex. You need only one, and a Claude Code or Codex plan alone runs Work, ChatDGC and
+Personal Pips. Project Pips that read committed source need a host, because their source checks run only in DGC's own
+loop. One provider is the default. With several, a checkbox on each picks the one new chats and
+Pips on Default start from. Each Work session, ChatDGC chat and Pip can choose another in its model button and keeps it
+after a reload, and changing the default leaves them where they are. A key is kept per address and goes only there. If a
+saved subscription's CLI has gone or signed out, Settings says so and how to fix it.
 """.strip()),
 
     ("Reconnecting", "what DGC does when a model request fails, is refused as busy, or is cut off", """
@@ -5003,8 +5057,10 @@ DGC with only the environment secrets that turn needs.
 
 - `dgc setup` lists subscription engines first, with each one's detected login marker. The vendor
   performs the actual authentication check when its CLI launches.
-- `/connect claude|codex|qwen|kimi|copilot` selects an engine (a direct `/connect`
-  to a provider or URL turns delegation back off).
+- `/connect claude|codex|qwen|kimi|copilot` selects an engine (`/connect` to a provider or URL
+  turns delegation back off). In the editor, **Settings → Models → + Add provider** adds Claude Code or Codex
+  once its CLI is signed in, and Work, ChatDGC and Personal Pips can then run on it. A Pip on one is held to DGC's own
+  tools.
 - Sign in once with the vendor's own command, e.g. `claude auth login`, `codex login`,
   `qwen` (device code), `kimi login`, `copilot login`. `dgc doctor` reports status.
 

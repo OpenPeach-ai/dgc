@@ -20,7 +20,7 @@ import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { DGCConfigError, DGCRuntimeError, DGCTimeoutError, DGCUnsupportedError } from "./errors.ts";
-import type { Session } from "./session.ts";
+import type { Cards, Session } from "./session.ts";
 import type { Frame } from "./transport.ts";
 
 export const CHAT_THINKING = ["off", "low", "medium", "high", "xhigh"] as const;
@@ -48,6 +48,10 @@ export type ChatReply = {
   artifacts: Array<Record<string, unknown>>;
   /** Set when the Output asked for wasn't made. */
   outputNote: string;
+  /** What the reply did, as DGC's Trace draws it (CLI 0.51+): `{v: 1, ms: total, steps: [{kind: "model" | "tool", label,
+   *  start, end, tokens?, detail?, hits?, error?, denied?}]}`, every number measured. A reply that stopped or failed has
+   *  none. */
+  trace: Record<string, unknown> | null;
   raw: Record<string, unknown>;
 };
 
@@ -71,7 +75,7 @@ export type ChatSummary = {
  * research's progress) or `"reply"` (the last one: `reply` is the finished {@link ChatReply}).
  */
 export type ChatEvent = {
-  kind: "text" | "thinking" | "activity" | "question" | "research" | "reply";
+  kind: "text" | "thinking" | "waiting" | "activity" | "card" | "question" | "research" | "reply";
   text: string;
   data: Record<string, unknown>;
   reply?: ChatReply;
@@ -90,6 +94,10 @@ export type ChatSendOptions = {
   timeoutMs?: number | null;
   /** CLI 0.50+: what the reply should make, as DGC's Output chip asks; the reply's `artifacts` hold it. */
   output?: "auto" | "document" | "slides" | "spreadsheet" | "page" | "dashboard";
+  /** CLI 0.51+: where your box drew its `@` marks, `{start, kind, label, identity}` with `kind` plugin, artifact, pip,
+   *  skill, template, file or command, so the sent message shows them again when the chat is reopened. For display only,
+   *  and marks that don't fit the text are dropped: the model reads the text, so write the names there too. */
+  displayMentions?: Array<Record<string, unknown>>;
 };
 
 export type ChatAnswerOptions = {
@@ -141,7 +149,9 @@ function toReply(chatId: string, message: Record<string, unknown>): ChatReply {
     files: (Array.isArray(message.files) ? message.files : []).map((f) => ({ ...record(f) })),
     model: text(message.model), finish: text(message.finish), usage: { ...record(message.usage) }, research,
     artifacts: (Array.isArray(message.artifacts) ? message.artifacts : []).map((a) => ({ ...record(a) })),
-    outputNote: text(message.output_note), raw: { ...message },
+    outputNote: text(message.output_note),
+    trace: message.trace && typeof message.trace === "object" && !Array.isArray(message.trace) ? { ...record(message.trace) } : null,
+    raw: { ...message },
   };
 }
 
@@ -188,6 +198,7 @@ export class Chats {
   /** @internal */ readonly titles = new Map<string, string>();
   private failure: Error | null = null;
   private closedFlag = false;
+  private watchingCards = false;
 
   constructor(session: Session, options: ChatsOptions = {}, ownsSession = true) {
     const chatdgc = record(session.capabilities.chatdgc);
@@ -222,7 +233,7 @@ export class Chats {
         const title = record(frame.summary).title;
         if (title) this.titles.set(conversation, text(title));
       }
-      if (!kind.startsWith("chatdgc_") || typeof conversation !== "string") continue;
+      if (!(kind.startsWith("chatdgc_") || kind === "mcp_app_card") || typeof conversation !== "string") continue;
       this.listeners.get(conversation)?.push(frame);
     }
   }
@@ -256,6 +267,32 @@ export class Chats {
     if (query) command.query = String(query).slice(0, 500);
     const answer = await this.request(command, "chatdgc_chats");
     return (Array.isArray(answer.chats) ? answer.chats : []).map(record).map(toSummary);
+  }
+
+  /** What a message can name with `@` (CLI 0.51+): `plugins` [{id, name}], every plugin a reply can use, and `pips`
+   *  [{id, name, pip_type, goal}], the user's Personal Pips, with `error` saying why they can't be listed (Pips off), the
+   *  plugins still there. For your own picker; pass what was picked as `displayMentions`. */
+  async mentions(): Promise<{ plugins: Array<Record<string, unknown>>; pips: Array<Record<string, unknown>>; error?: string }> {
+    if (!record(this.session.capabilities.chatdgc).mentions) {
+      throw new DGCUnsupportedError("This DGC CLI has no @ list for ChatDGC; update it (dgc update).");
+    }
+    const answer = await this.request({ type: "chatdgc_mentions" }, "chatdgc_mentions");
+    return {
+      plugins: (Array.isArray(answer.plugins) ? answer.plugins : []).map(record),
+      pips: (Array.isArray(answer.pips) ? answer.pips : []).map(record),
+      ...(typeof answer.error === "string" ? { error: answer.error } : {}),
+    };
+  }
+
+  /** Plugins' own cards in these chats (MCP Apps, CLI 0.51+; see `Cards`). The first use tells the CLI this app draws
+   *  them: from then on a reply that shows one yields a `"card"` event, and the reply's `raw` lists them as `apps`. */
+  get cards(): Cards {
+    const cards = this.session.cards;
+    if (!this.watchingCards) {
+      cards.watch("chat");
+      this.watchingCards = true;
+    }
+    return cards;
   }
 
   /** A new chat. It's saved (and listed) from its first message; a temporary one never is. */
@@ -347,6 +384,11 @@ export class Chat {
         } else if (kind === "chatdgc_delta" && started) {
           if (event.text) yield { kind: "text", text: text(event.text), data: {} };
           if (event.thinking) yield { kind: "thinking", text: text(event.thinking), data: {} };
+        } else if (kind === "chatdgc_waiting" && started) {
+          yield { kind: "waiting", text: "", data: { model: event.model, usual_s: event.usual_s } };
+        } else if (kind === "mcp_app_card" && started) {
+          const { type: _type, seq: _seq, ...card } = event;
+          yield { kind: "card", text: "", data: card };
         } else if (kind === "chatdgc_activity" && started) {
           yield { kind: "activity", text: text(event.text), data: { kind: event.kind, text: event.text } };
         } else if (kind === "chatdgc_question" && started) {
@@ -405,6 +447,12 @@ export class Chat {
         throw new DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).");
       }
       command.output = options.output;
+    }
+    if (options.displayMentions?.length) {
+      if (!record(this.chats.capabilities().chatdgc).mentions) {
+        throw new DGCUnsupportedError("This DGC CLI has no @ marks in ChatDGC; update it (dgc update).");
+      }
+      command.display_mentions = options.displayMentions.map((mark) => ({ ...mark }));
     }
     if (files.length) {
       command.attachments = files.map((item) => {

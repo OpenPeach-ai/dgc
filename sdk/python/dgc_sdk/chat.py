@@ -68,6 +68,10 @@ class ChatReply:
     # session.artifacts. output_note says the Output asked for wasn't made.
     artifacts: tuple[Mapping[str, Any], ...] = ()
     output_note: str = ""
+    # What the reply did, as DGC's Trace draws it (CLI 0.51+): {"v": 1, "ms": total, "steps": [{"kind": "model" or
+    # "tool", "label", "start", "end", "tokens"?, "detail"?, "hits"?, "error"?, "denied"?}]}, every number measured.
+    # A reply that stopped or failed has none.
+    trace: Mapping[str, Any] | None = None
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -91,9 +95,11 @@ class ChatEvent:
     """One moment of a reply, from :meth:`Chat.stream`.
 
     ``kind``: ``"text"`` (``text`` is the next piece of the reply), ``"thinking"`` (the model's thinking, when
-    it shows it), ``"activity"`` (``data`` = {kind, text}: searching, looking, compacting, ...), ``"question"``
-    (``data`` is a question the reply put to you), ``"research"`` (``data`` is deep research's progress) or
-    ``"reply"`` (the last one: ``reply`` is the finished :class:`ChatReply`).
+    it shows it), ``"waiting"`` (CLI 0.51+; ``data`` = {model, usual_s}: the model was asked and hasn't started, and how
+    long it usually takes, 0 when DGC doesn't know yet), ``"activity"`` (``data`` = {kind, text}: searching, looking,
+    compacting, ...), ``"card"`` (CLI 0.51+, after ``chats.cards``; ``data`` is a plugin's card as ``mcp_app_card``
+    carries it), ``"question"`` (``data`` is a question the reply put to you), ``"research"`` (``data`` is deep
+    research's progress) or ``"reply"`` (the last one: ``reply`` is the finished :class:`ChatReply`).
     """
 
     kind: str
@@ -115,7 +121,9 @@ def _reply(chat_id: str, message: Mapping[str, Any]) -> ChatReply:
         model=str(message.get("model") or ""), finish=str(message.get("finish") or ""),
         usage=dict(message.get("usage") or {}), research=dict(research) if isinstance(research, Mapping) else None,
         artifacts=tuple(dict(a) for a in message.get("artifacts") or [] if isinstance(a, Mapping)),
-        output_note=str(message.get("output_note") or ""), raw=dict(message))
+        output_note=str(message.get("output_note") or ""),
+        trace=dict(message["trace"]) if isinstance(message.get("trace"), Mapping) else None,
+        raw=dict(message))
 
 
 def _summary(row: Mapping[str, Any]) -> ChatSummary:
@@ -163,6 +171,7 @@ class Chats:
         self._titles: dict[str, str] = {}
         self._failure: BaseException | None = None
         self._closed = False
+        self._watching_cards = False
         self._reader = threading.Thread(target=self._read, name="dgc-sdk-chat", daemon=True)
         self._reader.start()
 
@@ -192,7 +201,7 @@ class Chats:
                 if isinstance(conversation, str) and summary.get("title"):
                     with self._lock:
                         self._titles[conversation] = str(summary["title"])
-            if not kind.startswith("chatdgc_") or not isinstance(conversation, str):
+            if not (kind.startswith("chatdgc_") or kind == "mcp_app_card") or not isinstance(conversation, str):
                 continue
             with self._lock:
                 listener = self._listeners.get(conversation)
@@ -230,6 +239,27 @@ class Chats:
             command["query"] = str(query)[:500]
         answer = self._request(command, "chatdgc_chats")
         return [_summary(row) for row in answer.get("chats") or [] if isinstance(row, Mapping)]
+
+    def mentions(self) -> dict[str, Any]:
+        """What a message can name with ``@`` (CLI 0.51+): ``plugins`` [{id, name}], every plugin a reply can use, and
+        ``pips`` [{id, name, pip_type, goal}], the user's Personal Pips, with ``error`` saying why they can't be listed
+        (Pips off), the plugins still there. For your own picker; pass what was picked as ``display_mentions``."""
+        chatdgc = self._session.capabilities.get("chatdgc")
+        if not isinstance(chatdgc, Mapping) or not chatdgc.get("mentions"):
+            raise DGCUnsupportedError("This DGC CLI has no @ list for ChatDGC; update it (dgc update).")
+        answer = self._request({"type": "chatdgc_mentions"}, "chatdgc_mentions")
+        return {key: answer[key] for key in ("plugins", "pips", "error") if key in answer}
+
+    @property
+    def cards(self) -> Any:
+        """Plugins' own cards in these chats (MCP Apps, CLI 0.51+; see :class:`dgc_sdk.Cards`). The first use tells the
+        CLI this app draws them: from then on a reply that shows one yields a ``"card"`` event, and the reply's ``raw``
+        lists them as ``apps``."""
+        cards = self._session.cards
+        if not self._watching_cards:
+            cards.watch("chat")
+            self._watching_cards = True
+        return cards
 
     def new(self, *, temporary: bool = False) -> "Chat":
         """A new chat. It's saved (and listed) from its first message; a temporary one never is."""
@@ -334,6 +364,10 @@ class Chat:
                         yield ChatEvent("text", text=str(event["text"]))
                     if event.get("thinking"):
                         yield ChatEvent("thinking", text=str(event["thinking"]))
+                elif kind == "chatdgc_waiting" and started:
+                    yield ChatEvent("waiting", data={"model": event.get("model"), "usual_s": event.get("usual_s")})
+                elif kind == "mcp_app_card" and started:
+                    yield ChatEvent("card", data={k: v for k, v in event.items() if k not in ("type", "seq")})
                 elif kind == "chatdgc_activity" and started:
                     yield ChatEvent("activity", text=str(event.get("text") or ""),
                                     data={"kind": event.get("kind"), "text": event.get("text")})
@@ -370,7 +404,8 @@ class Chat:
 
     def _send_command(self, text: str, model: str | None, thinking: str | None, search: str | None,
                       files: Sequence[str | Path], study: bool | None = None,
-                      output: str | None = None) -> dict[str, Any]:
+                      output: str | None = None,
+                      display_mentions: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
         if not isinstance(text, str) or not text.strip():
             raise DGCConfigError("text must be a non-empty message")
         if len(files) > MAX_FILES:
@@ -394,6 +429,11 @@ class Chat:
             if not isinstance(self._chats._session.capabilities.get("artifacts"), Mapping):
                 raise DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).")
             command["output"] = output
+        if display_mentions:
+            chatdgc = self._chats._session.capabilities.get("chatdgc")
+            if not isinstance(chatdgc, Mapping) or not chatdgc.get("mentions"):
+                raise DGCUnsupportedError("This DGC CLI has no @ marks in ChatDGC; update it (dgc update).")
+            command["display_mentions"] = [dict(mark) for mark in display_mentions]
         if files:
             attachments = []
             for item in files:
@@ -406,7 +446,8 @@ class Chat:
 
     def stream(self, text: str, *, model: str | None = None, thinking: str | None = None,
                search: str | None = None, files: Sequence[str | Path] = (), study: bool | None = None,
-               timeout: float | None = None, output: str | None = None) -> Iterator[ChatEvent]:
+               timeout: float | None = None, output: str | None = None,
+               display_mentions: Sequence[Mapping[str, Any]] | None = None) -> Iterator[ChatEvent]:
         """Send a message and yield the reply as it's written; the last event is ``"reply"``.
 
         ``search``: ``"auto"`` (the default: it searches when an answer depends on facts), ``"on"`` (search first)
@@ -414,8 +455,12 @@ class Chat:
         chat from this message (it teaches instead of answering), False turns it off; left out, the chat stays as it
         is. ``timeout``: seconds for the whole reply (default: the client's ``reply_timeout``, which is no limit unless it
         was given one); past it the reply is stopped. ``output`` (CLI 0.50+): what the reply should make, as DGC's
-        Output chip asks: document, slides, spreadsheet, page or dashboard; the reply's ``artifacts`` hold it."""
-        return self._turn(self._send_command(text, model, thinking, search, files, study, output), timeout)
+        Output chip asks: document, slides, spreadsheet, page or dashboard; the reply's ``artifacts`` hold it.
+        ``display_mentions`` (CLI 0.51+): where your box drew its ``@`` marks, ``{start, kind, label, identity}`` with
+        ``kind`` plugin, artifact, pip, skill, template, file or command, so the sent message shows them again when the
+        chat is reopened. It is for display only, and marks that don't fit the text are dropped: the model reads
+        ``text``, so write the names there too."""
+        return self._turn(self._send_command(text, model, thinking, search, files, study, output, display_mentions), timeout)
 
     def send(self, text: str, **options: Any) -> ChatReply:
         """Send a message and wait for the whole reply. Options as :meth:`stream`."""
@@ -572,6 +617,15 @@ class AsyncChats:
 
     async def list(self, query: str | None = None, **options: Any) -> list[ChatSummary]:
         return await asyncio.to_thread(self._sync.list, query, **options)
+
+    async def mentions(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.mentions)
+
+    @property
+    def cards(self) -> Any:
+        """Plugins' own cards in these chats, awaited (see :attr:`Chats.cards`)."""
+        from .client import AsyncCards
+        return AsyncCards(self._sync.cards)
 
     async def new(self, *, temporary: bool = False) -> "AsyncChat":
         return AsyncChat(await asyncio.to_thread(self._sync.new, temporary=temporary))

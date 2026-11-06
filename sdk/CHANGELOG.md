@@ -5,6 +5,15 @@
 - Pips API 72 adds local Personal and Project Pip workflow list, detail, create and status controls in both SDKs. A workflow routes exact Personal results or a Project finding through two to four Pips in reviewed or unattended mode without granting the receiving Pip any new external action permission.
 - Pips API 73 accepts a text message during one running Personal Pip conversation as a mid-turn update. It stays in that run's history; no second reply starts.
 - A message to the Primary Core Pip can propose up to three Personal Pip setup cards. Apps use the existing Pips API 23 `list_pip_setups`, `get_pip_setup`, `accept_pip_setup` and `reject_pip_setup` operations to present and decide them; no new SDK mutation or implicit approval is added.
+- Pips API 74: a Pip on a provider saved in the editor's Settings → Models, `model_choice` `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`. Both SDKs refuse it before sending on a runtime below API 74, or when it isn't whole.
+- `session.set_model(model, base_url=, api_key=, api_mode=)` and `session.set_thinking(level)` (TypeScript `setModel`, `setThinking`; sync and async in Python) move one session to another model or provider, from its next model request, with `capabilities["session_model_route"]`. It comes back with the session, and the user's settings and other sessions don't change. Moving to another address without a key sends none there.
+- `cancel()` on a follow-up that is still waiting takes it out of DGC's queue (`capabilities["queue_edit"]`), so it never starts and the follow-ups behind it still run. Before, it started and was stopped.
+- `ChatReply.trace` (`{v, ms, steps}`): what a ChatDGC reply did, as DGC's Trace draws it. A run's stream has `trace_usage`, a saved turn's `history()` has its `{"role": "time", "of": "trace"}` markers, and `list_pip_reply_stats` says `has_trace` for a Pip's run, with the steps when asked about one run.
+- ChatDGC: `chats.mentions()` lists what a message can name with `@`, `chat.send(..., display_mentions=[...])` (TypeScript `displayMentions`) says where your box drew the marks, `chats.cards` gives a plugin's cards with a `card` event in the stream, and a `waiting` event names the model and how long it usually takes to start. `send_pip_message` takes `display_mentions` on a CLI that offers `pip_display_mentions`.
+- `session.cards.watch(surface)` says whose cards an app draws: `work` by default, or `pip`.
+- `session.router.set_thinking(system, model, thinking)` (TypeScript `setThinking`) sets how hard a helper on that model thinks; needs `router_thinking`.
+- Fixed: the TypeScript SDK dropped `model_provider_saved`.
+- Not exposed, on purpose: `set_model_defaults`, `set_subscription_default` and `save_model_provider` write the person's own defaults and saved providers; `queue_reorder` would break the order follow-ups report in; `resume_session`'s `saved_mode` could ask less than the app asked for. See "What the SDK leaves out" in `docs/SDK.md`.
 Pairs with CLI 0.51.0. Linux, macOS (Apple silicon), and Windows through WSL 2 are the
 release test targets. Native Windows remains experimental.
 

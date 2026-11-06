@@ -1,9 +1,8 @@
 # DGC SDK
 
 Embed the DGC coding agent in an application or a CI job. **0.9.0**, editor protocol **v14**,
-pairs with CLI **0.51.0**. The Python and TypeScript SDK suites passed on Linux, macOS 26.5.1
-(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04); see
-[COMPATIBILITY.md](COMPATIBILITY.md). Native Windows is experimental.
+pairs with CLI **0.51.0**. This version has been tested on Linux only; macOS and WSL 2 passed for an
+earlier candidate (see [COMPATIBILITY.md](COMPATIBILITY.md)). Native Windows is experimental.
 Release tag **`sdk-v0.9.0`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
@@ -83,9 +82,9 @@ same rules for state, policy, sandbox, timeouts, usage and errors; its times are
 
 ## Pips
 
-SDK 0.7.0 adds `session.pips` in Python (sync and async) and TypeScript, for managing
-the Pips of an existing DGC profile from trusted host code. It pairs with CLI 0.48.0
-(Pips API 40), needs a client opened with `inherit_user_state=True`
+SDK 0.7.0 added `session.pips` in Python (sync and async) and TypeScript, for managing
+the Pips of an existing DGC profile from trusted host code. SDK 0.9.0 pairs with CLI 0.51.0
+(Pips API 74). It needs a client opened with `inherit_user_state=True`
 (`inheritUserState: true`), and refuses isolated, policy-bound and sandboxed
 sessions. Every mutation needs the host's explicit `approved=True`
 (`{ approved: true }`) on that call. See [PIPS.md](PIPS.md) for the commands,
@@ -98,3 +97,9 @@ and your model answers, with web search and numbered sources, streaming, deep re
 a backend of its own that never opens a workspace; with `inherit_user_state=True` (`inheritUserState: true`) the
 chats are the user's own, as the editor lists them. See [docs/SDK.md](../docs/SDK.md#chatdgc-dgcchat).
 
+## One session, another provider
+
+`session.set_model(model, base_url=, api_key=, api_mode=)` and `session.set_thinking(level)` (TypeScript `setModel`,
+`setThinking`) move one session to another model or provider from its next request. It comes back when the session is
+reopened, the user's settings and other sessions don't change, and a key goes only to its own address. `cancel()` on a
+follow-up still waiting takes it out of DGC's queue, so it never starts. See [docs/SDK.md](../docs/SDK.md).

@@ -6125,7 +6125,7 @@
     }
     if (name === "pips_settings") {
       return `<dl class="pip-permission">${row("Model for Pips", String(args.default_model || "") || "Same as DGC")}${row("Why", args.reason)}</dl>`
-        + `<div class="muted pip-permission-note">Allow saves it in Settings, Agents, Pips: every Pip on Default uses it from its next run. A Pip with a model of its own keeps it.</div>`;
+        + `<div class="muted pip-permission-note">Allow saves it in Settings, Models, Pips: every Pip on Default uses it from its next run. A Pip with a model of its own keeps it.</div>`;
     }
     if (name === "pips_workflow") {
       const ids = Array.isArray(args.pip_ids) ? args.pip_ids : [];

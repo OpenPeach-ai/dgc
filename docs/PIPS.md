@@ -869,6 +869,9 @@ and apply to its replies and to everything it does on its own (schedules, routin
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
+**Queue.** Alt+Enter keeps a later message above the box until its turn begins, as in Work and ChatDGC. Drag it or use
+the arrow keys to reorder it, steer it in, remove it, copy it or move it to the top.
+
 **Trace.** Under a finished reply, and under a post of a run it finished on its own, **Trace** replays what the Pip did,
 as in Work and ChatDGC: each model round with the tokens the provider reported, each tool with its own time, a search with
 its hits. Play it or scrub its timeline. A run keeps its steps beside its result (`pip_run_traces`), so they survive a
@@ -1025,7 +1028,7 @@ its face, its name and an optional title at the top, then four tabs.
 - **Files**: the files sent in the chat, and the ones in its computer's Files folder.
 
 **Edit** under its face changes its look: one of the eight Pip faces, picked from the same
-list as New Pip's, and a colour. **Reset to
+list as New Pip's. A Pip's colour comes with its face and looks the same everywhere. **Reset to
 default** puts back the face its type gives it. A look never changes what a Pip can do. Its
 model is chosen in the chat (the model button by the message box). The **…** menu has **Copy ID**,
 **Pause** and **Archive**. When you have chosen **Always allow** for something the Pip does, Info

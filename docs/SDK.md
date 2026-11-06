@@ -9,9 +9,9 @@ answers its permission and question requests, and gets a structured result back.
 | `dgc-sdk` (Python, PyPI) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Python 3.10+ |
 | `@vibedgc/sdk` (Node, GitHub release tarball) | **0.9.0** | CLI **0.51.0** | editor protocol v14 | Node 22+ |
 
-SDK 0.9.0's Python and TypeScript suites passed on Linux, macOS 26.5.1 (Apple silicon), and
-Windows 11 through WSL 2 (Ubuntu 24.04). [sdk/COMPATIBILITY.md](../sdk/COMPATIBILITY.md)
-records the scope of the host checks.
+SDK 0.9.0 has been tested on Linux only. Its suites passed on macOS and on Windows 11 through WSL 2
+for an earlier candidate; [sdk/COMPATIBILITY.md](../sdk/COMPATIBILITY.md) records the scope of the
+host checks.
 Native Windows is experimental (custom tools need Unix sockets).
 The SDK is free: there is no DGC fee for embedding it. `Pricing` only lets your
 application attribute the model-token spend your provider bills you.
@@ -33,7 +33,7 @@ application attribute the model-token spend your provider bills you.
 SDK 0.7.0 introduced `session.pips` (`Pips`, and `AsyncPips` on `AsyncDGC` sessions) for
 managing the Pips of an existing DGC profile: standing agents that review, test and
 draft beside the main chat. SDK 0.9.0 pairs with DGC CLI 0.51.0, which advertises Pips API
-71; each control checks the minimum Pips API it needs before sending anything. See
+74; each control checks the minimum Pips API it needs before sending anything. See
 [sdk/PIPS.md](../sdk/PIPS.md) for the full command list and capability gates.
 
 | API | Purpose |
@@ -113,12 +113,29 @@ try {
 | `chats.new(temporary=)`, `chats.open(chat_id)` | A `Chat`: a new one (saved from its first message) or an existing one with its latest `messages`. |
 | `chat.send(text, model=, thinking=, search=, files=, study=, timeout=)` | Send and wait for the whole reply. `search`: `auto` (default), `on` or `off`; `files`: up to ten local files; `study`: `True` turns Study mode on for the chat (it teaches instead of answering), `False` turns it off. |
 | `chat.answer(message_id, choice, question=0, choices=None, ...)` | Answer the question card a reply asked (a `question` event), as a click on it does: `choice` for a one-question card, `choices` (one per question, in order) for a card of several. The message the model wrote for it is sent with your answers, and its reply comes back. TypeScript: `chat.answer(messageId, choice, { choices })`. |
-| `chat.stream(...)` | The same, as `ChatEvent`s while it's written: `text`, `thinking`, `activity` (searching, looking), `question`, `research`, and last `reply`. |
+| `chat.stream(...)` | The same, as `ChatEvent`s while it's written: `text`, `thinking`, `waiting` (CLI 0.51+: the model was asked and hasn't started; `data` has `model` and `usual_s`), `activity` (searching, looking), `card`, `question`, `research`, and last `reply`. |
 | `chat.research(question, edit_plan=, on_event=, timeout=)` | Deep research: a plan you may change, then the research, then a report whose citations are checked. `timeout` bounds each of its two turns (default: the client's `reply_timeout`, no limit unless you gave one). |
 | `chat.cancel()`, `rename(title)`, `pin()`, `archive()`, `delete()`, `export(path, format=)`, `refresh()` | Stop a reply (what it wrote is kept), manage the chat, save it as Markdown or JSON. |
 
 A `ChatReply` has `chat_id`, `message_id`, `text`, `sources` (each a `ChatSource`: `n`, `title`, `url`, `snippet`),
-`searches`, `files`, `model`, `finish` and `usage`. One reply at a time per chat; any number of chats at once.
+`searches`, `files`, `model`, `finish`, `usage` and `trace`. `trace` (CLI 0.51+) is what the reply did, as DGC's Trace
+draws it: `{"v": 1, "ms": total, "steps": [...]}`, each step a model round with its reported `tokens`, or a tool with
+its `hits` when it searched, and `start` and `end` in milliseconds. A reply that stopped or failed has none. One reply
+at a time per chat; any number of chats at once.
+
+`model` also takes `subscription:<engine>` or `subscription:<engine>:<model>` (`claude`, `codex`), a signed-in Claude
+Code or Codex on this computer. To use another provider, give the client its address and key:
+`DGC(model=, base_url=, api_key=).chat()`. The `provider` field on `chatdgc_*` commands is not exposed: it is how the
+editor brings a key from its own store for one turn, and a chat saved that way can't go on without that store.
+
+`@` marks (CLI 0.51+, `capabilities["chatdgc"]["mentions"]`): `chats.mentions()` says what a message can name, for your
+own picker: `plugins` [{id, name}], `pips` [{id, name, pip_type, goal}], and `error` when the Pips can't be listed.
+`chat.send(text, display_mentions=[...])` (TypeScript `displayMentions`) says where your box drew them, each
+`{start, kind, label, identity}`; the sent message has them as `display_mentions` when it is read back. They are for
+display only: the model reads `text`, so write the names there too.
+
+Plugin cards in a chat (CLI 0.51+): the first use of `chats.cards`, a [`Cards`](#session), tells the CLI this app draws
+them. A reply that shows one then yields a `card` event, and `reply.raw["apps"]` lists its cards.
 `AsyncDGC.chat()` returns `AsyncChats`, whose `AsyncChat` has the same API to `await`, with `stream()` an async
 iterator. TypeScript uses camelCase (`chatId`, `messageId`,
 `timeoutMs`, `editPlan`, `onEvent`) and milliseconds.
@@ -354,9 +371,23 @@ Running:
   `RunHandle` — queue a prompt behind the run in flight (or start it now when idle). Its turn is
   observed, audited and billed like any run. Behind a run with its own `max_turns` or
   `output_schema` it is sent once that run is over, so it runs under the session's settings; it
-  does not run when the run in front of it is cancelled or times out.
+  does not run when the run in front of it is cancelled or times out. `cancel()` on a follow-up
+  still waiting takes it out of DGC's queue (`capabilities["queue_edit"]`, CLI 0.51+), so it never
+  starts and the follow-ups behind it still run; its result is `status="cancelled"` once the run in
+  front of it is over. Follow-ups run in the order they were made: each handle reports its own turn
+  because it reads after the one in front, so `queue_reorder` is not exposed. An app that wants another
+  order keeps its own list and calls `followup` when it is ready.
 - `steer(text)` — add guidance to the run in flight; raises `DGCConfigError` when no run is active.
 - `cancel()` — stop the run in flight, including one waiting for a decision.
+- `set_model(model=None, *, base_url=None, api_key=None, api_mode=None)` → `{"model", "base_url"}` (TypeScript
+  `setModel(model, { baseUrl, apiKey, apiMode })`), CLI 0.51+, `capabilities["session_model_route"]`: move this session
+  to another model or provider from its next model request, also mid-run. It stays this session's and comes back when
+  the session is reopened; the user's settings and other sessions don't change, with `inherit_user_state=True` too. A
+  key belongs to its address: moving with `base_url` and no `api_key` sends none to the new one, and the key is kept in
+  this process only, so give it again after a reopen. `api_mode` is `auto`, `ollama`, `anthropic`, `chat_completions` or
+  `responses`.
+- `set_thinking(level)` → the level in use (TypeScript `setThinking`), CLI 0.51+: `off`, `low`, `medium`, `high` or
+  `xhigh`, for this session only, as `set_model`.
 - `close()` — stop this session's child. `Session` is a context manager.
 
 Conversations and checkpoints:
@@ -446,6 +477,9 @@ request, and the answers are the CLI's status dicts (`{enabled, when_busy, worke
   Glances, Netdata) or a dgc node's address, which the CLI detects; `""` stops it. `token` is a dgc node's pairing
   token, kept in `secrets.json` bound to that address and never sent back (`hardware.has_token`). With neither it
   reads the hardware now. A system's `hardware` in the status has its `line` ("GB10 · 92 of 128 GB · 34% · 61°C").
+- `set_thinking(system, model, thinking)` (needs `router_thinking`, TypeScript `setThinking`) → `{"change", "status"}`:
+  how hard a helper on that model of that system thinks: `off`, `low`, `medium` or `high`, or `""` for the helper's own
+  level. The status's model row says `thinking`, and `thinks` says whether its server reports the model can think.
 - `suggest(system, *, context=None)` (needs `router_suggest`) → workers per model from its memory, what the server
   reports and what `probe` measured: `{workers, memory, models: [{name, context, workers, basis, line}], notes,
   applicable}`. A model's `workers` is `None` when nothing backs a number. `update("apply_suggestion", system=...)`
@@ -768,10 +802,29 @@ most applications use:
 | `context` | `used`, `size`, `input_tokens`, `output_tokens`, `cached_input_tokens` |
 | `error` | `message` |
 | `turn_end` | `turn_id`, `reason` (`completed`, `cancelled`, `error`) |
+| `trace_usage` | `tokens` — one finished model request's measured tokens, for a live Trace (CLI 0.51+) |
+| `queued` | `count`, `text` — how many prompts are waiting |
+| `queue_changed` | `order` (the request ids still waiting, in the order they will run), `removed`, `count` (CLI 0.51+) |
 
 Events are plain dictionaries, not typed classes; check `event.type` before reading `event.data`.
+A saved turn's Trace is in `history()`: beside an event, a marker `{"role": "time", "of": "trace", "at": when, "tokens"?: n}`
+says when it happened, and a `turn_start` carries `display_mentions` when an editor sent marks.
 The startup handshake is not a run event, and event types newer than this SDK's copy of the protocol
 are skipped rather than ending the session.
+
+### What the SDK leaves out
+
+Some commands of protocol v14 are for an editor's own screens, and have no method here. `session.raw` still reaches them.
+
+- `set_model_defaults`, `set_subscription_default`, `save_model_provider`: they write the person's own defaults and saved
+  providers, for future chats. An SDK client never writes those (`inherit_user_state=True` refuses `model=` for the same
+  reason), and the list of saved providers belongs to the editor. Use `set_model` for one session, or `DGC(model=, ...)`
+  for a client.
+- `resume_session`'s `saved_mode`: it brings a reopened chat back in a mode that may ask less. An app's `resume` keeps the
+  mode the app asked for.
+- `prompt`'s `display_mentions`: a run's prompt is what the model reads, and your app draws its own transcript.
+- `get_pip_usage_report`: `pips.read("get_pip_usage", ...)` reads one Pip, and `session.get_usage(system=)` one system.
+- `subagent_thinking` has no method: give it with `extra_config={"subagent_thinking": "low"}` on an isolated client.
 
 ## Defaults
 

@@ -9,14 +9,19 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
 
 ## Using it
 
-- **Open it.** The DGC side bar has two tabs, **Chat** and **Work**, so a long list of either never hides the
-  other; it remembers the one you used last. **New chat** opens a chat in an editor tab. You can also run
+- **Open it.** The DGC side bar has two tabs, **Work** and **Chat**, so a long list of either never hides the
+  other. Work comes first and opens by default; after that the side bar remembers the one you used last. **New chat** opens a chat in an editor tab. You can also run
   **DGC: New Chat (ChatDGC)** from the Command Palette. One search box searches both tabs, and while you
   search, each tab says how many it found. It finds a chat by its name or anything said in it, and shows the
   words around what it found.
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Queue.** A message you send while a reply is being written waits above the box and goes when the reply
+  finishes. Drag it or use the arrow keys to reorder it, remove it, copy it or move it to the top.
+- **Choose a model.** The model button in the box lists the providers saved in **Settings → Models**, a host with
+  its key or a signed-in Claude Code or Codex, then that provider's models. The thinking slider stays in view while
+  the list scrolls. The chat keeps its choice after a reload, and a new chat starts from the default in Settings.
 - **Trace.** Under a finished reply, **Trace** beside its icons replays what the reply did, as in Work: each
   model round with the tokens the provider reported, plugin calls, cards, searches with their hits, and a card
   you sent later, without the wait before you sent it. Play it or scrub its timeline; it's saved with the reply,
@@ -459,8 +464,9 @@ A new chat is written to disk only when you send its first message, so empty cha
 list. If you rename, pin or delete a chat while it is still replying, that change stands. A deleted chat
 stays deleted.
 
-ChatDGC uses the model settings in Settings: provider, address and key. Your Work sessions use the same
-settings. ChatDGC's requests count in **Settings → Usage**, by model and by day, like every other request
+ChatDGC starts from the default provider in **Settings → Models**, as a new Work session does, and each chat can choose
+another saved provider. Changing the default leaves open chats on what they chose. A key is kept per address and goes only
+there. ChatDGC's requests count in **Settings → Usage**, by model and by day, like every other request
 DGC makes. The usage ledger records them under the source `chatdgc`.
 
 ## Protocol (`chatdgc_*`)

@@ -232,7 +232,7 @@ test("opening the map closes the menus; a click inside keeps it, the backdrop cl
   assert.equal(mapOpen(), false);
   assert.deepEqual(JSON.parse(JSON.stringify(posted.filter((m) => m.type === "slash" && m.action === "subagent"))),
     [{ type: "slash", action: "subagent" }],
-    "it opens Settings ▸ Agents, as the dropdown's link did");
+    "it opens Settings ▸ Models ▸ Sub-agents, as the dropdown's link did");
   assert.deepEqual(errors, []);
 });
 
