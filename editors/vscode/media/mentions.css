@@ -150,3 +150,17 @@ body:is(.vscode-light, .vscode-high-contrast-light) {
   .pop .pi.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none; }
   .pop .pi.sel * { color: inherit; }
 }
+
+/* The quiet row above ChatDGC's and a Pip's box (media/pasteclean.js): the look of Work's rail row and of a queued message's
+   row here, a barely-there surface and muted words, because it reports something already done. */
+.paste-note { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 6px; padding: 4px 6px 4px 10px; border-radius: 12px;
+  background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 5%, transparent);
+  color: color-mix(in srgb, var(--vscode-descriptionForeground, #9d9d9d) 85%, transparent); font-size: 12px; line-height: 1.35; }
+body.vscode-light .paste-note { color: color-mix(in srgb, var(--vscode-descriptionForeground, #3b3b3b) 72%, transparent); }
+:host-context(body.vscode-light) .paste-note { color: color-mix(in srgb, var(--vscode-descriptionForeground, #3b3b3b) 72%, transparent); }   /* a Pip's page in the side bar */
+.paste-note[hidden] { display: none; }
+.paste-note-icon { flex: none; opacity: .7; }
+.paste-note-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.paste-note-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.paste-note-close:hover { background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 10%, transparent); color: var(--vscode-foreground, #cccccc); }

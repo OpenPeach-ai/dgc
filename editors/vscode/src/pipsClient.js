@@ -15,6 +15,7 @@ import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as m
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import '../media/numbered-list.js';
+import '../media/pasteclean.js';  // window.DgcPasteClean: what a paste becomes, the same in all three chats
 import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
 import '../media/mentions.css';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
@@ -160,6 +161,8 @@ const voiceMode=talkBar&&reader&&window.DgcVoiceMode?window.DgcVoiceMode.create(
 // what was dictated, a message sent or given back, a choice added -- are steps of it.
 const chatHistory=window.DgcTextHistory?window.DgcTextHistory.create({box:()=>$('chatText'),changed:()=>{const box=$('chatText');if(!box)return;draft.chatText=box.value;if(S.selected)chatDrafts.set(S.selected,draft.chatText);rememberMarks();rememberView();render();fitChatInput();}}):null;
 const chatEdit=change=>chatHistory?chatHistory.record(change):change();
+// The box's words as a message: the blank lines around them go, and the first line keeps its indentation.
+const messageWords=text=>globalThis.DgcPasteClean?.trimDraft(text)??String(text||'').trim();
 // The box holds @ marks where they were typed (media/mentions.js), so it is Work's kind of box: an editing host answering
 // this page as a <textarea>. It is one element for the life of the page, never redrawn: the page's markup holds an empty
 // slot (data-dom-own), and a redraw that replaced the slot gets this element back, marks, caret and all.
@@ -191,13 +194,15 @@ if(Mentions){
   pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
   // A project's Pip reads the project: the path is the words.
   filePart:file=>({kind:'file',label:file.label,wire:file.label,identity:''})});
+ if(chatBox.note){chatBox.note.id='chat-paste-note';chatBox.note.setAttribute('data-dom-own','1');}
  disposers.push(()=>chatBox.dispose());
 }
 // Put the box back in its slot after a redraw, and bring it up to date with what the page says it holds.
 function syncChatBox(){
  if(!chatBox)return;
- const slot=$('chatText'),pop=$('chat-pop');
+ const slot=$('chatText'),pop=$('chat-pop'),note=$('chat-paste-note');
  if(pop&&pop!==chatPop)pop.replaceWith(chatPop);
+ if(note&&chatBox.note&&note!==chatBox.note)note.replaceWith(chatBox.note);
  if(!slot)return;
  const el=chatBox.el,moved=slot!==el;
  if(moved)slot.replaceWith(el);
@@ -207,6 +212,7 @@ function syncChatBox(){
  el.disabled=archived()||!usable();
  const now=el.value,want=draft.chatText;
  if(boxPip!==S.selected||now!==want){
+  if(boxPip!==S.selected)chatBox.forgetCleaned();
   const kept=chatMarks.get(S.selected);
   if(kept&&kept.text===want)chatBox.writeParts(kept.parts);
   else if(boxPip===S.selected&&now&&want.startsWith(now)){const at=now.length;chatBox.replace(at,at,want.slice(at));}
@@ -223,7 +229,9 @@ let micCaret=null;
 function dictatedToPip(text,send){
   const whole=draft.chatText||'',[start,end]=micCaret&&micCaret[1]<=whole.length?micCaret:[whole.length,whole.length];micCaret=null;
   const before=whole.slice(0,start),after=whole.slice(end);
-  const piece=(before&&!/\s$/.test(before)?' ':'')+text+(after&&!/^\s/.test(after)?' ':'');
+  // Nobody can say an invisible character, so one in a transcript is the speech model's noise, and goes without a notice.
+  const said=window.DgcPasteClean?.classify(text).clean??text;
+  const piece=(before&&!/\s$/.test(before)?' ':'')+said+(after&&!/^\s/.test(after)?' ':'');
   chatEdit(()=>{if(chatBox&&$('chatText')===chatBox.el){chatBox.replace(start,end,piece);draft.chatText=chatBox.el.value.slice(0,4000);rememberMarks();}else draft.chatText=(before+piece+after).slice(0,4000);render();});
   const again=$('chatText');if(again){again.focus();const at=Math.min(draft.chatText.length,start+piece.length);again.setSelectionRange(at,at);}
   fitChatInput();
@@ -670,7 +678,7 @@ function chatMarkup(){
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
   const quietChat=!S.messages.length&&!items.length&&!live;
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section><form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section>${chatBox?'<div id="chat-paste-note" data-dom-own="1" hidden></div>':''}<form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -1100,12 +1108,12 @@ let chatQueueSeq=0;
 const chatQueue=(pip=S.selected)=>chatQueues.get(pip)||[];
 function setChatQueue(list,pip=S.selected){if(list.length)chatQueues.set(pip,list);else chatQueues.delete(pip);rememberView();drawChatQueue();}
 function queueChatMessage(){
- const text=draft.chatText.trim();if(!text||!S.selected)return;
+ const text=messageWords(draft.chatText);if(!text||!S.selected)return;
  if(pendingImages().length||pendingFiles().length){setError('Send attached photos or files after this reply. Queued messages are text only.');return;}
  if(cardNumber(text)){refuseCard(S.selected);return;}
  if(text.length>4000){setError('That message is too long. Keep it under 4,000 characters. Nothing was queued.');return;}
  const list=chatQueue();if(list.length>=MAX_CHAT_QUEUE){setError(`${MAX_CHAT_QUEUE} messages are already waiting: send them first, or remove one.`);return;}
- const fromBox=chatBox?.el.value.trim()===text,marks=fromBox&&S.displayMentions?chatBox.marks(text):[];
+ const fromBox=!!chatBox&&messageWords(chatBox.el.value)===text,marks=fromBox&&S.displayMentions?chatBox.marks(text):[];
  setChatQueue([...list,{id:`q${Date.now()}-${++chatQueueSeq}`,text,...(marks.length?{marks}:{})}]);
  // The page's markup still says what the box said when it was last drawn, so a redraw alone can leave the words there.
  chatEdit(()=>{draft.chatText='';const box=$('chatText');if(box)box.value='';chatDrafts.set(S.selected,'');rememberView();render();});
@@ -1147,18 +1155,18 @@ function drainChatQueue(){
 async function sendChat(sent={}){
   if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!takesMessages()||!S.runner?.online||S.runner?.paused)return;
   if(S.chatActiveRun&&S.apiVersion<73){setError('Update DGC before sending a mid-turn update to this Pip.');return;}
-  const text=draft.chatText.trim(),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
+  const text=messageWords(draft.chatText),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
   if(S.chatActiveRun&&(images.length||files.length)){setError('Send attached photos or files after this reply. Mid-turn updates are text only.');return;}
   // /learn [what]: a skill drafted from this chat, shown here with Save, Edit and Cancel. It isn't a message to the Pip.
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
   if(cardNumber(text)){refuseCard(S.selected);return;}if(text.length>4000||new TextEncoder().encode(text).length>8192){setError('That message is too long. Keep it under 4,000 characters (fewer with emoji). Nothing was sent.');return;}
-  const boxText=chatBox?.el.value.trim()===text,marks=S.displayMentions?(sent.marks||(boxText?chatBox.marks(text):[])):[],parts=sent.parts||(boxText?chatBox.parts():null);
+  const boxText=!!chatBox&&messageWords(chatBox.el.value)===text,marks=S.displayMentions?(sent.marks||(boxText?chatBox.marks(text):[])):[],parts=sent.parts||(boxText?chatBox.parts():null);
   const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,marks,parts,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
-  S.sending={pip:id,text,key:pending.key,marks:pending.marks,at:new Date().toISOString()};chatEdit(()=>{if(draft.chatText.trim()===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
-  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(draft.chatText.trim()===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
+  S.sending={pip:id,text,key:pending.key,marks:pending.marks,at:new Date().toISOString()};chatEdit(()=>{if(messageWords(draft.chatText)===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
+  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(messageWords(draft.chatText)===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
   catch(error){if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});}setError(error);render();});}}
   finally{if(S.sending?.key===pending.key)S.sending=null;if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }

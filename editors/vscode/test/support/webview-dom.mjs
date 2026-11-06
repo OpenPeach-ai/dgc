@@ -15,6 +15,7 @@ export const breakdownJs = readFileSync(dir + "../media/breakdown.js", "utf8"); 
 export const msgTimeJs = readFileSync(dir + "../media/msgtime.js", "utf8");     // a message's time (DgcTime), also before
 export const promptRailJs = readFileSync(dir + "../media/promptrail.js", "utf8");   // the prompt rail (DgcPromptRail), also before
 export const numberedListJs = readFileSync(dir + "../media/numbered-list.js", "utf8");
+export const pasteCleanJs = readFileSync(dir + "../media/pasteclean.js", "utf8");
 export const modsJs = readFileSync(dir + "../media/mods.js", "utf8");               // the user's mods (DgcMods), also before
 export const traceJs = readFileSync(dir + "../media/trace.js", "utf8");
 export const messageQueueJs = readFileSync(dir + "../media/messagequeue.js", "utf8");
@@ -162,6 +163,7 @@ export function makeDom(options = {}) {
   dom.window.eval(msgTimeJs);
   dom.window.eval(promptRailJs);
   dom.window.eval(numberedListJs);
+  dom.window.eval(pasteCleanJs);
   dom.window.eval(modsJs);
   dom.window.eval(traceJs);
   dom.window.eval(messageQueueJs);

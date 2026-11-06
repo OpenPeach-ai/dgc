@@ -9448,6 +9448,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The prompt rail beside the transcript, the same as ChatDGC's.
     const promptRailJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "promptrail.js"));
     const numberedListJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "numbered-list.js"));
+    const pasteCleanJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pasteclean.js"));
     // The user's mods, drawn the same way here and in ChatDGC (window.DgcMods).
     const modsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mods.js"));
     // Plugins' cards (MCP Apps): their bridge and look, the same in Work, a Pip's chat and ChatDGC (media/mcpApps.js).
@@ -9648,9 +9649,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div id="goal-detail" class="goal-detail" role="region" aria-label="Goal detail" tabindex="0" hidden></div>
     </section>
-    <section id="pastebar" class="rail-item" aria-label="Invisible characters in this draft" data-status="noise" hidden>
-      <button type="button" id="paste-strip" class="rail-main" aria-label="Remove the invisible characters" title="Remove them from the draft"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count">Remove 0 invisible characters</span></button>
-      <button type="button" id="paste-keep" class="rail-text-action" title="Send the text exactly as pasted">Keep</button>
+    <section id="pastebar" class="rail-item" role="status" aria-label="Pasted text" hidden>
+      <div id="paste-note" class="rail-main rail-note"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count"></span></div>
+      <button type="button" id="paste-close" class="rail-icon-button" title="Close" aria-label="Close this notice"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     </section>
   </div>
   <div id="cbox" data-mode="default">
@@ -9691,7 +9692,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <!-- The prompt cache's clock (0.48, Work only): always here; dimmed, with no minutes, where the provider doesn't say how long its cache lasts. -->
       <div class="picker cache-picker">
-        <button type="button" id="cache-clock" class="fbtn cache-clock" aria-haspopup="dialog" aria-expanded="false" data-cache-window="unknown"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5C14.1421 2.5 17.5 5.85786 17.5 10C17.5 14.1421 14.1421 17.5 10 17.5C5.85786 17.5 2.5 14.1421 2.5 10C2.5 5.85786 5.85786 2.5 10 2.5ZM10 3.5C6.41015 3.5 3.5 6.41015 3.5 10C3.5 13.5899 6.41015 16.5 10 16.5C13.5899 16.5 16.5 13.5899 16.5 10C16.5 6.41015 13.5899 3.5 10 3.5ZM10 5C10.2761 5 10.5 5.22386 10.5 5.5V9.66895L13.6973 11.04L13.7852 11.0898C13.9763 11.2224 14.0552 11.4751 13.96 11.6973C13.8647 11.9193 13.6272 12.0372 13.3994 11.9902L13.3027 11.96L9.80273 10.46C9.61896 10.3811 9.5 10.2 9.5 10V5.5C9.5 5.22386 9.72386 5 10 5Z" fill="currentColor"/></svg><span id="cache-clock-left" class="cache-clock-left"></span></button>
+        <button type="button" id="cache-clock" class="fbtn cache-clock" title="Prompt cache" aria-haspopup="dialog" aria-expanded="false" data-cache-window="unknown"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5C14.1421 2.5 17.5 5.85786 17.5 10C17.5 14.1421 14.1421 17.5 10 17.5C5.85786 17.5 2.5 14.1421 2.5 10C2.5 5.85786 5.85786 2.5 10 2.5ZM10 3.5C6.41015 3.5 3.5 6.41015 3.5 10C3.5 13.5899 6.41015 16.5 10 16.5C13.5899 16.5 16.5 13.5899 16.5 10C16.5 6.41015 13.5899 3.5 10 3.5ZM10 5C10.2761 5 10.5 5.22386 10.5 5.5V9.66895L13.6973 11.04L13.7852 11.0898C13.9763 11.2224 14.0552 11.4751 13.96 11.6973C13.8647 11.9193 13.6272 12.0372 13.3994 11.9902L13.3027 11.96L9.80273 10.46C9.61896 10.3811 9.5 10.2 9.5 10V5.5C9.5 5.22386 9.72386 5 10 5Z" fill="currentColor"/></svg><span id="cache-clock-left" class="cache-clock-left"></span></button>
         <section id="cachemenu" class="cmenu context-menu cache-menu" role="dialog" aria-label="Prompt cache" tabindex="-1" hidden>
           <div class="context-head"><div><span class="context-kicker">Prompt cache</span><strong id="cache-state">No timer</strong></div></div>
           <p id="cache-said" class="cache-said"></p>
@@ -9741,6 +9742,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${pluginCallsJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
 <script nonce="${nonce}" src="${numberedListJs}"></script>
+<script nonce="${nonce}" src="${pasteCleanJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${traceJs}"></script>

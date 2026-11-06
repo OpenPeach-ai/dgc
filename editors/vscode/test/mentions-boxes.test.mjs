@@ -210,7 +210,7 @@ test("ChatDGC: a file mark attaches the file and shows once; removing the mark t
     await s.page.keyboard.press("Enter");
     const sent = (await s.posted("send")).at(-1);
     assert.deepEqual(sent.attachments, [{ kind: "file", name: "calc.py", path: "/ws/src/calc.py" }], "one: the mark Backspace took went with what it stood for");
-    assert.equal(sent.text, "Read ", "the file adds no words");
+    assert.equal(sent.text, "Read", "the file adds no words, and a message ends where its words do");
     assert.equal(await s.page.locator(".cd-user .sent-mention.pill-file").last().textContent(), "src/calc.py");
     assert.equal(await s.page.locator(".cd-user .cd-chip").count(), 0, "in its sentence, not a chip above it");
   } finally { await s.page.close(); }
@@ -472,3 +472,222 @@ test("a Project Pip's chat lists its fellow Pips and the project's files, with t
     assert.deepEqual(await p.page.evaluate(() => window.__sent[0].display_mentions), [{ start: 5, kind: "file", label: "src/calc.py", identity: "file", wired: true }]);
   } finally { await p.close(); }
 });
+
+// ---- a paste, as VS Code delivers it ------------------------------------------------------------------------------
+// Its Paste runs execCommand("paste") on the page, so the handler is already inside an editing command: Chromium refuses
+// insertText there, the text goes in by hand and no input event fires of its own. A test that lets insertText run takes a
+// branch that does not ship.
+const vscodePaste = (page, boxOf, flavours) => page.evaluate(async ([find, c]) => {
+  const box = eval(find)();
+  box.focus();
+  const saved = document.execCommand;
+  document.execCommand = function (cmd, ui, value) { return cmd === "insertText" ? false : saved.call(document, cmd, ui, value); };
+  const data = new DataTransfer();
+  if (c.plain !== undefined) data.setData("text/plain", c.plain);
+  if (c.html !== undefined) data.setData("text/html", c.html);
+  box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true }));
+  await new Promise((r) => setTimeout(r, 60));
+  document.execCommand = saved;
+}, [boxOf, flavours]);
+const CHAT_BOX = "() => document.getElementById('cd-input')", PIP_BOX = "() => window.__box()";
+const NOTE5 = "Removed 5 invisible characters from the pasted text";
+const hiddenFive = "Pay\u200Bment guide with\u200B some\u200B hidden\u200B text\u200B";
+const undoKey = process.platform === "darwin" ? "Meta+Z" : "Control+Z", redoKey = process.platform === "darwin" ? "Meta+Shift+Z" : "Control+Shift+Z";
+const LIST_PLAIN = "Steps\nInstall the package\nOpen the settings\nPick a theme\nRestart\n";
+const LIST_HTML = '<h2 style="color:red">Steps</h2><ol start="4"><li>Install the <b>package</b></li><li>Open the settings<ul><li>Pick a theme</li></ul></li><li>Restart</li></ol>';
+const LIST_SHAPED = "Steps\n4. Install the package\n5. Open the settings\n   - Pick a theme\n6. Restart";
+const SHAPED = "    first line is indented\n\tsecond starts with a tab\n\n\n  two   blank   lines   above,  and   spaces\n1. keep\n2. me\n4. and this four";
+
+async function pasteCases(page, boxOf, note, read) {
+  // Cleaned before it lands, and the row says how many.
+  await vscodePaste(page, boxOf, { plain: hiddenFive });
+  assert.equal(await read(), "Payment guide with some hidden text");
+  assert.equal(await note.isVisible(), true);
+  assert.equal(await note.locator(".paste-note-words").textContent(), NOTE5);
+  // One undo: as it came, and nothing to say. Redo: both back. Another undo and the paste is gone.
+  await page.keyboard.press(undoKey);
+  await page.waitForFunction(([find, want]) => eval(find)().value === want, [boxOf, hiddenFive]);
+  assert.equal(await note.isVisible(), false, "after undo nothing has been removed");
+  await page.keyboard.press(redoKey);
+  await page.waitForFunction(([find]) => eval(find)().value === "Payment guide with some hidden text", [boxOf]);
+  assert.equal(await note.locator(".paste-note-words").textContent(), NOTE5);
+  assert.equal(await note.isVisible(), true);
+  await page.keyboard.press(undoKey); await page.keyboard.press(undoKey);
+  await page.waitForFunction(([find]) => eval(find)().value === "", [boxOf]);
+  assert.equal(await note.isVisible(), false);
+  // A second paste adds to the first; closing changes nothing in the box.
+  await vscodePaste(page, boxOf, { plain: "a\u200Bb" });
+  await vscodePaste(page, boxOf, { plain: "c\u200Bd\u200B" });
+  assert.equal(await note.locator(".paste-note-words").textContent(), "Removed 3 invisible characters from the pasted text");
+  await note.locator("button").click();
+  assert.equal(await note.isVisible(), false);
+  assert.equal(await read(), "abcd");
+  // Cleared by hand.
+  await vscodePaste(page, boxOf, { plain: "e\u200Bf" });
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.press("Backspace");
+  assert.equal(await read(), "");
+  assert.equal(await note.isVisible(), false, "the draft is gone, and so is what the row was about");
+  // What is harmless is untouched and raises nothing.
+  for (const text of ["\u{1F468}\u200D\u{1F469}\u200D\u{1F467} family", "مرحبا\u200Fبا", "می\u200Cخواهم"]) {
+    await vscodePaste(page, boxOf, { plain: text });
+    assert.equal(await read(), text);
+    assert.equal(await note.isVisible(), false);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.press("Backspace");
+  }
+  // Typed text stays as typed.
+  await page.keyboard.insertText("pass\u200Bword");
+  assert.equal(await read(), "pass\u200Bword");
+  assert.equal(await note.isVisible(), false);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.press("Backspace");
+  // The list a browser's plain text lost, as plain text.
+  await vscodePaste(page, boxOf, { plain: LIST_PLAIN, html: LIST_HTML });
+  assert.equal(await read(), `${LIST_SHAPED}\n`);
+}
+
+test("ChatDGC: a paste is cleaned as it lands, in VS Code's route, and keeps the shape it was copied with", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat();
+  try {
+    await pasteCases(s.page, CHAT_BOX, s.page.locator(".paste-note"), () => value(s.page));
+    assert.equal(await s.page.evaluate(() => document.querySelectorAll("#cd-input b, #cd-input ol, #cd-input [style]").length), 0, "never as rich formatting");
+    assert.equal(await s.page.locator("#cd-send").evaluate((n) => n.disabled), false, "the page heard of the paste");
+    // What the model reads and the bubble shows.
+    await s.page.keyboard.press("Enter");
+    await s.page.waitForFunction(() => document.getElementById("cd-input").value === "");
+    assert.equal((await s.posted("send")).at(-1).text, LIST_SHAPED);
+    assert.equal(await s.page.locator(".cd-user .cd-bubble").last().textContent(), LIST_SHAPED);
+    await s.send({ type: "done" });
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
+test("ChatDGC: a first line's indentation is sent and drawn, the row goes with the send, and a folded paste is cleaned", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat();
+  try {
+    await vscodePaste(s.page, CHAT_BOX, { plain: `\n  \n${SHAPED}\n\n` });
+    await s.page.keyboard.press("Enter");
+    await s.page.waitForFunction(() => document.getElementById("cd-input").value === "");
+    assert.equal((await s.posted("send")).at(-1).text, SHAPED, "only the blank lines around the message go");
+    assert.equal(await s.page.locator(".cd-user .cd-bubble").last().textContent(), SHAPED);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+  const f = await openChat();
+  try {
+    const note = f.page.locator(".paste-note"), chips = f.page.locator("#cd-chips li");
+    const big = "A long line of pasted text.\n".repeat(300);
+    await vscodePaste(f.page, CHAT_BOX, { plain: "\u200B" + big + "\u{E0048}\u{E0049}\u{E0044}\u{E0045}" });
+    assert.equal(await chips.count(), 1, "folded");
+    assert.equal(await note.locator(".paste-note-words").textContent(), NOTE5, "and counted: this text used to skip the check");
+    await f.page.keyboard.press(undoKey);
+    await f.page.waitForFunction(() => document.querySelector(".paste-note").hidden);
+    assert.equal(await chips.count(), 1, "one undo: the chip as it was copied");
+    await f.page.keyboard.press(redoKey);
+    await f.page.waitForFunction(() => !document.querySelector(".paste-note").hidden);
+    await f.page.keyboard.press("Enter");
+    await f.page.waitForFunction(() => !document.querySelectorAll("#cd-chips li").length);
+    const sent = (await f.posted("send")).at(-1);
+    assert.equal(sent.attachments[0].text, big, "the model reads the clean text");
+    assert.equal(await note.isVisible(), false, "the send took the row");
+    await f.send({ type: "done" });
+    assert.deepEqual(f.errors, []);
+  } finally { await f.page.close(); }
+  const c = await openChat();
+  try {
+    await vscodePaste(c.page, CHAT_BOX, { plain: "\u200B" + "line of text\n".repeat(600) });
+    assert.equal(await c.page.locator("#cd-chips li").count(), 1);
+    await c.page.locator("#cd-chips li button").last().click();
+    assert.equal(await c.page.locator("#cd-chips li").count(), 0);
+    assert.equal(await c.page.locator(".paste-note").isVisible(), false, "closing the chip leaves the row nothing to be about");
+  } finally { await c.page.close(); }
+});
+
+test("ChatDGC: text dragged in is a paste, and a dictated phrase loses what nobody can say, without a word", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openChat();
+  try {
+    await s.page.evaluate(() => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "One\u200B\nTwo");
+      data.setData("text/html", "<ol><li>One\u200B</li><li>Two</li></ol>");
+      const box = document.getElementById("cd-input"); box.focus();
+      box.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertFromDrop", dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    assert.equal(await value(s.page), "1. One\n2. Two");
+    assert.equal(await s.page.locator(".paste-note-words").textContent(), "Removed 1 invisible character from the pasted text");
+    await s.page.locator(".paste-note button").click();
+    await s.page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await s.page.keyboard.press("Backspace");
+    await s.send({ type: "mic", from: "chat", state: "idle", text: "hello\u200B there" });
+    await s.page.waitForFunction(() => document.getElementById("cd-input").value !== "");
+    assert.equal(await value(s.page), "hello there");
+    assert.equal(await s.page.locator(".paste-note").isVisible(), false);
+  } finally { await s.page.close(); }
+});
+
+test("the row is quiet in both themes, and holds its whole sentence in a narrow box", async (t) => {
+  if (skipOrFail(t)) return;
+  for (const theme of ["dark-modern", "light-modern"]) {
+    const s = await openChat({ theme, width: 300 });
+    try {
+      await vscodePaste(s.page, CHAT_BOX, { plain: hiddenFive });
+      const look = await s.page.locator(".paste-note").evaluate((n) => {
+        const words = n.querySelector(".paste-note-words"), css = getComputedStyle(n), hit = n.querySelector("button").getBoundingClientRect();
+        const top = document.elementFromPoint(hit.left + hit.width / 2, hit.top + hit.height / 2);
+        return { color: css.color, fill: css.backgroundColor, border: css.borderTopWidth, clipped: words.scrollWidth > words.clientWidth || words.scrollHeight > words.clientHeight + 1,
+          closes: n.querySelector("button").contains(top), buttons: n.querySelectorAll("button").length };
+      });
+      assert.match(look.fill, / \/ 0\.05\)$/, `${theme}: a barely-there surface, no fill of its own: ${look.fill}`);
+      assert.match(look.color, / \/ 0\.(72|85)\)$/, `${theme}: softer than the muted colour: ${look.color}`);
+      assert.equal(look.border, "0px");
+      assert.equal(look.clipped, false, `${theme}: the whole sentence shows`);
+      assert.equal(look.closes, true, `${theme}: the close control takes its click`);
+      assert.equal(look.buttons, 1, "there is nothing else to press");
+      assert.deepEqual(s.errors, []);
+    } finally { await s.page.close(); }
+  }
+});
+
+for (const embedded of [true, false]) {
+  const where = embedded ? "in Work's page" : "in its own tab";
+  test(`a Pip's chat ${where}: a paste is cleaned as it lands, and keeps the shape it was copied with`, async (t) => {
+    if (skipOrFail(t)) return;
+    const p = await openPip({ embedded });
+    try {
+      await p.box().click();
+      await pasteCases(p.page, PIP_BOX, p.$(".paste-note"), () => pipValue(p.page));
+      assert.equal(await p.$(".chat-send").first().evaluate((n) => n.classList.contains("ready")), true, "the page heard of the paste");
+      await p.page.keyboard.press("Enter");
+      await p.page.waitForFunction(() => window.__sent?.length === 1);
+      assert.equal(await p.page.evaluate(() => window.__sent[0].text), LIST_SHAPED, "the model reads the same lines");
+      await p.$(".pip-message.user .prompt-text").last().waitFor();
+      assert.equal(await p.$(".pip-message.user .prompt-text").last().textContent(), LIST_SHAPED);
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  });
+
+  test(`a Pip's chat ${where}: the first line's indentation is sent and drawn, and the row goes with the send and survives a redraw`, async (t) => {
+    if (skipOrFail(t)) return;
+    const p = await openPip({ embedded });
+    try {
+      await p.box().click();
+      await vscodePaste(p.page, PIP_BOX, { plain: `\n  \n${SHAPED}\u200B\n\n` });
+      assert.equal(await p.$(".paste-note").isVisible(), true);
+      // The page draws itself again, as it does when a reply streams in. The row is still the row.
+      await p.$("#chat-context-toggle").click();
+      await p.page.keyboard.press("Escape");
+      assert.equal(await p.$(".paste-note").isVisible(), true);
+      await p.box().click();
+      await p.page.keyboard.press("Enter");
+      await p.page.waitForFunction(() => window.__sent?.length === 1);
+      assert.equal(await p.page.evaluate(() => window.__sent[0].text), SHAPED);
+      await p.$(".pip-message.user .prompt-text").last().waitFor();
+      assert.equal(await p.$(".pip-message.user .prompt-text").last().textContent(), SHAPED);
+      assert.equal(await p.$(".paste-note").isVisible(), false, "the send took the row");
+      assert.deepEqual(p.errors, []);
+    } finally { await p.close(); }
+  });
+}
