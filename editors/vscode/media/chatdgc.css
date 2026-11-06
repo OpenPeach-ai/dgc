@@ -261,6 +261,7 @@ body:is(.vscode-high-contrast, .vscode-high-contrast-light) .cd-user .cd-bubble:
 .cd-action { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm);
   padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .cd-action:hover { background: var(--surface2); color: var(--text); }
+.cd-trace { width: auto; padding-inline: 7px; font: var(--w-med, 500) 11px/1 var(--sans); }
 .cd-meta { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.4 var(--sans); padding-left: var(--sp-1); }
 
 .cd-foot { flex: none; padding-bottom: var(--sp-2); }
@@ -309,7 +310,11 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-input { width: 100%; min-height: 24px; max-height: 40vh; resize: none; border: 0; outline: none; padding: 0 var(--sp-1);
   background: transparent; color: var(--text-strong); font: var(--w-reg) calc(var(--t-chat) + 1px)/1.55 var(--sans); }
 .cd-input:focus-visible { outline: none; }
-.cd-input::placeholder { color: var(--muted); }
+/* This box's words are a pixel larger than Work's, so a mark's place against them is half a pixel off Work's. */
+.cd-input .composer-artifact-mark { top: 0; }
+.cd-input .composer-plugin-mark { top: .5px; }
+.cd-input .composer-pip-face { top: -.5px; }
+.cd-input.is-empty::before, .cd-input::placeholder { color: var(--muted); }
 /* One row however narrow the box. Below 640px the tools keep their icons and drop their words (each keeps its name
    for a screen reader, and its tooltip), so the meter, the model and Send hold their places on the right; the model's
    name gives way last, cut short. A container query: the box is as narrow as the editor group, not the window. */

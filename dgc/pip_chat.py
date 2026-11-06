@@ -9,6 +9,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from . import reply_trace
 from .workspace_registry import RegistryError, identifier
 
 MAX_USER_BYTES = 8192
@@ -139,6 +140,50 @@ CREATE TABLE IF NOT EXISTS pip_chat_choices (
 );
 """
 MAX_CHOICES = 4
+# Where a message's @ marks go in its bubble (dgc/prompt_display.py): display-only, beside the text the model reads, for
+# a message or a mid-turn update alike. Made the first time a message has any, so a registry from before opens as it was.
+MENTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pip_chat_mentions (
+ message_id TEXT PRIMARY KEY,
+ pip_id TEXT NOT NULL REFERENCES pips(id),
+ mentions TEXT NOT NULL CHECK(length(CAST(mentions AS BLOB)) BETWEEN 2 AND 16384)
+);
+"""
+
+
+def save_mentions(db, pip_id, message_id, mentions) -> None:
+    if mentions:
+        db.execute(MENTIONS_SCHEMA)
+        db.execute("INSERT OR REPLACE INTO pip_chat_mentions VALUES(?,?,?)", (message_id, pip_id, _json(mentions)))
+
+
+def message_mentions(db, message_id) -> list:
+    """A message's marks as they were saved; none from a registry that has never held any."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_mentions'").fetchone():
+        return []
+    row = db.execute("SELECT mentions FROM pip_chat_mentions WHERE message_id=?", (message_id,)).fetchone()
+    if not row:
+        return []
+    try:
+        value = json.loads(row[0])
+    except ValueError:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def _named_pips(store, pip, req) -> list:
+    """The other Pips this message names, as the Pip is told of them: only ones in its own workspace, looked up here."""
+    from .prompt_display import named_pips
+    named = []
+    for mark in named_pips(req.get("display_mentions")):
+        row = store.db.execute("SELECT id FROM pips WHERE id=? AND workspace_id=? AND status<>'archived'",
+                               (mark["identity"], pip["workspace_id"])).fetchone()
+        if not row or mark["identity"] == pip["id"]:
+            continue
+        job = store._job(mark["identity"])
+        named.append({"name": job["name"][:120], "character": job.get("pip_type", "rook"),
+                      "goal": job["goal"][:200], "status": job["status"]})
+    return named
 
 
 def validate_choices(value):
@@ -1071,6 +1116,9 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
         cards = []
     if cards:
         context["card_context"] = cards
+    named = _named_pips(store, pip, req)
+    if named:
+        context["named_pips"] = named
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
@@ -1136,6 +1184,7 @@ def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest) "
                      "VALUES(?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
                      "user", req["text"], model, now, req["request_key"], digest))
+    save_mentions(store.db, pip["id"], message_id, req.get("display_mentions"))
     if req.get("images") or req.get("files"):
         widen_tables(store.db)
     for index, item in enumerate(req.get("images") or []):
@@ -1350,6 +1399,9 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             attached = message_files(store.db, row["id"])
             if attached:
                 message["files"] = attached
+            marks = message_mentions(store.db, row["id"])
+            if marks:
+                message["display_mentions"] = marks
         else:
             pictures = message_images(store.db, row["id"])   # images the Pip made for this reply (generate_image)
             if pictures:
@@ -1393,7 +1445,11 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             # couldn't have one, under that reply.
             unread = steering['status'] != 'applied' and item['status'] == 'succeeded'
             if not (unread and steering['status'] == 'pending') and (item['role'] == 'assistant') == unread:
-                expanded.append(steer_message(steering, item['status']))
+                said = steer_message(steering, item['status'])
+                marks = message_mentions(store.db, said['id'])
+                if marks:
+                    said['display_mentions'] = marks
+                expanded.append(said)
     return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
             "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
@@ -1401,7 +1457,7 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
 
 
 def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=None, files=None,
-         spooled_images=None, spooled_files=None, _intro=False):
+         spooled_images=None, spooled_files=None, display_mentions=None, _intro=False):
     """Queue a reply to a message, with what it brings: images and files inline (API 43) or handed
     over through the backend's spool (API 52, ``spooled_images`` and ``spooled_files``)."""
     try:
@@ -1443,6 +1499,11 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
+    if display_mentions is not None and not _intro:
+        from .prompt_display import checked_mentions
+        marks = checked_mentions(display_mentions, req["text"])
+        if marks:
+            req["display_mentions"] = marks
     result = _deliver(store, pip_id, req, actor, config, _intro)
     if not _intro:
         from .pip_steering import forget_resent
@@ -1505,6 +1566,9 @@ def _deliver(store, pip_id, req, actor, config, _intro):
     attached = message_files(store.db, row["id"])
     if attached:
         message["files"] = attached
+    marks = message_mentions(store.db, row["id"])
+    if marks:
+        message["display_mentions"] = marks
     return {"run": run, "message": message}
 
 
@@ -1513,8 +1577,12 @@ def answer_waiting(store, row, config):
     with the Pip's own saved options, as the same message."""
     from .pip_eyes import answer, bind
     decided = answer(store, row["pip_id"], row["text"], row["requested_by"], config)
+    req = request(row["text"], row["request_key"])
+    marks = message_mentions(store.db, row["id"])
+    if marks:
+        req["display_mentions"] = marks     # its bubble keeps them, and its turn is told which Pips it names
     run = store.enqueue(row["pip_id"], "chat_" + hashlib.sha256(row["request_key"].encode()).hexdigest(), row["requested_by"],
-                        config, conversation_request=request(row["text"], row["request_key"]), _waiting_message=row)
+                        config, conversation_request=req, _waiting_message=row)
     if decided is not None:
         bind(store, row["pip_id"], run["id"], decided)
     return run
@@ -1562,7 +1630,7 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context", "named_pips"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1575,6 +1643,9 @@ def validate_context(value):
         validate_recent(value["run_posts"])
     if "card_context" in value:
         _valid_card_context(value["card_context"])
+    if "named_pips" in value and (not isinstance(value["named_pips"], list) or len(value["named_pips"]) > 8
+                                  or len(_json(value["named_pips"]).encode()) > 8192):
+        raise RegistryError("invalid_history", "The named Pips exceed their bounded context contract.")
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])
@@ -1636,8 +1707,54 @@ def _instant(text):
         return None
 
 
+# What a run did, step by step, for the Trace under its reply (dgc/reply_trace.py). Beside the run, not in its result: a
+# result is checked per run kind and read by much that has no use for this. Made the first time a run has one. Named by
+# run_id and pip_id, which is how deleting a Pip finds it (pip_purge).
+TRACE_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS pip_run_traces (
+ run_id TEXT PRIMARY KEY,
+ pip_id TEXT NOT NULL,
+ trace TEXT NOT NULL CHECK(length(CAST(trace AS BLOB)) <= {reply_trace.MAX_BYTES})
+);
+"""
+
+
+def keep_trace(db, run, value) -> None:
+    """Keep a finished run's measured steps. Inside the run's own transaction, and it never costs the run."""
+    steps = reply_trace.validated(value)
+    if steps is None:
+        return
+    try:
+        from .workspace_registry import _execute_schema
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_run_traces'").fetchone() is None:
+            _execute_schema(db, TRACE_SCHEMA)
+        db.execute("INSERT OR REPLACE INTO pip_run_traces(run_id,pip_id,trace) VALUES(?,?,?)",
+                   (run["id"], run["pip_id"], _json(steps)))
+    except sqlite3.Error:
+        pass
+
+
+def _traces(db, pip_id, run_ids, *, full=False) -> dict:
+    """The runs of these that have a trace: run id to its steps (``full``) or to True."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_run_traces'").fetchone() is None:
+        return {}
+    marks = ",".join("?" * len(run_ids))
+    found = {}
+    for row in db.execute(f"SELECT run_id,trace FROM pip_run_traces WHERE pip_id=? AND run_id IN ({marks})",
+                          (pip_id, *run_ids)).fetchall():
+        try:
+            steps = reply_trace.validated(json.loads(row["trace"]))
+        except (ValueError, RecursionError):
+            steps = None
+        if steps is not None:
+            found[row["run_id"]] = steps if full else True
+    return found
+
+
 def reply_stats(store, pip_id, run_ids) -> dict:
-    """What each reply took, for the line under it in the chat: its time and its tokens."""
+    """What each reply took, for the line under it in the chat: its time and its tokens. Each says whether it has a
+    Trace (``has_trace``). Asked about one reply, it also brings that Trace (``trace``): a page of 50 of them would
+    not fit one answer, and it is read only when someone opens it."""
     if (not isinstance(run_ids, list) or not 1 <= len(run_ids) <= 50
             or any(not isinstance(r, str) or not re.fullmatch(r"run_[a-f0-9]{32}", r) for r in run_ids)):
         raise RegistryError("invalid_request", "Name 1–50 of this Pip's replies.")
@@ -1659,4 +1776,12 @@ def reply_stats(store, pip_id, run_ids) -> dict:
                       "seconds": round((end - start).total_seconds(), 1) if start and end and end >= start else None,
                       "input_tokens": count("input_tokens"), "output_tokens": count("output_tokens"),
                       "requests": count("requests")})
+    wanted = sorted(set(run_ids))
+    traced = _traces(store.db, pip_id, wanted, full=len(wanted) == 1)
+    for item in stats:
+        steps = traced.get(item["run_id"])
+        if steps:
+            item["has_trace"] = True
+            if isinstance(steps, dict):
+                item["trace"] = steps
     return {"pip_id": pip_id, "stats": stats}

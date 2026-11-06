@@ -26,7 +26,7 @@ export const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "ask_request", "ask_resolved", "background_output", "background_shells", "cache_clock", "cache_settings",
   "chat_change", "chat_changes", "chat_closed", "chat_opened",
   "chatdgc_action", "chatdgc_activity", "chatdgc_canvas", "chatdgc_changed", "chatdgc_chats", "chatdgc_compacted", "chatdgc_context", "chatdgc_delta", "chatdgc_earlier", "chatdgc_error", "chatdgc_exported", "chatdgc_file", "chatdgc_folder", "chatdgc_followups", "chatdgc_held", "chatdgc_holder", "chatdgc_images", "chatdgc_library", "chatdgc_library_file", "chatdgc_made", "chatdgc_message",
-  "chatdgc_opened", "chatdgc_outline", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_waiting", "chatdgc_widget", "chatdgc_widgets", "chatdgc_work_brief", "checkpoints", "command_rejected", "compacted", "config",
+  "chatdgc_mentions", "chatdgc_opened", "chatdgc_outline", "chatdgc_pips", "chatdgc_project", "chatdgc_projects", "chatdgc_question", "chatdgc_research", "chatdgc_turn", "chatdgc_waiting", "chatdgc_widget", "chatdgc_widgets", "chatdgc_work_brief", "checkpoints", "command_rejected", "compacted", "config",
   "context", "context_breakdown", "doc", "docs_catalog", "error", "files_ready", "goal_changed", "handoff", "handoff_started",
   "history", "hook_activity", "hook_catalog", "image", "images_library", "images_made", "images_result", "images_status", "info", "live_sessions", "mcp_call_complete",
   "mcp_app_card", "mcp_app_reply", "mcp_app_resource",

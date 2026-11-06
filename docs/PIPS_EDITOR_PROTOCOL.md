@@ -124,6 +124,11 @@ The reply is a `pips_result` event that carries the nested request ID:
   documents the main chat reads), 2 MB in all within the same 2,800,000-character budget as the
   images. A listed user message carries `files: [{index, name, bytes}]`. The host refuses `files`
   before sending to a CLI below API 43, and refuses images and files over the shared budget.
+- `send_pip_message` may carry `display_mentions` when `ready.capabilities.pip_display_mentions` is 1: where the box
+  drew its `@` marks, in the shape `prompt` takes, plus `wired: true` on a Pip or a file whose name is the words of
+  the text. They are display-only and no part of the retry key. Marks that don't spell the text are dropped and the
+  message still goes. A listed user message, or a mid-turn update, carries them back. The Pips a message names in its
+  own workspace reach the worker's turn as `named_pips` reference data.
 - From API 52 the host sends a message's photos and files the main chat's way: it writes each into
   the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
   and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of
@@ -308,7 +313,7 @@ run's history and does not start another reply. The existing `send_pip_message` 
 
 A message the running reply never read is never dropped, and what becomes of it is what Work does with steering a turn
 did not take. When the reply finishes, the message becomes the Pip's next turn: the same message `id` moves below that
-reply as an ordinary user message with its own run, keeping its time and its retry key. With several, the first takes
+reply as an ordinary user message with its own run, keeping its time, its retry key and its `display_mentions`. With several, the first takes
 that turn and the rest wait in order, one turn each; `list_pip_messages` returns them in `waiting` (`[{id, text,
 created_at}]`, oldest first) rather than in `messages`, and the editor draws them above the prompt box. A
 `send_pip_message` in the moment after a reply closes joins the back of `waiting` when it holds anything; otherwise it
@@ -317,7 +322,7 @@ starts a turn, so a reply closing under a send is not an error.
 When the user stops the reply, or it fails, times out or is lost to a runner restart, the message stays in `messages`
 with `steer_status: "missed"`, `status: "failed"` and an `error` in plain words: it wasn't sent. On Stop, everything in
 `waiting` joins it; on a failure, `waiting` carries on, as Work's queue does. The editor shows Not sent with Send again,
-and as it happens puts the message back in an empty prompt box. `send_pip_message` with the same words from the same
+and as it happens puts the message back in an empty prompt box, with its @ marks. `send_pip_message` with the same words from the same
 device removes the not-sent message. A `steer_status` of `pending` is not read yet, and only `applied` means the model has read it.
 
 **Saved logins** (API 56). Four `pips_control` requests: `list_pip_logins {pip_id?}`,

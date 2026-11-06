@@ -19,8 +19,10 @@ const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 // resolved against the page and drew Chromium's broken-image picture: find DGC's bundle instead.
 const script=globalThis.document?.currentScript?.src
  ||[...(globalThis.document?.scripts||[])].map(s=>s.src).find(src=>/\/dist\/[A-Za-z]+\.js(?:[?#]|$)/.test(src));
-const asset=script?new URL('../media/pips/plush-bodies.webp',script).href:'../media/pips/plush-bodies.webp';
-const bodyMask=script?new URL('../media/pips/plush-body-mask.png',script).href:'../media/pips/plush-body-mask.png';
+// Loaded as itself (ChatDGC's page wants the faces and none of the Pips bundle), the sprite is beside this file.
+const direct=script&&/\/media\/pips\/plush\.js(?:[?#]|$)/.test(script);
+const asset=direct?new URL('plush-bodies.webp',script).href:script?new URL('../media/pips/plush-bodies.webp',script).href:'../media/pips/plush-bodies.webp';
+const bodyMask=direct?new URL('plush-body-mask.png',script).href:script?new URL('../media/pips/plush-body-mask.png',script).href:'../media/pips/plush-body-mask.png';
 const styles=`
 .dgc-plush{display:inline-block;position:relative;width:100%;height:100%;vertical-align:middle;isolation:isolate;--plush-reach:4.5px;transform-origin:50% 90%;rotate:var(--plush-lean,0deg);animation:dgc-plush-lean 9.7s ease-in-out var(--plush-delay) infinite}
 .dgc-plush[data-character=lens]{--plush-reach:3px}

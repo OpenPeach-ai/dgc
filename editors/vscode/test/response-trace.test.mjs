@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { makeDom, mainCss } from "./support/webview-dom.mjs";
+
+const traceCss = readFileSync(new URL("../media/trace.css", import.meta.url), "utf8");
 
 // History carries saved times as markers beside the events, so no event gains a field. These tests write the time on
 // each event and saved() turns it into the markers the backend sends.
@@ -38,6 +41,19 @@ test("a saved answer replays measured model and tool spans with their own detail
   dialog.querySelector(".dgc-trace-close").click();
   assert.equal(view.doc.querySelector(".dgc-trace-dialog"), null);
   assert.deepEqual(view.errors, []);
+});
+
+test("a grep tool's row counts its hits, and no matches is none", () => {
+  const view = makeDom();
+  const { DgcTrace } = view.dom.window;
+  const trace = DgcTrace.create(1000, "t", "m", false);
+  DgcTrace.toolStart(trace, { call_id: "g1", name: "grep", summary: "TODO", trace_at_ms: 1100 });
+  DgcTrace.toolEnd(trace, { call_id: "g1", name: "grep", output: "a.py:1: TODO\nb.py:2: TODO\n", trace_at_ms: 1200 });
+  DgcTrace.toolStart(trace, { call_id: "g2", name: "grep", summary: "FIXME", trace_at_ms: 1300 });
+  DgcTrace.toolEnd(trace, { call_id: "g2", name: "grep", output: "no matches", trace_at_ms: 1400 });
+  DgcTrace.modelEnd(trace, { trace_at_ms: 1500 });
+  assert.deepEqual([...trace.rows].filter((row) => row.kind === "tool").map((row) => [row.label, row.detail]),
+    [["grep", "2 hits"], ["grep", "0 hits"]]);
 });
 
 test("live model usage lands on the completed model span, including a tool-only round", () => {
@@ -100,7 +116,60 @@ test("a timed denial closes its own span without claiming a failure", () => {
 });
 
 test("Trace failures use DGC's tool-failure olive token", () => {
-  assert.match(mainCss, /\.dgc-trace-row\.error \.dgc-trace-bar \{ background: var\(--err, #768A00\)/);
+  assert.match(traceCss, /\.dgc-trace-row\.error \.dgc-trace-bar \{ background: var\(--err, #768A00\)/);
+});
+
+test("the dialog shows on a Pip's page: its body hides everything else, never this", () => {
+  assert.match(mainCss, /body\.pips-active > [^{]*:not\(\.dgc-trace-backdrop\)/);
+});
+
+// ChatDGC and a Pip save their steps on the reply (dgc/reply_trace.py): the same dialog, the same rows.
+const savedSteps = { v: 1, ms: 2000, steps: [
+  { kind: "model", label: "model.lookup", start: 0, end: 300 },
+  { kind: "tool", label: "web_search", detail: "kings of france", hits: 3, start: 300, end: 700 },
+  { kind: "model", label: "model.response", start: 700, end: 1200, tokens: 1240 },
+  { kind: "tool", label: "aave.get_markets", start: 1200, end: 1300, error: true },
+  { kind: "tool", label: "bash", detail: "rm -rf x", start: 1300, end: 1400, denied: true },
+  { kind: "tool", label: "read_file", detail: "README.md", start: 1400, end: 1400 },
+  { kind: "model", label: "model.response", start: 1400, end: 2000, tokens: 940 },
+] };
+
+test("a saved reply's steps open as the same rows: tokens, hits, a failure, nothing invented", () => {
+  const view = makeDom();
+  const trace = view.dom.window.DgcTrace.fromSaved(savedSteps, "msg_7c41f2", "deepseek");
+  view.dom.window.DgcTrace.open(trace);
+  const dialog = view.doc.querySelector(".dgc-trace-dialog");
+  const rows = [...dialog.querySelectorAll(".dgc-trace-row")];
+  assert.equal(dialog.querySelector(".dgc-trace-head strong").textContent, "msg_7c41f2");
+  assert.equal(dialog.querySelector(".dgc-trace-model").textContent, "deepseek · 7 spans");
+  assert.deepEqual(rows.map(row => row.querySelector(".dgc-trace-meta span").textContent),
+    ["", "3 hits", "1,240 tk", "Failed", "Denied", "README.md", "940 tk"]);
+  assert.ok(rows[3].classList.contains("error"));
+  assert.equal(rows[4].classList.contains("error"), false);
+  assert.equal(dialog.querySelector(".dgc-trace-scrub").max, "2000");
+  assert.deepEqual(view.errors, []);
+});
+
+test("saved steps that aren't whole give no Trace", () => {
+  const { DgcTrace } = makeDom().dom.window;
+  for (const broken of [null, undefined, {}, { v: 2, ms: 10, steps: savedSteps.steps }, { v: 1, ms: 0, steps: savedSteps.steps },
+    { v: 1, ms: 2000, steps: [] }, { v: 1, ms: 100, steps: savedSteps.steps },
+    { v: 1, ms: 2000, steps: [{ kind: "model", label: "m", start: 5 }] },
+    { v: 1, ms: 2000, steps: [{ kind: "model", label: "m", start: 9, end: 5 }] },
+    { v: 1, ms: 2000, steps: [{ kind: "other", label: "m", start: 0, end: 5 }] }]) {
+    assert.equal(DgcTrace.fromSaved(broken, "id", "model"), null);
+  }
+});
+
+test("Esc closes the dialog and nothing behind it hears the key", () => {
+  const view = makeDom();
+  let heard = 0;
+  view.doc.addEventListener("keydown", () => { heard += 1; });
+  view.dom.window.DgcTrace.open(view.dom.window.DgcTrace.fromSaved(savedSteps, "a", "b"));
+  const before = heard;
+  view.doc.body.dispatchEvent(new view.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(view.doc.querySelector(".dgc-trace-dialog"), null);
+  assert.equal(heard, before);
 });
 
 test("parallel tools keep overlapping measured spans and the failed step", () => {

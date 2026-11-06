@@ -1,4 +1,5 @@
 import {esc,activityLabel,personalStatusLabel} from './pipsModel.js';
+import '../media/mentions.js';   // globalThis.DgcMentions: @ marks in the bubble, the same in all three chats
 import '../media/msgtime.js';   // globalThis.DgcTime: a message's time, the same in all three chats
 import '../media/pictureFold.js';   // globalThis.DgcPictureFold: a reply's pictures fold away, the same in all three chats
 
@@ -32,6 +33,18 @@ export function replyParts(text) {
   return parts.length>8?[...parts.slice(0,7),parts.slice(7).join('\n\n')]:parts;
 }
 
+// A message's words with its @ marks where they were typed, or "" for plain words. A face keeps a key of its own, so a
+// redraw leaves it moving (pipsDomPatch.js).
+function promptWithMarks(m,pluginLogo){
+  const M=globalThis.DgcMentions;
+  if(!M||!Array.isArray(m.display_mentions)||!m.display_mentions.length)return '';
+  let n=0;
+  const node=M.sentNode(String(m.text),m.display_mentions,{doc:globalThis.document,
+    pillFor:mark=>({logo:mark.kind==='plugin'?pluginLogo(mark.identity):'',plug:transcriptIcon('plug'),faceStyles:false,faceId:`sent-${m.id}-${++n}`}),
+    decorate:(pill,mark)=>{if(mark.kind!=='pip')return;const face=pill.querySelector('.composer-pip-face');if(face){face.setAttribute('data-avatar-key',`mention-${m.id}-${n}`);face.setAttribute('data-character',mark.pip_type);face.setAttribute('data-pose','idle');}}});
+  return node?node.innerHTML:'';
+}
+
 // `head`: a line above a reply the Pip sent unasked (a routine's: its face, name, routine and time); `clip`: {text, open,
 // key}, a long one's start and its Show all.
 export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,canSend,activity,split=false,imageSrc=()=>'',pluginLogo=()=>'',choices=null,stats=null,head='',clip=null}) {
@@ -44,7 +57,7 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   // A message that is only images or files shows them, not DGC's stand-in text.
   const standIn=pictures&&m.text==='(sent an image)'||files&&m.text==='(sent a file)';
   const said=!user&&clip&&!clip.open?clip.text:m.text;
-  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
+  const body=user?`${pictures}${files}${standIn?'':`<div class="bubble"><div class="prompt-text">${promptWithMarks(m,pluginLogo)||esc(m.text)}</div></div>`}`:(split?`<div class="answer split">${replyParts(said).map(part=>`<div class="message-body text final reply-part">${renderMarkdown(part)}</div>`).join('')}</div>`:`<div class="answer"><div class="message-body text final">${renderMarkdown(replyParts(said).join('\n\n'))}</div></div>`)
     // A reply's pictures and videos fold away under one header row each, as in Work and ChatDGC (media/pictureFold.js).
     +(!user&&pictures?foldPictures(`pip:${m.id}:images`,pictures,{pictures:Math.min(64,m.images.length)}):'')
     // API 71: the videos it started (generate_video), each its job's figure (media/videoPlayer.js), filled in by the
@@ -65,12 +78,14 @@ export function messageMarkup(message,{name,formatDate,renderMarkdown,prompt,can
   const unsent=user&&m.steer_status==='missed',again=user&&m.steered&&m.status==='failed'?` <button type="button" class="message-send-again" data-chat-action="resend" data-message-id="${esc(m.id)}"${canSend?'':' disabled'}>Send again</button>`:'';
   const status=user&&phase(m.status)?`<p class="message-status" role="status" data-status="${unsent?'unsent':esc(m.status)}">${unsent?'Not sent':phase(m.status)}${m.status==='failed'&&m.error?` · ${esc(m.error)}`:m.status==='failed'||m.status==='cancelled'?' · No reply':''}${again}</p>`:'';
   const options=!user&&prompt?`${action('retry','Ask again',m.id,!canSend)}${action('edit','Edit message',m.id,false)}`:'';
+  // The word Trace after the icons, as in Work: only for a reply that recorded its steps (dgc/reply_trace.py).
+  const trace=!user&&stats?.has_trace===true?`<button type="button" class="ract ract-trace" data-chat-action="trace" data-message-id="${esc(m.id)}" aria-label="Replay response trace" title="Replay response trace">Trace</button>`:'';
   const details=`<details class="message-details" data-details="message-${esc(m.id)}"><summary title="${user?'Message details':'Response details'}" aria-label="${user?'Message details':'Response details'}">${transcriptIcon('info')}<span class="sr-only">${user?'Message details':'Response details'}</span></summary><div class="message-provenance"><dl><dt>${user?'Sent':'Saved'}</dt><dd>${esc(formatDate(m.created_at))}</dd>${!user&&m.model?`<dt>Model</dt><dd>${esc(m.model)}</dd>`:''}<dt>Status</dt><dd>${unsent?'Not sent':esc(({queued:'Waiting',running:'Working',cancelling:'Stopping',succeeded:'Done',failed:'Failed',cancelled:'Stopped'})[m.status]||m.status)}</dd></dl><button type="button" data-chat-run="${esc(m.run_id)}">${m.status==='failed'&&!unsent?'View error':'Details'}</button></div></details>`;
   // When it was sent or written, at the message's own edge: after a prompt's buttons, before a reply's.
   const at=Date.parse(m.created_at),time=globalThis.DgcTime?.markup(at)||'';
   const sentTime=user&&m.steer_status==='applied'?time.replace(/(<time[^>]*>)/,'$1Steered · '):time;
   const activityRow=!user?`<button type="button" class="chat-activity-toggle" data-chat-activity="${esc(m.run_id)}" aria-expanded="${activity?.open===true}">${transcriptIcon('tool')}<span>${activity?.loading?'Loading…':'What it did'}</span><span class="activity-chevron">${transcriptIcon('chevron')}</span></button>${activity?.open?activityMarkup(activity,m.run_id):''}`:'';
-  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
+  return `<article class="pip-message msg ${user?'user':'assistant dgc'}${head&&!user?' routine-reply':''}" data-message="${esc(m.id)}">${user?'':head}<span class="sr-only role">${esc(label)}</span>${activityRow}${shownCards}${body}${used}${offered}${status}<div class="response-actions">${user||head?'':time}${action('copy',user?'Copy message':'Copy response',m.id)}${!user&&m.text&&globalThis.DgcReadAloud?readAction(m.id):''}${options}${details}${trace}${!user&&stats?replyStats(stats):''}${user?sentTime:''}<span class="copy-feedback sr-only" role="status"></span></div></article>`;
 }
 
 // What a reply took, beside its actions: its time and its tokens (in and out, all its model requests).

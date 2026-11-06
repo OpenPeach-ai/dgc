@@ -869,6 +869,12 @@ and apply to its replies and to everything it does on its own (schedules, routin
 triggers, handoffs). A new Pip starts with DGC's context window. They don't change the
 Pip's job. A Pip answers only while the runner is running.
 
+**Trace.** Under a finished reply, and under a post of a run it finished on its own, **Trace** replays what the Pip did,
+as in Work and ChatDGC: each model round with the tokens the provider reported, each tool with its own time, a search with
+its hits. Play it or scrub its timeline. A run keeps its steps beside its result (`pip_run_traces`), so they survive a
+reload and go when the Pip is deleted. `list_pip_reply_stats` says `has_trace` for each run, and brings the steps as
+`trace` when asked about one run. A run that failed or was stopped, and one from before steps were recorded, has no Trace.
+
 You can send a Personal Pip photos and files with a message, as in the main chat: use the attach
 button, paste, or drop them on the message box. Images (PNG, JPEG, GIF, WebP, BMP), text and code
 files, and PDF, Word, Excel, PowerPoint, OpenDocument, RTF, CSV and TSV files are accepted. The
@@ -906,6 +912,12 @@ setup cards and proposals; queue a run of Scout, Lens, Rook, Lock, Quill or a
 Personal Pip; pause, resume or attach a Pip to the chat; propose handoffs; and draft
 emails, events and connector actions from a Personal result. In the editor, type `@` and choose
 **Reference a Pip…** to point a message at a Pip in this project.
+
+A Pip's own chat box takes `@` too, for what that Pip can reach. A Personal Pip lists the plugins it can use and your
+other Personal Pips; a Project Pip lists the other Pips of its project and the project's files. It reads your message
+as plain words, the name or the path. A Pip named this way comes with a short note of what it is (its name, type,
+goal and status): it can talk about that Pip, and it can't run or change it. Pips make no Outputs, so a Pip's list has
+none.
 
 **Models from the main chat.** Ask "Which models can my Pips use?" and the main chat lists the
 models on DGC's connection, each with the context window DGC starts it with when it knows one, and

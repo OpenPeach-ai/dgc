@@ -13,6 +13,7 @@ import { ARTIFACT_ID, outputChoice, type Artifacts } from "./artifacts";
 import { allowFromJobs, handleVideoMessage, VIDEO_MESSAGES } from "./videoHost";
 import { onPicturesSetting, pictureFoldsMessage, picturesFolded, rememberPictureFold } from "./pictureFolds";
 import { promises as fs } from "fs";
+import { displayMentions, workspaceFiles } from "./mentionsHost";
 
 /**
  * ChatDGC in the editor: a chat tab of its own (one conversation each) and the home's Chat list.
@@ -280,7 +281,7 @@ function canvasTabPath(tab: vscode.Tab): string | undefined {
 export function chatdgcDocument(asset: (name: string) => string, cspSource: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${attr(cspSource)} data: https://www.google.com https://*.gstatic.com; font-src ${attr(cspSource)}; style-src ${attr(cspSource)} 'unsafe-inline'; script-src ${attr(cspSource)}; media-src blob:; frame-src http://127.0.0.1:* http://localhost:*;">
-<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/messagequeue.css"))}"><link rel="stylesheet" href="${attr(asset("media/genui.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}"><link rel="stylesheet" href="${attr(asset("media/mcpApps.css"))}">
+<link rel="stylesheet" href="${attr(asset("media/codicon.css"))}"><link rel="stylesheet" href="${attr(asset("media/main.css"))}"><link rel="stylesheet" href="${attr(asset("media/mentions.css"))}"><link rel="stylesheet" href="${attr(asset("media/messagequeue.css"))}"><link rel="stylesheet" href="${attr(asset("media/trace.css"))}"><link rel="stylesheet" href="${attr(asset("media/genui.css"))}"><link rel="stylesheet" href="${attr(asset("media/chatdgc.css"))}"><link rel="stylesheet" href="${attr(asset("media/voicebar.css"))}"><link rel="stylesheet" href="${attr(asset("media/mcpApps.css"))}">
 <title>ChatDGC</title></head><body class="cd-blank" data-pictures-folded="${picturesFolded() ? "1" : ""}" data-katex="${attr(asset("dist/katex/katex.js"))}" data-katex-css="${attr(asset("dist/katex/katex.css"))}">
 <header class="cd-head"><span class="pm"><svg class="mk mk-chat" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-bubble" d="M5.5 2.5 H18.5 A4 4 0 0 1 22.5 6.5 V13.5 A4 4 0 0 1 18.5 17.5 H11 L6 21.5 V17.5 H5.5 A4 4 0 0 1 1.5 13.5 V6.5 A4 4 0 0 1 5.5 2.5 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><g class="mk-slashes" transform="translate(6.53 4.53) scale(0.4560)" fill="currentColor"><path d="M7.63 4.67 L3.44 6.76 L1 21.43 L5.19 19.33 Z"/><path d="M15.32 2.57 L11.13 4.67 L8.68 21.43 L12.87 19.33 Z"/><path d="M23 4.67 L18.81 6.76 L16.37 19.33 L20.56 17.24 Z"/></g></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="cd-crumb" class="cd-crumb" hidden></button><h1 id="cd-title" class="cd-title">New chat</h1><span id="cd-temp-badge" class="cd-badge" hidden>Temporary</span>
 <button type="button" id="cd-widgets" class="cd-head-btn" title="This chat's widgets" aria-label="Widgets in this chat" aria-haspopup="dialog" aria-expanded="false" hidden><span class="codicon codicon-play-circle" aria-hidden="true"></span><span class="cd-head-btn-label">Widgets</span><span id="cd-widgets-count" class="cd-head-btn-count"></span></button>
@@ -298,8 +299,9 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <p id="cd-notice" class="cd-notice" role="alert" hidden></p>
 <div id="cd-context-pop" class="cd-pop" role="dialog" aria-label="Context window" hidden></div>
 <div id="cd-mod-strip" class="mod-strip" hidden></div>
-<form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul><label for="cd-input" class="sr-only">Message ChatDGC</label>
-<textarea id="cd-input" class="cd-input" rows="1" placeholder="Ask anything" maxlength="${MAX_TEXT}"></textarea>
+<form id="cd-box" class="cd-box"><div id="cd-queue" class="cd-queue" role="region" aria-label="Queued messages" hidden></div><ul id="cd-chips" class="cd-chips" aria-label="Attached" hidden></ul>
+<div id="cd-pop" class="pop pop-over" role="listbox" aria-label="Suggestions"></div>
+<div id="cd-input" class="cd-input mention-box" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message ChatDGC" data-placeholder="Ask anything" data-maxlength="${MAX_TEXT}" aria-controls="cd-pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></div>
 <div class="cd-tools">
 <button type="button" id="cd-attach" class="cd-icon" data-changes="1" title="Attach files (or paste an image)" aria-label="Attach files"><span class="codicon codicon-attach" aria-hidden="true"></span></button>
 <span class="cd-picks" hidden><select id="cd-model" tabindex="-1" aria-hidden="true"></select><select id="cd-thinking" tabindex="-1" aria-hidden="true">
@@ -323,7 +325,7 @@ export function chatdgcDocument(asset: (name: string) => string, cspSource: stri
 <div id="cd-announce" class="sr-only" aria-live="polite"></div>
 <dialog id="cd-keys" class="cd-keys" aria-labelledby="cd-keys-title"><h2 id="cd-keys-title">Keyboard shortcuts</h2><dl id="cd-keys-list"></dl>
 <button type="button" id="cd-keys-close" class="cd-edit-cancel">Close</button></dialog>
-<script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
+<script src="${attr(asset("media/mentions.js"))}"></script><script src="${attr(asset("media/pips/plush.js"))}"></script><script src="${attr(asset("media/messagequeue.js"))}"></script><script src="${attr(asset("media/trace.js"))}"></script><script src="${attr(asset("media/mcpApps.js"))}"></script><script src="${attr(asset("dist/markdown.js"))}"></script><script src="${attr(asset("media/chart.js"))}"></script><script src="${attr(asset("media/breakdown.js"))}"></script><script src="${attr(asset("media/voicebar.js"))}"></script><script src="${attr(asset("media/msgtime.js"))}"></script><script src="${attr(asset("media/videoPlayer.js"))}"></script><script src="${attr(asset("media/pictureFold.js"))}"></script><script src="${attr(asset("media/pluginCalls.js"))}"></script><script src="${attr(asset("media/readaloud.js"))}"></script><script src="${attr(asset("media/voicemode.js"))}"></script><script src="${attr(asset("media/texthistory.js"))}"></script><script src="${attr(asset("media/numbered-list.js"))}"></script><script src="${attr(asset("media/promptrail.js"))}"></script><script src="${attr(asset("media/mods.js"))}"></script><script src="${attr(asset("media/chatdgc.js"))}"></script></body></html>`;
 }
 
 /** The Library (ChatGPT's): every file attached in ChatDGC, in its own tab. */
@@ -1618,6 +1620,13 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           for (const tab of showing(conversation)) this.post(tab, { type: "action", messageId: ev.message_id, action: ev.action });
         }
         return;
+      case "chatdgc_mentions":
+        if (asker) this.requests.delete(requestId);
+        if (asker?.tab) {
+          this.post(asker.tab, { type: "mentionSources", offered: true, plugins: Array.isArray(ev.plugins) ? ev.plugins.slice(0, 40) : [],
+                                 pips: Array.isArray(ev.pips) ? ev.pips.slice(0, 100) : [], error: typeof ev.error === "string" ? ev.error : "" });
+        }
+        return;
       case "chatdgc_pips": {
         if (asker) this.requests.delete(requestId);
         const pips = (Array.isArray(ev.pips) ? ev.pips : []).filter((p: any) => /^pip_[a-f0-9]{32}$/.test(String(p?.id || "")));
@@ -1821,6 +1830,21 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
                                                 exports: Array.isArray(message.exports) ? message.exports.filter((f: unknown) => typeof f === "string") : [] }, message.format);
         }
         return;
+      case "mentionSources":
+        // What the box's @ list can name: asked of the backend, which knows what a reply can really use.
+        if (Number(this.host?.chatdgcOffers?.()?.mentions) >= 1) this.ask({ tab, kind: "mentions" }, { type: "chatdgc_mentions" });
+        else this.post(tab, { type: "mentionSources", offered: false });
+        return;
+      case "reqFiles":
+        if (Number(this.host?.chatdgcOffers?.()?.mentions) >= 1) this.post(tab, { type: "files", files: await workspaceFiles() });
+        return;
+      case "mentionFile": {
+        // A file picked from the @ list, or a draft's coming back: one this window has open is as good as one picked.
+        const path = typeof message.path === "string" ? message.path : "";
+        const uri = path ? vscode.Uri.file(path) : undefined;
+        if (uri && vscode.workspace.getWorkspaceFolder?.(uri)) tab.picked.add(uri.fsPath);
+        return;
+      }
       case "pluginLogos": {
         // The logos of the plugins replies used ("Used [logo] Aave"), by id; "" for one with none (it shows a plug).
         const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
@@ -1936,7 +1960,9 @@ export class ChatDGC implements vscode.WebviewPanelSerializer, vscode.Disposable
           && Number.isInteger(picked.start_line) && Number.isInteger(picked.end_line) && typeof picked.text === "string" && picked.text.length <= 20_000
           ? { canvas_id: picked.canvas_id, start_line: picked.start_line, end_line: picked.end_line, text: picked.text } : undefined;
         if (this.unsavedCanvas(conversation)) await this.saveCanvases(conversation);   // the model reads what's on screen
+        const marks = Number(this.host?.chatdgcOffers?.()?.mentions) >= 1 ? displayMentions(message.display_mentions) : undefined;
         this.ask({ tab, kind: "send" }, { type: "chatdgc_send", conversation_id: conversation, text,
+                                          ...(marks ? { display_mentions: marks } : {}),
                                           ...(model ? { model } : {}), ...(thinking ? { thinking } : {}),
                                           ...(search ? { search } : {}),
                                           // The Output chip: a choice other than Auto, to a process that offers artifacts.

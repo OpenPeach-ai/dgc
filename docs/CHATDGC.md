@@ -17,6 +17,10 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
 - **Ask.** Enter sends your message. Shift+Enter adds a new line, and Esc stops a reply. Replies stream
   in as Markdown, with code blocks, tables and links. A link opens in your browser only after you click
   it.
+- **Trace.** Under a finished reply, **Trace** beside its icons replays what the reply did, as in Work: each
+  model round with the tokens the provider reported, plugin calls, cards, searches with their hits, and a card
+  you sent later, without the wait before you sent it. Play it or scrub its timeline; it's saved with the reply,
+  so it survives a reload. A reply that stopped or failed, and one from before steps were recorded, has no Trace.
 - **Through a reload.** Reload the window, close it, or lose a Remote SSH connection while a reply is being
   written: the reply carries on, and when the window comes back its tab shows it finished or still streaming,
   with nothing lost or shown twice, and your queued messages still waiting. With no window it saves and stops by
@@ -69,6 +73,11 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     records while it speaks, so the reply never comes back as your words.
   - **Nothing to look at:** as in ChatGPT's voice mode, a spoken reply makes no canvas, file, chart, widget or
     question card. Ask for one and it says it can once you're back to typing.
+- **Mention with `@`.** Type `@` for what this chat can use, as in Work's box: your plugins, the Outputs, your Personal
+  Pips (`@pip` lists them with their faces) and this window's files. A plugin shows its logo and name, an Output its
+  icon, a Pip its face. The model reads your message as plain words, so a message without `@` works just the same; a
+  file you name this way is attached, as the paperclip attaches it, and a Pip you name comes with a short note of what
+  it is. ChatDGC can't run a Pip: it can talk about one and tell you to ask it in its own chat.
 - **Files, images and long pastes.** Use the paperclip to attach up to ten files to a message, or paste an
   image or a long piece of text (more than 5,000 characters) into the box. You can send a message with only
   files.
@@ -438,6 +447,9 @@ Chats are stored in `~/.dgc/chat/`:
 
 - each chat is one file, `chats/<id>.json`, holding its title, times, model, thinking level, pinned and
   archived state, and messages;
+- a reply's measured steps are in its message as `trace`, `{"v": 1, "ms", "steps": [{"kind", "label", "start",
+  "end", "tokens"?, "detail"?, "hits"?, "error"?, "denied"?}]}`, in whole milliseconds from its first step; the model
+  never reads them;
 - `index.sqlite3` keeps the list fast and holds what each chat says for search (with SQLite's FTS5 where available).
 
 Every file is owner-only and written atomically. A lock file keeps two windows from writing a chat at
@@ -457,6 +469,13 @@ The `dgc serve` process answers every `chatdgc_*` command itself; no session eve
 therefore never carries the envelope's `chat_id`, because that name belongs to the session router. A
 conversation is named by `conversation_id` (`chat_` followed by 32 hex digits). A backend that supports
 ChatDGC says so in `ready.capabilities.chatdgc = {"version": 1}`.
+
+`chatdgc_mentions {request_id}` (`capabilities.chatdgc.mentions`) answers with what the box can name with `@`:
+`chatdgc_mentions {request_id, plugins: [{id, name}], pips: [{id, name, pip_type, goal}], error?}`, every plugin a reply
+can use and your Personal Pips. `error` says why the Pips aren't listed, with the plugins still there.
+`chatdgc_send` may carry `display_mentions`, where the box drew its marks, as on `prompt`, plus `wired: true` on a Pip
+whose name is the words of the text. They are display-only: they come back on the saved message, and marks that don't
+spell the text are left out. The model reads `text`, and a Pip so named comes with a line of what it is, for that reply.
 
 | Command | Fields | Answered by |
 | --- | --- | --- |

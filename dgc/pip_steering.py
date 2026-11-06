@@ -54,13 +54,13 @@ def send(store, pip, run, req, actor):
         if prior:
             if prior['request_digest'] != req['digest'] or prior['requested_by'] != actor:
                 raise RegistryError('conflict', 'This message key was already used for different words or by another device.')
-            return {'run': store.run(prior['run_id']), 'message': message(prior, store.run(prior['run_id'])['status'])}
+            return {'run': store.run(prior['run_id']), 'message': _said(store, prior, store.run(prior['run_id'])['status'])}
         # Recheck under the write lock: the run may have finished while the editor sent the request.
         live = store.db.execute('SELECT status FROM pip_runs WHERE id=?', (run['id'],)).fetchone()
         if live is None or live['status'] not in ('queued', 'running'):
             raise RegistryError('conversation_changed', 'The Pip finished that reply. Send the message again as a new turn.')
         row = _insert(store, pip, run['id'], req, actor)
-    return {'run': store.run(run['id']), 'message': message(row, live['status'])}
+    return {'run': store.run(run['id']), 'message': _said(store, row, live['status'])}
 
 
 def _insert(store, pip, run_id, req, actor):
@@ -73,7 +73,18 @@ def _insert(store, pip, run_id, req, actor):
                      'VALUES(?,?,?,?,?,?,?,?,?,?)',
                      (message_id, pip['id'], pip['workspace_id'], run_id, req['text'], req['request_key'], req['digest'], actor,
                       store.registry.clock(), 'pending'))
+    from .pip_chat import save_mentions
+    save_mentions(store.db, pip['id'], message_id, req.get('display_mentions'))
     return store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
+
+
+def _said(store, row, run_status):
+    from .pip_chat import message_mentions
+    said = message(row, run_status)
+    marks = message_mentions(store.db, row['id'])
+    if marks:
+        said['display_mentions'] = marks
+    return said
 
 
 def wait_behind(store, pip, req, actor):
@@ -87,7 +98,7 @@ def wait_behind(store, pip, req, actor):
         if ahead is None:
             return None
         row = _insert(store, pip, ahead['run_id'], req, actor)
-    return {'run': store.run(row['run_id']), 'message': message(row, 'succeeded')}
+    return {'run': store.run(row['run_id']), 'message': _said(store, row, 'succeeded')}
 
 
 # The line under a message that wasn't sent ("Not sent · ...").
@@ -233,4 +244,7 @@ def forget_resent(store, pip_id, req, actor):
     values = (pip_id, req['text'], actor, req['request_key'])
     if store.db.execute("SELECT 1 FROM pip_chat_steers WHERE " + match + " LIMIT 1", values).fetchone():
         with store.registry.transaction():
+            if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_chat_mentions'").fetchone():
+                store.db.execute("DELETE FROM pip_chat_mentions WHERE message_id IN "
+                                 "(SELECT id FROM pip_chat_steers WHERE " + match + ")", values)
             store.db.execute("DELETE FROM pip_chat_steers WHERE " + match, values)

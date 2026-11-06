@@ -116,7 +116,7 @@ test("the bar: the waveform rises with speech and lies flat in silence; quiet fo
 async function mainPage(width = 520) {
   const panelSrc = readFileSync(join(root, "src/panel.ts"), "utf8");
   const css = readFileSync(join(root, "media/main.css"), "utf8"), codicon = readFileSync(join(root, "media/codicon.css"), "utf8");
-  const mainJs = readFileSync(join(root, "media/main.js"), "utf8");
+  const mainJs = readFileSync(join(root, "media/mentions.js"), "utf8") + "\n" + readFileSync(join(root, "media/main.js"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown",
     write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

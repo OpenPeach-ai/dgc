@@ -1548,6 +1548,8 @@ COMMAND_FIELDS.update({
     "chatdgc_action": {"request_id": _S(), "conversation_id": _S(), "message_id": _S(), "action_id": _S(),
                        "op": _f("string", enum=("run", "dismiss", "hand")), "arguments": _O(False), "pip_id": _S(False)},
     "chatdgc_pips": {"request_id": _S()},
+    # What this box can name with @ (capabilities.chatdgc.mentions): answered by `chatdgc_mentions`.
+    "chatdgc_mentions": {"request_id": _S()},
     "chatdgc_library_file": {"request_id": _S(), "op": _f("string", enum=("save", "remove", "to_project")),
                              "conversation_id": _S(False), "project_id": _S(False), "attachment_id": _S(),
                              "path": _S(False), "target_project": _S(False)},
@@ -1556,6 +1558,9 @@ COMMAND_FIELDS.update({
     # Widgets list read it (offered as ready.capabilities.chatdgc.outline). Answered by `chatdgc_outline`.
     "chatdgc_outline": {"request_id": _S(), "conversation_id": _S()},
     "chatdgc_send": {"request_id": _S(), "conversation_id": _S(), "text": _S(), "model": _S(False),
+                     # Where the box drew its marks, for the bubble (capabilities.chatdgc.mentions): display-only,
+                     # as on `prompt`. The model reads `text`.
+                     "display_mentions": _A(False),
                      # The Output chip, as on `prompt` (only with capabilities.artifacts).
                      "output": _f("string", required=False, enum=("auto", "document", "slides", "spreadsheet",
                                                                 "page", "dashboard")),
@@ -1677,6 +1682,9 @@ EVENT_FIELDS.update({
     # and after each choice. The finished reply carries them in `actions`.
     "chatdgc_action": {"conversation_id": _S(), "message_id": _S(), "action": _O(), "request_id": _S(False)},
     "chatdgc_pips": {"request_id": _S(), "pips": _A(), "error": _S(False)},
+    # plugins: [{id, name}], every plugin a reply can use. pips: [{id, name, pip_type, goal}], your Personal Pips;
+    # error: why they can't be listed (Pips off), with the plugins still there.
+    "chatdgc_mentions": {"request_id": _S(), "plugins": _A(), "pips": _A(), "error": _S(False)},
     # Suggested next messages under a reply (ChatGPT's follow-ups), after it ended; the reply carries them in
     # `followups` too. Only the chat's last reply has any worth showing.
     "chatdgc_followups": {"conversation_id": _S(), "message_id": _S(), "followups": _A()},

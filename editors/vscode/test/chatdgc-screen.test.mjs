@@ -40,7 +40,7 @@ function screenHtml() {
   const codicon = readFileSync(join(root, "media/codicon.css"), "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(join(root, "media/codicon.ttf")).toString("base64")}")`);
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
-  const own = readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
+  const own = readFileSync(join(root, "media/mentions.css"), "utf8") + readFileSync(join(root, "media/trace.css"), "utf8") + readFileSync(join(root, "media/chatdgc.css"), "utf8") + readFileSync(join(root, "media/voicebar.css"), "utf8");
   // The page's own scripts, in the order chatdgc.ts loads them: a list kept here by hand misses the next one added.
   const scripts = [...source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1].matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);
   assert.equal(scripts.at(-1), "chatdgc.js");
@@ -73,6 +73,42 @@ async function openScreen({ width = 900, height = 700, theme = "dark-modern", st
 const shown = (page, selector) => page.evaluate((s) => { const n = document.querySelector(s); return !!n && n.checkVisibility(); }, selector);
 const conversation = (extra = {}) => ({ id: ID, title: "New chat", model: null, thinking: null, pinned: false, archived: false, temporary: false, ...extra });
 
+test("Trace: the word beside a reply's icons, only when it recorded its steps, and the same dialog as Work", async (t) => {
+  if (skipOrFail(t)) return;
+  const s = await openScreen();
+  try {
+    const at = "2026-11-06T10:00:00.000Z";
+    const trace = { v: 1, ms: 3000, steps: [
+      { kind: "model", label: "model.response", start: 0, end: 1200, tokens: 13537 },
+      { kind: "tool", label: "aave.get_markets", detail: "Card", start: 1200, end: 1500 },
+      { kind: "tool", label: "web_search", detail: "kings", hits: 3, start: 1500, end: 1800, error: true },
+      { kind: "model", label: "model.response", start: 1800, end: 3000, tokens: 13596 }] };
+    await s.send({ type: "opened", conversation: conversation(), earlier: 0, busy: false, messages: [
+      { id: M(1), role: "user", text: "Old", created_at: at },
+      { id: M(2), role: "assistant", text: "An old reply.", created_at: at, finish: "stop", model: "m" },
+      { id: M(3), role: "user", text: "New", created_at: at },
+      { id: M(4), role: "assistant", text: "A new reply.", created_at: at, finish: "stop", model: "deepseek", trace }] });
+    assert.equal(await s.page.locator(`.cd-assistant[data-id="${M(2)}"] .cd-trace`).count(), 0, "an old chat's reply shows no Trace");
+    const word = s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-actions .cd-trace`);
+    assert.equal(await word.textContent(), "Trace");
+    const row = await s.page.evaluate((id) => [...document.querySelector(`.cd-assistant[data-id="${id}"] .cd-actions`).children].map((n) => n.className.split(" ")[0] + (n.classList.contains("cd-trace") ? ":trace" : "")), M(4));
+    assert.equal(row.at(-2), "cd-action:trace", "after the icons, before the model's name");
+    assert.equal(row.at(-1), "cd-meta");
+    const copy = await s.page.locator(`.cd-assistant[data-id="${M(4)}"] .cd-actions [aria-label="Copy"]`).boundingBox(), box = await word.boundingBox();
+    assert.equal(box.height, copy.height, "as tall as the icons beside it");
+    assert.equal(box.y, copy.y, "on their line");
+    await word.click();
+    const dialog = s.page.locator("body > .dgc-trace-backdrop .dgc-trace-dialog");
+    assert.equal(await dialog.locator(".dgc-trace-head strong").textContent(), "msg_444444");
+    assert.equal(await dialog.locator(".dgc-trace-model").textContent(), "deepseek · 4 spans");
+    assert.deepEqual(await dialog.locator(".dgc-trace-row .dgc-trace-meta span:first-child").allTextContents(), ["13,537 tk", "Card", "Failed", "13,596 tk"]);
+    assert.equal(await dialog.locator(".dgc-trace-scrub").getAttribute("max"), "3000");
+    await s.page.keyboard.press("Escape");
+    assert.equal(await dialog.count(), 0);
+    assert.deepEqual(s.errors, []);
+  } finally { await s.page.close(); }
+});
+
 test("a new chat: the question and the box together, and a message goes out with its model and thinking", async (t) => {
   if (skipOrFail(t)) return;
   const s = await openScreen();
@@ -97,7 +133,7 @@ test("a new chat: the question and the box together, and a message goes out with
     await s.page.keyboard.press("Enter");
     assert.deepEqual(await s.posted("send"), [{ type: "send", text: "What's the capital of France?", model: "qwen3:32b", thinking: "high",
                                                 search: "auto", study: false }], "web search is auto unless you choose");
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "");
     assert.equal(await shown(s.page, "#cd-stop"), true, "Stop while it answers");
     assert.equal(await shown(s.page, "#cd-send"), false);
     await s.page.locator("#cd-input").fill("second");
@@ -153,7 +189,7 @@ test("ChatDGC Shift+Enter continues numbered prompts without sending", async (t)
     await input.fill("1. First point");
     await input.press("End");
     await input.press("Shift+Enter");
-    assert.equal(await input.inputValue(), "1. First point\n2. ");
+    assert.equal(await input.evaluate((n) => n.value), "1. First point\n2. ");
     assert.equal((await s.posted("send")).length, 0);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
@@ -552,7 +588,7 @@ test("dictation: the voice bar while it records; Stop writes it down at the care
     assert.equal(await bar.getAttribute("data-state"), "writing");
     assert.equal(await bar.locator("[data-voice-status]").textContent(), "Writing it down…");
     await s.send({ type: "mic", state: "idle", text: "for two people", mode: "insert" });
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "Plan a trip for two people to Lisbon");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "Plan a trip for two people to Lisbon");
     assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").selectionStart), "Plan a trip for two people".length, "the caret after what was said");
     assert.equal(await tools.isVisible(), true);
     assert.equal(await bar.isVisible(), false);
@@ -833,7 +869,7 @@ test("errors, a CLI without ChatDGC, and older messages", async (t) => {
     await s.send({ type: "error", opening: true, message: "That chat doesn't exist." });
     assert.deepEqual((await s.posted("reopenNew")).length, 1, "a chat that is gone opens as a new one");
     await s.send({ type: "unavailable", message: "ChatDGC needs a newer DGC CLI." });
-    assert.equal(await s.page.locator("#cd-input").isDisabled(), true);
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").disabled), true);
   } finally { await s.page.close(); }
 });
 
@@ -1214,7 +1250,7 @@ test("projects in a chat's tab: the project's page, its settings, and the projec
     assert.equal(await s.page.locator(".cd-project-card").first().textContent(), "InstructionsBudget traveller. Prices in rupees.");
     assert.deepEqual(await s.page.locator(".cd-project-chips .cd-chip-name").allTextContents(), ["itinerary.pdf", "Hotel"]);
     assert.equal(await s.page.locator(".cd-project-memory").textContent(), "Memory: shared with your other chats, Work and Pips.");
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "New chat in Goa trip");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "New chat in Goa trip");
     assert.equal(await s.page.locator("#cd-temp-toggle").isHidden(), true, "a project's chat is kept: never temporary");
     assert.equal(await s.page.locator("#cd-crumb").isHidden(), true, "on its own page, the page is the project");
     assert.deepEqual(await s.posted("projectChats"), [{ type: "projectChats", id: P }], "its chats, asked for once");
@@ -1761,7 +1797,7 @@ test("follow-ups: a few next messages under the last reply; one click sends it, 
     await box.locator(".cd-followup").first().click();
     const sent = (await s.posted("send")).at(-1);
     assert.deepEqual([sent.text, typeof sent.model, sent.search], [next[0], "string", "auto"]);
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed thought", "the box keeps what you were typing");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "half-typed thought", "the box keeps what you were typing");
     // One at a time: a reply is on its way (drawn at once, waiting for the model), and the follow-ups wait for it.
     assert.equal(await s.page.locator(".cd-followups").count(), 0);
     assert.equal(await s.page.locator(".cd-assistant .cd-waiting").count(), 1);
@@ -1785,7 +1821,7 @@ test("Generative UI choice sends once and keeps an unrelated ChatDGC draft", asy
     const sent = await s.posted("send");
     assert.equal(sent.length, 1);
     assert.equal(sent[0].text, "Check the ERP alert and show the evidence.");
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "My unfinished thought");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "My unfinished thought");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });
@@ -1845,7 +1881,7 @@ test("attachments: picked files and pastes become chips, go with the message, an
       document.getElementById("cd-input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     });
     await s.page.waitForFunction(() => document.querySelectorAll("#cd-chips .cd-chip").length === 3);
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "", "the long paste went to a chip, not the box");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "", "the long paste went to a chip, not the box");
     const names = await s.page.locator("#cd-chips .cd-chip-name").allTextContents();
     assert.deepEqual(names, ["trip.csv", "Pasted text", "Pasted image"]);
     assert.match(await s.page.locator("#cd-chips .cd-chip").nth(1).innerText(), /7,500 characters/);
@@ -1946,7 +1982,7 @@ test("versions: edit a message, try a reply again, and step between versions", a
     await s.page.locator("#cd-input").fill("half-typed question");
     await s.send(view({ messages: [{ id: M(3), role: "user", text: "Plan Panjim", versions: { parent: "root", index: 2, count: 3 } }],
                         busy: true, replyId: M(4), keep: true }));
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "half-typed question", "what you were typing stays");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "half-typed question", "what you were typing stays");
     assert.deepEqual(await s.page.locator(".cd-msg").evaluateAll((n) => n.map((x) => x.dataset.id)), [M(3), M(4)],
       "cut back to the edit, and its new reply waiting for the model (0.51: never nothing before the first word)");
     assert.equal(await s.page.locator(`.cd-msg[data-id="${M(4)}"] .cd-waiting`).count(), 1);
@@ -2521,7 +2557,7 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     await box.fill("And the weather?");
     await s.page.locator("#cd-send").click();
     assert.deepEqual(await sends(), [], "nothing is sent while it answers");
-    assert.equal(await box.inputValue(), "");
+    assert.equal(await box.evaluate((n) => n.value), "");
     assert.deepEqual([await s.page.locator("#cd-send").isHidden(), await s.page.locator("#cd-stop").isVisible()], [true, true],
                      "queued, the box is empty again: Stop only");
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?", "And the weather?"]);
@@ -2529,7 +2565,7 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     if (process.env.DGC_SHOTS) await s.page.locator(".cd-box").screenshot({ path: join(process.env.DGC_SHOTS, "chatdgc-queue.png") });
     // Up in an empty box takes back the last one (Codex's "edit last queued message"); Enter queues it again.
     await box.press("ArrowUp");
-    assert.equal(await box.inputValue(), "And the weather?");
+    assert.equal(await box.evaluate((n) => n.value), "And the weather?");
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["And the budget?"]);
     await box.fill("And the weather in May?"); await box.press("Enter");
     // The reply finishes: the first goes, and the next waits for its reply.
@@ -2549,7 +2585,7 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     assert.equal((await s.posted("stop")).length, 1);
     await s.send({ type: "turn", state: "ended", replyId: M(6) });
     assert.equal((await sends()).length, 2, "Stop: nothing queued is sent");
-    assert.equal(await box.inputValue(), "One\n\nTwo\n\nStill typing");
+    assert.equal(await box.evaluate((n) => n.value), "One\n\nTwo\n\nStill typing");
     assert.equal(await queue.isHidden(), true);
     // A reply that fails: the same -- what waited is yours again.
     await box.fill("");
@@ -2558,7 +2594,7 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     await s.send({ type: "error", message: "The model is not reachable." });
     await s.send({ type: "turn", state: "ended", replyId: M(8) });
     assert.equal((await sends()).length, 2);
-    assert.equal(await box.inputValue(), "Three");
+    assert.equal(await box.evaluate((n) => n.value), "Three");
     // Edit and Remove on a row.
     await box.fill("");
     await s.send({ type: "turn", state: "started", replyId: M(9) });
@@ -2572,14 +2608,14 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Keep me", "Drop me", "Change me"]);
     await queue.getByRole("button", { name: "Remove queued message: Drop me" }).click();
     await queue.getByRole("button", { name: "Edit queued message: Change me" }).click();
-    assert.equal(await box.inputValue(), "Change me");
+    assert.equal(await box.evaluate((n) => n.value), "Change me");
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Keep me"]);
     // Kept with the chat: shown again on a reload while it answers; with nothing running, back in the box instead.
     const saved = await s.page.evaluate(() => window.__state[`queue:chat_${"a".repeat(32)}`]);
     assert.deepEqual(saved.map((q) => q.text), ["Keep me"]);
     await s.send({ type: "opened", conversation: conversation(), messages: [{ id: M(1), role: "user", text: "Plan a trip." }], earlier: 0, busy: false });
     assert.equal(await queue.isHidden(), true);
-    assert.match(await box.inputValue(), /^Keep me/, "never sent on its own after a reload");
+    assert.match(await box.evaluate((n) => n.value), /^Keep me/, "never sent on its own after a reload");
     assert.equal((await sends()).length, 2);
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
@@ -2604,7 +2640,7 @@ test("a queued message with pasted attachments is returned for review after a re
   try {
     await second.send({ type: "opened", conversation: conversation(), messages: [], earlier: 0, busy: true });
     assert.equal(await second.page.locator("#cd-queue").isHidden(), true);
-    assert.equal(await second.page.locator("#cd-input").inputValue(), "Use both attachments");
+    assert.equal(await second.page.evaluate(() => document.getElementById("cd-input").value), "Use both attachments");
     assert.match(await second.page.locator("#cd-notice").textContent(), /attach them again/);
     await second.send({ type: "turn", state: "ended", replyId: M(2) });
     assert.deepEqual(await second.posted("send"), [], "a changed message must not send itself after reload");
@@ -2671,7 +2707,7 @@ test("deep research: the toggle, a plan that counts down, editing it, the readin
     await s.send({ type: "opened", conversation: conversation({ title: "London" }), earlier: 0, busy: false, messages: [] });
     const toggle = s.page.locator("#cd-research");
     await toggle.click();
-    assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("placeholder")],
+    assert.deepEqual([await toggle.getAttribute("aria-pressed"), await s.page.locator("#cd-input").getAttribute("data-placeholder")],
                      ["true", "What should I research?"]);
     await s.page.locator("#cd-input").fill("Can I buy a London flat with savings in India?");
     await s.page.keyboard.press("Enter");
@@ -2935,9 +2971,9 @@ test("a send refused before it starts gives back what was typed, and never leave
     await s.page.locator("#cd-research").click();
     await s.page.locator("#cd-input").fill("Scooters under 1.5 lakh");
     await s.page.keyboard.press("Enter");
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "");
     await s.send({ type: "error", message: "Deep research needs a context window of at least 16k: choose 32k or more in Settings." });
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "Scooters under 1.5 lakh", "nothing typed is lost");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "Scooters under 1.5 lakh", "nothing typed is lost");
     assert.equal(await s.page.locator("#cd-research").getAttribute("aria-pressed"), "true", "still a research request");
     assert.deepEqual([await s.page.locator("#cd-stop").isHidden(), await s.page.locator("#cd-send").isDisabled()], [true, false],
                      "not stuck as if a reply were running");
@@ -3010,23 +3046,23 @@ test("study mode: the chat's, on when it opens on, sent with each message, and o
     await s.send({ type: "opened", conversation: conversation({ title: "Fractions", study: true }), earlier: 0, busy: false, messages: [] });
     await s.frame();
     assert.equal(await study.getAttribute("aria-pressed"), "true", "a chat in study mode opens with it on");
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What do you want to learn?");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "What do you want to learn?");
     await s.page.locator("#cd-input").fill("Teach me halves");
     await s.page.keyboard.press("Enter");
     assert.equal((await s.posted("send")).at(-1).study, true);
     await s.send({ type: "opened", conversation: conversation({ id: `chat_${"9".repeat(32)}`, title: "Other" }), earlier: 0, busy: false, messages: [] });
     await s.frame();
     assert.equal(await study.getAttribute("aria-pressed"), "false", "another chat: as it is");
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "Ask anything");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "Ask anything");
     await study.click();
     assert.equal(await study.getAttribute("aria-pressed"), "true");
     await s.page.locator("#cd-input").fill("x");          // a redraw keeps what the box asks for
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What do you want to learn?");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "What do you want to learn?");
     await s.page.locator("#cd-input").fill("");
     await s.page.locator("#cd-research").click();
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What should I research?", "research asks for its own");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "What should I research?", "research asks for its own");
     await s.page.locator("#cd-input").fill("y");
-    assert.equal(await s.page.locator("#cd-input").getAttribute("placeholder"), "What should I research?", "and keeps it as you type");
+    assert.equal(await s.page.locator("#cd-input").getAttribute("data-placeholder"), "What should I research?", "and keeps it as you type");
     await s.page.locator("#cd-input").fill("");
     await s.page.locator("#cd-research").click();
     await study.click();
@@ -3658,7 +3694,7 @@ test("the prompt rail: from five prompts, a tick each and the one being read bri
     await s.page.keyboard.press("Alt+ArrowUp");
     await s.page.waitForTimeout(450);
     assert.equal((await railState(s.page)).now, 2);
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "", "nothing typed into the box");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "", "nothing typed into the box");
     // The keys: Tab reaches it, Down goes into the list, Enter goes there, Esc closes it.
     await rail.focus();
     await s.page.keyboard.press("ArrowDown");
@@ -3767,7 +3803,7 @@ test("Open here for a chat: read-only while another window writes to it, in Work
     assert.equal((await s.page.locator("#cd-elsewhere-text").textContent()).trim(), "This chat is open in another window.");
     assert.equal(await s.page.locator("#cd-elsewhere .codicon-multiple-windows").count(), 1, "Work's bar and look");
     assert.equal(await box.isDisabled(), true, "the composer is off");
-    assert.equal(await box.getAttribute("placeholder"), "Open here to carry on in this window");
+    assert.equal(await box.getAttribute("data-placeholder"), "Open here to carry on in this window");
     assert.equal(await s.page.locator("#cd-attach").isDisabled(), true);
     assert.equal(await s.page.locator("#cd-send").isDisabled(), true);
     await s.page.locator("#cd-elsewhere-open").click();
@@ -3790,7 +3826,7 @@ test("Open here for a chat: read-only while another window writes to it, in Work
     assert.equal((await s.page.locator("#cd-elsewhere-text").textContent()).trim(), "This chat is open in another window now.");
     assert.equal(await s.page.locator("#cd-stop").isHidden(), true);
     assert.equal(await s.page.locator("#cd-queue").isHidden(), true);
-    assert.equal(await box.inputValue(), "And then?");
+    assert.equal(await box.evaluate((n) => n.value), "And then?");
     await s.send({ type: "turn", state: "ended", replyId: M(4) });
     assert.deepEqual(await s.posted("send"), [], "nothing goes from a chat another window writes to");
     // Another chat in this tab: the bar is that chat's alone.

@@ -395,6 +395,84 @@ class ARoutine(Base):
         self.assertEqual(self.store.claim_next()["id"], sent["run"]["id"])
 
 
+class TheMarks(Base):
+    """The @ marks of a message (dgc/prompt_display.py) stay with it, whatever becomes of it."""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.job_ready()
+        self.other = self.store.create(self.workspace["id"], "Scout", "Look around.", "device_1")
+        self.words = "Ask Scout about it"
+        self.marks = [{"start": 4, "kind": "pip", "label": "Scout", "identity": self.other["id"], "pip_type": "rook", "wired": True}]
+
+    def marked(self, key, text=None):
+        return pip_chat.send(self.store, self.job["id"], text or self.words, key, "device_1", self.cfg, display_mentions=self.marks)
+
+    def message_of(self, text):
+        return next(m for m in self.page()["messages"] if m["text"] == text)
+
+    def test_a_message_that_becomes_a_turn_keeps_its_marks_and_its_turn_knows_the_pip_it_names(self):
+        self.send("Write the summary", "first")
+        joined = self.marked("late")
+        self.assertEqual(joined["message"]["display_mentions"], self.marks)
+        self.assertEqual(self.message_of(self.words)["display_mentions"], self.marks, "while it waits to be read")
+        self.run_to_end("Summary.")
+        turn = self.message_of(self.words)
+        self.assertEqual(turn["id"], joined["message"]["id"])
+        self.assertEqual(turn["display_mentions"], self.marks, "in its bubble as its own turn")
+        self.assertFalse(turn.get("steered"))
+        manifest = json.loads(self.queued_run_of(self.words)["manifest"])
+        self.assertEqual([p["name"] for p in manifest["conversation"]["named_pips"]], ["Scout"])
+        self.run_to_end("Scout says hello.")
+        with WorkspaceRegistry(self.registry.directory) as reopened:
+            kept = pip_chat.list_messages(pips.PipStore(reopened), self.job["id"])["messages"]
+        self.assertEqual(next(m for m in kept if m["text"] == self.words)["display_mentions"], self.marks, "after a reload")
+
+    def test_one_waiting_behind_another_keeps_its_marks_until_its_own_turn(self):
+        self.send("Write the summary", "first")
+        self.send("First thing", "a")
+        self.marked("b")
+        self.run_to_end("Summary.")
+        self.assertEqual([m["text"] for m in self.page()["waiting"]], [self.words])
+        self.run_to_end("One.")
+        self.assertEqual(self.message_of(self.words)["display_mentions"], self.marks)
+        self.assertEqual(json.loads(self.queued_run_of(self.words)["manifest"])["conversation"]["named_pips"][0]["name"], "Scout")
+
+    def test_one_sent_in_the_moment_after_the_close_keeps_its_marks(self):
+        first = self.send("Write the summary", "first")
+        self.send("Earlier", "earlier")
+        self.store.claim_next()
+        self.store.finish(first["run"]["id"], result={"text": "Summary."})
+        behind = self.marked("later")
+        self.assertEqual(behind["message"]["display_mentions"], self.marks)
+        pip_steering.settle(self.store, first["run"]["id"], self.cfg)
+        self.run_to_end("Done.")
+        self.assertEqual(self.message_of(self.words)["display_mentions"], self.marks)
+
+    def test_a_message_not_sent_keeps_its_marks_and_sending_it_again_leaves_one_set(self):
+        first = self.send("Write the summary", "first")
+        late = self.marked("late")
+        self.store.claim_next()
+        self.store.cancel(first["run"]["id"], "device_1")
+        self.store.finish(first["run"]["id"], result={"text": "Partial"})
+        pip_steering.settle(self.store, first["run"]["id"], self.cfg)
+        unsent = self.message_of(self.words)
+        self.assertEqual((unsent["steer_status"], unsent["display_mentions"]), ("missed", self.marks))
+        again = self.marked("again")
+        self.assertNotEqual(again["message"]["id"], late["message"]["id"])
+        self.assertEqual(self.message_of(self.words)["id"], again["message"]["id"])
+        self.assertEqual(self.message_of(self.words)["display_mentions"], self.marks)
+        self.assertEqual(pip_chat.message_mentions(self.registry.db, late["message"]["id"]), [], "nothing left of the old one")
+
+    def test_the_retry_of_a_message_with_marks_still_matches_after_it_became_a_turn(self):
+        self.send("Write the summary", "first")
+        late = self.marked("late")
+        self.run_to_end("Summary.")
+        again = self.marked("late")
+        self.assertEqual(again["message"]["id"], late["message"]["id"])
+        self.assertEqual(again["message"]["display_mentions"], self.marks)
+
+
 class TheWorker(Base):
     """The real Agent loop on a mocked model: what it reads, and what it leaves for the controller."""
 

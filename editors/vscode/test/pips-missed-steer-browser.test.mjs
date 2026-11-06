@@ -51,22 +51,22 @@ const host = `(${function (PIP, opening) {
     get_pip_runner: () => ({ runner: { runner_id: "r", status: "running", online: true, paused: false, counts: { queued: 0, running: 0, cancelling: 0 } } }),
     get_workspace_context: () => ({ context: { workspace_id: W, revision: 0, entries: [] } }),
     list_pip_models: () => ({ default_model: "m", models: [], connection: "configured" }),
-    list_pip_messages: () => ({ pip_id: PIP, workspace_id: W, next_before_id: null, history_context_omitted_count: 0, chat_controls: controls, ...window.__page }),
+    list_pip_messages: () => (window.__lists = (window.__lists || 0) + 1, { pip_id: PIP, workspace_id: W, next_before_id: null, history_context_omitted_count: 0, chat_controls: controls, ...window.__page }),
     list_pip_run_posts: () => ({ pip_id: PIP, workspace_id: W, posts: [], next_before_id: null }),
     list_pip_reply_stats: () => ({ pip_id: PIP, stats: [] }),
     list_pip_apps: () => ({ apps: [] }), get_pips_limit: () => ({ max_pips: 100, default: 100, maximum: 100000 }),
     get_pip: () => ({ pip }), list_pip_runs: () => ({ runs: [] }),
     get_pip_chat_stream: () => ({ run_id: "r", cursor: 0, text: "", done: false, events: [] }),
-    send_pip_message: (req) => { window.__sent.push(req.text); window.__afterSend?.(req); return { message: window.__msg("sent" + window.__sent.length, "user", req.text, "run_x", "queued"), run: { id: "run_x", pip_id: PIP, status: "queued" } }; },
+    send_pip_message: (req) => { window.__sent.push(req.text); (window.__reqs ||= []).push(req); window.__afterSend?.(req); return { message: window.__msg("sent" + window.__sent.length, "user", req.text, "run_x", "queued"), run: { id: "run_x", pip_id: PIP, status: "queued" } }; },
   };
-  window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
+  window.acquireVsCodeApi = () => ({ getState: () => (window.__savedQueue ? { workspace_id: W, selected: window.__savedQueue.pipId, chat_queues: { [window.__savedQueue.pipId]: [window.__savedQueue.queue] } } : undefined), setState() {}, postMessage(m) {
     if (m?.type === "copy") { window.__copied = m.text; return; }
     if (m?.type !== "pipsRequest") return;
     const make = answers[m.request.type];
     setTimeout(() => window.postMessage(make ? { type: "pipsReply", id: m.id, ok: true, result: make(m.request) }
       : { type: "pipsReply", id: m.id, ok: false, error: "not offered here" }, "*"), 1);
   } });
-  setTimeout(() => window.postMessage({ type: "pipsConnection", apiVersion: 74, generation: 1, connected: true, supported: true, enabled: true }, "*"), 5);
+  setTimeout(() => window.postMessage({ type: "pipsConnection", apiVersion: 74, generation: 1, connected: true, supported: true, enabled: true, displayMentions: true }, "*"), 5);
 }})(${JSON.stringify(PIP)}, __OPENING__);`;
 const running = (msg) => ({ messages: [msg("u1", "user", "Write the summary", "run_1", "running"),
   msg("s1", "user", "One more thing", "run_1", "queued", { steered: true, steer_status: "pending" })],
@@ -74,22 +74,28 @@ active_run: { id: "run_1", status: "running", run_kind: "conversation" }, waitin
 const pageFor = (opening) => `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body><main id="app"></main><div id="review-root"></div>`
   + `<script>${queueScript}</script><script>${host.replace("__OPENING__", opening.toString())}</script><script>${js.replace(/<\/script/g, "<\\/script")}</script></body></html>`;
 
-async function open(opening = running) {
+async function open(opening = running, saved = null) {
   const context = await browser.newContext({ viewport: { width: 640, height: 800 }, reducedMotion: "reduce" });
   const p = await context.newPage();
   const errors = [];
   p.on("pageerror", (error) => errors.push(String(error)));
+  if (saved) await p.addInitScript((q) => { window.__savedQueue = q; }, saved);
   await p.route("https://pips.test/**", (r) => r.fulfill({ body: pageFor(opening), contentType: "text/html" }));
   await p.goto("https://pips.test/view");
-  await p.waitForSelector(`[data-job="${PIP}"]`);
-  await p.click(`[data-job="${PIP}"]`);
+  if (!saved) {     // a saved view opens on its Pip
+    await p.waitForSelector(`[data-job="${PIP}"]`);
+    await p.click(`[data-job="${PIP}"]`);
+  }
   await p.waitForSelector("#chatText");
   await p.waitForSelector(".pip-message");
   return { p, errors, context };
 }
+const boxValue = (p) => p.evaluate(() => document.getElementById("chatText").value);
 const log = (p) => p.evaluate(() => [...document.querySelectorAll(".conversation-log .pip-message:not(.provisional)")].map((m) => (m.querySelector(".prompt-text, .message-body")?.textContent || "").trim()));
 const article = (p, id) => p.locator(`.pip-message[data-message="${id}"]`);
-const poll = async (p, change) => { await p.evaluate(`(${change.toString()})(window.__msg)`); await p.evaluate(() => window.__pipPoll()); await p.waitForTimeout(60); };
+// A change on the server, then the view's own poll until it has read the page twice: the first read was drawn by the second.
+const seen = async (p, from) => { await p.waitForFunction((n) => { if (window.__lists >= n + 2) return true; window.__pipPoll(); return false; }, from, { polling: 50 }); await p.waitForTimeout(40); };
+const poll = async (p, change) => seen(p, await p.evaluate(`(() => { (${change.toString()})(window.__msg); return window.__lists; })()`));
 const stopped = (msg) => { window.__page = { messages: [msg("u1", "user", "Write the summary", "run_1", "cancelled"),
   msg("s1", "user", "One more thing", "run_1", "failed", { steered: true, steer_status: "missed", error: "Stopped before the Pip read this." })], active_run: null, waiting: [] }; };
 
@@ -154,7 +160,7 @@ test("on Stop it says it wasn't sent in plain words, comes back to an empty box,
   const said = await article(p, "s1").locator(".message-status").innerText();
   assert.match(said, /^Not sent · Stopped before the Pip read this\. Send again$/);
   assert.doesNotMatch(said, /Failed/);
-  assert.equal(await p.inputValue("#chatText"), "One more thing", "back in the box, as in Work");
+  assert.equal(await boxValue(p), "One more thing", "back in the box, as in Work");
   await p.fill("#chatText", "");
   // Sending again does not touch the box, and the row goes once the server replaces it.
   await p.fill("#chatText", "typing something else");
@@ -163,7 +169,7 @@ test("on Stop it says it wasn't sent in plain words, comes back to an empty box,
   await p.waitForFunction(() => window.__sent.length === 1);
   assert.deepEqual(await p.evaluate(() => window.__sent), ["One more thing"]);
   await p.waitForFunction(() => !document.querySelector('.pip-message[data-message="s1"]'));
-  assert.equal(await p.inputValue("#chatText"), "typing something else", "what you were typing stays");
+  assert.equal(await boxValue(p), "typing something else", "what you were typing stays");
   assert.deepEqual(await log(p), ["Write the summary", "One more thing"], "one message, not a sent one beside an unsent one");
   assert.deepEqual(errors, []);
   await context.close();
@@ -173,12 +179,12 @@ test("Send again with the same words back in the box sends once and clears the b
   if (skipOrFail(t)) return;
   const { p, errors, context } = await open();
   await poll(p, stopped);
-  assert.equal(await p.inputValue("#chatText"), "One more thing");
+  assert.equal(await boxValue(p), "One more thing");
   await p.evaluate(() => { window.__afterSend = () => { window.__page = { ...window.__page, messages: [window.__page.messages[0], window.__msg("n1", "user", "One more thing", "run_3", "queued")], active_run: { id: "run_3", status: "queued", run_kind: "conversation" } }; }; });
   await article(p, "s1").locator(".message-send-again").click();
   await p.waitForFunction(() => window.__sent.length === 1);
   await p.waitForFunction(() => !document.querySelector('.pip-message[data-message="s1"]'));
-  assert.equal(await p.inputValue("#chatText"), "", "not left there to be sent twice");
+  assert.equal(await boxValue(p), "", "not left there to be sent twice");
   assert.deepEqual(await p.evaluate(() => window.__sent), ["One more thing"]);
   assert.deepEqual(errors, []);
   await context.close();
@@ -189,7 +195,7 @@ test("on Stop with something already in the box, the box is left alone", async (
   const { p, context } = await open();
   await p.fill("#chatText", "my next thought");
   await poll(p, stopped);
-  assert.equal(await p.inputValue("#chatText"), "my next thought");
+  assert.equal(await boxValue(p), "my next thought");
   assert.equal(await article(p, "s1").locator(".message-send-again").count(), 1);
   await context.close();
 });
@@ -199,7 +205,7 @@ test("after a reload it still says Not sent with Send again, and the box stays e
   const { p, context } = await open((msg) => ({ messages: [msg("u1", "user", "Write the summary", "run_1", "cancelled"),
     msg("s1", "user", "One more thing", "run_1", "failed", { steered: true, steer_status: "missed", error: "Stopped before the Pip read this." })], active_run: null, waiting: [] }));
   assert.match(await article(p, "s1").locator(".message-status").innerText(), /^Not sent/);
-  assert.equal(await p.inputValue("#chatText"), "", "only as it happens, never on a reload");
+  assert.equal(await boxValue(p), "", "only as it happens, never on a reload");
   await context.close();
 });
 
@@ -210,5 +216,77 @@ test("a message the reply read before it failed has no answer, and offers Send a
   assert.match(await article(p, "s1").locator(".message-status").innerText(), /^Failed · No reply/);
   assert.equal(await article(p, "s1").locator(".message-send-again").count(), 1);
   assert.equal(await article(p, "u1").locator(".message-send-again").count(), 0, "the first message has its own way back");
+  await context.close();
+});
+
+// The @ marks of a message stay with it (media/mentions.js): a plugin that is in the words, and a Pip named by its name.
+const WORDS = "Ask Aave and Scout about it";
+const MARKS = [{ start: 4, kind: "plugin", label: "Aave", identity: "aave" }, { start: 13, kind: "pip", label: "Scout", identity: "pip_" + "b".repeat(32), pip_type: "lens", wired: true }];
+const markedRunning = `(msg) => ({ messages: [msg("u1", "user", "Write the summary", "run_1", "running"),
+  msg("s1", "user", ${JSON.stringify(WORDS)}, "run_1", "queued", { steered: true, steer_status: "pending", display_mentions: ${JSON.stringify(MARKS)} })],
+active_run: { id: "run_1", status: "running", run_kind: "conversation" }, waiting: [] })`;
+const markedStopped = `(msg) => { window.__page = { messages: [msg("u1", "user", "Write the summary", "run_1", "cancelled"),
+  msg("s1", "user", ${JSON.stringify(WORDS)}, "run_1", "failed", { steered: true, steer_status: "missed", error: "Stopped before the Pip read this.", display_mentions: ${JSON.stringify(MARKS)} })], active_run: null, waiting: [] }; }`;
+const pills = (p) => p.evaluate(() => [...document.querySelectorAll("#chatText [data-pill]")].map((n) => [n.dataset.kind, n.textContent.trim()]));
+const bubblePills = (p, id) => article(p, id).locator(".sent-mention").allInnerTexts();
+
+test("a message given back on Stop comes back with its @ marks, and sending it from the box sends them", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, context } = await open(markedRunning);
+  assert.equal((await bubblePills(p, "s1")).length, 2, "its bubble has them while it waits to be read");
+  await poll(p, markedStopped);
+  await p.waitForFunction((w) => document.getElementById("chatText").value === w, WORDS);
+  assert.deepEqual((await pills(p)).map(([kind]) => kind), ["plugin", "pip"], "marks in the box, where they were");
+  assert.equal(await boxValue(p), WORDS, "the same words");
+  assert.equal((await bubblePills(p, "s1")).length, 2, "and in the Not sent bubble");
+  await p.focus("#chatText"); await p.press("#chatText", "Enter");
+  await p.waitForFunction(() => window.__sent.length === 1);
+  const [sent] = await p.evaluate(() => window.__reqs);
+  assert.equal(sent.text, WORDS);
+  assert.deepEqual(sent.display_mentions, MARKS, "the marks went with it, exactly");
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test("Send again sends the message's @ marks, and its bubble shows them while it goes", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, context } = await open(markedRunning);
+  await p.fill("#chatText", "typing something else");
+  await poll(p, markedStopped);
+  await article(p, "s1").locator(".message-send-again").waitFor();
+  assert.equal(await boxValue(p), "typing something else");
+  await p.evaluate((marks) => { window.__afterSend = () => { window.__page = { ...window.__page, messages: [window.__page.messages[0], window.__msg("n1", "user", window.__reqs[0].text, "run_3", "queued", { display_mentions: marks })], active_run: { id: "run_3", status: "queued", run_kind: "conversation" } }; }; }, MARKS);
+  await article(p, "s1").locator(".message-send-again").click();
+  await p.waitForFunction(() => window.__sent.length === 1);
+  assert.deepEqual((await p.evaluate(() => window.__reqs))[0].display_mentions, MARKS);
+  await p.waitForFunction(() => document.querySelector('.pip-message[data-message="n1"]'));
+  assert.equal((await bubblePills(p, "n1")).length, 2, "the re-sent bubble keeps them");
+  assert.equal(await boxValue(p), "typing something else", "what you were typing stays");
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test("a message that becomes its own turn keeps its @ marks in its bubble", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, context } = await open(markedRunning);
+  await p.evaluate((a) => { const [words, marks] = a; window.__page = { messages: [window.__msg("u1", "user", "Write the summary", "run_1", "succeeded"), window.__msg("a1", "assistant", "Summary.", "run_1", "succeeded"),
+    window.__msg("s1", "user", words, "run_2", "queued", { display_mentions: marks })], active_run: { id: "run_2", status: "queued", run_kind: "conversation" }, waiting: [] }; window.__pipPoll(); }, [WORDS, MARKS]);
+  await p.waitForFunction(() => document.querySelector(".pip-message.assistant"));
+  await p.waitForTimeout(60);
+  assert.deepEqual(await log(p), ["Write the summary", "Summary.", WORDS]);
+  assert.equal((await bubblePills(p, "s1")).length, 2);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test("a message queued above the box and given back on Stop comes back with its @ marks too", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, context } = await open(markedRunning, { queue: { id: "q1", text: WORDS, marks: MARKS }, pipId: PIP });
+  assert.deepEqual(await p.locator("#chat-queue .dgc-queue-text").allTextContents(), [WORDS]);
+  await p.evaluate(() => { window.__page = { messages: [window.__msg("u1", "user", "Write the summary", "run_1", "cancelled")], active_run: null, waiting: [] }; window.__pipPoll(); });
+  await p.waitForFunction((w) => document.getElementById("chatText").value === w, WORDS);
+  assert.deepEqual((await pills(p)).map(([kind]) => kind), ["plugin", "pip"]);
+  assert.deepEqual(await p.locator("#chat-queue .dgc-queue-text").allTextContents(), []);
+  assert.deepEqual(errors, []);
   await context.close();
 });

@@ -2650,7 +2650,10 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
-                          "display_mentions": 2,
+                          # 3: a mark whose name is the words of the text (`wired`), a Pip's or a file's.
+                          "display_mentions": 3,
+                          # send_pip_message takes display_mentions: a Pip's chat draws its marks in the bubble.
+                          "pip_display_mentions": 1,
                           # A finished Pip run reaches the chats it reports to as a card in the
                           # transcript (pip_report events, {role: "pip_report"} history markers),
                           # once the client sends watch_pip_reports; pip_report_dismiss removes one.
@@ -3208,9 +3211,10 @@ class Backend:
         # outline: chatdgc_outline is understood (every prompt of a chat, and the widgets its replies made).
         # holder: chatdgc_holder is understood (where a chat another window holds is open, and whether it is writing).
         # folder: chatdgc_folder, chatdgc_set_folder and chatdgc_work_brief (a folder the chat reads; Continue in Work).
+        # mentions: chatdgc_mentions is understood, and chatdgc_send takes display_mentions.
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1, "folder": 1},
+                            "holder": 1, "folder": 1, "mentions": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}

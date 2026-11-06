@@ -40,7 +40,7 @@ for (const [theme, tokens] of Object.entries(LIGHT_THEMES)) {
     if (skipReason()) return t.skip(skipReason());
     const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
     const css = readFileSync(here + "/../media/main.css", "utf8");
-    const mainJs = readFileSync(here + "/../media/main.js", "utf8");
+    const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
     const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0])
       .find(c => c.includes('id="input"')).replace(/\$\{[^}]*\}/g, "");
     const vars = Object.entries(tokens).map(([k, v]) => `${k}:${v};`).join("");

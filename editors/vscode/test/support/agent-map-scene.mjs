@@ -19,7 +19,7 @@ export function mapPanelHtml(root = here) {
   const codicon = readFileSync(here + "/media/codicon.css", "utf8").replace(/url\([^)]*codicon\.ttf[^)]*\)/,
     `url("data:font/ttf;base64,${readFileSync(here + "/media/codicon.ttf").toString("base64")}")`);
   // A message's time (DgcTime), which the panel loads before main.js.
-  const mainJs = readFileSync(here + "/media/msgtime.js", "utf8") + "\n" + readFileSync(root + "/media/main.js", "utf8");
+  const mainJs = readFileSync(here + "/media/msgtime.js", "utf8") + "\n" + readFileSync(root + "/media/mentions.js", "utf8") + "\n" + readFileSync(root + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

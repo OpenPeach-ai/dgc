@@ -27,6 +27,8 @@
 /* A message's time (media/msgtime.js), at its own edge of the row: read, not pressed, so it stays when the buttons hide. */
 .pip-message .msg-time{font:400 11px/1.2 var(--vscode-font-family,system-ui,sans-serif);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;padding:0 4px}
 .pip-message .ract,.message-details>summary{display:inline-flex;align-items:center;justify-content:center;height:20px;min-height:20px;min-width:20px;padding:0 4px;border:0;border-radius:6px;background:transparent;color:var(--vscode-descriptionForeground,#96969b);cursor:pointer}
+.pip-message .ract-trace{width:auto;padding-inline:7px;font-size:11px;font-weight:500}
+.run-post-attach .ract-trace{align-self:stretch;height:auto;min-height:24px;font-size:12px;font-weight:400}
 .pip-message .ract:hover,.message-details>summary:hover{background:var(--vscode-input-background,#29292b);color:var(--vscode-foreground)}.pip-message .ract:disabled{opacity:.4;cursor:default}.pip-message .ract svg,.message-details>summary svg{width:12px;height:12px;flex:none}
 .message-details{position:relative;margin:0}.message-details>summary{list-style:none}.message-details>summary::-webkit-details-marker{display:none}.message-details[open]{flex:1 0 100%}.message-details[open]>summary{background:var(--vscode-input-background,#29292b)}
 .message-provenance{margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--vscode-editor-background,#202021);font-size:11px;min-width:0}.message-provenance dl{display:grid;grid-template-columns:48px minmax(0,1fr);gap:4px 8px;margin:0 0 6px}.message-provenance dt{color:var(--muted)}.message-provenance dd{margin:0;overflow-wrap:anywhere}.message-provenance button{font-size:11px;min-height:24px;padding:2px 6px}
