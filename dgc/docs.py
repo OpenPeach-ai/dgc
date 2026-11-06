@@ -3969,12 +3969,14 @@ Line breaks, blank lines, indentation, tabs and runs of spaces all stay, in the 
 model receives and in the message you see once it is sent. Only the blank lines around a whole
 message go. Its first line keeps its indentation, so a pasted block arrives in step with itself.
 
-A browser's plain text is not what was on the page. Chrome and VS Code copy a numbered list without
-its numbers and a nested list without its nesting, though the same copy's HTML still has them. In the
-editor, DGC puts them back from that HTML as plain text: `1.`, `2.`, `a.` and `-`, indented as they
-were nested, starting where the list started. Every other character comes from the plain text. If
-the two versions on the clipboard do not describe the same text, the plain text is used as it is. A
-browser or application that writes the numbers itself (Firefox, Safari, Word) is left alone.
+A browser's plain text is not what was on the page. Chrome copies a numbered list without its numbers
+and a nested list without its nesting, though the same copy's HTML still has them. In the editor's
+prompt boxes, DGC puts them back from that HTML as plain text: `1.`, `2.`, `a.` and `-`, indented as
+they were nested, starting where the list says it starts. Every other character comes from the plain
+text. A list whose items cannot all be found in the plain text stays as the plain text has it. An
+application that writes the numbers itself (Firefox, Safari, Word, LibreOffice) is left alone. A
+selection that begins partway down a list is numbered from the list's start, because the clipboard
+does not say where it began.
 
 The **terminal** only ever receives a paste as plain text, so it keeps everything that text holds,
 but a number the browser already dropped cannot be recovered there.
@@ -3994,7 +3996,8 @@ paste, or text dragged into the box, is cleaned before it lands, and a quiet row
 **Removed 3 invisible characters from the pasted text**. Hover over it to see which kinds. Close it
 if you like; it goes by itself when you send or clear the draft. If you wanted them, one undo brings
 the paste back exactly as it was copied, and a second takes the paste away. A paste large enough to
-fold into a chip is cleaned too, because the chip's text is what reaches the model.
+fold into a chip is cleaned too, because the chip's text is what reaches the model. Work, ChatDGC and
+a Pip's chat all behave this way.
 
 In the terminal the classic prompt and the full-screen prompt do the same, with a short dim line
 saying so.

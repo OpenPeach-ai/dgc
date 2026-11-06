@@ -352,6 +352,27 @@
   }
   const fromClipboard = (data) => fromText(clipboardText(data));
 
+  /** The quiet row above a box that isn't Work's (Work's is a row of its rail, in the panel's markup): words, a way to
+   *  close it, nothing else. Its look is in media/mentions.css. */
+  function noticeRow(doc, onClose) {
+    const row = doc.createElement("div");
+    row.className = "paste-note";
+    row.setAttribute("role", "status");
+    row.hidden = true;
+    row.innerHTML = '<svg class="paste-note-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M1.8 8S4 4.2 8 4.2 14.2 8 14.2 8 12 11.8 8 11.8 1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.7"/><path d="M3 13 13 3"/></svg>'
+      + '<span class="paste-note-words"></span>'
+      + '<button type="button" class="paste-note-close" title="Close" aria-label="Close this notice">'
+      + '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>';
+    row.querySelector("button").addEventListener("click", onClose);
+    const words = row.querySelector(".paste-note-words");
+    return {
+      el: row,
+      show(n, counts) { words.textContent = notice(n); row.title = detail(counts); row.hidden = !n; },
+      hide() { row.hidden = true; },
+    };
+  }
+
   root.DgcPasteClean = { classify, total, notice, detail, lineBreaks, trimDraft, restoreLists, htmlToText,
-    clipboardText, fromText, fromClipboard };
+    clipboardText, fromText, fromClipboard, noticeRow };
 })(globalThis);

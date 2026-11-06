@@ -24,6 +24,13 @@
   // The character that stands for a pill while a selection is split into its words and pills.
   const PILL_MARK = "";
 
+  // Nothing after it in its block. An empty text node is nothing: splitting a text node at its end leaves one, and read as
+  // something it turned the last <br> of a box emptied by hand into a line, so the box read "\n" and was not empty.
+  function endsItsBlock(node) {
+    let next = node.nextSibling;
+    while (next && next.nodeType === 3 && !next.data) next = next.nextSibling;
+    return !next;
+  }
   function walk(root, stopNode, stopOffset, pillText = (pill) => pill.dataset.pill) {
     // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree. `pillText`
     // is what a pill reads as: its wire text for the model, its typed token for the clipboard.
@@ -56,7 +63,7 @@
         // which kept the placeholder off and made the three draft guards call an empty composer
         // non-empty, so "Restore message to draft" answered "Send or clear the current draft
         // first." against a box that was empty on screen.
-        const filler = node.tagName === "BR" && node === node.parentNode.lastChild;
+        const filler = node.tagName === "BR" && endsItsBlock(node);
         if (!filler) {
           text += node.tagName === "BR" ? "\n" : pillText(node);
           endedByBr = node.tagName === "BR";
@@ -106,7 +113,7 @@
       }
       if (node.nodeType !== 1) return;
       if (node.tagName === "BR") {
-        if (node === node.parentNode.lastChild) return;   // the block's filler, as in walk()
+        if (endsItsBlock(node)) return;   // the block's filler, as in walk()
         if (seen >= target) { hit = [node.parentNode, [...node.parentNode.childNodes].indexOf(node)]; return; }
         seen += 1; endedByBr = true;
         return;
@@ -216,6 +223,8 @@
     const last = frag.lastChild;
     if (!last) return true;
     range.insertNode(frag);
+    // Inserting at the end of a text node leaves an empty one behind what went in.
+    if (last.nextSibling?.nodeType === 3 && !last.nextSibling.data) last.nextSibling.remove();
     // A <br> that ends its line is the line's filler and reads as nothing, so a text that ends in a
     // newline needs a second one -- the rule setComposerValue writes by.
     if (last.nodeName === "BR" && !last.nextSibling) last.after(doc.createElement("br"));
@@ -634,12 +643,33 @@
   function box(el, opts = {}) {
     const doc = el.ownerDocument, view = doc.defaultView || window;
     let editing = false, copied = null, disabled = false, readOnly = false, maxLength = opts.maxLength || 0;
+    // What pastes in this draft had cleaned out, and the quiet row that says so. It moves with the box's history: undoing
+    // a paste back to the text as it came takes the row with it, and redo brings it back.
+    let cleaned = { n: 0, counts: {} };
+    const noteRow = pasteModule()?.noticeRow(doc, () => { forgetCleaned(); el.focus({ preventScroll: true }); }) || null;
+    const drawCleaned = () => { if (cleaned.n) noteRow?.show(cleaned.n, cleaned.counts); else noteRow?.hide(); };
+    function noteCleaned(paste) {
+      if (!paste.removed) return;
+      const counts = { ...cleaned.counts };
+      for (const [kind, n] of Object.entries(paste.counts)) counts[kind] = (counts[kind] || 0) + n;
+      cleaned = { n: cleaned.n + paste.removed, counts };
+      drawCleaned();
+    }
+    function forgetCleaned() {
+      if (!cleaned.n) return;
+      cleaned = { n: 0, counts: {} };
+      drawCleaned();
+    }
+    // The pasted words went, so the row has nothing to be about. A page's chip can hold them too (opts.holdsPaste).
+    function checkCleaned() {
+      if (cleaned.n && text() === "" && !el.querySelector("[data-pill]") && !opts.holdsPaste?.()) forgetCleaned();
+    }
     const edit = (change) => (opts.edit ? opts.edit(change) : change());
     const text = () => walk(el, null, 0)[0];
     const announce = () => el.dispatchEvent(new (view.Event || Event)("input", { bubbles: true, composed: true }));
     // Our own edits fire the browser's input events as they go; the page hears of each once, when it is whole.
     const quietly = (change) => { const was = editing; editing = true; try { return change(); } finally { editing = was; } };
-    el.addEventListener("input", (event) => { if (editing) event.stopImmediatePropagation(); else markEmpty(); }, true);
+    el.addEventListener("input", (event) => { if (editing) event.stopImmediatePropagation(); else { markEmpty(); checkCleaned(); } }, true);
     caretAfterClickedPill(el);
 
     function markEmpty() {
@@ -696,6 +726,7 @@
       markEmpty();
     }
     function writeParts(list) {
+      if (!list.length) forgetCleaned();
       const frag = doc.createDocumentFragment();
       for (const part of list) {
         if (typeof part === "string") frag.appendChild(textFragment(doc, part));
@@ -721,6 +752,7 @@
       get: text,
       set: (value) => {
         const next = String(value ?? "");
+        if (!next) forgetCleaned();
         // The same words keep their pills; "" empties a box of pills that add no words as well.
         if (next === text() && (next !== "" || !el.querySelector("[data-pill]"))) return;
         write(next);
@@ -770,9 +802,9 @@
       if (/^format/.test(type)) { event.preventDefault(); return; }
       if (type === "insertFromDrop" || type === "insertFromYank") {
         // An editing host takes a drop's markup. Only its words come in.
-        const words = clipboardText(event.dataTransfer);
+        const dropped = pasteFrom(event.dataTransfer);
         event.preventDefault();
-        if (words) { edit(() => { insertText(words); }); announce(); }
+        if (dropped.raw) land(dropped);
         return;
       }
       if (maxLength && !editing && /^insert(Text|CompositionText|ReplacementText)$/.test(type) && typeof event.data === "string") {
@@ -807,11 +839,11 @@
       if (!sel || !sel.rangeCount || !el.contains(sel.getRangeAt(0).startContainer)) return;
       event.preventDefault();
       if (disabled || readOnly) return;
-      const pasted = clipboardText(event.clipboardData);
-      if (!pasted) return;
+      const paste = pasteFrom(event.clipboardData);
+      if (!paste.raw) return;
       // A copy or cut out of this box that held pills is pills again here. Nothing is trusted from the clipboard for
       // that -- the pills come from this box's memory of its last copy, and only when the clipboard holds that text.
-      if (copied && pasted === copied.text) {
+      if (copied && paste.raw === copied.text) {
         const list = copied.parts;
         edit(() => {
           const now = selectionOf(el);
@@ -825,20 +857,37 @@
         announce();
         return;
       }
-      const [start, end] = selectedOffsets(el);
-      const room = maxLength ? Math.max(0, maxLength - (text().length - (end - start))) : pasted.length;
-      const words = pasted.slice(0, room);
-      if (!words) return;
-      edit(() => { insertText(words); });
-      announce();
+      land(paste);
     };
+    // Words from elsewhere, at the selection, cleaned. A paste that had something taken out is two steps of the history,
+    // in one tick, so nothing but the clean text ever paints: the text as it came, then the clean text in its place. One
+    // undo gives back exactly what was copied, and the next takes the paste away.
+    function land(paste) {
+      const [start, end] = selectedOffsets(el);
+      const room = maxLength ? Math.max(0, maxLength - (text().length - (end - start))) : paste.clean.length;
+      const words = paste.clean.slice(0, room);
+      if (paste.removed) {
+        const before = capture(el);
+        const asCopied = paste.raw.slice(0, maxLength ? room : paste.raw.length);
+        if (asCopied) edit(() => { insertText(asCopied); });
+        edit(() => {
+          restore(el, before);
+          if (words) insertText(words);
+          markEmpty();
+        });
+      } else if (words) edit(() => { insertText(words); });
+      if (words) announce();
+      noteCleaned(paste);
+    }
     view.addEventListener("paste", onPaste);
 
     markEmpty();
     return el.mentionBox = {
       el, text, insertPill, parts: () => parts(el), writeParts, replace, insertText, markEmpty,
       marks: (sent, options) => displayMarks(parts(el), sent, options),
-      capture: () => capture(el), restore: (state) => { restore(el, state); markEmpty(); },
+      capture: () => ({ ...capture(el), cleaned }),
+      restore: (state) => { restore(el, state); markEmpty(); cleaned = state.cleaned || { n: 0, counts: {} }; drawCleaned(); },
+      note: noteRow?.el || null, noteCleaned, forgetCleaned, checkCleaned,
       dispose: () => view.removeEventListener("paste", onPaste),
     };
   }

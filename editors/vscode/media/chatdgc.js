@@ -49,6 +49,7 @@
     edit: (change) => edit(change),
     pillOptions: (part) => markLook(part),
     removed: () => dropUnmarkedFiles(),
+    holdsPaste: () => state.pending.some((item) => item.pasted === true),
     // Pasted back, a mark this chat can still use is a mark again; any other is the words it was copied as.
     pasteBack: (part) => {
       if (part.kind === "plugin") return mentionData.plugins.some((row) => row.id === part.identity);
@@ -61,6 +62,8 @@
       return false;
     },
   });
+  // The quiet row saying a paste was cleaned, where notices above the box sit.
+  if (field.note) $("cd-box").before(field.note);
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
     if (!button || !button.closest("#cd-log .cd-msg.cd-assistant")) return;
@@ -985,7 +988,7 @@
     const box = $("cd-chips");
     // Closed by hand is a decision, not an edit: undo does not bring it back.
     // A file marked in the box shows there, not in a chip as well.
-    const shown = state.pending.map((item, i) => (item.fromPill ? null : chip(item, () => { history?.dismiss(item); state.pending.splice(i, 1); chips(); controls(); input.focus(); }))).filter(Boolean);
+    const shown = state.pending.map((item, i) => (item.fromPill ? null : chip(item, () => { history?.dismiss(item); state.pending.splice(i, 1); field.checkCleaned(); chips(); controls(); input.focus(); }))).filter(Boolean);
     box.replaceChildren(...shown);
     box.hidden = !shown.length;
   }
@@ -3346,14 +3349,17 @@
   function dictated(text) {
     const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
     const before = input.value.slice(0, start), after = input.value.slice(end);
-    const piece = (before && !/\s$/.test(before) ? " " : "") + text + (after && !/^\s/.test(after) ? " " : "");
+    // Nobody can say an invisible character, so one in a transcript is the speech model's noise, and goes without a notice.
+    const said = window.DgcPasteClean?.classify(text).clean ?? text;
+    const piece = (before && !/\s$/.test(before) ? " " : "") + said + (after && !/^\s/.test(after) ? " " : "");
     input.focus();
     edit(() => input.setRangeText(piece, start, end, "end"));
     grow(); controls(); saveDraft();
     announce("Added what you said.");
   }
   function submit(spoken = false) {
-    const text = input.value;
+    // The box's words as a message: the blank lines around them go, and the first line keeps its indentation.
+    const text = window.DgcPasteClean?.trimDraft(input.value) ?? input.value;
     // /mods, or a running mod's own "/name args": run here at once, never sent to the model.
     if (!spoken && !readOnly() && !state.unavailable && !state.pending.length && mods?.intercept(text)) {
       edit(() => { input.value = ""; });
@@ -3610,7 +3616,7 @@
   });
   input.addEventListener("paste", async (e) => {
     const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
-    const words = e.clipboardData?.getData("text/plain") || "";
+    const paste = M.pasteFrom(e.clipboardData);
     if (files.length) {
       e.preventDefault();
       for (const file of files.slice(0, 10 - state.pending.length)) {
@@ -3620,9 +3626,17 @@
         else showNotice("That image couldn't be read.");
       }
       chips(); controls();
-    } else if (words.length > PASTE_AS_FILE && state.pending.length < 10) {
+    } else if (paste.clean.length > PASTE_AS_FILE && state.pending.length < 10) {
+      // The chip's text is what reaches the model, so it is cleaned as any paste is. Two steps, as in the box: one undo
+      // gives back the paste as it was copied, and the next takes it away.
       e.preventDefault();
-      edit(() => state.pending.push({ kind: "text", name: "Pasted text", text: words }));
+      const chip = (text) => ({ kind: "text", name: "Pasted text", text, pasted: true });
+      if (paste.removed) {
+        const asCopied = chip(paste.raw);
+        edit(() => state.pending.push(asCopied));
+        edit(() => { state.pending[state.pending.indexOf(asCopied)] = chip(paste.clean); });
+        field.noteCleaned(paste);
+      } else edit(() => state.pending.push(chip(paste.clean)));
       chips(); controls();
     }
   });
