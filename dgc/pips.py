@@ -4371,7 +4371,8 @@ def _execute_run(registry, row, config):
             taint.add(str(reference.get('text', '')) if isinstance(reference, dict) else '')
         conversation_turn = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
         if row['requested_by'] in pip_careful.UNATTENDED and conversation_turn.get('text'):
-            taint.add(str(conversation_turn['text']))    # a routine's turn carries its app items
+            from .pip_routines import split_turn
+            taint.add(split_turn(registry, row['id'], conversation_turn['text'])[1])    # the app items its turn carries
     if personal and manifest.get('computer') is not None and manifest.get('run_kind') in ('personal_task', 'conversation'):
         from . import pip_careful
         careful = pip_careful.is_on(registry, row['pip_id'])
@@ -4386,6 +4387,9 @@ def _execute_run(registry, row, config):
             conversation_pin = manifest.get('conversation') if isinstance(manifest.get('conversation'), dict) else {}
             # The user's own words this turn are theirs to type; a turn DGC wrote (a hello, a routine) is not.
             said = str(conversation_pin.get('text') or '') if manifest.get('user_turn') is True else ''
+            if row['requested_by'] in pip_careful.UNATTENDED and conversation_pin.get('text'):
+                from .pip_routines import split_turn
+                said = split_turn(registry, row['id'], conversation_pin['text'])[0]    # the words the user gave a routine
             from . import pip_levels
             computer_host.begin(row['id'], run_dir / 'artifacts' / 'computer', careful=careful, said=said,
                                 sites=pip_careful.known(registry, row['pip_id']) if careful else (),
@@ -5187,6 +5191,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         request.get("expected_digest"), actor, config, accept=command == "accept_pip_setup")}
             elif command in APP_ACTION_COMMANDS:
                 from . import pip_app_actions, pip_app_sends, pip_message_drafts
+                from .pip_action_grants import with_asked_again
                 if command == 'inspect_pip_connector_actions':
                     from . import pip_connector_actions
                     result=pip_connector_actions.inspect(config,request.get('server'))
@@ -5195,7 +5200,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                         request.get('connection_digest'),'connection_managed',request.get('schema_digest'),
                         request.get('call'),request.get('request_key'),actor,config,kind='connector_call')}
                 elif command == 'get_pip_connector_draft':
-                    result={'draft':pip_message_drafts.get(store,request.get('draft_id'),kind='connector')}
+                    result={'draft':with_asked_again(store.registry,pip_message_drafts.get(store,request.get('draft_id'),kind='connector'),'connector')}
                 elif command == 'list_pip_connector_drafts':
                     result=pip_message_drafts.history(store,pip_id,request.get('before_id'),request.get('limit',20),kind='connector')
                 elif command == 'dismiss_pip_connector_draft':
@@ -5204,7 +5209,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                     from .pip_connector_drafts import prepare
                     result={'action':prepare(store,request.get('draft_id'),request.get('expected_digest'),request.get('call'),actor,config)}
                 elif command == 'get_pip_calendar_draft':
-                    result={'draft':pip_message_drafts.get(store,request.get('draft_id'),kind='calendar')}
+                    result={'draft':with_asked_again(store.registry,pip_message_drafts.get(store,request.get('draft_id'),kind='calendar'),'calendar')}
                 elif command == 'list_pip_calendar_drafts':
                     result=pip_message_drafts.history(store,pip_id,request.get('before_id'),request.get('limit',20),kind='calendar')
                 elif command == 'dismiss_pip_calendar_draft':
@@ -5212,7 +5217,7 @@ def handle_control(config, request: dict, device_id: str, *, start_worker=True) 
                 elif command == 'prepare_pip_calendar_draft':
                     result={'action':pip_message_drafts.prepare(store,*(request.get(k) for k in ('draft_id','expected_digest','server','connection_digest','account','schema_digest','event')),actor,config,kind='calendar')}
                 elif command == 'get_pip_message_draft':
-                    result={'draft':pip_message_drafts.get(store,request.get('draft_id'))}
+                    result={'draft':with_asked_again(store.registry,pip_message_drafts.get(store,request.get('draft_id')),'email')}
                 elif command == 'list_pip_message_drafts':
                     result=pip_message_drafts.history(store,pip_id,request.get('before_id'),request.get('limit',20))
                 elif command == 'dismiss_pip_message_draft':

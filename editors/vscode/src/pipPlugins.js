@@ -3,7 +3,7 @@
 // or Not now. What the Pip would then do in a plugin is an Allow card: Allow, Always allow (never for
 // a plugin that can move money: those ask every time) or Don't.
 
-import { field, editButton, editError } from './pipAppLinks.js';
+import { field, editButton, editError, askedAgainLine } from './pipAppLinks.js';
 import '../media/pluginCalls.js';   // globalThis.DgcPluginCalls: a plugin call in plain words, the same in all three chats
 
 const STATUSES = ['requested', 'allowed', 'declined'];
@@ -133,6 +133,7 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const accessibleTitle = esc(calls ? `Do this in ${plugin.name}?` : `Run ${a.call.tool} in ${plugin.name}?`);
   return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
+    + askedAgainLine(esc, draft)
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
     + editError(esc, edit)
     + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`

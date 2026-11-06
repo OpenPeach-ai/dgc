@@ -1095,8 +1095,8 @@ attached target, a read method only; a write to it is held as an ordinary submit
 only the Pip's sites (its egress proxy refuses others). `type`, `choose`, `open` and a Terminal `run`
 whose text carries features (email addresses, 6+ digit runs, 16+ character tokens, 5-word runs) of what
 the Pip read from apps in the last 24 hours (`read_app`, `call_plugin` and `plugin_answer` results,
-`app_references`, a routine's turn; every run of the Pip, with or without its computer), less what the
-user's own message says, are recorded with `summary.kind: "text"`, `read_from_apps: true`, the whole
+`app_references`, the email or event that started a routine's turn; every run of the Pip, with or without its computer),
+less what the user's own message or the routine's own words say, are recorded with `summary.kind: "text"`, `read_from_apps: true`, the whole
 `text` (up to 4,000 characters; longer is refused) and its `text_digest`. The record is per Pip, hashed
 features only, in `<state>/careful/<pip>.json` (owner-only), the oldest dropped past 200,000. These holds
 pause nothing in the browser (`request_ref` `careful:<id>`) and outlive a closed computer: approving a
@@ -1152,7 +1152,7 @@ whose summary has `what` ("Added to cart on shop.example"), `level` and `unatten
 `frame` is the step's picture, and the Pip's answer says "DGC approved that by the user's level (…): …". A careful
 site hold becomes, at `approve` and `full`, such a row of `kind: "site"` (`request_ref` `level:<site>`) and the site
 joins the run's sites (not `computer_sites:<pip>`, which stays the user's). A pending hold at those levels carries
-`asks_because` (`payment`, `consequential` or `unsure`), and its card says why. `get_pip_computer` lists pending
+`asks_because` (`payment`, `maybe_payment`, `consequential` or `unsure`), and its card says why. `get_pip_computer` lists pending
 actions first. An event `pip_level_approved` is recorded for each.
 
 After a run (and its Always-allow grants), `pip_levels.dispatch_for_run` sends each pending draft of that run its
@@ -1273,20 +1273,31 @@ GET, HEAD and OPTIONS continue. The rest are held, at most eight at a time; more
 request whose body carries a Luhn-valid card number (also when form-encoded) is held like any
 other, and its summary adds `payment: true` so the review can say so. From API 53 a payment asks
 every time: `always_allow_pip_computer_action` refuses it (`asks_every_time`), and no
-`computer_submit` grant approves one.
+`computer_submit` grant approves one. So does a hold `pip_levels.classify` calls a payment, at every level:
+its summary adds `asks_because: "payment"` (card fields, a button that pays, a checkout in the address, a payment
+provider's own site). One that only may be about money adds `asks_because: "maybe_payment"` and `asks_word`, the word
+that raised it: it asks at every level, and Always allow is allowed.
 
 A held request becomes a `pip_computer_actions` row: `pending` for 24 hours, with a summary
-(method, host, path, page, up to 24 fields with secret-named values masked), the digest of that
+(method, host, path, `route`, page, up to 24 fields with secret-named values masked), the digest of that
 summary and a screenshot. `decide_pip_computer_action` with the expected digest records
 `approved` or `rejected`. `always_allow_pip_computer_action {action_id, expected_digest}`
 approves it and, in the same transaction, saves an Always-allow grant of kind `computer_submit`
-for its Pip, pinned to the method, host and path (`server` = host, `account` = `browser`,
-`tool` = `METHOD /path`, `connection_digest` binds the Pip's computer, `schema_digest` the
-endpoint); if the grant cannot be saved, nothing is approved. Later, a held request of that Pip
-that matches a grant is recorded `approved` at once with `resolved_by` `pip-grant:GRANT_ID`, and
-the desktop notifier says so after it is sent. Grants are listed and revoked like app-action grants. The supervisor's next tick then continues or fails the paused
+for its Pip, pinned to the method, host and route (`server` = host, `account` = `browser`,
+`tool` = `METHOD route`, `connection_digest` binds the Pip's computer, `schema_digest` the
+endpoint); if the grant cannot be saved, nothing is approved. `route` is the address's shape
+(`pip_action_grants.route_of`): UUIDs, long hex, random tokens and numbers become `*`, a run of them one `*`; plain words
+stay exactly; a query value stays only under a key that says what the request does (`action`, `op`, `route`, `wc-ajax`
+and the like); a GraphQL request adds ` (reads)` or ` (OperationName)`. A grant from before routes (`tool` = the exact
+path) keeps matching only that path, and a new route grant that covers it replaces it; at the 20-grant limit, grants
+naming one exact ID are discarded. Later, a held request of that Pip in a run that matches a grant is sent at once: a row
+`sent` with `resolved_by` `pip-grant:GRANT_ID`, a timeline label "Always allowed · …", and the Pip's answer says it went
+through, so the run goes on; the desktop notifier says so after. A page's own submit with no run is recorded `approved`
+with that `resolved_by`. Grants are listed and revoked like app-action grants. The supervisor's next tick then continues or fails the paused
 request, and after a send queues one continuation run (actor `local-computer`, request key
-`computer-ACTION_ID`) carrying `manifest.computer_continuation`. Status moves one way:
+`computer-ACTION_ID`) carrying `manifest.computer_continuation`. In a chat, a follow-up turn its chat is too busy to take
+is kept in metadata (`pip_chat_owed_turn:<pip>:<key>`), and the tick sends it once the chat is free, for up to 24 hours;
+the same holds for a plugin action that ran on the user's Allow, an app connected and a plugin allowed. Status moves one way:
 `pending` to `approved`, `rejected`, `expired` or `lost`; `approved` to `sent` or `lost`. Every
 other column is immutable. Stopping the computer, a runner restart or a closed browser marks
 what it held `lost`; nothing is resent. A computer with nothing held closes after 15 idle minutes.

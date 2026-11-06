@@ -311,3 +311,15 @@ test('edited inputs keep their kind exactly: plain decimals only, safe integers,
  assert.match(html,/<textarea[^>]*>\n\nstarts on a new line<\/textarea>/,'HTML drops one newline after <textarea>; one is always added');
 });
 
+// Always allow goes quiet when a tool changes (its pin is right), so the card that comes back says why, in one line.
+test('a card a changed tool brought back says why it asked again, and only then',async()=>{
+ const code=(await build({entryPoints:[new URL('../src/pipPlugins.js',import.meta.url).pathname],bundle:true,write:false,platform:'node',format:'cjs',loader:{'.css':'empty'}})).outputFiles[0].text;
+ const out={exports:{}};new Function('module','exports','require',code)(out,out.exports,()=>({}));
+ const draft=extra=>({id:DRAFT,payload:{action:{server:'airtable',call:{tool:'t',arguments:{}}}},...extra});
+ const shown=extra=>out.exports.pluginActionMarkup(draft(extra),{name:'Airtable',money:false},{esc:s=>String(s)});
+ assert.match(shown({asked_again:'tool'}),/Asked again because this tool changed\./);
+ assert.match(shown({asked_again:'connection'}),/Asked again because this connection changed\./);
+ assert.doesNotMatch(shown({}),/Asked again/);
+ assert.match(shown({asked_again:'tool'}),/data-plugin-always/,'and Always allow is offered again');
+});
+

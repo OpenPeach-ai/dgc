@@ -3,14 +3,15 @@
 The user grants it while approving a real action (Always allow), never a model and never auto mode.
 A grant is pinned to that action's kind, saved connection and its fingerprint, account, tool and
 tool schema: if any of them changes, the grant no longer matches and the action waits for the user
-as before. Grants live in registry metadata, outside the reviewed job; the user revokes them in the
+as before, with one line on its card saying why it asked again. Grants live in registry metadata, outside the reviewed job; the user revokes them in the
 Pip's Job tab or with `dgc pips allowed`.
 
 After each finished run of a Personal Pip, the runner prepares and runs every action the run drafted
 that a grant covers (`dispatch_for_run`), as that grant (actor `pip-grant:<id>`), and tells the user
 after. An action no grant covers waits for Send once, Always allow or Reject, as it always has.
 A payment plugin (pip_plugins: 1inch, Aave, Airwallex) is the one exception: its actions never get
-Always allow, and ask every time.
+Always allow, and ask every time. A Pip's computer has its own kind of grant, at the end of this file:
+a site, a method and the shape of an address, so a submit with an ID in its address asks once.
 """
 from __future__ import annotations
 
@@ -117,8 +118,14 @@ def grant_from_action(store, action_id, expected_digest, actor) -> dict:
         for existing in existing_grants:
             if all(existing[k] == v for k, v in pins.items()):
                 return existing
-        existing_grants = _reclaim_legacy_challenge_grants(
-            store.registry, pip_id, payload["source"]["workspace_id"], existing_grants)
+        # An Always allow for this tool from before it changed can never match again: this one takes its place.
+        for voided in [g for g in existing_grants if g["kind"] == pins["kind"] and g["server"] == pins["server"]
+                       and g["tool"] == pins["tool"] and g["account"] == pins["account"]]:
+            store.registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, voided["id"]),))
+            store.registry.event(payload["source"]["workspace_id"], "pip_action_grant_revoked", pip_id=pip_id,
+                                 payload={"grant_id": voided["id"], "actor": actor, "replaced": True})
+            existing_grants.remove(voided)
+        existing_grants = _reclaim_one_offs(store.registry, pip_id, payload["source"]["workspace_id"], existing_grants)
         if len(existing_grants) >= MAX_PER_PIP:
             raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
         grant_id = identifier("grant")
@@ -151,7 +158,7 @@ def grant_app_tool(registry, pip_id, workspace_id, server, tool, connection_dige
     for existing in existing_grants:
         if all(existing[k] == v for k, v in pins.items()):
             return existing
-    existing_grants = _reclaim_legacy_challenge_grants(registry, pip_id, workspace_id, existing_grants)
+    existing_grants = _reclaim_one_offs(registry, pip_id, workspace_id, existing_grants)
     if len(existing_grants) >= MAX_PER_PIP:
         raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
     from . import pip_sdk_apps
@@ -206,6 +213,45 @@ def covers(registry, pip_id, kind) -> bool:
 def summary(registry, pip_id) -> list:
     """What a Pip's runs are told: which drafted actions run without asking."""
     return [{"kind": g["kind"], "tool": g["tool"], "server": g["server"]} for g in list_grants(registry, pip_id)][:MAX_PER_PIP]
+
+
+# Why a card asks again though the user chose Always allow (its pins keep it from running): the tool's definition or the
+# connection changed since. The card says so in one line (asked_again, on the draft the editor reads).
+_CHANGED = {"send_schema_changed": "tool", "connection_changed": "connection"}
+
+
+def _voided(grants, kind, content) -> str:
+    """A connector draft carries its own digests: "tool" or "connection" when a grant for this very tool no longer
+    matches them, else ""."""
+    if kind != "connector_call":
+        return ""
+    for g in grants:
+        if g["kind"] == kind and g["server"] == content.get("server") and g["tool"] == content["call"]["tool"]:
+            if g["connection_digest"] != content.get("connection_digest"):
+                return "connection"
+            if g["schema_digest"] != content.get("schema_digest"):
+                return "tool"
+    return ""
+
+
+def with_asked_again(registry, draft, kind) -> dict:
+    """A pending draft as the editor reads it, with asked_again ("tool" or "connection") when a grant used to cover it."""
+    if draft.get("status") != "pending":
+        return draft
+    why = ""
+    try:
+        if kind == "connector":
+            why = _voided(list_grants(registry, draft["pip_id"]), "connector_call", draft["payload"]["action"])
+        else:
+            for row in registry.db.execute("SELECT payload FROM workspace_events WHERE run_id=? AND event_type='pip_action_grant_skipped' "
+                                           "ORDER BY seq DESC LIMIT 20", (draft["source_run_id"],)):
+                said = json.loads(row["payload"])
+                if said.get("draft_id") == draft["id"] and said.get("changed"):
+                    why = said["changed"]
+                    break
+    except Exception:                       # noqa: BLE001 - the card shows without its line
+        return draft
+    return {**draft, "asked_again": why} if why else draft
 
 
 def _matching(grants, kind, draft_content):
@@ -263,9 +309,10 @@ def dispatch_for_run(registry, config, run_id) -> list:
                 after_action(store, config, done)   # a plugin action: the Pip reads its answer and carries on
             except Exception as exc:
                 outcomes.append({"draft_id": draft_id, "status": "waiting", "reason": str(exc)[:300]})
+                changed = _CHANGED.get(getattr(exc, "code", ""))
                 try:
                     registry.event(row[1], "pip_action_grant_skipped", pip_id=row[0], run_id=run_id,
-                                   payload={"draft_id": draft_id, "reason": str(exc)[:300]})
+                                   payload={"draft_id": draft_id, "reason": str(exc)[:300], **({"changed": changed} if changed else {})})
                 except Exception:
                     pass
     return outcomes
@@ -331,58 +378,132 @@ def ran_on_their_own(registry, limit=20) -> list:
 
 
 # --------------------------------------------------------------------------- a Pip's computer
-# A browser submit is the same kind of action when it goes to the same site, method and path, from
-# the same Pip's computer: Gmail's send, a broker's order form, a booking page. Its pins reuse the
-# fields above: server = the site, account = "browser", tool = "METHOD /path", the digests bind the
-# Pip's computer and the exact endpoint.
+# A browser submit is the same kind of action when it goes to the same site with the same method, to the same address
+# apart from what changes on each visit, from the same Pip's computer. Its pins reuse the fields above: server = the
+# site, account = "browser", tool = "METHOD route", the digests bind the Pip's computer and the route.
+#
+# The route is the address's shape (route_of): IDs become *, plain words stay exactly as they are. So an address with an
+# ID, token or session in it asks once, and /delete can never match /update.
 
 def _hash(text):
     import hashlib
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-_CLOUDFLARE_CHALLENGE = "/cdn-cgi/challenge-platform/h/b/precursor/"
+_UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Za-z])", re.I)
+_HEX = re.compile(r"[0-9a-f]+", re.I)
+_BETWEEN = re.compile(r"((?:%[0-9A-Fa-f]{2}|[^0-9A-Za-z*])+)")     # what separates the pieces of one path segment
+_CLASS_RUN = re.compile(r"[a-z]+|[A-Z]+|[0-9]+")
+_LETTER_RUN = re.compile(r"[A-Za-z]{5,}")
+_LONG_NUMBER = re.compile(r"[0-9]{4,}")
+_WILD_RUN = re.compile(r"\*(?:[^0-9A-Za-z*]+\*)+")
+TOKEN_LENGTH = 20
+# Query keys whose value says what a request does (?action=delete, ?route=checkout/confirm, ?wc-ajax=checkout). Their
+# plain words stay in the route; every other query value generalises, because a session, a tracker or a redirect changes
+# from visit to visit and doesn't change what the request does.
+ACTION_KEYS = frozenset({"action", "_action", "op", "operation", "do", "cmd", "command", "method", "task", "mode", "type",
+                         "route", "page", "step", "function", "func", "controller", "module", "fc", "wc-ajax"})
 
 
-def _reclaim_legacy_challenge_grants(registry, pip_id, workspace_id, grants, *, force=False):
-    """Discard per-token approvals for expired Cloudflare verification URLs.
-
-    This removes authority; it never turns an old exact approval into a route-wide
-    one. A new route grant still requires an explicit Always allow decision.
-    """
-    if len(grants) < MAX_PER_PIP and not force:
-        return grants
-    old = [g for g in grants if g["kind"] == "computer_submit" and g["server"] == "dash.cloudflare.com"
-           and str(g["tool"]).startswith("POST " + _CLOUDFLARE_CHALLENGE)
-           and g["tool"] != "POST " + _CLOUDFLARE_CHALLENGE + "*"]
-    for grant in old:
-        registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, grant["id"]),))
-    if old:
-        registry.event(workspace_id, "pip_action_grants_reclaimed", pip_id=pip_id,
-                       payload={"kind": "computer_submit", "host": "dash.cloudflare.com", "count": len(old)})
-    return [g for g in grants if g not in old]
+def _worded(piece: str) -> int:
+    """How many of a piece's letters read as words: runs of five or more, a third of them vowels (random letters rarely
+    are), so getUser2024 is mostly words and ZZKBKACTAV9WEVGEMMVRZ isn't."""
+    runs = (run for run in _LETTER_RUN.findall(piece) if sum(c in "aeiouyAEIOUY" for c in run) * 3 >= len(run))
+    return sum(len(run) for run in runs)
 
 
-def _computer_grant_path(method: str, host: str, path: str) -> str:
-    """Cloudflare rotates a token in this browser verification URL on each visit.
+def _random_piece(piece: str) -> bool:
+    """A number, long hex or random token: what changes between visits. A plain word, a short code like v2 or h2, and
+    words joined up (getUserProfile, report2024) are not."""
+    if piece.isdigit():
+        return True
+    if not piece.isascii() or not piece.isalnum():
+        return False
+    digits, letters = any(c.isdigit() for c in piece), any(c.isalpha() for c in piece)
+    if _HEX.fullmatch(piece) and (len(piece) >= 12 or (digits and letters and len(piece) >= 7)):
+        return True
+    runs = len(_CLASS_RUN.findall(piece))
+    if digits and letters:
+        return len(piece) >= 8 and runs >= 4 and _worded(piece) * 2 < len(piece)
+    return letters and len(piece) >= 10 and len(piece) / runs < 2.5
 
-    An explicit Always allow for that route covers only the same verification family,
-    on the same host, for this Pip. All other browser writes retain exact-path grants.
-    """
-    if (method == "POST" and host == "dash.cloudflare.com"
-            and path.startswith(_CLOUDFLARE_CHALLENGE)
-            and len(path) > len(_CLOUDFLARE_CHALLENGE)):
-        return _CLOUDFLARE_CHALLENGE + "*"
-    return path
+
+def _plain_word(piece: str) -> bool:
+    """A piece that reads as a word: its letters are one case, or Capitalised, or camelCase, and it has a vowel."""
+    if len(piece) < 3 or not piece.isalpha() or not re.search(r"[aeiouyAEIOUY]", piece):
+        return False
+    return piece.islower() or piece.isupper() or bool(re.fullmatch(r"[A-Za-z]?[a-z]+(?:[A-Z][a-z]+)*", piece))
+
+
+def _whole_token(segment: str) -> bool:
+    """One long token however it is punctuated (a JWT; "0.881:1730000000:abcDEF-_123XYz"), in the middle of which a few
+    short pieces may read as words by chance. A word first or last, or a long word anywhere, is a real word: not a token."""
+    if len(segment) < TOKEN_LENGTH or not any(c.isdigit() for c in segment):
+        return False
+    pieces = [p for p in _BETWEEN.split(segment) if p and not _BETWEEN.fullmatch(p)]
+    if len(pieces) < 2 or _plain_word(pieces[0]) or _plain_word(pieces[-1]):
+        return False
+    words = [p for p in pieces if _plain_word(p)]
+    return not any(len(w) >= 5 for w in words) and sum(len(w) for w in words) * 3 < sum(len(p) for p in pieces)
+
+
+def _shape_segment(segment: str) -> str:
+    """One path segment with its IDs as *, and every plain word kept: delete-12345 is delete-*, never just *."""
+    segment = _UUID.sub("*", segment)
+    if _random_piece(segment) or _whole_token(segment):
+        return "*"
+    # A long number inside a word goes too: report2024 and report2025 are one address, delete2024 and update2024 aren't.
+    return _WILD_RUN.sub("*", "".join(
+        part if not part or _BETWEEN.fullmatch(part) else "*" if _random_piece(part) else _LONG_NUMBER.sub("*", part)
+        for part in _BETWEEN.split(segment)))
+
+
+def route_of(path, query: str = "", fields=()) -> str:
+    """What an Always allow pins of an address: its shape. Same plain words in the same order, any IDs (a run of them
+    counts as one); a query's values only when they say what the request does (ACTION_KEYS); and for GraphQL, whose one
+    address does everything, whether it reads or which change it makes."""
+    from urllib.parse import parse_qsl
+    segments = []
+    for segment in str(path or "/").split("/"):
+        shaped = _shape_segment(segment) if segment else segment
+        if shaped == "*" and segments and segments[-1] == "*":
+            continue
+        segments.append(shaped)
+    route = "/".join(segments) or "/"
+    kept = []
+    for key, value in parse_qsl(str(query or ""), keep_blank_values=True):
+        if key.lower() in ACTION_KEYS:
+            shaped = "/".join(_shape_segment(part) for part in value.split("/"))
+            if shaped and shaped != "*":
+                kept.append(f"{key.lower()}={shaped}"[:80])
+    if kept:
+        route += "?" + "&".join(sorted(set(kept)))
+    return route + _graphql_scope(route, fields)
+
+
+def _graphql_scope(route: str, fields) -> str:
+    named = {str(name).lower(): str(value) for name, value in fields or ()}
+    if "graphql" not in route.lower() and "operationname" not in named:
+        return ""
+    text, operation = named.get("query", "").lstrip(), named.get("operationname", "")
+    if text.startswith(("query", "{")) and "mutation" not in text[:200]:
+        return " (reads)"
+    if not operation and text.startswith("mutation"):
+        found = re.match(r"mutation\s+([A-Za-z0-9_]+)", text)
+        operation = found.group(1) if found else ""
+    return f" ({re.sub(r'[^A-Za-z0-9_]', '', operation)[:60]})" if operation else ""
+
+
+# A route grant the 0.51 test builds gave for Cloudflare's browser check covered everything under its address. The rule
+# above makes the same route from its tokens, and this keeps that grant whole for one that doesn't read as a token.
+_OLD_ROUTE_GRANT = ("POST", "dash.cloudflare.com", "/cdn-cgi/challenge-platform/h/b/precursor/")
 
 
 def computer_pins(pip_id, summary, *, exact=False) -> dict:
     method, host = str(summary["method"]).upper(), str(summary["host"]).lower()
-    path = str(summary["path"])
-    if not exact:
-        path = _computer_grant_path(method, host, path)
+    route = str(summary["path"]) if exact else str(summary.get("route") or route_of(summary["path"]))
     return {"kind": "computer_submit", "server": host, "connection_digest": _hash("dgc.pip.computer\0" + pip_id),
-            "account": "browser", "schema_digest": _hash(f"{method} {host}{path}"), "tool": f"{method} {path}"[:160]}
+            "account": "browser", "schema_digest": _hash(f"{method} {host}{route}"), "tool": f"{method} {route}"[:160]}
 
 
 def computer_grant_for(registry, pip_id, summary):
@@ -392,14 +513,50 @@ def computer_grant_for(registry, pip_id, summary):
     grant = matching(pins)
     if grant:
         return grant
-    # Old exact approvals remain effective for the URL the person approved. A newly
-    # rotated token asks once for the explicit route-scoped approval.
+    # An approval from before routes stays exactly what it was: good for the address the person approved, never wider.
     exact = computer_pins(pip_id, summary, exact=True)
-    return matching(exact) if exact != pins else None
+    grant = matching(exact) if exact != pins else None
+    if grant:
+        return grant
+    method, host, prefix = _OLD_ROUTE_GRANT
+    if (exact["tool"].startswith(f"{method} {prefix}") and exact["server"] == host):
+        return matching(computer_pins(pip_id, {"method": method, "host": host, "path": prefix + "*"}, exact=True))
+    return None
+
+
+def _one_off_address(grant) -> str | None:
+    """The address of an approval from before routes that named one exact ID: it can only ever match that one visit."""
+    if grant["kind"] != "computer_submit":
+        return None
+    path = str(grant["tool"]).partition(" ")[2]
+    if str(grant["server"]) == _OLD_ROUTE_GRANT[1] and path.startswith(_OLD_ROUTE_GRANT[2]) and path != _OLD_ROUTE_GRANT[2] + "*":
+        return path                  # one token of that check, however it reads
+    return path if path and route_of(path) != path else None
+
+
+def _reclaim_one_offs(registry, pip_id, workspace_id, grants):
+    """At the limit: discard approvals that named one exact ID, so they can't block the next Always allow. This only
+    removes authority, and an address that has moved on no longer needed it; nothing old ever becomes a route."""
+    if len(grants) < MAX_PER_PIP:
+        return grants
+    return _drop_grants(registry, pip_id, workspace_id, grants, [g for g in grants if _one_off_address(g)])
+
+
+def _drop_grants(registry, pip_id, workspace_id, grants, old):
+    for grant in old:
+        registry.db.execute("DELETE FROM metadata WHERE key=?", (_key(pip_id, grant["id"]),))
+    if old:
+        registry.event(workspace_id, "pip_action_grants_reclaimed", pip_id=pip_id,
+                       payload={"kind": "computer_submit", "count": len(old)})
+    return [g for g in grants if g not in old]
+
+
+def route_label(host, route) -> str:
+    return f"Submit in its browser to {host}{route}" + (", whatever the ID" if "*" in str(route) else "")
 
 
 def add_computer_grant(registry, action_id, actor) -> dict:
-    """Always allow this submit's site, method and path for the Pip whose computer held it. Runs
+    """Always allow this submit's route (site, method, the address's shape) for the Pip whose computer held it. Runs
     inside the caller's transaction (`pip_computer.approve_always`), which checked the digest."""
     _local(actor)
     row = registry.db.execute("SELECT pip_id,workspace_id,summary FROM pip_computer_actions WHERE id=?", (action_id,)).fetchone()
@@ -411,18 +568,16 @@ def add_computer_grant(registry, action_id, actor) -> dict:
     for existing in existing_grants:
         if all(existing[k] == v for k, v in pins.items()):
             return existing
-    # Old per-token approvals would otherwise exhaust this Pip's 20-grant limit.
-    # Reclaim them even for another action when the limit is full; they are expired
-    # exact URLs, and reclaiming them grants no new access.
-    existing_grants = _reclaim_legacy_challenge_grants(
-        registry, row["pip_id"], row["workspace_id"], existing_grants,
-        force=pins["tool"] == "POST " + _CLOUDFLARE_CHALLENGE + "*")
+    # This route covers every one-address approval of it from before routes: each is one grant of 20 this no longer needs.
+    method, route = pins["tool"].split(" ", 1)
+    existing_grants = _drop_grants(registry, row["pip_id"], row["workspace_id"], existing_grants, [
+        g for g in existing_grants if _one_off_address(g) and g["server"] == pins["server"]
+        and str(g["tool"]).startswith(method + " ") and route_of(_one_off_address(g)) == route])
+    existing_grants = _reclaim_one_offs(registry, row["pip_id"], row["workspace_id"], existing_grants)
     if len(existing_grants) >= MAX_PER_PIP:
         raise RegistryError("limit", f"A Pip can always allow at most {MAX_PER_PIP} actions. Remove one in its Job tab first.")
     grant_id = identifier("grant")
-    label = ("Cloudflare browser verification on dash.cloudflare.com"
-             if pins["tool"] == "POST " + _CLOUDFLARE_CHALLENGE + "*"
-             else f"Submit in its browser to {summary['host']}{summary['path']}")[:200]
+    label = route_label(pins["server"], route)[:200]
     record = {**pins, "label": label, "created_at": registry.clock(), "created_by": actor, "from_action": action_id}
     registry.db.execute("INSERT INTO metadata VALUES(?,?)", (_key(row["pip_id"], grant_id), json.dumps(record, ensure_ascii=False)))
     registry.event(row["workspace_id"], "pip_action_granted", pip_id=row["pip_id"],

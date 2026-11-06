@@ -284,6 +284,57 @@ test('what its computer holds shows in the chat: a site to allow, and a payment 
  const rejected=x.requests('decide_pip_computer_action').at(-1);assert.equal(rejected.request.approve,false);assert.equal(rejected.request.action_id,id('b'));
 });
 
+// Approvals that hold (2026-11-05, "it literally asking for same things again and again"): a held submit is the approved
+// Soft card. Its buttons are on the card, it says what Always allow covers, and a false alarm isn't called a payment.
+const hold=(summary,id='compact_'+'c'.repeat(32))=>({id,pip_id:PIP,workspace_id:PW,run_id:'run_'+'b'.repeat(32),summary:{method:'POST',host:'dash.example',path:'/accounts/0f8fad5b/settings',page:'https://dash.example/home',fields:[{name:'name',value:'Ada'}],more_fields:0,body_bytes:9,...summary},digest:'d'.repeat(64),frame:null,status:'pending',created_at:'2026-11-05T10:00:00Z',expires_at:'2036-11-06T10:00:00Z',resolved_at:null,resolved_by:null,continuation_run_id:null});
+const chatWith=async actions=>{const computer={pip_id:PIP,granted:true,available:true,reason:'',pending:actions.length,actions},x=setup({links:[],computer});await openChat(x);return {...x,computer};};
+test('a held submit is the Soft card: Send once, Always allow and Reject on it, and it says what Always allow covers',async()=>{
+ const a=hold({route:'/accounts/*/settings'}),x=await chatWith([a]);
+ const card=x.d.querySelector(`[data-computer-card="${a.id}"]`);assert.ok(card.classList.contains('allow-card'),'the approved Soft card');
+ assert.equal(card.querySelector('strong').textContent,'Send a form to dash.example?');
+ assert.deepEqual([...card.querySelectorAll('.app-link-actions button')].map(b=>b.textContent),['Send once','Always allow','Reject']);
+ assert.equal(card.querySelector('.allow-details').open,false,'collapsed until Details');
+ assert.match(card.querySelector('.allow-preview').textContent,/^Always allow covers POST \/accounts\/\*\/settings, whatever the ID$/);
+ assert.match(card.querySelector('.allow-details').textContent,/Sends todash\.example\/accounts\/0f8fad5b\/settings/);
+ assert.match(card.querySelector('.allow-details').textContent,/Gmail send this again without asking.*where \* is any ID or number\. A different site, method or page still asks, and so does a payment\./);
+ assert.ok(card.querySelector(`[data-computer-action="${a.id}"]`),'the page and every field are one click on, under Details');
+ x.click(`[data-computer-always="${a.id}"]`);
+ const asked=x.requests('always_allow_pip_computer_action')[0];
+ assert.deepEqual(JSON.parse(JSON.stringify(asked.request)),{type:'always_allow_pip_computer_action',action_id:a.id,expected_digest:'d'.repeat(64)});
+ x.computer.actions=[];x.answer(asked,{action:{...a,status:'approved',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'},grant:{id:'grant_'+'1'.repeat(32),kind:'computer_submit',server:'dash.example',connection_digest:'a'.repeat(64),account:'browser',schema_digest:'b'.repeat(64),tool:'POST /accounts/*/settings',label:'Submit in its browser to dash.example/accounts/*/settings, whatever the ID',created_at:'2026-11-05T10:01:00Z',created_by:'editor-user'}});await x.drain();
+ assert.match(x.d.body.textContent,/Always allowed: Submit in its browser to dash\.example\/accounts\/\*\/settings, whatever the ID\./);
+ assert.equal(x.d.querySelector(`[data-computer-card="${a.id}"]`),null,'the card is gone');
+});
+test('Send once on the Soft card sends this one, and says so',async()=>{
+ const a=hold({route:'/accounts/*/settings'}),x=await chatWith([a]);
+ x.click(`[data-computer-decide="${a.id}"][data-approve="1"]`);
+ const asked=x.requests('decide_pip_computer_action')[0];assert.equal(asked.request.approve,true);
+ x.computer.actions=[];x.answer(asked,{action:{...a,status:'approved',resolved_at:'2026-11-05T10:01:00Z',resolved_by:'editor-user'}});await x.drain();
+ assert.match(x.d.body.textContent,/Sent as shown\. It carries on\./);
+ assert.doesNotMatch(x.d.body.textContent,/opens the site/);
+});
+test('a false alarm is not called a payment: an honest line, and Always allow',async()=>{
+ const a=hold({route:'/accounts/*/billing/profile',path:'/accounts/0f8fad5b/billing/profile',asks_because:'maybe_payment',asks_word:'billing'}),x=await chatWith([a]);
+ const card=x.d.querySelector(`[data-computer-card="${a.id}"]`);
+ assert.equal(card.querySelector('strong').textContent,'Send a form to dash.example?');
+ assert.match(card.querySelector('small').textContent,/It mentions “billing”, so DGC asks\. Nothing shows it’s a payment\. Nothing has been sent\./);
+ assert.ok(card.querySelector(`[data-computer-always="${a.id}"]`));
+});
+test('a real payment says Pay, is reviewed first and never offers Always allow, in its card and in its review',async()=>{
+ for(const signs of [{payment:true},{asks_because:'payment'}]){
+  const a=hold({host:'shop.example',path:'/checkout/complete',route:'/checkout/complete',...signs}),x=await chatWith([a]);
+  const card=x.d.querySelector(`[data-computer-card="${a.id}"]`);
+  assert.equal(card.querySelector('strong').textContent,'Pay on shop.example?');
+  assert.ok(card.classList.contains('allow-card'));
+  assert.deepEqual([...card.querySelectorAll('.app-link-actions button')].map(b=>b.textContent),['Review…','Reject']);
+  assert.equal(card.querySelector('[data-computer-always]'),null);
+  assert.doesNotMatch(card.textContent,/Always allow/);
+  x.click(`[data-computer-card="${a.id}"] .primary`);await x.drain();
+  assert.ok(x.d.querySelector('#review-confirm'),'its review opens');
+  assert.equal(x.d.querySelector('#review-always'),null,'with no Always allow');
+ }
+});
+
 // Cards follow the password rule (2026-10-20): a card number typed in a Pip's chat is never sent or kept; one line says
 // to type it on the Pip's screen, with the way there. DGC refuses it too (dgc/cards.py), for an SDK or a missed one.
 test('a card number in a Pip chat is refused before sending, with the way to its screen',async()=>{

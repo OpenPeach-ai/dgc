@@ -8,15 +8,16 @@ Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does:
   site's first visit, a search, filter or sort, adding to a cart, saving a draft, an upload of a file the user sent in
   its chat, an email to someone the user already named or wrote to. Consequential, always asked: an order or checkout,
   a payment, sending to someone new, posting, deleting, account settings and passwords, anything the page calls pay,
-  purchase, subscribe, transfer or book. Decided from the request itself (method, address, field names) and the words
-  the page gives what was pressed; anything DGC can't place asks.
-- **Full access** (``full``): no asking for sites, submits or app sends, except payments.
+  purchase or book. Decided from the request itself (method, address, field names) and the words the page gives what
+  was pressed; anything DGC can't place asks.
+- **Full access** (``full``): no asking for sites, submits or app sends, except payments and what might be one.
 
-At every level, unchanged: a payment asks (a card number in the request, or a payment's words), a plugin the user set
-to Always ask asks before each call, a card the user types on the Pip's screen is their own approval, the Pip never
-types a card, a saved login is sent only to its own site, careful mode's check of what it read from the user's apps,
-and the safety floor: a Terminal command that could wipe its Files waits for the user (OpenMausBot's safety floor,
-server/safety-floor.ts).
+At every level, unchanged: a payment asks and never gets Always allow (a card number or card fields in the request, a
+checkout's address, a button that says pay, a payment provider's site; ``classify``), what only might be one asks with
+Always allow, a plugin the user set to Always ask asks before each call, a card the user types on the Pip's screen is
+their own approval, the Pip never types a card, a saved login is sent only to its own site, careful mode's check of what
+it read from the user's apps, and the safety floor: a Terminal command that could wipe its Files waits for the user
+(OpenMausBot's safety floor, server/safety-floor.ts).
 
 Everything here runs in the supervisor (pip_computer.Host, pip_action_grants.dispatch_for_run's neighbour): the Pip's
 own process only ever reads the tool's answer. Each action a level approved is kept (a computer action ``sent`` by
@@ -208,14 +209,51 @@ def _find(pattern, text) -> str:
     return found.group(0) if found else ""
 
 
-# What a payment looks like, besides a card number (pip_computer_box.carries_card_number): the page calls it so, or it
-# carries card or bank fields. A saved card sends a token, not a number: its words are how it shows.
-PAYMENT = (r"pay|pays|paying|payment|payments|paynow|purchase|purchases|buy|buy now|buynow|place order|placeorder|"
-           r"order now|complete order|confirm order|submit order|complete purchase|confirm purchase|donate|donation|"
-           r"transfer|send money|subscribe|subscription|top up|topup|recharge|billing")
-PAYMENT_FIELDS = (r"card|cardnumber|cvv|cvc|csc|cc num|cc number|ccnum|cc exp|ccexp|cc name|security code|expiry|"
-                  r"exp month|exp year|iban|upi|vpa|account number|routing number|sort code|amount|payment method|"
-                  r"payment token|card token")
+# What a payment looks like, besides a card number (pip_computer_box.carries_card_number). Real signs only: a word on its
+# own in an address or a field name says little ("billing" on a profile page, a Subscribe that takes an email), and a
+# false Pay refuses Always allow on something that isn't a payment. A saved card sends a token, not a number: its words
+# and its token's name are how it shows. Missing a payment is worse than a false alarm, so these lean to Pay, and what is
+# truly unclear asks too (MAYBE_PAYMENT), in plain words, with Always allow.
+MAYBE_PAYMENT = "maybe_payment"
+PAYING = (r"pay|pays|paying|payment|payments|paynow|pay now|purchase|purchases|buy|buy now|buynow|place order|placeorder|"
+          r"order now|complete order|confirm order|submit order|complete purchase|confirm purchase|donate|donation|"
+          r"send money|top up|topup|recharge|saved card|payer|pagar|pago|comprar|acheter|bezahlen|zahlung|kaufen|bestellen")
+CHECKOUT = r"checkout|checkouts|check out"
+CARD_FIELDS = (r"cardnumber|card number|card num|card no|cc num|cc number|ccnum|cvv|cvc|csc|cc exp|ccexp|cc name|exp month|"
+               r"exp year|expiry month|expiry year|card exp|card expiry|card cvc|saved card|card token|payment token|"
+               r"payment intent|payment method|payment method id|payment method nonce|stripe token|razorpay payment id|"
+               r"iban|upi|upi id|vpa|routing number|sort code")
+CARD_PAIR = r"expiry|expires|expiration|exp|security code"
+PAID_TO = r"beneficiary|payee|recipient|to account|account number|ifsc|swift|bic"
+SENDS_MONEY = r"transfer|transfers|send|remit|withdraw|payout"
+# Words that may mean money, or may not: a domain transfer, a billing address, a channel to subscribe to.
+MAYBE_WORDS = r"billing|subscribe|subscribes|subscription|subscriptions|transfer|transfers|upgrade|renew|renewal"
+ORDERING = r"create|new|add|submit|confirm|complete|place"     # an address about orders that may be making one
+MAYBE_FIELDS = r"card|amount|expiry|account number"
+# After a word of a payment in an address, these read about payments rather than make one.
+ABOUT = (r"list|search|history|export|report|reports|settings|status|summary|analytics|stats|methods|method|preferences|options|"
+         r"get|fetch|read|view")
+# Reports about what happens on a page: never a payment, whatever they say happened (/collect?en=purchase).
+TELEMETRY = (r"track|tracking|tracker|telemetry|analytics|beacon|collect|metrics|rum|sentry|envelope|pixel|log|logs|logger|"
+             r"logging")
+NOT_MONEY_HERE = r"cart|basket|bag|wishlist|filter|filters|sort|sortby|search|draft|drafts"
+NEWSLETTER_FIELDS = r"plan|price|tier|billing|pricing|product|sku|quantity"
+PRICE = re.compile(r"[$€£₹¥]\s?\d|(?<![a-z0-9])\d[\d,.]*\s?(?:usd|eur|gbp|inr|rs|rupees|dollars)(?![a-z0-9])"
+                   r"|(?<![a-z0-9])(?:rs\.?|inr|usd|eur|gbp)\s?\d", re.I)
+PRICED_PRESS = r"subscribe|upgrade|renew|confirm|continue|start|get|join|order|submit|complete|next|proceed|activate"
+# A payment provider's own site: posting there is paying, or setting up to pay. Not its telemetry (r.stripe.com) or its
+# dashboard, which is the seller's own.
+PAYMENT_SITES = ("paypal.com", "razorpay.com", "rzp.io", "adyen.com", "squareup.com", "braintreegateway.com", "payu.in",
+                 "payu.com", "payumoney.com", "paytm.in", "paytm.com", "phonepe.com", "cashfree.com", "ccavenue.com",
+                 "billdesk.com", "juspay.in", "instamojo.com", "klarna.com", "affirm.com", "afterpay.com", "mollie.com",
+                 "worldpay.com", "authorize.net", "2checkout.com", "paddle.com", "lemonsqueezy.com", "api.checkout.com",
+                 "recurly.com", "chargebee.com", "gocardless.com", "paystack.co", "paystack.com", "flutterwave.com",
+                 "rapyd.net", "dlocal.com", "api.stripe.com", "checkout.stripe.com", "pay.stripe.com", "buy.stripe.com",
+                 "billing.stripe.com", "hooks.stripe.com", "merchant-ui-api.stripe.com", "pay.google.com",
+                 "payments.google.com", "pay.amazon.com", "payments.amazon.com", "apple-pay-gateway.apple.com",
+                 "checkout.shopify.com", "pay.shopify.com", "shop.app", "venmo.com", "cash.app")
+# An app tool's own name (decide_send): any of these keeps it waiting for the user, at every level.
+PAYMENT = PAYING + r"|transfer|subscribe|subscription|billing"
 CONSEQUENTIAL = (r"send|sends|sent|message|messages|email|mail|contact|post|posts|publish|share|tweet|comment|comments|"
                  r"reply|review|reviews|rate|rating|vote|delete|deletes|remove|erase|destroy|cancel|unsubscribe|"
                  r"password|passwd|passcode|account|accounts|settings|setting|profile|security|signup|sign up|"
@@ -243,23 +281,27 @@ def classify(cues) -> dict:
     when it pressed something), buttons (the submit buttons of the form it sent, read in DGC's own world of the page),
     upload (the name of a file from the user's chat the Pip just put in the page, if any).
 
-    Returns {"verdict": "payment" | "consequential" | "routine" | "unsure", "what": a few words, "why": the word that
-    decided}. Payment beats consequential beats routine; "unsure" asks at Approve for me."""
+    Returns {"verdict": "payment" | "consequential" | "routine" | "unsure" | "maybe_payment", "what": a few words, "why":
+    the word that decided}. Payment beats consequential beats a maybe beats routine; every one but routine asks at Approve
+    for me, and a payment and a maybe ask at every level."""
     host = str(cues.get("host") or "")
     method = str(cues.get("method") or "").upper()
     target = str(cues.get("target") or "")
     fields = [str(f) for f in cues.get("fields") or []]
     said = words(target) if target.strip() else words(cues.get("buttons") or [])
+    pressed = target if target.strip() else " ".join(str(b) for b in cues.get("buttons") or [])
     path = words(cues.get("path") or "")
     names = words(fields)
     everything = said + path + names
     if cues.get("payment") is True:
         return {"verdict": "payment", "what": f"A payment on {host}", "why": "card number"}
-    hit = _find(PAYMENT, said + path) or _find(PAYMENT_FIELDS, names)
-    if hit:
-        return {"verdict": "payment", "what": f"A payment on {host}", "why": hit.strip()}
+    strength, word = _money_signs(cues, host, said, pressed, names, everything)
+    if strength == "payment":
+        return {"verdict": "payment", "what": f"A payment on {host}", "why": word}
     if method == "DELETE":
         return {"verdict": "consequential", "what": f"Deleted something on {host}", "why": "DELETE"}
+    if strength == MAYBE_PAYMENT:
+        return {"verdict": MAYBE_PAYMENT, "what": _said_what(target, host, method, cues.get("path")), "why": word}
     upload = str(cues.get("upload") or "")
     check = everything
     if upload:
@@ -282,6 +324,64 @@ def classify(cues) -> dict:
     return {"verdict": "unsure", "what": _said_what(target, host, method, cues.get("path")), "why": ""}
 
 
+def _on_payment_site(host) -> bool:
+    name = str(host or "").lower().rstrip(".")
+    return any(name == site or name.endswith("." + site) for site in PAYMENT_SITES)
+
+
+def _money_signs(cues, host, said, pressed, names, everything) -> tuple[str, str]:
+    """("payment", the sign), (MAYBE_PAYMENT, the word) or ("", ""): see PAYING above. A query's values count only where
+    they say what the request does (?wc-ajax=checkout), never a tracker's (?en=purchase); a GraphQL request's only by a
+    change's own name, since a read pays nothing."""
+    from urllib.parse import parse_qsl
+    from .pip_action_grants import ACTION_KEYS
+    address, _, query = str(cues.get("path") or "").partition("?")
+    flow = words(address, [value for key, value in parse_qsl(query) if key.lower() in ACTION_KEYS], _graphql_operation(cues))
+    telemetry = bool(_find(TELEMETRY, flow))
+    if _on_payment_site(host) and not telemetry:
+        return "payment", host
+    hit = _find(PAYING, said)
+    if hit:
+        return "payment", hit.strip()
+    if PRICE.search(pressed) and _find(PRICED_PRESS, said):
+        return "payment", "a price on what was pressed"
+    hit = _find(CARD_FIELDS, names)
+    if hit:
+        return "payment", hit.strip()
+    if _find(r"card", names) and _find(CARD_PAIR, names):
+        return "payment", "card fields"
+    if _find(r"amount", names) and (_find(PAID_TO, names) or _find(SENDS_MONEY, said + flow)):
+        return "payment", "an amount and where it goes"
+    hit = _find(PAYING + "|" + CHECKOUT, flow)
+    if hit and not telemetry:
+        return (MAYBE_PAYMENT if _find(ABOUT, flow) else "payment"), hit.strip()
+    if telemetry or _find(NOT_MONEY_HERE, everything):
+        return "", ""
+    hit = _find(MAYBE_WORDS, said + flow)
+    if hit:
+        newsletter = (hit.strip() in ("subscribe", "subscribes") and _find(r"email|e mail|mail", names)
+                      and not _find(NEWSLETTER_FIELDS, names) and not _find(r"billing|subscription|subscriptions|plan|plans|pricing", flow))
+        if not newsletter:
+            return MAYBE_PAYMENT, hit.strip()
+    # An order may be a purchase: one pressed, or an address making one. Not one being tracked, listed or removed.
+    if _find(r"order|orders", said) or flow.endswith((" order ", " orders ")) or (_find(r"order|orders", flow) and _find(ORDERING, said + flow)):
+        return MAYBE_PAYMENT, "order"
+    hit = _find(MAYBE_FIELDS, names)
+    return (MAYBE_PAYMENT, hit.strip()) if hit else ("", "")
+
+
+def _graphql_operation(cues) -> str:
+    """A GraphQL change's name for the money signs; "" when this isn't GraphQL, it has no name, or it only reads."""
+    names = {str(f).strip().lower() for f in cues.get("fields") or []}
+    if "graphql" not in str(cues.get("path") or "").lower() and "operationname" not in names:
+        return ""
+    values = cues.get("values") or {}
+    text = str(values.get("query") or "").lstrip()
+    if text.startswith(("query", "{")) and "mutation" not in text[:200]:
+        return ""
+    return str(values.get("operationName") or values.get("operationname") or "")
+
+
 def _graphql(cues) -> dict | None:
     """A GraphQL request carries everything in one field named query: what it does is its operation (a query reads, a
     mutation changes) and the operation's name ("AddToCart", "PlaceOrder"). None when it isn't one. A payment or a
@@ -294,8 +394,6 @@ def _graphql(cues) -> dict | None:
     operation = str(values.get("operationName") or values.get("operationname") or "")
     text = str(values.get("query") or "").lstrip()
     said = words(operation)
-    if _find(PAYMENT, said):
-        return {"verdict": "payment", "what": f"A payment on {host}", "why": "graphql " + operation[:40]}
     if _find(CONSEQUENTIAL, said):
         return {"verdict": "consequential", "what": f"Sent {operation[:40]} to {host}", "why": "graphql " + operation[:40]}
     if text.startswith("mutation"):
@@ -321,8 +419,8 @@ def decide_write(value, cues) -> dict | None:
     if value not in (APPROVE, FULL):
         return None
     found = classify(cues)
-    if found["verdict"] == "payment":
-        return None                          # every level: a payment asks
+    if found["verdict"] in ("payment", MAYBE_PAYMENT):
+        return None                          # every level: a payment asks, and so does what might be one
     if value == FULL or found["verdict"] == "routine":
         return found
     return None
