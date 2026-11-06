@@ -1237,8 +1237,13 @@ button.act:hover { border-color: var(--accent); }
   padding: var(--sp-2) var(--sp-1); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); color: var(--text); }
 #tasksbar[data-status="active"] .tasks-icon { color: var(--accent-text); }
 #tasksbar[data-status="blocked"] .tasks-icon { color: var(--err-text); }
-#pastebar[data-status="noise"] .paste-icon { color: var(--faint); }
-#pastebar[data-status="hidden"] .paste-icon { color: var(--err-text); }
+/* The paste notice is information about something already done: the rail's own quiet row, nothing to press but close.
+   Softer than --muted, which in Light Modern is the text colour itself, and not --faint, VS Code's disabled colour, too
+   pale to read in the light themes: about 4.8:1 on the rail's surface in the default dark and light themes. It wraps
+   rather than ends in an ellipsis, because in a narrow panel the words cut off would be the ones that say what happened. */
+#pastebar .rail-note, #pastebar .rail-note:hover { color: color-mix(in srgb, var(--muted) 85%, transparent); cursor: default; }
+body.vscode-light #pastebar .rail-note { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+#paste-count { min-width: 0; padding: var(--sp-1) 0; line-height: 1.35; overflow-wrap: anywhere; }
 #tasksbar[data-status="pending"] .tasks-icon, #tasksbar[data-status="done"] .tasks-icon { color: var(--faint); }
 #tasks-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 #tasks-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
@@ -2916,12 +2921,9 @@ body.ask-docked #tasks-panel { display: none; }
 /* A short panel: the rail and "Workspace changes" step aside while a question is open, and below
    560px only the highlighted row keeps its description. */
 @media (max-height: 599px) {
-  /* The paste notice is the one rail item that must not step aside: a hidden instruction in a
-     pasted answer is exactly what a docked question invites. Everything else still goes, and the
-     rail itself still goes when the notice is not up -- keeping the container laid out cost the
-     transcript its height at 480px and pushed the card into overflow. */
-  body.ask-docked #composer-rail:not(:has(#pastebar:not([hidden]))) { display: none; }
-  body.ask-docked #composer-rail > :not(#pastebar), body.ask-docked #workspace-changes { display: none; }
+  /* The whole rail goes, the paste notice with it: what it reports is already done. Keeping the container laid out
+     cost the transcript its height at 480px and pushed the card into overflow. */
+  body.ask-docked #composer-rail, body.ask-docked #workspace-changes { display: none; }
   body.ask-docked :is(#rail-chips, #rail-pop) { display: none; }
   body.ask-docked #rail-line:not(:has(#queued:not(:empty))) { display: none; }
 }

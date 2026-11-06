@@ -215,8 +215,6 @@
     try { M.deleteSelection(input); } finally { composerEditing = false; }
   }
 
-  function clipboardText(data) { return M.clipboardText(data); }
-
   // The placeholder cannot key off :empty, because of the filler <br>. It keys off the serializer.
   function markComposerEmpty() {
     // A pill carries no wire text -- a skill's is "" by design -- so a composer holding one
@@ -285,6 +283,9 @@
   const HISTORY_DEPTH = 100, HISTORY_GROUP_MS = 500;
   const MAC = /Mac|iP(hone|[oa]d)/.test(navigator.platform || "");
   const composerHistory = { done: [], undone: [], open: null, pending: null, depth: 0, before: null, restoring: false };
+  // How much the pastes in this draft had cleaned out. It moves with the box's history: undoing a
+  // paste back to the text as it came takes the notice with it, and redo brings it back.
+  let pasteRemoved = { n: 0, counts: {} };
   // Which selections the history may put back or take away. One added or removed BY an edit is
   // the history's; one added from outside the box (the explorer, the Skills page) is not, and
   // undoing some typing must not drop it. A chip closed by hand is a decision, never undone.
@@ -292,7 +293,7 @@
   function dismissAttachment(item) { if (item && typeof item === "object") historyDismissed.add(item); }
 
   function captureComposer() {
-    return { ...M.capture(input), goal: goalDraftArmed,
+    return { ...M.capture(input), goal: goalDraftArmed, removed: pasteRemoved,
       atts: attachments.map((item) => ({ item, fromPill: item.fromPill === true })) };
   }
   function sameComposer(a, b) {
@@ -314,6 +315,7 @@
       if (entry.fromPill) item.fromPill = true; else delete item.fromPill;
     });
     if (state.goal !== goalDraftArmed) setGoalDraftArmed(state.goal);
+    pasteRemoved = state.removed;
     M.restoreCaret(input, state);
   }
   function pushComposerUndo(state) {
@@ -324,6 +326,7 @@
   function resetComposerHistory() {
     Object.assign(composerHistory, { open: null, pending: null });
     composerHistory.done.length = 0; composerHistory.undone.length = 0;
+    pasteRemoved = { n: 0, counts: {} };
   }
   // Whether an edit of this kind, made now, carries on the typing run before it.
   function typingContinues(kind) {
@@ -2067,6 +2070,7 @@
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
   function draftParts() { return M.parts(input); }
+  const messageText = (text) => pasteClean()?.trimDraft(text) ?? String(text).trim();
   function promptDisplayMentions(text) {
     return M.displayMarks(draftParts(), text, { rich: displayMentionsVersion >= 2,
       pipType: (part) => attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference?.pip_type });
@@ -6656,121 +6660,36 @@ function permissionChoices(ev) {
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
   let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   // ---- invisible characters in a paste -------------------------------------------------------
-  // A mirror of dgc/textsafety.py, deliberately: the panel, the TUI and the backend must give the
-  // same answer, and tests/test_invisible_characters.py owns the definition. If you change a rule
-  // here, change it there in the same commit -- three slightly different answers is worse than
-  // none, because the notice starts disagreeing with what the strip removes.
-  //
-  // Most invisible characters are harmless residue from a web page. Three kinds are not: bidi
-  // overrides reorder how text DISPLAYS without changing its bytes, so what the reader sees and
-  // what the model reads can differ; tag characters encode a whole ASCII string inside something
-  // that renders as nothing at all; zero-width characters pad text invisibly. DGC hands a paste to
-  // a model and then acts on it, so text that hides instructions from the person who pasted it is
-  // a real problem. Counted and offered, never stripped on its own: silently altering what someone
-  // pasted is its own bug.
-  const INVIS_OVERRIDES = new Set([0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069]);
-  const INVIS_MARKS = new Set([0x200E, 0x200F, 0x061C]);
-  const INVIS_ZERO = new Set([0x200B, 0x2060, 0xFEFF, 0x00AD, 0x180E, 0x034F, 0x115F, 0x1160, 0x3164, 0xFFA0]);
-  const INVIS_JOINERS = new Set([0x200C, 0x200D]);
-  // The only tag sequences Unicode defines. Checking the SHAPE of a subdivision flag -- a leading
-  // U+1F3F4 and a trailing U+E007F -- accepts any hidden string wearing one character as a
-  // costume, which is a one-character bypass of the exact thing this exists to catch.
-  const INVIS_RGI = new Set(["gbeng", "gbsct", "gbwls"]);
-  // U+061C and U+FEFF sit inside the naive Arabic ranges, so a class written the obvious way lets
-  // each of them declare the text RTL and thereby excuse itself. Split around both.
-  const INVIS_RTL = /[\u0590-\u05FF\u0600-\u061B\u061D-\u06FF\u0700-\u074F\u0780-\u07BF\u0860-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFE]|[\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
-  const INVIS_WORD = /[0-9A-Za-z]/;
-  const isTag = (n) => n >= 0xE0000 && n <= 0xE007F;
-  const isHiddenMark = (n) => n >= 0xE0100 && n <= 0xE01EF;
-  const isControl = (n) => (n < 0x20 || n === 0x7F || (n >= 0x80 && n <= 0x9F))
-    && n !== 0x09 && n !== 0x0A && n !== 0x0D;
-
-  function classifyInvisible(text) {
-    const cps = [...String(text ?? "")];
-    const rtl = INVIS_RTL.test(String(text ?? ""));
-    const counts = Object.create(null);
-    const keep = [];
-    const bump = (kind, n = 1) => { counts[kind] = (counts[kind] || 0) + n; };
-    const drops = (n) => INVIS_OVERRIDES.has(n) || INVIS_ZERO.has(n) || isControl(n)
-      || isHiddenMark(n) || (INVIS_MARKS.has(n) && !rtl);
-    // The next codepoint that will SURVIVE. Reading the original neighbours instead lets a dropped
-    // one change the verdict on a second pass, and then one click is not enough to clean the box.
-    const nextKept = (from) => {
-      for (let j = from; j < cps.length; j++) {
-        const n = cps[j].codePointAt(0);
-        if (INVIS_JOINERS.has(n) || drops(n)) continue;
-        return cps[j];
-      }
-      return "";
-    };
-    const tagLetters = (run) => {
-      let out = "";
-      for (const ch of run) {
-        const n = ch.codePointAt(0);
-        if (n < 0xE0020 || n > 0xE007E) return "";
-        out += String.fromCharCode(n - 0xE0000);
-      }
-      return out;
-    };
-    for (let i = 0; i < cps.length; ) {
-      const n = cps[i].codePointAt(0);
-      if (isTag(n)) {
-        let j = i;
-        while (j < cps.length && isTag(cps[j].codePointAt(0))) j++;
-        const run = cps.slice(i, j);
-        const closed = run.length > 1 && run[run.length - 1].codePointAt(0) === 0xE007F;
-        const spelled = closed ? tagLetters(run.slice(0, -1)) : "";
-        if (i > 0 && cps[i - 1].codePointAt(0) === 0x1F3F4 && INVIS_RGI.has(spelled)) {
-          keep.push(...run);                       // a flag people actually type
-        } else {
-          bump("hidden", run.length);
-        }
-        i = j; continue;
-      }
-      if (INVIS_OVERRIDES.has(n)) { bump("bidi"); i++; continue; }
-      if (INVIS_MARKS.has(n)) { rtl ? keep.push(cps[i]) : bump("bidi"); i++; continue; }
-      if (INVIS_JOINERS.has(n)) {
-        const before = keep.length ? keep[keep.length - 1] : "";
-        if (INVIS_WORD.test(before) && INVIS_WORD.test(nextKept(i + 1))) bump("zero-width");
-        else keep.push(cps[i]);                    // emoji, Indic and Persian shaping keep theirs
-        i++; continue;
-      }
-      if (INVIS_ZERO.has(n)) { bump("zero-width"); i++; continue; }
-      if (isHiddenMark(n)) { bump("hidden"); i++; continue; }
-      if (isControl(n)) { bump("control"); i++; continue; }
-      keep.push(cps[i]); i++;
-    }
-    return { counts, clean: keep.join("") };
+  // What counts as invisible, and the words for it, live in media/pasteclean.js (the mirror of
+  // dgc/textsafety.py). A paste is cleaned as it lands, and this row says so: it is information
+  // about something already done, so it asks for nothing and has only a way to close it.
+  const pasteClean = () => window.DgcPasteClean || null;
+  const pasteFrom = (data) => M.pasteFrom(data);
+  function notePasteRemoved(paste) {
+    if (!paste.removed) return;
+    pasteRemoved = { n: pasteRemoved.n + paste.removed, counts: { ...pasteRemoved.counts } };
+    for (const [kind, n] of Object.entries(paste.counts)) pasteRemoved.counts[kind] = (pasteRemoved.counts[kind] || 0) + n;
+    renderPasteNotice();
   }
-
-  function invisibleTotal(counts) {
-    return Object.values(counts).reduce((sum, n) => sum + n, 0);
+  function forgetPasteRemoved() {
+    if (!pasteRemoved.n) return;
+    pasteRemoved = { n: 0, counts: {} };
+    renderPasteNotice();
   }
-
   function renderPasteNotice() {
-    const { counts } = classifyInvisible(composerText());
-    const n = invisibleTotal(counts);
-    pasteBar.hidden = n === 0;
-    if (!n) { syncComposerRail(); return; }
-    // Name the danger only when it is earned. Saying "hidden instruction" over a stray BOM from a
-    // web page is the crying-wolf failure wearing a different costume.
-    const risky = (counts["bidi"] || 0) + (counts["hidden"] || 0);
-    pasteBar.dataset.status = risky ? "hidden" : "noise";
-    $("paste-count").textContent = `Remove ${n} invisible character${n === 1 ? "" : "s"}`
-      + (risky ? ` — ${risky} can carry a hidden instruction` : "");
+    pasteBar.hidden = !pasteRemoved.n;
+    if (pasteRemoved.n) {
+      const shared = pasteClean(), words = shared ? shared.notice(pasteRemoved.n) : "";
+      $("paste-count").textContent = words;
+      $("paste-note").title = shared ? shared.detail(pasteRemoved.counts) : "";
+    }
     syncComposerRail();
   }
-
-  // One click, never automatic. Strip removes exactly what the notice counted -- one walk produces
-  // both, so they cannot disagree -- and Keep says the text is deliberate and dismisses the row
-  // until the draft changes again.
-  $("paste-strip").onclick = () => {
-    const { clean } = classifyInvisible(composerText());
-    setComposerText(clean);
-    renderPasteNotice();
-    input.focus({ preventScroll: true });
-  };
-  $("paste-keep").onclick = () => { pasteBar.hidden = true; syncComposerRail(); input.focus({ preventScroll: true }); };
+  // Nothing left of what was cleaned: the pasted words went, so the row has nothing to be about.
+  function pastedTextGone() {
+    return composerText() === "" && !input.querySelector("[data-pill]") && !attachments.some((a) => a.pasted);
+  }
+  $("paste-close").onclick = () => { forgetPasteRemoved(); input.focus({ preventScroll: true }); };
 
   // One kind of work showing keeps its full row above the box. Two or more fold into one line of chips
   // (renderRailChips), and the rail itself then holds only the invisible-characters notice, if any. Pip fixes count
@@ -9019,11 +8938,15 @@ function permissionChoices(ev) {
     // A folded paste is part of the message, not a side-channel: append it in chip order so the
     // model receives exactly what was pasted.
     const pastes = attachments.filter((a) => a.pasted);
+    // A command is read from the trimmed words, and a message keeps the shape it has: the blank lines
+    // around it go, and its first line's indentation stays, or a pasted block arrives with its first
+    // line out of step with the rest.
     const typed = composerText().trim();
-    const displayMentions = pastes.length ? [] : promptDisplayMentions(typed);
+    const kept = typed.startsWith("/") ? typed : messageText(composerText());
+    const displayMentions = pastes.length ? [] : promptDisplayMentions(kept);
     const text = pastes.length
-      ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
-      : typed;
+      ? [kept, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
+      : kept;
     if (!text && !attachments.length) return;
     if (cardNumberIn(text) && cardWarnedFor !== text) {
       cardWarnedFor = text;
@@ -9092,7 +9015,7 @@ function permissionChoices(ev) {
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, typed, attachments, displayMentions);
+    fillUserBubble(bubble, kept, attachments, displayMentions);
     m.appendChild(bubble); m.hidden = streaming && delivery === "queue"; log.appendChild(m);
     if (!m.hidden) settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
@@ -9100,14 +9023,14 @@ function permissionChoices(ev) {
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
     // restoring `text` (which has them appended) as well would put every paste back twice.
     const sentAt = Date.now();
-    pendingPrompts.set(requestId, { text: pastes.length ? typed : text,
+    pendingPrompts.set(requestId, { text: pastes.length ? kept : text,
       attachments: attachments.map(({ fromPill, ...rest }) => rest), node: m, session: draftSession, sentAt });
     // A message sent while a turn runs is folded into that turn, so no turn start ever stamps it: it gets its time
     // now, as every prompt does (reported 25 Oct: steered prompts had none).
     if (streaming && delivery === "steer") stampPrompt(m, sentAt);
     // The restore draft rides along for the extension, which keeps it while the message is queued (a
     // reload loses this webview's copy); an image's bytes are already in `images`, so they are left out.
-    const restore = { text: pastes.length ? typed : text,
+    const restore = { text: pastes.length ? kept : text,
       attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
@@ -9192,7 +9115,10 @@ function permissionChoices(ev) {
       // (No pill to take with it: pillShowing() suppresses a chip for as long as a pill stands for
       // the same selection, so a chip and its pill are never both on screen. Measured in Chromium
       // -- two skills picked, #attachments is empty.)
-      remove.onclick = () => { dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts(); };
+      remove.onclick = () => {
+        dismissAttachment(attachments[i]); attachments.splice(i, 1); renderAtts();
+        if (pastedTextGone()) forgetPasteRemoved();
+      };
       chip.appendChild(label);
       if (a.pasted) {
         // The paste is not hidden, only folded away. One click puts it back where it was typed.
@@ -9522,7 +9448,7 @@ function permissionChoices(ev) {
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages before sending a card choice.", true); return; }
     resend(prompt);
   });
-  function clearComposer() { recordComposerEdit(emptyComposer); }
+  function clearComposer() { recordComposerEdit(emptyComposer); forgetPasteRemoved(); }
   function emptyComposer() {
     // A composer holding nothing but pills serializes to the empty string -- a skill pill's wire
     // text IS "" -- so the text-range edit below is a 0-to-0 no-op and the pills survive the send,
@@ -9556,19 +9482,24 @@ function permissionChoices(ev) {
   // that one by comparing what the box read. It is an ordinary step of the composer's history now:
   // the chip is in the snapshot beside the text, so typing after a paste is undone first, a run at
   // a time, and the next press takes the chip.
-  function onInput() {
-    if (composerEditing) return;   // our own edit: its caller already does the follow-up work
+  // What everything watching the box needs to hear after any change to it. False during a composition.
+  function composerChanged() {
     markComposerEmpty();
     reconcilePills();
-    renderPasteNotice();
+    if (pastedTextGone()) forgetPasteRemoved();
     // An IME composition builds a word by repeatedly rewriting text nodes. A textarea absorbed
     // that internally; an editing host does not, and ANY programmatic edit or selection move
     // during a composition cancels the session and drops what was being typed. So the picker,
     // autosize and draft save all wait for compositionend.
-    if (composing) return;
+    if (composing) return false;
     scheduleDraftSave();
     renderComposerControls();
     autosizeComposer();
+    return true;
+  }
+  function onInput() {
+    if (composerEditing) return;   // our own edit: its caller already does the follow-up work
+    if (!composerChanged()) return;
     const v = composerText(), caret = composerSelection()[0];
     const upto = v.slice(0, caret);
     const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
@@ -9708,7 +9639,10 @@ function permissionChoices(ev) {
     const [start, end] = composerSelection();
     const whole = composerText();
     const before = whole.slice(0, start), after = whole.slice(end);
-    insertComposerText((before && !/\s$/.test(before) ? " " : "") + msg.text + (after && !/^\s/.test(after) ? " " : ""));
+    // Nobody can say an invisible character, so one in a transcript is the speech model's noise. It
+    // goes without a notice: nothing was pasted, and nothing the person said has changed.
+    const said = pasteClean()?.classify(msg.text).clean ?? msg.text;
+    insertComposerText((before && !/\s$/.test(before) ? " " : "") + said + (after && !/^\s/.test(after) ? " " : ""));
     onInput();
     persistDraft();
     if (msg.mode === "send") submit();
@@ -9730,8 +9664,15 @@ function permissionChoices(ev) {
       const list = e.dataTransfer ? e.dataTransfer.getData("text/uri-list") : "";
       const uris = list.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).slice(0, 16);
       if (!uris.length) {
-        const text = e.dataTransfer ? e.dataTransfer.getData("text/plain") : "";
-        if (text && zone === input) { const at = composerSelection()[0]; editComposer(at, at, text); }
+        // Text dragged in is text from somewhere else, so it is what a paste is.
+        if (zone === input) {
+          const dropped = pasteFrom(e.dataTransfer);
+          if (dropped.raw) {
+            const at = composerSelection()[0];
+            setComposerRange(at);
+            landPastedText(dropped);
+          }
+        }
         return;
       }
       vscode.postMessage({ type: "drop_uris", uris });
@@ -9803,28 +9744,16 @@ function permissionChoices(ev) {
       }
     }
     if (sawImage) return;
-    // A wall of pasted text buries the composer and hides the controls under it. Past this many
-    // characters it becomes an attachment instead, recoverable with one click. The threshold
-    // matches Codex's.
-    const pasted = clipboardText(e.clipboardData);
+    const paste = pasteFrom(e.clipboardData), pasted = paste.clean;
     // A copy or cut out of this box that held pills is pills again here (copyComposerSelection).
-    if (composerCopy && pasted === composerCopy.text) {
+    if (composerCopy && paste.raw === composerCopy.text) {
       e.preventDefault();
       pasteComposerCopy(composerCopy.parts);
       return;
     }
-    // No hook here. Every branch that puts text INTO the composer fires an input event, and
-    // onInput already re-counts -- proved by removing this line and watching the tests stay green.
-    // The one branch it would have covered, a paste large enough to fold into an attachment,
-    // changes no composer text, so there is nothing for it to count. That path is a known gap:
-    // the folded text still travels to the model in `a.pasted`, and nothing inspects it. Fixing
-    // it means classifying the attachment, not the draft, and giving the chip its own notice.
     if (pasted.length >= PASTED_TEXT_LIMIT && canAttach()) {
       e.preventDefault();
-      const chip = { label: "Pasted text", pasted, chars: pasted.length };
-      recordComposerEdit(() => attachments.push(chip));
-      renderAtts();
-      sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
+      foldPastedText(paste);
       return;
     }
     // A pasted link becomes a pill carrying its favicon, which is what Codex does and what was
@@ -9838,6 +9767,7 @@ function permissionChoices(ev) {
       e.preventDefault();
       const [selStart, selEnd] = composerSelection();
       insertComposerPill(selStart, selEnd, "link", single, single);
+      afterPaste(paste);
       return;
     }
     // EVERY other paste is prevented too, and the plain text re-inserted by hand.
@@ -9852,8 +9782,54 @@ function permissionChoices(ev) {
     // they handled the paste themselves; where they fall through, this inserts the text, so a
     // clipboard is never silently dropped.
     e.preventDefault();
-    if (pasted) insertComposerText(pasted);
+    if (paste.raw) landPastedText(paste);
   });
+  // A paste that had something taken out is two steps of the box's history, in one tick, so nothing
+  // but the clean text ever paints: the text as it came, then the clean text in its place. One undo
+  // gives back exactly what was copied, and the next takes the paste away. `place` puts one version
+  // of the text in, at the box's selection, from the state the first step started from.
+  function landTwice(paste, place) {
+    recordComposerEdit(() => place(paste.raw));
+    const asCopied = captureComposer();
+    const before = composerHistory.done[composerHistory.done.length - 1];
+    composerHistory.restoring = true;
+    try {
+      restoreComposer(before);
+      place(paste.clean);
+    } finally { composerHistory.restoring = false; }
+    pushComposerUndo(asCopied);
+  }
+  function landPastedText(paste) {
+    if (paste.removed) landTwice(paste, (text) => { if (text) placeComposerText(text); });
+    else insertComposerText(paste.clean);
+    afterPaste(paste);
+  }
+  // A wall of pasted text buries the composer and hides the controls under it, so past
+  // PASTED_TEXT_LIMIT (Codex's threshold) it becomes a chip, recoverable with one click. The text in
+  // it is cleaned as any other paste is: the chip is what reaches the model.
+  function foldPastedText(paste) {
+    const chipOf = (text) => ({ label: "Pasted text", pasted: text, chars: text.length });
+    if (paste.removed) {
+      landTwice(paste, (text) => {
+        const chip = chipOf(text);
+        historyManaged.add(chip);
+        attachments.push(chip);
+      });
+    } else recordComposerEdit(() => attachments.push(chipOf(paste.clean)));
+    renderAtts();
+    sysLine(`Attached ${paste.clean.length.toLocaleString()} characters of pasted text.`);
+    afterPaste(paste);
+  }
+  // VS Code delivers a paste inside its own execCommand("paste"), where Chromium will not run another
+  // editing command, so the text goes in by hand and NO input event fires. Everything that watches
+  // the box has to be told: the Send button, the placeholder, the box's height, the saved draft, and
+  // the notice, which is why no real paste ever raised it. A paste is not someone finishing a word, so
+  // it opens no completion list, and text that happens to end in "/goal" does not arm a goal.
+  function afterPaste(paste) {
+    composerChanged();
+    hidePop();
+    notePasteRemoved(paste);
+  }
   send.onclick = () => { if (streaming && (!hasComposerInput() || askCardDocked())) doStop(); else submit(); };
   $("stop-run").onclick = doStop;
   $("queue-send").onclick = () => submit("queue");

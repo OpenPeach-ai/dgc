@@ -296,8 +296,9 @@ test("the goal's chip keeps the row's time; the paste notice and N queued never 
   assert.equal(c.chip("queued"), null);
 
   const input = c.$("input");
-  input.textContent = "hello‮world";
-  input.dispatchEvent(new c.dom.window.Event("input", { bubbles: true }));
+  const paste = new c.dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { items: [], getData: (type) => (type === "text/plain" ? "hello\u202Eworld" : "") } });
+  input.dispatchEvent(paste);
   assert.equal(c.$("pastebar").hidden, false);
   assert.equal(c.$("composer-rail").hidden, false, "the notice is about the message being typed: its own row");
   assert.equal(c.$("pastebar").parentElement, c.$("composer-rail"));

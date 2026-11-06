@@ -14,8 +14,11 @@ import webbrowser
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from rich.console import Console
 from rich.markup import escape as escape_markup
 from rich.panel import Panel
@@ -37,6 +40,8 @@ from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
 from .redaction import redact_text, redact_value, secret_values
 from .style import (ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section,
                     terminal_safe_text)
+from .composer import tab_display
+from .textsafety import clean_paste, trim_draft
 from .tools import TOOL_SCHEMAS
 
 from .update import (  # update-check lives in its own module so the TUI can share it
@@ -869,6 +874,21 @@ def _ask_search_key(cfg, provider: str, meta: dict) -> str:
         return ""
     cfg.set(slot, typed)
     return "saved"
+
+
+def classic_paste_keys(say) -> KeyBindings:
+    """A paste at the classic prompt is cleaned as it lands, as in the editor and the full-screen
+    prompt, and `say` prints one dim line above the prompt with how many characters went."""
+    keys = KeyBindings()
+
+    @keys.add(Keys.BracketedPaste)
+    def _paste(event):
+        text, removed = clean_paste(event.data)
+        if text:
+            event.current_buffer.insert_text(text)
+        if removed:
+            run_in_terminal(lambda: say(removed))
+    return keys
 
 
 class ClassicSlashCompleter(Completer):
@@ -2149,7 +2169,10 @@ class CLI:
         session: PromptSession = PromptSession(
             history=FileHistory(str(USER_HOME / "history")),
             completer=ClassicSlashCompleter(self.config.project_root, self.config),
-            complete_while_typing=True)
+            complete_while_typing=True,
+            input_processors=[tab_display()],
+            key_bindings=classic_paste_keys(
+                lambda removed: self.console.print(f"  [{DIM}]{removed}[/]", highlight=False)))
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
         draft = ""
@@ -2173,7 +2196,7 @@ class CLI:
                 try:                                    # ❯ prefix + right-aligned `model · mode`
                     rp = ANSI(f"{dim}{terminal_safe_text(self._model_label())}  {glyphs.MIDDOT}  "
                               f"{terminal_safe_text(mode)}{rst}")
-                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp, default=draft).strip()
+                    line = trim_draft(session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp, default=draft))
                     draft = ""
                 except KeyboardInterrupt:
                     continue

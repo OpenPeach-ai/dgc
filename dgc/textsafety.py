@@ -1,4 +1,4 @@
-"""Invisible characters in text someone pasted, and what to do about them.
+"""Invisible characters in text someone pasted, and taking them out.
 
 A paste can carry characters with no visible glyph. Most are harmless residue from a web page,
 but three kinds are not: bidirectional overrides reorder how text DISPLAYS without changing its
@@ -7,15 +7,15 @@ ASCII string inside something that renders as nothing; and zero-width characters
 invisibly. DGC feeds a paste to a model and then acts on it, so text that hides instructions from
 the person who pasted it is a real problem, not untidiness.
 
-This module is the ONE definition of that, so the panel, the TUI and the backend cannot drift into
-three slightly different answers. The rule is: count and report, never strip on your own. Silently
-altering what someone pasted is its own bug.
+This module is the ONE definition of that for Python, and editors/vscode/media/pasteclean.js is its
+mirror for the editor's prompt boxes, so the surfaces cannot drift into slightly different answers.
+tests/test_invisible_characters.py holds the two together. The rule is: a paste is cleaned as it
+lands, and a short line says how many characters went. Text someone typed stays as they typed it.
 
-The hard part is not finding invisible characters, it is NOT crying wolf. Arabic, Persian and
-Hebrew legitimately carry directional marks; every multi-person emoji is held together by zero
+The hard part is not finding invisible characters, it is NOT breaking ordinary text. Arabic, Persian
+and Hebrew legitimately carry directional marks; every multi-person emoji is held together by zero
 width joiners; the subdivision flags are built from tag characters; our own dgc/logo.py is 86
-braille blanks. A notice that fires on any of those teaches the reader to dismiss it, which is
-worse than having no notice at all.
+braille blanks. None of those are touched, and none raise the line.
 """
 from __future__ import annotations
 
@@ -28,9 +28,11 @@ _OVERRIDES = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
 _MARKS = frozenset((0x200E, 0x200F, 0x061C))
 _ZERO_WIDTH = frozenset((0x200B, 0x2060, 0xFEFF, 0x00AD, 0x180E, 0x034F,
                          0x115F, 0x1160, 0x3164, 0xFFA0))
-# Legal inside emoji and in Indic/Persian shaping; suspicious only between ASCII word characters,
-# where they have no typographic job and exist to break up a word the reader thinks they can see.
+# Legal inside emoji and in Indic/Persian/Arabic shaping, where they follow a character of those
+# scripts, all of which stand at U+0590 or later. After anything earlier (ASCII, Latin, Greek,
+# Cyrillic, a space, or nothing at all) they have no typographic job and only hide something.
 _JOINERS = frozenset((0x200C, 0x200D))
+_JOINER_USERS_FROM = 0x0590
 _TAGS = frozenset(range(0xE0000, 0xE0080))
 _HIDDEN_MARKS = frozenset(range(0xE0100, 0xE01F0))     # variation selectors 17-256
 _CONTROL = ((frozenset(range(0x20)) | {0x7F} | frozenset(range(0x80, 0xA0)))
@@ -42,7 +44,8 @@ _STRONG_RTL = re.compile(
     "[֐-׿؀-؛؝-ۿ܀-ݏހ-޿"
     "ࡠ-ࣿיִ-﷿ﹰ-﻾"
     "\U00010800-\U00010FFF\U0001E800-\U0001EFFF]")
-_ASCII_WORD = re.compile("[0-9A-Za-z]")
+_LINE_BREAK = re.compile("\r\n?|[\u2028\u2029]")
+_LEADING_BLANK_LINES = re.compile(r"^(?:[^\S\n]*\n)+")
 
 # The ONLY tag sequences Unicode actually defines: the three subdivision flags. Anything else
 # shaped like a flag is a payload wearing a costume -- checking the SHAPE (leading U+1F3F4, tag
@@ -73,8 +76,7 @@ def classify(text) -> tuple[dict[str, int], str]:
 
     The removal is a fixed point -- classify(classify(t)[1])[0] is empty for every t -- because
     the joiner rule reads the text that SURVIVES rather than the original. Reading the original
-    lets a dropped neighbour change the verdict on the next pass, and then one click is not enough
-    to clean the box.
+    lets a dropped neighbour change the verdict on the next pass, and then one pass is not enough.
     """
     source = str(text or "")
     points = list(source)
@@ -84,18 +86,6 @@ def classify(text) -> tuple[dict[str, int], str]:
 
     def bump(category: str, n: int = 1) -> None:
         counts[category] = counts.get(category, 0) + n
-
-    def next_kept(start: int) -> str:
-        """The next codepoint that will survive, so the joiner rule is stable under re-running."""
-        for j in range(start, len(points)):
-            point = ord(points[j])
-            if point in _JOINERS:
-                continue                      # undecided; keep looking past it
-            if (point in _OVERRIDES or point in _ZERO_WIDTH or point in _CONTROL
-                    or point in _HIDDEN_MARKS or (point in _MARKS and not rtl)):
-                continue
-            return points[j]
-        return ""
 
     i = 0
     while i < len(points):
@@ -121,12 +111,10 @@ def classify(text) -> tuple[dict[str, int], str]:
             else: bump("bidi")
             i += 1; continue
         if point in _JOINERS:
-            before = keep[-1] if keep else ""
-            after = next_kept(i + 1)
-            if _ASCII_WORD.search(before or "") and _ASCII_WORD.search(after or ""):
-                bump("zero-width")
-            else:
+            if keep and ord(keep[-1]) >= _JOINER_USERS_FROM:
                 keep.append(points[i])        # emoji, Indic and Persian shaping keep theirs
+            else:
+                bump("zero-width")
             i += 1; continue
         if point in _ZERO_WIDTH:
             bump("zero-width"); i += 1; continue
@@ -143,14 +131,27 @@ def total(counts: dict[str, int]) -> int:
 
 
 def notice(counts: dict[str, int]) -> str:
-    """One line for a reader, naming the count and -- only when earned -- why it matters."""
+    """One line for a reader: what is already gone, as information. Empty when nothing was taken."""
     n = total(counts)
     if not n:
         return ""
-    line = f"Remove {n} invisible character{'' if n == 1 else 's'}"
-    # Say "hidden instruction" only for the classes that can actually carry one. Saying it for a
-    # stray BOM from a web page would be the crying-wolf failure in a different costume.
-    risky = counts.get("bidi", 0) + counts.get("hidden", 0)
-    if risky:
-        line += f" — {risky} can carry a hidden instruction"
-    return line
+    return f"Removed {n} invisible character{'' if n == 1 else 's'} from the pasted text"
+
+
+def line_breaks(text) -> str:
+    """Every way a line can end, as a newline. Blank lines stay what they are."""
+    return _LINE_BREAK.sub("\n", str(text or ""))
+
+
+def clean_paste(text) -> tuple[str, str]:
+    """A paste as it should land: `(the text, the line saying what was taken, or "")`."""
+    counts, clean = classify(line_breaks(text))
+    return clean, notice(counts)
+
+
+def trim_draft(text) -> str:
+    """A draft as a message: no blank lines around it and no trailing space, and the first line's
+    indentation kept, because a pasted block's first line is as indented as the rest. A command
+    is read from its words, so a draft that opens with one (`/`, `!`, `#`) loses it as before."""
+    body = _LEADING_BLANK_LINES.sub("", str(text or "")).rstrip()
+    return body.lstrip() if body.lstrip().startswith(("/", "!", "#")) else body

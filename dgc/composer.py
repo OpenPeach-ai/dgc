@@ -64,6 +64,13 @@ def _names(value, kind: str) -> list[str]:
     return list(dict.fromkeys(value))
 
 
+def tab_display():
+    """How a terminal prompt draws a tab: as the space it takes. prompt_toolkit's default is the two
+    characters `^I`, so a pasted tab looked like damage while the text underneath was intact."""
+    from prompt_toolkit.layout.processors import TabsProcessor
+    return TabsProcessor(tabstop=4, char1=" ", char2=" ")
+
+
 def compose_prompt(text: str, *, skills=None, templates=None, catalog: dict,
                    project_root: Path) -> str:
     """Resolve explicit selections without losing the original request or expanding client paths."""

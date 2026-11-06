@@ -2,6 +2,9 @@
 
 ## 0.35.0 — 2026-11-06
 
+- In Work, ChatDGC and a Pip's chat, invisible characters in a paste are now removed as it lands, and a quiet row above the prompt box says "Removed 5 invisible characters from the pasted text". It has a close control, and goes when you send or clear the draft. One undo brings the paste back as it was copied. Work's old Remove and Keep bar never appeared after a real paste in VS Code, and a paste folded into a chip skipped the check; both are fixed. Text you type stays as you typed it.
+- A paste keeps the shape it was copied with. List numbers, bullets and nesting that a browser's plain text drops come back from the same copy's HTML, as plain text, and the first line's indentation now reaches the model and the sent message.
+- After a paste in VS Code the Send button lights up and the draft is saved at once. Before, nothing noticed the paste until the next key.
 - The cache clock in Work's prompt box opens its own small popup, with the time left, what your next message will do, and the tokens reported as cached. It no longer opens the context window details, and the keyboard can reach it.
 - Cloudflare in Settings → Plugins, with its logo and sign-in. It only reads, so a daily traffic Pip needs no approval and no browser.
 - A Pip's model menu lists every provider saved in Settings → Models, by name, with its models, as a Work session's does. The Pip keeps its choice after a reload. If you remove that provider, its prompt box and its next run say so. The menu now looks and works as Work's: plain rows with a check on the chosen one, and "Add provider in Settings…". Its search box is gone, and Refresh models stays only for a list that failed to load.
