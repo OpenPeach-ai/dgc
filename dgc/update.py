@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -94,6 +95,14 @@ EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_LOCKED = 0, 1, 2, 3
 
 def _base_url() -> str:
     return (os.environ.get("DGC_BASE_URL") or "https://vibedgc.com").rstrip("/")
+
+
+def _other_dgc_on_path(launcher) -> str | None:
+    """The `dgc` a person gets by typing it, when that is not the launcher an update just switched."""
+    found = shutil.which("dgc")
+    if not found or os.path.realpath(found) == os.path.realpath(launcher):
+        return None
+    return found
 
 
 def _parse_update_args(args: list[str]) -> tuple[str, str | None] | None:
@@ -286,6 +295,19 @@ def run_update(args: list[str] | None = None) -> int:
             return EXIT_FAILED
     after = os.path.realpath(launcher) if os.path.lexists(launcher) else None
     if code == 0:
+        other = _other_dgc_on_path(launcher)
+        # Whoever named this launcher, by DGC_BIN or by running it, keeps any other dgc on PATH as it is.
+        chosen = bool(os.environ.get("DGC_BIN")) or (
+            L._launcher_from_argv0(L._real(sys.prefix), sys.argv[0] if sys.argv else None) == location.bin_dir)
+        if other and chosen:
+            c.print(f"\nInstalled to {escape(str(launcher))}. Note: `dgc` on your PATH is {escape(other)}, "
+                    "which was not changed.", highlight=False, soft_wrap=True)
+        elif other:
+            c.print(f"\n[bold red]update not finished[/bold red] — DGC was installed to {escape(str(launcher))}, "
+                    f"but `dgc` on your PATH is {escape(other)}, and that one was not changed.\n"
+                    f"  Run the new one directly, or put {escape(str(location.bin_dir))} first on your PATH.",
+                    highlight=False, soft_wrap=True)
+            return EXIT_FAILED
         if after == before:
             c.print("\n[bold green]DGC is up to date[/bold green] — nothing to restart.")
         else:

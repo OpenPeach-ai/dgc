@@ -37,6 +37,11 @@ class CodexCatalogueTests(unittest.TestCase):
             self.assertEqual(row["model_hints"], ["gpt-5.6-terra", "gpt-5.6-luna"])
             self.assertFalse(row["cli_default_listed"])
 
+    def test_a_service_tier_the_account_refuses_points_at_the_setting(self):
+        event = {"type": "turn.failed", "error": {"message": "400 Unsupported service_tier: flex"}}
+        parsed = subs.parse_stream_events("codex", json.dumps(event))
+        self.assertIn("service_tier in your Codex config.toml", parsed[0]["text"])
+
     def test_nested_codex_http_error_is_actionable_plain_text(self):
         detail = "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."
         event = {"type": "turn.failed", "error": {"message": json.dumps({

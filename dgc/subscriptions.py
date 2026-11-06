@@ -572,6 +572,9 @@ def _events_codex(obj: dict) -> list[dict]:
         message = _error_text(obj) or "Codex turn failed"
         if "model is not supported when using Codex with a ChatGPT account" in message:
             message += " Choose a model available to your signed-in Codex account in DGC's model menu."
+        elif "service_tier" in message:
+            # A tier the account or model doesn't take, from the person's own Codex settings: sign-in is fine.
+            message += " This comes from service_tier in your Codex config.toml: remove that line or set it to auto."
         return _text_event("error", message)
     if top_type == "turn.completed" and isinstance(obj.get("usage"), dict):
         return [{"kind": "usage", "usage": obj["usage"]}]

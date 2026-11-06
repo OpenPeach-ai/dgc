@@ -388,8 +388,11 @@ function render() {
             send({type:'addProviderProfile',profile:{...providerForm}});
         });
         main.querySelectorAll('[data-provider-remove]').forEach(button=>button.addEventListener('click',()=>send({type:'removeProviderProfile',id:button.dataset.providerRemove})));
-        main.querySelectorAll('[data-provider-default]').forEach(button=>button.addEventListener('click',()=>{
-            button.disabled=true;send({type:'setProviderDefault',id:button.dataset.providerDefault});
+        main.querySelectorAll('[data-provider-default]').forEach(box=>box.addEventListener('change',()=>{
+            // One is always the default: its own box can't be cleared, only another one chosen.
+            if(!box.checked){box.checked=true;return;}
+            main.querySelectorAll('[data-provider-default]').forEach(other=>{if(other!==box)other.checked=false;other.disabled=true;});
+            send({type:'setProviderDefault',id:box.dataset.providerDefault});
         }));
     }
     // Sub-agents' Context window: a size typed or picked (src/contextCombo.js), as DGC Router's Context each.

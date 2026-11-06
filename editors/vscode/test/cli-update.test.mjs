@@ -186,6 +186,17 @@ test("the executable is spawned directly, so shell metacharacters in its path ar
   assert.equal(existsSync(join(process.cwd(), "pwned.txt")), false);
 });
 
+test("an update runs from a neutral folder: `python -m dgc` in a home with ~/dgc found a namespace package", async () => {
+  if (process.platform === "win32") return;
+  const path = join(scratch, "dgc-pwd");
+  writeFileSync(path, "#!/usr/bin/env bash\necho \"folder:$(pwd)\"\n");
+  chmodSync(path, 0o700);
+  const result = await runCliUpdate(path);
+  assert.equal(result.ok, true);
+  assert.match(result.log, /folder:\/\n/);
+  assert.equal(updateTerminalOptions(path).cwd, "/");
+});
+
 test("cancelling stops the installer's children too, not just the process it spawned", async () => {
   // The real installer forks curl, bash, python and pip. A child that outlives the signal would
   // keep the pipes open, so the caller would wait for an update it had already given up on.

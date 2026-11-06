@@ -166,7 +166,24 @@ export function renderFields(section, main, config, providers, ui) {
         const c = config;
         const savedProviders = Array.isArray(ui.providerProfiles) ? ui.providerProfiles : [];
         const providerDraft = ui.providerDraft || {};
-        const savedRows = savedProviders.map(row => `<div class="field"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${escapeHtml(row.model || "CLI default")}${row.kind === "subscription" ? " · Signed-in CLI" : " · " + escapeHtml(row.base_url)}</span></span><span class="host-control"><button type="button" class="secondary" data-provider-default="${escapeHtml(row.id)}" ${ui.defaultProviderId === row.id ? 'disabled' : ''}>${ui.defaultProviderId === row.id ? 'Default' : 'Make default'}</button><button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`).join("");
+        // A subscription's own state, as the backend sees it: a CLI that has gone or signed out says so here, and how to fix it.
+        const subscriptionState = (row) => {
+            const info = (Array.isArray(c.subscription_engines) ? c.subscription_engines : []).find(item => item && item.key === row.engine);
+            if (info?.installed === false) return { problem: true, text: `Its CLI isn't installed on this computer. Install it first.` };
+            if (info?.auth_state === "signed_out") return { problem: true, text: `Not signed in on this computer. Run ${info.login_cmd || `${row.engine} login`} first.` };
+            return { problem: false, text: "Signed-in CLI" };
+        };
+        const savedRows = savedProviders.map(row => {
+            const state = row.kind === "subscription" ? subscriptionState(row) : null;
+            const hint = `${escapeHtml(row.model || "CLI default")}${state
+                ? ` · <span class="${state.problem ? "provider-problem" : ""}">${escapeHtml(state.text)}</span>` : " · " + escapeHtml(row.base_url)}`;
+            // One provider is the default. With several, a checkbox on each says which.
+            const isDefault = ui.defaultProviderId === row.id || savedProviders.length === 1;
+            const choice = savedProviders.length === 1
+                ? `<span class="provider-default-only">Default</span>`
+                : `<label class="provider-default-check"><input type="checkbox" data-provider-default="${escapeHtml(row.id)}" aria-label="Make ${escapeHtml(row.name)} the default"${isDefault ? " checked" : ""}>Default</label>`;
+            return `<div class="field"><span class="words"><span class="name-line"><span class="name">${escapeHtml(row.name)}</span></span><span class="hint">${hint}</span></span><span class="host-control">${choice}<button type="button" class="secondary" data-provider-remove="${escapeHtml(row.id)}" aria-label="Remove ${escapeHtml(row.name)}">Remove</button></span></div>`;
+        }).join("");
         const configuredUrls = new Set(savedProviders.map(row => String(row.base_url || '').replace(/\/+$/, '').toLowerCase()));
         const availableHosts = providers.filter(row => !configuredUrls.has(String(row.url || '').replace(/\/+$/, '').toLowerCase()));
         const savedEngines = new Set(savedProviders.filter(row => row.kind === "subscription").map(row => row.engine));

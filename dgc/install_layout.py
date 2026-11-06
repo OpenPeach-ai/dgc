@@ -34,6 +34,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -467,6 +468,8 @@ def read_record() -> dict:
 
 def write_record(data_dir: Path, bin_dir: Path, version: str, previous: str | None) -> Path:
     path = record_path()
+    if under_temp(data_dir):
+        return path                # a throwaway install never speaks for this home's real one
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     body = {
         "layout": LAYOUT,
@@ -555,6 +558,26 @@ class Location:
     version: str | None = None
 
 
+def _script_runs(path: Path, prefix: Path) -> bool:
+    """True for a launcher that is a small script, not a link: pip's console script copied out of the
+    venv, whose first line names this venv's Python. The venv's own script is not a launcher."""
+    try:
+        if not path.is_file() or path.is_symlink() or _real(path.parent) == _real(prefix / "bin"):
+            return False
+        with open(path, "rb") as stream:
+            first = stream.read(512).split(b"\n", 1)[0]
+    except OSError:
+        return False
+    if not first.startswith(b"#!"):
+        return False
+    try:
+        interpreter = first[2:].decode().split()[0]
+    except (UnicodeDecodeError, IndexError):
+        return False
+    # The folder, not the interpreter itself: a venv's python is a link to the system's.
+    return os.path.isabs(interpreter) and _real(Path(interpreter).parent.parent) == _real(prefix)
+
+
 def _launcher_from_argv0(prefix: Path, argv0: str | None) -> Path | None:
     """The directory of the launcher this dgc was started through.
 
@@ -565,6 +588,8 @@ def _launcher_from_argv0(prefix: Path, argv0: str | None) -> Path | None:
         return None
     candidate = Path(os.path.abspath(argv0))
     try:
+        if _script_runs(candidate, prefix):
+            return candidate.parent
         if not (candidate.is_symlink() and _real(candidate) == _real(prefix / "bin" / "dgc")):
             return None
         for _ in range(16):
@@ -575,6 +600,31 @@ def _launcher_from_argv0(prefix: Path, argv0: str | None) -> Path | None:
         return candidate.parent
     except OSError:
         return None
+
+
+def _launcher_on_path(prefix: Path, env) -> Path | None:
+    """The directory of the `dgc` on PATH, when that dgc runs this install. It answers when this
+    process was started some other way, as an editor does, or through the venv's own script."""
+    found = shutil.which("dgc", path=env.get("PATH", os.environ.get("PATH")))
+    return _launcher_from_argv0(prefix, os.path.abspath(found)) if found else None
+
+
+def _temp_roots() -> list[Path]:
+    return [_real(root) for root in (tempfile.gettempdir(), "/tmp", "/var/tmp")]
+
+
+def under_temp(path) -> bool:
+    """A folder the system clears. A person's install does not live there, unless their whole home
+    does (a container, or a test with its own HOME). A clean-install check with only DGC_DATA_DIR
+    and DGC_BIN redirected left the real home's record naming one of these, and every later forced
+    update went there."""
+    real, home = _real(path), _real(Path.home())
+    return any(root in real.parents and root not in home.parents and root != home for root in _temp_roots())
+
+
+def _record_usable(record: dict) -> bool:
+    data, launcher = record.get("data_dir"), record.get("launcher") or record.get("bin_dir")
+    return bool(data and launcher) and not under_temp(data) and not under_temp(launcher)
 
 
 def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Location:
@@ -595,6 +645,13 @@ def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Loc
         kind, located = "legacy", data_dir_for_legacy_tree(tree)
     else:
         tree = None
+    # The launcher that started this dgc outranks any record: a forced update targets what is running.
+    running = _launcher_from_argv0(real_prefix, argv0) or _launcher_on_path(real_prefix, env)
+    if not _record_usable(record):
+        record = {}
+    elif (running is not None and located is None and record.get("bin_dir")
+            and _real(record["bin_dir"]) != _real(running)):
+        record = {}                # it describes another install, not the one this launcher runs
     explicit = _real(env["DGC_DATA_DIR"]) if env.get("DGC_DATA_DIR") else None
     data_dir = (explicit or located or data_dir_from_env(env)
                 or (_real(record["data_dir"]) if record.get("data_dir") else None)
@@ -602,7 +659,7 @@ def locate(env=None, prefix: str | None = None, argv0: str | None = None) -> Loc
     if env.get("DGC_BIN"):
         bin_dir = Path(os.path.abspath(os.path.expanduser(env["DGC_BIN"])))
     else:
-        bin_dir = (_launcher_from_argv0(real_prefix, argv0)
+        bin_dir = (running
                    or (Path(record["bin_dir"]) if record.get("bin_dir")
                        and _real(record.get("data_dir", "")) == data_dir else None)
                    or default_bin_dir())

@@ -428,7 +428,8 @@ function currentChatProvider(value){
 }
 function chatModelListMarkup(selected,locked,reviewed,current,subs,usage){
  const routed=routerChoices(routerOffer());
- const providers=[{key:'connection',label:'DGC connection'},...(routed.length?[{key:'router',label:'DGC Router'}]:[]),
+ // With only a subscription there is no host to choose: it isn't offered as an empty step.
+ const providers=[...(S.models.length||currentChatProvider('default')==='connection'?[{key:'connection',label:'Current host'}]:[]),...(routed.length?[{key:'router',label:'DGC Router'}]:[]),
   ...subs.map(x=>({key:'subscription:'+x.engine,label:x.name}))];
  const provider=providers.some(x=>x.key===S.modelProviderChoice)?S.modelProviderChoice:currentChatProvider(selected);
  const matches=s=>s.toLowerCase().includes(draft.chatModelSearch.toLowerCase());

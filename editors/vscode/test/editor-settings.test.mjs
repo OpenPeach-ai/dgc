@@ -1163,7 +1163,33 @@ test('saved provider list hides already added presets and changes the default ex
   const values=[...x.d.querySelector('#saved_provider_preset').options].map(o=>o.value);
   assert.equal(values.includes('ollama'),false);
   assert.equal(values.includes('vllm'),true);
-  assert.match(x.d.querySelector('[data-provider-default]').textContent,/Default/);
+  // One provider is the default, with nothing to choose.
+  assert.equal(x.d.querySelector('[data-provider-default]'),null);
+  assert.match(x.d.querySelector('.provider-default-only').textContent,/Default/);
+});
+
+test('with several providers each has a checkbox for the default, and a gone or signed-out CLI says so',()=>{
+  const x=setup();
+  const ollama='provider_'+'a'.repeat(32);
+  x.message({type:'providerProfiles',defaultId:ollama,profiles:[
+    {id:ollama,kind:'native',name:'Ollama',base_url:'http://127.0.0.1:11434/v1',model:'qwen',api_mode:'auto'},
+    {id:'claude',kind:'subscription',engine:'claude',name:'Claude Code',model:''},
+    {id:'codex',kind:'subscription',engine:'codex',name:'Codex',model:''}]});
+  x.message({type:'event',event:{...x.config,subscription_engines:[
+    {key:'claude',installed:true,auth_state:'signed_out',login_cmd:'claude login'},{key:'codex',installed:false}]}});
+  x.click('[data-nav=models]');
+  const boxes=()=>[...x.d.querySelectorAll('input[data-provider-default]')];
+  assert.deepEqual(boxes().map(b=>[b.type,b.checked]),[['checkbox',true],['checkbox',false],['checkbox',false]]);
+  assert.match(x.d.body.textContent,/Not signed in on this computer\. Run claude login first\./);
+  assert.match(x.d.body.textContent,/CLI isn't installed on this computer/);
+  // Its own box can't be cleared.
+  boxes()[0].checked=false;boxes()[0].dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(boxes()[0].checked,true);
+  assert.equal(x.sent.filter(m=>m.type==='setProviderDefault').length,0);
+  boxes()[1].checked=true;boxes()[1].dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.sent.at(-1).type,'setProviderDefault');
+  assert.equal(x.sent.at(-1).id,'claude');
+  assert.equal(boxes()[0].checked,false);
 });
 
 test('saved subscription shows its own model field while fallback and agent controls remain reachable',()=>{

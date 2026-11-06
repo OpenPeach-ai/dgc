@@ -64,6 +64,13 @@ export function resolveCommandPath(command: string, env: NodeJS.ProcessEnv = pro
   return undefined;
 }
 
+/** Where an update runs from: never the editor's own folder, which is often the home. A `python -m dgc` puts its
+ *  folder first on sys.path, and a checkout at ~/dgc (no __init__.py) then hides the installed package from an editable
+ *  install: "cannot import name '__version__' from 'dgc' (unknown location)". The installer keeps to `/` for the same reason. */
+export function neutralUpdateFolder(): string {
+  return process.platform === "win32" ? tmpdir() : "/";
+}
+
 type InstallTree = { tree: string; dataDir: string; versioned: boolean };
 
 /** The install behind an executable, when its real path is <dir>/.venv/bin/dgc: either a
@@ -196,6 +203,7 @@ export function updateTerminalOptions(executable: string, name = "DGC update", s
   return {
     ...heldCliTerminalOptions(executable, ["update"], name,
       "DGC CLI update finished. Run DGC: Restart Backend to use it.", "DGC CLI update failed", statusFile),
+    cwd: neutralUpdateFolder(),
     env: { DGC_SKIP_EXTENSION: "1", ...cliUpdateEnvironment(executable) },
   };
 }
@@ -325,8 +333,8 @@ export function runCliUpdate(
         // cancelled update would keep installing and the editor would never see the end of it.
         // Under hidden WSL (src/wslSetup.ts), the DGC to update is the one in its distro.
         const distro = hiddenWslDistro();
-        const spec = distro ? launch(distro, undefined, ["update"], env) : { command: executable, args: ["update"], env };
-        current = spawn(spec.command, spec.args, { env: spec.env, detached: process.platform !== "win32", windowsHide: true });
+        const spec = distro ? launch(distro, "/", ["update"], env) : { command: executable, args: ["update"], env };
+        current = spawn(spec.command, spec.args, { env: spec.env, cwd: neutralUpdateFolder(), detached: process.platform !== "win32", windowsHide: true });
       } catch (err: any) {
         finish({ ok: false, reason: `could not run ${executable}: ${err?.message ?? err}`, log });
         return;

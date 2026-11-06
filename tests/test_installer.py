@@ -1236,6 +1236,109 @@ class QaInstallerRegressions(unittest.TestCase):
         self.assertEqual(L._launcher_from_argv0(vdir / ".venv", str(outer)), inner.parent)
         self.assertEqual(L._launcher_from_argv0(vdir / ".venv", str(inner)), inner.parent)
 
+    def _script_launcher(self, home: Path, venv: Path) -> Path:
+        launcher = home / ".local" / "bin" / "dgc"
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        (venv / "bin").mkdir(parents=True, exist_ok=True)
+        launcher.write_text(f"#!{venv}/bin/python\nimport sys\nfrom dgc.cli import main\nsys.exit(main())\n")
+        launcher.chmod(0o755)
+        return launcher
+
+    def _home_env(self, home: Path, **extra: str):
+        return mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home),
+                                            "XDG_DATA_HOME": str(home / ".local" / "share"),
+                                            "DGC_DATA_DIR": "", "DGC_DIR": "", "DGC_BIN": "",
+                                            "DGC_FORCE_OVERWRITE": "", **extra})
+
+    def test_a_forced_update_targets_a_script_launcher_not_the_record(self):
+        # 6 Nov: `dgc` was a console script in ~/.local/bin, so nothing recognised it as the launcher, and the
+        # update followed the record to a leftover test folder and said "updated".
+        home, leftover = new_home("script-launcher"), new_home("script-leftover")
+        checkout = home / "src" / "dgc"
+        (checkout / ".git").mkdir(parents=True)
+        launcher = self._script_launcher(home, checkout / ".venv")
+        with self._home_env(home), mock.patch.object(L, "_temp_roots", return_value=[leftover.resolve()]):
+            L.write_record(home / "elsewhere", home / "elsewhere" / "bin", "0.50.0", None)
+            body = json.loads(L.record_path().read_text())
+            body.update(data_dir=str(leftover / "data"), bin_dir=str(leftover / "bin"), launcher=str(leftover / "bin" / "dgc"))
+            L.record_path().write_text(json.dumps(body))
+            location = L.locate(env={"PATH": "/nonexistent"}, prefix=str(checkout / ".venv"), argv0=str(launcher))
+        self.assertEqual(location.kind, "checkout")
+        self.assertEqual(location.bin_dir, launcher.parent)
+        self.assertEqual(location.data_dir, (home / ".local" / "share" / "dgc").resolve())
+
+    def test_the_dgc_on_path_is_found_when_a_process_was_not_started_through_it(self):
+        home = new_home("script-path")
+        venv = home / "src" / "dgc" / ".venv"
+        launcher = self._script_launcher(home, venv)
+        (venv / "bin" / "dgc").write_text(f"#!{venv}/bin/python\n")
+        (venv / "bin" / "dgc").chmod(0o755)
+        with self._home_env(home):
+            for argv0 in ("", str(venv / "bin" / "dgc")):
+                self.assertEqual(L.locate(env={"PATH": str(launcher.parent)}, prefix=str(venv), argv0=argv0).bin_dir,
+                                 launcher.parent, argv0)
+            self.assertIsNone(L._launcher_from_argv0(venv, str(venv / "bin" / "dgc")), "the venv's own script is no launcher")
+            other = home / "other-venv"
+            self.assertNotEqual(L.locate(env={"PATH": str(launcher.parent)}, prefix=str(other), argv0="").bin_dir.parent,
+                                venv, "another install's dgc is not this one's launcher")
+
+    def test_a_record_of_another_install_is_not_used_by_a_running_launcher(self):
+        home = new_home("record-other")
+        venv = home / "src" / "dgc" / ".venv"
+        launcher = self._script_launcher(home, venv)
+        with self._home_env(home):
+            L.write_record(home / "release" / "data", home / "release" / "bin", "0.50.0", None)
+            location = L.locate(env={"PATH": "/nonexistent"}, prefix=str(venv), argv0=str(launcher))
+            self.assertEqual(location.bin_dir, launcher.parent)
+            self.assertEqual(location.data_dir, (home / ".local" / "share" / "dgc").resolve())
+            # A process with no launcher of its own still honours the record.
+            location = L.locate(env={"PATH": "/nonexistent"}, prefix=str(venv), argv0="")
+            self.assertEqual(location.bin_dir, home / "release" / "bin")
+
+    def test_a_throwaway_install_never_replaces_this_homes_record(self):
+        home, throwaway = new_home("record-temp"), new_home("record-temp-install")
+        with self._home_env(home), mock.patch.object(L, "_temp_roots", return_value=[throwaway.resolve()]):
+            L.write_record(home / "data", home / "bin", "0.50.0", None)
+            L.write_record(throwaway / "data", throwaway / "bin", "0.51.0", "0.50.0")
+            self.assertEqual(L.read_record()["data_dir"], str(home / "data"))
+
+    def _update_with_stub_installer(self, home: Path, location, **extra: str) -> tuple[int, str]:
+        from dgc import update
+        printed = io.StringIO()
+        def stub(url, destination):
+            Path(destination).write_text("#!/bin/sh\nexit 0\n")
+        with self._home_env(home, **extra), mock.patch.object(L, "locate", return_value=location), \
+                mock.patch.object(update, "_download_installer", side_effect=stub), contextlib.redirect_stdout(printed):
+            code = update.run_update([])
+        return code, " ".join(printed.getvalue().split())
+
+    def test_update_does_not_report_success_while_path_runs_another_dgc(self):
+        home = new_home("path-other")
+        bin_dir = home / "new" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "dgc").write_text("#!/bin/sh\n")
+        (bin_dir / "dgc").chmod(0o755)
+        old = home / "old"
+        old.mkdir()
+        (old / "dgc").write_text("#!/bin/sh\n")
+        (old / "dgc").chmod(0o755)
+        location = L.Location("other", home / "data", bin_dir, None, None)
+        code, said = self._update_with_stub_installer(home, location, PATH=f"{old}{os.pathsep}/usr/bin:/bin")
+        self.assertEqual(code, 1, said)
+        self.assertIn("update not finished", said)
+        self.assertIn(str(old / "dgc"), said)
+        self.assertNotIn("up to date", said)
+        code, said = self._update_with_stub_installer(home, location, PATH=f"{bin_dir}{os.pathsep}/usr/bin:/bin")
+        self.assertEqual(code, 0, said)
+        code, said = self._update_with_stub_installer(home, location, PATH=f"{old}{os.pathsep}/usr/bin:/bin", DGC_BIN=str(bin_dir))
+        self.assertEqual(code, 0, said)
+        self.assertIn("was not changed", said)
+        # Run through that launcher by its own path, it is the one that had to change.
+        with mock.patch.object(L, "_launcher_from_argv0", return_value=bin_dir):
+            code, said = self._update_with_stub_installer(home, location, PATH=f"{old}{os.pathsep}/usr/bin:/bin")
+        self.assertEqual(code, 0, said)
+        self.assertIn("was not changed", said)
+
     def test_update_list_runs_from_a_checkout_and_refusals_give_a_runnable_command(self):
         home = new_home("list-checkout")
         checkout = home / "src" / "dgc"
