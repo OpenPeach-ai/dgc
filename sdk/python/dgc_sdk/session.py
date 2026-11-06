@@ -23,6 +23,7 @@ from typing import Any, Callable, NamedTuple
 from .wire.client import DGCClient, DGCClientError, DGCEventTimeout
 
 from ._mcp_bridge import ToolHub
+from .audit import remember_secret
 from .errors import (
     DGCCommandRejectedError, DGCConfigError, DGCRuntimeError, DGCTimeoutError, DGCUnsupportedError, public_error,
 )
@@ -332,6 +333,8 @@ def _same_command(left: str, right: str) -> bool:
 
 
 OUTPUTS = ("auto", "document", "slides", "spreadsheet", "page", "dashboard")
+API_MODES = ("auto", "ollama", "anthropic", "chat_completions", "responses")
+SESSION_THINKING = ("off", "low", "medium", "high", "xhigh")
 
 
 def _artifact_info(row: Mapping[str, Any]) -> ArtifactInfo:
@@ -470,9 +473,13 @@ class Cards:
     def __init__(self, session: "Session"):
         self._session = session
 
-    def watch(self) -> None:
-        """This app draws cards: the CLI makes them from now on (before this, a tool's text is all there is)."""
-        self._session._client.send({"type": "watch_mcp_apps"})
+    def watch(self, surface: str = "work") -> None:
+        """This app draws cards: the CLI makes them from now on (before this, a tool's text is all there is).
+        ``surface`` is whose: ``"work"`` for this session's runs, ``"pip"`` for Pips' chats on a session that can reach
+        them. For ChatDGC use :attr:`Chats.cards`, which watches for you. A Pip's reply lists its cards as ``apps``."""
+        if surface not in ("work", "chat", "pip"):
+            raise DGCConfigError("surface is work, chat or pip")
+        self._session._client.send({"type": "watch_mcp_apps", **({} if surface == "work" else {"surface": surface})})
 
     def get(self, card_id: str) -> dict[str, Any]:
         """One card as ``mcp_app_card`` carries it, with its page (``html``), its whole result and the exact
@@ -542,6 +549,9 @@ def context_tokens(value: Any) -> int:
     if not 2048 <= tokens <= 16_777_216:
         raise DGCConfigError("context is between 2,048 and 16,777,216 tokens (2K and up)")
     return tokens
+
+
+ROUTER_THINKING = ("", "off", "low", "medium", "high")
 
 
 class Router:
@@ -657,6 +667,16 @@ class Router:
     def prefer(self, system: str | None = None, model: str | None = None) -> dict[str, Any]:
         """Where the next turn's helpers run (``run(..., system=)`` does this for you); ``None`` lets DGC pick."""
         return self.update("prefer", system=system or "", model=model or "")
+
+    def set_thinking(self, system: str, model: str, thinking: str) -> dict[str, Any]:
+        """How hard a helper on this model of this system thinks (CLI 0.51+): ``off``, ``low``, ``medium`` or ``high``,
+        or ``""`` for the helper's own level. The status's model row then says ``thinking``, and ``thinks`` says whether
+        its server reports the model can think. Returns ``{"change", "status"}``."""
+        self._needs("router_thinking")
+        if thinking not in ROUTER_THINKING:
+            raise DGCConfigError("thinking is off, low, medium, high, or empty for the helper's own level")
+        got = self._ask({"type": "router_thinking", "system": system, "model": model, "thinking": thinking}, timeout=30)
+        return {"change": got.get("change", ""), "status": got["status"]}
 
 
 class Images:
@@ -908,6 +928,8 @@ class _Run:
         self.holds_followups = False
         # A follow-up the SDK keeps until the run in front of it is over, then sends.
         self.held = False
+        # Its cancel asked DGC to take it out of the queue (queue_remove), and the answer hasn't come yet.
+        self.unqueuing = ""
 
 
 class _Turn(NamedTuple):
@@ -1127,6 +1149,7 @@ class Session:
         self._owners: dict[str, _Run] = {}
         self._run: _Run | None = None
         self._queued: deque[_Run] = deque()
+        self._unqueuing: dict[str, _Run] = {}     # queue_remove's request id -> the follow-up it takes out
         self._turn: _Turn | None = None
         self._usage_last: dict[str, int] | None = None
         self._bill_to: tuple[_Run | None, str] | None = None
@@ -1764,6 +1787,51 @@ class Session:
     def get_config(self) -> dict[str, Any]:
         return self._request({"type": "get_config", "request_id": _new_id("cfgget")}, "config")
 
+    def set_model(self, model: str | None = None, *, base_url: str | None = None, api_key: str | None = None,
+                  api_mode: str | None = None) -> dict[str, Any]:
+        """Move this session to another model or provider (CLI 0.51+, ``capabilities["session_model_route"]``), from its
+        next model request. It stays this session's and comes back when the session is reopened; the user's settings and
+        other sessions don't change, with ``inherit_user_state=True`` too.
+
+        ``base_url`` moves it to another provider. A key belongs to its address, so moving without ``api_key`` sends none
+        to the new one; the key is kept in this process only, never in the transcript. ``api_mode`` is auto, ollama,
+        anthropic, chat_completions or responses. Returns ``{"model", "base_url"}``."""
+        self._needs_route()
+        if not any(isinstance(value, str) and value for value in (model, base_url)):
+            raise DGCConfigError("set_model needs a model or a base_url")
+        if api_mode is not None and api_mode not in API_MODES:
+            raise DGCConfigError(f"api_mode must be one of {', '.join(API_MODES)}")
+        command: dict[str, Any] = {"type": "set_model", "route": "native", "scope": "session",
+                                   "request_id": _new_id("model")}
+        for name, value in (("model", model), ("base_url", base_url), ("api_mode", api_mode)):
+            if value is not None:
+                if not isinstance(value, str):
+                    raise DGCConfigError(f"{name} must be a string")
+                command[name] = value
+        if api_key is not None:
+            if not isinstance(api_key, str):
+                raise DGCConfigError("api_key must be a string")
+            remember_secret(api_key)
+            command["api_key"] = api_key
+        got = self._request(command, "model_changed", timeout=30)
+        with self._lock:
+            self._model_seen = str(got.get("model") or self._model_seen)
+        return {"model": str(got.get("model") or ""), "base_url": str(got.get("base_url") or "")}
+
+    def set_thinking(self, level: str) -> str:
+        """How hard this session's model thinks from its next request (CLI 0.51+): ``off``, ``low``, ``medium``,
+        ``high`` or ``xhigh``. It stays this session's, as :meth:`set_model` does. Returns the level in use."""
+        self._needs_route()
+        if level not in SESSION_THINKING:
+            raise DGCConfigError(f"thinking must be one of {', '.join(SESSION_THINKING)}")
+        got = self._request({"type": "set_think", "level": level, "scope": "session",
+                             "request_id": _new_id("think")}, "think_changed", timeout=30)
+        return str(got.get("think") or level)
+
+    def _needs_route(self) -> None:
+        if self.capabilities.get("session_model_route") is not True:
+            raise DGCUnsupportedError("This DGC CLI can't change one session's model; update it (dgc update).")
+
     def get_plan(self) -> dict[str, Any]:
         return self._request({"type": "get_plan", "request_id": _new_id("plan")}, "saved_plan")
 
@@ -1856,6 +1924,11 @@ class Session:
                 owner, scoped = self._turn.owner, True
             if kind == "context":
                 self._account_locked(event)
+            elif kind == "queue_changed":
+                self._note_unqueued_locked(str(event.get("removed") or ""))
+            elif kind == "command_rejected" and rid in self._unqueuing:
+                # It had started, or was about to: its turn is stopped as any running turn is.
+                self._unqueuing.pop(rid).unqueuing = ""
             elif kind in ("prompt_accepted", "steering_update", "command_rejected", "error") and rid:
                 self._note_outcome_locked(kind, rid, event)
             elif kind in ("model_changed", "config") and event.get("model"):
@@ -1920,6 +1993,16 @@ class Session:
             run.unresolved.discard(rid)
             run.expect.discard(rid)
             run.rejected[rid] = str(event.get("message") or event.get("reason") or kind)
+
+    def _note_unqueued_locked(self, removed: str) -> None:
+        """DGC took a waiting prompt out of its queue: its turn will never start."""
+        run = self._owners.get(removed) if removed else None
+        if run is None:
+            return
+        run.expect.discard(removed)
+        run.returned.add(removed)
+        self._unqueuing.pop(run.unqueuing, None)
+        run.unqueuing = ""
 
     def _account_locked(self, event: Mapping[str, Any]) -> None:
         totals = usage_totals(event)
@@ -1989,17 +2072,31 @@ class Session:
                 return
             if not run.cancel_reason:
                 run.cancel_reason = reason
-            # A follow-up still queued behind another run is cancelled when its turn starts;
-            # DGC's cancel would stop the run in front of it too.
-            send = run is self._run and not run.cancel_sent
+            # DGC's cancel would stop the run in front of a queued follow-up too. So a follow-up still
+            # waiting is taken out of the queue, and one that can't be (an older CLI, or it has just
+            # started) is cancelled when its turn starts.
+            send = run is self._run and not run.cancel_sent and not run.unqueuing
             if send:
                 run.cancel_sent = True
                 run.cancel_at = time.monotonic()
+            unqueue = ""
+            if (not send and run is not self._run and not run.held and not run.started and not run.unqueuing
+                    and self.capabilities.get("queue_edit") is True):
+                unqueue = run.unqueuing = _new_id("unqueue")
+                self._unqueuing[unqueue] = run
         if send:
             try:
                 self._client.send({"type": "cancel"})
             except DGCClientError as exc:
                 raise DGCRuntimeError("could not cancel the run") from exc
+        elif unqueue:
+            try:
+                self._client.send({"type": "queue_remove", "queued_id": run.request_id, "request_id": unqueue})
+            except DGCClientError as exc:
+                with self._lock:
+                    self._unqueuing.pop(unqueue, None)
+                    run.unqueuing = ""
+                raise DGCRuntimeError("could not take the queued prompt out") from exc
 
     def _forget(self, run: _Run) -> None:
         """Drop a queued run nobody will drive (its turn, if DGC runs it, is audited unowned)."""
@@ -2220,9 +2317,10 @@ class Session:
                 return
             if returned:
                 acc.cancel()
-                acc.error = "DGC stopped before this queued prompt ran"
+                if run.cancel_reason != "cancelled":
+                    acc.error = "DGC stopped before this queued prompt ran"
                 return
-            if run.cancel_reason and not run.cancel_sent:
+            if run.cancel_reason and not run.cancel_sent and not run.unqueuing:
                 with contextlib.suppress(DGCRuntimeError):
                     self._cancel(run, run.cancel_reason)
             if deadline is not None and now >= deadline and not run.cancel_reason:
@@ -2253,8 +2351,8 @@ class Session:
                 acc.transport(run, exc)
                 return
             kind = str(event.get("type") or "")
-            if kind == "ready":
-                continue
+            if kind == "ready" or (kind == "command_rejected" and event.get("command") == "queue_remove"):
+                continue      # a follow-up that had already started: its own cancel goes on from here
             mine = scoped and owner is run
             if scoped and not mine and kind not in _DECISION_EVENTS:
                 continue      # a turn this run does not own: observed and audited, not reported

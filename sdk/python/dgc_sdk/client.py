@@ -735,8 +735,8 @@ class AsyncCards:
     def __init__(self, sync):
         self._sync = sync
 
-    def watch(self) -> None:
-        self._sync.watch()
+    def watch(self, surface: str = "work") -> None:
+        self._sync.watch(surface)
 
     async def get(self, card_id: str):
         return await asyncio.to_thread(self._sync.get, card_id)
@@ -828,6 +828,9 @@ class AsyncRouter:
 
     async def suggest(self, system: str, *, context: int | str | None = None):
         return await asyncio.to_thread(lambda: self._sync.suggest(system, context=context))
+
+    async def set_thinking(self, system: str, model: str, thinking: str):
+        return await asyncio.to_thread(self._sync.set_thinking, system, model, thinking)
 
 
 class AsyncVideos:
@@ -1002,6 +1005,16 @@ class AsyncSession:
 
     async def steer(self, text: str) -> None:
         await asyncio.to_thread(self._sync.steer, text)
+
+    async def set_model(self, model: str | None = None, *, base_url: str | None = None, api_key: str | None = None,
+                        api_mode: str | None = None) -> dict[str, Any]:
+        """Move this session to another model or provider (see Session.set_model)."""
+        return await asyncio.to_thread(
+            lambda: self._sync.set_model(model, base_url=base_url, api_key=api_key, api_mode=api_mode))
+
+    async def set_thinking(self, level: str) -> str:
+        """How hard this session's model thinks (see Session.set_thinking)."""
+        return await asyncio.to_thread(self._sync.set_thinking, level)
 
     async def bind_identity(self) -> None:
         await asyncio.to_thread(self._sync.bind_identity)

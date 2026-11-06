@@ -9,7 +9,7 @@ import type { Frame, Transport } from "./transport.ts";
 import { longTimer } from "./transport.ts";
 import { assertSupported, extractJson, validate as validateSchema } from "./schema.ts";
 import type { ToolHub } from "./tools.ts";
-import type { AuditLog } from "./audit.ts";
+import { rememberSecret, type AuditLog } from "./audit.ts";
 import type { UsageLog, UsageTotals } from "./usage.ts";
 import { USAGE_TOTAL_KEYS, costUsd, emptyTotals, reported, usageDelta, usageTotals } from "./usage.ts";
 import { diffWorkspace, snapshotWorkspace, type Snapshot } from "./changes.ts";
@@ -164,9 +164,12 @@ export class Cards {
     this.send = send;
   }
 
-  /** This app draws cards: the CLI makes them from now on. */
-  watch(): void {
-    this.send({ type: "watch_mcp_apps" });
+  /** This app draws cards: the CLI makes them from now on. `surface` is whose: "work" for this session's runs, "pip"
+   *  for Pips' chats on a session that can reach them. For ChatDGC use `chats.cards`, which watches for you. A Pip's
+   *  reply lists its cards as `apps`. */
+  watch(surface: "work" | "chat" | "pip" = "work"): void {
+    if (!["work", "chat", "pip"].includes(surface)) throw new DGCConfigError("surface is work, chat or pip");
+    this.send({ type: "watch_mcp_apps", ...(surface === "work" ? {} : { surface }) });
   }
 
   /** One card with its page (`html`), its whole result and the exact CSP header (`csp_header`) the CLI serves it with. */
@@ -209,6 +212,9 @@ export class Cards {
   }
 }
 
+const ROUTER_THINKING = ["", "off", "low", "medium", "high"];
+const API_MODES = ["auto", "ollama", "anthropic", "chat_completions", "responses"];
+const SESSION_THINKING = ["off", "low", "medium", "high", "xhigh"];
 const ROUTER_ACTIONS = ["turn_on", "turn_off", "add_system", "edit_system", "remove_system", "enable_system",
   "disable_system", "set_model", "set_jobs", "set_when_busy", "set_key", "prefer", "apply_suggestion"];
 const ROUTER_FIELDS = new Set(["system", "name", "base_url", "jobs", "models", "workers", "one_model_at_a_time",
@@ -325,6 +331,16 @@ export class Router {
     const command: Frame = { type: "router_suggest", system, request_id: newId("router") };
     if (options.context !== undefined) command.context = contextTokens(options.context);
     return mapping((await this.ask(command, "router_suggestion", 30_000)).suggestion);
+  }
+
+  /** How hard a helper on this model of this system thinks (CLI 0.51+): "off", "low", "medium" or "high", or "" for the
+   *  helper's own level. The status's model row then says `thinking`, and `thinks` says whether its server reports the
+   *  model can think. */
+  async setThinking(system: string, model: string, thinking: string): Promise<{ change: string; status: Record<string, unknown> }> {
+    this.needs("router_thinking");
+    if (!ROUTER_THINKING.includes(thinking)) throw new DGCConfigError("thinking is off, low, medium, high, or empty for the helper's own level");
+    const event = await this.send({ type: "router_thinking", system, model, thinking }, 30_000);
+    return { change: typeof event.change === "string" ? event.change : "", status: mapping(event.status) };
   }
 }
 
@@ -644,6 +660,7 @@ export class Run {
   holdsFollowups = false;   // this run changes DGC's config for its own turns
   output = "";              // the Output chip's choice for this run's prompt (CLI 0.50+)
   held = false;             // a follow-up the SDK sends once the run in front of it is over
+  unqueuing = "";           // its cancel asked DGC to take it out of the queue, and the answer hasn't come yet
   /** The workspace when this run's last turn ended: its "after", and a follow-up's "before". */
   after: Snapshot | null = null;
   private cancelWaiters: Array<() => void> = [];
@@ -871,6 +888,7 @@ export class Session {
   private owners = new Map<string, Run>();
   private active: Run | null = null;
   private queued: Run[] = [];
+  private unqueuing = new Map<string, Run>();    // queue_remove's request id -> the follow-up it takes out
   private turn: Turn | null = null;
   private usageLast: UsageTotals | null = null;
   private billTo: [Run | null, string] | null = null;
@@ -1303,6 +1321,51 @@ export class Session {
     return this.projectTasks(event.todos);
   }
 
+  /** Move this session to another model or provider (CLI 0.51+, `capabilities.session_model_route`), from its next model
+   *  request. It stays this session's and comes back when the session is reopened; the user's settings and other
+   *  sessions don't change, with `inheritUserState: true` too. `baseUrl` moves it to another provider. A key belongs to
+   *  its address, so moving without `apiKey` sends none to the new one; the key is kept in this process only, never in
+   *  the transcript. `apiMode` is auto, ollama, anthropic, chat_completions or responses. */
+  async setModel(model?: string | null, options: { baseUrl?: string; apiKey?: string; apiMode?: string } = {}): Promise<{ model: string; baseUrl: string }> {
+    this.needsRoute();
+    if (!(typeof model === "string" && model) && !(typeof options.baseUrl === "string" && options.baseUrl)) {
+      throw new DGCConfigError("setModel needs a model or a baseUrl");
+    }
+    if (options.apiMode !== undefined && !API_MODES.includes(options.apiMode)) {
+      throw new DGCConfigError(`apiMode must be one of ${API_MODES.join(", ")}`);
+    }
+    const command: Frame = { type: "set_model", route: "native", scope: "session", request_id: newId("model") };
+    for (const [name, value] of [["model", model], ["base_url", options.baseUrl], ["api_mode", options.apiMode]] as const) {
+      if (value === undefined || value === null) continue;
+      if (typeof value !== "string") throw new DGCConfigError(`${name} must be a string`);
+      command[name] = value;
+    }
+    if (options.apiKey !== undefined) {
+      if (typeof options.apiKey !== "string") throw new DGCConfigError("apiKey must be a string");
+      rememberSecret(options.apiKey);
+      command.api_key = options.apiKey;
+    }
+    const event = await this.request(command, "model_changed", { timeoutMs: 30_000 });
+    if (event.model) this.modelSeen = String(event.model);
+    return { model: String(event.model || ""), baseUrl: String(event.base_url || "") };
+  }
+
+  /** How hard this session's model thinks from its next request (CLI 0.51+): off, low, medium, high or xhigh. It stays
+   *  this session's, as `setModel` does. Returns the level in use. */
+  async setThinking(level: string): Promise<string> {
+    this.needsRoute();
+    if (!SESSION_THINKING.includes(level)) throw new DGCConfigError(`thinking must be one of ${SESSION_THINKING.join(", ")}`);
+    const event = await this.request({ type: "set_think", level, scope: "session", request_id: newId("think") },
+      "think_changed", { timeoutMs: 30_000 });
+    return String(event.think || level);
+  }
+
+  private needsRoute(): void {
+    if (this.capabilities.session_model_route !== true) {
+      throw new DGCUnsupportedError("This DGC CLI can't change one session's model; update it (dgc update).");
+    }
+  }
+
   async getPlan(): Promise<Record<string, unknown>> {
     return this.request({ type: "get_plan", request_id: newId("plan") }, "saved_plan");
   }
@@ -1398,7 +1461,12 @@ export class Session {
       scoped = true;
     }
     if (kind === "context") this.account(event);
-    else if (["prompt_accepted", "steering_update", "command_rejected", "error"].includes(kind) && rid) {
+    else if (kind === "queue_changed") this.noteUnqueued(String(event.removed || ""));
+    else if (kind === "command_rejected" && this.unqueuing.has(rid)) {
+      // It had started, or was about to: its turn is stopped as any running turn is.
+      this.unqueuing.get(rid)!.unqueuing = "";
+      this.unqueuing.delete(rid);
+    } else if (["prompt_accepted", "steering_update", "command_rejected", "error"].includes(kind) && rid) {
       this.noteOutcome(kind, rid, event);
     } else if ((kind === "model_changed" || kind === "config") && event.model) {
       this.modelSeen = String(event.model);
@@ -1457,6 +1525,16 @@ export class Session {
       run.expect.delete(rid);
       run.rejected.set(rid, String(event.message || event.reason || kind));
     }
+  }
+
+  /** DGC took a waiting prompt out of its queue: its turn will never start. */
+  private noteUnqueued(removed: string): void {
+    const run = removed ? this.owners.get(removed) : undefined;
+    if (!run) return;
+    run.expect.delete(removed);
+    run.returned.add(removed);
+    this.unqueuing.delete(run.unqueuing);
+    run.unqueuing = "";
   }
 
   private account(event: Frame): void {
@@ -1526,9 +1604,9 @@ export class Session {
       run.cancelReason = reason;
       run.noteCancel();
     }
-    // A follow-up still queued behind another run is cancelled when its turn starts; DGC's cancel
-    // would stop the run in front of it too.
-    const send = run === this.active && !run.cancelSent;
+    // DGC's cancel would stop the run in front of a queued follow-up too. So a follow-up still waiting is taken
+    // out of the queue, and one that can't be (an older CLI, or it has just started) is cancelled when its turn starts.
+    const send = run === this.active && !run.cancelSent && !run.unqueuing;
     if (send) {
       run.cancelSent = true;
       run.cancelAt = Date.now();
@@ -1536,6 +1614,17 @@ export class Session {
         this.transport.send({ type: "cancel" });
       } catch (error) {
         throw new DGCRuntimeError("could not cancel the run", { cause: error });
+      }
+    } else if (run !== this.active && !run.held && !run.started && !run.unqueuing && this.capabilities.queue_edit === true) {
+      const unqueue = newId("unqueue");
+      run.unqueuing = unqueue;
+      this.unqueuing.set(unqueue, run);
+      try {
+        this.transport.send({ type: "queue_remove", queued_id: run.requestId, request_id: unqueue });
+      } catch (error) {
+        this.unqueuing.delete(unqueue);
+        run.unqueuing = "";
+        throw new DGCRuntimeError("could not take the queued prompt out", { cause: error });
       }
     }
   }
@@ -1717,10 +1806,10 @@ export class Session {
       }
       if (returned) {
         acc.cancel();
-        acc.error = "DGC stopped before this queued prompt ran";
+        if (run.cancelReason !== "cancelled") acc.error = "DGC stopped before this queued prompt ran";
         return;
       }
-      if (run.cancelReason && !run.cancelSent) {
+      if (run.cancelReason && !run.cancelSent && !run.unqueuing) {
         try { this.cancelRun(run, run.cancelReason); } catch { /* reported by the next read */ }
       }
       if (deadline !== null && now >= deadline && !run.cancelReason) {
@@ -1752,7 +1841,8 @@ export class Session {
       }
       const { event, owner, scoped } = item;
       const kind = String(event.type || "");
-      if (kind === "ready") continue;
+      // A rejected queue_remove: the follow-up had already started, and its own cancel goes on from here.
+      if (kind === "ready" || (kind === "command_rejected" && event.command === "queue_remove")) continue;
       const mine = scoped && owner === run;
       if (mine && kind === "turn_end" && !run.expect.size && !run.unresolved.size) {
         // This run's last turn just ended; a queued follow-up may start any moment now.

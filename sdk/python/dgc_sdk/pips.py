@@ -271,6 +271,8 @@ READ_COMMANDS |= API53_READS
 MUTATION_COMMANDS |= API53_MUTATIONS
 API53_FIELDS = {'list_pip_computer_frames': frozenset({'pointers'})}
 EYES_CHOICES = frozenset({'ask', 'relay', 'off'})
+# API 74: a provider saved in the editor's Settings -> Models.
+PROVIDER_ID = re.compile(r"provider_[a-f0-9]{32}\Z")
 # API 55: the subscription CLIs a Personal Pip can run on (pip_brain).
 SUBSCRIPTION_ENGINES = frozenset({'claude', 'codex'})
 # API 54: Pips use the whole desktop. get_pip_computer_apps reads which of its apps (an image editor, a document editor,
@@ -953,6 +955,17 @@ class Pips:
             if any(isinstance(choice, dict) and choice.get('mode') == 'router'
                    and set(choice) not in ({'mode'}, {'mode', 'system', 'model'}) for choice in choices):
                 raise DGCConfigError('A DGC Router model_choice is {"mode": "router"} or {"mode": "router", "system": id, "model": name}')
+        if any(isinstance(choice, dict) and choice.get('mode') == 'provider' for choice in choices):
+            # API 74: a Pip on a provider saved in the editor's Settings -> Models, by its id. The run reads the key.
+            if version < 74:
+                raise DGCUnsupportedError("A Pip on a saved provider requires a runtime advertising Pips API 74 or newer")
+            if any(isinstance(choice, dict) and choice.get('mode') == 'provider'
+                   and (set(choice) != {'mode', 'provider', 'model'} or type(choice.get('model')) is not str or not choice['model']
+                        or type(choice.get('provider')) is not str or not PROVIDER_ID.fullmatch(choice['provider']))
+                   for choice in choices):
+                raise DGCConfigError('A saved provider model_choice is {"mode": "provider", "provider": "provider_<32 hex>", "model": name}')
+        if command == 'send_pip_message' and 'display_mentions' in values and not caps.get('pip_display_mentions'):
+            raise DGCUnsupportedError("@ marks in a Pip's chat require a runtime that offers pip_display_mentions; update it (dgc update)")
         if command == 'set_pip_eyes' and (type(values.get('choice')) is not str or values['choice'] not in EYES_CHOICES):
             raise DGCConfigError('choice must be ask, relay or off')
         if command == 'set_pip_computer_apps' and (type(values.get('choice')) is not str or values['choice'] not in APPS_CHOICES):

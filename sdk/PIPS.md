@@ -17,7 +17,20 @@ API 70 lets a Pip run on DGC Router: `model_choice` takes `{"mode": "router"}` (
 Pips job) or `{"mode": "router", "system": "nas", "model": "qwen3.5:9b"}` (that one), and `list_pip_models` names
 those systems while the Router is on. A run on the Router waits in the Pip queue while every worker that could take it
 is busy; see `session.router` in [docs/SDK.md](../docs/SDK.md). From API 71 a Personal Pip's chat reply that
-started a video carries `videos`, each video's job as DGC last saw it.
+started a video carries `videos`, each video's job as DGC last saw it. API 72 adds Pip workflows (`list_pip_flows`,
+`get_pip_flow`, `create_pip_flow`, `set_pip_flow`), and from API 73 a text message sent during a running Personal Pip
+conversation joins that reply. API 74 lets a Pip run on a provider saved in the editor's Settings → Models:
+`model_choice` takes `{"mode": "provider", "provider": "provider_<32 hex>", "model": id}`, refused before it is sent by a
+runtime below API 74. The saved list belongs to the editor, so an SDK app can't list or add one; it reuses an id it reads
+from a Pip's own `model_choice`. For a Pip on your app's own endpoint, use a model on the profile's connection or DGC
+Router.
+
+`send_pip_message` takes `display_mentions` when `ready.capabilities.pip_display_mentions` is 1: where your box drew its
+`@` marks, for the sent bubble. They are for display only; the model reads `text`. A Pip's reply keeps what it did for
+Trace: `list_pip_reply_stats {pip_id, run_ids}` says `has_trace` for each run, and asked about one run it brings the
+steps as `trace` (`{v, ms, steps}`, each step a model round with its reported tokens or a tool with its hits, in
+milliseconds from the first step). A reply that stopped or failed has none. A Pip's reply lists the plugin cards it
+showed as `apps`; `session.cards.get(card_id)` reads one, and `session.cards.watch("pip")` asks for them live.
 
 It pairs with DGC CLI 0.51.0, which advertises **Pips API 74** over editor protocol
 v14. For what Pips are and how they behave, see [docs/PIPS.md](../docs/PIPS.md); for
@@ -127,7 +140,7 @@ Show the saved record to the user before asking for the second decision.
 
 ### Commands and parameters
 
-Commands form closed sets: 95 reads, 104 mutations and one event (`trigger_app_event`, your app's event,
+Commands form closed sets: 100 reads, 109 mutations and one event (`trigger_app_event`, your app's event,
 API 63), with a closed field set for each. There is no generic passthrough. `pips_enable` and `pips_runtime` are not
 exposed. Parameters are plain JSON:
 

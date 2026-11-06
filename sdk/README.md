@@ -1,9 +1,8 @@
 # DGC SDK
 
 Embed the DGC coding agent in an application or a CI job. **0.9.0**, editor protocol **v14**,
-pairs with CLI **0.51.0**. The Python and TypeScript SDK suites passed on Linux, macOS 26.5.1
-(Apple silicon), and Windows 11 through WSL 2 (Ubuntu 24.04); see
-[COMPATIBILITY.md](COMPATIBILITY.md). Native Windows is experimental.
+pairs with CLI **0.51.0**. This version has been tested on Linux only; macOS and WSL 2 passed for an
+earlier candidate (see [COMPATIBILITY.md](COMPATIBILITY.md)). Native Windows is experimental.
 Release tag **`sdk-v0.9.0`** (not `v0.5.x`, which are historical CLI tags).
 
 | Package | Install |
