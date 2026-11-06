@@ -1441,7 +1441,8 @@ test("the Library: every file you attached, by kind, searched by name, each with
     assert.equal(await page.locator(".lib-row").count(), 2, "the next page adds to the list");
     assert.equal(await page.locator("#lib-more").isHidden(), true);
     await page.locator("#lib-search").fill("tax");
-    await page.waitForTimeout(400);
+    // The search waits for typing to pause: wait for its request rather than a fixed time, which fails on a busy machine.
+    await page.waitForFunction(() => window.__posted.filter((m) => m.type === "list").at(-1)?.query === "tax", null, { timeout: 5000 });
     assert.deepEqual((await posted("list")).at(-1), { type: "list", query: "tax", kind: "pdf", offset: 0 });
     await send({ type: "library", files: [], total: 0, next: null, counts: { pdf: 0 } });
     assert.equal(await page.locator("#lib-status").textContent(), "No file named like “tax”.");
