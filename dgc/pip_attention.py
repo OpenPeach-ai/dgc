@@ -128,15 +128,15 @@ def collect(registry, now, *, limit=MAX_ITEMS) -> dict:
         # asked for before then is no longer waiting on anyone.
         for row in rows("SELECT id,pip_id,summary,created_at,expires_at FROM pip_computer_actions WHERE status='pending' "
                         f"AND expires_at>? AND {mine} ORDER BY created_at DESC", now, ids):
+            from .pip_computer import is_payment, sends_words
             summary = _json(row["summary"])
             # Careful mode's holds say what they are: a new site, or something read from your apps.
             title = (f"Visit {summary.get('site') or summary.get('host', 'a new site')}?" if summary.get("kind") == "site"
                      else f"Save a login for {summary.get('site') or summary.get('host', 'a site')}?" if summary.get("kind") == "login"
                      else f"Put what it read from your apps on {summary.get('host') or 'a page'}?" if summary.get("kind") == "text"
-                     else f"Pay on {summary.get('host', 'a site')}?" if summary.get("payment") is True
+                     else f"Pay on {summary.get('host', 'a site')}?" if is_payment(summary)
                      else f"Send this on {summary.get('host', 'a site')}?")
             # What it sends, when it is a form: a payment's bill number and amount, an order's sizes.
-            from .pip_computer import sends_words
             said = sends_words(summary) if summary.get("kind") not in ("site", "text", "login") else ""
             add("computer_action", row["id"], row["pip_id"], row["created_at"], row["expires_at"], title, said or summary.get("page", ""))
         for row in rows("SELECT key,value FROM metadata WHERE key LIKE 'computer\\_needs\\_you:%' ESCAPE '\\'"):

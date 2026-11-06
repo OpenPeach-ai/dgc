@@ -31,7 +31,7 @@ def chat(self, messages, tools=None, on_text=None, **kwargs):
     if len(tool_results) == 1:
         ref = re.search(r'button "Send" \[(e\d+)\]', last).group(1)
         return ChatResult(tool_calls=[ToolCall("c2", "computer", {"op": "click", "ref": ref})])
-    assert last.startswith("Held:"), last
+    assert last.startswith("Held:") or "It went through; carry on." in last, last
     return ChatResult(content="Your order form is filled in and waiting for your approval to send.")
 with patch.object(LLMClient, "chat", chat):
     raise SystemExit(_worker_main())
@@ -187,12 +187,48 @@ class PipComputerTests(unittest.TestCase):
         self.store.cancel(sent["continuation_run_id"], "local-console")      # this test drives the next run itself
         self.run_worker(pip)
         latest = pip_computer.list_actions(self.registry, pip["id"])[0]
-        self.assertEqual((latest["status"], latest["resolved_by"]), ("approved", "pip-grant:" + grant["id"]),
-                         "the same submit on the same site is approved by the grant, not left for you")
-        pip_computer.tick(self.registry, self.cfg)
+        self.assertEqual((latest["status"], latest["resolved_by"]), ("sent", "pip-grant:" + grant["id"]),
+                         "the same submit on the same site is sent by the grant, in its step: no card and no waiting")
         self.assertEqual(len(self.received), 2, "and sent without asking")
         said = [text for action_id, text in grants.ran_on_their_own(self.registry) if action_id == latest["id"]]
         self.assertEqual(said, [f"Shopper submitted to {TEST_HOST}/submit in its browser, as you always allow."])
+
+    def test_an_unattended_routine_that_names_its_site_runs_with_no_card_once_its_submit_is_always_allowed(self):
+        """Reported 2026-11-05: "so user can allow once for all, and the Pip can run its routine unattended daily". The
+        routine's own words were counted as read from the user's apps, so opening the site it names asked every time."""
+        from dgc import pip_action_grants as grants, pip_careful, pip_routines
+        pip = self.personal()
+        with self.registry.transaction():
+            self.registry.db.execute("DELETE FROM metadata WHERE key LIKE 'computer_sites:%'")   # only the routine names it
+        pip_careful.add_site(self.registry, pip["id"], TEST_HOST, "you")
+        self.run_worker(pip)
+        [first] = pip_computer.list_actions(self.registry, pip["id"])
+        pip_computer.approve_always(self.registry, first["id"], first["digest"], "editor-user")
+        pip_computer.tick(self.registry, self.cfg)
+        self.store.cancel(pip_computer.list_actions(self.registry, pip["id"])[0]["continuation_run_id"], "local-console")
+        made = pip_routines.add(self.store, pip["id"], "Morning order", f"Open {self.url} and press Send, then say it went.",
+                                {"kind": "schedule", "schedule": {"type": "interval", "minutes": 60}})
+        routine = self.registry.db.execute("SELECT * FROM pip_routines WHERE id=?", (made["id"],)).fetchone()
+        for run in (1, 2):
+            fired = pip_routines._fire(self.store, routine, self.cfg, "", f"schedule:{run}")
+            row = self.store.claim_next()
+            popen = subprocess.Popen
+
+            def process(argv, *a, **kw):
+                if argv[1:] == ["-m", "dgc.pips", "--worker"]:
+                    argv = [sys.executable, "-c", CHAT_WORKER % self.url]
+                return popen(argv, *a, **kw)
+            with patch.object(pips.subprocess, "Popen", side_effect=process):
+                result = pips._execute_run(self.registry, row, self.cfg)
+            finished = self.store.finish(fired["run"]["id"], result=result)
+            self.assertEqual(finished["status"], "succeeded", finished.get("error"))
+            self.assertEqual(len(self.received), run + 1, "it went, with nobody there")
+        rows = pip_computer.list_actions(self.registry, pip["id"])
+        self.assertEqual([r for r in rows if r["status"] == "pending"], [], "no card of any kind, run after run")
+        self.assertEqual(pip_careful.taint_for(self.registry.directory, pip["id"]).carried(self.url, ""), [],
+                         "and the routine's own words aren't remembered as read from the user's apps")
+        self.assertEqual({r["summary"]["unattended"] for r in rows if r["resolved_by"].startswith("pip-grant:")}, {True})
+        self.assertTrue(grants.list_grants(self.registry, pip["id"]))
 
     def test_an_always_allow_that_cannot_be_made_leaves_the_submit_waiting(self):
         from dgc import pip_action_grants as grants

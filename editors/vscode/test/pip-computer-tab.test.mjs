@@ -180,6 +180,19 @@ test('an older computer poll cannot restore a card after Always allow succeeds',
  assert.match(x.d.body.textContent,/Sent, and allowed from now on/);
 });
 
+test('a real payment with no card number in it is Pay and never Always allow; a false alarm is neither',async()=>{
+ const pay=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,asks_because:'payment'}}]})});await pay.drain();
+ assert.match(pay.d.querySelector('.pc-waiting').textContent,/Pay on shop\.example/);
+ assert.equal(pay.d.querySelector(`[data-always="${actionId}"]`),null);
+ const maybe=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,route:'/accounts/*/billing',asks_because:'maybe_payment',asks_word:'billing'}}]})});await maybe.drain();
+ const text=maybe.d.querySelector('.pc-waiting').textContent;
+ assert.match(text,/Send a form to shop\.example/);
+ assert.match(text,/It mentions “billing”, so DGC asks\. Nothing shows it’s a payment\./);
+ assert.match(text,/Always allow covers POST \/accounts\/\*\/billing, whatever the ID\./);
+ assert.ok(maybe.d.querySelector(`[data-always="${actionId}"]`));
+ assert.doesNotMatch(text,/Cloudflare/);
+});
+
 test('a payment waits with Send once and Reject, never Always allow',async()=>{
  const x=setup({status:computer({pending:1,actions:[{...hold,summary:{...hold.summary,payment:true}}]})});await x.drain();
  assert.ok(x.d.querySelector(`[data-send="${actionId}"]`));assert.ok(x.d.querySelector(`[data-reject="${actionId}"]`));

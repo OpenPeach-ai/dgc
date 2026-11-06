@@ -223,12 +223,15 @@ actions}}` with the newest five actions. `list_pip_computer_actions {pip_id, lim
 `{actions}`, each `{id, pip_id, workspace_id, run_id, summary, digest, frame, status,
 created_at, expires_at, resolved_at, resolved_by, continuation_run_id}`; `summary` is
 `{method, host, path, page, fields: [{name, value}], more_fields, body_bytes}` with
-secret-named values already masked. `decide_pip_computer_action {action_id, expected_digest,
+secret-named values already masked, and from 0.51.0 `route`, the address's shape an Always allow covers
+(`/accounts/*/settings`). `decide_pip_computer_action {action_id, expected_digest,
 approve}` returns `{action}`; the supervisor sends or drops the request within seconds.
 `always_allow_pip_computer_action {action_id, expected_digest}` approves it and saves a
-`computer_submit` grant for the same method, host and path on that Pip, in one step; it returns
+`computer_submit` grant for the same method, host and route on that Pip, in one step; it returns
 `{action, grant}` (a grant row as in `list_pip_action_grants`). `summary.payment` is `true` when
-the request carries a card number.
+the request carries a card number. `get_pip_connector_draft`, `get_pip_message_draft` and
+`get_pip_calendar_draft` may add `asked_again` to the draft (`tool` or `connection`): an Always allow used to
+cover it and what it was pinned to changed, and its card says so in one line.
 `get_pip_computer_frame {run_id, frame}` returns `{run_id, frame, image}` (a JPEG data URL) and
 `list_pip_computer_frames {run_id}` returns `{run_id, frames}`. `stop_pip_computer {pip_id}`
 returns `{pip_id, stopping: true}`. `open_pip_computer {pip_id}` asks the supervisor to open the
@@ -338,8 +341,10 @@ on** (`set_pip_level` `ask`). Choosing a level shows its `name: says` once as th
 now include ones its level let through: `status: "sent"`, `resolved_by: "pip-level:approve" | "pip-level:full"`, and
 `summary.what`, `summary.level`, `summary.unattended`; the extension shows them only through `on_its_own` and the run's
 timeline, whose labels already name them. A pending action may carry `summary.asks_because` (`payment`,
-`consequential`, `unsure`): its card under the reply adds one line saying why the level still asks, and one of
-`payment` is titled **Pay on HOST?**. A pending action of kind `floor` (the safety floor: `summary.floor`, the command
+`maybe_payment`, `consequential`, `unsure`): its card under the reply adds one line saying why it still asks, and one of
+`payment` is titled **Pay on HOST?** and offers no Always allow. `payment` and `maybe_payment` come at every level; a
+`maybe_payment` also has `summary.asks_word`, the word that raised it. A form's card is the Soft card: **Send once**,
+**Always allow** (`always_allow_pip_computer_action`), **Reject**, and what it covers from `summary.route`. A pending action of kind `floor` (the safety floor: `summary.floor`, the command
 as `fields[0].value`) is shown as **Let PIP run this in its Terminal?** with **Allow once** and **Not now**. `get_pip_computer`
 lists pending actions first. The host refuses both requests before API 58 ("Update DGC to choose how much a Pip
 asks.") and an older CLI is asked for neither.

@@ -24,8 +24,8 @@ class ActionGrantTests(unittest.TestCase):
 
     def test_browser_always_allow_releases_matching_cards_already_waiting(self):
         first = {"method": "POST", "host": "dash.cloudflare.com",
-                 "path": "/cdn-cgi/challenge-platform/h/b/precursor/one"}
-        rotated = {**first, "path": "/cdn-cgi/challenge-platform/h/b/precursor/two"}
+                 "path": "/cdn-cgi/challenge-platform/h/b/precursor/8f3a1b2c3d4e5f60"}
+        rotated = {**first, "path": "/cdn-cgi/challenge-platform/h/b/precursor/0.8812345:1730000000:abcDEF-_123XYz"}
         unrelated = {**first, "host": "other.example"}
         payment = {**first, "payment": True}
         for action_id, summary in (("first", first), ("rotated", rotated),
@@ -47,9 +47,10 @@ class ActionGrantTests(unittest.TestCase):
         self.assertEqual(cards["payment"]["status"], "pending")
 
     def test_cloudflare_verification_grant_covers_rotating_token_only_on_same_route(self):
+        # No special case for it now: the general rule (test_pip_approvals_hold), on the address that first showed the bug.
         base = {"method": "POST", "host": "dash.cloudflare.com"}
-        first = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/one/token-a"}
-        next_token = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/two/token-b"}
+        first = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/8f3a1b2c3d4e5f60/AbC9xYz12QwErTy7"}
+        next_token = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/0.8812345:1730000000:abcDEF-_123XYz/Zz81kLmN0pQrStU4"}
         pinned = grants.computer_pins("pip_one", first)
         self.assertEqual(pinned, grants.computer_pins("pip_one", next_token))
         self.assertEqual(pinned["tool"], "POST /cdn-cgi/challenge-platform/h/b/precursor/*")
@@ -65,13 +66,13 @@ class ActionGrantTests(unittest.TestCase):
         db.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
         db.execute("CREATE TABLE pip_computer_actions (id TEXT, pip_id TEXT, workspace_id TEXT, summary TEXT)")
         for index in range(grants.MAX_PER_PIP):
-            old = grants.computer_pins("pip_one", {**base, "path": first["path"] + str(index)}, exact=True)
+            old = grants.computer_pins("pip_one", {**base, "path": f"{first['path']}{index:04d}"}, exact=True)
             db.execute("INSERT INTO metadata VALUES (?, ?)",
                        ("pip_action_grant:pip_one:grant_" + f"{index:032x}",
                         json.dumps({**old, "created_at": "now", "label": "Old exact approval"})))
         events = []
         registry = SimpleNamespace(db=db, clock=lambda: "now", event=lambda *a, **kw: events.append((a, kw)))
-        self.assertIsNotNone(grants.computer_grant_for(registry, "pip_one", {**base, "path": first["path"] + "0"}))
+        self.assertIsNotNone(grants.computer_grant_for(registry, "pip_one", {**base, "path": first["path"] + "0000"}))
         self.assertIsNone(grants.computer_grant_for(registry, "pip_one", next_token))
         db.execute("INSERT INTO pip_computer_actions VALUES (?, ?, ?, ?)",
                    ("action_one", "pip_one", "workspace_one", json.dumps(next_token)))
@@ -152,6 +153,20 @@ class ActionGrantTests(unittest.TestCase):
         self.assertEqual(drafts.get(self.store, draft["id"])["status"], "pending")
         skipped = self.registry.db.execute("SELECT count(*) FROM workspace_events WHERE event_type='pip_action_grant_skipped'").fetchone()[0]
         self.assertEqual(skipped, 1, "and the reason is recorded")
+        seen = drafts.get(self.store, draft["id"])
+        self.assertEqual(grants.with_asked_again(self.registry, seen, "email")["asked_again"], "connection",
+                         "and its card says why it asked again")
+
+    def test_always_allow_again_after_a_tool_changed_replaces_the_grant_that_no_longer_holds(self):
+        _, first = self.always()
+        key = grants._key(self.source["id"], first["id"])
+        old = json.loads(self.registry.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()[0])
+        with self.registry.transaction():
+            self.registry.db.execute("UPDATE metadata SET value=? WHERE key=?", (json.dumps({**old, "schema_digest": "0" * 64}), key))
+        _, second = self.always(self.propose(request_key="after-the-change"))
+        listed = grants.list_grants(self.registry, self.source["id"])
+        self.assertEqual([g["id"] for g in listed], [second["id"]], "one grant for one tool: a changed tool can't use up the 20")
+        self.assertEqual(listed[0]["schema_digest"], first["schema_digest"])
 
     def test_a_grant_never_covers_another_account_or_pip(self):
         _, grant = self.always()

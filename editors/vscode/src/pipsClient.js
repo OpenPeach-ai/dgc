@@ -30,7 +30,7 @@ import {pluginsPage,pluginResult,shownPluginCards,pluginForServer,installedForSe
 import {attentionPage,attentionMarkup,attentionNavigation,cardSelector} from './pipAttention.js';
 import {notesPage,notesMarkup,keptMarkup} from './pipNotes.js';
 import {workingNotesPage,dailyLogPage,workingNotesMarkup,dailyLogMarkup,learnCardMarkup,learnRequest} from './pipWorkingNotes.js';
-import {carefulPage,carefulMarkup,carefulWords,sendsWords} from './pipCareful.js';
+import {carefulPage,carefulMarkup,carefulWords,sendsWords,isPayment,asksWords,coversWords,coversDetail} from './pipCareful.js';
 import {loginsMarkup,loginFormMarkup,readLoginForm,loginFormProblem,clearLoginForm} from './pipLogins.js';
 import {pipLogins,pipLogin} from './pipsModel.js';
 import {livePlan,livePlanFromText,livePip} from './pipsModel.js';
@@ -1455,22 +1455,33 @@ async function refreshComputer(){
 // still sees it. A reply that said "Starting with the hospital bill on its pay page" sat above nothing while "Let Bill
 // Payer visit…?" waited only in the tab (three-asks test, 2026-10-20). A site: Allow / Not now here; a form or a payment:
 // Review… (the screenshot and every field, then Send once) or Reject.
-const LEVEL_ASKS={payment:'It looks like a payment, so it asks at every level.',consequential:'Its level asks before this.',unsure:'DGC can’t tell what this does, so it asks.'};
 function computerWaitingCards(){
  const c=computerState.pip===S.selected?computerState.value:null;if(!c||S.apiVersion<43||remoteHost)return '';
  const waiting=(Array.isArray(c.actions)?c.actions:[]).filter(a=>a.status==='pending').slice(0,3);if(!waiting.length)return '';
  const name=S.pip?.name||'The Pip',off=S.busy||!usable()||archived()?' disabled':'';
  return waiting.map(a=>{
-  const s=a.summary||{},words=carefulWords(s,name),pay=s.payment===true;
-  // API 58: why its level still asks (a payment asks at every level; Approve for me asks before an order, a post...).
-  const because=LEVEL_ASKS[s.asks_because]||'';
-  const title=words?words[0]:pay||s.asks_because==='payment'?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
-  const line=words?words[1]:[sendsWords(s),pay?'It sends payment card details.':'',because,'Nothing has been sent.'].filter(Boolean).join(' ');
+  const s=a.summary||{},words=carefulWords(s,name);
+  if(!words)return computerSubmitCard(a,name,off);
   const yes=s.kind==='login'?`<button type="button" class="primary" data-login-card="${esc(a.id)}"${off}>${esc(words[2])}</button>`
-   :words?`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`
-   :`<button type="button" class="primary" data-computer-action="${esc(a.id)}"${off}>Review…</button>`;
-  return `<div class="app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(title)}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div></div><div class="app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>${words?'Not now':'Reject'}</button></div></div>`;
+   :`<button type="button" class="primary" data-computer-decide="${esc(a.id)}" data-approve="1"${off}>${esc(words[2])}</button>`;
+  return `<div class="app-link" data-state="waiting" data-computer-card="${esc(a.id)}" role="group" aria-label="${esc(words[0])}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">!</span><div class="app-link-words"><strong>${esc(words[0])}</strong><small>${esc(words[1])}</small></div></div><div class="app-link-actions">${yes}<button type="button" class="quiet" data-computer-decide="${esc(a.id)}" data-approve="0"${off}>Not now</button></div></div>`;
  }).join('');
+}
+// A submit its computer holds, as the Soft card (approved 2026-11-05): what it is, what Always allow would cover, Send once /
+// Always allow / Reject, and the rest under Details. A payment is never sent in one tap and never always allowed: Review…
+// shows it first.
+function computerSubmitCard(a,name,off){
+ const s=a.summary,id=esc(a.id),pay=isPayment(s),title=pay?`Pay on ${s.host}?`:`Send a form to ${s.host}?`;
+ const line=[pay?sendsWords(s):'',s.payment===true?'It sends payment card details.':'',asksWords(s),'Nothing has been sent.'].filter(Boolean).join(' ');
+ const rows=(Array.isArray(s.fields)?s.fields:[]).filter(f=>f.value!=='•••').map(f=>`<dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd>`).join('');
+ const details=`<details class="allow-details"><summary><span class="allow-preview">${esc(pay?`${s.method} ${s.host}${s.path}`:coversWords(s))}</span><span>Details</span></summary>`
+  +`<dl class="allow-meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd>${s.page?`<dt>From page</dt><dd>${esc(s.page)}</dd>`:''}${rows}</dl>`
+  +(s.more_fields?`<p class="app-link-note">And ${esc(String(s.more_fields))} more fields.</p>`:'')
+  +(pay?'':`<p class="app-link-note">${esc(coversDetail(s,name))}</p><button type="button" class="link allow-see" data-computer-action="${id}"${off}>See the page…</button>`)
+  +'</details>';
+ const actions=pay?`<button type="button" class="primary" data-computer-action="${id}"${off}>Review…</button>`
+  :`<button type="button" class="primary" data-computer-decide="${id}" data-approve="1"${off}>Send once</button><button type="button" class="quiet" data-computer-always="${id}"${off} title="${esc(coversDetail(s,name))}">Always allow</button>`;
+ return `<div class="allow-card" data-state="waiting" data-computer-card="${id}" role="group" aria-label="${esc(title)}"><div class="app-link-head"><span class="app-link-mark" aria-hidden="true">${pay?'!':'↗'}</span><div class="app-link-words"><strong>${esc(title)}</strong><small>${esc(line)}</small></div></div>${details}<div class="app-link-actions">${actions}<button type="button" class="quiet" data-computer-decide="${id}" data-approve="0"${off}>Reject</button></div></div>`;
 }
 async function decideInChat(id,approve){
  const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
@@ -1478,7 +1489,20 @@ async function decideInChat(id,approve){
  try{
   const done=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve})).action,pip);
   if(token!==scope())return;if(done.id!==a.id||done.status!==(approve?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh to see it.');
-  S.notice=!approve?(a.summary?.kind==='login'?`Not now. ${S.pip?.name||'It'} won’t ask to save a login for ${a.summary.site||'that site'} again today.`:careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):'Allowed. It opens the site and carries on.';
+  S.notice=!approve?(a.summary?.kind==='login'?`Not now. ${S.pip?.name||'It'} won’t ask to save a login for ${a.summary.site||'that site'} again today.`:careful?'Not now. It won’t do that.':'Rejected. Nothing was sent.'):careful?'Allowed. It opens the site and carries on.':'Sent as shown. It carries on.';
+  computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
+ }catch(error){if(token===scope())setError(error);}
+ finally{if(token===scope()){S.busy=false;render();void refreshComputer();}}
+}
+// Always allow on its Soft card: this submit now, and its route from now on, for this Pip's computer.
+async function alwaysInChat(id){
+ const pip=S.selected,a=computerState.pip===pip?computerState.value?.actions?.find(x=>x.id===id):null;if(!a||S.busy||!usable())return;
+ const token=scope();S.busy=true;render();
+ try{
+  const result=await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});
+  const done=pipComputerAction(result.action,pip),g=actionGrant(result.grant);
+  if(token!==scope())return;if(done.id!==a.id||done.status!=='approved')throw Error('The saved decision differs from your choice. Refresh to see it.');
+  grantsState.pip='';S.notice=`Always allowed: ${g.label}. It carries on, and tells you after each one.`;
   computerState.value={...computerState.value,actions:computerState.value.actions.map(x=>x.id===a.id?done:x)};
  }catch(error){if(token===scope())setError(error);}
  finally{if(token===scope()){S.busy=false;render();void refreshComputer();}}
@@ -1549,12 +1573,10 @@ async function openComputerAction(id){
    request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
   return;
  }
- const challenge=s.host==='dash.cloudflare.com'&&s.method?.toUpperCase()==='POST'&&s.path?.startsWith('/cdn-cgi/challenge-platform/h/b/precursor/');
- openReview({title:challenge?'Cloudflare browser verification?':'Send this once?',description:challenge
-  ?`${S.pip?.name||'The Pip'} is sending a Cloudflare verification request. Nothing has been sent. Always allow covers this verification route on dash.cloudflare.com for this Pip, including its changing URL token. Other browser requests still ask separately.`
-  :`${S.pip?.name||'The Pip'} wants to send a form to ${s.host}. Nothing has been sent.`,
-  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
-  confirm:'Send once',always:s.payment!==true,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
+ const pay=isPayment(s),name=S.pip?.name||'The Pip';
+ openReview({title:'Send this once?',description:`${name} wants to send a form to ${s.host}. Nothing has been sent.${pay?'':` ${coversDetail(s,name)}`}`,
+  body:`${image?`<img class="computer-shot" alt="The page as the Pip left it" src="${image}">`:''}<dl class="meta"><dt>Sends to</dt><dd>${esc(s.host)}${esc(s.path)}</dd><dt>From page</dt><dd>${esc(s.page)}</dd>${rows}</dl>${s.more_fields?`<p class="muted">And ${s.more_fields} more fields.</p>`:''}${s.payment===true?'<p class="notice">This sends payment card details.</p>':pay?'<p class="notice">This looks like a payment, so it asks every time.</p>':''}<p class="muted">Sent exactly as shown, once. Values marked ••• are hidden here but will be sent.</p>`,secondary:{id:'reject-computer-action',label:'Reject'},
+  confirm:'Send once',always:!pay,expiresAt:a.expires_at,computerAction:a.id,request:{type:'decide_pip_computer_action',action_id:a.id,expected_digest:a.digest,approve:true}});
 }
 async function decideComputerAction(review,approve){
  if(S.busy||!usable())return;const token=scope();S.busy=true;renderReview();
@@ -4120,6 +4142,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.loginRemove){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginRemove);void loginCall('remove_pip_login',{login_id:target.dataset.loginRemove},`Removed. No Pip signs in to ${l?.site||'that site'} with it now.`);return;}
   if(target.dataset.loginShare){const l=(loginsState.value||[]).find(x=>x.id===target.dataset.loginShare);if(l&&l.pips!=='all')void loginCall('grant_pip_login',{login_id:l.id,pips:[...l.pips,S.selected]},`${S.pip?.name||'It'} can use the login for ${l.site} now.`);return;}
   if(target.dataset.computerDecide){void decideInChat(target.dataset.computerDecide,target.dataset.approve==='1');return;}
+  if(target.dataset.computerAlways){void alwaysInChat(target.dataset.computerAlways);return;}
   if(target.dataset.cardOpen){cardRefused='';if(computerState.pip===S.selected&&computerState.value?.granted)void openComputerView();render();return;}
   if(target.dataset.cardDismiss){cardRefused='';render();return;}
   if(target.dataset.revokeGrant){revokeGrant(target.dataset.revokeGrant);return;}

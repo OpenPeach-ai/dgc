@@ -24,6 +24,7 @@ import ipaddress
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -172,14 +173,20 @@ URL_IN_TEXT = re.compile(r"(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,24})(?=[/:?#\
 
 
 def user_sites(registry, pip_id) -> set[str]:
-    """Sites the user named in their own messages to this Pip (DGC's own turns don't count)."""
+    """Sites the user named in their own messages to this Pip and in the words of its routines, which they wrote or read
+    and added (DGC's own turns don't count, so an email a routine started from never names a site)."""
     from .pip_chat import DGC_KEYS
+    texts = [str(row["text"] or "") for row in registry.db.execute(
+        "SELECT text,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' ORDER BY seq DESC LIMIT 300", (pip_id,))
+        if not str(row["request_key"] or "").startswith(DGC_KEYS)]
+    try:
+        texts += [str(row["prompt"] or "") for row in registry.db.execute(
+            "SELECT prompt FROM pip_routines WHERE pip_id=? AND status IN ('on','off')", (pip_id,))]
+    except sqlite3.Error:
+        pass                                  # a registry without routines
     found = set()
-    for row in registry.db.execute("SELECT text,request_key FROM pip_chat_messages WHERE pip_id=? AND role='user' "
-                                   "ORDER BY seq DESC LIMIT 300", (pip_id,)):
-        if str(row["request_key"] or "").startswith(DGC_KEYS):
-            continue
-        for match in URL_IN_TEXT.finditer(str(row["text"] or "")):
+    for text in texts:
+        for match in URL_IN_TEXT.finditer(text):
             name = match.group(1).lower()
             if "." in name and not name.replace(".", "").isdigit():
                 found.add(site_of(name))

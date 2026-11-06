@@ -303,7 +303,7 @@ class RejectFollowUp(unittest.TestCase):
     def test_a_held_submit_tells_the_pip_its_card_is_below(self):
         host = types.SimpleNamespace(_kind=lambda action_id: "")
         said = pip_computer.Host._held_text(host, ["compact_" + "a" * 32])
-        self.assertIn("DGC shows it to them as a card below your reply, with what it sends, Review… and Reject. It is there.", said)
+        self.assertIn("DGC shows it to them as a card below your reply, with what it sends and how to send or reject it. It is there.", said)
 
     def test_a_held_site_is_named_to_the_pip(self):
         made = []

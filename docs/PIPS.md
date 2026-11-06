@@ -1261,12 +1261,14 @@ without.
 - **Sends caused by the Pip wait for you** (at Ask; see [How much it asks](#how-much-it-asks)). When its click,
   typing or choice makes a page submit a form or send data, DGC holds that exact request, unsent, and the run ends with it waiting. It appears under
   **Waiting for you** in the Pip's **Job** tab, and the Pips bar above the chat says so at once. It also waits
-  as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form or a
-  payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
-  **Review…** shows a screenshot of the page, where the request would go and its form fields.
+  as a card under the Pip's reply in its chat: a new site with **Allow this site** and **Not now**; a form with
+  **Send once**, **Always allow** and **Reject**, and what **Always allow** would cover, with the rest under **Details**;
+  a payment with what it sends (a bill number and amount, never a card field), **Review…** and **Reject**.
+  **Review…** (and **See the page…** under a form's **Details**) shows a screenshot of the page, where the request
+  would go and its form fields.
   Fields named like passwords, codes or card details are hidden in the review but are sent as
   entered. **Send once** sends exactly that request, once, and starts a follow-up run so the Pip
-  carries on from the result. **Reject** drops it, and the Pip is told: it says what wasn't done and goes on with
+  carries on from the result, as soon as its chat is free. **Reject** drops it, and the Pip is told: it says what wasn't done and goes on with
   the rest of what you asked (the next bill). A held request expires after 24 hours. It is
   also lost, unsent, if the computer stops or the runner restarts, because the browser is what
   holds it.
@@ -1285,7 +1287,7 @@ without.
   network, this computer's own services and cloud metadata addresses are refused. A request
   caused by the Pip that carries a payment card number waits for you every time: its review says it sends payment
   card details, it never offers **Always allow**, and no Always allow you gave for that site sends
-  one. A Pip with
+  one. So does anything else with real signs of paying: see [What counts as a payment](#what-counts-as-a-payment). A Pip with
   a computer can't also have app reads, so private data from your accounts never sits in a
   browser that could send it on.
 - **Stop it any time.** **Stop computer**, or `dgc pips computer stop PIP`, closes the browser at
@@ -1647,9 +1649,9 @@ Always allow covers still waits for you.
 
 Always allow is pinned to what you approved. If the connection, account, tool or the
 tool's inputs change, it no longer matches, and the action waits for you again.
-Nothing else grants it: not the chat, not auto mode, not a Pip. Money is not special:
-a trade or a payment through a connected app is an action like any other, so allow
-it only for a tool you trust to act on its own.
+Nothing else grants it: not the chat, not auto mode, not a Pip. A payment plugin's
+actions ask every time. Any other connected app's trade or payment is an action like any
+other, so allow it only for a tool you trust to act on its own.
 
 See and take back what a Pip may do in its **Job** tab, under **Allowed without
 asking** (**Stop allowing**), or in the terminal:
@@ -1660,10 +1662,47 @@ dgc pips allowed PIP                      # what runs without asking
 dgc pips allowed PIP --revoke GRANT_ID
 ```
 
-A Pip's computer has **Always allow** too, in the review of a waiting submit (or `dgc pips
-computer approve ACTION_ID --always`): the Pip may then send the same kind of submit, to the same
-site, method and path, from its own browser without asking, and you are told after. Anything
-else it would submit still waits for you.
+A Pip's computer has **Always allow** too, on the card of a waiting submit (or `dgc pips
+computer approve ACTION_ID --always`): the Pip may then send the same kind of submit from its own
+browser without asking, carrying on in the same step, and you are told after. Same kind means the
+same site, the same method and the same address, whatever ID is in it: the card says what it
+covers, such as `POST /accounts/*/settings`, where `*` is any ID or number.
+
+What changes between visits generalises: UUIDs, long hex, random tokens, numbers, and query values
+such as a session or a tracker. Plain words never do, so `/delete` can't match `/update`, and
+`?action=delete` can't match `?action=update`. A GraphQL address does everything through one path, so
+an Always allow there covers its reads, or one named change.
+
+It still asks, on purpose, when any of these differ: the site (`shop.example` and `pay.shop.example`
+are two sites), the method, or a plain word in the address. It always asks for a payment, a new site in
+careful mode, what it read from your apps going onto a page, and a Terminal command that could wipe its
+Files. An Always allow from before this rule keeps working for its one exact address and never widens
+by itself; your next Always allow on that address's shape replaces it.
+
+A routine holds this too: once you always allow a submit, its unattended runs send it with no card. The words of a
+routine are yours, as a message of yours is, so the site it names needs no card. What started a routine (an email, an
+app's event) is not yours: it counts as read from your apps.
+
+If a tool's definition or a connection changed, an Always allow for it no longer holds, and its card
+comes back with one line saying so: "Asked again because this tool changed."
+
+### What counts as a payment
+
+A Pip's computer calls something a payment, titled **Pay on SITE?**, only on real signs of paying. These
+ask at every level and never get **Always allow**:
+
+- a card number in the request, or card fields being filled (a card token, a CVV, an expiry with a card, a
+  UPI ID, an IBAN, an amount with who gets it);
+- a button that says pay, buy, donate, top up or place order, or names a price on Subscribe or Confirm;
+- a checkout in the address (`/checkout`, `/pay`, `/place-order`, `?wc-ajax=checkout`), but not a report
+  about one (`/collect?en=purchase`, `/analytics/checkout-started`);
+- a payment provider's own site, such as Stripe's API, PayPal or Razorpay.
+
+A single word doesn't make a payment. A billing profile, a zone's subscription, a lone `amount` or `card`
+field, or an order with no sign of paying is truly unclear, so it still asks at every level, with a plain
+line ("It mentions "billing", so DGC asks. Nothing shows it's a payment.") and **Always allow**. A newsletter's
+Subscribe that takes only an email isn't about money at all. A page could mislabel what it does; that is why
+what is unclear keeps asking until you say otherwise.
 
 ## What Pips never do
 
