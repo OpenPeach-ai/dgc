@@ -107,3 +107,81 @@ test('the Pip\'s model menu reads Default (the model it runs): the Pips default 
  assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Same as DGC/);
  assert.equal(model.modelLabel({mode:'default'}),'Default');
 });
+
+// Pips API 74: every provider saved in Settings -> Models, the same list Work has. The Pip keeps its id and a model.
+const SECOND='provider_'+'b'.repeat(32),HOME_HOST='provider_'+'a'.repeat(32);
+const savedCatalog=(extra={})=>({default_model:'local-default',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS,
+ providers:[{id:HOME_HOST,name:'Home host',default:true,models:['model-a']},{id:SECOND,name:'Second host',default:false,models:['second-a','second-b']}],...extra});
+const providerRows=x=>[...x.d.querySelectorAll('[data-chat-provider]')].map(n=>n.textContent);
+
+test('a Pip lists every saved provider by name, then its models, and keeps only its id and the model',async()=>{
+ const x=setup({api:74,catalog:savedCatalog()});await x.select();await openList(x);
+ x.click('#chat-model-providers');
+ assert.deepEqual(providerRows(x),['Home host','Second host','Claude Code','Codex'],'by name; the default is not also "Current host"');
+ x.click(`[data-chat-provider="provider:${SECOND}"]`);
+ assert.deepEqual([...x.d.querySelectorAll('[data-chat-model]')].map(n=>n.textContent),['second-a','second-b']);
+ x.click(`[data-chat-model="provider:${SECOND}:second-b"]`);await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('propose_pip_update')[0].request.changes)),{model_choice:{mode:'provider',provider:SECOND,model:'second-b'}});
+ assert.equal(x.requests('accept_pip_update').length,1,'a Personal Pip saves its own choice at once');
+ assert.match(x.d.body.textContent,/Tees now uses second-b on Second host\./);
+ assert.match(x.d.querySelector('#chat-model').textContent,/second-b/,'the chip names the model');
+ assert.match(x.d.querySelector('#chat-model').title,/second-b · Second host/,'its hover names the provider');
+ await openList(x);
+ assert.equal(x.d.querySelector(`[data-chat-model="provider:${SECOND}:second-b"]`).getAttribute('aria-selected'),'true','it opens on the chosen provider');
+});
+
+test('a provider chosen before reloads as chosen, and a project Pip is reviewed the same way',async()=>{
+ const job=pip({model_choice:{mode:'provider',provider:SECOND,model:'second-a'}});
+ const x=setup({api:74,job,catalog:savedCatalog()});await x.select();await openList(x);
+ assert.equal(x.d.querySelector(`[data-chat-model="provider:${SECOND}:second-a"]`).getAttribute('aria-selected'),'true');
+ const y=setup({api:74,kind:'project',catalog:savedCatalog()});await y.select();await openList(y);
+ y.click('#chat-model-providers');
+ assert.ok(y.d.querySelector(`[data-chat-provider="provider:${SECOND}"]`),'a project Pip is offered it too');
+});
+
+test('with no default among them, the host stays "Current host", first',async()=>{
+ const x=setup({api:74,catalog:savedCatalog({providers:[{id:SECOND,name:'Second host',default:false,models:['second-a']}]})});await x.select();await openList(x);
+ x.click('#chat-model-providers');
+ assert.deepEqual(providerRows(x),['Current host','Second host','Claude Code','Codex']);
+});
+
+test('a provider removed from Settings says so in plain words, and is never silently replaced',async()=>{
+ const job=pip({model_choice:{mode:'provider',provider:SECOND,model:'second-a'}});
+ const x=setup({api:74,job,catalog:savedCatalog({providers:[{id:HOME_HOST,name:'Home host',default:true,models:['model-a']}]})});await x.select();
+ assert.match(x.d.querySelector('[role="alert"].composer-unavailable').textContent,/was removed from Settings\. Choose another model/,'said with no menu open, before anything is sent');
+ await openList(x);
+ assert.match(x.d.querySelector('#chat-model').textContent,/second-a/,'the chip still says what it was set to');
+ assert.equal(x.requests('propose_pip_update').length,0,'nothing changes by itself');
+});
+
+test('below API 74 a list from a newer host is not offered',async()=>{
+ const x=setup({api:73,catalog:savedCatalog()});await x.select();await openList(x);
+ x.click('#chat-model-providers');
+ assert.deepEqual(providerRows(x),['Current host','Claude Code','Codex']);
+});
+
+test('the host adds the saved providers to the list and saves one before a Pip is set to it, with no key in the view',async()=>{
+ const sent=[],posted=[];const calls=[];
+ const editor=new view.PipsEditor({},m=>{sent.push(m);return true;},()=>{});editor.attach(m=>posted.push(m));
+ editor.ready({pips_supported:true,pips_enabled:true,pips_api_version:74},{});
+ editor.useSavedProviders(async()=>[{id:SECOND,name:'Second host',default:false,models:['second-a']}],async id=>{calls.push(id);if(id===HOME_HOST)throw new Error('Provider not found. Open Settings and add it again.');});
+ const ask=(id,request)=>editor.receive({type:'pipsRequest',id,request});
+ ask('list',{type:'list_pip_models'});
+ const listed=sent.at(-1);
+ editor.event({type:'pips_result',ok:true,command:'list_pip_models',request_id:listed.request.request_id,result:{default_model:'m',models:[]}});
+ await flush();await new Promise(r=>setTimeout(r,0));
+ const reply=posted.find(m=>m.type==='pipsReply'&&m.id==='list');
+ assert.equal(reply.result.providers[0].name,'Second host');
+ const before=sent.length;
+ ask('good',{type:'propose_pip_update',pip_id:PIP,expected_version:1,changes:{model_choice:{mode:'provider',provider:SECOND,model:'second-a'}},reason:'x'});
+ assert.equal(sent.length,before,'nothing goes to the Pips control before the provider is saved');
+ await flush();await new Promise(r=>setTimeout(r,0));
+ assert.deepEqual(calls,[SECOND]);
+ assert.equal(sent.at(-1).request.type,'propose_pip_update');
+ assert.equal(JSON.stringify(sent.at(-1)).includes('api_key'),false);
+ const count=sent.length;
+ ask('gone',{type:'propose_pip_update',pip_id:PIP,expected_version:1,changes:{model_choice:{mode:'provider',provider:HOME_HOST,model:'m'}},reason:'x'});
+ await flush();await new Promise(r=>setTimeout(r,0));
+ assert.equal(sent.length,count,'a provider that could not be saved never reaches the Pip');
+ assert.match(posted.find(m=>m.type==='pipsReply'&&m.id==='gone').error.message,/add it again/);
+});

@@ -387,6 +387,9 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 67: get_pip_artifacts and set_pip_artifacts (artifact_pips): a Pip's report_as ("chat", "doc", "sheet": each
 # finished review also kept as the newest version of its own document or sheet) and the dashboards it refreshes after
 # each run it finishes (a Pulse keeps one current on its schedule).
+# API 74: model_choice also takes {"mode": "provider", "provider": "provider_<32 hex>", "model": id}, a provider saved in
+# Settings -> Models. The editor adds `providers` to its list_pip_models answer and saves the chosen provider first
+# (save_model_provider); a removed one refuses in plain words, at queue time and when a queued run starts.
 # API 70: DGC Router. model_choice also takes {"mode": "router"} (any of the user's systems with the Pips job) and
 # {"mode": "router", "system": id, "model": name} (that one; a pinned Pip waits for its own system). The worker is
 # leased when the run leaves the queue, and while every one that could take it is busy the run waits there.
@@ -399,7 +402,7 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # never changes either Pip's authority to use apps, send, or operate its computer.
 # API 73 lets a new text message join one running Pip conversation. It keeps the
 # same run and session history instead of starting a competing reply.
-PIPS_API_VERSION = 73
+PIPS_API_VERSION = 74
 
 
 def _pips_platform_supported() -> bool:
@@ -441,7 +444,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
-    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "set_subscription_default", "set_think", "set_goal", "get_goal",
+    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "save_model_provider", "set_subscription_default", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
@@ -2647,7 +2650,10 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
-                          "display_mentions": 2,
+                          # 3: a mark whose name is the words of the text (`wired`), a Pip's or a file's.
+                          "display_mentions": 3,
+                          # send_pip_message takes display_mentions: a Pip's chat draws its marks in the bubble.
+                          "pip_display_mentions": 1,
                           # A finished Pip run reaches the chats it reports to as a card in the
                           # transcript (pip_report events, {role: "pip_report"} history markers),
                           # once the client sends watch_pip_reports; pip_report_dismiss removes one.
@@ -2717,6 +2723,9 @@ class Backend:
                           # list_models_at is understood: the models at a host as Settings has it typed, with a
                           # saved key only for the host it is bound to (models_at answers).
                           "list_models_at": 1,
+                          # save_model_provider is understood: a provider saved in Settings, kept in secrets.json for
+                          # the Pips set to it, answered by model_provider_saved.
+                          "saved_model_providers": 1,
                           # DGC Router (dgc/router.py): router_status / router_update / router_probe / router_find,
                           # each answered by router_status; router_changed follows once a client has asked.
                           "router": self._router_capability(),
@@ -3202,9 +3211,10 @@ class Backend:
         # outline: chatdgc_outline is understood (every prompt of a chat, and the widgets its replies made).
         # holder: chatdgc_holder is understood (where a chat another window holds is open, and whether it is writing).
         # folder: chatdgc_folder, chatdgc_set_folder and chatdgc_work_brief (a folder the chat reads; Continue in Work).
+        # mentions: chatdgc_mentions is understood, and chatdgc_send takes display_mentions.
         return {"chatdgc": {"version": 1, "widget_report": 1, "widget_library": 1, "windows": list(CHATDGC_WINDOWS),
                             "context_breakdown": 1, "voice_replies": 1, "question_forms": 1, "outline": 1,
-                            "holder": 1, "folder": 1},
+                            "holder": 1, "folder": 1, "mentions": 1},
                 # history: memory_history and memory_undo; learned: memory_watch, then memory_learned when a
                 # Work session's look back keeps something (dgc/memory_review.py).
                 "memory": {"version": 1, "history": 1, "learned": 1}, "voice": {"version": 1}}
@@ -5262,6 +5272,38 @@ class Backend:
             sanitizer=lambda value: redact_value(value, secret_values(self.config)))
         fields = {"message": str(message)[:500]} if message else {}
         self.em.emit("memory", request_id=request_id, project=project, user=user, **fields)
+
+    def _save_model_provider(self, cmd: dict, request_id: str) -> None:
+        """Keep one provider saved in Settings for the Pips set to it, or forget it (``remove``). A fresh Config owns it,
+        as with set_model_defaults: the running chat's route stays untouched. The answer never carries the key."""
+        from .config import Config
+        from .sessions import _clean_native_route
+        provider_id = cmd.get("id")
+        remove = cmd.get("remove") is True
+        record = None
+        if not remove:
+            cleaned = _clean_native_route({"base_url": cmd.get("base_url"), "model": cmd.get("model"),
+                                           "api_mode": cmd.get("api_mode"), "thinking": "off"})
+            name, key = cmd.get("name"), cmd.get("api_key", "")
+            if (cleaned is None or not cleaned.get("model") or not isinstance(name, str) or not 1 <= len(name) <= 64
+                    or not isinstance(key, str) or len(key) > 16384 or any(ord(char) < 32 for char in key)):
+                self.em.emit("command_rejected", command="save_model_provider", reason="invalid_config_value",
+                             message="Choose a valid provider name, URL, model and single-line key.",
+                             **_request_fields(request_id))
+                return
+            record = {"name": name, "base_url": cleaned["base_url"], "api_mode": cleaned["api_mode"],
+                      "model": cleaned["model"], "api_key": key}
+        try:
+            Config(project_root=self.config.project_root).set_saved_provider(provider_id, record)
+        except ValueError:
+            self.em.emit("command_rejected", command="save_model_provider", reason="invalid_config_value",
+                         message="Choose a provider saved in Settings.", **_request_fields(request_id))
+            return
+        except Exception:                       # noqa: BLE001 -- its text could hold what was being saved
+            self.em.emit("command_rejected", command="save_model_provider", reason="defaults_save_failed",
+                         message="DGC could not save this provider for your Pips.", **_request_fields(request_id))
+            return
+        self.em.emit("model_provider_saved", id=provider_id, removed=remove, **_request_fields(request_id))
 
     def _emit_hook_catalog(self, request_id: str) -> None:
         catalog = hook_catalog(self.config)
@@ -8174,6 +8216,8 @@ class Backend:
                 return
             self.em.emit("model_defaults_changed", base_url=cleaned["base_url"],
                          model=cleaned["model"], **_request_fields(request_id))
+        elif t == "save_model_provider":
+            self._save_model_provider(cmd, request_id)
         elif t == "set_model":
             config_get = getattr(self.config, "get", None)
             session_route = cmd.get("scope") == "session"

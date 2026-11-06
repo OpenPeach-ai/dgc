@@ -19,6 +19,17 @@ test('Pip picker uses keyboard, sends only exact reference pins, and never attac
  assert.match(p.doc.querySelector('#log .prompt-text .sent-mention.pill-pip')?.textContent||'',/Rook review/);
  assert.equal(p.doc.querySelector('#log .pip-reference-chip'),null,'the sent Pip stays inline');
 });
+test('a Pip picked in Work is in the words the model reads, beside its reference, from a backend that takes them',()=>{
+ const p=makeDom({clock:true});const event=ready(1);event.event.capabilities.display_mentions=3;
+ p.send(event);p.send({type:'session_ready',sessionId:'chat-a'});select(p);
+ assert.equal(p.doc.getElementById('input').value,'Explain Rook review');
+ key(p,'Enter');
+ const sent=p.posted.filter(m=>m.type==='prompt').at(-1);
+ assert.equal(sent.text,'Explain Rook review');
+ assert.deepEqual(JSON.parse(JSON.stringify(sent.pip_references)),[{pip_id:ID,expected_version:2,expected_lifecycle_revision:4}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(sent.display_mentions)),[{start:8,kind:'pip',label:'Rook review',identity:ID,pip_type:'rook',wired:true}]);
+ assert.equal(p.doc.querySelector('#log .prompt-text').textContent,'Explain Rook review');
+});
 test('copying an inline Pip reference copies its name without plush style rules',()=>{
  const p=panel();select(p);
  const input=p.doc.getElementById('input'),selection=p.dom.window.getSelection(),range=p.doc.createRange();

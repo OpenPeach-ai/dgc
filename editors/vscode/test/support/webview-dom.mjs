@@ -10,7 +10,7 @@ import { buildSync } from "esbuild";
 
 const dir = fileURLToPath(new URL("../", import.meta.url));
 export const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
-export const mainJs = readFileSync(dir + "../media/main.js", "utf8");
+export const mainJs = readFileSync(dir + "../media/mentions.js", "utf8") + "\n" + readFileSync(dir + "../media/main.js", "utf8");
 export const breakdownJs = readFileSync(dir + "../media/breakdown.js", "utf8");   // the panel loads it before main.js
 export const msgTimeJs = readFileSync(dir + "../media/msgtime.js", "utf8");     // a message's time (DgcTime), also before
 export const promptRailJs = readFileSync(dir + "../media/promptrail.js", "utf8");   // the prompt rail (DgcPromptRail), also before

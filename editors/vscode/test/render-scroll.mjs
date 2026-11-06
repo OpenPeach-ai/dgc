@@ -16,7 +16,7 @@ import { buildSync } from "esbuild";
 const here = dirname(fileURLToPath(import.meta.url));
 const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
 const css = readFileSync(here + "/../media/main.css", "utf8");
-const mainJs = readFileSync(here + "/../media/main.js", "utf8");
+const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
 const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
 const candidates = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0]);

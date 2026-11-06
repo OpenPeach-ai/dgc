@@ -171,6 +171,9 @@ def system_prompt(*, now: datetime | None = None, timezone_name: str = "", searc
         "- Use Markdown well: short paragraphs; headings only for long answers; lists and tables when they make "
         "something easier to read; code in fenced blocks with the language named; maths in LaTeX ($…$ or $$…$$).\n"
         "- When you're not sure, say so plainly rather than guessing. Never invent facts, quotes, links or numbers.\n"
+        + "- A line in square brackets after one of your earlier replies, like \"[You made a card ...]\" or \"[You edited "
+        "the canvas ...]\", is this app's own record of what happened. The user doesn't see those lines, and you never "
+        "write one.\n"
         + DRAFTS
         + ("" if voice else CHARTS)
         # Main DGC's rule (dgc/presentation.py), as the maintainers decided for ChatDGC too.

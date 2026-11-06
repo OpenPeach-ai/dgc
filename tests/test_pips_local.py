@@ -48,6 +48,11 @@ class LocalPipsTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {"DGC_HOME": str(self.base / "home"), "HOME": str(self.base / "home")})
         self.env.start()
         self.addCleanup(self.env.stop)
+        # The saved route a run pins is read through this path, fixed when dgc.config was first imported: this home,
+        # never one another test left a saved connection in.
+        saved = patch("dgc.config.USER_CONFIG", self.base / "home" / ".dgc" / "config.json")
+        saved.start()
+        self.addCleanup(saved.stop)
         self.registry = WorkspaceRegistry(self.base / "state", clock=lambda: "2026-10-01T10:00:00.000Z")
         self.addCleanup(self.registry.close)
         self.store = pips.PipStore(self.registry)

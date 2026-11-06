@@ -394,6 +394,27 @@ class TheEditorIsTold(IsolatedHome):
         self.assertEqual(cfg.get("thinking"), "high")
         self.assertEqual(cfg.api_key, "runtime-only")
 
+    def test_a_provider_saved_for_pips_never_touches_the_chat_and_its_answer_has_no_key(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        provider = "provider_" + "b" * 32
+        active = (host.default.config.base_url, host.default.config.model)
+        host.dispatch({"type": "save_model_provider", "id": provider, "name": "Second", "base_url": "https://two.example/v1",
+                       "model": "m", "api_mode": "chat_completions", "api_key": "second-provider-key", "request_id": "kept"})
+        answer = self.frames("model_provider_saved")[-1]
+        self.assertEqual((answer["id"], answer["removed"], answer["request_id"]), (provider, False, "kept"))
+        self.assertNotIn("second-provider-key", self.wire.getvalue(), "the key is never on the wire back")
+        self.assertEqual((host.default.config.base_url, host.default.config.model), active)
+        self.assertNotIn("second-provider-key", (self.user / "config.json").read_text() if (self.user / "config.json").exists() else "")
+        self.assertEqual(json.loads((self.user / "secrets.json").read_text())["saved_providers"][provider]["api_key"], "second-provider-key")
+        for bad in ({"id": "nope", "name": "x", "base_url": "https://two.example/v1", "model": "m", "api_mode": "auto"},
+                    {"id": provider, "name": "x", "base_url": "https://u:p@two.example/v1", "model": "m", "api_mode": "auto"},
+                    {"id": provider, "name": "x", "base_url": "https://two.example/v1", "model": "m", "api_mode": "auto", "api_key": "a\nb"}):
+            host.dispatch({"type": "save_model_provider", **bad})
+            self.assertEqual(self.frames("command_rejected")[-1]["command"], "save_model_provider")
+        host.dispatch({"type": "save_model_provider", "id": provider, "remove": True, "request_id": "gone"})
+        self.assertEqual(self.frames("model_provider_saved")[-1]["removed"], True)
+        self.assertNotIn("saved_providers", json.loads((self.user / "secrets.json").read_text()))
+
     def test_new_chat_default_does_not_switch_the_open_chat(self):
         host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
         active = (host.default.config.base_url, host.default.config.model,

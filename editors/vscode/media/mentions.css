@@ -1,0 +1,152 @@
+/* The inline marks of a prompt box and the @ list that picks them: one look for Work's box, ChatDGC's and a Pip's
+   (media/mentions.js). Loaded after main.css where that page has it, and bundled into pips.css for a Pip's chat. */
+
+/* The marks' colours. On a dark ground these are the ones chosen in the box and the bubble. They are too pale for a light
+   ground (a Page mark read 1.6:1 on white, and the bubble's grey less on its lilac), so a light theme takes the same
+   effects in darker steps of the same hues. A Pip's bubble is the deep purple in either theme: its marks stay light. */
+:root {
+  --mark-word: #c7b5ff; --mark-word-shimmer: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
+  --mark-plugin: #c5a9ff; --mark-icon: #b6a0ff;
+  --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);
+  --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+}
+body:is(.vscode-light, .vscode-high-contrast-light) {
+  --mark-word: #6242d8; --mark-word-shimmer: linear-gradient(105deg,#6242d8,#8a6df0,#4f30c4,#7657e6,#6242d8);
+  --mark-plugin: #5d3cd2; --mark-icon: #6d49e8;
+  --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(124,92,255,.12), rgba(124,92,255,.22), rgba(124,92,255,.12), transparent);
+  /* A logo drawn light (Composio's) keeps a dark edge on a light ground. */
+  --mark-logo-filter: drop-shadow(.5px 0 0 #2a2140) drop-shadow(-.5px 0 0 #2a2140) drop-shadow(0 .5px 0 #2a2140) drop-shadow(0 -.5px 0 #2a2140);
+  --mark-sent: #5c5a68; --mark-sent-hover: #2f2d3a; --mark-sent-shimmer: linear-gradient(105deg,#5c5a68,#7f7d8c,#4f4d5a,#716f7e,#5c5a68);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);
+}
+.pip-message.user .bubble .prompt-text {
+  --mark-logo-filter: none;
+  --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+}
+/* A sigil and the name in the accent colour, with no box. A bordered chip beside another chip
+   makes two rectangles compete with the text between them. The atomicity that
+   the border used to signal is carried by the hover state and by Backspace still removing the
+   whole thing; `user-select: none` keeps a drag from selecting half a name. */
+.composer-pill { display: inline-flex; align-items: baseline; gap: 4px; margin: 0 2px; padding: 0 1px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--link);
+  font: var(--w-med) var(--t-xs)/1.35 var(--sans); white-space: nowrap; user-select: none; vertical-align: baseline; }
+.composer-pill:hover { background: color-mix(in srgb, var(--link) 12%, transparent); }
+/* The sigil has to be the key that opens the picker for that kind, and the sigil attachInvocation
+   puts on the chip underneath: $ for a skill, / for a template, @ for a file. There was no
+   .pill-skill rule at all, so a skill fell through to the default and rendered the TEMPLATE's
+   sigil -- type $fix, get a pill reading /fixture above a chip reading $fixture. */
+/* The same icon the `/` menu row shows for that kind, so picking a row and seeing the pill are
+   the same object twice. A file keeps "@" -- it is the key you type AND what every editor uses for
+   a mention -- while a skill and a template take their codicon. */
+.composer-pill::before { content: "/"; color: var(--link); font-family: var(--mono); }
+.composer-pill.pill-skill::before { content: "\eb29"; font-family: codicon; font-weight: normal; font-style: normal; }
+.composer-pill.pill-template::before { content: "\eb66"; font-family: codicon; font-weight: normal; font-style: normal; }
+.composer-pill.pill-file::before { content: "@"; }
+/* Slash, file and link selections are words in the prompt too. The older small flex pill put
+   their labels above the surrounding text and made their icons look detached from the line. */
+.composer-pill:is(.pill-skill, .pill-template, .pill-command, .pill-file, .pill-link) {
+  display: inline; font-size: inherit; line-height: inherit; font-family: inherit;
+  font-weight: var(--w-med); vertical-align: baseline; gap: 0;
+}
+.composer-pill:is(.pill-skill, .pill-template, .pill-link)::before {
+  display: inline-block; font-size: .86em; line-height: 1;
+  position: relative; top: 1px; margin-right: 4px;
+}
+.composer-pill.pill-pip { color: var(--text); }
+/* These marks are words in a sentence. Keep the label in the sentence's own inline line box so
+   its glyph baseline is identical to the surrounding prose in both the composer and sent bubble. */
+.composer-pill:is(.pill-plugin, .pill-artifact, .pill-pip) {
+  display: inline; font-size: inherit; line-height: inherit; font-family: inherit;
+  font-weight: var(--w-med); vertical-align: baseline; gap: 0;
+}
+.composer-pill.pill-pip::before { content: none; }
+.composer-pip-name { color: var(--mark-word); background: var(--mark-word-shimmer);
+  background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: composerArtifactWords 7s ease-in-out infinite; }
+.composer-pip-face, .composer-pip-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
+.composer-pip-face { vertical-align: -1px; margin-right: 4px; position: relative; top: -1px; }
+.composer-pill.pill-plugin::before, .composer-pill.pill-artifact::before { content: none; }
+.composer-pill.pill-plugin { padding: 2px 4px; color: var(--mark-plugin);
+  background: var(--mark-plugin-glow);
+  background-size: 260% 100%; animation: composerPluginGlow 4.5s ease-in-out infinite; }
+.composer-pill.pill-artifact { color: var(--mark-word); }
+.composer-artifact-name { color: var(--mark-word); background: var(--mark-word-shimmer);
+  background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: composerArtifactWords 7s ease-in-out infinite; }
+.composer-plugin-mark, .composer-artifact-mark { display: inline-block; width: 16px; height: 16px;
+  line-height: 16px; vertical-align: -3px; margin-right: 4px; }
+.composer-plugin-mark { position: relative; top: 1px; }
+.composer-artifact-mark { position: relative; top: .5px; }
+.composer-plugin-mark img { display: block; width: 15px; height: 15px; object-fit: contain; }
+.composer-artifact-mark { color: var(--mark-icon); -webkit-text-fill-color: var(--mark-icon); font-size: 14px; }
+.composer-plugin-mark img { filter: var(--mark-logo-filter, none); }
+.prompt-text .sent-mention { user-select: text; cursor: text; }
+.prompt-text .sent-mention.pill-plugin { color: var(--mark-sent);
+  background: var(--mark-sent-glow);
+  background-size: 260% 100%; }
+.prompt-text .sent-mention .composer-artifact-name,
+.prompt-text .sent-mention .composer-pip-name { color: var(--mark-sent);
+  background: var(--mark-sent-shimmer);
+  background-size: 400% 100%; background-clip: text; -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent; }
+.prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command),
+.prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command)::before,
+.user .bubble .prompt-link { color: var(--mark-sent); }
+.prompt-text .sent-mention.pill-command::before { content: none; }
+.prompt-text .sent-attachment { cursor: pointer; }
+.prompt-text .sent-attachment:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.user .bubble .prompt-link:hover { color: var(--mark-sent-hover); }
+@keyframes composerPluginGlow { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes composerArtifactWords { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@media (prefers-reduced-motion: reduce) {
+  .composer-pill.pill-plugin, .composer-artifact-name, .composer-pip-name { animation: none; }
+}
+/* A link pill wears the BUNDLED globe, never a fetched favicon: an icon fetched while you are
+   still typing discloses the host of a URL you may yet delete, and the codicon costs no request.
+   It shows the host rather than the whole URL; the message you send draws the site's own favicon
+   on its prompt bubble. */
+.composer-pill.pill-link::before { content: "\eb01"; font-family: codicon; font-weight: normal; font-style: normal; color: var(--link); }
+/* With no border of its own, a pill in forced colours needs the one thing that still marks it. */
+@media (forced-colors: active) { .composer-pill { border: 1px solid CanvasText; color: LinkText; } }
+
+/* @file / slash popover */
+/* ONE height, whatever the query matches. It used to size to its rows, so narrowing "/g" to
+   "/goal" collapsed a four-row list to a single line: the panel jumped under the cursor as you
+   typed, and the one row that was left read as a stray banner rather than a list you were choosing
+   from. Codex caps its popup at 8 rows (MAX_POPUP_ROWS) and lets it shrink; in a terminal that is
+   calm, in a panel it is not. Fixed, top-aligned, and it scrolls past four.
+
+   `flex: 0 0 auto` is load-bearing, and its absence is what a fixed height alone bought: this is a
+   direct child of the column-flex `body`, so with the default `flex-shrink: 1` a tall transcript
+   plus a composer rail simply squashed the 210px down to whatever was left -- one clipped row,
+   which is worse than the collapsing it replaced. `max-height: min(210px, 40vh)` is the other half:
+   refusing to shrink must not mean pushing the composer off a short panel. */
+.pop { display: none; margin: 0 var(--sp-1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); flex: 0 0 auto; height: 210px; max-height: min(210px, 40vh); overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); align-content: start; }
+.pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); color: var(--text); }
+.pop .pi-label { display: flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The icon carries the kind, so the row can drop the sigil and read as a name. Sized to the row's
+   own text rather than the codicon default, which is a line taller than this list wants. */
+.pop .pi-icon { flex: 0 0 auto; font-size: 13px; line-height: 1; color: var(--link); }
+.pop .pi.sel .pi-icon { color: inherit; }
+.pop .pi-kind { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
+.pop .pi.sel { background: var(--sel); }
+.pop .pd { grid-column: 1 / -1; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop .pi-pip-face, .pop .pi-pip-face .dgc-plush { display: inline-block; flex: none; width: 20px; height: 20px; }
+.pop .pi-plugin-mark img { display: block; width: 16px; height: 16px; object-fit: contain; }
+
+/* A box that was a <textarea>: ChatDGC's and a Pip's. Its font and line height stay its page's; these are what a
+   textarea gave it for free. The placeholder is out of flow, as #input's is: as an in-flow inline box it is the first
+   thing in the editing host's line, so the caret sat AFTER it. */
+.mention-box { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; }
+.mention-box.is-empty::before { content: attr(data-placeholder); display: inline-block; width: 0;
+  white-space: nowrap; overflow: visible; pointer-events: none; }
+.mention-box[contenteditable="false"] { cursor: not-allowed; }
+/* Above the box, over the conversation: choosing a mark doesn't move what you are reading. */
+.pop.pop-over { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); margin: 0; z-index: 30; }
+@media (forced-colors: active) {
+  .pop { border-color: CanvasText; }
+  .pop .pi.sel { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; box-shadow: none; }
+  .pop .pi.sel * { color: inherit; }
+}

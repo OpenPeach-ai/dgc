@@ -51,7 +51,7 @@ export function panelHtml() {
   // The prompt rail (DgcPromptRail) is loaded before main.js, as the panel loads it.
   // So are the user's mods (DgcMods).
   const mainJs = readFileSync(here + "/media/promptrail.js", "utf8") + "\n" + readFileSync(here + "/media/mods.js", "utf8")
-    + "\n" + readFileSync(here + "/media/main.js", "utf8");
+    + "\n" + readFileSync(here + "/media/mentions.js", "utf8") + "\n" + readFileSync(here + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/src/markdown.ts"], bundle: true, format: "iife",
     globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

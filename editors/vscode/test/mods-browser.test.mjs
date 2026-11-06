@@ -147,7 +147,7 @@ test("ChatDGC: \"/\" lists /mods and the running mods' commands, and a chosen or
     const [run] = await modsPosted("command");
     assert.deepEqual({ name: run.name, surface: run.surface }, { name: "tally", surface: "chat" });
     assert.match(run.request_id, /^chatdgc-mods-/);
-    assert.equal(await page.inputValue("#cd-input"), "", "chosen, it ran: the box is empty again");
+    assert.equal(await page.evaluate(() => document.getElementById("cd-input").value), "", "chosen, it ran: the box is empty again");
     await send({ type: "modsEvent", event: { type: "mod_result", request_id: run.request_id, name: "tally", mod: "Tally", tree: RESULT } });
     const card = await page.$eval("#cd-log .mod-result", (n) => [n.querySelector(".mod-result-from").textContent, n.dataset.state, n.querySelector(".mod-table td")?.textContent]);
     assert.deepEqual(card, ["From Tally", "done", "read_file"]);

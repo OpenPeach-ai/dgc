@@ -1,6 +1,7 @@
 """A Personal Pip's plugins: it asks before it uses one, reads run at once, and anything else waits for Allow."""
 import copy
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -677,3 +678,47 @@ class PluginInstructionsTests(unittest.TestCase):
         self.assertIn("Your plugins: Aave (Live Aave lending and borrowing rates.); 1inch.", said)
         self.assertIn("When the user names one of them", said)
         self.assertNotIn("use_plugin", said, "there is nothing to ask for")
+
+    def test_it_is_told_to_read_with_a_plugin_rather_than_drive_a_browser(self):
+        said = pip_plugins.instructions([{"plugin": "cloudflare", "name": "Cloudflare", "about": "", "allowed": True}])
+        self.assertIn("read it there rather than driving a browser on your computer", said)
+
+
+class CloudflareCatalogTests(unittest.TestCase):
+    """Cloudflare's read path for a Pip: a read runs with no approval, and anything DGC hasn't reviewed still asks."""
+
+    def setUp(self):
+        from dgc import plugins
+        self.entry = next(row for row in plugins.load_catalog()["plugins"] if row["name"] == "cloudflare")
+        # What an install really records for a hosted preset: it has no commit, so source_pin is "".
+        record = {"name": "cloudflare", "marketplace": "dgc-curated", "upstream": self.entry["upstream"],
+                  "source_pin": self.entry.get("sha", ""), "source_kind": "preset"}
+        self.info = pip_plugins._info(record, {"cloudflare": self.entry})
+
+    def test_it_is_cloudflares_own_read_only_server_with_its_own_sign_in(self):
+        self.assertEqual(self.entry["install"], "allow")
+        self.assertEqual(self.entry["auth"], "browser")
+        self.assertEqual(self.entry["mcp_presets"], {"cloudflare": {"url": "https://graphql.mcp.cloudflare.com/mcp"}})
+        self.assertNotIn("risk", self.entry)
+
+    def test_a_real_install_records_what_the_reviewed_reads_ask_for(self):
+        from dgc import plugins
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder) / "plugins"
+            with patch.object(plugins, "PLUGIN_HOME", home), patch.object(plugins, "SKILL_ROOT", home / "skills"), \
+                    patch.object(plugins, "LOGO_ROOT", home / "logos"), patch.object(plugins, "STATE_PATH", home / "installed.json"):
+                plugins.install(self.entry)
+                record = next(row for row in plugins._installed() if row["name"] == "cloudflare")
+        found = pip_plugins._info(record, {"cloudflare": self.entry})
+        self.assertEqual(found["display_name"], "Cloudflare")
+        self.assertIn("graphql_query", found["reads"])
+
+    def test_a_traffic_read_runs_at_once(self):
+        for tool in ("graphql_query", "graphql_schema_search", "graphql_type_details", "zones_list", "zone_details"):
+            self.assertTrue(pip_plugins.read_only({"name": tool}, self.info), tool)
+        self.assertTrue(pip_plugins.read_only({"name": "zones_list", "annotations": {"readOnlyHint": True}}, self.info))
+
+    def test_anything_else_still_asks_and_the_vendors_own_mark_wins(self):
+        self.assertFalse(pip_plugins.read_only({"name": "execute"}, self.info), "a tool it didn't review")
+        self.assertFalse(pip_plugins.read_only({"name": "graphql_query", "annotations": {"readOnlyHint": False}}, self.info))
+        self.assertFalse(pip_plugins.read_only({"name": "graphql_query", "annotations": {"destructiveHint": True}}, self.info))

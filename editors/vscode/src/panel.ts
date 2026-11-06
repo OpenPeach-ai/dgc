@@ -1,3 +1,4 @@
+import { workspaceFiles } from "./mentionsHost";
 import { APP_CONNECTORS, connectorUrl, ownAppRedirect } from "./appConnectors";
 import { COMPOSIO_CATALOG } from "./composioConnections";
 import * as vscode from "vscode";
@@ -4573,7 +4574,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name: installName });
         this.backend?.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
       }
-      const items = (ev as any).items.map((item: any) => ({ ...item, logo: this.pluginLogo(item, this.view?.webview) }));
+      // The chat's marks (@Composio) draw a connected plugin's own logo, and that page takes logos only as data: URIs.
+      const items = (ev as any).items.map((item: any) => ({ ...item, logo: this.pluginLogo(item, this.view?.webview, item?.connected === true) }));
       if (this.view) this.post({ type: "event", event: { ...ev, items } });
       const editorItems = (ev as any).items.map((item: any) => ({
         ...item, logo: this.pluginLogo(item, this.settingsEditor?.webview),
@@ -5197,6 +5199,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsOpenPhoto":
       case "pipsOpenArtifact":
       case "pipsPluginLogos":
+      case "pipsFiles":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
@@ -5936,18 +5939,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendFiles(): Promise<void> {
-    const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,out,.venv,.next}/**", 600);
-    const multiRoot = (vscode.workspace.workspaceFolders?.length || 0) > 1;
-    const files = uris.map((uri) => {
-      const folder = vscode.workspace.getWorkspaceFolder(uri);
-      return {
-        label: vscode.workspace.asRelativePath(uri, multiRoot),
-        uri: uri.toString(),
-        path: uri.fsPath,
-        relative_path: folder ? vscode.workspace.asRelativePath(uri, false) : uri.fsPath,
-        workspace: folder?.name || "",
-      };
-    }).sort((a, b) => a.label.localeCompare(b.label));
+    const files = await workspaceFiles();
     this.post({ type: "files", files });
   }
 
@@ -7706,6 +7698,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.pipsEditor.attach(message => this.post(message));
       this.pipsEditor.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsEditor.usePluginLogos((plugin) => this.replyPluginLogo(plugin));
+      this.pipsEditor.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id));
       // A Pip's page lists the person's dashboards and opens its report and its dashboards (Pips API 67).
       this.pipsEditor.useArtifacts(() => this.artifacts);
       this.pipsEditor.videoStop = (job) => this.videosStop(job);
@@ -7719,6 +7712,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (this.sessionReady) this.pipsEditor.ready(this.lastReadyEvent?.capabilities, this.backend);
     return this.pipsEditor;
+  }
+  /** The API providers saved in Settings, for a Pip's model menus, with their models as Work lists them. Names and
+   *  model ids only: no address and no key reaches a Pip's page. */
+  private async pipSavedProviders(): Promise<{ id: string; name: string; default: boolean; models: string[] }[]> {
+    if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) return [];
+    const defaultId = defaultProfileId(this.context);
+    const saved = listProfiles(this.context).filter(row => row.kind !== "subscription");
+    return Promise.all(saved.map(async row => ({ id: row.id, name: row.name, default: row.id === defaultId,
+      models: (await this.chatdgcModels(row.id)).ids.filter(Boolean) })));
+  }
+  /** A Pip was set to this provider. Its runs happen with no window, so its route and key go where DGC keeps keys. */
+  private async savePipProvider(id: string): Promise<void> {
+    if ((this.lastReadyEvent?.capabilities as any)?.saved_model_providers !== 1) {
+      throw new Error("Update DGC CLI to run a Pip on a saved provider.");
+    }
+    const { route, api_key } = await profileCredential(this.context, id);
+    if (route.kind === "subscription") throw new Error("That provider uses a subscription CLI.");
+    await this.requestState(this.ensureBackend(), "pip-provider", { type: "save_model_provider", id: route.id, name: route.name,
+      base_url: route.base_url, model: route.model, api_mode: route.api_mode, api_key }, "model_provider_saved", 10000);
+  }
+  /** The provider list changed: every open Pips page lists it again. */
+  private savedProvidersChanged(): void {
+    const home = this.tab?.host || this;
+    home.pipsEditor?.modelsChanged();
+    home.pipsTab?.modelsChanged();
   }
   /** A Pip's messages were marked read (its chat opened, its count pill, its card in a Work chat acted on): the home's
    *  Pips row and every open Pips page count them again. */
@@ -7753,6 +7771,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }, true);
       this.pipsTab.useDictation(() => this.dictationService(), () => this.readAloudService());
       this.pipsTab.usePluginLogos(plugin => this.replyPluginLogo(plugin));
+      this.pipsTab.useSavedProviders(() => this.pipSavedProviders(), id => this.savePipProvider(id));
       this.pipsTab.useArtifacts(() => this.artifacts);
       this.pipsTab.videoStop = (job) => this.videosStop(job);
       this.pipsTab.videoFollow = (job) => this.videosJobs(job);
@@ -8136,8 +8155,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await markDefaultProfile(this.context, id);
   }
 
-  private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview): string {
+  private pluginLogo(item: PluginLogoItem, webview?: vscode.Webview, inline = false): string {
     if (!webview) return "";
+    if (inline) return pluginLogoData(this.context.extensionUri, item);
     const found = pluginLogoSource(this.context.extensionUri, item);
     return found.data ?? (found.file ? webview.asWebviewUri(found.file).toString() : "");
   }
@@ -8218,13 +8238,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           catch (error) { await removeProfile(this.context, added.id); throw error; }
         }
         this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context), saved: true });
+        this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not save provider.") });
       }
     } else if (msg?.type === "removeProviderProfile") {
       try {
-        await removeProfile(this.context, String(msg.id || ""));
+        const removing = String(msg.id || "");
+        // A Pip set to it stops here and says so. First, so a failure keeps both: the key is never left behind.
+        if (defaultProfileId(this.context) !== removing && removing.startsWith("provider_")
+            && (this.lastReadyEvent?.capabilities as any)?.saved_model_providers === 1) {
+          await this.requestState(be, "pip-provider-removed", { type: "save_model_provider", id: removing, remove: true },
+            "model_provider_saved", 10000);
+        }
+        await removeProfile(this.context, removing);
         this.settingsEditor?.webview.postMessage({ type: "providerProfiles", profiles: listProfiles(this.context), defaultId: defaultProfileId(this.context) });
+        this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError", message: String(error?.message || "Could not remove provider.") });
       }
@@ -8234,6 +8263,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await this.setDefaultProvider(id);
         this.settingsEditor?.webview.postMessage({ type: "providerProfiles",
           profiles: listProfiles(this.context), defaultId: id });
+        this.savedProvidersChanged();
       } catch (error: any) {
         this.settingsEditor?.webview.postMessage({ type: "providerProfileError",
           message: String(error?.message || "Could not set the default model.") });
@@ -9387,10 +9417,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const queueCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.css"));
+    const mentionsCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.css"));
+    const mentionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const traceJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "trace.js"));
+    const traceCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "trace.css"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
     const breakdownScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "breakdown.js"));
@@ -9450,6 +9483,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${css}">
 <link rel="stylesheet" href="${genuiCss}">
 <link rel="stylesheet" href="${queueCss}">
+<link rel="stylesheet" href="${mentionsCss}">
+<link rel="stylesheet" href="${traceCss}">
 <link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 <link rel="stylesheet" href="${mcpAppsCss}">
@@ -9698,6 +9733,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${breakdownScript}"></script>
 <script nonce="${nonce}" src="${toolInsightsScript}"></script>
+<script nonce="${nonce}" src="${mentionsJs}"></script>
 <script nonce="${nonce}" src="${pipsScript}"></script>
 <script nonce="${nonce}" src="${voicebarJs}"></script>
 <script nonce="${nonce}" src="${msgTimeJs}"></script>

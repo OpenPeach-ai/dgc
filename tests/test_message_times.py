@@ -46,7 +46,7 @@ class AgentStampTests(unittest.TestCase):
         self.assertLessEqual(prompt["_dgc_at"], reply["_dgc_at"])
         self.assertLessEqual(reply["_dgc_at"], after + 0.01)
 
-    def test_every_model_round_is_stamped_and_tool_results_are_not(self):
+    def test_every_model_round_and_tool_result_is_stamped_for_the_trace(self):
         agent = self.agent()
         scripted(agent, [ChatResult(content="", tool_calls=[ToolCall("c1", "bash", {"command": "echo hi"})],
                                     finish_reason="tool_calls"),
@@ -55,7 +55,10 @@ class AgentStampTests(unittest.TestCase):
         replies = [m for m in agent.messages if m.get("role") == "assistant"]
         self.assertEqual(len(replies), 2)
         self.assertTrue(all(isinstance(m.get("_dgc_at"), float) for m in replies))
-        self.assertFalse(any("_dgc_at" in m for m in agent.messages if m.get("role") == "tool"))
+        # A tool result says when it came back: a saved turn's Trace replays from these (media/trace.js).
+        tools = [m for m in agent.messages if m.get("role") == "tool"]
+        self.assertEqual(len(tools), 1)
+        self.assertIsInstance(tools[0].get("_dgc_at"), float)
 
     def test_messages_already_in_the_transcript_are_left_alone(self):
         agent = self.agent()
@@ -138,10 +141,13 @@ class HistoryTests(unittest.TestCase):
             {"role": "assistant", "content": "Yes.", "_dgc_at": 1_760_000_104.0},
         ])
         shape = [item.get("type") or f'{item["role"]}:{item.get("of")}' for item in items]
-        self.assertEqual(shape, ["turn_start", "time:prompt", "tool_call", "tool_result", "text_delta", "stream_end",
-                                 "time:reply", "turn_end",
-                                 "turn_start", "time:prompt", "text_delta", "stream_end", "time:reply", "turn_end"])
-        times = [(item["of"], item["at"]) for item in items if item.get("role") == "time"]
+        self.assertEqual(shape, ["turn_start", "time:prompt", "time:trace", "tool_call", "tool_result", "text_delta",
+                                 "time:trace", "stream_end", "time:reply", "turn_end",
+                                 "turn_start", "time:prompt", "text_delta", "time:trace", "stream_end", "time:reply",
+                                 "turn_end"])
+        self.assertEqual([item["at"] for item in items if item.get("of") == "trace"],
+                         [1_760_000_003.0, 1_760_000_009.5, 1_760_000_104.0], "each model round's time, for its Trace")
+        times = [(item["of"], item["at"]) for item in items if item.get("role") == "time" and item["of"] != "trace"]
         self.assertEqual(times, [("prompt", 1_760_000_000.0), ("reply", 1_760_000_009.5),
                                  ("prompt", 1_760_000_100.0), ("reply", 1_760_000_104.0)],
                          "the reply's time is its last message's, after the tools")

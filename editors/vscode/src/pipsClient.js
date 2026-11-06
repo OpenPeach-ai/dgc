@@ -3,6 +3,8 @@ import {connectorDraft,connectorDraftsPage,connectorCall,connectorInspection,act
 import './pips.css';
 import '../media/messagequeue.js';
 import '../media/messagequeue.css';
+import '../media/trace.js'; // window.DgcTrace: a reply's steps replayed, the same dialog as Work and ChatDGC
+import '../media/trace.css';
 import '../media/genui.css';
 import {accountChoices,accountReadPlan,appLabels,appReadNotices,appReadWords,extraReadTools,combineReadPlans} from './pipsAppPicker.js';
 import './pipsTranscript.css';
@@ -13,6 +15,8 @@ import '../media/readaloud.js'; // window.DgcReadAloud: a reply read aloud, as m
 import '../media/voicemode.js'; // window.DgcVoiceMode: a spoken conversation, as ChatDGC has it
 import '../media/texthistory.js'; // window.DgcTextHistory: undo and redo for the chat box, as main DGC and ChatDGC have them
 import '../media/numbered-list.js';
+import '../media/mentions.js';   // window.DgcMentions: @ marks in the box and the bubble, the same in all three chats
+import '../media/mentions.css';
 import {messageMarkup,replyParts,executionCardMarkup,transcriptIcon} from './pipsTranscript.js';
 import {patchChildren} from './pipsDomPatch.js';
 import {runPostsPage,mergePosts,postMarkup,postShort,postStatus,timeline,shortReply,routineTitle as postRoutineTitle,runFixesPage,askable,FIX_ACTIVE,livePostMarkup} from './pipRunPosts.js';
@@ -154,8 +158,62 @@ const voiceMode=talkBar&&reader&&window.DgcVoiceMode?window.DgcVoiceMode.create(
 // is a new <textarea> with an empty history of its own: Cmd/Ctrl+Z in a Pip's box did nothing once a reply streamed in, or
 // once the first word swapped voice mode for Send. The history lives outside the element, and the box's own edits --
 // what was dictated, a message sent or given back, a choice added -- are steps of it.
-const chatHistory=window.DgcTextHistory?window.DgcTextHistory.create({box:()=>$('chatText'),changed:()=>{const box=$('chatText');if(!box)return;draft.chatText=box.value;if(S.selected)chatDrafts.set(S.selected,draft.chatText);rememberView();render();fitChatInput();}}):null;
+const chatHistory=window.DgcTextHistory?window.DgcTextHistory.create({box:()=>$('chatText'),changed:()=>{const box=$('chatText');if(!box)return;draft.chatText=box.value;if(S.selected)chatDrafts.set(S.selected,draft.chatText);rememberMarks();rememberView();render();fitChatInput();}}):null;
 const chatEdit=change=>chatHistory?chatHistory.record(change):change();
+// The box holds @ marks where they were typed (media/mentions.js), so it is Work's kind of box: an editing host answering
+// this page as a <textarea>. It is one element for the life of the page, never redrawn: the page's markup holds an empty
+// slot (data-dom-own), and a redraw that replaced the slot gets this element back, marks, caret and all.
+// `chatMarks`: per Pip, the draft's words and marks, for when the box comes back to it.
+const Mentions=remoteHost?null:globalThis.DgcMentions;
+const chatMarks=new Map();
+let chatBox=null,chatPop=null,chatPicker=null,boxPip='',projectFiles=[],projectFilesAsked=false;
+const rowTerminal='<svg class="pi-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4 3.5 3.5L3 11M8 12h5"/></svg>';
+function chatMarkLook(part){return{logo:part.kind==='plugin'?pluginLogoSrc(part.identity):'',plug:transcriptIcon('plug'),faceStyles:false};}
+function rememberMarks(pip=S.selected){if(!chatBox||!pip)return;const parts=chatBox.parts();if(parts)chatMarks.set(pip,{text:chatBox.el.value,parts});else chatMarks.delete(pip);}
+// What this Pip can reach, and nothing else: the plugins it can call (a Personal Pip's), the other Pips of its own
+// workspace (what it can hand work to and be told about), and the project's files for a Pip that reads them. It makes
+// no Outputs: a Pip's chat has no Output menu and no artifact tools.
+function chatMentionSources(){
+ const others=(S.jobs||[]).filter(p=>p.id!==S.selected&&p.status!=='archived'&&p.name).slice(0,100).map(p=>{const body=profile(p.profile).body;return{pip_id:p.id,name:p.name,pip_type:personalPip(p)&&body?body:p.pip_type,kind:`${p.pip_type} Pip`,detail:`${personalPip(p)?'Personal':'Project'} · v${p.current_version} · ${p.id.slice(-8)}`};}).filter(p=>Mentions.PIP_TYPES.includes(p.pip_type));
+ return{plugins:personalPip()?(S.pluginsInstalled||[]).map(p=>({id:p.plugin,name:p.name})):[],outputs:[],pips:others,pipsEmpty:'No other Pips here',files:personalPip()?[]:projectFiles};
+}
+if(Mentions){
+ const el=owner.createElement('div');el.id='chatText';el.className='mention-box';el.dataset.draft='chatText';el.setAttribute('data-dom-own','1');el.setAttribute('contenteditable','true');el.setAttribute('role','textbox');el.setAttribute('aria-multiline','true');el.setAttribute('aria-controls','chat-pop');el.setAttribute('aria-autocomplete','list');el.setAttribute('aria-haspopup','listbox');el.setAttribute('aria-expanded','false');
+ chatPop=owner.createElement('div');chatPop.id='chat-pop';chatPop.className='pop pop-over';chatPop.setAttribute('role','listbox');chatPop.setAttribute('aria-label','Suggestions');chatPop.setAttribute('data-dom-own','1');
+ chatBox=Mentions.box(el,{maxLength:4000,faceStyles:false,edit:change=>chatEdit(change),pillOptions:chatMarkLook,
+  pasteBack:part=>part.kind==='plugin'?chatMentionSources().plugins.some(p=>p.id===part.identity):part.kind==='pip'?chatMentionSources().pips.some(p=>p.pip_id===part.identity):part.kind==='file'&&!personalPip()});
+ chatPicker=Mentions.picker(chatBox,chatPop,{edit:change=>chatEdit(change),sources:chatMentionSources,pipsDetail:'This Pip\u2019s workspace · no work starts',
+  refresh(){if(!personalPip()&&!projectFilesAsked){projectFilesAsked=true;vscode.postMessage({type:'pipsFiles'});}},
+  face:(it,i)=>{const index=it.pipRow?Mentions.PIP_TYPES.indexOf(it.pipRow.pip_type):-1;return index>=0?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:it.pipRow.name},'idle',`pickerPip${i}`,{includeStyles:false})}</span>`:'';},
+  icon:it=>{if(!it.pluginId)return rowTerminal;const src=pluginLogoSrc(it.pluginId);return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${esc(it.pluginId)}">${src?`<img alt="" src="${esc(src)}">`:transcriptIcon('plug')}</span>`;},
+  drawn:()=>hydratePluginLogos(),
+  // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (named_pips).
+  pipPart:p=>{const name=p.name.replace(/\s+/g,' ').trim();return{kind:'pip',label:name,wire:name,identity:p.pip_id,pipType:p.pip_type};},
+  // A project's Pip reads the project: the path is the words.
+  filePart:file=>({kind:'file',label:file.label,wire:file.label,identity:''})});
+ disposers.push(()=>chatBox.dispose());
+}
+// Put the box back in its slot after a redraw, and bring it up to date with what the page says it holds.
+function syncChatBox(){
+ if(!chatBox)return;
+ const slot=$('chatText'),pop=$('chat-pop');
+ if(pop&&pop!==chatPop)pop.replaceWith(chatPop);
+ if(!slot)return;
+ const el=chatBox.el,moved=slot!==el;
+ if(moved)slot.replaceWith(el);
+ const type=pipType(S.pip,S.types);
+ el.placeholder=chatStyle()?`Ask ${S.pip?.name||''}`:`Message ${type?.name||'this Pip'}…`;
+ el.setAttribute('aria-label',`Message ${type?.name||'this Pip'}`);
+ el.disabled=archived()||!usable();
+ const now=el.value,want=draft.chatText;
+ if(boxPip!==S.selected||now!==want){
+  const kept=chatMarks.get(S.selected);
+  if(kept&&kept.text===want)chatBox.writeParts(kept.parts);
+  else if(boxPip===S.selected&&now&&want.startsWith(now)){const at=now.length;chatBox.replace(at,at,want.slice(at));}
+  else chatBox.writeParts(want?[want]:[]);
+  boxPip=S.selected;
+ }
+}
 function micShow(next,action=''){S.mic=['starting','recording','writing'].includes(next)?next:'idle';voiceBar?.state(S.mic,action);}
 function micCancel(){micShow('idle');render();vscode.postMessage({type:'micCancel',from:'pips'});$('chatText')?.focus();}
 /** What was said, at the caret of the Pip's box, spaced from its neighbours; then sent, when Send stopped it. */
@@ -166,7 +224,7 @@ function dictatedToPip(text,send){
   const whole=draft.chatText||'',[start,end]=micCaret&&micCaret[1]<=whole.length?micCaret:[whole.length,whole.length];micCaret=null;
   const before=whole.slice(0,start),after=whole.slice(end);
   const piece=(before&&!/\s$/.test(before)?' ':'')+text+(after&&!/^\s/.test(after)?' ':'');
-  chatEdit(()=>{draft.chatText=(before+piece+after).slice(0,4000);render();});
+  chatEdit(()=>{if(chatBox&&$('chatText')===chatBox.el){chatBox.replace(start,end,piece);draft.chatText=chatBox.el.value.slice(0,4000);rememberMarks();}else draft.chatText=(before+piece+after).slice(0,4000);render();});
   const again=$('chatText');if(again){again.focus();const at=Math.min(draft.chatText.length,start+piece.length);again.setSelectionRange(at,at);}
   fitChatInput();
   if(send)void sendChat();
@@ -199,7 +257,7 @@ const askedRuns=new Set(Array.isArray(savedView?.asked)?savedView.asked.filter(r
 // Show all, opened on a run's result or a routine's reply (by run or message id): for this view only.
 const shownInFull=new Set();
 S.sidebarPinned=savedView?.sidebar_pinned===true;
-function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
+function rememberView(){savedView={workspace_id:S.workspace?.id,scope_tab:S.workspace?scopeTab():undefined,selected:S.selected,tab:S.tab,overview:S.overview,sidebar_pinned:S.sidebarPinned,drafts:Object.fromEntries([...chatDrafts].slice(-20)),draft_marks:Object.fromEntries([...chatMarks].slice(-20)),chat_queues:Object.fromEntries([...chatQueues].filter(([,list])=>list.length).slice(-20)),asked:[...askedRuns].slice(-100)};options.setState?.(savedView);}
 const characterStyles=document.createElement('style');characterStyles.id='pips-plush-styles';characterStyles.textContent=window.PipConcepts.plush.styles;document.head.append(characterStyles);
 let outcomeSessions=[],outcomeSessionsCursor='',outcomeSessionsMore=false,outcomeSessionsLoaded=false,outcomeSessionsLoading=false,outcomeSessionsError='',outcomeHistory=[],outcomeCursor=null,outcomeLoaded=false,outcomeLoading=false,outcomeError='',outcomeInspection=null,outcomeInspecting=false,outcomeSessionSeq=0,outcomeSeq=0,outcomeInspectSeq=0,outcomeReviewSeq=0,outcomeRetry=null;
 let notifications=null,notificationItems=[],notificationLoading=false,notificationError='',notificationSeq=0,notificationMark='';
@@ -209,7 +267,7 @@ let commandReceipts=[],commandCursor=null,commandMore=false,commandTotal=0,comma
 let pulseCommands=[{argv:[''],cwd:'.'}],commitRules=[{kind:'exact',path:''}];
 // The Source section's Excluded folders (safe_source_v2, API 50), its size check and one run's left-out record.
 let sourceExcludeList=[],sourceExcludeProblem='',sourceCheckState={pip:'',value:null,loading:false,error:''},runSourceState={run:'',value:null,error:''};
-const draft = {deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',chatModelSearch:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
+const draft = {deletePipName:'',sourceExcludeInput:'',noteAdd:'',workingNotesText:'',pipLearnText:'',newPipName:'',newPipCharacter:'scout',quickKind:'manual',quickTime:'08:30',quickHours:'4',quickZone:defaultZone,feedbackNote:'',webReads:'',setupTask:'',verificationEnabled:false,pulseMode:'tests',liveCommands:'',statementKind:'fact',statementTitle:'',statementText:'',statementReason:'',statementExpiry:'',statementSource:'',specialistExplorer:false,specialistCritic:false,specialistWorker:false,specialistCalls:'1',memoryExpiry:'',outcomeSession:'',outcomeSourceKind:'commit',outcomeSourceValue:'',outcomeTitle:'',outcomeText:'',sourceMode:'committed_only',sourceReason:'',triggerContext:false,triggerFinding:false,triggerCommit:false,triggerSession:false,triggerPaths:false,triggerMinutes:'5',adaptationMode:'suggest_changes',adaptationName:false,adaptationSource:false,adaptationReason:'',handoffText:'',handoffTarget:'',handoffTask:'',handoffPaths:'',handoffTests:'[]',createModel:'default',pipModel:'default',modelReason:'',findingReviewReason:'',chatText:'',scheduleType:'manual',scheduleAt:'',scheduleCron:'0 9 * * 1-5',scheduleMinutes:'60',scheduleTime:'09:00',scheduleZone:defaultZone,scheduleReason:'',name:'',goal:'',source_ref:'HEAD',revisionGoal:'',revisionReason:'',contextKind:'decision',contextTitle:'',contextContent:''};
 // The face-and-dropdown pickers (pipPicker.js): New Pip's job or character, and a Personal Pip's face on its page. A pick
 // redraws what it changes, the big face and what follows it, and gives the dropdown's button the focus back.
 const picker=createPicker({root:document,onPick(id,value){
@@ -350,6 +408,11 @@ function rememberCreationDraft(){if(S.createType)creationDrafts.set(S.createType
 function subscriptionChoices(){return S.apiVersion>=55?S.subscriptions||[]:[];}
 // API 70: DGC Router, while it is on: any computer with the Pips job, or one system and model (list_pip_models' router).
 function routerOffer(){return S.apiVersion>=70?S.router:null;}
+// API 74: the API providers saved in Settings -> Models, each with its models. The default's row is the connection a
+// Pip on Default runs on, so it lists that connection's models under its own name.
+function savedProviders(){return S.apiVersion>=74?S.providers||[]:[];}
+function providerOf(id){return savedProviders().find(p=>p.id===id);}
+function providerRemoved(){const c=S.pip?.model_choice;return c?.mode==='provider'&&S.apiVersion>=74&&Array.isArray(S.providers)&&!S.modelsLoading&&!providerOf(c.provider);}
 function routerLabel(choice){const value=modelValue(choice);const found=routerChoices(S.router).find(([v])=>v===value);return found?found[1]:modelLabel(choice);}
 function defaultModelName(){return defaultRunsOn({router:S.router,default_engine:S.defaultEngine,default_model:S.defaultModel});}
 // Default: the Pips default model set in Settings, else DGC's own (list_pip_models' default_model says which runs).
@@ -359,6 +422,7 @@ function defaultLabel(){return defaultModelName()?`Default (${defaultModelName()
 // fits a side bar ("DGC Router (any Pip sy…" was cut) and names the computer the last reply came from, which the
 // reply keeps ("glm-5.3:cloud on Workstation (DGC Router)", dgc/pip_chat.py _answered_by); the hover says it all.
 function chipModel(choice,current){
+ if(choice?.mode==='provider'){const saved=providerOf(choice.provider);return{text:choice.model,title:saved?`${choice.model} · ${saved.name}`:choice.model};}
  if(choice?.mode==='subscription')return{text:modelLabel(choice),title:modelLabel(choice)};
  if(choice?.mode==='router'&&choice.system){const label=routerLabel(choice);return{text:label,title:`${label} (DGC Router)`};}
  if(choice?.mode==='router'){
@@ -374,12 +438,14 @@ function modelPicker(id,label,value,personal=false) {
   const explicit=value.startsWith('model:')?value.slice(6):'',subs=subscriptionChoices(personal),usage=subs.length||value.startsWith('subscription:')?usageLine(value):'';
   const engine=value.startsWith('subscription:')?value.slice(13):'';
   const routed=routerChoices(routerOffer()),routedValue=value==='router'||value.startsWith('router:');
+  const providerValue=value.startsWith('provider:'),named=savedProviders(),heldProvider=providerValue?value.slice(9,value.indexOf(':',9)):'';
+  const providerGroups=`${named.filter(p=>!p.default||p.id===heldProvider).map(p=>`<optgroup label="${esc(p.name)}">${p.models.map(id=>{const v=`provider:${p.id}:${id}`;return `<option value="${esc(v)}"${value===v?' selected':''}>${esc(id)}</option>`;}).join('')}</optgroup>`).join('')}${providerValue&&!named.some(p=>p.models.some(id=>`provider:${p.id}:${id}`===value))?`<option value="${esc(value)}" selected>${esc(value.slice(value.indexOf(':',9)+1))} · ${providerOf(heldProvider)?'not offered now':'provider removed'}</option>`:''}`;
   const routerGroup=routed.length||routedValue?`<optgroup label="DGC Router">${routedValue&&!routed.some(([v])=>v===value)?`<option value="${esc(value)}" selected>${esc(value==='router'?'DGC Router':value.slice(7).replace('/',' · '))} · not offered now</option>`:''}${routed.map(([v,l])=>`<option value="${esc(v)}"${value===v?' selected':''}>${esc(l)}</option>`).join('')}</optgroup>`:'';
-  return `<label for="${id}">${esc(label)}</label><select id="${id}" data-draft="${id}"><option value="default"${value==='default'?' selected':''}>${esc(defaultLabel())}</option>${routerGroup}${explicit&&!S.models.some(m=>m.id===explicit)?`<option value="${esc(value)}" selected>${esc(explicit)} · not in current list</option>`:''}${S.models.map(m=>`<option value="model:${esc(m.id)}"${explicit===m.id?' selected':''}>${esc(m.name)}</option>`).join('')}${subs.length||engine?`<optgroup label="Your subscriptions">${engine&&!subs.some(x=>x.engine===engine)?`<option value="${esc(value)}" selected>${esc(modelLabel({mode:'subscription',engine}))} · not signed in here</option>`:''}${subs.map(x=>`<option value="subscription:${esc(x.engine)}"${engine===x.engine?' selected':''}>${esc(x.name)}</option>`).join('')}</optgroup>`:''}</select>${usage?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?`<p class="muted">${esc(S.modelsError)} ${button('refresh-models','Try again',S.modelsLoading||!usable(),'link')}</p>`:`<p class="muted">Models from your DGC connection${subs.length?', and your own subscriptions':''}. ${button('refresh-models','Refresh list',S.modelsLoading||!usable(),'link')}</p>`}`;
+  return `<label for="${id}">${esc(label)}</label><select id="${id}" data-draft="${id}"><option value="default"${value==='default'?' selected':''}>${esc(defaultLabel())}</option>${routerGroup}${explicit&&!S.models.some(m=>m.id===explicit)?`<option value="${esc(value)}" selected>${esc(explicit)} · not in current list</option>`:''}${S.models.map(m=>`<option value="model:${esc(m.id)}"${explicit===m.id?' selected':''}>${esc(m.name)}</option>`).join('')}${providerGroups}${subs.length||engine?`<optgroup label="Your subscriptions">${engine&&!subs.some(x=>x.engine===engine)?`<option value="${esc(value)}" selected>${esc(modelLabel({mode:'subscription',engine}))} · not signed in here</option>`:''}${subs.map(x=>`<option value="subscription:${esc(x.engine)}"${engine===x.engine?' selected':''}>${esc(x.name)}</option>`).join('')}</optgroup>`:''}</select>${usage?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError?`<p class="muted">${esc(S.modelsError)} ${button('refresh-models','Try again',S.modelsLoading||!usable(),'link')}</p>`:`<p class="muted">Models from your DGC connection${subs.length?', and your own subscriptions':''}. ${button('refresh-models','Refresh list',S.modelsLoading||!usable(),'link')}</p>`}`;
 }
 async function loadModels(){
   if(!usable()||S.modelsLoading)return;const epoch=S.epoch;S.modelsLoading=true;S.modelsError='';render();
-  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.modelsError=result.error?errorText(result.error):'';}
+  try{const result=pipModels(await send('list_pip_models'));if(epoch!==S.epoch)return;S.models=result.models;S.defaultModel=result.default_model;S.subscriptions=result.subscriptions;S.defaultEngine=result.default_engine;S.router=pipRouter(result.router);S.providers=result.providers;S.modelsError=result.error?errorText(result.error):'';}
   catch(error){if(epoch===S.epoch)S.modelsError=errorText(error);}
   finally{if(epoch===S.epoch){S.modelsLoading=false;render();}}
 }
@@ -395,7 +461,7 @@ function checkedChatOptions(value,max=S.chatControls?.context_max||32768){
 function chosenChatOptions(){return checkedChatOptions(chatPreferences.get(S.selected)||S.chatControls?.options);}
 // The main chat's two-zone composer, using only controls Pip chat supports.
 function routineIcon(){return '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v2.8h-2.8"/><path d="M8 5v3.2l2 1.3"/></svg>';}
-function composerIcon(name){const paths={shield:'<path d="M8 1.5 13 3.5v4c0 3-2 5-5 7-3-2-5-4-5-7v-4Z"/><path d="m6 8 1.3 1.3L10 6.5"/>',context:'<path d="M7 2a6 6 0 1 0 7 7H7Z"/><path d="M9 1.5V7h5.5A6 6 0 0 0 9 1.5Z"/>',up:'<path d="M8 14V2M3 7l5-5 5 5"/>',chevron:'<path d="m4 10 4-4 4 4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx=".5"/>',image:'<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.8" r="1.1"/><path d="m2.5 11.5 3.5-3.5 2.5 2.5 2-2 3 3"/>',zap:'<path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8Z"/>',next:'<path d="m6 4 4 4-4 4"/>',mic:'<rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v1.5"/>'};return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;}
+function composerIcon(name){const paths={shield:'<path d="M8 1.5 13 3.5v4c0 3-2 5-5 7-3-2-5-4-5-7v-4Z"/><path d="m6 8 1.3 1.3L10 6.5"/>',context:'<path d="M7 2a6 6 0 1 0 7 7H7Z"/><path d="M9 1.5V7h5.5A6 6 0 0 0 9 1.5Z"/>',up:'<path d="M8 14V2M3 7l5-5 5 5"/>',chevron:'<path d="m4 10 4-4 4 4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx=".5"/>',image:'<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.8" r="1.1"/><path d="m2.5 11.5 3.5-3.5 2.5 2.5 2-2 3 3"/>',zap:'<path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8Z"/>',next:'<path d="m6 4 4 4-4 4"/>',check:'<path d="m3.5 8.5 3 3 6-7"/>',back:'<path d="M13 8H3M7 4 3 8l4 4"/>',add:'<path d="M8 3v10M3 8h10"/>',mic:'<rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v1.5"/>'};return `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">${paths[name]||''}</svg>`;}
 function continuityMarkup(){
  const c=S.continuity;if(!c)return `<p class="composer-scope">${esc(S.pip?.name||'This Pip')} saves a summary of this chat after its next reply.</p>`;
  return `<details class="chat-continuity"><summary>Chat memory${c.summarized_messages?' · '+c.summarized_messages+' messages summarized':''}</summary><p class="muted">${esc(c.notice)}</p><p class="muted">${c.strategy==='mechanical'?'A short summary. Some details may be left out; your messages are still saved.':c.strategy==='model'?`A summary ${esc(S.pip?.name||'it')} keeps up to date.`:'It still sees every message; nothing needs summarizing yet.'}</p>${c.summary?`<pre>${esc(c.summary)}</pre>`:''}<p class="muted">Summarized by ${esc(c.provenance.model||'its model')}</p></details>`;
@@ -420,6 +486,7 @@ async function loadChatContext(){
  catch{if(token===scope()&&sequence===chatContextSeq){S.chatContext=null;render();}}
 }
 function currentChatProvider(value){
+ if(value.startsWith('provider:')){const id=value.slice(9,value.indexOf(':',9));return providerOf(id)?.default?'connection':'provider:'+id;}
  if(value.startsWith('subscription:'))return value;
  if(value==='router'||value.startsWith('router:'))return 'router';
  if(value==='default'&&routerOffer()?.pips_default)return 'router';
@@ -428,25 +495,32 @@ function currentChatProvider(value){
 }
 function chatModelListMarkup(selected,locked,reviewed,current,subs,usage){
  const routed=routerChoices(routerOffer());
- // With only a subscription there is no host to choose: it isn't offered as an empty step.
- const providers=[...(S.models.length||currentChatProvider('default')==='connection'?[{key:'connection',label:'Current host'}]:[]),...(routed.length?[{key:'router',label:'DGC Router'}]:[]),
+ // Every provider saved in Settings, in its order, by its name, as Work lists them; a default on a host that isn't saved
+ // stays "Current host", first. With only a subscription there is no host to choose: it isn't offered as an empty step.
+ const named=savedProviders(),ownDefault=named.find(p=>p.default),hostKept=S.models.length||currentChatProvider('default')==='connection';
+ const providers=[...(hostKept&&!ownDefault?[{key:'connection',label:'Current host'}]:[]),
+  ...named.map(p=>p.default&&hostKept?{key:'connection',label:p.name}:{key:'provider:'+p.id,label:p.name}),
+  ...(routed.length?[{key:'router',label:'DGC Router'}]:[]),
   ...subs.map(x=>({key:'subscription:'+x.engine,label:x.name}))];
  const provider=providers.some(x=>x.key===S.modelProviderChoice)?S.modelProviderChoice:currentChatProvider(selected);
- const matches=s=>s.toLowerCase().includes(draft.chatModelSearch.toLowerCase());
- if(S.modelProviderView)return `<div class="composer-model-list"><p class="composer-scope">Provider</p><div class="composer-model-options" role="listbox" aria-label="Providers">${providers.map(x=>`<button type="button" role="option" data-chat-provider="${esc(x.key)}" aria-selected="${provider===x.key}">${esc(x.label)}</button>`).join('')}</div></div>`;
+ // The rows as Work's: a check where it is chosen, the name beside it.
+ const row=(attr,value,label,on,sub='',off=locked,after='')=>`<button type="button" class="composer-model-option" role="option" ${attr}="${esc(value)}" aria-selected="${on}"${off?' disabled':''}><span class="composer-model-check">${on?composerIcon('check'):''}</span><span class="composer-model-row">${esc(label)}${sub?`<small>${esc(sub)}</small>`:''}</span>${after}</button>`;
+ const modelRow=(value,label,sub='',on=selected===value)=>row('data-chat-model',value,label,on,sub);
+ const followsDefault=key=>currentChatProvider('default')===key?modelRow('default',defaultLabel()):'';
+ if(S.modelProviderView)return `<div class="composer-model-list"><p class="composer-list-title">Provider</p><div class="composer-model-options" role="listbox" aria-label="Providers">${providers.map(x=>row('data-chat-provider',x.key,x.label,provider===x.key,'',false,composerIcon('next'))).join('')}<button type="button" class="composer-model-action" data-open-models><span class="composer-model-check">${composerIcon('add')}</span><span class="composer-model-row">Add provider in Settings…</span></button></div></div>`;
  let rows='';
  if(provider==='connection'){
-  rows=(currentChatProvider('default')==='connection'?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
-   S.models.filter(m=>matches(m.name+' '+m.id)).map(m=>`<button type="button" role="option" data-chat-model="model:${esc(m.id)}" aria-selected="${selected==='model:'+m.id}"${locked?' disabled':''}>${esc(m.name)}${m.name!==m.id?`<small>${esc(m.id)}</small>`:''}</button>`).join('');
+  rows=followsDefault('connection')+S.models.map(m=>modelRow('model:'+m.id,m.name,m.name!==m.id?m.id:'',selected==='model:'+m.id||(!!ownDefault&&selected===`provider:${ownDefault.id}:${m.id}`))).join('');
+ }else if(provider.startsWith('provider:')){
+  const saved=providerOf(provider.slice(9));
+  rows=(saved?.models||[]).map(id=>modelRow(`provider:${saved.id}:${id}`,id)).join('');
  }else if(provider==='router'){
-  rows=(currentChatProvider('default')==='router'?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
-   routed.filter(([,label])=>matches(label)).map(([value,label])=>`<button type="button" role="option" data-chat-model="${esc(value)}" aria-selected="${selected===value}"${locked?' disabled':''}>${esc(label)}${value==='router'?'<small>Any computer with the Pips job</small>':''}</button>`).join('');
+  rows=followsDefault('router')+routed.map(([value,label])=>modelRow(value,label,value==='router'?'Any computer with the Pips job':'')).join('');
  }else{
   const sub=subs.find(x=>'subscription:'+x.engine===provider);
-  rows=(currentChatProvider('default')===provider?`<button type="button" role="option" data-chat-model="default" aria-selected="${selected==='default'}"${locked?' disabled':''}>${esc(defaultLabel())}</button>`:'')+
-   (sub&&matches(sub.name)?`<button type="button" role="option" data-chat-model="${esc(provider)}" aria-selected="${selected===provider}"${locked?' disabled':''}>${esc(sub.name)}<small>Your signed-in subscription</small></button>`:'');
+  rows=followsDefault(provider)+(sub?modelRow(provider,sub.name,'Your signed-in subscription'):'');
  }
- return `<div class="composer-model-list"><button type="button" id="chat-model-providers" class="composer-model-back">← Providers</button><label class="sr-only" for="chatModelSearch">Search models</label><input id="chatModelSearch" data-draft="chatModelSearch" value="${esc(draft.chatModelSearch)}" placeholder="Search models" autocomplete="off">${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models">${rows}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError&&provider==='connection'?errorMarkup(S.modelsError):''}${current&&provider==='connection'&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${usage&&provider.startsWith('subscription:')?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${button('chat-refresh-models','Refresh models',S.modelsLoading||locked)}</div>`;
+ return `<div class="composer-model-list"><button type="button" id="chat-model-providers" class="composer-model-action"><span class="composer-model-check">${composerIcon('back')}</span><span class="composer-model-row">Providers</span></button><p class="composer-list-title">Model</p>${reviewed?'<p class="composer-scope">You’ll confirm a new model before it’s used. Work already started keeps the old one.</p>':''}<div class="composer-model-options" role="listbox" aria-label="Available models">${rows}</div>${S.modelsLoading?'<p class="muted" role="status">Loading models…</p>':''}${S.modelsError&&provider==='connection'?errorMarkup(S.modelsError):''}${current&&provider==='connection'&&!S.modelsLoading&&!S.models.some(m=>m.id===current)?'<p class="muted">The current model is absent from this list. Its saved choice remains unchanged.</p>':''}${usage&&provider.startsWith('subscription:')?`<p class="muted" data-usage-line>${esc(usage)}</p>`:''}${S.modelsError&&provider==='connection'?button('chat-refresh-models','Refresh models',S.modelsLoading||locked):''}</div>`;
 }
 function chatControlsMarkup(canSend,busy){
  // Dictating: the bottom row is the voice bar (media/voicebar.js), which draws itself into whatever is rendered here.
@@ -457,7 +531,7 @@ function chatControlsMarkup(canSend,busy){
  const unavailable=`<p class="composer-unavailable">${S.apiVersion<24?'Update DGC to change these settings.':'These settings didn’t load. Refresh, then send.'}</p>`;
  const effortLabel=o?EFFORT_NAME[o.thinking]||o.thinking:'';
  const effortStep=Math.max(0,chatThinkingLevels.indexOf(o?.thinking));
- const effort=o?`<div class="composer-effort-control" style="--effort:${effortStep*25}%;--face-offset:${18-effortStep*9}px"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${S.modelListOpen?'':composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
+ const effort=o?`<div class="composer-effort-control" style="--effort:${effortStep*25}%;--face-offset:${18-effortStep*9}px"><label class="sr-only" for="chat-thinking">Thinking</label><input id="chat-thinking" class="composer-effort-slider" type="range" min="0" max="4" step="1" value="${effortStep}" aria-valuetext="${esc(effortLabel)}" title="${esc(choiceScope())}"${locked?' disabled':''}><span class="composer-effort-face">${pipAvatar(S.pip,S.chatActiveRun?'working':'idle',`effort-${S.pip.id}`,pipType(S.pip,S.types)||characterType(S.pip.pip_type))}</span><div class="composer-effort-labels"><span>Off</span><output for="chat-thinking">${esc(effortLabel)}</output><span>Extra high</span></div></div>${composerNote(choiceScope()+' '+S.chatControls.reasoning_note)}`:unavailable;
  const reviewed=!personalPip();
  const list=chatModelListMarkup(selected,locked,reviewed,current,subs,usage);
  const modelMenu=S.composerPanel==='model'?`<div class="composer-model-menu composer-reasoning" role="dialog" aria-label="Model and thinking"><button type="button" id="chat-model-summary" class="composer-model-summary" aria-expanded="${S.modelListOpen}">${composerIcon('zap')}<span class="composer-summary-label">${esc(shownModel)}${o?` <span class="muted">${esc(effortLabel)}</span>`:''}</span>${composerIcon('next')}</button>${effort}${S.modelListOpen?list:''}</div>`:'';
@@ -471,7 +545,7 @@ function chatControlsMarkup(canSend,busy){
  const action=offerVoice?`<button type="button" id="chat-voicemode" class="chat-send ready" aria-label="Voice mode" title="Voice mode: talk with ${esc(S.pip?.name||'this Pip')}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5v3M6 4v8M10 3v10M13 6v4"/></svg></button>`:busy?`<button type="button" id="chat-stop" class="composer-chip" title="Stop generation" aria-label="Stop generation"${S.busy||!usable()?' disabled':''}>${composerIcon('stop')}</button>${S.apiVersion>=73?sendAction:''}`:sendAction;
  const routineCount=(S.routines||[]).filter(r=>r.status==='on').length;
  const routineChip=personalPip()&&S.apiVersion>=43?`<button type="button" id="chat-routines" class="composer-routines" aria-label="Routines: ${routineCount} on" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='routines'}" title="Manage ${esc(S.pip.name)}’s routines">${routineIcon()}<span>Routines</span>${routineCount?`<b>${routineCount}</b>`:''}</button>`:'';
- return `${modelMenu}${contextMenu}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
+ return `${modelMenu}${contextMenu}${providerRemoved()?'<p class="composer-unavailable" role="alert">The provider this Pip runs on was removed from Settings. Choose another model for it.</p>':''}<div class="composer-controls"><div class="composer-left">${canAttachImages()?`<button type="button" id="chat-attach" class="composer-chip" title="Add images and files" aria-label="Add images and files"${S.busy||archived()?' disabled':''}>${composerIcon('image')}</button><input type="file" id="chat-attach-input" accept="${[...PIP_IMAGE_TYPES,...(spoolsPhotos()?[...PIP_HEIC_TYPES,'.heic','.heif']:[]),...PIP_FILE_EXTENSIONS].join(',')}" multiple hidden>`:''}<button type="button" id="chat-context-toggle" class="composer-chip${pct===null?'':' with-text'}" title="Context window${o?' · '+o.context_size.toLocaleString()+' tokens':''}${pct===null?'':' · '+pct+'% used'}" aria-label="Context window${pct===null?'':': '+pct+' percent used'}" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='context'}">${composerIcon('context')}${pct===null?'':`<span class="composer-ctx-pct">${pct}%</span>`}</button>${routineChip}<button type="button" id="chat-permissions" class="composer-chip" title="What ${esc(S.pip.name)} can do" aria-label="What this Pip can do">${composerIcon('shield')}<span class="sr-only">What it can do</span></button></div><div class="composer-right"><button type="button" id="chat-model" class="model-control" aria-label="Change model and thinking" aria-haspopup="dialog" aria-expanded="${S.composerPanel==='model'}" title="${esc(chip.title)}${o?' · '+esc(effortLabel):''} — change model and thinking"${locked?' disabled':''}><span class="model-copy"><span class="composer-model-name">${esc(shownModel)}</span>${o?`<span class="composer-effort-name">${esc(effortLabel)}</span>`:''}</span><span class="composer-chevron">${composerIcon('chevron')}</span></button>${voiceBar?`<button type="button" id="chat-mic" class="composer-chip" title="Dictate" aria-label="Dictate"${!usable()||archived()||busy?' disabled':''}>${composerIcon('mic')}</button>`:''}${action}</div></div>`;
 }
 function fitChatInput(){const input=$('chatText');if(!input)return;const sendButton=document.querySelector('.chat-send');sendButton?.classList.toggle('ready',!sendButton.disabled&&!!draft.chatText.trim()||!sendButton.disabled&&canAttachImages()&&(pendingImages().length>0||pendingFiles().length>0));if(!input.isConnected||input.clientWidth<40||document.hidden)return;input.style.height='auto';const content=input.scrollHeight,capped=content>=160;input.style.overflowY=capped?'auto':'hidden';input.style.height=(capped?160:content+1)+'px';}
 // What the prompt box's choices are for: since API 47 they are this Pip's own (its replies and the work it does on
@@ -506,9 +580,9 @@ function updateChatPreference(kind,value){
 }
 function reviewChatModel(value){
  if(!usable()||S.busy||archived()||!S.pip)return;
- let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()),routerOffer());}catch(error){setError(error);return;}
- S.composerPanel='';draft.chatModelSearch='';const current=S.pip.model_choice||{mode:'default'};if(JSON.stringify(choice)===JSON.stringify(current)){render();return;}
- if(personalPip()){const name=choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
+ let choice;try{choice=modelChoice(value,S.models,subscriptionChoices(personalPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
+ S.composerPanel='';const current=S.pip.model_choice||{mode:'default'};if(JSON.stringify(choice)===JSON.stringify(current)){render();return;}
+ if(personalPip()){const name=choice.mode==='provider'?`${choice.model} on ${providerOf(choice.provider)?.name||'that provider'}`:choice.mode==='model'?(S.models.find(m=>m.id===choice.model)?.name||choice.model):choice.mode==='subscription'?modelLabel(choice):choice.mode==='router'?routerLabel(choice):'the same model as DGC',usage=usageLine(modelValue(choice));void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${name}.${usage?' '+usage:''}`);return;}
  const version=S.pip.current_version,pip=S.selected;
  void mutate({type:'propose_pip_update',pip_id:pip,expected_version:version,changes:{model_choice:choice},reason:'Model selected in this Pip conversation.'},result=>{const proposal=result.proposal;if(!record(proposal)||proposal.pip_id!==pip||proposal.expected_version!==version||!record(proposal.definition)||JSON.stringify(proposal.definition.model_choice)!==JSON.stringify(choice))throw Error('The saved model choice differs from the selection. Refresh before reviewing it.');S.pip={...S.pip,proposals:[...(S.pip.proposals||[]).filter(p=>p.id!==proposal.id),proposal]};S.notice='New model is waiting for you. Nothing changes until you accept it.';proposalReview(proposal.id);});
 }
@@ -541,6 +615,7 @@ document.addEventListener('click',event=>{
   const text=String(button.dataset.genuiSend||'').slice(0,500);
   if(!text||!S.selected)return;
   if(pendingImages().length||pendingFiles().length){setError('Remove attachments before sending a card choice.');return;}
+  rememberMarks();
   const saved=draft.chatText;
   draft.chatText=text;
   void sendChat();
@@ -570,7 +645,7 @@ function chatMarkup(){
   const type=pipType(S.pip,S.types),busy=S.chatActiveRun,canSend=(S.apiVersion<24||!!S.chatControls)&&!archived()&&S.messagesLoaded&&usable()&&takesMessages()&&supportedSource()&&S.runner?.online&&!S.runner?.paused&&!S.busy&&(!busy||S.apiVersion>=73);
   const markdown=renderPipMarkdown;
   const sending=S.sending&&S.sending.pip===S.selected&&!S.messages.some(m=>m.role==='user'&&m.text===S.sending.text&&Date.parse(m.created_at)>=Date.parse(S.sending.at)-60000)?S.sending:null;
-  const shown=[...S.messages.filter(m=>!(m.role==='user'&&m.intro===true)),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at}]:[])];
+  const shown=[...S.messages.filter(m=>!(m.role==='user'&&m.intro===true)),...(sending?[{id:'sending',pip_id:S.selected,workspace_id:S.workspace?.id,role:'user',text:sending.text,status:'sending',created_at:sending.at,...(sending.marks?.length?{display_mentions:sending.marks}:{})}]:[])];
   // While it answers, the Pip itself is in the chat, at work, with its name: the reply replaces it.
   // A routine's run is its live post (liveMarkup), not the working row: what it is doing, its clock, Stop, how it started.
   const routineLive=!!(S.live?.routine&&S.chatActiveRun&&S.live.runId===S.chatActiveRun.id);
@@ -590,12 +665,12 @@ function chatMarkup(){
   const items=postsShown()?timeline(shown,S.posts,{complete:!S.messageCursor}):shown.map(m=>({message:m}));
   const context=postsShown()?postContext():null;
   const drawPost=i=>{const p=i.streak?i.streak.at(-1):i.post,first=i.streak?i.streak[0]:p;
-    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id)});};
+    return timed({created_at:p.posted_at},false)+postMarkup(p,{...context,previous:i.previous,streak:i.streak||null,face:pipAvatar(S.pip,['failed','checks_failed'].includes(p.outcome)?'failure':'idle',`post-${first.run_id}`,context.type),...fixState(p.run_id),expanded:shownInFull.has(p.run_id),traced:replyStats.get(p.run_id)?.has_trace===true});};
   const messages=items.map(i=>i.message?drawMessage(i.message):drawPost(i)).join('');
   // A run going now: its live post, at the end, where its own post will stand when it ends.
   const live=liveMarkup(markdown);
   const quietChat=!S.messages.length&&!items.length&&!live;
-  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section><form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}<div class="composer-input"><label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea></div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
+  return `<section class="pip-conversation${simple?' chat-style':''}" aria-label="Pip conversation"><div class="conversation-log" role="log" aria-live="polite">${errorMarkup(S.error)}${S.notice?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${(S.messageCursor&&S.messages.length<200)||(postsShown()&&S.postsCursor&&!S.messageCursor)?button('older-messages','Load earlier messages',S.messagesLoading||S.postsLoading||!usable()):''}${S.messages.length>=200?'<p class="muted">Showing the latest 200 loaded messages. Earlier messages remain saved.</p>':''}${S.messagesError?errorMarkup(S.messagesError):''}${!S.messagesLoaded?'<p role="status" class="muted">Loading conversation…</p>':quietChat?`<div class="conversation-empty"><h3>Talk to ${esc(type?.name||'this Pip')}</h3><p class="muted">${personalPip()?'Talk about your plans, ask questions, or share details to work with.':'Ask about '+(currentTree()?'your current files':'the committed code')+' in this project.'} ${esc(S.pip.name)} keeps this chat.</p><p class="muted">${personalPip()?'It sees only what you share here. To use an app like Gmail, ask it to connect one.':type?esc(type.description):'Unsupported Pip type.'}</p></div>`:''}${messages}${live}${simple?'':typing}${S.stream?.text&&!routineLive?`<article class="pip-message assistant dgc provisional" aria-label="Live reply preview"><span class="sr-only">${esc(type?.name||'Pip')}</span>${simple?'':'<p class="message-status">Still writing…</p>'}${simple?`<div class="answer split">${replyParts(S.stream.text).map(part=>`<div class="message-body text reply-part">${markdown(part)}</div>`).join('')}</div>`:`<div class="message-body text">${markdown(replyParts(S.stream.text).join('\n\n'))}</div>`}${S.stream.limited?'<p class="muted">Showing the start of the reply. The whole reply appears when it’s done.</p>':''}</article>`:''}${S.stream?.error?`<p class="muted">${esc(S.stream.error)}</p>`:''}${simple?typing:''}${memoryKept()}${learnCard()}${chatResultCards()}${chatSetupCards()}${emailDraftCards()}${appLinkCards()}${pluginCards()}${borrowCards()}${routineCards()}${computerWaitingCards()}${needsYouCard()}${cardRefusedCard()}${S.omitted?`<p class="context-limit">${esc(S.pip.name)} no longer sees your ${S.omitted===1?'earliest message':S.omitted+' earliest messages'}. ${S.omitted===1?'It’s':'They’re'} still saved here.</p>`:''}</div>${simple?runnerOffMarkup():''}<div class="pip-composer-shell">${routinePopoverMarkup()}<section id="chat-queue-box" class="chat-queue-box" aria-label="Queued messages"${chatQueue().length?'':' hidden'}><p class="chat-queue-head"></p><ol id="chat-queue" class="chat-queue-list" data-dom-own="1"></ol></section><form id="chat-form" class="pip-composer">${canAttachImages()?imageStripMarkup():''}${chatBox?'<div id="chat-pop" class="pop pop-over" data-dom-own="1"></div>':''}<div class="composer-input">${chatBox?'<div id="chatText" class="mention-box" data-dom-own="1"></div>':`<label class="sr-only" for="chatText">Message ${esc(type?.name||'this Pip')}</label><textarea id="chatText" data-draft="chatText" rows="1" placeholder="${simple?`Ask ${esc(S.pip.name)}`:`Message ${esc(type?.name||'this Pip')}…`}" maxlength="4000"${archived()||!usable()?' disabled':''}>${esc(draft.chatText)}</textarea>`}</div>${chatControlsMarkup(canSend,busy)}</form></div><p class="composer-hint">${personalPip()?[archived()?'Archived. Restore it in Settings to chat again.':'',!S.runner?.online?'Start Pips to send a message.':S.runner?.paused?'Resume Pips to send a message.':''].filter(Boolean).join(' '):`${archived()?'Archived · Restore to paused before sending another message. ':''}${(currentTree()?'Your current files':'Committed code')+' · reads only'}${!S.runner?.online?' · Start Pips to send a message.':S.runner?.paused?' · Resume Pips to send a message.':''}`}</p></section>`;
 }
 // ---- Its runs in its chat (Pips API 51) ----
 // Each finished run is a post from the Pip, read with list_pip_run_posts and drawn among the messages; History
@@ -765,7 +840,7 @@ async function loadPosts(more=false){
     S.posts=mergePosts(S.postsPip===id?S.posts:[],page.posts);S.postsPip=id;
     if(more||!S.postsLoaded)S.postsCursor=page.next_before_id;S.postsLoaded=true;S.postsError='';
   }catch(error){if(token===scope()&&sequence===postsSeq)S.postsError=errorText(error);}
-  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();}}
+  finally{if(token===scope()&&sequence===postsSeq){S.postsLoading=false;if(S.live?.state==='ending'&&sequence>=S.live.endSeq)settleLive();render();maybeMarkRead();void loadFixes();void loadReplyStats();}}
 }
 // Open full report: the run, under History, at its report.
 function openPostReport(runId){S.tab='runs';S.overview=false;rememberView();render();void loadRun(runId).then(()=>document.querySelector('section[aria-label="Run report"],section[aria-label="Pulse command receipt"],section[aria-label="Documentation draft"]')?.scrollIntoView?.({block:'start'}));}
@@ -834,13 +909,29 @@ async function loadMessages(more=false){
 const replyStats=new Map();let replyStatsSeq=0;
 async function loadReplyStats(){
   if(remoteHost||S.apiVersion<44||!usable())return;
-  const pip=S.selected,token=scope(),sequence=++replyStatsSeq;
-  const runs=[...new Set(S.messages.filter(m=>m.role==='assistant'&&m.status==='succeeded'&&/^run_[a-f0-9]{32}$/.test(m.run_id||'')&&!replyStats.has(m.run_id)).map(m=>m.run_id))].slice(-50);
+  const pip=S.selected,token=scope();
+  const posted=postsShown()&&Array.isArray(S.posts)?S.posts.map(p=>p.run_id):[];   // a run's post has its Trace too
+  const runs=[...new Set([...posted,...S.messages.filter(m=>m.role==='assistant'&&m.status==='succeeded').map(m=>m.run_id)].filter(r=>/^run_[a-f0-9]{32}$/.test(r||'')&&!replyStats.has(r)))].slice(-50);
   if(!runs.length)return;
+  const sequence=++replyStatsSeq;
   try{const v=await send('list_pip_reply_stats',{pip_id:pip,run_ids:runs});if(token!==scope()||S.selected!==pip||sequence!==replyStatsSeq||!record(v)||v.pip_id!==pip||!Array.isArray(v.stats))return;
    for(const s of v.stats.slice(0,50))if(record(s)&&runs.includes(s.run_id)&&(s.seconds===null||Number.isFinite(s.seconds))&&[s.input_tokens,s.output_tokens,s.requests].every(n=>Number.isSafeInteger(n)&&n>=0))replyStats.set(s.run_id,s);
    render();}
   catch{/* the line is left out */}
+}
+// Its Trace: the steps are read when it's opened, one reply's at a time (list_pip_reply_stats with just its run).
+async function openReplyTrace(run,model){
+  const pip=S.selected,token=scope();
+  let trace=null;
+  try{
+    const v=await send('list_pip_reply_stats',{pip_id:pip,run_ids:[run]});
+    if(token!==scope()||S.selected!==pip)return;
+    const item=record(v)&&Array.isArray(v.stats)?v.stats.find(s=>record(s)&&s.run_id===run):null;
+    trace=globalThis.DgcTrace?.fromSaved(item?.trace,String(run).slice(0,10),model)||null;
+  }catch{/* said below */}
+  if(token!==scope()||S.selected!==pip)return;
+  if(trace)globalThis.DgcTrace.open(trace);
+  else{S.notice="This reply's trace couldn't be read.";render();}
 }
 // While a reply runs, its stream is read every 400 ms (the chat's own refresh is every 4 s), so it
 // reads as it is written, with DGC's working row: what it is doing, its clock and its tokens.
@@ -1014,13 +1105,15 @@ function queueChatMessage(){
  if(cardNumber(text)){refuseCard(S.selected);return;}
  if(text.length>4000){setError('That message is too long. Keep it under 4,000 characters. Nothing was queued.');return;}
  const list=chatQueue();if(list.length>=MAX_CHAT_QUEUE){setError(`${MAX_CHAT_QUEUE} messages are already waiting: send them first, or remove one.`);return;}
- setChatQueue([...list,{id:`q${Date.now()}-${++chatQueueSeq}`,text}]);
+ const fromBox=chatBox?.el.value.trim()===text,marks=fromBox&&S.displayMentions?chatBox.marks(text):[];
+ setChatQueue([...list,{id:`q${Date.now()}-${++chatQueueSeq}`,text,...(marks.length?{marks}:{})}]);
  // The page's markup still says what the box said when it was last drawn, so a redraw alone can leave the words there.
  chatEdit(()=>{draft.chatText='';const box=$('chatText');if(box)box.value='';chatDrafts.set(S.selected,'');rememberView();render();});
  fitChatInput();
 }
-function chatQueueSendText(text){
- const saved=draft.chatText;draft.chatText=text;void sendChat();
+function chatQueueSendText(text,marks){
+ rememberMarks();
+ const saved=draft.chatText;draft.chatText=text;void sendChat({marks:marks||[]});
  if(S.sending?.text===text){draft.chatText=saved;chatDrafts.set(S.selected,saved);rememberView();render();return true;}
  draft.chatText=saved;return false;
 }
@@ -1033,7 +1126,7 @@ function drawChatQueue(){
  window.DgcMessageQueue?.render(box,list.map(item=>({id:item.id,text:item.text.replace(/\s+/g,' ')||'',title:item.text})),{
   reorder:list.length>1?order=>{const byId=new Map(chatQueue().map(item=>[item.id,item]));setChatQueue(order.map(id=>byId.get(id)).filter(Boolean));}:null,
   // Steer is a mid-turn update to the reply running now; with none running, the message simply goes.
-  steer:S.chatActiveRun&&S.apiVersion>=73?id=>{const item=chatQueue().find(i=>i.id===id);if(item&&chatQueueSendText(item.text))setChatQueue(chatQueue().filter(i=>i.id!==id));}:null,
+  steer:S.chatActiveRun&&S.apiVersion>=73?id=>{const item=chatQueue().find(i=>i.id===id);if(item&&chatQueueSendText(item.text,item.marks))setChatQueue(chatQueue().filter(i=>i.id!==id));}:null,
   remove:id=>{setChatQueue(chatQueue().filter(i=>i.id!==id));$('chatText')?.focus();},
   copy:(id,text)=>{const item=chatQueue().find(i=>i.id===id);vscode.postMessage({type:'copy',text:item?.text||text});},
  });
@@ -1049,9 +1142,9 @@ function drainChatQueue(){
   return;
  }
  if(pendingImages().length||pendingFiles().length)return;
- if(chatQueueSendText(list[0].text))setChatQueue(list.slice(1),pip);
+ if(chatQueueSendText(list[0].text,list[0].marks))setChatQueue(list.slice(1),pip);
 }
-async function sendChat(){
+async function sendChat(sent={}){
   if(S.apiVersion>=24&&!S.chatControls||archived()||!supportedSource()||!usable()||!S.messagesLoaded||S.busy||!S.pip||!takesMessages()||!S.runner?.online||S.runner?.paused)return;
   if(S.chatActiveRun&&S.apiVersion<73){setError('Update DGC before sending a mid-turn update to this Pip.');return;}
   const text=draft.chatText.trim(),images=canAttachImages()?pendingImages().map(i=>i.data):[],files=canAttachImages()?pendingFiles().map(f=>({name:f.name,data:f.data})):[];if(!text&&!images.length&&!files.length){setError('Enter a message.');return;}
@@ -1060,12 +1153,13 @@ async function sendChat(){
   const learning=personalPip()&&!images.length&&!files.length?learnRequest(text):null;if(learning){void startLearn(learning);return;}
   // A card number never leaves the box: not sent, not kept as a draft. The user types it on the Pip's screen.
   if(cardNumber(text)){refuseCard(S.selected);return;}if(text.length>4000||new TextEncoder().encode(text).length>8192){setError('That message is too long. Keep it under 4,000 characters (fewer with emoji). Nothing was sent.');return;}
-  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
+  const boxText=chatBox?.el.value.trim()===text,marks=S.displayMentions?(sent.marks||(boxText?chatBox.marks(text):[])):[],parts=sent.parts||(boxText?chatBox.parts():null);
+  const options=S.apiVersion>=24?chosenChatOptions():undefined,signature=JSON.stringify({text,...(options?{chat_options:options}:{}),...(images.length?{images:images.map(i=>i.length+':'+i.slice(-64))}:{}),...(files.length?{files:files.map(f=>f.name+':'+f.data.length+':'+f.data.slice(-64))}:{})});const token=scope(),id=S.selected,generation=selectionGeneration,epoch=S.epoch;let pending=chatRequests.get(id);if(!pending||pending.signature!==signature){pending={text,signature,options,images,files,marks,parts,key:`pip-chat-${globalThis.crypto.randomUUID()}`};chatRequests.set(id,pending);}S.busy=true;S.error='';
   // Your message is in the chat at once, as in DGC's own chat: the box clears now, not when the reply
   // is queued (a Pip's first step lists its workflow connectors' tools, which can take seconds).
-  S.sending={pip:id,text,key:pending.key,at:new Date().toISOString()};chatEdit(()=>{if(draft.chatText.trim()===text)draft.chatText='';render();});
-  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(draft.chatText.trim()===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
-  catch(error){if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim())draft.chatText=text;setError(error);render();});}}
+  S.sending={pip:id,text,key:pending.key,marks:pending.marks,at:new Date().toISOString()};chatEdit(()=>{if(draft.chatText.trim()===text){draft.chatText='';if(boxText)chatMarks.delete(id);}render();});
+  try{const result=await send('send_pip_message',{pip_id:id,text,idempotency_key:pending.key,...(pending.options?{chat_options:pending.options}:{}),...(pending.images?.length?{images:pending.images}:{}),...(pending.files?.length?{files:pending.files}:{}),...(pending.marks?.length?{display_mentions:pending.marks}:{})});if(epoch!==S.epoch)return;if(!record(result.message)||result.message.pip_id!==id||!record(result.run)||result.run.pip_id!==id)throw new Error('The saved message response did not match this Pip. Refresh before retrying.');if(chatRequests.get(id)?.key===pending.key)chatRequests.delete(id);if(chatDrafts.get(id)?.trim()===text)chatDrafts.delete(id);if(pending.images?.length)chatImages.delete(id);if(pending.files?.length)chatFiles.delete(id);rememberView();if(token!==scope()||generation!==selectionGeneration)return;if(draft.chatText.trim()===text)draft.chatText='';await Promise.all([loadMessages(),refresh(false)]);}
+  catch(error){if(token===scope()&&generation===selectionGeneration){if(String(errorText(error)).startsWith(CARD_REFUSED)){refuseCard(id);return;}chatEdit(()=>{if(!draft.chatText.trim()){draft.chatText=text;if(pending.parts)chatMarks.set(id,{text,parts:pending.parts});}setError(error);render();});}}
   finally{if(S.sending?.key===pending.key)S.sending=null;if(token===scope()&&generation===selectionGeneration){S.busy=false;render();$('chatText')?.focus();}}
 }
 function hydrateAdaptation(pip){const p=adaptationPolicy(pip.adaptation_policy);draft.adaptationMode=p.mode;draft.adaptationName=p.allowed_fields.includes('name');draft.adaptationSource=p.allowed_fields.includes('source_ref');S.adaptationDraftVersion=pip.current_version;}
@@ -2771,7 +2865,7 @@ function createProjectPip(review){
  const type=S.types.find(t=>t.id===S.createType);
  if(!type?.available||type.id==='core'){review.error='Pick a character for the job.';renderReview();return;}
  if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){review.error='Give it a name, say what it does, and choose a branch or commit.';renderReview();return;}
- let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false),routerOffer());}catch(error){review.error=errorText(error);renderReview();return;}
+ let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(false),routerOffer(),savedProviders());}catch(error){review.error=errorText(error);renderReview();return;}
  const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:type.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
  if(executionPip(type)){openReview({...executionCreateReview(type,request,choice),secondary:{id:'new-pip-back',label:'Back'}});return;}
  void mutate(request,finishCreate);
@@ -2889,7 +2983,7 @@ function simpleMarkup(){
 function render() {
   if(disposed)return;
   noticeFades();syncNewPipModel();
-  const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const selection=focus&&typeof focus.selectionStart==='number'?[focus.selectionStart,focus.selectionEnd]:null;
+  const focus=document.activeElement; const focusId=focus?.id; const focusActivity=focus?.dataset?.chatActivity; const focusData=focus?.getAttribute?.('data-run')||focus?.getAttribute?.('data-job')||focus?.getAttribute?.('data-pip-type'); const inBox=!!chatBox&&focus===chatBox.el;const selection=focus&&typeof focus.selectionStart==='number'&&!inBox?[focus.selectionStart,focus.selectionEnd]:null;const boxAt=inBox?Mentions.selectedOffsets(chatBox.el):null;
   const oldLog=document.querySelector('.conversation-log'),oldScroll=oldLog?.scrollTop||0,oldHeight=oldLog?.scrollHeight||0,atEnd=!oldLog||oldHeight-oldScroll-oldLog.clientHeight<32,oldFirst=oldLog?.querySelector('[data-message]')?.dataset.message;
   const oldPipId=shell.dataset.motionPip||'',oldMessageRows=[...(oldLog?.querySelectorAll('[data-message]')||[])];
   const oldMessages=new Set(oldMessageRows.map(e=>e.dataset.message));
@@ -2902,7 +2996,7 @@ function render() {
   shell.classList.toggle('simple-pips',!intro&&simpleMode());
   const header=(embedded?`<header class="embedded-header${!intro&&scopeTabs()?' scoped':''}"><span class="workspace-name" title="${esc(S.workspace?.name||'Current workspace')}">${esc(S.workspace?.name||'Pips')}</span>${runnerMarkup()}</header>`:`<header><div class="heading"><div>${options.close?button('return-main','Back to DGC',false,'back-control'):''}<h1><span class="pips-wordmark">Pips</span></h1><p class="muted">${esc(S.workspace?.kind==='personal'?'Personal':S.workspace?.name||'Current workspace')}</p></div></div>${runnerMarkup()}</header>`)+(intro?'':scopeTabsMarkup());
   const markup=!intro&&simpleMode()?simpleMarkup():`${header}${S.error&&!chatView?`<div style="padding:0 20px">${errorMarkup(S.error)}</div>`:''}${S.notice&&!chatView?`<p class="notice" role="status">${esc(S.notice)}</p>`:''}${!intro&&S.overview&&!S.create&&!(S.projectEmpty&&scopeTabs())?setupsMarkup():''}${intro?`<div class="content">${intro}</div>`:S.projectEmpty&&scopeTabs()?projectEmptyMarkup():S.switching?`<div class="pips-tab-loading"${scopePanelAttrs()}></div>`:`<div class="layout ${S.overview&&!S.create?'overview':'selected'}"${scopePanelAttrs()}><aside aria-label="Workspace Pips"><div class="aside-heading">${!remoteHost?`<button type="button" id="pin-pips-sidebar" class="sidebar-toggle" aria-label="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" title="${S.sidebarPinned?'Collapse Pip sidebar':'Pin Pip sidebar open'}" aria-pressed="${S.sidebarPinned}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M6 2v12"/></svg></button>`:''}<h2>Your Pips</h2><button type="button" id="new-pip" aria-label="New Pip" title="New Pip"${S.busy||!usable()||!S.types.length?' disabled':''}><span aria-hidden="true" class="new-pip-mark">+</span><span class="new-pip-text">New</span></button></div>${S.overview&&!S.create?`<div class="pips-overview-intro${S.jobs.length?'':' welcome'}"><span class="pips-eyebrow">${S.workspace?.kind==='personal'?'A little help, day to day':'Your project, looked after'}</span><h2>A little team. A clear purpose.</h2><p>Give each Pip a job. Stay in the conversation, and review what comes back.</p></div>`:''}<div class="job-list">${S.jobs.filter(p=>S.showArchived||p.status!=='archived').map(jobMarkup).join('')||`<div class="pips-first-job"><div class="pips-welcome-cast">${S.types.filter(t=>['scout','rook','pulse'].includes(t.id)).map(t=>avatar('idle',t,`welcome-${t.id}`)).join('')}</div><h3>What should your first Pip look after?</h3><p>Describe the job to DGC. You’ll review the scope and schedule before it starts.</p>${button('create-first','Describe a job',!usable()||!S.types.length,'primary')}<small>No Pips yet · Nothing is running for this project</small></div>`}</div>${S.jobs.some(p=>p.status==='archived')?button('show-archived',S.showArchived?'Hide archived Pips':`Show archived Pips (${S.jobs.filter(p=>p.status==='archived').length})`):''}${button('workspace-context','Workspace context',!usable())}${S.apiVersion>=13?button('workspace-notifications','Notifications',!usable()):''}${!embedded&&!remoteHost?`<details><summary>Local controls</summary><p class="muted">Stop all pauses every Pip on this computer and stops what they’re doing. To undo it, resume Pips here, then resume each Pip.</p>${button('disable','Turn off Pips…',S.busy||!usable())}</details>`:''}</aside><div class="content" data-view="${esc(S.tab)}">${!S.create&&(S.selected||['context','notifications'].includes(S.tab))?button('back-pips','Back to Pips',false,'back-control'):''}${S.overview&&!S.create?'':setupsMarkup()}<nav class="tabs" aria-label="Pip sections"${S.create||!S.selected?' hidden':''}>${tabsMarkup()}</nav>${detailMarkup()}</div></div>`}`;
-  if(markup===lastMarkup) return;
+  if(markup===lastMarkup){syncChatBox();return;}
   lastMarkup=markup;
   const previousAvatars=new Map([...document.querySelectorAll('[data-avatar-key]')].map(node=>[node.dataset.avatarKey,node]));
   avatarObserver?.disconnect();
@@ -2911,7 +3005,10 @@ function render() {
     const next=owner.createElement('template');next.innerHTML=markup;
     patchChildren($('app'),next.content);
   }else $('app').innerHTML=markup;
-  // The keyed chat patch above retains message nodes and their selection.
+  // The keyed chat patch above retains message nodes and their selection, and leaves the box in place. The other
+  // takes it out, so it goes back with its caret where it was.
+  syncChatBox();
+  if(boxAt&&!S.review&&chatBox.el.isConnected&&owner.activeElement!==chatBox.el&&document.activeElement!==chatBox.el){chatBox.el.focus({preventScroll:true});chatBox.el.setSelectionRange(boxAt[0],boxAt[1]);}
   globalThis.DgcMcpApps?.fill($('app'),{sendMessage:sendCardMessage});
   drawChatQueue();
   shell.dataset.motionPip=S.selected||'';
@@ -3602,7 +3699,7 @@ function renderReview() {
   $('review-title')?.focus({preventScroll:true});document.querySelector('[role=dialog]')?.scrollTo?.(0,0);
   picker.restore();
 }
-function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null;draft.chatModelSearch=''; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
+function clearSelection() { S.notes=null;S.notesPip='';S.notesError='';notesSeq++;noteConfirmAll=false;draft.noteAdd='';S.workingNotes=null;S.workingNotesPip='';S.workingNotesError='';workingNotesSeq++;workingNotesEditing=false;draft.workingNotesText='';S.dailyLog=null;S.dailyLogPip='';S.dailyLogError='';dailyLogSeq++;S.appLinks=[];S.appLinksError='';S.plugins=[];S.pluginsInstalled=[];S.pluginsError='';pluginSeq++;pluginBusy='';S.routines=null;S.routinesError='';routineSeq++;routineEditing='';routineError='';S.pipPage='info';S.legacyOpen=false;pageNameDirty=false;lookDirty=false;shared.pip='';shared.seq++;window.clearTimeout(appLinkTimer);appLinkBusy=''; S.editingGoal=false;S.quickDirty=false;connectorDraftSeq++;S.connectorDrafts=[];S.connectorDraftError=""; calendarDraftSeq++;S.calendarDrafts=[];S.calendarDraftError="";emailDraftSeq++;S.emailDrafts=[];S.emailDraftError=""; chatActivities.clear(); S.composerPanel='';S.chatControls=null;S.continuity=null; statementSeq++;statementAnchorSeq++;statementRows=[];statementPage=null;statementLoaded=false;statementLoading=false;statementError='';statementInspecting=false;statementRetry=null;draft.statementKind='fact';draft.statementTitle='';draft.statementText='';draft.statementReason='';draft.statementExpiry='';draft.statementSource=''; memorySeq++;memorySourceSeq++;memories=[];memoryCursor=null;memoryLoaded=false;memoryLoading=false;memoryError='';draft.memoryExpiry='';resetOutcomes(); S.sourceDirty=false;S.sourceDraftVersion=null;draft.sourceReason=''; adaptationSeq++;S.adaptations=[];S.adaptationCursor=null;S.adaptationsLoaded=false;S.adaptationsLoading=false;S.adaptationsError='';S.adaptationDirty=false;S.adaptationDraftVersion=null;draft.adaptationReason='';handoffSeq++;handoffDetailSeq++;S.handoffs=[];S.handoffCursor=null;S.handoffsLoaded=false;S.handoffsLoading=false;S.handoffsError='';S.handoffDraft=null;checkpointSeq++;S.checkpoints=[];S.checkpointCursor=null;S.checkpointsLoaded=false;S.checkpointsLoading=false;S.checkpointsError='';draft.findingReviewReason='';selectionGeneration++;if(S.selected)chatDrafts.set(S.selected,draft.chatText);postsSeq++;S.posts=[];S.postsCursor=null;S.postsPip='';S.postsLoaded=false;S.fixes=new Map();S.fixesPip='';fixesSeq++;S.postsLoading=false;S.postsError='';messageSeq++;streamSeq++;streamLoading=false;S.stream=null;S.messages=[];S.messageCursor=null;S.messagesLoaded=false;S.messagesLoading=false;S.messagesError='';S.chatActiveRun=null;S.omitted=0;S.modelDirty=false;draft.modelReason='';S.busy=false;approvalSeq++;S.approvals=[];S.approvalCursor=null;S.approvalsLoaded=false;S.approvalsLoading=false;S.approvalsError='';S.scheduleDirty=false;S.scheduleDraftVersion=null;draft.scheduleReason=''; activitySeq++;S.activity=null;S.activityLoading=false;S.activityError=''; dropLive(); selectionSeq++;detailSeq++;historySeq++;S.pip=null;S.runs=[];S.run=null;S.runId='';S.versions=[];S.cursor=null;S.historyLoaded=false;draft.revisionGoal='';draft.revisionReason='';closeReview(); }
 // "Report ready", "Last run failed": the Pip page's status names its latest run, so it opens that run (reported
 // 19 Oct: it read like a link and did nothing). A status that names no finished run stays words.
 // Since its runs post in its chat (API 51), the status says what the latest found and goes to that post.
@@ -3623,7 +3720,7 @@ async function loadSelected(chooseLatest=false) {
   if(!S.selected)return;const id=S.selected,sequence=++selectionSeq,token=scope();
   try{const [p,r]=await Promise.all([send('get_pip',{pip_id:id}),send('list_pip_runs',{pip_id:id})]);if(token!==scope()||sequence!==selectionSeq)return;
     if(!record(p.pip)||p.pip.id!==id||p.pip.workspace_id!==S.workspace.id||!Array.isArray(r.runs)||!r.runs.every(run=>run.pip_id===id))throw new Error('Pip details do not match this workspace.');
-    S.pip=p.pip;S.runs=r.runs;syncLive();if(!S.modelDirty)draft.pipModel=modelValue(p.pip.model_choice);if(!S.scheduleDirty)hydrateSchedule(p.pip);if(!S.quickDirty)hydrateQuickSchedule(p.pip);if(!S.adaptationDirty)hydrateAdaptation(p.pip);if(!S.sourceDirty)hydrateSource(p.pip);if(!draft.revisionGoal)draft.revisionGoal=p.pip.goal;render();void loadPosts();
+    S.pip=p.pip;S.runs=r.runs;syncLive();if(p.pip?.model_choice?.mode==='provider'&&S.apiVersion>=74&&!Array.isArray(S.providers)&&!S.modelsLoading)void loadModels();if(!S.modelDirty)draft.pipModel=modelValue(p.pip.model_choice);if(!S.scheduleDirty)hydrateSchedule(p.pip);if(!S.quickDirty)hydrateQuickSchedule(p.pip);if(!S.adaptationDirty)hydrateAdaptation(p.pip);if(!S.sourceDirty)hydrateSource(p.pip);if(!draft.revisionGoal)draft.revisionGoal=p.pip.goal;render();void loadPosts();
     const desired=S.runId||(chooseLatest?r.runs.find(run=>run.manifest?.run_kind!=='conversation')?.id:'');if(desired&&S.tab!=='chat')await loadRun(desired);if(S.tab==='chat')await loadMessages();
   }catch(error){if(token===scope()&&sequence===selectionSeq)setError(error);}
 }
@@ -3649,7 +3746,7 @@ async function refreshNow(includeContext=false) {
     if(includeContext){if(results[2].status==='fulfilled'){S.context=null;S.context=context(results[2].value.context,S.workspace.id);}else{S.context=null;S.error=errorText(results[2].reason);}}
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)&&paged&&S.pip?.id===S.selected)S.jobs=[...S.jobs,S.pip];
     if(S.selected&&!S.jobs.some(p=>p.id===S.selected)){clearSelection();S.selected='';}
-    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=4000)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
+    if(restoreView&&!S.create){restoreView=false;if(savedView?.workspace_id===S.workspace.id&&record(savedView.drafts))for(const [id,text] of Object.entries(savedView.drafts).slice(-20))if(typeof text==='string'&&text.length<=4000)chatDrafts.set(id,text);if(savedView?.workspace_id===S.workspace.id&&record(savedView.draft_marks))for(const [id,kept] of Object.entries(savedView.draft_marks).slice(-20)){const fine=record(kept)&&typeof kept.text==='string'&&Array.isArray(kept.parts)&&kept.parts.length<=256&&kept.parts.every(p=>typeof p==='string'||record(p)&&['plugin','pip','file'].includes(p.kind)&&typeof p.label==='string'&&typeof p.wire==='string'&&typeof p.identity==='string'&&p.label.length<=4096&&p.wire.length<=4096&&p.identity.length<=128)&&kept.parts.map(p=>typeof p==='string'?p:p.wire).join('')===kept.text;if(fine)chatMarks.set(id,kept);}if(savedView?.workspace_id===S.workspace.id&&record(savedView.chat_queues))for(const [id,list] of Object.entries(savedView.chat_queues).slice(-20))if(Array.isArray(list))chatQueues.set(id,list.filter(item=>record(item)&&typeof item.id==='string'&&typeof item.text==='string'&&item.text.length<=4000).slice(0,MAX_CHAT_QUEUE));if(savedView?.workspace_id===S.workspace.id&&!savedView.overview&&!(navigationPending&&options.navigation?.overview===true)&&S.jobs.some(p=>p.id===savedView.selected))await select(savedView.selected);}if(S.selected)await loadSelected(false);
   }catch(error){if(token===scope())S.error=errorText(error);}
   finally{if(epoch===S.epoch&&sequence===refreshSeq){S.refreshing=false;render();if(S.apiVersion>=72&&(!S.selected||S.overview)&&!S.create&&(!flowState.loaded||flowState.workspace!==S.workspace.id||Date.now()-flowState.loadedAt>15000))void loadFlows();}}
 }
@@ -3801,9 +3898,10 @@ function updateDraft(event) {
   const key=event.target.dataset?.draft;if(!(key in draft))return;draft[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;
   if(key==='noteAdd'){const add=document.querySelector('#note-add-form button[type=submit]');if(add)add.disabled=notesBusy||!usable()||!draft.noteAdd.trim();}
   if(key==='outcomeSession'){outcomeInspectSeq++;outcomeInspection=null;outcomeInspecting=false;outcomeSessionsError='';}
-  if(key==='chatText'&&S.selected){chatDrafts.set(S.selected,draft.chatText);rememberView();fitChatInput();
-    // The box emptied or got its first word: voice mode and Send trade places (the caret is kept across the redraw).
-    if(voiceMode&&!!$('chat-voicemode')===!!draft.chatText.trim()){const at=event.target.selectionStart;render();const box=$('chatText');if(box){box.focus();box.setSelectionRange(at,at);}}}if(key==='chatModelSearch')render();
+  if(key==='chatText'&&S.selected){chatDrafts.set(S.selected,draft.chatText);rememberMarks();rememberView();fitChatInput();
+    // The box emptied or got its first word: voice mode and Send trade places (the caret is kept across the redraw;
+    // the rich box stays where it is, and a selection set in an open composition would cancel it).
+    if(voiceMode&&!!$('chat-voicemode')===!!draft.chatText.trim()){const at=event.target.selectionStart;render();const box=$('chatText');if(box&&box!==chatBox?.el){box.focus();box.setSelectionRange(at,at);}}}
   if(key==='sourceMode'||key==='sourceReason'||key==='sourceExcludeInput')S.sourceDirty=true;
   if(key==='pipModel')S.modelDirty=true;
   if((key==='pipPageName'||key==='pipPageTitle')&&!pageNameDirty){pageNameDirty=true;render();}
@@ -3898,7 +3996,7 @@ document.addEventListener('submit',event=>{
     void applyOwnChange({adaptation_policy:policy},d=>JSON.stringify(adaptationPolicy(d.adaptation_policy))===JSON.stringify(policy),'Saved. The Pip uses this from its next run.').then(ok=>{if(ok)S.adaptationDirty=false;});return;
   }
   if(id==='model-form'){
-    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(personalPip()),routerOffer());}catch(error){setError(error);return;}
+    let choice;try{choice=modelChoice(draft.pipModel,S.models,subscriptionChoices(personalPip()),routerOffer(),savedProviders());}catch(error){setError(error);return;}
     void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`Model saved: ${modelLabel(choice)}. Its next run uses it.${choice.mode==='subscription'?' '+subscriptionUsage(modelLabel(choice)):''}`).then(ok=>{if(ok)S.modelDirty=false;});return;
   }
   if(id==='create-form'){
@@ -3906,7 +4004,7 @@ document.addEventListener('submit',event=>{
     const selectedType=S.types.find(t=>t.id===S.createType);
     if(!S.create||S.createStep!=='configure'||!selectedType?.available){setError('Choose an available Pip type first.');return;}
     if(!draft.name.trim()||!draft.goal.trim()||!draft.source_ref.trim()){setError('Give it a name, say what it does, and choose a branch or commit.');return;}
-    let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(S.workspace?.kind==='personal'),routerOffer());}catch(error){setError(error);return;}
+    let choice;try{choice=modelChoice(draft.createModel,S.models,subscriptionChoices(S.workspace?.kind==='personal'),routerOffer(),savedProviders());}catch(error){setError(error);return;}
     const request={type:'create_pip',workspace_id:S.workspace.id,pip_type:selectedType.id,model_choice:choice,name:draft.name.trim(),goal:draft.goal.trim(),source_ref:draft.source_ref.trim()};
     if(executionPip(selectedType)&&S.workspace?.kind!=='personal')openReview(executionCreateReview(selectedType,request,choice));
     else void mutate(request,finishCreate);
@@ -3978,9 +4076,11 @@ document.addEventListener('click',event=>{
   if(target.dataset.removeImage!==undefined){const i=Number(target.dataset.removeImage),images=[...pendingImages()];if(Number.isInteger(i)&&i>=0&&i<images.length){images.splice(i,1);images.length?chatImages.set(S.selected,images):chatImages.delete(S.selected);render();$('chatText')?.focus();}return;}
   if(target.id==='pin-pips-sidebar'){S.sidebarPinned=!S.sidebarPinned;rememberView();render();return;}
   if(target.dataset.chatActivity){void toggleChatActivity(target.dataset.chatActivity);return;}
+  if(target.dataset.postTrace){void openReplyTrace(target.dataset.postTrace,'');return;}
   if(target.dataset.chatAction){
     const m=S.messages.find(m=>m.id===target.dataset.messageId);if(!m)return;
     if(target.dataset.chatAction==='read'){reader?.toggle(m.id,m.text);return;}
+    if(target.dataset.chatAction==='trace'){void openReplyTrace(m.run_id,m.model);return;}
     if(target.dataset.chatAction==='copy'){vscode.postMessage({type:'copy',text:m.text});target.innerHTML=transcriptIcon('check')+'<span class="sr-only">Copied</span>';target.title='Copied';target.setAttribute('aria-label','Copied');const status=target.parentElement.querySelector('.copy-feedback');if(status)status.textContent='Copied';return;}
     const prompt=S.messages.find(p=>p.role==='user'&&p.run_id===m.run_id);if(!prompt||archived()||!usable())return;
     if(draft.chatText.trim()&&draft.chatText!==prompt.text){S.notice='You have an unsent message in the box. Send or copy it first, then edit this one.';render();return;}
@@ -4044,7 +4144,7 @@ document.addEventListener('click',event=>{
    if(item?.kind==='setup')void dismissSetupFromAttention(item);
    return;
   }
-  if(target.dataset.eyesSwitch){const model=target.dataset.eyesSwitch,choice={mode:'model',model};void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${model}, which can see.`).then(ok=>{if(ok)void loadEyes();});return;}
+  if(target.dataset.eyesSwitch){const model=target.dataset.eyesSwitch,held=S.pip?.model_choice,choice=held?.mode==='provider'?{mode:'provider',provider:held.provider,model}:{mode:'model',model};void applyOwnChange({model_choice:choice},d=>JSON.stringify(d.model_choice)===JSON.stringify(choice),`${S.pip.name} now uses ${model}, which can see.`).then(ok=>{if(ok)void loadEyes();});return;}
   if(target.dataset.levelAsk!==undefined){void setLevel('ask');return;}
   if(target.dataset.dashboardRemove){const id=target.dataset.dashboardRemove;if(artifactsState.value){const list=artifactsState.value.dashboards.filter(d=>d!==id),known=!artifactsState.dashboards||artifactsState.dashboards.some(d=>d.id===id);void setArtifacts({dashboards:dashboardsToSave(list)},known?`${S.pip?.name||'It'} no longer refreshes “${dashboardTitle(id)}”.${goneNote(list)}`:`Removed. ${S.pip?.name||'It'} refreshes ${list.length?'the others':'no dashboards'} now.`);}return;}
   if(target.dataset.artifactOpen){vscode.postMessage({type:'pipsOpenArtifact',id:target.dataset.artifactOpen,artifactType:target.dataset.artifactType||''});return;}
@@ -4057,6 +4157,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.attentionMore!==undefined){attentionExpanded=Number(target.dataset.attentionMore)||false;render();return;}
   if(target.dataset.pluginUseRemove){void pipsSettingsCall('decline_pip_plugin',{pip_id:target.dataset.pluginUsePip,grant_id:target.dataset.pluginUseRemove},'Removed. That Pip no longer uses the plugin.');return;}
   if(target.dataset.openPlugins!==undefined){vscode.postMessage({type:'openSettings',section:'plugins'});return;}
+  if(target.dataset.openModels!==undefined){vscode.postMessage({type:'openSettings',section:'models'});return;}
   if(target.dataset.pipRead){markPipRead(target.dataset.pipRead);return;}
   if(target.dataset.job){if(event.detail>0&&!S.sidebarPinned)shell.classList.add('sidebar-dismissed');void select(target.dataset.job);return;}
   if(target.dataset.postOpen){openPostReport(target.dataset.postOpen);return;}
@@ -4089,7 +4190,7 @@ document.addEventListener('click',event=>{
   if(target.dataset.handoffFinding!==undefined){
     try{if(currentTree()||!handoffSourceAllowed(S.run?.manifest))throw new Error('Handoffs need committed code. Switch this Pip to committed code in Settings, under Advanced.');const c=runCheckpoint(S.run?.checkpoint,{id:S.runId,pip_id:S.selected,workspace_id:S.workspace.id}),index=Number(target.dataset.handoffFinding),f=c?.findings[index];if(!f)return;S.handoffDraft={runId:S.runId,index,finding:f,sourceName:S.pip.name};draft.handoffTask='Investigate: '+f.title;draft.handoffTarget='';draft.handoffPaths=f.path;draft.handoffTests='[]';draft.specialistExplorer=false;draft.specialistCritic=false;draft.specialistWorker=false;draft.specialistCalls='1';S.tab='handoffs';S.error='';render();void loadHandoffs();}catch(error){setError(error);}return;
   }
-  if(target.dataset.chatProvider){S.modelProviderChoice=target.dataset.chatProvider;S.modelProviderView=false;draft.chatModelSearch='';render();$('chatModelSearch')?.focus();return;}
+  if(target.dataset.chatProvider){S.modelProviderChoice=target.dataset.chatProvider;S.modelProviderView=false;render();$('chat-model-providers')?.focus();return;}
   if(target.dataset.chatModel){reviewChatModel(target.dataset.chatModel);return;}
   if(target.dataset.setup){void openSetup(target.dataset.setup);return;}
   if(target.dataset.rejectSetup){void openSetup(target.dataset.rejectSetup,true);return;}
@@ -4241,9 +4342,9 @@ document.addEventListener('click',event=>{
     case 'pip-run-open':{const id=target.dataset.runId;S.tab='runs';S.overview=false;rememberView();render();void loadSelected(false).then(()=>{if(id&&S.tab==='runs')return loadRun(id);});break;}
     case 'back-pips':chatDrafts.set(S.selected,draft.chatText);if(!S.selected)S.tab='chat';S.overview=true;rememberView();render();break;
     case 'return-main':options.close?.();break;
-    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.modelProviderView=false;S.modelProviderChoice=currentChatProvider(modelValue(S.pip?.model_choice));S.composerNoteOpen=false;draft.chatModelSearch='';render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
-    case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;S.modelProviderView=false;render();(S.modelListOpen?$('chatModelSearch'):$('chat-model-summary'))?.focus();break;
-    case 'chat-model-providers':S.modelProviderView=true;draft.chatModelSearch='';render();[...document.querySelectorAll('[data-chat-provider]')].find(node=>node.dataset.chatProvider===S.modelProviderChoice)?.focus();break;
+    case 'chat-model':S.composerPanel=S.composerPanel==='model'?'':'model';S.modelListOpen=false;S.modelProviderView=false;S.modelProviderChoice=currentChatProvider(modelValue(S.pip?.model_choice));S.composerNoteOpen=false;render();if(S.composerPanel){if(!S.models.length)void loadModels();$('chat-model-summary')?.focus();}break;
+    case 'chat-model-summary':S.modelListOpen=!S.modelListOpen;S.modelProviderView=false;render();(S.modelListOpen?$('chat-model-providers'):$('chat-model-summary'))?.focus();break;
+    case 'chat-model-providers':S.modelProviderView=true;render();[...document.querySelectorAll('[data-chat-provider]')].find(node=>node.dataset.chatProvider===S.modelProviderChoice)?.focus();break;
     case 'chat-model-close':S.composerPanel='';render();$('chat-model')?.focus();break;
     case 'chat-context-toggle':S.composerPanel=S.composerPanel==='context'?'':'context';S.composerNoteOpen=false;render();if(S.composerPanel){void loadChatContext();$('chat-context')?.focus();}break;
     case 'chat-context-close':S.composerPanel='';render();$('chat-context-toggle')?.focus();break;
@@ -4443,7 +4544,6 @@ document.addEventListener('keydown',event=>{
   // Personal | Project keys, as the Sessions home's tabs take them: an arrow goes to the other tab, Home and End to
   // the first and the last, and the tab chosen takes the focus.
   if(!S.review&&event.target.dataset?.pipsTab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();chooseScopeTab(event.key==='Home'?'personal':event.key==='End'?'project':scopeTab()==='personal'?'project':'personal',true);return;}
-  if(!S.review&&event.target.id==='chatModelSearch'&&event.key==='Enter'){event.preventDefault();return;}
   if(!S.review&&S.composerPanel){if(event.key==='Escape'){event.preventDefault();const target=S.composerPanel==='context'?'chat-context-toggle':S.composerPanel==='routines'?'chat-routines':'chat-model';S.composerPanel='';render();$(target)?.focus();return;}if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.closest?.('.composer-model-options')){event.preventDefault();const items=[...document.querySelectorAll('[data-chat-model]:not(:disabled)')],at=items.indexOf(event.target);items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;}}
   if(event.key==='Escape'&&voiceMode?.active){event.preventDefault();voiceMode.end();return;}
   if(event.key==='Escape'&&(S.mic==='recording'||S.mic==='starting')){event.preventDefault();micCancel();return;}
@@ -4479,6 +4579,7 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsReply'){broker.receive(message);if(message.ok===true)window.setTimeout(clearBusy,0);return;}
   if(globalThis.DgcPictureFold?.message(message))return;     // which pictures stay folded, and the setting
   if(message.type==='pipsPluginLogos'){takePluginLogos(message.logos);return;}
+  if(message.type==='pipsFiles'){projectFiles=(Array.isArray(message.files)?message.files:[]).filter(f=>record(f)&&typeof f.label==='string').slice(0,600);chatPicker?.refresh();return;}
   // Settings or the Router changed: Default may run somewhere else now. A list already read is read again.
   // A Pip was marked read somewhere else (its pill on the home, a card in a Work chat): the counts are read again.
   if(message.type==='pipsUnreadChanged'){lastUnreadAt=0;void loadUnread(true);return;}
@@ -4487,8 +4588,8 @@ const stopMessages=options.onMessage(message=>{
   if(message.type==='pipsVisibility'){S.visible=message.visible===true;motion();if(S.visible)void refresh(false);return;}
   if(message.type==='pipsConnection'){
     if(message.generation !== undefined && message.generation === S.generation) return;
-    S.generation=message.generation ?? null;
-    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
+    S.generation=message.generation ?? null;S.displayMentions=message.displayMentions===true;
+    savedView=options.getState?.()||savedView;S.epoch++;broker.reset();clearSelection();S.selected='';S.overview=true;restoreView=true;chatDrafts.clear();chatMarks.clear();chatRequests.clear();chatPreferences.clear();draft.chatText='';chatHistory?.reset();S.workspace=null;S.projectEmpty=false;S.switching=false;S.currentWorkspaceId=null;S.folderOpen=message.folder!==false;S.jobs=[];setupSeq++;setupDetailSeq++;setupRows=[];setupLoading=false;setupError='';draft.setupTask='';S.types=[];S.models=[];S.defaultModel='';S.subscriptions=[];S.defaultEngine=null;S.router=null;S.modelsError='';S.modelsLoading=false;S.executionCapability=null;S.executionLoading=false;S.executionError='';draft.createModel='default';S.create=false;S.createStep='type';S.createType='';creationDrafts.clear();avatarIds.clear();S.runner=null;S.context=null;S.refreshing=false;S.busy=false;S.loading=false;S.error='';S.notice='';S.apiVersion=Number.isSafeInteger(message.apiVersion)?message.apiVersion:9;S.connected=message.connected===true;S.supported=message.supported===true;S.enabled=message.enabled===true;
     render();if(usable())void initialize();
   }
 });

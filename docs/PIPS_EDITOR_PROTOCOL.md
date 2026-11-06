@@ -124,6 +124,11 @@ The reply is a `pips_result` event that carries the nested request ID:
   documents the main chat reads), 2 MB in all within the same 2,800,000-character budget as the
   images. A listed user message carries `files: [{index, name, bytes}]`. The host refuses `files`
   before sending to a CLI below API 43, and refuses images and files over the shared budget.
+- `send_pip_message` may carry `display_mentions` when `ready.capabilities.pip_display_mentions` is 1: where the box
+  drew its `@` marks, in the shape `prompt` takes, plus `wired: true` on a Pip or a file whose name is the words of
+  the text. They are display-only and no part of the retry key. Marks that don't spell the text are dropped and the
+  message still goes. A listed user message, or a mid-turn update, carries them back. The Pips a message names in its
+  own workspace reach the worker's turn as `named_pips` reference data.
 - From API 52 the host sends a message's photos and files the main chat's way: it writes each into
   the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
   and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of
@@ -286,6 +291,14 @@ time after asking the user, changes a Pip's model (a new job version, as the Pip
 context window (the Pip's own chat options, as its prompt box saves them with `set_pip_chat_options`),
 the Pips default, or a new Pip's pick on its setup card. The Pip's page shows a window the chat set the
 next time it reads the Pip's messages (at most every 4 seconds while its chat is open).
+
+**Saved providers** (API 74). `model_choice` also takes `{mode: "provider", provider: "provider_<32 hex>", model}`, a
+provider saved in Settings → Models. The saved list belongs to the editor, so its host adds `providers` (`[{id, name,
+default, models}]`, no address and no key) to its own `list_pip_models` answer. Before a request carrying such a choice,
+the host sends the new top-level command `save_model_provider` (`id`, `name`, `base_url`, `model`, `api_mode`, `api_key`,
+offered as `ready.capabilities.saved_model_providers`, answered by `model_provider_saved`), and with `remove: true` when
+the provider is removed. The run pins the address, API and id, and reads the key when it starts. A removed provider is
+refused with `model_not_available` when a run is queued and `model_changed` when a queued run starts, in plain words.
 
 **DGC Router** (API 70). No new request and no event changes. `model_choice` also takes `{mode: "router"}` (any of
 the user's systems with the Pips job) and `{mode: "router", system, model}` (that one system and model). The run

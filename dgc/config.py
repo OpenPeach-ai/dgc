@@ -711,6 +711,29 @@ def bound_provider_key(config, secret_key: str, base_url: str) -> str:
     return key if bound and bound == asked else ""
 
 
+# ---- Saved model providers a Pip runs on (0.51) ---------------------------------------------------
+# The editor owns the list of saved providers (Settings -> Models). A Pip's runs happen with no window, so the provider
+# a Pip was set to is kept here too: only that one, whole, in secrets.json. Its key sits beside its address in one
+# record, so the two can't come apart. It is never in config.json or the `data` every listing reads.
+SAVED_PROVIDERS = "saved_providers"
+_SAVED_PROVIDER_ID = re.compile(r"provider_[0-9a-f]{32}\Z")
+_SAVED_PROVIDER_FIELDS = ("name", "base_url", "api_mode", "model", "api_key")
+_MAX_SAVED_PROVIDERS = 16
+
+
+def _clean_saved_providers(value) -> dict[str, dict[str, str]]:
+    """The saved providers that can be used; anything else in the block is left out."""
+    if not isinstance(value, dict):
+        return {}
+    kept: dict[str, dict[str, str]] = {}
+    for provider_id, record in list(value.items())[:_MAX_SAVED_PROVIDERS]:
+        if (isinstance(provider_id, str) and _SAVED_PROVIDER_ID.match(provider_id) and isinstance(record, dict)
+                and all(isinstance(record.get(field), str) for field in _SAVED_PROVIDER_FIELDS)
+                and record["base_url"] and len(record["api_key"]) <= 16_384):
+            kept[provider_id] = {field: record[field] for field in _SAVED_PROVIDER_FIELDS}
+    return kept
+
+
 # ---- DGC Router (0.51): the user's other computers that run models --------------------------------
 # The `router` block is NOT in DEFAULTS: with the Router never set up, config.json, the editor's config event and every
 # listing stay exactly as 0.50 had them. router_block() reads it (validated, with defaults); set_router() writes it.
@@ -1523,6 +1546,8 @@ class Config:
         self._router_keys: dict[str, tuple[str, str]] = {}
         # Image generators' keys, by generator id, the same way: (key, the identity of the address it was saved for).
         self._image_keys: dict[str, tuple[str, str]] = {}
+        # Saved providers a Pip was set to, by provider id (see SAVED_PROVIDERS).
+        self._saved_providers: dict[str, dict[str, str]] = {}
         self.credential_warnings: tuple[str, ...] = ()
         self.permissions: dict[str, list[str]] = {"allow": [], "ask": [], "deny": []}
         self.load()
@@ -1854,6 +1879,7 @@ class Config:
         if set(image_identity) != set(image_keys):
             migrated = True
         self._image_keys = image_keys
+        self._saved_providers = _clean_saved_providers(secrets.get(SAVED_PROVIDERS))
         self._stored_secrets = accepted_secrets
         self._stored_provider_identity = accepted_provider_identity
         self.data.update(accepted_secrets)
@@ -2282,6 +2308,7 @@ class Config:
         own["images"] = {generator_id: (value, identity)
                          for generator_id, (value, identity) in getattr(self, "_image_keys", {}).items()
                          if value and identity and _image_identity(images, generator_id) == identity}
+        own[SAVED_PROVIDERS] = copy.deepcopy(getattr(self, "_saved_providers", {}))
         return own
 
     def _save_secrets(self) -> None:
@@ -2383,6 +2410,18 @@ class Config:
                 secrets[IMAGE_KEY_PREFIX + generator_id] = images[generator_id][0]
             secrets["image_identity"] = {generator_id: images[generator_id][1] for generator_id in sorted(images)}
         self._image_keys = dict(images)
+        # Saved providers, merged the same way: disk's stand, and this process's own changes apply.
+        providers = _clean_saved_providers(disk.get(SAVED_PROVIDERS)) if was is not None else {}
+        before_providers = (was or {}).get(SAVED_PROVIDERS, {})
+        for provider_id in set(now[SAVED_PROVIDERS]) | set(before_providers):
+            if was is not None and now[SAVED_PROVIDERS].get(provider_id) == before_providers.get(provider_id):
+                continue
+            providers.pop(provider_id, None)
+            if provider_id in now[SAVED_PROVIDERS]:
+                providers[provider_id] = now[SAVED_PROVIDERS][provider_id]
+        if providers:
+            secrets[SAVED_PROVIDERS] = copy.deepcopy(providers)
+        self._saved_providers = providers
         _write_private_json(USER_SECRETS, secrets)
         self._baseline_secrets = self._own_secrets()
 
@@ -2408,6 +2447,7 @@ class Config:
         clone._env_secret_keys = set(self._env_secret_keys)
         clone._router_keys = dict(getattr(self, "_router_keys", {}))
         clone._image_keys = dict(getattr(self, "_image_keys", {}))
+        clone._saved_providers = copy.deepcopy(getattr(self, "_saved_providers", {}))
         clone._explicit_keys = set(getattr(self, "_explicit_keys", set()))
         clone.credential_warnings = tuple(self.credential_warnings)
         clone.permissions = self.permissions
@@ -2631,6 +2671,37 @@ class Config:
         self._router_keys = keys
         if persist:
             self.save()
+
+    # ---- Saved model providers a Pip runs on (0.51) ----------------------------------------------
+    def saved_provider(self, provider_id: str) -> dict[str, str] | None:
+        """The saved provider a Pip was set to: name, base_url, api_mode, model, api_key; None when it was removed.
+        Always as secrets.json has it now, in a private view too: the Pips runner outlives a provider's removal, and
+        must never run on what it remembered. Holds the key: never put the record in a result, a log or an event."""
+        disk = _disk_json(USER_SECRETS)
+        if disk is not None:
+            self._saved_providers = _clean_saved_providers(disk.get(SAVED_PROVIDERS))
+        elif USER_SECRETS.exists():             # unreadable right now: what this process last read
+            pass
+        else:
+            self._saved_providers = {}
+        record = getattr(self, "_saved_providers", {}).get(str(provider_id or ""))
+        return dict(record) if record else None
+
+    def set_saved_provider(self, provider_id: str, record: dict | None) -> None:
+        """Save a provider (the whole record, with its key), or with None forget it, in secrets.json."""
+        provider_id = str(provider_id or "")
+        if not _SAVED_PROVIDER_ID.match(provider_id):
+            raise ValueError("that isn't a saved provider's id")
+        providers = dict(getattr(self, "_saved_providers", {}))
+        if record is None:
+            providers.pop(provider_id, None)
+        else:
+            cleaned = _clean_saved_providers({provider_id: record})
+            if not cleaned:
+                raise ValueError("a saved provider needs a name, an address, an API, a model and a key field")
+            providers[provider_id] = cleaned[provider_id]
+        self._saved_providers = providers
+        self._save_secrets()
 
     # ---- Image generators (0.51) ---------------------------------------------------------------
     def _images_raw(self):

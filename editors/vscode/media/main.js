@@ -26,101 +26,16 @@
   // DOM and the accessors are defined in terms of THEM, so a test that goes through `.value`
   // still moves the real composer.
   // The composer is a contenteditable, so "the text" and "the caret" have to be computed rather
-  // than read off the element. Two measured facts drive every line of this:
-  //
-  //   * Chromium does NOT insert "\n" for a newline. It wraps the following content in a block:
-  //     typing a, Enter, b gives `a<div>b</div>`, whose textContent is "ab". Reading textContent
-  //     would silently JOIN every line the user typed.
-  //   * After an edit it leaves a trailing filler <br> in an otherwise empty host, so the DOM
-  //     looking non-empty says nothing about whether there is a draft.
-  //
-  // walk() is the single definition of the text, and offsetOf/rangeAt are its exact inverse.
-  // Everything -- the wire, drafts, the pickers' arithmetic, the empty check -- comes from here,
-  // so they cannot disagree with each other.
-  const BLOCK = new Set(["DIV", "P", "LI", "TR", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE"]);
+  // than read off the element. media/mentions.js holds the one definition of both (walk, and its
+  // exact inverse rangeAt), which this box shares with ChatDGC's and a Pip's.
+  const M = window.DgcMentions;
+  const walk = M.walk;
 
-  function walk(root, stopNode, stopOffset, pillText = (pill) => pill.dataset.pill) {
-    // Returns [text, offsetAtStop]. A null stopNode just serializes the whole subtree. `pillText`
-    // is what a pill reads as: its wire text for the model, its typed token for the clipboard.
-    let text = "";
-    let found = stopNode == null ? 0 : -1;
-    let endedByBr = false;   // a real <br> ended the last line, as opposed to a block boundary
-    const visit = (node) => {
-      if (node.nodeType === 3) {
-        if (stopNode === node && found < 0) found = text.length + Math.min(stopOffset, node.data.length);
-        text += node.data;
-        if (node.data) endedByBr = false;
-        return;
-      }
-      if (node.nodeType !== 1) {
-        if (stopNode === node && found < 0) found = text.length;
-        return;
-      }
-      // A <br> and a pill are atomic: an offset into one only says which side of it the caret is
-      // on. Everything else takes its offset from the child index, below. This used to be one
-      // blanket "found = text.length" on entry, which pinned every element-anchored caret to the
-      // position BEFORE that element's contents and left the child-index checks unreachable --
-      // and an element anchor with a non-zero offset is exactly what Chromium hands back after an
-      // uneditable pill, so the caret read as sitting in front of the pill it was placed after.
-      const atomic = node.tagName === "BR" || (node.hasAttribute && node.hasAttribute("data-pill"));
-      if (atomic) {
-        const before = text.length;
-        // Chromium ends every block with a <br> so the block's last line can hold a caret. That
-        // line is already represented by the boundary the block opened with, so charging for both
-        // made one Shift+Enter serialize as "\n\n" and a visually empty box serialize as "\n" --
-        // which kept the placeholder off and made the three draft guards call an empty composer
-        // non-empty, so "Restore message to draft" answered "Send or clear the current draft
-        // first." against a box that was empty on screen.
-        const filler = node.tagName === "BR" && node === node.parentNode.lastChild;
-        if (!filler) {
-          text += node.tagName === "BR" ? "\n" : pillText(node);
-          endedByBr = node.tagName === "BR";
-        }
-        if (stopNode === node && found < 0) found = stopOffset > 0 ? text.length : before;
-        return;
-      }
-      const block = BLOCK.has(node.tagName) && node !== root;
-      // A block starts a new line unless nothing has been written yet, or unless a <br> just ended
-      // one: in the flat text<br>text shape setComposerValue builds, the <br> IS the break and a
-      // following block must not add a second. Between two BLOCKS it must, because the empty line
-      // Shift+Enter leaves behind is the boundary itself -- its filler <br> contributed nothing
-      // just above. Asking only whether the text already ended in a newline could not tell those
-      // two apart, and collapsed every blank line in the draft.
-      if (block && text && !endedByBr) text += "\n";
-      endedByBr = false;
-      const kids = [...node.childNodes];
-      kids.forEach((kid, i) => {
-        if (stopNode === node && i === stopOffset && found < 0) found = text.length;
-        visit(kid);
-      });
-      if (stopNode === node && stopOffset >= kids.length && found < 0) found = text.length;
-    };
-    visit(root);
-    if (found < 0) found = text.length;
-    // (The filler <br> is dropped where it is visited, above. Trimming a trailing newline here as
-    // well would eat the block boundary a real last line stands on.)
-    return [text, Math.min(found, text.length)];
-  }
-
+  M.caretAfterClickedPill(input);
   const composerText = () => walk(input, null, 0)[0];
 
   function setComposerValue(text) {
-    // One text node per line, separated by <br>. Never innerHTML: the string may be a draft that
-    // came back from storage, or a pasted payload, and neither may bring markup into the host.
-    const frag = document.createDocumentFragment();
-    const lines = String(text ?? "").split("\n");
-    lines.forEach((line, i) => {
-      if (i) frag.appendChild(document.createElement("br"));
-      if (line) frag.appendChild(document.createTextNode(line));
-    });
-    // A TRAILING newline takes TWO <br>, which is what Chromium itself emits: the second is the
-    // filler that lets the new empty line hold a caret, and walk() drops a <br> that is its
-    // parent's lastChild for exactly that reason. Writing one made the separator and the filler the
-    // same node, so the reader could not tell "ends in a newline" from "ends in a line" -- a draft
-    // finished with Shift+Enter lost one newline on every save and restore, silently, accumulating
-    // across chat switches. This is the writer's half of walk()'s contract: setComposerValue(t)
-    // followed by composerText() is t, for every t.
-    if (lines.length > 1 && lines[lines.length - 1] === "") frag.appendChild(document.createElement("br"));
+    const frag = M.textFragment(document, text);
     // Whether the caret was ours to move must be decided BEFORE the nodes it points at are gone.
     const sel = window.getSelection();
     const wasOurs = !sel || sel.rangeCount === 0 || input.contains(sel.getRangeAt(0).startContainer);
@@ -149,87 +64,9 @@
     return walk(input, node, offset)[1];
   }
 
-  function composerSelection() {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return [composerText().length, composerText().length];
-    const range = sel.getRangeAt(0);
-    if (!input.contains(range.startContainer)) {
-      const end = composerText().length;
-      return [end, end];
-    }
-    const a = offsetOf(range.startContainer, range.startOffset);
-    const b = offsetOf(range.endContainer, range.endOffset);
-    return a <= b ? [a, b] : [b, a];
-  }
+  function composerSelection() { return M.selectedOffsets(input); }
 
-  function rangeAt(target) {
-    // The inverse of walk(): the DOM position whose serialized offset is `target`.
-    // This and walk() must count identically. walk() opened a block's line only when the text did
-    // not already end in a newline; this charged for every block while seen < target -- two
-    // different rules. Blink turns Shift+Enter and any multi-line paste into paragraph separators,
-    // so one blank line anywhere in the draft put the two out of step, and insertComposerPill --
-    // which, unlike editComposer, has no verification step and no fallback -- spliced the pill a
-    // character early into the text that was actually sent.
-    let seen = 0, hit = null, endedByBr = false;
-    const visit = (node) => {
-      if (hit) return;
-      if (node.nodeType === 3) {
-        if (seen + node.data.length >= target) { hit = [node, target - seen]; return; }
-        seen += node.data.length;
-        if (node.data) endedByBr = false;
-        return;
-      }
-      if (node.nodeType !== 1) return;
-      if (node.tagName === "BR") {
-        if (node === node.parentNode.lastChild) return;   // the block's filler, as in walk()
-        if (seen >= target) { hit = [node.parentNode, [...node.parentNode.childNodes].indexOf(node)]; return; }
-        seen += 1; endedByBr = true;
-        return;
-      }
-      if (node.hasAttribute && node.hasAttribute("data-pill")) {
-        const len = node.dataset.pill.length;
-        if (seen + len >= target) {
-          const parent = node.parentNode;
-          hit = [parent, [...parent.childNodes].indexOf(node) + (target > seen ? 1 : 0)];
-          return;
-        }
-        seen += len;
-        if (len) endedByBr = false;
-        return;
-      }
-      if (BLOCK.has(node.tagName) && node !== input && seen && !endedByBr) {
-        // The newline this block contributes sits AT offset `seen`, so a target of exactly `seen`
-        // is the position in front of it -- the end of the line above, which is the position just
-        // before this block in its parent. Answering [node, 0] put it after the newline instead,
-        // one offset further on than walk() reads that same position back as.
-        if (seen >= target) {
-          const parent = node.parentNode;
-          hit = [parent, [...parent.childNodes].indexOf(node)];
-          return;
-        }
-        seen += 1;
-      }
-      endedByBr = false;
-      [...node.childNodes].forEach(visit);
-    };
-    visit(input);
-    if (hit) return hit;
-    return [input, input.childNodes.length];
-  }
-
-  function setComposerRange(start, end = start) {
-    const sel = window.getSelection();
-    if (!sel) return;
-    const range = document.createRange();
-    const [sn, so] = rangeAt(Math.max(0, start));
-    const [en, eo] = rangeAt(Math.max(0, end));
-    try {
-      range.setStart(sn, so);
-      range.setEnd(en, eo);
-    } catch { range.selectNodeContents(input); range.collapse(false); }
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
+  function setComposerRange(start, end = start) { M.setRange(input, start, end); }
 
   // Set for as long as an IME session is open. There were no composition listeners at all before:
   // harmless for a textarea, which handles it internally, and not harmless here.
@@ -240,85 +77,14 @@
   // ---- inline pills -------------------------------------------------------------------------
   // A picked skill, template or @file used to vanish from the box and reappear as a chip in a row
   // underneath, because a <textarea> cannot contain an element. It can now sit where it was typed.
-  //
-  // `data-pill` is the pill's WIRE text, and for these kinds it is deliberately the empty string:
-  // the payload travels in `skills`, `templates` or `context`, never in prompt.text, and the tests
-  // that pin "Review  after" are asserting exactly that. The attribute's PRESENCE marks a pill;
-  // its value is what the model reads. contenteditable=false makes it one object to the caret, so
-  // the browser steps over it and selects it whole.
-  function ensurePlushStyles() {
-    const plush = window.PipConcepts?.plush;
-    if (plush?.styles && !document.getElementById("dgc-composer-plush-styles")) {
-      const style = document.createElement("style");
-      style.id = "dgc-composer-plush-styles";
-      style.textContent = plush.styles;
-      document.head.appendChild(style);
-    }
+  // The pill itself is media/mentions.js's, the same in every box; here is what only Work knows.
+  function pillLook(kind, identity) {
+    return { logo: kind === "plugin" ? pluginLogos[identity] : "",
+      glyph: kind === "artifact" ? OUTPUT_CHOICES.find(([value]) => value === identity)?.[3] || "output" : "" };
   }
   function pillElement(kind, label, wire = "", identity = "", pipType = "") {
-    const pill = document.createElement("span");
-    pill.className = `composer-pill pill-${kind}`;
-    pill.setAttribute("contenteditable", "false");
-    pill.setAttribute("data-pill", wire);
-    pill.dataset.kind = kind;
-    if (kind === "pip") {
-      pill.dataset.pipId = identity;
-      const type = pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type;
-      const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(type);
-      const face = document.createElement("span"); face.className = "composer-pip-face"; face.setAttribute("aria-hidden", "true");
-      if (index >= 0 && window.PipConcepts?.plush) {
-        ensurePlushStyles();
-        face.innerHTML = window.PipConcepts.plush.markup(
-          { index, name: label }, "idle", `composerPip${Math.random().toString(36).slice(2, 12)}`,
-          { includeStyles: false });
-      }
-      else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
-      const name = document.createElement("span"); name.className = "composer-pip-name"; name.textContent = label;
-      pill.append(face, name);
-      pill.title = `${label} · Pip reference`;
-      return pill;
-    }
-    if (kind === "plugin") {
-      pill.dataset.pluginId = identity;
-      const mark = document.createElement("span"); mark.className = "composer-plugin-mark"; mark.setAttribute("aria-hidden", "true");
-      const logo = pluginLogos[identity];
-      if (logo) { const img = document.createElement("img"); img.alt = ""; img.src = logo; mark.appendChild(img); }
-      else mark.innerHTML = '<span class="codicon codicon-plug"></span>';
-      const name = document.createElement("span"); name.className = "composer-plugin-name"; name.textContent = label;
-      pill.append(mark, name);
-      pill.title = `${label} · connected plugin`;
-      return pill;
-    }
-    if (kind === "artifact") {
-      pill.dataset.artifactKind = identity;
-      const glyph = OUTPUT_CHOICES.find(([value]) => value === identity)?.[3] || "output";
-      const mark = document.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${glyph}`;
-      mark.setAttribute("aria-hidden", "true");
-      const name = document.createElement("span"); name.className = "composer-artifact-name"; name.textContent = label;
-      pill.append(mark, name);
-      pill.title = `${label} · Artifact format`;
-      return pill;
-    }
-    if (kind === "link") {
-      // NO FAVICON HERE, and that is the whole point. Setting img.src fetches from Google's icon
-      // service the instant the element is built -- on a DETACHED node, before insertComposerPill
-      // has even tried to splice it in, so it fired on the path where the insertion throws and no
-      // pill ever renders. That moved the disclosure boundary from "when you send" to "when you
-      // paste": paste an internal wiki or Jira URL, think better of it, delete the pill, never
-      // send, and the host has already left the machine. The transcript's trade is that Google
-      // learns the hosts you SENT; this would have covered hosts you merely considered, which is
-      // not the same trade. Nothing is lost after send: promptFavicon draws the site's own icon on
-      // the prompt bubble, which is where it was drawn before pills existed, and dgc.linkFavicons
-      // still governs that. The pill carries the host as text, which is what a reader needs.
-      let shown = label;
-      try { const u = new URL(label); shown = u.host + (u.pathname === "/" ? "" : u.pathname); }
-      catch { /* keep the raw text if it will not parse */ }
-      pill.appendChild(document.createTextNode(shown.length > 48 ? shown.slice(0, 47) + "\u2026" : shown));
-      pill.title = label;
-      return pill;
-    }
-    pill.textContent = label;
-    return pill;
+    return M.pill(kind, label, wire, identity, { ...pillLook(kind, identity),
+      pipType: kind === "pip" ? pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type : "" });
   }
 
   // A null `start` puts the pill at the caret as it stands. Text offsets cannot say which side of
@@ -333,54 +99,9 @@
     input.focus({ preventScroll: true });
     if (start != null) setComposerRange(start, end);
     const built = pillElement(kind, label, wire, identity);
-    // Tag it so the caret repair below can find exactly the node just inserted, rather than
-    // guessing at "the last pill" -- there may already be others, in any order.
-    const stamp = `p${Math.random().toString(36).slice(2, 10)}`;
-    built.dataset.fresh = stamp;
     composerEditing = true;
-    try {
-      const ok = typeof document.execCommand === "function"
-        && document.execCommand("insertHTML", false, built.outerHTML);
-      if (!ok) {
-        const range = window.getSelection()?.getRangeAt(0);
-        if (range) {
-          range.deleteContents();
-          range.insertNode(built);
-          range.collapse(false);
-        }
-      }
-    } catch { /* leave the draft as it was rather than half-edit it */ }
+    try { M.placePill(input, built); }
     finally { composerEditing = false; }
-    // THE CARET REPAIR, and why it is not optional. An inline contenteditable=false span has no
-    // editable position after it, so Blink collapses the caret to the END OF THE PRECEDING TEXT
-    // NODE -- before the pill, not after. Everything typed next goes in front of it: measured in
-    // Chromium, "Review $fix" + Tab + " the diff" produced "Review  the diff[fixture]", the pill
-    // having migrated to the end of the message. Two pills came out reversed, Backspace looked on
-    // the wrong side and could never remove one, and a link pill's URL -- whose wire text is the
-    // URL itself -- landed in the wrong place in what the model was sent.
-    //
-    // jsdom never showed any of this: it has no execCommand, so every test took the fallback
-    // above, whose range.collapse(false) puts the caret after the pill. The tests exercised the
-    // branch that does not ship.
-    const fresh = input.querySelector(`[data-fresh="${stamp}"]`);
-    if (fresh) {
-      delete fresh.dataset.fresh;
-      // Give the caret somewhere to be. Without a following text node there is no editable
-      // position after an inline uneditable element at the end of the host.
-      let after = fresh.nextSibling;
-      if (!after || after.nodeType !== 3) {
-        after = document.createTextNode("");
-        fresh.parentNode.insertBefore(after, fresh.nextSibling);
-      }
-      const sel = window.getSelection();
-      if (sel) {
-        const range = document.createRange();
-        range.setStart(after, 0);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    }
     markComposerEmpty();
     // Remember that this selection arrived as a pill. A selection added from the + menu or the
     // Skills surface has no pill and must not be governed by one; reconcilePills() below only
@@ -398,21 +119,7 @@
   // deletes one character of a label that is not text the user typed.
   input.addEventListener("keydown", (event) => {
     if (event.key !== "Backspace" && event.key !== "Delete") return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    if (!input.contains(range.startContainer)) return;
-    const back = event.key === "Backspace";
-    let victim = null;
-    if (range.startContainer.nodeType === 1) {
-      const kids = range.startContainer.childNodes;
-      const at = back ? range.startOffset - 1 : range.startOffset;
-      const node = kids[at];
-      if (node && node.nodeType === 1 && node.hasAttribute("data-pill")) victim = node;
-    } else if (back && range.startOffset === 0) {
-      const prev = range.startContainer.previousSibling;
-      if (prev && prev.nodeType === 1 && prev.hasAttribute("data-pill")) victim = prev;
-    }
+    const victim = M.pillAgainstCaret(input, event.key);
     if (!victim) return;
     event.preventDefault();
     // An edit like any other, so Cmd+Z brings the pill back with the skill or file it stood for.
@@ -500,41 +207,12 @@
     }
     markComposerEmpty();
   }
-  // The DOM write insertText would have made, for where Chromium refuses to run it: the selection's
-  // contents out, the text in as text and <br>, the caret after it. Pills outside the selection are
-  // left exactly where they are.
-  function spliceComposer(text) {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return false;
-    const range = sel.getRangeAt(0);
-    if (!input.contains(range.startContainer) || !input.contains(range.endContainer)) return false;
-    range.deleteContents();
-    const frag = document.createDocumentFragment();
-    String(text).split("\n").forEach((line, i) => {
-      if (i) frag.appendChild(document.createElement("br"));
-      if (line) frag.appendChild(document.createTextNode(line));
-    });
-    const last = frag.lastChild;
-    if (!last) return true;
-    range.insertNode(frag);
-    // A <br> that ends its line is the line's filler and reads as nothing, so a text that ends in a
-    // newline needs a second one -- the rule setComposerValue writes by.
-    if (last.nodeName === "BR" && !last.nextSibling) last.after(document.createElement("br"));
-    range.setStartAfter(last);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    return true;
-  }
+  function spliceComposer(text) { return M.spliceText(input, text); }
   // The selection out of the box, by the editing command where Chromium runs it and by hand where it
   // will not (inside a cut, which VS Code delivers as execCommand("cut")).
   function deleteComposerSelection() {
-    if (typeof document.execCommand === "function") {
-      composerEditing = true;
-      try { if (document.execCommand("delete", false)) return; } finally { composerEditing = false; }
-    }
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount && input.contains(sel.getRangeAt(0).commonAncestorContainer)) sel.getRangeAt(0).deleteContents();
+    composerEditing = true;
+    try { M.deleteSelection(input); } finally { composerEditing = false; }
   }
 
   // The placeholder cannot key off :empty, because of the filler <br>. It keys off the serializer.
@@ -614,31 +292,8 @@
   const historyManaged = new WeakSet(), historyDismissed = new WeakSet();
   function dismissAttachment(item) { if (item && typeof item === "object") historyDismissed.add(item); }
 
-  function nodePath(node) {
-    const path = [];
-    for (; node && node !== input; node = node.parentNode) {
-      if (!node.parentNode) return null;
-      path.unshift(Array.prototype.indexOf.call(node.parentNode.childNodes, node));
-    }
-    return node === input ? path : null;
-  }
-  function nodeAtPath(path) {
-    let node = input;
-    for (const index of path || []) node = node ? node.childNodes[index] : null;
-    return node || null;
-  }
   function captureComposer() {
-    // The caret as a DOM position, not a text offset: a skill pill reads as "", so the offsets on
-    // either side of it are the same number, and a caret restored by offset lands in FRONT of the
-    // pill it was after -- and the next word typed goes there too.
-    let caret = null;
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount) {
-      const r = sel.getRangeAt(0), start = nodePath(r.startContainer), end = nodePath(r.endContainer);
-      if (start && end) caret = { start, startOffset: r.startOffset, end, endOffset: r.endOffset };
-    }
-    return { nodes: [...input.childNodes].map((node) => node.cloneNode(true)), markup: input.innerHTML,
-      caret, at: composerSelection(), goal: goalDraftArmed, removed: pasteRemoved,
+    return { ...M.capture(input), goal: goalDraftArmed, removed: pasteRemoved,
       atts: attachments.map((item) => ({ item, fromPill: item.fromPill === true })) };
   }
   function sameComposer(a, b) {
@@ -661,17 +316,7 @@
     });
     if (state.goal !== goalDraftArmed) setGoalDraftArmed(state.goal);
     pasteRemoved = state.removed;
-    input.focus({ preventScroll: true });
-    const sel = window.getSelection(), c = state.caret;
-    const start = c && nodeAtPath(c.start), end = c && nodeAtPath(c.end);
-    const room = (node) => (node.nodeType === 3 ? node.data.length : node.childNodes.length);
-    try {
-      if (!sel || !start || !end) throw new Error("no caret");
-      const range = document.createRange();
-      range.setStart(start, Math.min(c.startOffset, room(start)));
-      range.setEnd(end, Math.min(c.endOffset, room(end)));
-      sel.removeAllRanges(); sel.addRange(range);
-    } catch { setComposerRange(state.at[0], state.at[1]); }
+    M.restoreCaret(input, state);
   }
   function pushComposerUndo(state) {
     composerHistory.done.push(state);
@@ -798,46 +443,17 @@
   // skills and files they stand for: Codex's composer does the same through its own clipboard
   // serializer. Nothing is trusted from the clipboard for that -- the pills come from this
   // panel's memory of its last copy, and only when the clipboard still holds that exact text.
-  const PILL_MARK = "";
   var composerCopy = null;
-  function pillLabel(pill) {
-    // Plush faces include a scoped <style>. textContent on the whole Pip pill copies that CSS.
-    return pill.dataset.kind === "pip" ? pill.querySelector(".composer-pip-name")?.textContent || pill.lastChild?.textContent || "" : pill.textContent;
-  }
-  function pillToken(pill) {
-    const kind = pill.dataset.kind, name = pillLabel(pill);
-    if (kind === "link") return pill.dataset.pill || pill.title || name;
-    return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact"].includes(kind) ? "@" : "/") + name;
-  }
   function copyComposerSelection(event) {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed || !event.clipboardData) return false;
-    const range = sel.getRangeAt(0);
-    if (!input.contains(range.startContainer) || !input.contains(range.endContainer)) return false;
-    const holder = document.createElement("div");
-    holder.appendChild(range.cloneContents());
-    const text = walk(holder, null, 0, pillToken)[0];
-    event.preventDefault();
-    event.clipboardData.setData("text/plain", text);
-    const pills = [];
-    const marked = walk(holder, null, 0, (pill) => { pills.push(pill); return PILL_MARK; })[0];
-    composerCopy = null;
-    if (pills.length && !text.includes(PILL_MARK)) {
-      const parts = [];
-      marked.split(PILL_MARK).forEach((piece, i) => {
-        if (i) {
-          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pillLabel(pill);
-          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent)
-            : kind === "pip" ? attachments.find((a) => a.pipReference?.pip_id === pill.dataset.pipId) : null;
-          parts.push({ kind, label, wire: pill.dataset.pill || "", token: pillToken(pill),
-            identity: kind === "plugin" ? pill.dataset.pluginId : kind === "artifact" ? pill.dataset.artifactKind : "",
-            resource: att?.resource ? { ...att.resource } : null,
-            pipReference: att?.pipReference ? { ...att.pipReference } : null });
-        }
-        if (piece) parts.push(piece);
-      });
-      composerCopy = { text, parts };
-    }
+    const made = M.copySelection(input, event, (pill) => {
+      const kind = pill.dataset.kind;
+      const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent)
+        : kind === "pip" ? attachments.find((a) => a.pipReference?.pip_id === pill.dataset.pipId) : null;
+      return { resource: att?.resource ? { ...att.resource } : null,
+        pipReference: att?.pipReference ? { ...att.pipReference } : null };
+    });
+    if (!made) return false;
+    composerCopy = made.parts ? { text: made.text, parts: made.parts } : null;
     return true;
   }
   input.addEventListener("copy", copyComposerSelection);
@@ -2453,58 +2069,11 @@
   let backendExitNotice = null;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
-  function draftParts() {
-    const pills = [...input.querySelectorAll('[data-pill]')];
-    if (!pills.length) return null;
-    const marker = [...Array(32)].map((_, i) => String.fromCharCode(0xe000 + i))
-      .find(c => !composerText().includes(c));
-    if (!marker) return null;
-    const marked = walk(input, null, 0, () => marker)[0].split(marker);
-    if (marked.length !== pills.length + 1) return null;
-    const parts = [];
-    marked.forEach((words, i) => {
-      if (words) parts.push(words);
-      if (i < pills.length) {
-        const pill = pills[i], kind = pill.dataset.kind;
-        const label = kind === 'link' ? pill.title : pill.lastChild?.textContent || '';
-        const identity = kind === 'pip' ? pill.dataset.pipId
-          : kind === 'plugin' ? pill.dataset.pluginId : kind === 'artifact' ? pill.dataset.artifactKind : '';
-        parts.push({kind, label, wire: pill.dataset.pill || '', identity: identity || ''});
-      }
-    });
-    return parts;
-  }
+  function draftParts() { return M.parts(input); }
   const messageText = (text) => pasteClean()?.trimDraft(text) ?? String(text).trim();
   function promptDisplayMentions(text) {
-    const parts = draftParts();
-    if (!parts || parts.length > 49) return [];
-    const rich = displayMentionsVersion >= 2;
-    const raw = parts.map(part => typeof part === "string" ? part : part.wire).join("");
-    // What the send took off the front, only ever white space. The offsets below count from there.
-    const body = raw.trimEnd(), front = body.length - text.length;
-    if (front < 0 || body.slice(front) !== text || body.slice(0, front).trim()) return [];
-    const leading = Array.from(body.slice(0, front)).length;
-    let offset = -leading;
-    const mentions = [];
-    for (const part of parts) {
-      if (typeof part === "string") { offset += Array.from(part).length; continue; }
-      if (["plugin", "artifact", "pip"].includes(part.kind)
-          || (rich && ["skill", "template", "file", "command"].includes(part.kind)
-              && part.label.length <= 120)) {
-        // References and selected attachments contribute no prompt text. A trailing space before
-        // one is removed by submit(), so anchor an end-of-prompt mark at the trimmed text's end.
-        const entry = {start: ["pip", "skill", "template", "file"].includes(part.kind)
-          ? Math.min(offset, Array.from(text).length) : offset,
-          kind: part.kind, label: part.label, identity: part.identity || part.kind};
-        if (part.kind === "pip") {
-          const ref = attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference;
-          if (ref?.pip_type) entry.pip_type = ref.pip_type;
-        }
-        mentions.push(entry);
-      }
-      offset += Array.from(part.wire).length;
-    }
-    return mentions.length <= 24 && mentions.every(m => m.start >= 0) ? mentions : [];
+    return M.displayMarks(draftParts(), text, { rich: displayMentionsVersion >= 2,
+      pipType: (part) => attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference?.pip_type });
   }
   function restoreDraftParts(parts, text) {
     if (!parts?.length) return;
@@ -3786,67 +3355,29 @@
     }
     if (body || !items.length) bubble.appendChild(promptTextWithMentions(body, marks, inline));
   }
-  function validPromptMentions(body, mentions) {
-    if (!Array.isArray(mentions) || mentions.length > 24) return false;
-    const chars = Array.from(body);
-    let at = 0;
-    for (const mention of mentions) {
-      const {start, kind, label, identity, pip_type: pipType} = mention || {};
-      if (!Number.isInteger(start) || start < at || start > chars.length ||
-          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) ||
-          typeof label !== "string" || typeof identity !== "string" ||
-          (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) return false;
-      const end = start + (["pip", "skill", "template", "file"].includes(kind)
-        ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
-      if (end > chars.length || (end > start && chars.slice(start, end).join("") !==
-          (kind === "command" ? "/" + label : label))) return false;
-      at = end;
-    }
-    return true;
-  }
+  function validPromptMentions(body, mentions) { return M.validMarks(body, mentions); }
   function promptTextWithMentions(body, mentions, inline = new Map()) {
-    if (!Array.isArray(mentions) || !mentions.length || mentions.length > 24) return promptText(body);
-    const chars = Array.from(body), host = el("div", "prompt-text");
-    let at = 0;
-    for (const mention of mentions) {
-      const { start, kind, label, identity, pip_type: pipType } = mention || {};
-      if (!Number.isInteger(start) || start < at || start > chars.length ||
-          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) || typeof label !== "string" ||
-          typeof identity !== "string" || (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) {
-        return promptText(body);
-      }
-      const zeroWidth = ["pip", "skill", "template", "file"].includes(kind);
-      const end = start + (zeroWidth ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
-      if (end > chars.length || (!zeroWidth && chars.slice(start, end).join("") !==
-          (kind === "command" ? "/" + label : label))) return promptText(body);
-      host.append(...promptText(chars.slice(at, start).join("")).childNodes);
-      const pill = pillElement(kind, label, "", identity, pipType);
-      // History can contain a plugin mention even when the composer is empty after a reload.
-      // Fetch its logo once for the whole batch of restored prompts, then upgrade the mark in place.
-      if (kind === "plugin" && !pluginLogos[identity] &&
-          (!pluginListRequestedAt || Date.now() - pluginListRequestedAt > 30000)) {
-        pluginListRequestedAt = Math.max(1, Date.now());
-        vscode.postMessage({ type: "requestPlugins" });
-      }
-      if (kind === "command") pill.textContent = "/" + label;
-      pill.classList.add("sent-mention");
-      pill.removeAttribute("contenteditable");
-      pill.removeAttribute("data-pill");
-      const item = inline.get(mention);
-      if (item) {
+    const drawn = M.sentNode(body, mentions, { words: promptText,
+      pillFor: (mention) => pillLook(mention.kind, mention.identity),
+      decorate: (pill, mention) => {
+        // History can contain a plugin mention even when the composer is empty after a reload.
+        // Fetch its logo once for the whole batch of restored prompts, then upgrade the mark in place.
+        if (mention.kind === "plugin" && !pluginLogos[mention.identity] &&
+            (!pluginListRequestedAt || Date.now() - pluginListRequestedAt > 30000)) {
+          pluginListRequestedAt = Math.max(1, Date.now());
+          vscode.postMessage({ type: "requestPlugins" });
+        }
+        const item = inline.get(mention);
+        if (!item) return;
         pill.classList.add("sent-attachment");
         pill.setAttribute("role", "button"); pill.tabIndex = 0;
-        pill.setAttribute("aria-label", `Open attachment ${item.label || label}`);
+        pill.setAttribute("aria-label", `Open attachment ${item.label || mention.label}`);
         pill.onclick = event => { event.stopPropagation(); openPromptAttachment(item); };
         pill.onkeydown = event => { if (event.key === "Enter" || event.key === " ") {
           event.preventDefault(); event.stopPropagation(); openPromptAttachment(item);
         } };
-      }
-      host.appendChild(pill);
-      at = end;
-    }
-    host.append(...promptText(chars.slice(at).join("")).childNodes);
-    return host;
+      } });
+    return drawn || promptText(body);
   }
   // A URL the user typed is a link they can open, not grey text to select and copy by hand.
   //
@@ -7133,13 +6664,7 @@ function permissionChoices(ev) {
   // dgc/textsafety.py). A paste is cleaned as it lands, and this row says so: it is information
   // about something already done, so it asks for nothing and has only a way to close it.
   const pasteClean = () => window.DgcPasteClean || null;
-  // What a paste carries. Without the module (a test page that does not load it) the text goes in as it came.
-  function pasteFrom(data) {
-    const shared = pasteClean();
-    if (shared) return shared.fromClipboard(data);
-    const raw = data ? String(data.getData("text/plain") || "") : "";
-    return { raw, clean: raw, counts: {}, removed: 0 };
-  }
+  const pasteFrom = (data) => M.pasteFrom(data);
   function notePasteRemoved(paste) {
     if (!paste.removed) return;
     pasteRemoved = { n: pasteRemoved.n + paste.removed, counts: { ...pasteRemoved.counts } };
@@ -9632,15 +9157,14 @@ function permissionChoices(ev) {
     // icon says the same thing, and "/goal" beside "$code-review" made the list read as two
     // alphabets. `label` keeps its sigil -- the matcher and the inserter both read it -- so this
     // is a rendering change only.
-    const rowIcon = (it) => (it.skill ? "codicon-package"
-      : it.template ? "codicon-symbol-snippet" : it.modCommand || it.action === "mods" ? "codicon-extensions" : "codicon-terminal");
-    pop.innerHTML = items.map((it, i) => { const ref=it.pipReference,index=ref?["core","scout","lens","patch","rook","pulse","lock","quill"].indexOf(ref.pip_type):-1;
-      const logo = it.pluginId && pluginLogos[it.pluginId];
-      const icon=index>=0&&window.PipConcepts?.plush?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:ref.name},"idle",`pickerPip${i}`)}</span>`
-        : logo ? `<span class="pi-icon pi-plugin-mark" aria-hidden="true"><img src="${esc(logo)}" alt=""></span>`
+    const rowIcon = M.rowIconClass;
+    const face = (it, i) => { const ref = it.pipReference, index = ref ? M.PIP_TYPES.indexOf(ref.pip_type) : -1;
+      return index >= 0 && window.PipConcepts?.plush ? `<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:ref.name},"idle",`pickerPip${i}`)}</span>` : ""; };
+    const icon = (it) => { const logo = it.pluginId && pluginLogos[it.pluginId];
+      return logo ? `<span class="pi-icon pi-plugin-mark" aria-hidden="true"><img src="${esc(logo)}" alt=""></span>`
         : it.artifactKind ? `<span class="pi-icon codicon codicon-${esc(it.artifactGlyph)}" aria-hidden="true"></span>`
-        :`<span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>`;
-      return `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${icon}${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`; }).join("");
+        : `<span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>`; };
+    pop.innerHTML = items.map((it, i) => M.rowMarkup(it, i, { esc, face, icon })).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
@@ -9705,7 +9229,10 @@ function permissionChoices(ev) {
       if(attachments.filter(a=>a.pipReference).length>=8){sysLine("Reference at most eight Pips in one message.",true);return;}
       if(!canAttach())return;
       attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});
-      insertComposerPill(popStart,popEnd,"pip",it.pipReference.name.replace(/\s+/g," ").trim(),"",it.pipReference.pip_id);
+      // Its name is in the words the model reads, beside the reference: "ask  to look" read as a sentence with a hole.
+      // A backend from before takes no mark that stands on words.
+      const pipName=it.pipReference.name.replace(/\s+/g," ").trim();
+      insertComposerPill(popStart,popEnd,"pip",pipName,displayMentionsVersion>=3?pipName:"",it.pipReference.pip_id);
       hidePop();input.focus();return;
     }
     if (it.pluginId || it.artifactKind) {
@@ -11870,7 +11397,7 @@ function permissionChoices(ev) {
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
     // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
     // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
-    if (["pipsPluginLogos", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
+    if (["pipsPluginLogos", "pipsFiles", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);

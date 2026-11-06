@@ -34,6 +34,63 @@ class PipChatTests(unittest.TestCase):
     def raw(self, sent):
         return json.loads(self.registry.db.execute("SELECT manifest FROM pip_runs WHERE id=?", (sent["run"]["id"],)).fetchone()[0])
 
+    def send_marked(self, text, marks, key="marked-1", pip=None):
+        return pip_chat.send(self.store, (pip or self.job)["id"], text, key, "device_1", self.cfg, display_mentions=marks)
+
+    def test_a_messages_marks_stay_beside_its_words_and_come_back_with_it(self):
+        self.setup_job()
+        marks = [{"start": 4, "kind": "plugin", "label": "Composio", "identity": "composio"}]
+        sent = self.send_marked("Use Composio", marks)
+        self.assertEqual(sent["message"]["text"], "Use Composio", "the model's words are the words")
+        self.assertEqual(sent["message"]["display_mentions"], marks)
+        self.assertEqual(self.raw(sent)["conversation"]["text"], "Use Composio")
+        self.assertNotIn("display_mentions", self.raw(sent)["conversation"], "they never reach the model")
+        listed = [m for m in pip_chat.list_messages(self.store, self.job["id"])["messages"] if m["role"] == "user"]
+        self.assertEqual(listed[0]["display_mentions"], marks, "a reload draws them again")
+        # A retry of the same message is the same message, with or without them: they are no part of its key.
+        self.assertEqual(self.send_marked("Use Composio", marks)["message"]["id"], sent["message"]["id"])
+        self.assertEqual(pip_chat.send(self.store, self.job["id"], "Use Composio", "marked-1", "device_1", self.cfg)["message"]["id"], sent["message"]["id"])
+
+    def test_marks_that_dont_fit_the_words_are_dropped_and_the_message_still_goes(self):
+        self.setup_job()
+        for key, bad in enumerate(([{"start": 0, "kind": "plugin", "label": "Notion", "identity": "notion"}], "marks", [{"start": 0}], [1])):
+            with self.subTest(bad=bad):
+                sent = self.send_marked("Use Composio", bad, key=f"bad-{key}")
+                self.assertEqual(sent["message"]["text"], "Use Composio")
+                self.assertNotIn("display_mentions", sent["message"])
+                self.finish(sent)
+
+    def test_a_mid_turn_update_keeps_its_marks_too(self):
+        self.setup_job()
+        self.send(text="Inspect the invoice", key="first")
+        marks = [{"start": 5, "kind": "plugin", "label": "Composio", "identity": "composio"}]
+        update = self.send_marked("Also Composio", marks, key="update")
+        self.assertEqual(update["message"]["display_mentions"], marks)
+        listed = pip_chat.list_messages(self.store, self.job["id"])["messages"]
+        self.assertEqual([m.get("display_mentions") for m in listed if m.get("steered")], [marks])
+
+    def test_a_registry_that_never_held_marks_reads_as_none(self):
+        self.setup_job()
+        sent = self.send()
+        self.assertIsNone(self.registry.db.execute("SELECT 1 FROM sqlite_master WHERE name='pip_chat_mentions'").fetchone())
+        self.assertEqual(pip_chat.message_mentions(self.registry.db, sent["message"]["id"]), [])
+        self.assertNotIn("display_mentions", sent["message"])
+
+    def test_the_other_pips_a_message_names_are_told_to_it_only_from_its_own_workspace(self):
+        self.setup_job()
+        other = self.store.create(self.workspace["id"], "Doc Lens", "Read the docs for mistakes.", "device_1", pip_type="lens")
+        mark = lambda pip, name, at: {"start": at, "kind": "pip", "label": name, "identity": pip, "pip_type": "lens", "wired": True}
+        sent = self.send_marked("Ask Doc Lens", [mark(other["id"], "Doc Lens", 4)])
+        self.assertEqual(self.raw(sent)["conversation"]["named_pips"],
+                         [{"name": "Doc Lens", "character": "lens", "goal": "Read the docs for mistakes.", "status": "active"}])
+        pip_chat.validate_context(self.raw(sent)["conversation"])
+        self.finish(sent)
+        # Itself, or a name the box was told by anything else, is no Pip it is told about.
+        for key, (identity, label) in enumerate(((self.job["id"], "Backend"), ("pip_" + "f" * 32, "Stranger"))):
+            sent = self.send_marked(f"Ask {label}", [mark(identity, label, 4)], key=f"none-{key}")
+            self.assertNotIn("named_pips", self.raw(sent)["conversation"], identity)
+            self.finish(sent)
+
     def test_a_reply_can_offer_choices_that_the_chat_lists_under_it(self):
         # Grok's A/B card: the Pip offers "Yes, connect Gmail" / "Not yet"; the user's tap answers.
         self.setup_job()

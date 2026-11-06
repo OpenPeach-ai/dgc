@@ -78,6 +78,30 @@ test('each finished reply says what it took',async()=>{
  const old=setup({apiVersion:43,messages:[reply]});await openChat(old);
  assert.equal(old.requests('list_pip_reply_stats').length,0,'an older DGC CLI is not asked');
 });
+test('Trace: the word after the icons only for a reply that recorded its steps, and it opens the same dialog',async()=>{
+ const reply={id:'a1',pip_id:PIP,workspace_id:PW,role:'assistant',text:'4.13%',run_id:RUN,status:'succeeded',model:'m',created_at:'2026-10-08T10:00:00.000Z'};
+ const steps={v:1,ms:1500,steps:[{kind:'model',label:'model.response',start:0,end:900,tokens:1240},{kind:'tool',label:'grep',detail:'todo',hits:2,start:900,end:1000},{kind:'tool',label:'bash',start:1000,end:1100,error:true},{kind:'model',label:'model.response',start:1100,end:1500,tokens:940}]};
+ const stat={run_id:RUN,status:'succeeded',seconds:8.44,input_tokens:1200,output_tokens:340,requests:2};
+ const none=setup({messages:[reply],stats:[stat]});await openChat(none);
+ assert.equal(none.d.querySelector('[data-message="a1"] .ract-trace'),null,'a reply with no steps recorded shows no Trace');
+ const x=setup({messages:[reply],stats:[{...stat,has_trace:true,trace:steps}]});await openChat(x);
+ const word=x.d.querySelector('[data-message="a1"] .response-actions .ract-trace');assert.ok(word,'the word Trace');
+ assert.equal(word.textContent,'Trace');
+ assert.equal(word.previousElementSibling.tagName,'DETAILS','after the icons');
+ assert.ok(word.nextElementSibling.classList.contains('reply-stats'),'before what it took');
+ const asked=x.requests('list_pip_reply_stats').length;word.click();await x.drain();
+ assert.deepEqual(clean(x.requests('list_pip_reply_stats').at(-1).request),{type:'list_pip_reply_stats',pip_id:PIP,run_ids:[RUN]});
+ assert.equal(x.requests('list_pip_reply_stats').length,asked+1,'its steps are read when it is opened');
+ const dialog=x.d.querySelector('body > .dgc-trace-backdrop .dgc-trace-dialog');assert.ok(dialog,'on the body, as in Work and ChatDGC');
+ assert.deepEqual([...dialog.querySelectorAll('.dgc-trace-row .dgc-trace-meta span:first-child')].map(n=>n.textContent),['1,240 tk','2 hits','Failed','940 tk']);
+ assert.ok(dialog.querySelectorAll('.dgc-trace-row')[2].classList.contains('error'));
+ assert.equal(dialog.querySelector('.dgc-trace-model').textContent,'m · 4 spans');
+ dialog.querySelector('.dgc-trace-close').click();assert.equal(x.d.querySelector('.dgc-trace-dialog'),null);
+ const lost=setup({messages:[reply],stats:[{...stat,has_trace:true}]});await openChat(lost);
+ lost.d.querySelector('[data-message="a1"] .ract-trace').click();await lost.drain();
+ assert.equal(lost.d.querySelector('.dgc-trace-dialog'),null,'steps it can\'t read: no dialog, never a guess');
+ assert.match(lost.d.body.textContent,/trace couldn.t be read/);
+});
 test('a Personal Pip’s model chip names the model as soon as its chat opens',async()=>{
  const x=setup();await openChat(x);
  assert.equal(x.requests('list_pip_models').length,1,'read once, when the chat opens');
