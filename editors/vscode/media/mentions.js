@@ -540,6 +540,27 @@
     return null;
   }
 
+  // A pill is `user-select: none`, so a click on one sets no caret: with nothing selected before it (a box after a reload)
+  // the box has the focus and no caret at all, and what is typed next goes nowhere. It goes just after the pill.
+  function caretAfterClickedPill(root) {
+    root.addEventListener("click", (event) => {
+      const node = event.target?.closest?.("[data-pill]");
+      if (!node || !root.contains(node)) return;
+      const doc = root.ownerDocument, sel = selectionOf(root);
+      if (!sel) return;
+      let after = node.nextSibling;
+      if (!after || after.nodeType !== 3) {
+        after = doc.createTextNode("");
+        node.parentNode.insertBefore(after, node.nextSibling);
+      }
+      const range = doc.createRange();
+      range.setStart(after, 0);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+  }
+
   // The selection out of the box, by the editing command where Chromium runs it and by hand where it
   // will not (inside a cut, which VS Code delivers as execCommand("cut")).
   function deleteSelection(root) {
@@ -641,6 +662,7 @@
     // Our own edits fire the browser's input events as they go; the page hears of each once, when it is whole.
     const quietly = (change) => { const was = editing; editing = true; try { return change(); } finally { editing = was; } };
     el.addEventListener("input", (event) => { if (editing) event.stopImmediatePropagation(); else markEmpty(); }, true);
+    caretAfterClickedPill(el);
 
     function markEmpty() {
       el.classList.toggle("is-empty", text() === "" && !el.querySelector("[data-pill]"));
@@ -894,7 +916,7 @@
       const query = pipMode.query || "";
       const rows = (pips || []).filter((p) => !query || `${p.name} ${p.pip_type}`.toLowerCase().includes(query))
         .map((p) => ({ label: p.name.replace(/\s+/g, " "), kind: p.kind || `${p.pip_type} Pip`, detail: p.detail || "", pipRow: p }));
-      if (pipsLoading) rows.push({ label: "Loading Pips…", disabled: true });
+      if (pipsLoading && !rows.length) rows.push({ label: "Loading Pips…", disabled: true });
       else if (pipsError) rows.push({ label: pipsError, disabled: true });
       else if (!rows.length) rows.push({ label: pipsEmpty || "No matching Pips", disabled: true });
       return rows;
@@ -968,7 +990,7 @@
 
   globalThis.DgcMentions = {
     PIP_TYPES, walk, rangeAt, selectionOf, setRange, selectedOffsets, textFragment, spliceText, clipboardText,
-    ensureFaceStyles, pill, pillLabel, pillToken, parts, displayMarks, validMarks, sentNode, placePill, pillAgainstCaret,
+    ensureFaceStyles, pill, pillLabel, pillToken, parts, displayMarks, validMarks, sentNode, placePill, pillAgainstCaret, caretAfterClickedPill,
     deleteSelection, copySelection, capture, restore, restoreCaret, box, esc, rowIconClass, rowMarkup, picker,
   };
 })();

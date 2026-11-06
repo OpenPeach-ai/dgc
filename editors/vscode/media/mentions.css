@@ -1,6 +1,29 @@
 /* The inline marks of a prompt box and the @ list that picks them: one look for Work's box, ChatDGC's and a Pip's
    (media/mentions.js). Loaded after main.css where that page has it, and bundled into pips.css for a Pip's chat. */
 
+/* The marks' colours. On a dark ground these are the ones chosen in the box and the bubble. They are too pale for a light
+   ground (a Page mark read 1.6:1 on white, and the bubble's grey less on its lilac), so a light theme takes the same
+   effects in darker steps of the same hues. A Pip's bubble is the deep purple in either theme: its marks stay light. */
+:root {
+  --mark-word: #c7b5ff; --mark-word-shimmer: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
+  --mark-plugin: #c5a9ff; --mark-icon: #b6a0ff;
+  --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);
+  --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+}
+body:is(.vscode-light, .vscode-high-contrast-light) {
+  --mark-word: #6242d8; --mark-word-shimmer: linear-gradient(105deg,#6242d8,#8a6df0,#4f30c4,#7657e6,#6242d8);
+  --mark-plugin: #5d3cd2; --mark-icon: #6d49e8;
+  --mark-plugin-glow: linear-gradient(90deg, transparent, rgba(124,92,255,.12), rgba(124,92,255,.22), rgba(124,92,255,.12), transparent);
+  /* A logo drawn light (Composio's) keeps a dark edge on a light ground. */
+  --mark-logo-filter: drop-shadow(.5px 0 0 #2a2140) drop-shadow(-.5px 0 0 #2a2140) drop-shadow(0 .5px 0 #2a2140) drop-shadow(0 -.5px 0 #2a2140);
+  --mark-sent: #5c5a68; --mark-sent-hover: #2f2d3a; --mark-sent-shimmer: linear-gradient(105deg,#5c5a68,#7f7d8c,#4f4d5a,#716f7e,#5c5a68);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(60,52,92,.07), rgba(60,52,92,.14), rgba(60,52,92,.07), transparent);
+}
+.pip-message.user .bubble .prompt-text {
+  --mark-sent: #d8d6df; --mark-sent-hover: #f4f4f7; --mark-sent-shimmer: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+  --mark-sent-glow: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+}
 /* A sigil and the name in the accent colour, with no box. A bordered chip beside another chip
    makes two rectangles compete with the text between them. The atomicity that
    the border used to signal is carried by the hover state and by Backspace still removing the
@@ -38,17 +61,17 @@
   font-weight: var(--w-med); vertical-align: baseline; gap: 0;
 }
 .composer-pill.pill-pip::before { content: none; }
-.composer-pip-name { color: #c7b5ff; background: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
+.composer-pip-name { color: var(--mark-word); background: var(--mark-word-shimmer);
   background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   animation: composerArtifactWords 7s ease-in-out infinite; }
 .composer-pip-face, .composer-pip-face .dgc-plush { display: inline-block; flex: none; width: 18px; height: 18px; }
 .composer-pip-face { vertical-align: -1px; margin-right: 4px; position: relative; top: -1px; }
 .composer-pill.pill-plugin::before, .composer-pill.pill-artifact::before { content: none; }
-.composer-pill.pill-plugin { padding: 2px 4px; color: #c5a9ff;
-  background: linear-gradient(90deg, transparent, rgba(114,68,213,.24), rgba(121,69,235,.38), rgba(114,68,213,.24), transparent);
+.composer-pill.pill-plugin { padding: 2px 4px; color: var(--mark-plugin);
+  background: var(--mark-plugin-glow);
   background-size: 260% 100%; animation: composerPluginGlow 4.5s ease-in-out infinite; }
-.composer-pill.pill-artifact { color: #c7b5ff; }
-.composer-artifact-name { color: #c7b5ff; background: linear-gradient(105deg,#c7b5ff,#ece4ff,#ad96f4,#d8caff,#c7b5ff);
+.composer-pill.pill-artifact { color: var(--mark-word); }
+.composer-artifact-name { color: var(--mark-word); background: var(--mark-word-shimmer);
   background-size: 400% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   animation: composerArtifactWords 7s ease-in-out infinite; }
 .composer-plugin-mark, .composer-artifact-mark { display: inline-block; width: 16px; height: 16px;
@@ -56,24 +79,24 @@
 .composer-plugin-mark { position: relative; top: 1px; }
 .composer-artifact-mark { position: relative; top: .5px; }
 .composer-plugin-mark img { display: block; width: 15px; height: 15px; object-fit: contain; }
-.composer-artifact-mark { color: #b6a0ff; -webkit-text-fill-color: #b6a0ff; font-size: 14px; }
+.composer-artifact-mark { color: var(--mark-icon); -webkit-text-fill-color: var(--mark-icon); font-size: 14px; }
+.composer-plugin-mark img { filter: var(--mark-logo-filter, none); }
 .prompt-text .sent-mention { user-select: text; cursor: text; }
-.prompt-text .sent-mention .composer-pip-face { top: 3px; }
-.prompt-text .sent-mention.pill-plugin { color: #d8d6df;
-  background: linear-gradient(90deg, transparent, rgba(231,229,242,.09), rgba(250,250,255,.19), rgba(231,229,242,.09), transparent);
+.prompt-text .sent-mention.pill-plugin { color: var(--mark-sent);
+  background: var(--mark-sent-glow);
   background-size: 260% 100%; }
 .prompt-text .sent-mention .composer-artifact-name,
-.prompt-text .sent-mention .composer-pip-name { color: #d8d6df;
-  background: linear-gradient(105deg,#c5c4ce,#f4f4f7,#d4d3dc,#fafaff,#c5c4ce);
+.prompt-text .sent-mention .composer-pip-name { color: var(--mark-sent);
+  background: var(--mark-sent-shimmer);
   background-size: 400% 100%; background-clip: text; -webkit-background-clip: text;
   -webkit-text-fill-color: transparent; }
 .prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command),
 .prompt-text .sent-mention:is(.pill-skill, .pill-template, .pill-file, .pill-command)::before,
-.user .bubble .prompt-link { color: #d8d6df; }
+.user .bubble .prompt-link { color: var(--mark-sent); }
 .prompt-text .sent-mention.pill-command::before { content: none; }
 .prompt-text .sent-attachment { cursor: pointer; }
 .prompt-text .sent-attachment:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
-.user .bubble .prompt-link:hover { color: #f4f4f7; }
+.user .bubble .prompt-link:hover { color: var(--mark-sent-hover); }
 @keyframes composerPluginGlow { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 @keyframes composerArtifactWords { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 @media (prefers-reduced-motion: reduce) {

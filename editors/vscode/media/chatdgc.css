@@ -309,6 +309,10 @@ body.cd-dropping .cd-box { border-style: dashed; border-color: var(--accent); ba
 .cd-input { width: 100%; min-height: 24px; max-height: 40vh; resize: none; border: 0; outline: none; padding: 0 var(--sp-1);
   background: transparent; color: var(--text-strong); font: var(--w-reg) calc(var(--t-chat) + 1px)/1.55 var(--sans); }
 .cd-input:focus-visible { outline: none; }
+/* This box's words are a pixel larger than Work's, so a mark's place against them is half a pixel off Work's. */
+.cd-input .composer-artifact-mark { top: 0; }
+.cd-input .composer-plugin-mark { top: .5px; }
+.cd-input .composer-pip-face { top: -.5px; }
 .cd-input.is-empty::before, .cd-input::placeholder { color: var(--muted); }
 /* One row however narrow the box. Below 640px the tools keep their icons and drop their words (each keeps its name
    for a screen reader, and its tooltip), so the meter, the model and Send hold their places on the right; the model's

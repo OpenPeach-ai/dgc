@@ -4574,7 +4574,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.settingsEditor?.webview.postMessage({ type: "pluginResult", name: installName });
         this.backend?.send({ type: "list_mcp_servers", request_id: this.nextRequestId("settings-mcp") });
       }
-      const items = (ev as any).items.map((item: any) => ({ ...item, logo: this.pluginLogo(item, this.view?.webview) }));
+      // The chat's marks (@Composio) draw a connected plugin's own logo, and that page takes logos only as data: URIs.
+      const items = (ev as any).items.map((item: any) => ({ ...item,
+        logo: item?.connected === true ? pluginLogoData(this.context.extensionUri, item) : this.pluginLogo(item, this.view?.webview) }));
       if (this.view) this.post({ type: "event", event: { ...ev, items } });
       const editorItems = (ev as any).items.map((item: any) => ({
         ...item, logo: this.pluginLogo(item, this.settingsEditor?.webview),

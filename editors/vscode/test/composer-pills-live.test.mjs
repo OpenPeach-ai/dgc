@@ -31,7 +31,8 @@ before(async () => {
   } catch { browser = null; return; }
   const panelSrc = readFileSync(here + "/../src/panel.ts", "utf8");
   const css = readFileSync(here + "/../media/main.css", "utf8") + readFileSync(here + "/../media/mentions.css", "utf8");
-  const mainJs = readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
+  // The faces are real here (a page without them draws a stand-in icon, on another baseline).
+  const mainJs = readFileSync(here + "/../media/pips/plush.js", "utf8") + "\n" + readFileSync(here + "/../media/mentions.js", "utf8") + "\n" + readFileSync(here + "/../media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [here + "/../src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map(m => m[0])
@@ -109,7 +110,7 @@ test("a selected skill stays inline with muted text after sending", async (t) =>
   await freshComposer(["fixture"]);
   await page.evaluate(() => window.postMessage({type: "event", event: {
     type: "ready", capabilities: {display_mentions: 2}, skills: ["fixture"]}}, "*"));
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 50)));     // a frame can come before the message
   await page.keyboard.type("Use ");
   await pickSkill("fixture");
   await page.keyboard.type(" here");
@@ -125,6 +126,18 @@ test("a selected skill stays inline with muted text after sending", async (t) =>
   assert.equal(result.mark, "fixture");
   assert.equal(result.colour, "rgb(216, 214, 223)");
   assert.equal(result.chip, false);
+});
+
+test("a click on a pill leaves a caret after it, even with none before", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer(["fixture"]);
+  await page.keyboard.type("Use ");
+  await pickSkill("fixture");
+  await page.keyboard.type(" here");
+  await page.evaluate(() => { window.getSelection().removeAllRanges(); document.getElementById("input").blur(); });
+  await page.locator("#input .composer-pill").click();
+  await page.keyboard.type("!");
+  assert.equal(await value(), "Use ! here");
 });
 
 test("two pills keep the order they were picked in", async (t) => {
@@ -896,4 +909,18 @@ test("sent plugin, output and Pip keep their artwork inline while only names tur
   assert.ok(result.colors.every(color => color === "rgb(216, 214, 223)"), JSON.stringify(result));
   assert.ok(result.alignment.every(({markCenter, nameCenter}) => Math.abs(markCenter - nameCenter) < 3),
     JSON.stringify(result));
+  // The approved place: a face stands in the bubble where it stands in the box, not four pixels lower.
+  const faceInBox = await page.evaluate(() => {
+    const box = document.createElement("div");
+    box.style.font = getComputedStyle(document.getElementById("input")).font;
+    const sent = document.querySelector("#log .pill-pip.sent-mention").cloneNode(true);
+    sent.classList.remove("sent-mention");
+    box.append("Ask ", sent);
+    document.getElementById("input").parentElement.append(box);
+    const face = sent.querySelector(".composer-pip-face").getBoundingClientRect(), name = sent.querySelector(".composer-pip-name").getBoundingClientRect();
+    box.remove();
+    return face.top + face.height / 2 - (name.top + name.height / 2);
+  });
+  const pipInBubble = result.alignment[2].markCenter - result.alignment[2].nameCenter;
+  assert.ok(Math.abs(pipInBubble - faceInBox) < 1, JSON.stringify({ pipInBubble, faceInBox }));
 });

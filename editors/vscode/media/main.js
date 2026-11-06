@@ -31,6 +31,7 @@
   const M = window.DgcMentions;
   const walk = M.walk;
 
+  M.caretAfterClickedPill(input);
   const composerText = () => walk(input, null, 0)[0];
 
   function setComposerValue(text) {

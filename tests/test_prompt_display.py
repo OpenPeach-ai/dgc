@@ -1,8 +1,8 @@
-"""Display-only Work mentions cannot change the text a model receives."""
+"""Display-only mentions (Work, ChatDGC, a Pip's chat) cannot change the text a model receives."""
 
 import unittest
 
-from dgc.prompt_display import checked_mentions
+from dgc.prompt_display import checked_mentions, named_pips
 
 
 class PromptDisplayTests(unittest.TestCase):
@@ -44,3 +44,25 @@ class PromptDisplayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_a_mark_whose_name_is_the_words_must_spell_them(self):
+        pip = {"start": 4, "kind": "pip", "label": "Scout", "identity": "pip_" + "a" * 32, "pip_type": "scout", "wired": True}
+        self.assertEqual(checked_mentions([pip], "Ask Scout now"), [pip])
+        self.assertEqual(checked_mentions([pip], "Ask Rook now"), [], "the words no longer say it")
+        self.assertEqual(checked_mentions([{**pip, "wired": False}], "Ask Scout now"), [])
+        self.assertEqual(checked_mentions([{"start": 0, "kind": "plugin", "label": "Ask", "identity": "x", "wired": True}], "Ask"), [],
+                         "a plugin's name is always its words: it has no other way to be")
+        # What stands on the words takes them, so a mark after it can't start inside them.
+        file = {"start": 6, "kind": "file", "label": "src/a.py", "identity": "file", "wired": True}
+        self.assertEqual(checked_mentions([{**pip, "start": 0}, {**file, "start": 6}], "Scout src/a.py"), [{**pip, "start": 0}, {**file, "start": 6}])
+        self.assertEqual(checked_mentions([{**pip, "start": 0}, {**file, "start": 3}], "Scout src/a.py"), [])
+
+    def test_the_pips_a_prompt_names_are_each_named_once(self):
+        a, b = "pip_" + "a" * 32, "pip_" + "b" * 32
+        marks = [{"start": 0, "kind": "plugin", "label": "Composio", "identity": "composio"},
+                 {"start": 9, "kind": "pip", "label": "Scout", "identity": a, "pip_type": "scout", "wired": True},
+                 {"start": 15, "kind": "pip", "label": "Scout", "identity": a, "pip_type": "scout", "wired": True},
+                 {"start": 21, "kind": "pip", "label": "Rook", "identity": b, "pip_type": "rook", "wired": True}]
+        self.assertEqual(named_pips(marks), [{"identity": a, "label": "Scout", "pip_type": "scout"},
+                                             {"identity": b, "label": "Rook", "pip_type": "rook"}])
+        self.assertEqual(named_pips(None), [])
