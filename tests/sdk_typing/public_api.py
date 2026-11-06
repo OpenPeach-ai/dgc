@@ -110,6 +110,10 @@ def use_session(session: Session) -> str:
     handle.cancel()
     session.cancel()
     session.steer("Prefer the smaller fix.")
+    route: dict[str, Any] = session.set_model("other", base_url="http://127.0.0.1:1/v1", api_mode="chat_completions")
+    level: str = session.set_thinking("low")
+    session.router.set_thinking("nas", "other", "low")
+    session.cards.watch("pip")
     queued: RunHandle = session.followup("Then run the tests.", timeout=None)
     queued_id: str = queued.run_id
     sandbox: SandboxStatus = session.sandbox
@@ -208,6 +212,8 @@ async def use_async(state: Path) -> str:
         rules: list[PermissionRule] = await session.list_permissions()
         servers: list[McpServerInfo] = await session.list_mcp_servers()
         await session.steer("Prefer the smaller fix.")
+        moved: dict[str, Any] = await session.set_model("other", api_key="sk-x")
+        thinking: str = await session.set_thinking("low")
         queued: AsyncRunHandle = await session.followup("Then run the tests.")
         await session.close()
         resumed: AsyncSession = await dgc.resume(latest=True, cwd=state)
