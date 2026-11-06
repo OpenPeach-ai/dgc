@@ -110,7 +110,8 @@
     });
     return handle;
   }
-  /** items: {id, text, files, steering, title}. on: reorder(ids), steer(id), edit(id), remove(id), copy(id, text). */
+  /** items: {id, text, files, steering, title, fixed}. A fixed row is one the surface can't change: it shows and copies.
+      on: reorder(ids), steer(id), edit(id), remove(id), copy(id, text). */
   function render(list, items, on = {}) {
     if (list.dataset.dragging) return;        // the row under the pointer stays put; the next change redraws it
     const root = list.getRootNode();
@@ -119,7 +120,7 @@
     list.replaceChildren(...items.map((item, index) => {
       const row = make("li", `dgc-queue-row${on.rowClass ? ` ${on.rowClass}` : ""}`);
       row.dataset.queueId = item.id;
-      if (on.reorder && items.length > 1) {
+      if (on.reorder && items.length > 1 && !item.fixed) {
         const handle = handleFor(list, row, item, index, items.length, on);
         handle.dataset.queueRole = "handle";
         row.appendChild(handle);
@@ -136,7 +137,7 @@
         if (item.fileNames) files.title = item.fileNames;
         row.appendChild(files);
       }
-      if (on.steer) {
+      if (on.steer && !item.fixed) {
         const steer = make("button", "dgc-queue-steer");
         steer.type = "button"; steer.disabled = !!item.steering; steer.dataset.queueRole = "steer";
         steer.title = "Send this message to the running turn now";
@@ -145,13 +146,13 @@
         steer.addEventListener("click", () => on.steer(item.id));
         row.appendChild(steer);
       }
-      if (on.edit) {
+      if (on.edit && !item.fixed) {
         const edit = iconButton(`dgc-queue-icon${on.editClass ? ` ${on.editClass}` : ""}`, `Edit queued message: ${item.text}`, "edit", "Edit: back to the box");
         edit.dataset.queueRole = "edit";
         edit.addEventListener("click", () => on.edit(item.id));
         row.appendChild(edit);
       }
-      if (on.remove) {
+      if (on.remove && !item.fixed) {
         const remove = iconButton(`dgc-queue-icon${on.removeClass ? ` ${on.removeClass}` : ""}`, `Remove queued message: ${item.text}`, "remove", "Remove");
         remove.dataset.queueRole = "remove";
         remove.addEventListener("click", () => on.remove(item.id));

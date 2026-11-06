@@ -453,6 +453,25 @@
     return host;
   }
 
+  /** A sent prompt back as the box's parts, its marks where they were (displayMarks, the other way): a message given
+   *  back to the box comes back as it was typed. Null when it has none, or they don't fit its words. */
+  function partsOfMarks(body, marks) {
+    if (!Array.isArray(marks) || !marks.length || !validMarks(body, marks)) return null;
+    const chars = Array.from(body), list = [];
+    let at = 0;
+    for (const mark of marks) {
+      const end = mark.start + markWidth(mark);
+      if (mark.start > at) list.push(chars.slice(at, mark.start).join(""));
+      const part = { kind: mark.kind, label: mark.label, wire: chars.slice(mark.start, end).join(""),
+        identity: mark.kind === "file" ? "" : mark.identity };
+      if (mark.pip_type) part.pipType = mark.pip_type;
+      list.push(part);
+      at = end;
+    }
+    if (at < chars.length) list.push(chars.slice(at).join(""));
+    return list;
+  }
+
   // ---- the box's edits -----------------------------------------------------------------------
   /** Put a built pill at the selection. Through execCommand still, because insertHTML is what puts the caret, the
    *  selection and the surrounding text right. */
@@ -1018,7 +1037,7 @@
 
   globalThis.DgcMentions = {
     PIP_TYPES, walk, rangeAt, selectionOf, setRange, selectedOffsets, textFragment, spliceText, clipboardText, pasteFrom,
-    ensureFaceStyles, pill, pillLabel, pillToken, parts, displayMarks, validMarks, sentNode, placePill, pillAgainstCaret, caretAfterClickedPill,
+    ensureFaceStyles, pill, pillLabel, pillToken, parts, displayMarks, validMarks, partsOfMarks, sentNode, placePill, pillAgainstCaret, caretAfterClickedPill,
     deleteSelection, copySelection, capture, restore, restoreCaret, box, esc, rowIconClass, rowMarkup, picker,
   };
 })();

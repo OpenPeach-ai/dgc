@@ -181,7 +181,16 @@ export function messagesPage(value,pip,workspace) {
   for(const m of value.messages)if(m.choices!==undefined&&(m.role!=='assistant'||!Array.isArray(m.choices)||m.choices.length<2||m.choices.length>4||m.choices.some(c=>typeof c!=='string'||!c||c.length>80)))throw new Error('Conversation choices are invalid.');
   if(value.next_before_id!==null&&value.next_before_id!==value.messages[0]?.id)throw new Error('Conversation history cursor is invalid.');
   if(value.active_run!==null&&(!record(value.active_run)||typeof value.active_run.id!=='string'||!active(value.active_run.status)))throw new Error('Conversation active run is invalid.');
+  // Messages the reply they joined never read, each waiting for its own turn: above the box until then, like Work's queue.
+  value.waiting=Array.isArray(value.waiting)?value.waiting.filter(m=>record(m)&&typeof m.id==='string'&&m.id&&typeof m.text==='string'):[];
   return value;
+}
+// The newest page says what the chat is now: a message that became its own turn moved down, and one sent again is gone.
+// What was loaded before the page stays.
+export function mergeChatPage(held,page){
+  if(!page.length)return held;
+  const onPage=new Set(page.map(m=>m.id)),anchor=held.findIndex(m=>m.id===page[0].id);
+  return [...(anchor<0?held:held.slice(0,anchor)).filter(m=>!onPage.has(m.id)),...page];
 }
 export function chatContinuity(value,pip,workspace){
  if(value==null)return null;

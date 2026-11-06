@@ -938,6 +938,10 @@ def failure_text(row) -> str:
     if error.get("code") == "invalid_reply" and "empty" in error["message"]:
         # The model sent back nothing at all (a provider hiccup): nothing is wrong with the message.
         return "The model sent back an empty reply. Send your message again."
+    if error.get("code") == "interrupted":
+        return "Pips stopped before this reply finished. Send your message again."
+    if error["message"].startswith("The audit worker stopped"):
+        return "Its worker stopped unexpectedly. Send your message again."      # a chat reply isn't an audit
     return error["message"].strip()[:300]
 
 
@@ -1222,11 +1226,16 @@ def _photos_of_the_ask(store, pip_id, within=1):
     return None
 
 
-def insert_user(store, pip, req, run_id, model, now):
-    message_id = identifier("message")
+def insert_user(store, pip, req, run_id, model, now, *, waiting=None):
+    message_id, digest = identifier("message"), req["digest"]
+    if waiting is not None:
+        # The same message, now a turn of its own: its identity, the time it was sent and its retry key stay what they were.
+        message_id, digest, now = waiting["id"], waiting["request_digest"], waiting["created_at"]
+        if store.db.execute("DELETE FROM pip_chat_steers WHERE id=? AND status='pending'", (message_id,)).rowcount != 1:
+            raise RegistryError("conflict", "That waiting message has already moved on.")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at,request_key,request_digest) "
                      "VALUES(?,?,?,?,?,?,?,?,?,?)", (message_id, pip["id"], pip["workspace_id"], run_id,
-                     "user", req["text"], model, now, req["request_key"], req["digest"]))
+                     "user", req["text"], model, now, req["request_key"], digest))
     save_mentions(store.db, pip["id"], message_id, req.get("display_mentions"))
     if req.get("images") or req.get("files"):
         widen_tables(store.db)
@@ -1419,7 +1428,7 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             raise RegistryError("invalid_cursor", "That message cursor does not belong to this Pip.")
         before = cursor[0]
     rows = _bounded_rows(store.db, pip_id, before, limit + 1)
-    from .pip_steering import in_run, message as steer_message
+    from .pip_steering import in_run, waiting, message as steer_message
     selected = []
     projected = 0
     for row in rows[:limit]:
@@ -1483,14 +1492,18 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
     expanded = []
     for item in reversed(messages):
         expanded.append(item)
-        if item['role'] == 'user':
-            for steering in in_run(store.db, item['run_id']):
+        for steering in in_run(store.db, item['run_id']):
+            # What a reply that finished never read isn't part of it: waiting for its own turn (listed apart), or, if it
+            # couldn't have one, under that reply.
+            unread = steering['status'] != 'applied' and item['status'] == 'succeeded'
+            if not (unread and steering['status'] == 'pending') and (item['role'] == 'assistant') == unread:
                 said = steer_message(steering, item['status'])
                 marks = message_mentions(store.db, said['id'])
                 if marks:
                     said['display_mentions'] = marks
                 expanded.append(said)
     return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
+            "waiting": [{key: row[key] for key in ("id", "text", "created_at")} for row in waiting(store.db, pip_id)[:8]],
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
 
@@ -1543,13 +1556,27 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         marks = checked_mentions(display_mentions, req["text"])
         if marks:
             req["display_mentions"] = marks
+    result = _deliver(store, pip_id, req, actor, config, _intro)
+    if not _intro:
+        from .pip_steering import forget_resent
+        forget_resent(store, pip_id, req, actor)
+    return result
+
+
+def _deliver(store, pip_id, req, actor, config, _intro):
+    """The message's way in: a retry finds what it already became; otherwise it joins the reply running now, waits
+    behind messages that are waiting for their turn, or starts a turn. A reply can end at any point in this, so what
+    a message becomes is decided again when the reply it was going to join has just closed: never a refusal."""
     from . import pip_steering
+    key = req["request_key"]
     steered = store.db.execute('SELECT run_id FROM pip_chat_steers WHERE pip_id=? AND request_key=?',
                                (pip_id, key)).fetchone()
     if steered:
         return pip_steering.send(store, store._job(pip_id), store.run(steered['run_id']), req, actor)
     run = prior(store, pip_id, req, actor)
-    if run is None:
+    attempts = 4
+    while run is None:
+        attempts -= 1
         active = store.db.execute("SELECT r.id FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
                                   "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') "
                                   "ORDER BY m.seq DESC LIMIT 1", (pip_id,)).fetchone()
@@ -1558,13 +1585,28 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
                 # Routine, app and computer follow-ups are separate turns. Only the
                 # person's text can steer a live reply; a scheduled event must retry.
                 raise RegistryError("conversation_busy", "This Pip already has a queued or active reply. Wait for it or stop it before sending another message.")
-            return pip_steering.send(store, store._job(pip_id), store.run(active['id']), req, actor)
+            try:
+                return pip_steering.send(store, store._job(pip_id), store.run(active['id']), req, actor)
+            except RegistryError as exc:
+                if exc.code != 'conversation_changed' or not attempts:
+                    raise
+                continue
+        if not _intro:
+            behind = pip_steering.wait_behind(store, store._job(pip_id), req, actor)
+            if behind is not None:
+                return behind
         # A tap on the card a Pip that couldn't see showed (pip_eyes): applied before the run is queued, so a
         # switch to a model that sees already holds for it.
         from .pip_eyes import answer, bind
-        decided = None if _intro else answer(store, pip_id, text, actor, config)
-        run = store.enqueue(pip_id, "chat_" + hashlib.sha256(key.encode()).hexdigest(), actor, config,
-                            conversation_request=req)
+        decided = None if _intro else answer(store, pip_id, req["text"], actor, config)
+        try:
+            run = store.enqueue(pip_id, "chat_" + hashlib.sha256(key.encode()).hexdigest(), actor, config,
+                                conversation_request=req)
+        except RegistryError as exc:
+            # Another turn got in first (a message waiting for its turn, another device): this one joins it.
+            if exc.code != 'conversation_busy' or _intro or not attempts:
+                raise
+            continue
         if decided is not None:
             bind(store, pip_id, run["id"], decided)
     row = store.db.execute("SELECT m.*,r.status FROM pip_chat_messages m JOIN pip_runs r ON r.id=m.run_id "
@@ -1580,6 +1622,22 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
     if marks:
         message["display_mentions"] = marks
     return {"run": run, "message": message}
+
+
+def answer_waiting(store, row, config):
+    """A message the reply it joined never read becomes the Pip's next turn (pip_steering): queued like any message,
+    with the Pip's own saved options, as the same message."""
+    from .pip_eyes import answer, bind
+    decided = answer(store, row["pip_id"], row["text"], row["requested_by"], config)
+    req = request(row["text"], row["request_key"])
+    marks = message_mentions(store.db, row["id"])
+    if marks:
+        req["display_mentions"] = marks     # its bubble keeps them, and its turn is told which Pips it names
+    run = store.enqueue(row["pip_id"], "chat_" + hashlib.sha256(row["request_key"].encode()).hexdigest(), row["requested_by"],
+                        config, conversation_request=req, _waiting_message=row)
+    if decided is not None:
+        bind(store, row["pip_id"], run["id"], decided)
+    return run
 
 
 def computer_photo_names(images) -> list[str]:
