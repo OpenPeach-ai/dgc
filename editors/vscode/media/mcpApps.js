@@ -571,7 +571,7 @@
       if (!msg || typeof msg !== "object") return false;
       if (msg.type === "mcpAppDone") {
         const resolve = hostWaits.get(msg.id);
-        if (resolve) { hostWaits.delete(msg.id); resolve(msg); }
+        if (typeof resolve === "function") { hostWaits.delete(msg.id); resolve(msg); }
         return true;
       }
       if (msg.type === "mcpAppSend") {

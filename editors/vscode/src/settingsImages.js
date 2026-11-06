@@ -131,13 +131,13 @@ export function createImages({ send, esc, switchHTML, ui, onPaint }) {
             if (msg.status && typeof msg.status === 'object') S.status = msg.status;
             const done = S.waiting.get(msg.token);
             S.waiting.delete(msg.token);
-            if (done) done(msg); else paint();
+            if (typeof done === 'function') done(msg); else paint();
             return true;
         }
         if (msg.type === 'imagesWorkflow') {
             const done = S.workflows.get(msg.token);
             S.workflows.delete(msg.token);
-            if (done) done(msg);
+            if (typeof done === 'function') done(msg);
             return true;
         }
         if (msg.type === 'imagesMade') { if (S.capable) void refresh(); return true; }

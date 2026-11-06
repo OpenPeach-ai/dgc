@@ -764,7 +764,9 @@ class _WebSocket:
         raw = socket.create_connection((parts.hostname, port), timeout=timeout)
         try:
             if parts.scheme == "wss":
-                raw = ssl.create_default_context().wrap_socket(raw, server_hostname=parts.hostname)
+                context = ssl.create_default_context()
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                raw = context.wrap_socket(raw, server_hostname=parts.hostname)
             self.sock = raw
             key = base64.b64encode(os.urandom(16)).decode()
             path = parts.path + (f"?{parts.query}" if parts.query else "")

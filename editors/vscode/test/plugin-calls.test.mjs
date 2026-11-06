@@ -84,7 +84,7 @@ test("a Pip's Allow card: Composio's logo when the page has it, else its letter,
   assert.match(plain, /<li>Gmail · Fetch emails · 5 from Inbox · through Composio<\/li>/);
   for (const plumbing of ["session_id", "sess_1", "sync_response_to_workbench", "current_step"]) assert.equal(plain.includes(plumbing), false, plumbing);
   const withLogo = m.exports.pluginActionMarkup(draft, owner, { esc, logo: (id) => (id === "composio" ? LOGO : "") });
-  assert.match(withLogo, new RegExp(`<span class="app-link-mark has-logo" aria-hidden="true" data-plugin-mark="composio"><img alt="" src="${LOGO.replace(/[+/]/g, "\\$&")}"></span>`));
+  assert.ok(withLogo.includes(`<span class="app-link-mark has-logo" aria-hidden="true" data-plugin-mark="composio"><img alt="" src="${LOGO}"></span>`));
   const editing = m.exports.pluginActionMarkup(draft, owner, { esc, edit: { values: m.exports.argumentValues(READ) } });
   assert.match(editing, /session_id/, "Edit still edits every real input");
   // Every action it covers, and what it sends in full one click away (no Edit needed).

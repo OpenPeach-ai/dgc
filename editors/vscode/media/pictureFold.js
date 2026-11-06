@@ -59,10 +59,52 @@
   }
   /** The same block around a node already drawn. */
   function element(key, body, facts = {}) {
-    const box = document.createElement("div");
-    box.innerHTML = markup(key, "", facts);
-    const section = box.firstElementChild;
-    section.querySelector(".pic-fold-body").appendChild(body);
+    const id = `pic-fold-${++seq}`;
+    const shut = isFolded(key);
+    const title = summary(facts);
+    const section = document.createElement("section");
+    section.className = "pic-fold";
+    section.dataset.picFold = String(key);
+    section.dataset.folded = String(shut);
+    const header = document.createElement("div");
+    header.className = "pic-fold-head";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "pic-fold-toggle";
+    toggle.dataset.picFoldToggle = "";
+    toggle.setAttribute("aria-expanded", String(!shut));
+    toggle.setAttribute("aria-controls", id);
+    toggle.title = `${shut ? "Show" : "Fold away"} ${title}`;
+    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    chevron.setAttribute("class", "pic-fold-chev");
+    chevron.setAttribute("viewBox", "0 0 16 16");
+    chevron.setAttribute("width", "12");
+    chevron.setAttribute("height", "12");
+    chevron.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    for (const [name, value] of Object.entries({ d: "M6 4l4 4-4 4", fill: "none", stroke: "currentColor", "stroke-width": "1.5", "stroke-linecap": "round", "stroke-linejoin": "round" })) path.setAttribute(name, value);
+    chevron.append(path);
+    const words = document.createElement("span");
+    words.className = "pic-fold-title";
+    words.textContent = title;
+    toggle.append(chevron, words);
+    header.append(toggle);
+    if (facts.pictures) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "pic-fold-open";
+      open.dataset.picFoldOpen = "";
+      open.title = `Open the ${facts.pictures === 1 ? "picture" : "first picture"}`;
+      open.textContent = "Open";
+      open.hidden = !shut;
+      header.append(open);
+    }
+    const content = document.createElement("div");
+    content.className = "pic-fold-body";
+    content.id = id;
+    content.hidden = shut;
+    content.append(body);
+    section.append(header, content);
     return section;
   }
   /** Every block of `key` on the page as it now is (a chat can show one reply twice: a split view, a redraw). */

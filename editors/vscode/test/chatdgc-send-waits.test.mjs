@@ -32,7 +32,7 @@ const M = (n) => `msg_${String(n).repeat(32).slice(0, 32)}`;
 function screenHtml() {
   const source = readFileSync(join(root, "src/chatdgc.ts"), "utf8");
   const doc = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1]
-    .replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "");
+    .replace(/<link [^>]*>/g, "").replace(/<script\b[^>]*><\/script\s*>/gi, "").replace(/\$\{[^}]*\}/g, "");
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "");
   const own = readFileSync(join(root, "media/chatdgc.css"), "utf8");
   const scripts = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => m[1]);

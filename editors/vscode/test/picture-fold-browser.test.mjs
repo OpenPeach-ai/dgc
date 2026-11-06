@@ -152,7 +152,7 @@ function chatHtml() {
   const doc = source.match(/return `(<!doctype html>[\s\S]*?<\/html>)`;/)[1];
   const js = [...doc.matchAll(/asset\("media\/([\w-]+\.js)"\)/g)].map((m) => readFileSync(join(root, "media", m[1]), "utf8")).join("\n");
   assert.match(doc, /media\/pictureFold\.js/, "the ChatDGC page loads the fold");
-  const clean = doc.replace(/<link [^>]*>/g, "").replace(/<script [^>]*><\/script>/g, "").replace(/\$\{[^}]*\}/g, "");
+  const clean = doc.replace(/<link [^>]*>/g, "").replace(/<script\b[^>]*><\/script\s*>/gi, "").replace(/\$\{[^}]*\}/g, "");
   const css = readFileSync(join(root, "media/main.css"), "utf8").replace(/@import[^;]*;/, "") + readFileSync(join(root, "media/chatdgc.css"), "utf8");
   const markdownJs = buildSync({ entryPoints: [join(root, "src/markdown.ts")], bundle: true, format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   return { html: clean.replace("</head>", `<style>${css}</style></head>`), js, markdownJs };

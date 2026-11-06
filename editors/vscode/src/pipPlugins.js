@@ -130,7 +130,8 @@ export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName =
   const shown = `<details class="allow-details"><summary><span class="allow-preview">${summary}</span><span>Details</span></summary>`
     + (calls ? `<ul class="allow-calls">${calls.map(c => `<li>${esc(c.line)}${c.fields.length ? inputs(esc, c.fields) : ''}</li>`).join('')}</ul>` : inputs(esc, args))
     + sentInputs(esc, a.call.tool, args) + '</details>';
-  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${calls ? title.replace(/<[^>]*>/g, '') : esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
+  const accessibleTitle = esc(calls ? `Do this in ${plugin.name}?` : `Run ${a.call.tool} in ${plugin.name}?`);
+  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
     + head(esc, plugin.name, title, sub, plugin.plugin, logo)
     + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
     + editError(esc, edit)

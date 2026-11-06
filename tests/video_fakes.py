@@ -12,7 +12,7 @@ import struct
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 
 def _box(kind: bytes, body: bytes) -> bytes:
@@ -278,7 +278,7 @@ class Elsewhere:
                 fake.requests.append({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}})
                 if fake.to and not self.path.startswith("/landed"):
                     self.send_response(302)
-                    self.send_header("Location", fake.to + "/landed" + self.path)
+                    self.send_header("Location", fake.to + "/landed" + quote(self.path, safe="/?:&=%+-._~"))
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return

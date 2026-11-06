@@ -4317,7 +4317,7 @@
         return;
       case "pluginLogos":
         for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
-          if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src))) continue;
+          if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(src))) continue;
           pluginLogos.set(id, src);
           if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
           // A card's mark: the logo in place of the letter (none: the letter stays).

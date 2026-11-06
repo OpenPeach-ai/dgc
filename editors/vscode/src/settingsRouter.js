@@ -186,7 +186,7 @@ export function createRouter({ send, esc, switchHTML, onPaint, ui }) {
             if (msg.status && typeof msg.status === 'object') S.status = msg.status;
             const done = S.waiting.get(msg.token);
             S.waiting.delete(msg.token);
-            if (done) done(msg);
+            if (typeof done === 'function') done(msg);
             paint();
             return true;
         }

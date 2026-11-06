@@ -2692,7 +2692,7 @@
   function promptEntry(item, label) {
     const draft = cleanDraft({ ...(item?.draft || {}), start: 0, end: 0 })
       || { text: String(item?.text || "").slice(0, 1_000_000), attachments: [] };
-    const node = el("div", "msg user"); node.appendChild(el("div", "role", label));
+    const node = el("div", "msg user"); node.appendChild(textEl("div", "role", label));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, String(item?.text || "").slice(0, 1_000_000), draft.attachments);
     node.appendChild(bubble);
@@ -3849,7 +3849,7 @@
       if (index >= 0 && window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
         { index, name: ref.name }, "idle", `sentPip${Math.random().toString(36).slice(2, 12)}`, { paused: true });
       else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
-      chip.append(face, el("span", "pip-reference-name", ref.name.replace(/\s+/g," ").trim()));
+      chip.append(face, textEl("span", "pip-reference-name", ref.name.replace(/\s+/g," ").trim()));
       chip.title = `${item.pipReference.pip_id} · ${item.pipReference.status} · lifecycle ${item.pipReference.lifecycle_revision} · Reference only`;
       return chip;
     }
@@ -7826,10 +7826,10 @@ function permissionChoices(ev) {
     memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
-  let pluginLogos = {};
+  let pluginLogos = Object.create(null);
   let pluginRows = [];
   let pluginListRequestedAt = 0;
-  let pluginNames = {};                 // each plugin's own name, by the server its tools come from ("example" -> "Example")
+  let pluginNames = Object.create(null); // each plugin's own name, by the server its tools come from
   // The same names as DGC gives them on start (ready.capabilities.plugin_names), before the plugin list has loaded: an
   // Allow card for a plugin's tool names the plugin as its card does ("MCP Apps example", not "Example").
   let readyPluginNames = {};
@@ -7903,15 +7903,16 @@ function permissionChoices(ev) {
   // The catalog still arrives here, for one live consumer: a tool card belonging to a plugin's MCP
   // server draws that package's own mark (pluginLogoHtml, above). This is where that cache fills.
   function cachePluginLogos(items) {
-    pluginLogos = {};
-    pluginNames = {};
+    pluginLogos = Object.create(null);
+    pluginNames = Object.create(null);
     pluginRows = (Array.isArray(items) ? items : []).filter(row => row && typeof row.name === "string"
       && /^[a-z0-9_-]{1,64}$/.test(row.name) && row.connected === true);
     for (const row of Array.isArray(items) ? items : []) {
-      if (row.logo) pluginLogos[row.name] = row.logo;
+      if (!row || typeof row.name !== "string" || !/^[a-z0-9_-]{1,64}$/.test(row.name)) continue;
+      if (typeof row.logo === "string" && /^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(row.logo)) pluginLogos[row.name] = row.logo;
       const named = typeof row.display_name === "string" ? row.display_name.trim().slice(0, 80) : "";
       if (named) for (const server of [row.name, ...(Array.isArray(row.server_names) ? row.server_names : [])]) {
-        if (typeof server === "string") pluginNames[server] = named;
+        if (typeof server === "string" && /^[a-z0-9_-]{1,64}$/.test(server)) pluginNames[server] = named;
       }
     }
     // A saved inline mention can be restored before the catalog arrives. Upgrade its fallback
@@ -11707,7 +11708,7 @@ function permissionChoices(ev) {
     if (msg.type === "pluginLogos") {
       // A plugin's logo the host read for an Allow card (the catalog hadn't come yet): it replaces the card's shield.
       for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
-        if (!/^[a-z0-9_-]{1,64}$/.test(id) || typeof src !== "string" || !/^data:image\/(png|svg\+xml|x-icon);base64,/.test(src)) continue;
+        if (!/^[a-z0-9_-]{1,64}$/.test(id) || typeof src !== "string" || !/^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(src)) continue;
         pluginLogos[id] = src;
         for (const mark of document.querySelectorAll(`.q [data-logo-for="${id}"]`)) {
           const wrap = el("span", "perm-logo");
