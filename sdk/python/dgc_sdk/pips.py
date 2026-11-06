@@ -588,7 +588,7 @@ COMMAND_FIELDS = {
     'review_pip_execution': frozenset(['expected_revision', 'reason', 'run_id', 'status']),
     'review_pip_finding': frozenset(['expected_revision', 'finding_index', 'reason', 'run_id', 'status']),
     'run_pip': frozenset(['idempotency_key', 'pip_id', 'expected_version', 'expected_lifecycle_revision', 'expected_plan_digest']),
-    'send_pip_message': frozenset(['chat_options', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
+    'send_pip_message': frozenset(['chat_options', 'display_mentions', 'files', 'idempotency_key', 'images', 'pip_id', 'spooled_files', 'spooled_images', 'text']),
     'get_pip_message_image': frozenset(['as_file', 'index', 'message_id', 'pip_id']),
     'introduce_pip': frozenset(['pip_id']),
     'stop_pips': frozenset([]),

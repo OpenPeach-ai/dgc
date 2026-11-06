@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- ChatDGC's box and a Pip's chat box take the same `@` marks as Work's. ChatDGC lists the plugins a reply can use, the Outputs its Output chip offers, your Personal Pips and this window's files. A Personal Pip lists its plugins and its fellow Pips; a Project Pip lists its fellow Pips and the project's files. The model reads plain words: a plugin, Output or Pip's name, a file attached or its path, and a Pip named this way comes with a short reference to what it is. The marks come back in the sent bubble after a reload (`chatdgc_mentions`, `display_mentions` on `chatdgc_send` and `send_pip_message`, offered as `capabilities.chatdgc.mentions` and `ready.capabilities.pip_display_mentions`).
 - `dgc update` targets the launcher that is running, including a launcher that is a script rather than a link. It ignores an install record naming a temporary folder or another install, and it no longer reports success while the `dgc` on your PATH is a different one it did not change.
 - A Pip run is pinned to the saved model connection, not the route of the chat that queued it. Before, a chat on another provider made every Pip message it sent fail with `model_changed`.
 - A queued message can be removed or moved before its turn starts (`queue_remove`, `queue_reorder`, offered as `ready.capabilities.queue_edit`, answered by the `queue_changed` event).

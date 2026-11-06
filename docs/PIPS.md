@@ -900,6 +900,12 @@ Personal Pip; pause, resume or attach a Pip to the chat; propose handoffs; and d
 emails, events and connector actions from a Personal result. In the editor, type `@` and choose
 **Reference a Pip…** to point a message at a Pip in this project.
 
+A Pip's own chat box takes `@` too, for what that Pip can reach. A Personal Pip lists the plugins it can use and your
+other Personal Pips; a Project Pip lists the other Pips of its project and the project's files. It reads your message
+as plain words, the name or the path. A Pip named this way comes with a short note of what it is (its name, type,
+goal and status): it can talk about that Pip, and it can't run or change it. Pips make no Outputs, so a Pip's list has
+none.
+
 **Models from the main chat.** Ask "Which models can my Pips use?" and the main chat lists the
 models on DGC's connection, each with the context window DGC starts it with when it knows one, and
 the model Pips use by default. It can also change them for you: one Pip's model or its context

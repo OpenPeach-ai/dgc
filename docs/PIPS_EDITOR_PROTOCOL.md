@@ -124,6 +124,11 @@ The reply is a `pips_result` event that carries the nested request ID:
   documents the main chat reads), 2 MB in all within the same 2,800,000-character budget as the
   images. A listed user message carries `files: [{index, name, bytes}]`. The host refuses `files`
   before sending to a CLI below API 43, and refuses images and files over the shared budget.
+- `send_pip_message` may carry `display_mentions` when `ready.capabilities.pip_display_mentions` is 1: where the box
+  drew its `@` marks, in the shape `prompt` takes, plus `wired: true` on a Pip or a file whose name is the words of
+  the text. They are display-only and no part of the retry key. Marks that don't spell the text are dropped and the
+  message still goes. A listed user message, or a mid-turn update, carries them back. The Pips a message names in its
+  own workspace reach the worker's turn as `named_pips` reference data.
 - From API 52 the host sends a message's photos and files the main chat's way: it writes each into
   the backend's image spool (`ready.capabilities.image_spool_dir`, mode 0600, a fresh random name)
   and sends `spooled_images: [{name, media_type}]` and `spooled_files: [{name, spool}]` instead of

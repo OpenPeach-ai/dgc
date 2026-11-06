@@ -227,7 +227,7 @@ export type PipMutationParams = {
   review_pip_execution: { expected_revision: number; reason: string; run_id: string; status: string };
   review_pip_finding: { expected_revision: number; finding_index: number; reason: string; run_id: string; status: string };
   run_pip: { idempotency_key: string; pip_id: string; expected_version?: number; expected_lifecycle_revision?: number; expected_plan_digest?: string };
-  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[];
+  send_pip_message: { idempotency_key: string; pip_id: string; text: string; chat_options?: PipChatOptions; images?: string[]; files?: { name: string; data: string }[]; display_mentions?: unknown[];
     spooled_images?: { name: string; media_type: string }[]; spooled_files?: { name: string; spool: string }[] };
   introduce_pip: { pip_id: string };
   stop_pips: { [key: string]: never };
@@ -419,6 +419,7 @@ export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "send_pip_message": [
     "chat_options",
+    "display_mentions",
     "files",
     "idempotency_key",
     "images",
