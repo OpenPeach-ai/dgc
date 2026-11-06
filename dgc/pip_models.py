@@ -138,6 +138,17 @@ def follow_saved_route(config) -> None:
     config._provider_secret_identity = dict(saved._provider_secret_identity)
 
 
+def saved_route_view(config):
+    """A private view of ``config`` on the route Settings saved (follow_saved_route). A light configuration with no
+    private view to make (a plain mapping of settings) has no saved route to follow, and is used as it is."""
+    try:
+        view = config.clone_for_root(config.project_root)
+    except AttributeError:
+        return config
+    follow_saved_route(view)
+    return view
+
+
 def _connection(config):
     base = config.get("base_url", "")
     mode = config.get("api_mode", "auto")
@@ -381,7 +392,9 @@ def validate_pinned_connection(config, settings) -> None:
         if reason:
             raise RegistryError("model_changed", reason)
         return
-    current = _connection(config)
+    # A pin is made from the route Settings saved (pips._model_settings), so that is what it is checked against: whoever
+    # asks can be on another, a chat that switched provider or a runner started before the default changed.
+    current = _connection(saved_route_view(config))
     if not isinstance(settings, dict):
         raise RegistryError("model_changed", "The run has no valid pinned model connection. Start a new run.")
     try:

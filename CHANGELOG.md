@@ -7,7 +7,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 ## 0.51.0 — 2026-11-06
 
 - `dgc update` targets the launcher that is running, including a launcher that is a script rather than a link. It ignores an install record naming a temporary folder or another install, and it no longer reports success while the `dgc` on your PATH is a different one it did not change.
-- A Pip run is pinned to the saved model connection, not the route of the chat that queued it. Before, a chat on another provider made every Pip message it sent fail with `model_changed`.
+- A Pip run is pinned to the saved model connection, not the route of the chat that queued it. Before, a chat on another provider made every Pip message it sent fail with `model_changed`. The checks when a run is queued and when it starts compare against that same saved connection, and a runner started before the default changed follows it, with its key.
 - A queued message can be removed or moved before its turn starts (`queue_remove`, `queue_reorder`, offered as `ready.capabilities.queue_edit`, answered by the `queue_changed` event).
 - A text message sent while a Personal Pip is answering joins that active reply, like steering in Work. If its answer finishes first, DGC keeps the message and tells you to send it as a new turn.
 - Work and ChatDGC chats keep their selected native or subscription provider, model and effort on reload; a new chat starts from the default set in Settings. Settings can keep several native hosts and signed-in subscription CLIs ready, with API keys bound to each endpoint. Changing the default leaves open chats on their selected routes. Pips set to Default follow the shared default, including a signed-in subscription. A model's context window stays with its chat.

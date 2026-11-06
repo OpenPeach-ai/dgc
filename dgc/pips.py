@@ -564,10 +564,9 @@ def _output_budget(config) -> int:
 
 
 def _model_settings(config, model_choice=None, *, _prepared=None, personal=False):
-    from .pip_models import follow_saved_route, is_subscription, resolve_model_choice, validate_model_choice, validate_pinned_connection
+    from .pip_models import is_subscription, resolve_model_choice, saved_route_view, validate_model_choice, validate_pinned_connection
     # The pin is the saved connection, whichever chat or tool is queueing this run (see follow_saved_route).
-    config = config.clone_for_root(config.project_root)
-    follow_saved_route(config)
+    config = saved_route_view(config)
     choice = validate_model_choice(model_choice if model_choice is not None else {"mode": "default"})
     if choice["mode"] == "default":
         # Settings -> Models -> Pips on DGC Router (pips_model "router" or "router:<system>/<model>"): a Pip on Default
@@ -4152,7 +4151,10 @@ def _execute_run(registry, row, config):
         raise RegistryError('source_changed', 'The workspace binding no longer matches this queued run.')
     # Credential never crosses to a different endpoint after an unattended queue delay.
     frozen_config = config.clone_for_root(Path(binding["canonical_root"]))
-    from .pip_models import validate_pinned_connection
+    # Checked against the route Settings saved, and this run's key comes from it: a runner started before the default
+    # changed must neither refuse a run pinned to the new one nor send it the old key.
+    from .pip_models import follow_saved_route, validate_pinned_connection
+    follow_saved_route(frozen_config)
     validate_pinned_connection(frozen_config, manifest["model_settings"])
     run_dir = registry.directory / "runs" / row["id"]
     current_tree = source['source_policy']['mode'] == 'current_tree'
