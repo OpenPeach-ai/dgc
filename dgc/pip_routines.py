@@ -29,6 +29,7 @@ import hashlib
 import json
 import re
 import secrets
+import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -538,6 +539,29 @@ def _record(registry, row, **fields) -> bool:
 def turn_text(row, trigger) -> str:
     """The routine's turn, before what started it."""
     return ROUTINE_TURN.format(title=row["title"].replace('"', "'"), when=label(trigger), prompt=row["prompt"])
+
+
+def split_turn(registry, run_id, text) -> tuple[str, str]:
+    """One routine's turn, for careful mode: (the words the user gave it, what started it). The first are theirs, as a
+    message of theirs is: they wrote it, or read and added it. Only the second (an email, an app's event) was read from
+    their apps. Told the prompt was read from their apps, a routine that names a site was held every time it opened it, on
+    a card with no Always allow. A turn DGC can't place is all the second."""
+    text = str(text or "")
+    try:
+        message = registry.db.execute("SELECT request_key FROM pip_chat_messages WHERE run_id=? AND role='user' ORDER BY seq LIMIT 1",
+                                      (run_id,)).fetchone()
+        key = str(message[0] or "") if message else ""
+        if not key.startswith(KEY):
+            return "", text
+        routine = registry.db.execute("SELECT * FROM pip_routines WHERE substr(id,-16)=? AND status IN ('on','off') "
+                                      "AND pip_id=(SELECT pip_id FROM pip_runs WHERE id=?)",
+                                      (key[len(KEY):].rsplit("_", 1)[0], run_id)).fetchone()
+        own = turn_text(routine, json.loads(routine["trigger"])) if routine else None
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        return "", text
+    if own is None or not (text.startswith(own) or own.startswith(text)):      # a long turn is cut to fit (_fits)
+        return "", text
+    return str(routine["prompt"]), text[len(own):]
 
 
 def _fits(text: str) -> str:

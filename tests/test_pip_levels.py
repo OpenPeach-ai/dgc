@@ -136,8 +136,8 @@ class ClassifyTests(unittest.TestCase):
     def test_consequential_and_payments_ask_and_unsure_is_not_routine(self):
         for cues, expected in (({"target": "Place order · Pay ₹6,980", "path": "/api/order", "fields": ["order"]}, "payment"),
                                ({"target": "Pay with saved card", "path": "/pay-saved", "fields": ["card_token"]}, "payment"),
-                               ({"target": "Continue", "path": "/next", "fields": ["amount"]}, "payment"),
-                               ({"target": "Subscribe", "path": "/newsletter", "fields": ["email"]}, "payment"),
+                               ({"target": "Continue", "path": "/next", "fields": ["amount"]}, "maybe_payment"),
+                               ({"target": "Subscribe", "path": "/newsletter", "fields": ["email"]}, "consequential"),
                                ({"target": "", "buttons": ["Add to cart", "Buy now"], "path": "/cart/add"}, "payment"),
                                ({"payment": True, "target": "Search"}, "payment"),
                                ({"target": "Send", "path": "/compose", "fields": ["to", "body"]}, "consequential"),

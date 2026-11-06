@@ -427,6 +427,9 @@ button.pill{border-radius:999px;padding:6px 16px}
 .allow-details[open]>summary>span:last-child::after{content:'⌃'}
 .allow-details[open]{border-top:1px solid var(--pip-edge);padding-top:8px}
 .allow-details[open]>summary{margin-bottom:8px}
+.allow-details>.app-link-note{margin:6px 0 0}
+.allow-see{margin:4px 0 0 -6px;font-size:12px}
+.allow-card .allow-again{color:var(--vscode-foreground);font-size:11px;line-height:1.35}
 .allow-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;margin:0;font-size:12px}
 .allow-meta dt{color:var(--vscode-descriptionForeground)}.allow-meta dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:14em;overflow:auto}
 .allow-calls .allow-meta{margin:2px 0 4px 8px}

@@ -2,6 +2,9 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A form a Pip's computer holds is the Soft card in its chat: Send once, Always allow and Reject on the card, what Always allow covers in plain words (`POST /accounts/*/settings, whatever the ID`), and the rest under Details.
+- Pay on a site means a real payment: it is reviewed first and has no Always allow, here and in the computer's tab. A false alarm is a form with one honest line and Always allow.
+- A card an Always allow used to cover says why it came back: "Asked again because this tool changed."
 - The cache clock in Work's prompt box opens its own small popup, with the time left, what your next message will do, and the tokens reported as cached. It no longer opens the context window details, and the keyboard can reach it.
 - Cloudflare in Settings → Plugins, with its logo and sign-in. It only reads, so a daily traffic Pip needs no approval and no browser.
 - A Pip's model menu lists every provider saved in Settings → Models, by name, with its models, as a Work session's does. The Pip keeps its choice after a reload. If you remove that provider, its prompt box and its next run say so. The menu now looks and works as Work's: plain rows with a check on the chosen one, and "Add provider in Settings…". Its search box is gone, and Refresh models stays only for a list that failed to load.

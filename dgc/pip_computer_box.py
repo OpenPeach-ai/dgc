@@ -780,6 +780,9 @@ class HeldWrite:
         value = {"method": self.method, "host": parts.hostname or "", "path": (parts.path or "/")[:300],
                  "fields": [{"name": name[:80], "value": value[:200]} for name, value in self.fields[:MAX_SUMMARY_FIELDS]],
                  "more_fields": max(0, len(self.fields) - MAX_SUMMARY_FIELDS), "body_bytes": self.body_bytes}
+        if not self.site:
+            from .pip_action_grants import route_of
+            value["route"] = route_of(value["path"], parts.query, self.fields)[:400]   # what an Always allow pins
         if self.payment:
             value["payment"] = True
         if self.site:

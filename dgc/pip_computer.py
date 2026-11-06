@@ -650,10 +650,19 @@ class Host:
                 # Its level lets this through (pip_levels): sent now, kept on record, and the run goes on.
                 Host._release_by_level(self, held, approval)
                 continue
-            frame = self._frame("Waiting for your approval")
             summary = Host._held_summary(self, held)
             if getattr(held, "asks_because", None):
-                summary["asks_because"] = held.asks_because      # payment, consequential or unsure (pip_levels)
+                summary["asks_because"] = held.asks_because      # payment, maybe_payment, consequential or unsure (pip_levels)
+                if held.asks_because == "maybe_payment":
+                    summary["asks_word"] = str(getattr(held, "asks_word", ""))[:40]
+            if self.run_id is not None and held.request_id in self.browser.held:
+                # Always allowed for this Pip (same site, method and route): sent now, as the grant, and the run goes on.
+                # Told to stop and wait, a Pip said it was waiting on a card that never came.
+                grant = Host._grant_for(self, summary)
+                if grant is not None:
+                    Host._release_by_grant(self, held, summary, grant)
+                    continue
+            frame = self._frame("Waiting for your approval")
             from datetime import timedelta
             from .pip_schedules import _instant, timestamp
             action_id = identifier("compact")
@@ -666,11 +675,10 @@ class Host:
                          json.dumps(summary, ensure_ascii=False), _digest(summary), frame, now, expires))
                     registry.event(self.workspace_id, "pip_computer_action_held", pip_id=self.pip_id, run_id=self.run_id,
                                    payload={"action_id": action_id, "method": summary["method"], "host": summary["host"]})
-                    # Always allowed for this Pip (same site, method and path): approved now, as the grant;
-                    # the supervisor sends it within seconds and the user is told after.
+                    # A page's own submit, with no run, on a route the user always allows: the supervisor sends it
+                    # within seconds and the user is told after. A payment asks every time: no grant sends one.
                     from .pip_action_grants import computer_grant_for
-                    # A payment asks every time: no grant sends one.
-                    grant = (None if summary.get("kind") in CAREFUL_KINDS or summary.get("payment") is True
+                    grant = (None if summary.get("kind") in CAREFUL_KINDS or is_payment(summary)
                              else computer_grant_for(registry, self.pip_id, summary))
                     if grant is not None:
                         registry.db.execute("UPDATE pip_computer_actions SET status='approved',resolved_at=?,resolved_by=? "
@@ -681,6 +689,45 @@ class Host:
             self.waiting.append(action_id)
         return made
 
+    def _grant_for(self, summary) -> dict | None:
+        """The Always allow that covers this held submit, or None. A payment asks every time: no grant sends one."""
+        from .pip_action_grants import computer_grant_for
+        from .workspace_registry import WorkspaceRegistry
+        if summary.get("kind") in CAREFUL_KINDS or is_payment(summary):
+            return None
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry:
+                return computer_grant_for(registry, self.pip_id, summary)
+        except (OSError, RegistryError, sqlite3.Error):
+            return None                                    # it waits for the user, as with no grant
+
+    def _release_by_grant(self, held, summary, grant) -> None:
+        """Send one held submit an Always allow covers: kept on record as sent by that grant, shown in the run's timeline,
+        and the Pip's answer says it went through. The user is told after (pip_action_grants.ran_on_their_own)."""
+        from datetime import timedelta
+        from . import pip_levels
+        from .pip_schedules import _instant, timestamp
+        from .workspace_registry import WorkspaceRegistry, identifier
+        self.browser.release(held.request_id)
+        self.browser.pump(1.5)
+        where = f"{summary.get('host', '')}{summary.get('path', '')}"
+        unattended = bool(getattr(self, "unattended", False))
+        record = {**summary, "what": f"Sent a form to {where}"[:200], "unattended": unattended}
+        action_id, now = identifier("compact"), _now()
+        try:
+            with WorkspaceRegistry(self.state_directory) as registry, registry.transaction():
+                registry.db.execute("INSERT INTO pip_computer_actions VALUES(?,?,?,?,?,?,?,?,?,'sent',?,?,?,?,NULL)",
+                    (action_id, self.pip_id, self.workspace_id, self.run_id, self.id, str(held.request_id)[:200],
+                     json.dumps(record, ensure_ascii=False), _digest(record), None, now,
+                     timestamp(_instant(now) + timedelta(seconds=ACTION_TTL_SECONDS)), now, "pip-grant:" + grant["id"]))
+                registry.event(self.workspace_id, "pip_computer_action_decided", pip_id=self.pip_id, run_id=self.run_id,
+                               payload={"action_id": action_id, "approved": True, "grant_id": grant["id"]})
+        except Exception:                                  # noqa: BLE001 - it went through; the record is best effort
+            pass
+        said = f"Always allowed · {record['what']}" + (f" · {pip_levels.NOBODY}" if unattended else "")
+        self._level_pending.append((action_id, said, f"DGC sent that because the user always allows it here: {where}. It went "
+                                                     "through; carry on."))
+
     def _held_summary(self, held) -> dict:
         summary = {**held.summary(), "page": self.browser.current_url[:500]}
         scrub = getattr(getattr(self, "secrets", None), "scrub", None)
@@ -690,21 +737,25 @@ class Host:
             summary["fields"] = [{**f, "value": "\u2022\u2022\u2022" if scrub(f["value"]) != f["value"] else f["value"]}
                                  for f in summary["fields"]]
             summary["page"] = scrub(summary["page"])
+            if "route" in summary:
+                summary["route"] = scrub(summary["route"])
         return summary
 
     # -- how much it asks (pip_levels, Pips API 58) --------------------------------------------
 
     def _level_approves(self, held) -> dict | None:
         """What its level lets through of one held request, or None (it waits for the user as at Ask). Only in a run,
-        only the Pip's own steps; a payment never."""
+        only the Pip's own steps; a payment never. At every level this names what it holds if that is or may be a payment
+        (held.asks_because), which is what keeps Always allow from a checkout."""
         from . import pip_levels
         level = getattr(self, "level", "ask")
-        if self.run_id is None or level not in (pip_levels.APPROVE, pip_levels.FULL):
-            return None
+        acting = self.run_id is not None and level in (pip_levels.APPROVE, pip_levels.FULL)
         if held.request_id not in self.browser.held:
             return None
         parts = urlsplit(held.url)
         if getattr(held, "site", False):
+            if not acting:
+                return None
             from .pip_careful import site_of
             site = site_of(parts.hostname or "")
             return {"what": pip_levels.site_words(site), "site": site, "verdict": "routine"}
@@ -720,11 +771,13 @@ class Host:
         if not cues["target"]:
             form_cues = getattr(self.browser, "form_cues", None)
             cues["buttons"] = (form_cues(held.url) or {}).get("buttons", []) if form_cues else []
-        found = pip_levels.decide_write(level, cues)
+        found = pip_levels.decide_write(level, cues) if acting else None
         if found is not None and upload_name:
             self.upload_from_chat = None
         if found is None:
-            held.asks_because = pip_levels.classify(cues)["verdict"]     # why its level still asks, for the card
+            said = pip_levels.classify(cues)
+            if acting or said["verdict"] in ("payment", pip_levels.MAYBE_PAYMENT):
+                held.asks_because, held.asks_word = said["verdict"], said["why"]     # why it still asks, for the card
         return found
 
     def _release_by_level(self, held, approval) -> None:
@@ -949,10 +1002,10 @@ class Host:
         if kinds == {"site"}:
             return SITE_HELD
         # "That hold isn't a card here, so I can't show it to you" -- above the card (three-asks test, 2026-10-20).
-        return ("Held: this would change something on the website, so DGC paused it unsent. Unless the "
-                "user always allows this kind of submit here, it waits for their approval: DGC shows it to them as a "
-                "card below your reply, with what it sends, Review… and Reject. It is there. Stop now and tell the user "
-                "in a sentence or two what you submitted and why; a follow-up run continues once they decide.")
+        return ("Held: this would change something on the website, so DGC paused it unsent. It waits for the user's "
+                "approval: DGC shows it to them as a card below your reply, with what it sends and how to send or reject "
+                "it. It is there. Stop now and tell the user in a sentence or two what you submitted and why; a follow-up "
+                "run continues once they decide.")
 
     # -- eyes and a cursor ---------------------------------------------------------------------
 
@@ -1569,6 +1622,12 @@ def list_actions(registry, pip_id: str, *, limit: int = 20) -> list[dict]:
     return [projection(row) for row in rows]
 
 
+def is_payment(summary) -> bool:
+    """Whether a held submit is a payment: it carries a card number, or classify found real signs of paying. These ask
+    every time, whatever Always allow the user has given."""
+    return summary.get("payment") is True or summary.get("asks_because") == "payment"
+
+
 def decide(registry, action_id: str, expected_digest: str, approve: bool, actor: str) -> dict:
     """The user's decision on one held write. The supervisor carries it out within seconds."""
     if actor not in ("editor-user", "local-console"):
@@ -1583,7 +1642,7 @@ def decide(registry, action_id: str, expected_digest: str, approve: bool, actor:
 
 
 def approve_always(registry, action_id: str, expected_digest: str, actor: str) -> tuple:
-    """Send this held write and allow the same route for this Pip. The grant also releases
+    """Send this held write and allow its route for this Pip (pip_action_grants.route_of). The grant also releases
     already-waiting requests it covers; those must not leave duplicate cards behind."""
     from .pip_action_grants import add_computer_grant, computer_pins
     if actor not in ("editor-user", "local-console"):
@@ -1592,6 +1651,8 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
     kind = summary.get("kind")
     if summary.get("payment") is True:
         raise RegistryError("asks_every_time", "This sends payment card details, so it asks you every time. Choose Send once.")
+    if is_payment(summary):
+        raise RegistryError("asks_every_time", "This looks like a payment, so it asks you every time. Choose Send once.")
     if kind == "site":
         raise RegistryError("asks_once", "Allow adds this site for good: choose Allow.")
     if kind == LOGIN_KIND:
@@ -1610,7 +1671,7 @@ def approve_always(registry, action_id: str, expected_digest: str, actor: str) -
             if _now() >= sibling["expires_at"]:
                 continue
             other = json.loads(sibling["summary"])
-            if other.get("kind") in CAREFUL_KINDS or other.get("payment") is True:
+            if other.get("kind") in CAREFUL_KINDS or is_payment(other):
                 continue
             if computer_pins(sibling["pip_id"], other) != pins:
                 continue
@@ -1711,7 +1772,7 @@ def tick(registry, config) -> dict:
             try:
                 continuation = _continue(registry, row, config)
             except RegistryError:
-                continuation = None
+                continuation = None        # its chat is busy: pip_chat kept the turn, and a later tick sends it
         with registry.transaction():
             registry.db.execute("UPDATE pip_computer_actions SET status=?,continuation_run_id=? WHERE id=? AND status='approved'",
                                 (outcome, continuation, row["id"]))
@@ -1720,6 +1781,9 @@ def tick(registry, config) -> dict:
         if host.run_id is None and not host.browser.held and time.monotonic() - host.last_used > IDLE_SECONDS:
             stop_host(pip_id)
             done["closed"] += 1
+    # What the user approved while its chat was busy: its next turn, now the chat is free (pip_chat.send_owed_turns).
+    from .pip_chat import send_owed_turns
+    send_owed_turns(registry, config)
     return done
 
 

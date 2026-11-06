@@ -87,8 +87,15 @@ export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName
       + `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div></details>`;
   return `<div class="allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
     + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send email to ${esc(m.recipient_email)}?</strong><small>${from}</small></div></div>`
-    + shown + editError(esc, edit)
+    + askedAgainLine(esc, draft) + shown + editError(esc, edit)
     + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
+}
+
+/** Why a card came back though you chose Always allow: its grant is pinned, and what it was pinned to changed. */
+const ASKED_AGAIN = { tool: 'Asked again because this tool changed.', connection: 'Asked again because this connection changed.' };
+export function askedAgainLine(esc, draft) {
+  const line = ASKED_AGAIN[draft?.asked_again];
+  return line ? `<p class="app-link-note allow-again">${esc(line)}</p>` : '';
 }
 
 /** A Pip's calendar event as an Allow card, like the email one: Add event, Always allow, Edit, Don't add. */
@@ -116,7 +123,7 @@ export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipN
       + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '') + '</details>';
   return `<div class="allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
     + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">▦</span><div class="app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
-    + shown + editError(esc, edit)
+    + askedAgainLine(esc, draft) + shown + editError(esc, edit)
     + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t add</button></div></div>`;
 }
 
