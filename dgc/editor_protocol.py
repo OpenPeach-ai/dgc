@@ -196,6 +196,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "tool_denied": {
         "call_id": _NS(False), "name": _S(), "args": _O(), "reason": _S(),
     },
+    # One completed model request's measured tokens, for the live Trace of the reply. A saved turn
+    # carries the same numbers as {"role": "time", "of": "trace"} markers in history.items.
+    "trace_usage": {"tokens": _I()},
     "todos": {"todos": _A()},
     "artifact_ready": {"id": _S(), "name": _S(), "url": _S(), "rel": _S()},
     # v14: files the model produced and asked to show, as chips under the step that made them.
@@ -466,6 +469,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "markdown": _S(), "path": _NS(False), "error": _NS(False),
     },
     "queued": {"count": _I(), "text": _S()},
+    # The queue after a queue_remove or queue_reorder (ready.capabilities.queue_edit): the request ids
+    # still waiting, in the order they will run, and the one that was taken out, if any.
+    "queue_changed": {"order": _A(), "removed": _S(False), "count": _I()},
     "prompt_accepted": {"request_id": _S(), "state": _f("string", enum=("started", "queued", "steered")),
                         "message": _S(False)},
     "steering_update": {"request_id": _S(), "state": _f("string", enum=("applied", "queued", "returned")),
@@ -716,6 +722,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     # Each that moves is announced as prompt_accepted "steered"; none moving is command_rejected
     # "not_steerable". Sent only to a CLI whose ready.capabilities has steer_queued.
     "steer_queued": {"request_ids": _A(), "request_id": _S(False)},
+    # Take one waiting message out, or put the waiting messages in a new order, before their turn starts.
+    # Sent only to a CLI whose ready.capabilities has queue_edit; only the user's own prompts move.
+    "queue_remove": {"queued_id": _S(), "request_id": _S(False)},
+    "queue_reorder": {"order": _A(), "request_id": _S(False)},
     # v14: ``question_forms`` is still accepted and ignored (every v14 client takes question
     # forms); it is removed in v15.
     # ``open_asks`` is how a client says it can show a question the turn did not stop for. The

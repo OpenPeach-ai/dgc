@@ -530,7 +530,17 @@ test("Work's transcript already leaves its scrollbar room: your bubble stays cle
       await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: { type: "ready", version: "0.51.0", protocol_version: 14,
         capabilities: {}, model: "m", mode: "default", think: "off", base_url: "http://localhost:11434/v1", workspace_trusted: true, commands: [], custom_commands: [],
         goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" } } })));
-      for (let i = 0; i < 8; i++) { await page.fill("#input", `can you check if any mails from OKX today ? ${i}`); await page.keyboard.press("Enter"); }
+      // Build completed turns. Later prompts now stay in the queue above the composer, so
+      // sending eight without replies no longer fills the transcript being measured here.
+      await page.evaluate(() => {
+        for (let i = 0; i < 12; i++) {
+          const emit = (event) => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event } }));
+          emit({ type: "turn_start", turn_id: `scroll-${i}`, prompt: `can you check if any mails from OKX today ? ${i}`, kind: "prompt" });
+          emit({ type: "text_delta", text: "I checked the inbox and found no matching messages in this sample turn." });
+          emit({ type: "stream_end", message_id: `scroll-${i}:1`, phase: "answer" });
+          emit({ type: "turn_end", turn_id: `scroll-${i}`, reason: "completed", final_message_id: `scroll-${i}:1` });
+        }
+      });
       const m = await page.evaluate(() => { const log = document.getElementById("log"), left = log.getBoundingClientRect().left;
         const last = [...log.querySelectorAll(".msg.user .bubble")].at(-1);
         return { client: log.clientWidth, scrolls: log.scrollHeight > log.clientHeight, bubble: last.getBoundingClientRect().right - left }; });

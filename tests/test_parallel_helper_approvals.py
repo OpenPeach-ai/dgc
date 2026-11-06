@@ -7,6 +7,17 @@ from dgc.agent import _SubUI, interaction_helper_label
 
 
 class ParallelApprovalTest(unittest.TestCase):
+    def test_helper_model_usage_is_not_attributed_to_the_parent_trace(self):
+        class Parent:
+            def __init__(self):
+                self.trace_tokens = []
+            def trace_usage(self, tokens):
+                self.trace_tokens.append(tokens)
+
+        parent = Parent()
+        _SubUI(parent, "Reviewer").trace_usage(420)
+        self.assertEqual(parent.trace_tokens, [])
+
     def test_always_allow_recheck_skips_the_next_card(self):
         class Parent:
             deny_reason = ""

@@ -108,7 +108,7 @@ const CHATDGC_SEEN_KEY = "dgc.chatdgcSeen.v1";
  *  changes the session, its turn or its settings. */
 const WORK_READ_ONLY_REFUSES = new Set(["prompt", "slash", "slashText", "cancel", "setMode", "setModel", "setReasoningProfile",
   "setContextSize", "pickModel", "compact", "rateResponse", "branchChat", "resumeTurn", "permission_response", "plan_response",
-  "options_response", "mcp_input_response", "askSkip", "steerQueued", "rerunTask", "learnSave", "clear_todos", "undoTurn",
+  "options_response", "mcp_input_response", "askSkip", "steerQueued", "queueRemove", "queueReorder", "rerunTask", "learnSave", "clear_todos", "undoTurn",
   "startGoal", "updateGoal", "clearGoal", "resumeGoal", "drop_uris", "stopAgent", "stopMonitor", "restartMonitor",
   "stopBackgroundShell", "stopTroupe", "stopArtifact", "startPipFix", "undoPipFix", "backgroundNow", "continueAgent"]);
 /** The Sessions home's last backend, by its chat's session: a reload asks for it back (it may be writing a ChatDGC reply). */
@@ -3581,6 +3581,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.persistQueuedPrompts();
   }
 
+  /** The person removed a waiting message or moved them: what comes back after a reload follows suit. */
+  private queueChanged(ev: any): void {
+    if (typeof ev.removed === "string") { this.forgetPrompt(ev.removed); }
+    const order = Array.isArray(ev.order) ? ev.order.filter((id: unknown): id is string => typeof id === "string") : [];
+    if (!order.length) { return; }
+    const kept = new Map(this.unstartedPrompts);
+    this.unstartedPrompts.clear();
+    for (const id of order) {
+      const prompt = kept.get(id);
+      if (prompt) { this.unstartedPrompts.set(id, prompt); kept.delete(id); }
+    }
+    for (const [id, prompt] of kept) { this.unstartedPrompts.set(id, prompt); }
+    this.persistQueuedPrompts();
+  }
+
   private forgetPrompt(requestId: string): void {
     const prompt = requestId ? this.unstartedPrompts.get(requestId) : undefined;
     if (!prompt) { return; }
@@ -4281,6 +4296,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "steering_update":
         if (ev.state === "queued") { this.markPromptQueued(String(ev.request_id || "")); }
         else { this.forgetPrompt(String(ev.request_id || "")); }   // applied, or handed back to the webview
+        break;
+      case "queue_changed":
+        this.queueChanged(ev);
         break;
       case "turn_start": {
         this.forgetPrompt(String(ev.request_id || ""));
@@ -5751,6 +5769,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // turn as steering; the backend answers with prompt_accepted "steered" for each, or a command_rejected.
         const ids = Array.isArray(msg.request_ids) ? msg.request_ids.filter((i: unknown) => typeof i === "string" && i.length > 0 && i.length <= 200).slice(0, 16) : [];
         if (this.lastReadyEvent?.capabilities?.steer_queued === true && ids.length) be.send({ type: "steer_queued", request_ids: ids });
+        break;
+      }
+      case "queueRemove": {
+        // Take a queued message out before its turn (ready.capabilities.queue_edit). The backend answers with queue_changed.
+        const id = typeof msg.id === "string" && msg.id.length > 0 && msg.id.length <= 200 ? msg.id : "";
+        if ((this.lastReadyEvent?.capabilities as any)?.queue_edit === true && id) { be.send({ type: "queue_remove", queued_id: id }); }
+        break;
+      }
+      case "queueReorder": {
+        const order = Array.isArray(msg.order) ? msg.order.filter((i: unknown) => typeof i === "string" && i.length > 0 && i.length <= 200).slice(0, 32) : [];
+        if ((this.lastReadyEvent?.capabilities as any)?.queue_edit === true && order.length) { be.send({ type: "queue_reorder", order }); }
         break;
       }
       case "pipReportDismiss":
@@ -9357,8 +9386,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
+    const queueCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.css"));
+    const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
+    const traceJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "trace.js"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const pipsScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "pips.js"));
     const breakdownScript = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "breakdown.js"));
@@ -9416,6 +9448,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 <link rel="stylesheet" href="${genuiCss}">
+<link rel="stylesheet" href="${queueCss}">
 <link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 <link rel="stylesheet" href="${mcpAppsCss}">
@@ -9525,6 +9558,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <!-- The user's mods (media/mods.js): each band, then one status line. Above the rail, which sits on the box. -->
   <div id="mod-strip" class="mod-strip" hidden></div>
   <div id="composer-rail" aria-label="Current work" hidden>
+    <section id="queuebar" class="rail-item" aria-label="Queued messages" hidden>
+      <div class="queue-head"><span class="codicon codicon-list-ordered rail-icon" aria-hidden="true"></span><span id="queue-title">Queued messages</span><button type="button" id="queue-steer-all" class="rail-text-action" hidden>Steer all</button></div>
+      <ol id="queue-list" aria-label="Messages waiting for the next turn"></ol>
+    </section>
     <section id="pipsbar" class="rail-item" aria-label="Pips digest" hidden>
       <div id="pips-digest-panel" class="pips-digest-panel" role="region" aria-label="What your Pips found" hidden></div>
       <button type="button" id="pips-digest-main" class="rail-main" aria-expanded="false" aria-controls="pips-digest-panel" title="Show what your Pips found"><span class="pips-digest-icon codicon codicon-bell rail-icon" aria-hidden="true"></span><span class="pips-digest-label">Pips</span><span id="pips-digest-text"></span></button>
@@ -9662,6 +9699,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${numberedListJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
+<script nonce="${nonce}" src="${traceJs}"></script>
+<script nonce="${nonce}" src="${queueJs}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }

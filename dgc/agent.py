@@ -1870,6 +1870,11 @@ class _SubUI:
             self._buf = []
         # No parent prose was opened, so there is no parent stream to close or designate.
 
+    def trace_usage(self, tokens: int) -> None:
+        # A helper's model request belongs to its own page. Never forward its usage to the
+        # parent reply through __getattr__, which would label the wrong model span.
+        pass
+
     def turn_activity(self, state, label, detail=""):
         # The parent chat shows the chip / agents pill, not the child's "Working" line.
         return None
@@ -8763,6 +8768,13 @@ class Agent(GoalLifecycle):
                                "content": _assistant_content_with_thinking(
                                    result, bool(self.config.get("preserve_thinking", False))),
                                "_dgc_at": _written_at()}
+            trace_usage = normalize_usage(result.usage)
+            trace_tokens = trace_usage["input_tokens"] + trace_usage["output_tokens"]
+            if trace_tokens:
+                assistant["_dgc_trace_tokens"] = trace_tokens
+                trace_usage_hook = getattr(self.ui, "trace_usage", None)
+                if callable(trace_usage_hook):
+                    trace_usage_hook(trace_tokens)
             splice = _thinking_splice_marker(result, assistant["content"])
             if splice:
                 assistant["_dgc_think_splice"] = splice
@@ -9160,7 +9172,8 @@ class Agent(GoalLifecycle):
                     "— for a large file, write the whole thing in one write_file call.")
                 if native:
                     for call in result.tool_calls:      # every tool_call needs a matching result
-                        self.messages.append({"role": "tool", "tool_call_id": call.id, "content": reissue})
+                        self.messages.append({"role": "tool", "tool_call_id": call.id, "content": reissue,
+                                              "_dgc_at": _written_at()})
                 else:
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\n" + reissue + "\n</system-reminder>"})
@@ -9178,7 +9191,7 @@ class Agent(GoalLifecycle):
                 if native:
                     for call in result.tool_calls:
                         self.messages.append({"role": "tool", "tool_call_id": call.id,
-                                              "content": refuse})
+                                              "content": refuse, "_dgc_at": _written_at()})
                 else:
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\n" + refuse + "\n</system-reminder>"})
@@ -9272,7 +9285,7 @@ class Agent(GoalLifecycle):
                     self.ui.tool_result(call.name, NOT_RUN_AFTER_DISMISSAL, call.id)
                     if native:
                         self.messages.append({"role": "tool", "tool_call_id": call.id,
-                                              "content": NOT_RUN_AFTER_DISMISSAL})
+                                              "content": NOT_RUN_AFTER_DISMISSAL, "_dgc_at": _written_at()})
                     else:
                         text_results.append(f"<result tool=\"{call.name}\">\n{NOT_RUN_AFTER_DISMISSAL}\n</result>")
                     continue
@@ -9420,6 +9433,7 @@ class Agent(GoalLifecycle):
                 app_card = self.__dict__.get("_mcp_app_records", {}).pop(call.id, None)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out,
+                                          "_dgc_at": _written_at(),
                                           **({"_dgc_decision": decision} if decision else {}),
                                           **({"_dgc_task_batch": helpers} if helpers else {}),
                                           **({"_dgc_files": [{"call_id": call.id, "items": files}]} if files else {}),

@@ -707,41 +707,30 @@ test("a request card DGC focuses, and the chip the image viewer gives focus back
   assert.deepEqual(p.errors, []);
 });
 
-test("moving a row into its box keeps its focus and its selection", () => {
+test("a queued row becomes the visible head of its own turn", () => {
   const p = queuedPanel();
   const id = p.queue("Then read https://vibedgc.com/docs closely");
   p.event(ended("t1"));
   p.event({ type: "turn_start", turn_id: "t2", prompt: "Then run the tests", kind: "prompt", request_id: p.first });
   p.event(ended("t2"));
   const row = p.log.lastElementChild;
-  const link = row.querySelector(".prompt-link"), text = row.querySelector(".prompt-text").firstChild;
-  link.focus();
-  const selection = p.win.getSelection();
-  selection.setBaseAndExtent(text, 2, text, 9);
+  assert.equal(row.hidden, true, "the queued prompt stays above the composer until its turn starts");
+  assert.match(p.doc.querySelector("#queuebar")?.textContent || "", /Then read https:\/\/vibedgc.com\/docs closely/);
   p.event({ type: "turn_start", turn_id: "t3", prompt: "Then read https://vibedgc.com/docs closely", kind: "prompt", request_id: id });
   assert.ok(row.classList.contains("turn-head") && row.parentElement.classList.contains("turn"), "the row moved into its box");
-  assert.equal(p.doc.activeElement, link, "the link it held keeps focus");
-  assert.deepEqual([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset], [text, 2, text, 9],
-    "and the selection in it is as it was");
+  assert.equal(row.hidden, false, "the prompt is visible when DGC begins that turn");
   assert.deepEqual(p.errors, []);
 });
 
-test("rows a starting turn moves out of its way keep their focus too: one claimed out of order, one still waiting", () => {
-  for (const focusIn of ["claimed", "waiting"]) {
-    const p = queuedPanel();                                   // "Then run the tests" queued first
-    const second = p.queue("Then read https://vibedgc.com/docs closely");
-    p.event(ended("t1"));
-    const rows = [...p.log.querySelectorAll(":scope > .msg.user")];
-    const link = (focusIn === "claimed" ? rows[1] : rows[0]).querySelector(".prompt-link") ?? null;
-    const target = link || rows[0].querySelector(".prompt-text");
-    if (!link) target.tabIndex = -1;
-    target.focus();
-    // The backend runs the second one first: its row moves up past the first, which then waits below.
-    p.event({ type: "turn_start", turn_id: "t2", prompt: "Then read https://vibedgc.com/docs closely", kind: "prompt", request_id: second });
-    assert.deepEqual(p.shape().slice(1), [["HEAD:Then read https://vibedgc.com/docs closely", "dgc"], "you · queued:Then run the tests"]);
-    assert.equal(p.doc.activeElement, target, `focus held in the ${focusIn} row through the move`);
-    assert.deepEqual(p.errors, []);
-  }
+test("a turn that starts out of queue order leaves the other prompt in the queue", () => {
+  const p = queuedPanel();
+  const second = p.queue("Then read https://vibedgc.com/docs closely");
+  p.event(ended("t1"));
+  p.event({ type: "turn_start", turn_id: "t2", prompt: "Then read https://vibedgc.com/docs closely", kind: "prompt", request_id: second });
+  assert.deepEqual(p.shape().slice(1), [["HEAD:Then read https://vibedgc.com/docs closely", "dgc"], "you · queued:Then run the tests"]);
+  assert.match(p.doc.querySelector("#queuebar")?.textContent || "", /Then run the tests/);
+  assert.doesNotMatch(p.doc.querySelector("#queuebar")?.textContent || "", /Then read https:\/\/vibedgc.com\/docs closely/);
+  assert.deepEqual(p.errors, []);
 });
 
 test("Show less on a steered message keeps its own pinned place", () => {

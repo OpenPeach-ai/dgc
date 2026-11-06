@@ -3365,23 +3365,23 @@
     if (!list.length) { box.replaceChildren(); return; }
     const head = el("p", "cd-queue-head", list.length === 1 ? "Queued: sends when the reply finishes" : `${list.length} queued: each sends when the reply before it finishes`);
     const rows = el("ol", "cd-queue-list");
-    list.forEach((item, i) => {
-      const row = el("li", "cd-queue-item");
+    // Ids are for this drawing only: a queued message has none of its own, and the queue is drawn afresh on each change.
+    const byId = new Map(list.map((item, i) => [`q${i}`, item]));
+    const take = (id) => { const item = byId.get(id), at = queued().indexOf(item); return at < 0 ? null : queued().splice(at, 1)[0]; };
+    window.DgcMessageQueue?.render(rows, [...byId].map(([id, item]) => {
       const words = item.text.trim().replace(/\s+/g, " ") || item.pending.map((p) => p.name).join(", ");
-      const text = el("span", "cd-queue-text", (item.research ? "Deep research: " : "") + words);
-      text.title = item.text;
-      const files = item.pending.length ? el("span", "cd-queue-files", `+${item.pending.length}`) : null;
-      if (files) files.title = item.pending.map((p) => p.name).join(", ");
-      const edit = el("button", "cd-icon cd-queue-edit");
-      edit.type = "button"; edit.title = "Edit: back to the box"; edit.setAttribute("aria-label", `Edit queued message ${i + 1}`);
-      edit.append(icon("edit"));
-      edit.addEventListener("click", () => { const [taken] = queued().splice(i, 1); saveQueue(); queueView(); giveBack(taken); input.focus(); });
-      const remove = el("button", "cd-icon cd-queue-remove");
-      remove.type = "button"; remove.title = "Remove"; remove.setAttribute("aria-label", `Remove queued message ${i + 1}`);
-      remove.append(icon("close"));
-      remove.addEventListener("click", () => { queued().splice(i, 1); saveQueue(); queueView(); input.focus(); });
-      row.append(el("span", "cd-queue-mark", "\u21b3"), text, ...(files ? [files] : []), edit, remove);
-      rows.append(row);
+      return { id, text: (item.research ? "Deep research: " : "") + words, title: item.text, files: item.pending.length,
+               fileNames: item.pending.map((p) => p.name).join(", ") };
+    }), {
+      textClass: "cd-queue-text", rowClass: "cd-queue-item", editClass: "cd-queue-edit", removeClass: "cd-queue-remove",
+      reorder: list.length > 1 ? (order) => {
+        const arranged = order.map((id) => byId.get(id)).filter(Boolean);
+        queued().splice(0, queued().length, ...arranged);
+        saveQueue(); queueView();
+      } : null,
+      edit: (id) => { const taken = take(id); saveQueue(); queueView(); if (taken) giveBack(taken); input.focus(); },
+      remove: (id) => { take(id); saveQueue(); queueView(); input.focus(); },
+      copy: (id) => vscode.postMessage({ type: "copy", text: byId.get(id)?.text || "" }),
     });
     box.replaceChildren(head, rows);
   }

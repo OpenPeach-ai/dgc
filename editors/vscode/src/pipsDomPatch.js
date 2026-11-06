@@ -29,6 +29,8 @@ function patchNode(current, next) {
   if (current.hasAttribute('data-avatar-key') &&
       ['data-avatar-key', 'data-character', 'data-pose'].every(
         name => current.getAttribute(name) === next.getAttribute(name))) return;
+  // A list its own script draws (the message queue): the page's markup holds only the empty box.
+  if (current.hasAttribute('data-dom-own') && next.hasAttribute('data-dom-own')) return;
   if (current.outerHTML === next.outerHTML) return;
   for (const attr of [...current.attributes]) {
     if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);

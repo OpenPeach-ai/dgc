@@ -1668,6 +1668,11 @@ class HeadlessUI:
         self._stream_open = False
         self.em.emit("stream_end", **fields)
 
+    def trace_usage(self, tokens: int) -> None:
+        """Report one completed model request's measured tokens to the live editor trace."""
+        if type(tokens) is int and 0 < tokens < 100_000_000:
+            self.em.emit("trace_usage", tokens=tokens)
+
     def turn_activity(self, state: str, label: str, detail: str = "") -> None:
         """State what the turn is doing, once per change.
 
@@ -2570,7 +2575,7 @@ class Backend:
                           # get_outline: every prompt of the session (`outline`), for the editor's prompt rail.
                           "outline": 1,
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
-                          "live_steering": True, "steer_queued": True, "live_modes": True, "question_forms": True,
+                          "live_steering": True, "steer_queued": True, "queue_edit": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
                           # resume_session takes saved_mode: true, sent when the person reopens a chat themselves
                           # (the editor's list, a tab after a reload): it comes back in the mode it had, re-checked
@@ -3782,6 +3787,38 @@ class Backend:
         if moved:
             self.em.emit("queued", count=count, text="")
         return moved, "" if moved else "That message is no longer waiting in the queue."
+
+    def _queued_prompt_ids(self) -> list[str]:
+        """The user's own waiting messages, in the order they will run."""
+        return [item[4] for item in self._queue if len(item) > 4 and item[4] and item[3] == "prompt"]
+
+    def _queue_remove(self, queued_id: str) -> bool:
+        """Take one waiting message out of the queue. False if it is no longer waiting: it may have
+        started, and then it is that turn's to finish or stop."""
+        with self._turn_state_lock():
+            found = next((item for item in self._queue if len(item) > 4 and item[4] == queued_id
+                          and item[3] == "prompt"), None)
+            if found is None:
+                return False
+            self._queue.remove(found)
+            order, count = self._queued_prompt_ids(), self._queued_prompt_count()
+        self.em.emit("queue_changed", order=order, removed=queued_id, count=count)
+        return True
+
+    def _queue_reorder(self, order: list[str]) -> None:
+        """Put the waiting messages in the order asked. Only the user's own prompts move, among the
+        places they already hold; a continuation or a Pip setup keeps its place. A message that has
+        started since the person dragged is ignored, and one they did not name stays behind the named."""
+        with self._turn_state_lock():
+            places = [i for i, item in enumerate(self._queue)
+                      if len(item) > 4 and item[4] and item[3] == "prompt"]
+            current = [self._queue[i] for i in places]
+            rank = {identity: position for position, identity in enumerate(order)}
+            arranged = sorted(current, key=lambda item: rank.get(item[4], len(rank)))
+            for place, item in zip(places, arranged):
+                self._queue[place] = item
+            now, count = self._queued_prompt_ids(), self._queued_prompt_count()
+        self.em.emit("queue_changed", order=now, count=count)
 
     def _announce_peer(self, status: str = "idle") -> None:
         """Leave (or refresh) this backend's note in the peer registry.
@@ -6009,6 +6046,15 @@ class Backend:
             items.extend(turn.pop("pip_reports", ()))
             turn = None
 
+        def trace_mark(at, tokens=None) -> None:
+            # When the next event of a saved turn happened, for its Trace replay (media/trace.js).
+            # A marker beside the event, like the prompt and reply times: a field on the event would
+            # be one a client of this protocol version does not know.
+            if at is None:
+                return
+            items.append({"role": "time", "of": "trace", "at": at,
+                          **({"tokens": tokens} if tokens is not None else {})})
+
         def open_turn(prompt: str, kind: str, attachments: list | None = None,
                       answer_question: str = "", display_mentions=None) -> None:
             nonlocal turn, turn_n
@@ -6277,6 +6323,8 @@ class Backend:
             elif role == "assistant":
                 current = ensure_turn()
                 written_at = _history_written_at(m)
+                trace_tokens = m.get("_dgc_trace_tokens")
+                trace_tokens = trace_tokens if type(trace_tokens) is int and 0 < trace_tokens < 100_000_000 else None
                 if written_at is not None:
                     current["written_at"] = written_at
                 text = str(content or "")
@@ -6291,11 +6339,12 @@ class Backend:
                     message_id = f'{current["id"]}:{current["n"]}'
                     phase = "commentary" if tool_calls else "answer"
                     items.append({"type": "text_delta", "text": text})
+                    trace_mark(written_at, trace_tokens)
                     items.append({"type": "stream_end", "message_id": message_id, "phase": phase})
                     if phase == "answer":
                         current["final"] = message_id
                 items.extend(self._history_reasoning_items(m, current, after_text=True))
-                for tc in tool_calls:
+                for tc_index, tc in enumerate(tool_calls):
                     function = tc.get("function") or {}
                     name = str(function.get("name") or "tool")[:128]
                     saved = _history_saved_args(function.get("arguments"))
@@ -6311,6 +6360,7 @@ class Backend:
                     # A message to a sub-agent names that agent, as its live row did.
                     named = getattr(self.agent, "_with_task_agent", None)
                     shown = named(name, saved) if callable(named) else saved
+                    trace_mark(written_at, trace_tokens if tc_index == 0 and not text.strip() else None)
                     items.append({"type": "tool_call", "call_id": call_id, "name": name,
                                   "args": args, "summary": arg_summary(name, shown, self._display_root())})
                     if call_id:
@@ -6369,6 +6419,7 @@ class Backend:
                                       "output": helper_out, "is_error": tool_output_is_error(helper_out),
                                       "is_diff": helper_is_diff, "diff": helper_diff})
                 if not repaired and not denied_result:
+                    trace_mark(_history_written_at(m))
                     items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
                                   "output": output, "is_error": tool_output_is_error(saved),
                                   "is_diff": is_diff, "diff": diff})
@@ -6383,6 +6434,7 @@ class Backend:
                         (approval.get("decision") == "no" or approval.get("denied_reason"))):
                     # Older sessions did not save the decision card, but this canonical result
                     # still establishes that the operation never ran. Do not invent an approval.
+                    trace_mark(_history_written_at(m))
                     items.append({"type": "tool_denied", "call_id": call_id or None,
                                   "name": name, "args": {}, "reason": output})
             pause = m.get("_dgc_goal_pause")
@@ -7586,6 +7638,24 @@ class Backend:
             if not moved:
                 self.em.emit("command_rejected", command=t, reason="not_steerable", message=why,
                              **_request_fields(request_id))
+        elif t == "queue_remove":
+            queued_id = cmd.get("queued_id")
+            if not isinstance(queued_id, str) or not 0 < len(queued_id) <= 200:
+                self.em.emit("command_rejected", command=t, reason="invalid_request",
+                             message="Name the queued message to remove.", **_request_fields(request_id))
+                return
+            if not self._queue_remove(queued_id):
+                self.em.emit("command_rejected", command=t, reason="not_queued",
+                             message="That message is no longer waiting in the queue.",
+                             **_request_fields(request_id))
+        elif t == "queue_reorder":
+            order = cmd.get("order")
+            if (not isinstance(order, list) or not 1 <= len(order) <= _MAX_QUEUED_TURNS
+                    or not all(isinstance(i, str) and 0 < len(i) <= 200 for i in order)):
+                self.em.emit("command_rejected", command=t, reason="invalid_request",
+                             message="Name the queued messages in their new order.", **_request_fields(request_id))
+                return
+            self._queue_reorder(order)
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
             parts = text[1:].split(None, 1) if text.startswith("/") else []

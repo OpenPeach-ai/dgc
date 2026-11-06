@@ -342,6 +342,7 @@ test("live and replayed reasoning render the same DOM", () => {
   const b = makeDom();
   b.send(ev({ type: "history", items: replay }));
   const normalise = (html) => html
+    .replace(/<button class="ract ract-trace"[^>]*>Trace<\/button>/g, "") // live timing is absent from this fixture's saved history
     .replace(/tool-output-\d+/g, "tool-output-N").replace(/reasoning-\d+/g, "reasoning-N")
     .replace(/\b[a-z]\d+:(\d+)\b/g, "m:$1").replace(/Worked for \d+s/g, "Worked")
     .replace(/<time class="msg-time"[^>]*>[^<]*<\/time>/g, "")   // live times; this history was saved without them

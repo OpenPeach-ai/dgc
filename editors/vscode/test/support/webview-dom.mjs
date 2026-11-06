@@ -16,6 +16,8 @@ export const msgTimeJs = readFileSync(dir + "../media/msgtime.js", "utf8");     
 export const promptRailJs = readFileSync(dir + "../media/promptrail.js", "utf8");   // the prompt rail (DgcPromptRail), also before
 export const numberedListJs = readFileSync(dir + "../media/numbered-list.js", "utf8");
 export const modsJs = readFileSync(dir + "../media/mods.js", "utf8");               // the user's mods (DgcMods), also before
+export const traceJs = readFileSync(dir + "../media/trace.js", "utf8");
+export const messageQueueJs = readFileSync(dir + "../media/messagequeue.js", "utf8");
 export const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
   format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
 export const mainCss = readFileSync(dir + "../media/main.css", "utf8");
@@ -161,6 +163,8 @@ export function makeDom(options = {}) {
   dom.window.eval(promptRailJs);
   dom.window.eval(numberedListJs);
   dom.window.eval(modsJs);
+  dom.window.eval(traceJs);
+  dom.window.eval(messageQueueJs);
   dom.window.eval(options.script ?? mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
   return { dom, errors, posted, send, advance, layout, resize, doc: dom.window.document, savedState: () => savedState };

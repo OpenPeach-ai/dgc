@@ -278,6 +278,7 @@ test("a replayed stretch renders identically to the live one", () => {
   const items = founderTurn("h1").map((frame) => frame.type === "turn_end" ? { ...frame, token_estimate: 0 } : frame);
   restored.send({ type: "event", event: { type: "history", items } });
   const normalise = (html) => html
+    .replace(/<button class="ract ract-trace"[^>]*>Trace<\/button>/g, "") // this fixture omits historical timestamps
     .replace(/tool-output-\d+/g, "tool-output-N").replace(/reasoning-\d+/g, "reasoning-N")
     .replace(/\b[a-z]\d+:(\d+)\b/g, "m:$1").replace(/\b[a-z]\d+:think(\d+)\b/g, "m:think$1")
     .replace(/Worked for \d+s/g, "Worked")

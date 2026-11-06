@@ -88,14 +88,16 @@ test("a short prompt is drawn exactly as before", () => {
 });
 
 test("four lines fold, three do not; one unbroken line folds by its wrapped height", () => {
-  const p = panel();                                  // 300px: 40 characters to a line
-  const fold = (text) => p.submit(text).dataset.fold ?? "none";
+  // Each message is an idle send. Sending another before the first starts is a queued message,
+  // which now lives above the composer until DGC begins that turn.
+  const views = [];
+  const fold = (text) => { const p = panel(); views.push(p); return p.submit(text).dataset.fold ?? "none"; };
   assert.equal(fold(lines(3)), "none", "three lines show whole");
   assert.equal(fold(lines(4)), "folded", "a fourth line folds, as Claude Code does");
   assert.equal(fold("a".repeat(120)), "none", "one 120-character word wraps to three lines");
   assert.equal(fold("a".repeat(160)), "folded", "and at 160 to four");
   assert.equal(fold("QUJD".repeat(750)), "folded", "base64 has no spaces and folds like any prompt");
-  assert.deepEqual(p.errors, []);
+  for (const p of views) assert.deepEqual(p.errors, []);
 });
 
 test("a folded bubble holds every character, and only the prompt's", () => {
@@ -230,7 +232,9 @@ test("every builder folds: echoed, replayed, steered in history, recalled, queue
 
   const queued = panel();
   queued.send({ type: "prompts_queued", items: [{ requestId: "q-1", text: LONG }] });
-  assert.equal(queued.bubbles().at(-1).dataset.fold, "folded", "a queued prompt adopted after a reload");
+  assert.equal(queued.doc.querySelector("#queuebar").hidden, false, "a queued prompt is above the composer");
+  assert.equal(queued.doc.querySelector("#queue-list .dgc-queue-text").textContent, LONG.replace(/\s+/g, " ").trim());
+  assert.equal(queued.bubbles().at(-1).closest(".msg.user").hidden, true, "it is not yet a transcript turn");
   queued.send({ type: "prompts_unsent", items: [{ requestId: "u-1", text: LONG }] });
   const unsent = queued.bubbles().at(-1);
   assert.match(unsent.parentElement.querySelector(".role").textContent, /not sent/);

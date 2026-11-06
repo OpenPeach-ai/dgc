@@ -841,6 +841,44 @@ body.vscode-light, body.vscode-high-contrast-light {
 .ract:hover { color: var(--text); background: var(--surface2); }
 .ract.on { color: var(--accent-text); background: var(--accent-soft); }
 .ract .codicon { font-size: var(--t-sm); }
+.ract-trace { width: auto; padding-inline: 7px; font-size: 11px; font-weight: 500; }
+/* Trace replays measured turn events. The colour of failed spans follows the same error token as tool rows. */
+.dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000a; display: grid; place-items: center; padding: 24px; }
+.dgc-trace-dialog { --trace-name-width: 220px; --trace-meta-width: 190px; width: min(1080px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: 0 24px 70px #0008; font: 13px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
+.dgc-trace-head { min-height: 55px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.dgc-trace-head strong { font-size: 15px; font-weight: 600; }
+.dgc-trace-model { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dgc-trace-state { margin-left: auto; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--muted); font: 12px/1.2 var(--vscode-font-family, sans-serif); }
+.dgc-trace-close { border: 0; background: none; color: var(--muted); cursor: pointer; font: 23px/1 sans-serif; padding: 4px 6px; }
+.dgc-trace-close:hover { color: var(--text-strong); }
+.dgc-trace-ruler { height: 34px; flex: none; position: relative; border-bottom: 1px solid var(--border); }
+.dgc-trace-ticks { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); }
+.dgc-trace-ticks span { position: absolute; top: 8px; transform: translateX(-50%); color: var(--muted); font-size: 11px; }
+.dgc-trace-body { position: relative; min-height: 0; overflow: auto; padding: 5px 0; }
+.dgc-trace-grid { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); pointer-events: none; }
+.dgc-trace-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.dgc-trace-row { height: 40px; display: grid; grid-template-columns: var(--trace-name-width) minmax(0,1fr) var(--trace-meta-width); align-items: center; position: relative; }
+.dgc-trace-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.dgc-trace-row.future { opacity: .45; }
+.dgc-trace-label { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; overflow: hidden; white-space: nowrap; font-weight: 550; }
+.dgc-trace-label > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.dgc-trace-glyph { color: var(--muted); flex: none; }
+.dgc-trace-lane { height: 100%; position: relative; }
+.dgc-trace-bar { position: absolute; top: 16px; height: 9px; min-width: 3px; border-radius: 9px; background: var(--muted); }
+.dgc-trace-row.model .dgc-trace-bar { background: var(--text-strong); }
+.dgc-trace-row.error .dgc-trace-bar { background: var(--err, #768A00); }
+.dgc-trace-meta { display: flex; justify-content: flex-end; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; padding-right: 16px; color: var(--muted); font-size: 11px; }
+.dgc-trace-meta span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.dgc-trace-meta span:last-child { color: var(--text); flex: none; }
+.dgc-trace-row.error .dgc-trace-meta span:last-child { color: var(--err-text, #839900); }
+.dgc-trace-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-strong); pointer-events: none; }
+.dgc-trace-cursor::before { content: ""; position: absolute; top: 0; left: -4px; width: 9px; height: 9px; background: var(--text-strong); transform: rotate(45deg); }
+.dgc-trace-transport { min-height: 65px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--border); }
+.dgc-trace-play { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--text-strong); color: var(--surface); font: 18px/1 sans-serif; cursor: pointer; padding: 0 0 0 2px; }
+.dgc-trace-scrub { flex: 1; accent-color: var(--text-strong); cursor: pointer; }
+.dgc-trace-clock { width: 145px; text-align: right; color: var(--muted); white-space: nowrap; font-size: 12px; }
+@media (max-width: 700px) { .dgc-trace-dialog { --trace-name-width: 135px; --trace-meta-width: 100px; } .dgc-trace-label { padding-inline: 8px; gap: 4px; font-size: 10px; } .dgc-trace-meta { padding-right: 8px; font-size: 9px; } .dgc-trace-clock { width: 95px; font-size: 10px; } }
+@media (prefers-reduced-motion: reduce) { .dgc-trace-dialog *, .dgc-trace-dialog *::before { animation: none !important; transition: none !important; } }
 
 /* Copy one mid-turn line. Faded rather than absent, so Tab still reaches it and focus reveals
    it for anyone not using a mouse. It sits at the end of the line's last row, in room the line
@@ -1323,6 +1361,13 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-item { min-height: 33px; display: flex; min-width: 0; align-items: center; gap: var(--sp-2);
   padding: 0 var(--sp-2); border: 1px solid var(--border); border-bottom: 0; background: var(--surface); }
 .rail-item + .rail-item { border-radius: 0; }
+#queuebar { display: block; padding: var(--sp-1) var(--sp-2); }
+#queuebar[hidden] { display: none; }
+.queue-head { display: flex; align-items: center; gap: var(--sp-2); min-height: 26px;
+  color: var(--muted); font: var(--w-med) var(--t-xs)/1.4 var(--sans); }
+.queue-head #queue-steer-all { margin-left: auto; font-size: var(--t-xs); }
+#queue-list { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; overscroll-behavior: contain; }
+.queue-waiting { color: var(--faint); }
 .rail-main { min-width: 0; min-height: 28px; flex: 1; display: flex; align-items: center; gap: var(--sp-2);
   padding: 0; border: 0; background: transparent; color: var(--faint); cursor: pointer;
   text-align: left; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
@@ -1345,7 +1390,6 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-chips { display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: var(--sp-1); min-width: 0; }
 .rail-line[data-fit="wrap"] .rail-chips { flex-wrap: wrap; }
 .rail-line.has-chips #workspace-changes { margin-top: 2px; }
-.rail-line.has-chips #queued { margin-top: 4px; }
 .rail-chip { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; max-width: 100%; height: 24px; min-width: 0;
   padding: 0 7px; border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface);
   color: var(--muted); cursor: pointer; overflow: hidden; white-space: nowrap;
@@ -1413,11 +1457,9 @@ body.vscode-light .rail-pop { box-shadow: 0 10px 30px -10px rgba(0,0,0,.25); }
   padding: 0; border: 1px solid transparent; border-radius: var(--r-full); background: transparent; color: var(--faint); cursor: pointer; }
 .rail-icon-button:hover { border-color: var(--border); background: var(--surface2); color: var(--text); }
 .rail-icon-button .codicon { font-size: var(--t-sm); }
-/* "2 queued": the messages waiting behind the running turn, on the chip line. They are in the transcript already
-   ("you · queued"), and the count has no controls of its own, so it is words on the line, not a chip. */
-#queued { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
-#queued:empty { display: none; }
+/* The live queue is the rail row or chip; this status is solely for screen readers. */
+#queued { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 /* Inside the composer, above the text field: the attachments belong to the message being
    written, so they live in the same box as the words. */
 #attachments { display: flex; gap: var(--sp-1); flex-wrap: wrap; padding: var(--sp-2) var(--sp-3) 0; max-height: min(104px, 20vh); overflow-y: auto; overscroll-behavior: contain; }

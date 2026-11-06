@@ -2563,8 +2563,15 @@ test("Codex's queue: what you send while it answers waits above the box and goes
     await box.fill("");
     await s.send({ type: "turn", state: "started", replyId: M(9) });
     for (const words of ["Keep me", "Drop me", "Change me"]) { await box.fill(words); await box.press("Enter"); }
-    await queue.getByRole("button", { name: "Remove queued message 2" }).click();
-    await queue.getByRole("button", { name: "Edit queued message 2" }).click();
+    // The same row as Work: drag or arrow keys move it, and the menu copies it or takes it to the top.
+    await queue.locator(".dgc-queue-row").nth(0).locator(".dgc-queue-handle").focus();
+    await s.page.keyboard.press("ArrowDown");
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Drop me", "Keep me", "Change me"]);
+    await queue.locator(".dgc-queue-row").nth(1).locator(".dgc-queue-more").click();
+    await s.page.getByRole("menuitem", { name: "Move to top" }).click();
+    assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Keep me", "Drop me", "Change me"]);
+    await queue.getByRole("button", { name: "Remove queued message: Drop me" }).click();
+    await queue.getByRole("button", { name: "Edit queued message: Change me" }).click();
     assert.equal(await box.inputValue(), "Change me");
     assert.deepEqual(await queue.locator(".cd-queue-text").allTextContents(), ["Keep me"]);
     // Kept with the chat: shown again on a reload while it answers; with nothing running, back in the box instead.

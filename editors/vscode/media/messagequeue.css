@@ -1,0 +1,32 @@
+/* The messages waiting above a prompt box: Work, ChatDGC and a Pip's chat draw the same row (media/messagequeue.js). */
+.dgc-queue-row { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px;
+  padding: 2px 0; border-radius: 6px; color: var(--muted, var(--vscode-descriptionForeground)); background: transparent;
+  font-size: 12px; line-height: 18px; }
+.dgc-queue-row.dragging { z-index: 3; background: var(--surface, var(--vscode-editorWidget-background)); }
+.dgc-queue-handle, .dgc-queue-mark { position: relative; flex: none; width: 16px; height: 26px; display: flex; align-items: center;
+  justify-content: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; }
+.dgc-queue-handle { cursor: grab; touch-action: none; }
+.dgc-queue-row.dragging .dgc-queue-handle { cursor: grabbing; }
+.dgc-queue-handle svg, .dgc-queue-mark svg { position: absolute; left: 0; top: 5px; transition: opacity 150ms ease-out; }
+.dgc-queue-handle svg:last-child { opacity: 0; }
+.dgc-queue-row:hover .dgc-queue-handle svg:first-child, .dgc-queue-row:focus-within .dgc-queue-handle svg:first-child { opacity: 0; }
+.dgc-queue-row:hover .dgc-queue-handle svg:last-child, .dgc-queue-row:focus-within .dgc-queue-handle svg:last-child { opacity: 1; }
+.dgc-queue-text { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.dgc-queue-files { flex: none; font-size: 11px; white-space: nowrap; }
+.dgc-queue-steer, .dgc-queue-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 26px; border: 0;
+  border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.dgc-queue-steer { gap: 5px; padding: 0 7px; white-space: nowrap; }
+.dgc-queue-steer:disabled { opacity: .6; cursor: default; }
+.dgc-queue-icon { width: 26px; padding: 0; }
+.dgc-queue-steer:hover:not(:disabled), .dgc-queue-icon:hover { color: var(--text-strong, var(--vscode-foreground));
+  background: color-mix(in srgb, currentColor 10%, transparent); }
+.dgc-queue-handle:focus-visible, .dgc-queue-steer:focus-visible, .dgc-queue-icon:focus-visible, .dgc-queue-choice:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, currentColor); outline-offset: -1px; }
+.dgc-queue-menu { position: fixed; z-index: 30; min-width: 136px; padding: 4px; display: grid; gap: 1px; border-radius: 10px;
+  border: 1px solid var(--border, var(--vscode-widget-border, transparent)); box-shadow: 0 6px 20px #0004;
+  background: var(--surface, var(--vscode-editorWidget-background, var(--vscode-editor-background))); }
+.dgc-queue-choice { padding: 6px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dgc-queue-choice:hover:not(:disabled) { color: var(--text-strong, var(--vscode-foreground)); background: color-mix(in srgb, currentColor 10%, transparent); }
+.dgc-queue-choice:disabled { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .dgc-queue-handle svg, .dgc-queue-mark svg { transition: none; } }

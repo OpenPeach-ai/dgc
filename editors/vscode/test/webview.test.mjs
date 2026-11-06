@@ -99,8 +99,8 @@ test("the session checklist is a composer-rail row above the goal and updates in
   // Pips digest sits FIRST, furthest from the box: it is about work outside this chat. Troupes sit with the
   // monitors: both are this chat's work running in the background.
   assert.deepEqual([...rail.children].map(node => node.id),
-    ["pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"],
-    "rail order: Pips, monitors, troupes, changes, tasks, goal — the whole rail sits on the prompt box");
+    ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"],
+    "rail order: queue, Pips, monitors, troupes, changes, tasks, goal — the whole rail sits on the prompt box");
   assert.equal(rail.nextElementSibling.id, "cbox");
   assert.equal(bar.classList.contains("rail-item"), true);
   assert.equal(bar.hidden, true, "an empty checklist takes no room");
@@ -1586,6 +1586,7 @@ test("a turn replayed from history renders identically to the live turn it came 
   const restored = makeDom();
   restored.send({ type: "event", event: { type: "history", items } });
   const normalise = (html) => html
+    .replace(/<button class="ract ract-trace"[^>]*>Trace<\/button>/g, "") // this fixture omits historical timestamps
     .replace(/tool-output-\d+/g, "tool-output-N")
     .replace(/reasoning-\d+/g, "reasoning-N")
     .replace(/\b[a-z]\d+:(\d+)\b/g, "m:$1")          // t1:2 and h1:2 are the same block

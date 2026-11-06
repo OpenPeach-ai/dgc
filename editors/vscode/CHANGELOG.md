@@ -2,6 +2,8 @@
 
 ## 0.35.0 — 2026-11-06
 
+- Completed Work answers have a plain Trace action beside their existing response controls. It replays recorded model and tool spans with play and scrub controls, measured timing, reported token counts, and tool-specific details. Older turns without enough timing do not offer a guessed trace.
+- Alt+Enter keeps a later prompt above the prompt box until its turn begins, in Work, ChatDGC and a Pip's chat. Drag a message or use the arrow keys to reorder it, steer it in, remove it, copy it or move it to the top. In Work, when other status pills are present, a compact Queue pill holds the pending messages and their controls.
 - Model pickers keep Thinking in view while only the provider or model list scrolls. ChatDGC keeps its provider step, and a Pip's model picker now groups its DGC connection, Router and signed-in subscriptions before showing models, with its face on the effort slider.
 - Opening a Pip from a home notification reveals its waiting card inside the chat history without moving the entire view or lifting the composer away from the editor bottom.
 - Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.

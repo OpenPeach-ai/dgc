@@ -204,13 +204,17 @@ test("an applied reply pins; queued and unsent messages stay in place", async (t
       const positions = rows.map((row) => getComputedStyle(row).position);
       for (let top = 0; top <= P.log.scrollHeight; top += 90) {
         await P.scrollTo(top);
-        rows.forEach((row, i) => seen[i].add(Math.round(row.getBoundingClientRect().top + P.log.scrollTop)));
+        rows.forEach((row, i) => { if (!row.hidden) seen[i].add(Math.round(row.getBoundingClientRect().top + P.log.scrollTop)); });
       }
-      return { roles: rows.map((row) => row.querySelector(".role").textContent), positions, drift: seen.map((set) => set.size) };
+      return { roles: rows.map((row) => row.querySelector(".role").textContent), positions,
+        hidden: rows.map((row) => row.hidden), queue: document.querySelector("#queue-list")?.textContent,
+        drift: seen.map((set) => set.size) };
     });
     assert.deepEqual(walk.roles, ["you · steering", "you · queued", "you · not sent"]);
     assert.deepEqual(walk.positions, ["sticky", "static", "static"]);
-    assert.deepEqual(walk.drift.slice(1), [1, 1], "queued and unsent messages stay where laid out");
+    assert.deepEqual(walk.hidden, [false, true, false], "only the queued prompt waits above the composer");
+    assert.match(walk.queue, /Then run the smoke tests/);
+    assert.deepEqual(walk.drift.slice(1), [0, 1], "queued prompt has no transcript geometry; unsent stays where laid out");
     assert.deepEqual(s.errors, []);
   } finally { await s.page.close(); }
 });

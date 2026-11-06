@@ -911,10 +911,11 @@
   // the draft this is where its placeholder is turned back into the words the model should read.
   const wireText = (text) => text;
   const goalBar = $("goalbar"), changesBar = $("changesbar"), tasksBar = $("tasksbar"), composerRail = $("composer-rail");
+  const queueBar = $("queuebar"), queueList = $("queue-list"), queueTitle = $("queue-title"), queueSteerAll = $("queue-steer-all");
   const monitorsBar = $("monitorsbar"), pasteBar = $("pastebar"), pipsBar = $("pipsbar"), troupeBar = $("troupebar");
   // The kinds of work the rail can hold, in the order their chips stand on the chip line (B2). The
   // invisible-characters notice is not one of them: it is about the message being typed.
-  const RAIL_KINDS = [["goal", goalBar], ["troupe", troupeBar], ["monitors", monitorsBar], ["tasks", tasksBar],
+  const RAIL_KINDS = [["queue", queueBar], ["goal", goalBar], ["troupe", troupeBar], ["monitors", monitorsBar], ["tasks", tasksBar],
     ["changes", changesBar], ["pips", pipsBar]].filter(([, bar]) => bar);
   const announcer = $("announcer");
   const queuedEl = $("queued");
@@ -1478,21 +1479,60 @@
   let pipRunsLive = false;
   const pipRunning = new Map();          // run_id -> {run_id, pip_id, name, pip_type, started_at, trigger, at (ms)}
   let steerQueuedLive = false;           // ready.capabilities.steer_queued: a queued message can be steered in now
+  let queueEditLive = false;             // ready.capabilities.queue_edit: a queued message can be removed or moved
   // ready.capabilities.turn_files: the CLI counts each turn's Edited card (turn_files, before turn_end), from what the
   // turn's recovery point will restore. Without it the card counts this turn's edit-tool diffs, as it always has.
   let turnFilesLive = false;
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() {
-    queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : "";
-    // Steer all: every queued message of this chat into the running turn at once.
-    const waiting = [...queuedPrompts.values()].filter((entry) => entry.node?.isConnected && !entry.node.querySelector(".steer-now:disabled"));
-    if (queuedCount > 1 && steerQueuedLive && waiting.length > 1) {
-      const all = el("button", "steer-all", "Steer all");
-      all.type = "button";
-      all.title = "Send every queued message to the running turn now";
-      all.addEventListener("click", () => steerQueuedNow(waiting.map((entry) => entry.node)));
-      queuedEl.append(" · ", all);
-    }
+    const waiting = [...queuedPrompts].filter(([, entry]) => !entry.removing);
+    const count = Math.max(queuedCount - (queuedPrompts.size - waiting.length), waiting.length);
+    queuedEl.textContent = count ? `${count} queued` : "";
+    queueBar.hidden = count === 0;
+    queueTitle.textContent = count === 1 ? "1 queued message" : `${count} queued messages`;
+    const items = waiting.map(([id, entry]) => {
+      const text = String(entry.text || "").trim().replace(/\s+/g, " ");
+      return { id, text, title: String(entry.text || ""), files: entry.attachments?.length || 0 };
+    });
+    window.DgcMessageQueue?.render(queueList, items, {
+      steer: steerQueuedLive ? (id) => steerQueuedNow([queuedPrompts.get(id)?.node]) : null,
+      remove: queueEditLive ? removeQueued : null,
+      reorder: queueEditLive ? reorderQueued : null,
+      copy: (id, text) => vscode.postMessage({ type: "copy", text: queuedPrompts.get(id)?.text ?? text }),
+    });
+    if (count && !waiting.length) queueList.appendChild(el("li", "queue-waiting", "Waiting for DGC to confirm the queue…"));
+    queueSteerAll.hidden = !steerQueuedLive || waiting.length < 2;
+    queueSteerAll.onclick = () => steerQueuedNow(waiting.map(([, entry]) => entry.node));
+    syncComposerRail();
+    paintRailChip("queue");
+  }
+  // Remove and reorder wait for the backend's word (queue_changed): until then a message can still start.
+  function removeQueued(id) {
+    const entry = queuedPrompts.get(id);
+    if (!entry || entry.removing) return;
+    entry.removing = true;
+    renderQueued();
+    vscode.postMessage({ type: "queueRemove", id });
+  }
+  function reorderQueued(order) {
+    arrangeQueued(order);
+    renderQueued();
+    vscode.postMessage({ type: "queueReorder", order: [...queuedPrompts.keys()] });
+  }
+  function arrangeQueued(order) {
+    const named = order.filter((id) => queuedPrompts.has(id));
+    const rest = [...queuedPrompts.keys()].filter((id) => !named.includes(id));
+    const entries = [...named, ...rest].map((id) => [id, queuedPrompts.get(id)]);
+    queuedPrompts.clear();
+    for (const [id, entry] of entries) queuedPrompts.set(id, entry);
+  }
+  function queueChanged(ev) {
+    const gone = typeof ev.removed === "string" ? queuedPrompts.get(ev.removed) : null;
+    if (gone) { queuedPrompts.delete(ev.removed); gone.node?.remove(); }
+    if (Array.isArray(ev.order)) arrangeQueued(ev.order.filter((id) => typeof id === "string"));
+    queuedCount = Number.isInteger(ev.count) ? ev.count : queuedPrompts.size;
+    renderQueued();
+    persistDraft();
   }
 
   // ---- one renderer, two sources ----
@@ -2662,6 +2702,8 @@
       if (returnedNodes.size > 17) returnedNodes.delete(returnedNodes.keys().next().value);
     }
     pendingPrompts.delete(id); queuedPrompts.delete(id);
+    pending.node.hidden = false;
+    if (pending.node.isConnected) settleBlock(pending.node);
     pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
     // A bubble that still said "you" or "you · queued" read as a message that went through.
     const role = pending.node.querySelector(".role");
@@ -2725,7 +2767,8 @@
       if (role) role.textContent = label;
       entry.node.dataset.promptId = id;
       setSteerState(entry.node, steering ? "pending" : "queued");
-      if (!entry.node.isConnected) { log.appendChild(entry.node); settleBlock(entry.node); }
+      entry.node.hidden = !steering;
+      if (!entry.node.isConnected) { log.appendChild(entry.node); if (!entry.node.hidden) settleBlock(entry.node); }
       if (steering) { entry.acknowledged = true; pendingPrompts.set(id, entry); }
       else { pendingPrompts.delete(id); queuedPrompts.set(id, entry); }
     }
@@ -2960,21 +3003,28 @@
     const ids = [];
     for (const [id, entry] of [...queuedPrompts]) {
       if (!nodes.includes(entry.node)) continue;
-      queuedPrompts.delete(id); pendingPrompts.set(id, entry); ids.push(id);
+      queuedPrompts.delete(id); pendingPrompts.set(id, entry); entry.steering = true; ids.push(id);
       const button = entry.node.querySelector(".steer-now");
       if (button) { button.disabled = true; button.textContent = "Steering…"; }
     }
-    if (ids.length) vscode.postMessage({ type: "steerQueued", request_ids: ids });
+    if (ids.length) {
+      queuedCount = Math.max(0, queuedCount - ids.length);
+      vscode.postMessage({ type: "steerQueued", request_ids: ids });
+    }
     renderQueued();
   }
   // A Steer now the backend could not do (the turn just ended, or can't take a message): those rows are queued again.
   function steerQueuedRefused() {
+    let restored = 0;
     for (const [id, entry] of [...pendingPrompts]) {
       const button = entry.node?.querySelector?.(".steer-now");
       if (!button || !button.disabled) continue;
       pendingPrompts.delete(id); queuedPrompts.set(id, entry);
+      entry.steering = false;
+      restored++;
       button.disabled = false; button.textContent = "Steer now";
     }
+    queuedCount += restored;
     renderQueued();
   }
 
@@ -4167,6 +4217,7 @@
   function claimQueuedPrompt(requestId) {
     const node = typeof requestId === "string" && requestId ? queuedPrompts.get(requestId)?.node : null;
     if (!node?.isConnected || node.parentElement !== log || !node.classList.contains("user")) return null;
+    node.hidden = false;
     const waiting = [...queuedPrompts].map(([id, entry]) => id !== requestId && entry.node)
       .filter((other) => other && other.isConnected && other.parentElement === log
         && (other.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
@@ -4335,6 +4386,9 @@
     turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
              id: String(id || ""), activity: null, phaseT0: t0, handoff: false,
              prompt: String(prompt || ""), edits: new Map() };
+    // A saved turn's trace starts at its prompt's saved time (legacyItem). Historical turns can predate a model
+    // switch, so an earlier answer is never labelled with the currently selected model.
+    if (!replaying) turn.trace = window.DgcTrace?.create(t0, id, curModel || lastConfig?.model, true);
     if (wakeNote) turn.wake = { note: wakeNote, label: String(prompt || "").slice(0, 200), kinds: [], ids: new Set(), kind };
     // The prompt's time goes under its bubble: when its turn started, live. A saved turn's comes with its
     // history (a {role: "time"} item, legacyItem), so a reopened chat says when each prompt was sent.
@@ -4842,7 +4896,8 @@
       // ...and finds it by its recovery point when the card was drawn from history (a reloaded window's turn ids are
       // the history's, not the backend's live ones).
       box._checkpoint = turn.files?.checkpoint || null;
-      const actions = responseActions(answer, turn.prompt, !complete);
+      const trace = complete ? window.DgcTrace?.finish(turn.trace, turn.traceEnd || (replaying ? null : Date.now())) : null;
+      const actions = responseActions(answer, turn.prompt, !complete, trace);
       // When the reply was written, first in its row: now, live; a saved turn's from its history.
       const writtenAt = window.DgcTime?.node(turn.replyAt ?? (replaying ? NaN : Date.now()));
       if (writtenAt) actions.prepend(writtenAt);
@@ -5200,7 +5255,7 @@
   reader?.onError((text, kind) => sysLine(text, kind !== "info"));
   if (reader) new MutationObserver(() => reader.sync()).observe(log, { childList: true, subtree: true });
 
-  function responseActions(textEl, prompt, partial = false) {
+  function responseActions(textEl, prompt, partial = false, trace = null) {
     const actions = el("div", "response-actions");
     if (partial) actions.classList.add("partial");
     const add = (act, icon, label) => {
@@ -5232,6 +5287,11 @@
     }
     add("retry", "refresh", "Run this prompt again");
     if (!partial) add("edit", "edit", "Edit this prompt and send it again");
+    if (trace) {
+      const link = el("button", "ract ract-trace", "Trace"); link.type = "button";
+      link.dataset.act = "trace"; link.title = "Replay response trace";
+      link.setAttribute("aria-label", "Replay response trace"); actions.appendChild(link);
+    }
     const body = () => textEl._markdown || textEl.textContent;
     actions.onclick = (event) => {
       const button = event.target.closest("[data-act]");
@@ -5256,6 +5316,7 @@
         return;
       }
       if (act === "retry") { resend(prompt); return; }
+      if (act === "trace") { window.DgcTrace?.open(trace); return; }
       if (act === "edit") {
         setComposerText(String(prompt || "")); setComposerRange(composerText().length);
         input.focus(); onInput(); scroll();
@@ -7480,9 +7541,9 @@ function permissionChoices(ev) {
   const railLine = $("rail-line"), railChips = $("rail-chips"), railPop = $("rail-pop");
   const railPopBody = $("rail-pop-body"), railPopLinks = $("rail-pop-links");
   // Where each row lives in the rail, so a row a popover borrowed goes back to its own place.
-  const RAIL_ROW_ORDER = ["pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
+  const RAIL_ROW_ORDER = ["queuebar", "pipsbar", "monitorsbar", "troupebar", "changesbar", "tasksbar", "goalbar", "pastebar"];
   const RAIL_POP_TITLES = { goal: "Goal", troupe: "Troupe", monitors: "Monitors", tasks: "Tasks",
-    changes: "Changes in this chat", pips: "Pips", pipfixes: "Pip fixes", piprunning: "Pips running" };
+    changes: "Changes in this chat", pips: "Pips", queue: "Queued messages", pipfixes: "Pip fixes", piprunning: "Pips running" };
   const RAIL_FITS = ["full", "compact", "tight", "tighter", "wrap"];
   const railChipNodes = new Map();               // kind -> its chip, kept across repaints so a focused chip keeps focus
   let railKinds = [], railStop = "", railOpen = null, railFit = { width: -1, shape: "" }, railLinksSig = "";
@@ -7498,6 +7559,12 @@ function permissionChoices(ev) {
   // What a chip says: an icon, a word (the first thing a short line drops), the number, extras (dropped next) and,
   // when the kind needs you, an amber dot with the reason (the words go last; the amber and the label never do).
   function railChipSpec(kind) {
+    if (kind === "queue") {
+      const count = Math.max(queuedCount, queuedPrompts.size);
+      return { icon: "list-ordered", word: "Queue", num: String(count),
+        label: `${count} ${count === 1 ? "message" : "messages"} queued for the next turn`,
+        tip: `Queue · ${count} ${count === 1 ? "message" : "messages"} waiting` };
+    }
     if (kind === "goal") {
       const status = goalState.status, blocked = status === "blocked", paused = status === "paused";
       const state = blocked ? "blocked" : paused ? "paused" : "pursuing";
@@ -8193,6 +8260,7 @@ function permissionChoices(ev) {
         pipReportsLive = ev.capabilities?.pip_reports === 1;
         pipFixLive = pipReportsLive && ev.capabilities?.pip_fix === 1;
         steerQueuedLive = nativeSteering && ev.capabilities?.steer_queued === true;
+        queueEditLive = ev.capabilities?.queue_edit === true;
         turnFilesLive = ev.capabilities?.turn_files === 1;
         if (turnFilesLive) vscode.postMessage({ type: "turnFilesWatch" });
         // This panel draws Pip reports: ask for this chat's (none is sent, or taken, until it does).
@@ -8316,12 +8384,13 @@ function permissionChoices(ev) {
         if (!replaying && (ev.kind || "prompt") === "prompt") dropFinishedTroupes();
         if (!replaying) {
           // A monitor turn was never queued by anyone, so it takes nothing off the queued count.
-          setSending(true); if (queuedCount > 0 && ev.kind !== "monitor" && ev.kind !== "pip_setup") { queuedCount--; renderQueued(); }
+          setSending(true); if (queuedCount > 0 && ev.kind !== "monitor" && ev.kind !== "pip_setup") queuedCount--;
           // A queued prompt leaves the queue when its own turn starts, matched by the request id the
           // backend carries on turn_start. Never by position: a queued custom slash command, a goal
           // cycle or a continuation has no id of the user's, and popping the head for one of those
           // silently discarded a message the user could otherwise restore after a backend exit.
           if (typeof ev.request_id === "string" && ev.request_id) queuedPrompts.delete(ev.request_id);
+          renderQueued();
         }
         break;
       // What the turn is doing, stated by the backend rather than guessed here. A turn that is
@@ -8345,6 +8414,7 @@ function permissionChoices(ev) {
         if (turn) { turn.handoff = true; renderTurnMeta(); }
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
+      case "queue_changed": queueChanged(ev); break;
       case "prompt_accepted": {
         const pending = pendingPrompts.get(ev.request_id);
         if (ev.state === "steered") {
@@ -8357,17 +8427,22 @@ function permissionChoices(ev) {
           if (ev.state === "queued" && pending?.node) {
             pending.node.querySelector(".role").textContent = "you · queued";
             setSteerState(pending.node, "queued");
+            pending.node.hidden = true;
           }
           if (ev.state === "queued" && pending) queuedPrompts.set(ev.request_id, pending);
           pendingPrompts.delete(ev.request_id);
         }
+        renderQueued();
         if (ev.message) sysLine(ev.message);
         persistDraft(); break;
       }
       case "steering_update": {
         const pending = pendingPrompts.get(ev.request_id);
         if (ev.state === "returned") {
+          const wasQueued = queuedPrompts.has(ev.request_id);
           rejectPrompt(ev.request_id);
+          if (wasQueued) queuedCount = Math.max(0, queuedCount - 1);
+          renderQueued();
           if (ev.message) sysLine(ev.message);
         } else {
           if (pending?.node) {
@@ -8377,6 +8452,7 @@ function permissionChoices(ev) {
             // landed (agent.py, _drain_steer), which left a sighted user with no sign at all
             // that the model had picked the message up.
             setSteerState(pending.node, ev.state === "applied" ? "applied" : "queued");
+            pending.node.hidden = ev.state !== "applied";
             if (ev.state === "applied" && !pending.node.querySelector(":scope > .msg-time")) {
               stampPrompt(pending.node, pending.sentAt || Date.now());   // a queued message steered in later
             }
@@ -8389,6 +8465,7 @@ function permissionChoices(ev) {
             for (const [key, value] of rest) queuedPrompts.set(key, value);
           }
           pendingPrompts.delete(ev.request_id); persistDraft();
+          renderQueued();
         }
         break;
       }
@@ -8407,6 +8484,7 @@ function permissionChoices(ev) {
       // undetermined (a cancelled or errored round genuinely does not know), and then nothing is
       // claimed here: `turn_end` still designates the answer.
       case "stream_end": {
+        if (turn?.trace) window.DgcTrace?.modelEnd(turn.trace, ev);
         finishReasoning();
         const closed = turn?.textEl;
         if (closed && ev.message_id) closed.dataset.messageId = String(ev.message_id);
@@ -8417,6 +8495,9 @@ function permissionChoices(ev) {
         if (closed && ev.phase === "commentary") markCommentary(closed);
         break;
       }
+      case "trace_usage":
+        if (turn?.trace) window.DgcTrace?.modelUsage(turn.trace, ev.tokens);
+        break;
       case "tool_call": {
         pipFixStepFrom(ev);
         const childId = agentIdFromCall(ev.call_id);
@@ -8438,6 +8519,10 @@ function permissionChoices(ev) {
         // A sub-agent's step lives on its agent's line, not in the chat: it must not end the parent's
         // thought, or one long thought streams as a new "Thought" row after every hidden child step.
         ensureTurn(); if (!childId) finishReasoning();
+        // A saved task batch also projects display-only child cards (#1, #2...) without
+        // timestamps. The measured parent task span covers them; never invent child durations.
+        if (!childId && !(replaying && ev.name === "task" && /#\d+$/.test(String(ev.call_id || ""))))
+          window.DgcTrace?.toolStart(turn.trace, ev);
         turn._tools = turn._tools || Object.create(null);
         // One step, one row. A turn adopted from a reload snapshot can already hold this step, still
         // running, when its live tool_call arrives; a finished row whose id comes back is a new call.
@@ -8502,6 +8587,8 @@ function permissionChoices(ev) {
           return;
         }
         ensureTurn();
+        if (!childId && !(replaying && ev.name === "task" && /#\d+$/.test(String(ev.call_id || ""))))
+          window.DgcTrace?.toolEnd(turn.trace, ev);
         if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
           recordEdit(turn._paths?.[ev.call_id || ev.name], 0, 0, false);
         }
@@ -8553,6 +8640,8 @@ function permissionChoices(ev) {
       }
       case "tool_denied": {
         ensureTurn();
+        if (!agentIdFromCall(ev.call_id))
+          window.DgcTrace?.toolEnd(turn.trace, { ...ev, denied: true });
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ ...ev,
@@ -9105,6 +9194,7 @@ function permissionChoices(ev) {
         // that did not take): a refusal of its polling must not fill the chat with lines.
         if (["get_background_output", "list_background_shells", "stop_background_shell"].includes(ev.command)
             || (ev.command === "agent_control" && String(ev.request_id || "").startsWith("agent-stop-"))) break;
+        if (ev.command === "queue_remove") { for (const entry of queuedPrompts.values()) entry.removing = false; renderQueued(); if (ev.message) sysLine(ev.message); break; }
         if (ev.command === "steer_queued") { steerQueuedRefused(); sysLine(ev.message || "That message stays queued for the next turn."); break; }
         if (ev.command === "start_pip_fix" || ev.command === "undo_pip_fix") { pipFixRefused(ev); break; }
         if (ev.command === "continue_agent") break;    // the box that asked says why (agent_continue_state)
@@ -9154,6 +9244,7 @@ function permissionChoices(ev) {
         break;
       case "model_retry": onModelRetry(ev); break;
       case "turn_end":
+        if (turn?.trace) turn.traceEnd = replaying ? turn.replyAt : Date.now();
         speak(ev.reason === "paused" ? "DGC goal paused" : ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete");
         endTurn(ev.reason, ev.final_message_id);
         if (!replaying) { setSending(false); liveTurnHint = null; agentsTurnEnd(); }
@@ -9451,7 +9542,8 @@ function permissionChoices(ev) {
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, typed, attachments, displayMentions);
-    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    m.appendChild(bubble); m.hidden = streaming && delivery === "queue"; log.appendChild(m);
+    if (!m.hidden) settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     m.dataset.promptId = requestId;        // which request this row is: its turn_start finds it by this
     // What a restore puts back: the typed words and the chips. The pastes are already chips, so
@@ -10656,8 +10748,11 @@ function permissionChoices(ev) {
     turn = null; replaying = true; appendTarget = frag;
     try {
       for (const it of list) {
-        if (it && typeof it.type === "string") { if (REPLAYABLE.has(it.type)) onEvent(it); }
-        else legacyItem(it);
+        if (it && typeof it.type === "string") {
+          // The saved time and tokens of the next event, for its Trace (a marker, never a field on the event).
+          if (REPLAYABLE.has(it.type)) onEvent(traceMark ? { ...it, trace_at_ms: traceMark.at, trace_tokens: traceMark.tokens } : it);
+          traceMark = null;
+        } else legacyItem(it);
       }
       // The newest page may end inside the turn that is still running (see noteLiveTurn); any
       // other page that ends mid-turn still settles its block.
@@ -11497,13 +11592,18 @@ function permissionChoices(ev) {
   }
   // A saved steering message's send time (a {role: "time", of: "steering"} item just before it).
   let steeringAt = null;
+  let traceMark = null;
   function legacyItem(it) {
     if (!it || typeof it !== "object") return;
     if (it.role === "time") {
       // When a saved turn's prompt was sent and its reply written (seconds since 1970, from the session file).
       const at = Number(it.at) * 1000;
       if (!turn || !Number.isFinite(at) || at <= 0) return;
-      if (it.of === "prompt") { turn.promptAt = at; stampPrompt(turn.head, at); } else if (it.of === "reply") turn.replyAt = at;
+      if (it.of === "trace") { traceMark = { at, tokens: Number.isSafeInteger(it.tokens) ? it.tokens : undefined }; return; }
+      if (it.of === "prompt") {
+        turn.promptAt = at; stampPrompt(turn.head, at);
+        if (!turn.trace) turn.trace = window.DgcTrace?.create(at, turn.id, "", false);
+      } else if (it.of === "reply") turn.replyAt = at;
       else if (it.of === "steering") steeringAt = at;      // the next steering item's time
       return;
     }
@@ -12903,7 +13003,7 @@ function permissionChoices(ev) {
     ...["button", "textarea", "input", "select"].map((tag) => `.card[data-request-id] ${tag}`),      // a tool, a plan, a server's input
     "section.ask button", "section.ask input", "section.ask textarea",                              // a question in the box
     ".recovery-card .act.primary", ".task-interrupted button", ".ts-undo", ".learn-actions button",  // Continue, run again, Undo, Save
-    ".steer-now", ".steer-all", ".pip-report-fix", ".pip-report-fix-slim", "#tasks-clear",
+    ".steer-now", ".steer-all", ".dgc-queue-steer", "#queue-steer-all", ".pip-report-fix", ".pip-report-fix-slim", "#tasks-clear",
     "#btn-add", "#btn-cmd", "#btn-mode", "#btn-output", "#btn-model", "#btn-goal", "#btn-mic", "#ctx-compact", "#ctx-size",
     "#ctx-size-custom", "#queue-send", "#send",
   ].join(", ");

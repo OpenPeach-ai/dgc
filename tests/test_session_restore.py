@@ -122,6 +122,51 @@ class SessionRestoreTests(unittest.TestCase):
         for item in items:
             if item.get("type"):
                 self.assertIsNone(event_error({"seq": 0, **item}), item)
+        self.assertIsNone(event_error({"seq": 0, "type": "trace_usage", "tokens": 42}))
+
+    def test_restored_trace_uses_saved_times_and_reported_tokens_only(self):
+        self.agent.messages = [
+            {"role": "user", "content": "Check it", "_dgc_at": 1700000000.0},
+            {"role": "assistant", "content": "", "_dgc_at": 1700000000.5,
+             "_dgc_trace_tokens": 1240, "tool_calls": [
+                 {"id": "c1", "function": {"name": "bash", "arguments": '{"command":"rg fail"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "one\ntwo", "_dgc_at": 1700000001.0},
+            {"role": "assistant", "content": "Found two.", "_dgc_at": 1700000002.0,
+             "_dgc_trace_tokens": 940},
+        ]
+        items = self.backend._history()
+        # Saved times and tokens travel as markers beside the events: no event gains a field a client
+        # of this protocol version would refuse.
+        marks = [(item.get("of"), item.get("at"), item.get("tokens"), items[i + 1].get("type"))
+                 for i, item in enumerate(items) if item.get("role") == "time"]
+        self.assertIn(("trace", 1700000000.5, 1240, "tool_call"), marks)
+        self.assertIn(("trace", 1700000001.0, None, "tool_result"), marks)
+        self.assertIn(("trace", 1700000002.0, 940, "stream_end"), marks)
+        self.assertEqual([m[:2] for m in marks if m[0] in ("prompt", "reply")],
+                         [("prompt", 1700000000.0), ("reply", 1700000002.0)])
+        for item in items:
+            if item.get("type"):
+                self.assertFalse({"trace_at_ms", "trace_tokens"} & set(item), item)
+                self.assertIsNone(event_error({"seq": 0, **item}), item)
+
+    def test_a_queued_message_can_be_removed_or_moved_before_it_starts(self):
+        events = []
+        self.backend.em = type("Em", (), {"emit": lambda _self, kind, **fields: events.append((kind, fields))})()
+        self.backend._queue = [("a", None, None, "prompt", "r1"), ("", None, None, "continue", ""),
+                               ("b", None, None, "prompt", "r2"), ("c", None, None, "prompt", "r3"),
+                               ("", None, None, "pip_setup", "setup")]
+        self.backend._queue_reorder(["r3", "r1", "gone"])
+        self.assertEqual([item[4] for item in self.backend._queue], ["r3", "", "r1", "r2", "setup"])
+        self.assertEqual(events[-1], ("queue_changed", {"order": ["r3", "r1", "r2"], "count": 4}))
+        self.assertTrue(self.backend._queue_remove("r1"))
+        self.assertEqual([item[4] for item in self.backend._queue], ["r3", "", "r2", "setup"])
+        self.assertEqual(events[-1], ("queue_changed", {"order": ["r3", "r2"], "removed": "r1", "count": 3}))
+        count = len(events)
+        self.assertFalse(self.backend._queue_remove("r1"), "already gone")
+        self.assertFalse(self.backend._queue_remove("setup"), "only the person's own prompts")
+        self.assertEqual(len(events), count)
+        for kind, fields in events:
+            self.assertIsNone(event_error({"seq": 0, "type": kind, **fields}))
 
     def test_answered_question_replays_as_a_quote_and_answer(self):
         from dgc.workflows import STEERING_PREFIX, STEERING_SUFFIX
