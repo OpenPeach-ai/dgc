@@ -1109,7 +1109,7 @@ class PipStore:
         revision = source_revision(binding["canonical_root"], pip["source_ref"])
         return self._prepare_audit(pip, binding, revision)
 
-    def enqueue(self, pip_id, idempotency_key, actor, config, *, schedule_occurrence=None, conversation_request=None, handoff=None, event_occurrence=None, _audit_preparation=None, main_chat_request=None, pulse_request=None, _model_preparation=None, computer_continuation=None):
+    def enqueue(self, pip_id, idempotency_key, actor, config, *, schedule_occurrence=None, conversation_request=None, handoff=None, event_occurrence=None, _audit_preparation=None, main_chat_request=None, pulse_request=None, _model_preparation=None, computer_continuation=None, _waiting_message=None):
         _require_runner_platform()
         key = _text(idempotency_key, "idempotency_key", 128)
         if computer_continuation is not None:
@@ -1548,7 +1548,8 @@ class PipStore:
                     VALUES(?,?,?,?,?,?,?,?,?)""", (run_id, pip_id, pip["workspace_id"], binding["id"], key,
                                                    actor, _json(manifest), "queued", self.registry.clock()))
                 if conversation_request is not None:
-                    pip_chat.insert_user(self, latest, conversation_request, run_id, model["model"], self.registry.clock())
+                    pip_chat.insert_user(self, latest, conversation_request, run_id, model["model"], self.registry.clock(),
+                                         waiting=_waiting_message)
                 if schedule_occurrence is not None:
                     self.db.execute("UPDATE pip_schedule_state SET next_due_at=?,last_due_at=?,last_checked_at=? WHERE pip_id=?",
                                     (schedule_occurrence["next_due_at"], schedule_occurrence["scheduled_at"], schedule_occurrence["checked_at"], pip_id))
@@ -1742,6 +1743,9 @@ class PipStore:
                             (status, self.registry.clock() if status == "cancelled" else None, run_id))
             if status == 'cancelled':
                 self.db.execute('UPDATE pip_runs SET result=? WHERE id=?', (_json(pulse) if pulse is not None else None, run_id))
+                if run["manifest"].get("run_kind") == "conversation":   # it never reached the runner: nothing else will say so
+                    from .pip_steering import stopped
+                    stopped(self.db, run["pip_id"], run_id)
             self.registry.event(run["workspace_id"], "pip_run_cancelled" if status == "cancelled" else "pip_run_cancelling",
                                 pip_id=run["pip_id"], run_id=run_id, payload={"actor": actor})
         return self._transition_view(run_id)
@@ -4660,6 +4664,11 @@ def _drain(config, directory):
         with WorkspaceRegistry(directory) as registry:
             store = PipStore(registry)
             store.recover()
+            from . import pip_steering
+            try:
+                pip_steering.recover(store, config)
+            except Exception:
+                pass                        # the messages stay saved and shown; queued work still runs
             from . import pip_flows
             try:
                 pip_flows.recover(store, config)
@@ -4851,15 +4860,20 @@ def _run_claimed(registry, store, row, config, directory):
         store.finish(row["id"], error={"code": getattr(exc, "code", "run_failed"),
             "message": redact_text(str(exc), secret_values(config))[:1500]})
     finally:
-        if row['id'] and json.loads(row['manifest']).get('run_kind') == 'conversation':
-            from .pip_steering import miss_pending
-            miss_pending(store, row['id'])
         _router_release(row["id"])            # its DGC Router worker, whatever happened
         with _THREAD_LOCK:
             owned = _ACTIVE_RUNS.get(str(directory), set())
             owned.discard(row["id"])
             if not owned:
                 _ACTIVE_RUNS.pop(str(directory), None)
+        if row['id'] and json.loads(row['manifest']).get('run_kind') == 'conversation':
+            # What it never read: the Pip's next turn, or back to the user unsent (pip_steering). Whatever goes wrong here
+            # leaves those messages saved; the runner's next start deals with them, and the worker carries on.
+            from .pip_steering import settle
+            try:
+                settle(store, row['id'], config)
+            except Exception:
+                pass
     # A workflow failure must never rewrite a completed Pip result as failed.
     # Its own edge records a paused receipt for review.
     try:

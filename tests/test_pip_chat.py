@@ -148,7 +148,8 @@ class PipChatTests(unittest.TestCase):
         self.assertEqual(omitted, 0)
         self.assertIn('The invoice is number 272', history[0]['content'])
 
-    def test_a_late_mid_turn_update_is_reported_as_missed(self):
+    def test_a_mid_turn_update_that_cannot_have_a_turn_is_reported_as_not_sent(self):
+        # What a finished reply never read becomes the next turn (test_pip_missed_steer); this is when it can't.
         self.setup_job()
         sent = self.send(key='first')
         update = self.send(text='Look at the second tab', key='late')
