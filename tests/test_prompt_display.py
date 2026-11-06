@@ -41,10 +41,6 @@ class PromptDisplayTests(unittest.TestCase):
         self.assertEqual(checked_mentions([{**marks[-1], "label": "delete"}], text), [])
         self.assertEqual(text, "Use  in  then /review the result")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_a_mark_whose_name_is_the_words_must_spell_them(self):
         pip = {"start": 4, "kind": "pip", "label": "Scout", "identity": "pip_" + "a" * 32, "pip_type": "scout", "wired": True}
         self.assertEqual(checked_mentions([pip], "Ask Scout now"), [pip])
@@ -66,3 +62,7 @@ if __name__ == "__main__":
         self.assertEqual(named_pips(marks), [{"identity": a, "label": "Scout", "pip_type": "scout"},
                                              {"identity": b, "label": "Rook", "pip_type": "rook"}])
         self.assertEqual(named_pips(None), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
