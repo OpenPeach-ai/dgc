@@ -373,10 +373,11 @@ class PaymentTests(unittest.TestCase):
                 ("compact_" + "2" * 32, pip["id"], pip["workspace_id"], None, "host_1", "req-2", json.dumps(plain),
                  pip_computer._digest(plain), None, "2026-10-01T10:00:00.000Z", "2099-01-01T00:00:00.000Z"))
             grants.add_computer_grant(self.registry, "compact_" + "2" * 32, "editor-user")
+        held = types.SimpleNamespace(request_id="req-3", summary=lambda: dict(summary), url="https://shop.example/checkout",
+                                     method="POST", fields=[("card_number", "x")], payment=True)
         host = types.SimpleNamespace(state_directory=self.registry.directory, pip_id=pip["id"], workspace_id=pip["workspace_id"],
                                      run_id=None, id="host_1", waiting=[], frames_dir=None, frames=0,
-                                     browser=types.SimpleNamespace(current_url="https://shop.example/checkout"))
-        held = types.SimpleNamespace(request_id="req-3", summary=lambda: dict(summary))
+                                     browser=types.SimpleNamespace(current_url="https://shop.example/checkout", held={"req-3": held}))
         host._queued = [held]
         host._frame = lambda label: None
         made = pip_computer.Host._record_held(host)

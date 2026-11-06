@@ -84,8 +84,15 @@ class PipChatReviewTests(unittest.TestCase):
         return results
 
     def test_two_connections_cannot_enqueue_two_pending_replies(self):
+        # race() has already checked there is one run and one chat message. The other send isn't refused any more: it joins
+        # that reply, so it is answered and never lost, and neither send starts a competing one.
         results = self.race([("First message", "first-key"), ("Second message", "second-key")])
-        self.assertCountEqual([value[0] for value in results], ["ok", "conversation_busy"])
+        self.assertEqual([value[0] for value in results], ["ok", "ok"])
+        self.assertEqual(results[0][1], results[1][1], "both sends belong to the one reply")
+        kept = {row[0] for row in self.registry.db.execute("SELECT text FROM pip_chat_steers")}
+        said = {row[0] for row in self.registry.db.execute("SELECT text FROM pip_chat_messages")}
+        self.assertEqual(kept | said, {"First message", "Second message"}, "neither message is lost")
+        self.assertEqual(kept & said, set(), "and neither is kept twice")
 
     def test_two_connections_exact_retry_returns_one_run(self):
         results = self.race([("Same message", "same-key"), ("Same message", "same-key")])
