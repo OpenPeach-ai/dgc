@@ -61,6 +61,8 @@ from .reasoning import (display_text as reasoning_display_text, label_suffix as 
                         placement as reasoning_placement, saved_reasoning,
                         wire_identity as reasoning_wire_identity)
 from .redaction import redact_text, redact_value, secret_values
+from .composer import tab_display
+from .textsafety import clean_paste, trim_draft
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
@@ -1263,9 +1265,11 @@ class TUI:
         self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
-    def _flash(self, msg: str, secs: float = 2.2) -> None:
-        """Show a short confirmation in the status line so an action visibly registered."""
+    def _flash(self, msg: str, secs: float = 2.2, *, dim: bool = False) -> None:
+        """Show a short confirmation in the status line so an action visibly registered. `dim` is
+        for information about something already done, which should not look like a result."""
         self._flash_msg = msg
+        self._flash_dim = dim
         self._flash_until = time.monotonic() + secs
         self._invalidate()
 
@@ -4774,6 +4778,8 @@ class TUI:
             return ANSI(self._rich(f"[bold {th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]name this session[/] "
                                    f"[{th.faint}]· type a name then Enter (blank = unnamed) · Esc to cancel[/]"))
         if self._flash_msg and time.monotonic() < self._flash_until:
+            if getattr(self, "_flash_dim", False):
+                return ANSI(self._rich(f"[{th.faint}]{_esc(self._flash_msg)}[/]", no_wrap=True, overflow="ellipsis"))
             # One row: a flash wider than the terminal ends in an ellipsis on that row, rather than
             # word-wrapping onto a second line the status window never shows.
             return ANSI(self._rich(f"[{th.accent_bright}]{glyphs.DIAMOND}[/] [{th.text}]{_esc(self._flash_msg)}[/]",
@@ -6352,7 +6358,7 @@ class TUI:
         composer = Window(BufferControl(
                               self.input_buf, focus_on_click=True,
                               lexer=_ComposerLexer(self),
-                              input_processors=[ConditionalProcessor(
+                              input_processors=[tab_display(), ConditionalProcessor(
                                   PasswordProcessor(char="•"), filter=secret_input)]),
                           get_line_prefix=self._line_prefix, wrap_lines=True,
                           height=self._composer_height, style="class:composer")
@@ -6434,8 +6440,11 @@ class TUI:
         """A bracketed paste. A tall or long one collapses to `[Pasted text #N +L lines]` so the
         composer stays a few rows high — a 40-line paste used to take 41% of the screen — and
         expands back to the full text when the prompt is sent. Short pastes insert as typed;
-        field prompts (a URL, a name) always take the raw text."""
-        data = str(data or "").replace("\r\n", "\n").replace("\r", "\n")
+        field prompts (a URL, a name) always take the text whole. Either way the invisible
+        characters are out before it lands, and the status line says how many went."""
+        data, removed = clean_paste(data)
+        if removed:
+            self._flash(removed, secs=4.0, dim=True)
         if not data:
             return
         plain_field = self._input is not None or getattr(self, "_naming", False)
@@ -9567,7 +9576,8 @@ class TUI:
                 # fall through and submit — one Enter runs the command
             if self._req is not None and not (self._req.get("kind") == "questions" and self._input is not None):
                 return                      # answered via number keys
-            text = self.input_buf.text.strip()
+            draft = self.input_buf.text
+            text = draft.strip()
             self.input_buf.reset()
             if self._naming:                # naming a fresh session (blank = unnamed)
                 self._new_session(name=text or None)
@@ -9587,12 +9597,12 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            self._send_composer_text(text)
+            self._send_composer_text(trim_draft(draft))
 
         @kb.add(Keys.BracketedPaste)
         def _(ev):
             if self._overlay is not None or self._pane is not None or self._req is not None:
-                self.input_buf.insert_text(str(ev.data or "").replace("\r\n", "\n").replace("\r", "\n"))
+                self.input_buf.insert_text(clean_paste(ev.data)[0])
                 return
             self._paste_into_composer(ev.data)
 

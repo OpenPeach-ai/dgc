@@ -9415,6 +9415,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // The prompt rail beside the transcript, the same as ChatDGC's.
     const promptRailJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "promptrail.js"));
     const numberedListJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "numbered-list.js"));
+    const pasteCleanJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pasteclean.js"));
     // The user's mods, drawn the same way here and in ChatDGC (window.DgcMods).
     const modsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mods.js"));
     // Plugins' cards (MCP Apps): their bridge and look, the same in Work, a Pip's chat and ChatDGC (media/mcpApps.js).
@@ -9613,9 +9614,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div id="goal-detail" class="goal-detail" role="region" aria-label="Goal detail" tabindex="0" hidden></div>
     </section>
-    <section id="pastebar" class="rail-item" aria-label="Invisible characters in this draft" data-status="noise" hidden>
-      <button type="button" id="paste-strip" class="rail-main" aria-label="Remove the invisible characters" title="Remove them from the draft"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count">Remove 0 invisible characters</span></button>
-      <button type="button" id="paste-keep" class="rail-text-action" title="Send the text exactly as pasted">Keep</button>
+    <section id="pastebar" class="rail-item" role="status" aria-label="Pasted text" hidden>
+      <div id="paste-note" class="rail-main rail-note"><span class="paste-icon codicon codicon-eye-closed rail-icon" aria-hidden="true"></span><span id="paste-count"></span></div>
+      <button type="button" id="paste-close" class="rail-icon-button" title="Close" aria-label="Close this notice"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     </section>
   </div>
   <div id="cbox" data-mode="default">
@@ -9705,6 +9706,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${pluginCallsJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
 <script nonce="${nonce}" src="${numberedListJs}"></script>
+<script nonce="${nonce}" src="${pasteCleanJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${traceJs}"></script>

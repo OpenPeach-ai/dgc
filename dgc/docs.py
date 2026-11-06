@@ -3579,7 +3579,7 @@ CLI; the extension updates through your editor.
 - Paste an image to attach it for a vision model. Its chip shows the image's file name, cut to fit,
   with its type, size and dimensions on hover; a screenshot copied straight to the clipboard has no
   name of its own and reads like "PNG · 1920×1080". Drag files in from the explorer. See
-  **Pasted text** for a tall paste, a pasted link, and characters you cannot see.
+  **Pasted text** for a tall paste, a pasted link, a paste's shape, and characters you cannot see.
 - Tool calls collect into one folded group with a summary in its header. It opens by itself the
   first time something in it fails, and once you fold it by hand it stays folded — a later failure
   does not throw it open under you.
@@ -3936,20 +3936,20 @@ Pip, or stop them all with `dgc pips stop`. From your own program, the SDK's `se
 the Pips of your profile; see **SDK**.
 """.strip()),
     ("Pasted text",
-     "a tall paste, a pasted link, and characters you cannot see",
+     "a tall paste, a pasted link, a paste's shape, and characters you cannot see",
      """
 # Pasted text
 
-A paste is not typing. It can be forty lines of log, a bare URL, a whole file, or text carrying
-characters that have no glyph at all. DGC handles each of those differently, and changes what you
-pasted only when you ask it to.
+A paste is not typing. It can be forty lines of log, a bare URL, a whole file, a list copied from a
+web page, or text carrying characters that have no glyph at all. DGC keeps the shape it was copied
+with, takes out what you cannot see, and leaves everything you can see as it was.
 
 ## A tall paste folds
 
 In the **terminal**, a paste of five lines or more — or over 600 characters — collapses to a chip in
 the composer, `[Pasted text #1 +40 lines]`, so a forty-line paste no longer takes half the screen.
 It expands back to the full text the moment you send. A shorter paste inserts as typed, and a field
-prompt that wants one exact value (a URL, a session name) always takes the raw text.
+prompt that wants one exact value (a URL, a session name) always takes the whole text.
 
 In the **editor**, a paste of 5,000 characters or more becomes an attachment chip reading
 **Pasted text · 12,480 chars** instead of filling the composer. Click it to read what it holds.
@@ -3963,40 +3963,56 @@ receives is the URL itself, character for character: the pill shows the link, it
 it. Nothing is fetched to draw it, not even a favicon, so pasting a link discloses it to nobody. A
 paragraph that happens to contain a URL is prose, and is pasted as prose.
 
-## Characters you cannot see are counted, never removed for you
+## A paste keeps its shape
+
+Line breaks, blank lines, indentation, tabs and runs of spaces all stay, in the box, in what the
+model receives and in the message you see once it is sent. Only the blank lines around a whole
+message go. Its first line keeps its indentation, so a pasted block arrives in step with itself.
+
+A browser's plain text is not what was on the page. Chrome and VS Code copy a numbered list without
+its numbers and a nested list without its nesting, though the same copy's HTML still has them. In the
+editor, DGC puts them back from that HTML as plain text: `1.`, `2.`, `a.` and `-`, indented as they
+were nested, starting where the list started. Every other character comes from the plain text. If
+the two versions on the clipboard do not describe the same text, the plain text is used as it is. A
+browser or application that writes the numbers itself (Firefox, Safari, Word) is left alone.
+
+The **terminal** only ever receives a paste as plain text, so it keeps everything that text holds,
+but a number the browser already dropped cannot be recovered there.
+
+## Characters you cannot see are removed as they land
 
 Three kinds of invisible character can hide an instruction inside text that looks ordinary:
 
 - **Bidirectional overrides** reorder how text *displays* without changing its bytes, so what you
   read and what the model reads can differ.
 - **Tag characters** encode a whole line of ASCII inside something that renders as nothing at all.
-- **Zero-width characters** pad text invisibly.
+- **Zero-width characters** pad text invisibly. Byte order marks, soft hyphens and control characters
+  go with them.
 
-DGC hands your draft to a model and then acts on it, so this is a way in rather than untidiness. In
-the editor a bar appears over the composer: **Remove 3 invisible characters — 2 can carry a hidden
-instruction**, with **Keep** beside it. Click **Remove** and exactly those characters go, and
-nothing else. Click **Keep** to say the text is deliberate, and the row goes until the draft changes
-again. Ignore it and nothing changes either way: the count is a report, not an edit, because quietly
-altering what you pasted would be its own bug. The bar watches the whole draft rather than only a
-paste, so text you typed or dictated raises it the same way.
+DGC hands your draft to a model and then acts on it, so this is a way in rather than untidiness. A
+paste, or text dragged into the box, is cleaned before it lands, and a quiet row above the box says
+**Removed 3 invisible characters from the pasted text**. Hover over it to see which kinds. Close it
+if you like; it goes by itself when you send or clear the draft. If you wanted them, one undo brings
+the paste back exactly as it was copied, and a second takes the paste away. A paste large enough to
+fold into a chip is cleaned too, because the chip's text is what reaches the model.
 
-The bar is deliberately quiet about the harmless cases. Arabic, Persian and Hebrew carry directional
-marks as a matter of course, every multi-person emoji is held together by zero-width joiners, and
-the three subdivision flags are built from tag characters. None of them raise it, because a notice
-that fires on ordinary text teaches you to dismiss it — which is worse than no notice. And "can
-carry a hidden instruction" is said only for the two classes that actually can, so a stray
-byte-order mark from a web page is not dressed up as an attack.
+In the terminal the classic prompt and the full-screen prompt do the same, with a short dim line
+saying so.
 
-Two limits, stated rather than hidden. This is the editor's composer: the terminal does not show the
-bar. And a paste large enough to fold into an attachment changes no composer text, so nothing counts
-it yet — the text inside that chip still reaches the model.
+Text you type stays as you typed it, and nothing is said about it. Dictated text loses any invisible
+character the speech model produced, without a notice, because nobody can say one.
+
+Ordinary text is left alone. Arabic, Persian and Hebrew carry directional marks as a matter of
+course, every multi-person emoji is held together by zero-width joiners, Indic and Persian words use
+them too, and the three subdivision flags are built from tag characters. None of those are touched,
+and none raise the row. Visible characters, in code or anywhere else, come through byte for byte.
 
 ## The editor never pastes markup
 
 The composer is an editing host, which means the browser would otherwise insert your clipboard's
-HTML into it rather than its text. DGC takes the plain text instead, on every path — so a copied web
-page cannot bring an image that calls home the instant you paste, or an element laid over the Send
-button.
+HTML into it rather than its text. DGC only ever puts text in, on every path, and reads the HTML for
+nothing but the list markers above — so a copied web page cannot bring an image that calls home the
+instant you paste, or an element laid over the Send button.
 """),
     ("Questions", "when the model needs you to pick, not guess", """
 # Questions

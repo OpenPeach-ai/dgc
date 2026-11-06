@@ -29,6 +29,7 @@ STATIC_MEMBERS = {
     "extension/media/messagequeue.js": "media/messagequeue.js",
     "extension/media/messagequeue.css": "media/messagequeue.css",
     "extension/media/numbered-list.js": "media/numbered-list.js",
+    "extension/media/pasteclean.js": "media/pasteclean.js",
     "extension/media/main.css": "media/main.css",
     "extension/media/genui.css": "media/genui.css",
     "extension/media/tool-insights.js": "media/tool-insights.js",
