@@ -44,7 +44,7 @@ DEFAULT_QUESTION = ("Describe this image precisely: transcribe all visible text,
 # attachment) when the chat's model cannot see and no vision model is configured.
 SETUP_HINT = ("To let DGC look at images for it, set a vision sub-agent model: "
               "`/subagent model NAME` (a model whose capabilities include vision, such as "
-              "qwen3-vl:8b), or Settings ▸ Agents in the editor.")
+              "qwen3-vl:8b), or Settings ▸ Models ▸ Sub-agents in the editor.")
 
 LOOK_SYSTEM = (
     "You are the eyes of a coding agent whose own model cannot see images. You receive one or more "

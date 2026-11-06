@@ -9553,7 +9553,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <h3 id="agent-map-tasks-title" class="agent-map-subtitle"></h3>
         <ul id="agent-map-task-list" class="am-task-list"></ul>
       </section>
-      <button type="button" id="agent-map-settings" class="link am-settings" title="Open Settings ▸ Agents to change the sub-agent model and host">Sub-agent settings</button>
+      <button type="button" id="agent-map-settings" class="link am-settings" title="Open Settings ▸ Models ▸ Sub-agents to change the sub-agent model and host">Sub-agent settings</button>
     </div>
   </div>
 </div>

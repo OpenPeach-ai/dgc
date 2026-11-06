@@ -94,10 +94,10 @@ then told that nobody can answer and gives the options in its final answer.
 | Action | Extension | Terminal |
 | --- | --- | --- |
 | Steer a native turn | Enter or Send with a draft | Enter |
-| Queue a separate turn | Alt+Enter or Queue | Tab outside menus and completion |
+| Queue a separate turn | Alt+Enter or Queue, in Work, ChatDGC and a Pip's chat. It waits above the box: drag it, steer it in, remove it, copy it or move it to the top | Tab outside menus and completion |
 | Browse skills | Skills, View instructions, Use skill | `/skills`, `/skills show NAME` |
 | Change permission mode | Mode selector | `/mode MODE` or the full-screen mode selector |
-| Change model | Model picker | `/model NAME` or the full-screen model selector |
+| Change model | Model picker, for this chat only: providers saved in Settings → Models, then their models | `/model NAME` or the full-screen model selector |
 | Stop work | Stop, including the separate button while drafting or while a question is open | Esc or Ctrl+C (Ctrl+C on an open question) |
 | Close a question | × or Esc (with its text field empty) | Esc |
 

@@ -1,7 +1,7 @@
 {
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
-  "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
+  "description": "Work, ChatDGC and Pips in VS Code and Cursor, on your own local or cloud models or a signed-in Claude Code or Codex.",
   "version": "0.35.0",
   "publisher": "vibedgc",
   "license": "Apache-2.0",

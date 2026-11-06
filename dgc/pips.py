@@ -2797,7 +2797,7 @@ def execute_native(config, snapshot: Path, manifest: dict, emit, *, deadline=Non
         from . import pip_brain
         brain = pip_brain.validate_route(manifest['model_settings']['brain'])
         if specialist_pin is not None:
-            raise RegistryError('unsupported_model', 'Reviewed specialist runs need a direct model connection.')
+            raise RegistryError('unsupported_model', 'Reviewed specialist runs need a saved model host, not a signed-in CLI.')
         brain_launch = pip_brain.launch_from_env(brain)
     conversation = pip_chat.validate_context(manifest.get("conversation")) if kind == "conversation" else None
     from . import pip_chat_setup, pip_core_setup, pip_routines

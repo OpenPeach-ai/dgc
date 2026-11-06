@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- The agent map's link and a Pip's settings card name Settings → Models, where sub-agent and Pip models now live. The marketplace description says what the extension is now: Work, ChatDGC and Pips, on your own models or a signed-in Claude Code or Codex.
 - The cache clock in Work's prompt box opens its own small popup, with the time left, what your next message will do, and the tokens reported as cached. It no longer opens the context window details, and the keyboard can reach it.
 - Cloudflare in Settings → Plugins, with its logo and sign-in. It only reads, so a daily traffic Pip needs no approval and no browser.
 - A Pip's model menu lists every provider saved in Settings → Models, by name, with its models, as a Work session's does. The Pip keeps its choice after a reload. If you remove that provider, its prompt box and its next run say so. The menu now looks and works as Work's: plain rows with a check on the chosen one, and "Add provider in Settings…". Its search box is gone, and Refresh models stays only for a list that failed to load.

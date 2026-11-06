@@ -64,5 +64,5 @@ def apply(args, ctx) -> str:
         said = (f"Pips on Default now follow DGC's own model ({followed})." if changed
                 else "Pips already follow DGC's own model; nothing changed.")
     return json.dumps({"pips_model": model, "previous": before, "changed": changed,
-                       "message": said + (" Tell the user, and that it is in Settings, Agents, Pips." if changed else "")},
+                       "message": said + (" Tell the user, and that it is in Settings, Models, Pips." if changed else "")},
                       ensure_ascii=False, separators=(",", ":"))
