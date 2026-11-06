@@ -869,23 +869,31 @@ test("sent plugin, output and Pip keep their artwork inline while only names tur
   await page.waitForFunction(() => !!document.querySelector("#log .sent-mention.pill-pip"));
   const result = await page.evaluate(() => {
     const body = document.querySelector("#log .pill-pip.sent-mention")?.closest(".prompt-text");
-    const first = body.firstChild, range = document.createRange();
-    range.setStart(first, 0); range.setEnd(first, 3);
-    const baselineCenter = range.getBoundingClientRect().top + range.getBoundingClientRect().height / 2;
-    const centers = [...body.querySelectorAll(".composer-plugin-mark,.composer-artifact-mark,.composer-pip-face")]
-      .map(node => node.getBoundingClientRect().top + node.getBoundingClientRect().height / 2);
     const plugin = body.querySelector(".pill-plugin"), artifact = body.querySelector(".pill-artifact"), pip = body.querySelector(".pill-pip");
+    // The Pip can wrap to a new line at this 460px viewport, depending on the
+    // platform font. Compare each mark with its own name, not with the first
+    // line of the sentence.
+    const alignment = [
+      [plugin, ".composer-plugin-mark", ".composer-plugin-name"],
+      [artifact, ".composer-artifact-mark", ".composer-artifact-name"],
+      [pip, ".composer-pip-face", ".composer-pip-name"],
+    ].map(([pill, markSelector, nameSelector]) => {
+      const mark = pill.querySelector(markSelector).getBoundingClientRect();
+      const name = pill.querySelector(nameSelector).getBoundingClientRect();
+      return {markCenter: mark.top + mark.height / 2, nameCenter: name.top + name.height / 2};
+    });
     return {text: body.textContent, logo: !!plugin.querySelector(".composer-plugin-mark img"),
       outputIcon: artifact.querySelector(".composer-artifact-mark")?.className,
       pipFace: !!pip.querySelector(".composer-pip-face"),
       colors: [plugin.querySelector(".composer-plugin-name"), artifact.querySelector(".composer-artifact-name"),
         pip.querySelector(".composer-pip-name")].map(node => getComputedStyle(node).color),
-      centers, baselineCenter};
+      alignment};
   });
   assert.equal(result.text, "Use Composio to make a Page and ask Core to act.");
   assert.equal(result.logo, true);
   assert.match(result.outputIcon, /codicon-browser/);
   assert.equal(result.pipFace, true);
   assert.ok(result.colors.every(color => color === "rgb(216, 214, 223)"), JSON.stringify(result));
-  assert.ok(result.centers.every(center => Math.abs(center - result.baselineCenter) < 3), JSON.stringify(result));
+  assert.ok(result.alignment.every(({markCenter, nameCenter}) => Math.abs(markCenter - nameCenter) < 3),
+    JSON.stringify(result));
 });
