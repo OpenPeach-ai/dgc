@@ -4,6 +4,7 @@
 // a plugin that can move money: those ask every time) or Don't.
 
 import { field, editButton, editError } from './pipAppLinks.js';
+import '../media/pluginCalls.js';   // globalThis.DgcPluginCalls: a plugin call in plain words, the same in all three chats
 
 const STATUSES = ['requested', 'allowed', 'declined'];
 // Lengths in characters, as the CLI cuts them: an emoji is one, not two UTF-16 units.
@@ -30,7 +31,8 @@ export function pluginsPage(value, pip) {
       || p.servers !== undefined && !(Array.isArray(p.servers) && p.servers.length <= 8 && p.servers.every(s => SERVER.test(s)))) {
       throw new Error('These cards didn’t load. Refresh to try again.');
     }
-    return { plugin: p.plugin, name: p.name, money: p.money, ...(p.servers ? { servers: p.servers } : {}) };
+    return { plugin: p.plugin, name: p.name, money: p.money, ...(p.servers ? { servers: p.servers } : {}),
+      ...(p.asks === true ? { asks: true } : {}) };
   });
   return { plugins: value.plugins.map(card => pluginCard(card, pip)), installed };
 }
@@ -57,13 +59,21 @@ export function pluginForServer(cards, server) {
 export function installedForServer(installed, server) {
   const listed = installed || [];
   const owner = listed.find(p => Array.isArray(p.servers) && p.servers.includes(server));
-  if (owner) return { name: owner.name, money: owner.money };
+  if (owner) return { plugin: owner.plugin, name: owner.name, money: owner.money, ...(owner.asks === true ? { asks: true } : {}) };
   if (listed.length && !listed.some(p => Array.isArray(p.servers))) return { name: server, money: true };
   return null;
 }
 
-const mark = name => `<span class="app-link-mark" aria-hidden="true">${name.slice(0, 1).toUpperCase()}</span>`;
-const head = (esc, name, title, sub) => `<div class="app-link-head">${mark(esc(name))}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// The plugin's logo when the page has it (``logo(id)`` -> a data: URI, or ""), else its first letter. The page fills a
+// mark that has none yet once the host sends it ([data-plugin-mark]). Always the plugin DGC calls (Composio's for
+// Composio's tools), never the app inside it.
+const mark = (name, id = '', logo = null) => {
+  const own = PLUGIN_ID.test(id) ? id : '', src = own && typeof logo === 'function' ? logo(own) : '';
+  return `<span class="app-link-mark${src ? ' has-logo' : ''}" aria-hidden="true"${own ? ` data-plugin-mark="${own}"` : ''}>`
+    + (src && /^data:image\/(png|svg\+xml|x-icon);base64,/.test(src) ? `<img alt="" src="${src}">` : name.slice(0, 1).toUpperCase()) + '</span>';
+};
+const head = (esc, name, title, sub, id = '', logo = null) => `<div class="app-link-head">${mark(esc(name), id, logo)}<div class="app-link-words"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
 
 export function pluginCardMarkup(card, { esc, busy = false, pipName = 'This Pip' }) {
   const id = esc(card.id), name = esc(card.name), off = busy ? ' disabled' : '';
@@ -85,25 +95,47 @@ export function pluginCardMarkup(card, { esc, busy = false, pipName = 'This Pip'
   return `<div class="app-link plugin-card" data-plugin-card="${id}" data-state="${esc(card.status)}" role="group" aria-label="${esc(label)}">${body}</div>`;
 }
 
+// Every input of a call waiting for Allow, each in full: what it sends is in sight before Allow (an email's recipient,
+// subject and body), never cut and never one click away.
 function inputs(esc, args) {
-  const rows = Object.entries(args || {}).slice(0, 12).map(([k, v]) => {
+  const rows = (Array.isArray(args) ? args : Object.entries(args || {})).map(([k, v]) => {
     const shown = typeof v === 'string' ? v : JSON.stringify(v);
-    return `<dt>${esc(k)}</dt><dd>${esc(shown.length > 400 ? shown.slice(0, 399) + '…' : shown)}</dd>`;
+    return `<dt>${esc(k)}</dt><dd>${esc(shown)}</dd>`;
   });
   return rows.length ? `<dl class="allow-meta">${rows.join('')}</dl>` : '<p class="app-link-note">No inputs.</p>';
 }
+// What the card sends, in full, one click away: the list above it is a summary, and Edit isn't needed to see it.
+function sentInputs(esc, tool, args) {
+  if (!Object.keys(args || {}).length) return '';
+  const text = globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.sent(tool, args) : JSON.stringify(args, null, 2);
+  return `<details class="allow-sent"><summary>Inputs as sent</summary><pre>${esc(text)}</pre></details>`;
+}
 
 /** What the Pip would do in a plugin, as Grok's Allow card. Edit changes its inputs right here. */
-export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null }) {
+export function pluginActionMarkup(draft, plugin, { esc, busy = false, pipName = 'Your Pip', edit = null, logo = null }) {
   const a = draft.payload.action, id = esc(draft.id), off = busy ? ' disabled' : '';
-  const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you every time.` : `${esc(pipName)} wants to do this in ${esc(plugin.name)}.`;
-  const always = plugin.money ? '' : `<button type="button" class="quiet" data-plugin-always="${id}"${off} title="Run this, and let ${esc(pipName)} run ${esc(a.call.tool)} in ${esc(plugin.name)} without asking; take it back on its page">Always allow</button>`;
+  // A plugin the user set to Always ask offers Allow once and Don't only, as an ask rule of their own does: an Always
+  // allow there would save a grant their Always ask overrides.
+  const sub = plugin.money ? `${esc(plugin.name)} can move money, so ${esc(pipName)} asks you every time.`
+    : plugin.asks ? `You set ${esc(plugin.name)} to Always ask, so ${esc(pipName)} asks you every time.`
+    : `${esc(pipName)} wants to do this in ${esc(plugin.name)}.`;
+  const always = plugin.money || plugin.asks ? '' : `<button type="button" class="quiet" data-plugin-always="${id}"${off} title="Run this, and let ${esc(pipName)} run ${esc(a.call.tool)} in ${esc(plugin.name)} without asking; take it back on its page">Always allow</button>`;
   const args = a.call.arguments || {};
-  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${esc(`Run ${a.call.tool} in ${plugin.name}?`)}">`
-    + head(esc, plugin.name, `Run ${esc(a.call.tool)} in ${esc(plugin.name)}?`, sub)
-    + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : inputs(esc, args))
+  // Composio's multi-execute in plain words: each app call, "Gmail · Fetch emails · 5 from Inbox · through Composio".
+  const calls = globalThis.DgcPluginCalls ? globalThis.DgcPluginCalls.describe(a.call.tool, args, plugin.name) : null;
+  const title = calls ? `Do this in ${esc(plugin.name)}?` : `Run ${esc(a.call.tool)} in ${esc(plugin.name)}?`;
+  // A call that sends or changes something shows every input it sends under its line (pluginCalls.js fields).
+  const summary = calls?.length ? `${esc(calls[0].line)}${calls.length > 1 ? ` · ${calls.length - 1} more` : ''}`
+    : `${esc(a.call.tool)} · ${esc(plugin.name)}`;
+  const shown = `<details class="allow-details"><summary><span class="allow-preview">${summary}</span><span>Details</span></summary>`
+    + (calls ? `<ul class="allow-calls">${calls.map(c => `<li>${esc(c.line)}${c.fields.length ? inputs(esc, c.fields) : ''}</li>`).join('')}</ul>` : inputs(esc, args))
+    + sentInputs(esc, a.call.tool, args) + '</details>';
+  const accessibleTitle = esc(calls ? `Do this in ${plugin.name}?` : `Run ${a.call.tool} in ${plugin.name}?`);
+  return `<div class="allow-card plugin-action" data-plugin-action="${id}"${edit ? ' data-editing' : ''} role="group" aria-label="${accessibleTitle}">`
+    + head(esc, plugin.name, title, sub, plugin.plugin, logo)
+    + (edit ? `<div class="allow-fields">${argumentFields(args).map(f => field(esc, draft.id, f.name, f.label, edit.values[f.name] ?? '', { ...f, disabled: busy })).join('') || '<p class="app-link-note">No inputs.</p>'}</div>` : shown)
     + editError(esc, edit)
-    + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : 'Allow'}</button>${always}`
+    + `<div class="app-link-actions"><button type="button" class="primary" data-plugin-run="${id}"${off}>${busy ? 'Running…' : plugin.asks ? 'Allow once' : 'Allow'}</button>${always}`
     + (Object.keys(args).length ? editButton(id, Boolean(edit), off) : '')
     + `<button type="button" class="quiet" data-plugin-skip="${id}"${off}>Don’t</button></div></div>`;
 }

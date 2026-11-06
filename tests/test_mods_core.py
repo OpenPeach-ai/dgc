@@ -325,6 +325,81 @@ class RuntimeTests(Home):
         self.assertEqual(safe.running, {})
 
 
+class SymlinkedInterpreterTests(Home):
+    """Seen 11-02: DGC run from a .venv that is a symlink to a folder outside the sandbox's bound roots (a worktree whose
+    .venv links to another worktree's). The sandbox showed only where the link points, so the interpreter, started by
+    the name DGC knows it by, wasn't there: every mod came back empty (reason '', a guard reading "observe")."""
+
+    def linked_venv(self) -> Path:
+        real = Path(sys.prefix).resolve()
+        if real == Path(sys.base_prefix).resolve():          # not a venv: make one that sees this one's packages
+            real = self.tmp / "real-venv"
+            subprocess.run([sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(real)],
+                           check=True)
+        link = self.tmp / "worktree" / ".venv"
+        link.parent.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        return link
+
+    @unittest.skipUnless(BOXED and sys.platform.startswith("linux"), "the bubblewrap sandbox")
+    def test_a_venv_reached_through_a_symlink_still_runs_its_mods(self):
+        rec = write_mod(self.src, "recorder", RECORDER, CAPS)
+        script = self.tmp / "run.py"
+        script.write_text(textwrap.dedent(f"""
+            import json, sys
+            from pathlib import Path
+            from dgc.mods import catalog, consent
+            from dgc.mods.host import ModHost
+            h = ModHost(project_root=Path({str(self.project)!r}), session_id="s1", extra=({str(rec)!r},))
+            consent.allow(catalog.find("recorder", h.extra))
+            h.start()
+            said = h.tool_call("ask-me", {{}})
+            entry = next(e for e in h.mods() if e["name"] == "recorder")
+            h.stop()
+            print(json.dumps({{"prefix": sys.prefix, "said": said, "state": entry["state"], "error": entry["error"]}}))
+        """))
+        link = self.linked_venv()
+        python = next(p for p in (link / "bin" / "python", link / "bin" / "python3") if p.exists())
+        env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent), "HOME": str(self.tmp)}
+        done = subprocess.run([str(python), str(script)], capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        got = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertTrue(got["prefix"].startswith(str(link)), got["prefix"])     # this Python is reached by the link
+        self.assertEqual(got["state"], "running", got["error"])
+        self.assertEqual((got["said"]["decision"], got["said"]["reason"]), ("ask", "careful"))
+
+    def test_the_sandbox_shows_the_interpreter_by_both_names_and_seatbelt_is_unchanged(self):
+        from dgc.mods import runtime
+        link = self.linked_venv()
+        real = link.resolve()
+        with patch.object(sys, "prefix", str(link)), patch.object(sys, "exec_prefix", str(link)):
+            for platform in ("linux", "darwin"):
+                with patch.object(sys, "platform", platform):
+                    roots = runtime._install_roots(str(link / "bin" / "python"))
+                self.assertIn(real, roots, platform)
+                self.assertIn(link, roots, platform)        # the name DGC starts it by (Seatbelt had it already)
+                self.assertLess(roots.index(real), roots.index(link), platform)
+
+    @unittest.skipUnless(BOXED and sys.platform.startswith("linux"), "the bubblewrap sandbox")
+    def test_a_mod_that_still_cant_start_says_so_plainly(self):
+        from dgc.mods import runtime
+        rec = write_mod(self.src, "recorder", RECORDER, CAPS)
+        missing = self.tmp / "gone" / "bin" / "python"
+        real = runtime._interpreter
+        def interpreter(m):
+            argv = real(m)
+            return [str(missing), *argv[1:]] if m.name == "recorder" else argv
+        with patch.object(runtime, "_interpreter", interpreter):
+            h = self.host(rec)
+        entry = next(e for e in h.mods() if e["name"] == "recorder")
+        self.assertEqual(entry["state"], "crashed")
+        self.assertIn("couldn't start", entry["error"])
+        self.assertIn(str(missing), entry["error"])
+        self.assertNotIn("execvp", entry["error"])
+        said = h.tool_call("ask-me", {})
+        self.assertEqual(said["decision"], "observe")
+
+
 class GuardTests(Home):
     def test_guard_asks_before_what_cant_be_undone_and_says_what_it_would_change(self):
         subprocess.run(["git", "init", "-q", str(self.project)], check=True)

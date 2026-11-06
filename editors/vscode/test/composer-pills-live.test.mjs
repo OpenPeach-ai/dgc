@@ -53,8 +53,9 @@ after(async () => { await browser?.close(); });
 const value = () => page.evaluate(() => document.getElementById("input").value);
 // Linux Chromium binds undo to Ctrl+Z; macOS binds it to Cmd+Z. The browser's own undo command,
 // which a key binding ends up running, is exercised directly too.
-const undo = () => page.keyboard.press("Control+Z");
-const redo = () => page.keyboard.press("Control+Shift+Z");
+const mod = process.platform === "darwin" ? "Meta" : "Control";
+const undo = () => page.keyboard.press(`${mod}+Z`);
+const redo = () => page.keyboard.press(`${mod}+Shift+Z`);
 
 
 const pills = () => page.evaluate(() =>
@@ -101,6 +102,29 @@ test("what is typed after a pill lands after it, not in front of it", async (t) 
       .map((n) => (n.nodeType === 3 ? n.data : `[${n.textContent}]`)).join(""));
   assert.match(order, /Review \[fixture\] the diff/,
     "the pill sits where it was picked -- it used to migrate to the end of the message");
+});
+
+test("a selected skill stays inline with muted text after sending", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer(["fixture"]);
+  await page.evaluate(() => window.postMessage({type: "event", event: {
+    type: "ready", capabilities: {display_mentions: 2}, skills: ["fixture"]}}, "*"));
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  await page.keyboard.type("Use ");
+  await pickSkill("fixture");
+  await page.keyboard.type(" here");
+  await page.keyboard.press("Enter");
+  const result = await page.evaluate(() => {
+    const bubble = [...document.querySelectorAll(".msg.user .bubble")].at(-1);
+    const pill = bubble?.querySelector(".prompt-text .sent-mention.pill-skill");
+    return {text: bubble?.querySelector(".prompt-text")?.textContent,
+      mark: pill?.textContent, colour: pill ? getComputedStyle(pill).color : "",
+      chip: !!bubble?.querySelector(".prompt-atts")};
+  });
+  assert.equal(result.text, "Use fixture here");
+  assert.equal(result.mark, "fixture");
+  assert.equal(result.colour, "rgb(216, 214, 223)");
+  assert.equal(result.chip, false);
 });
 
 test("two pills keep the order they were picked in", async (t) => {
@@ -225,6 +249,49 @@ test("each pill wears the sigil that picks it, and the one on its own chip", asy
   assert.equal(await sigil("link"), "\ueb01",
     "a link pill wears the bundled globe codicon -- a fetched favicon would disclose the host of a "
     + "URL the user may still delete");
+});
+
+test("slash skill text shares the surrounding prompt baseline", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer(["onboard"]);
+  await page.keyboard.type("Please ");
+  await pickSkill("onboard");
+  await page.keyboard.type(" this project.");
+  const measured = await page.evaluate(() => {
+    const host = document.getElementById("input");
+    const pill = host.querySelector(".pill-skill");
+    const prose = [...host.childNodes].find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+    const box = n => { const r = document.createRange(); r.selectNodeContents(n); return r.getBoundingClientRect(); };
+    return { proseTop: box(prose).top, proseBottom: box(prose).bottom,
+      pillTop: box(pill).top, pillBottom: box(pill).bottom,
+      iconSize: parseFloat(getComputedStyle(pill, "::before").fontSize) };
+  });
+  assert.ok(Math.abs(measured.proseTop - measured.pillTop) < .5, JSON.stringify(measured));
+  assert.ok(Math.abs(measured.proseBottom - measured.pillBottom) < .5, JSON.stringify(measured));
+  assert.ok(measured.iconSize >= 10, "the skill icon stays legible beside the full size label");
+});
+
+test("every inline selection keeps the prompt text baseline", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer([]);
+  const rows = await page.evaluate(() => {
+    const host = document.getElementById("input");
+    host.replaceChildren();
+    const box = n => { const range = document.createRange(); range.selectNodeContents(n);
+      const rect = range.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; };
+    return ["skill", "template", "command", "file", "link", "plugin", "artifact", "pip"].map(kind => {
+      const prose = document.createTextNode("Use ");
+      const pill = document.createElement("span");
+      pill.className = `composer-pill pill-${kind}`;
+      pill.textContent = kind === "file" ? "src/main.py" : kind;
+      host.append(prose, pill, document.createTextNode(" here.\n"));
+      return { kind, prose: box(prose), pill: box(pill) };
+    });
+  });
+  for (const row of rows) {
+    assert.ok(Math.abs(row.prose.top - row.pill.top) < .5, JSON.stringify(row));
+    assert.ok(Math.abs(row.prose.bottom - row.pill.bottom) < .5, JSON.stringify(row));
+  }
 });
 
 test("a pill-only draft does not render the placeholder over itself", async (t) => {
@@ -378,7 +445,7 @@ test("clearing the box by hand does not leave its selections attached", async (t
   await freshComposer(["fixture"]);
   await page.keyboard.type("draft ");
   await pickSkill("fixture");
-  await page.keyboard.down("Control"); await page.keyboard.press("KeyA"); await page.keyboard.up("Control");
+  await page.keyboard.press(`${mod}+A`);
   await page.keyboard.press("Delete");
   assert.deepEqual(await pills(), []);
   // Read what the next message CARRIES, not the attachment row: without reconciliation nothing
@@ -753,4 +820,80 @@ test("the slash menu keeps one height however few rows match", async (t) => {
   assert.ok(wide.rows > narrow.rows, `"/g" must match more than "/goa" (${wide.rows} vs ${narrow.rows})`);
   assert.equal(wide.height, narrow.height, "and the menu must be the same height for both");
   assert.ok(narrow.height > 100, `a single match still gets a readable list, not a line (${narrow.height}px)`);
+});
+
+test("sent slash, file and command names stay muted on the prompt baseline", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer([]);
+  await page.evaluate(() => window.postMessage({type: "event", event: {type: "turn_start",
+    turn_id: "inline-marks-qa", kind: "prompt", prompt: "Use  in  then /review",
+    display_mentions: [
+      {start: 4, kind: "skill", label: "onboard", identity: "skill"},
+      {start: 8, kind: "file", label: "src/main.py", identity: "file"},
+      {start: 14, kind: "command", label: "review", identity: "command"},
+    ]}}, "*"));
+  await page.waitForFunction(() => [...document.querySelectorAll("#log .msg.dgc")]
+    .some(node => node._turnId === "inline-marks-qa"));
+  const marks = await page.evaluate(() => {
+    const block = [...document.querySelectorAll("#log .msg.dgc")]
+      .find(node => node._turnId === "inline-marks-qa");
+    const bubble = block?.closest(".turn")?.querySelector(".msg.user .bubble");
+    return [...(bubble?.querySelectorAll(".prompt-text .sent-mention") || [])].map(node => ({
+      kind: node.dataset.kind, color: getComputedStyle(node).color,
+      iconColor: getComputedStyle(node, "::before").color,
+      baseline: node.getBoundingClientRect().bottom,
+    }));
+  });
+  assert.deepEqual(marks.map(mark => mark.kind), ["skill", "file", "command"]);
+  assert.ok(marks.every(mark => mark.color === "rgb(216, 214, 223)"), JSON.stringify(marks));
+  assert.ok(marks.every(mark => mark.iconColor === "rgb(216, 214, 223)"), JSON.stringify(marks));
+  assert.ok(Math.max(...marks.map(mark => mark.baseline)) - Math.min(...marks.map(mark => mark.baseline)) < .5,
+    JSON.stringify(marks));
+});
+
+test("sent plugin, output and Pip keep their artwork inline while only names turn grey", async (t) => {
+  if (skipReason()) return t.skip(skipReason());
+  await freshComposer([]);
+  const prompt = "Use Composio to make a Page and ask  to act.";
+  await page.evaluate((text) => {
+    const logo = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7" fill="white"/></svg>');
+    window.postMessage({type: "event", event: {type: "plugin_catalog", items: [
+      {name: "composio", display_name: "Composio", connected: true, logo}]}}, "*");
+    window.postMessage({type: "event", event: {type: "turn_start", turn_id: "artwork-inline-qa",
+      kind: "prompt", prompt: text, display_mentions: [
+        {start: text.indexOf("Composio"), kind: "plugin", label: "Composio", identity: "composio"},
+        {start: text.indexOf("Page"), kind: "artifact", label: "Page", identity: "page"},
+        {start: text.indexOf("  to act") + 1, kind: "pip", label: "Core", identity: "core-qa", pip_type: "core"},
+      ]}}, "*");
+  }, prompt);
+  await page.waitForFunction(() => !!document.querySelector("#log .sent-mention.pill-pip"));
+  const result = await page.evaluate(() => {
+    const body = document.querySelector("#log .pill-pip.sent-mention")?.closest(".prompt-text");
+    const plugin = body.querySelector(".pill-plugin"), artifact = body.querySelector(".pill-artifact"), pip = body.querySelector(".pill-pip");
+    // The Pip can wrap to a new line at this 460px viewport, depending on the
+    // platform font. Compare each mark with its own name, not with the first
+    // line of the sentence.
+    const alignment = [
+      [plugin, ".composer-plugin-mark", ".composer-plugin-name"],
+      [artifact, ".composer-artifact-mark", ".composer-artifact-name"],
+      [pip, ".composer-pip-face", ".composer-pip-name"],
+    ].map(([pill, markSelector, nameSelector]) => {
+      const mark = pill.querySelector(markSelector).getBoundingClientRect();
+      const name = pill.querySelector(nameSelector).getBoundingClientRect();
+      return {markCenter: mark.top + mark.height / 2, nameCenter: name.top + name.height / 2};
+    });
+    return {text: body.textContent, logo: !!plugin.querySelector(".composer-plugin-mark img"),
+      outputIcon: artifact.querySelector(".composer-artifact-mark")?.className,
+      pipFace: !!pip.querySelector(".composer-pip-face"),
+      colors: [plugin.querySelector(".composer-plugin-name"), artifact.querySelector(".composer-artifact-name"),
+        pip.querySelector(".composer-pip-name")].map(node => getComputedStyle(node).color),
+      alignment};
+  });
+  assert.equal(result.text, "Use Composio to make a Page and ask Core to act.");
+  assert.equal(result.logo, true);
+  assert.match(result.outputIcon, /codicon-browser/);
+  assert.equal(result.pipFace, true);
+  assert.ok(result.colors.every(color => color === "rgb(216, 214, 223)"), JSON.stringify(result));
+  assert.ok(result.alignment.every(({markCenter, nameCenter}) => Math.abs(markCenter - nameCenter) < 3),
+    JSON.stringify(result));
 });

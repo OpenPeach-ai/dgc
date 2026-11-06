@@ -188,7 +188,7 @@ from dgc.pips import _worker_main
 import json
 
 def chat(self,messages,tools=None,**kwargs):
-    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event', 'skill', 'connect_app', 'read_app', 'web_search', 'working_notes'}, "A Personal task may only draft, load a skill's instructions, ask for and read its own connected apps, or keep its own working notes (Grok-style, reported 2026-10-07: nothing runs or sends"
+    assert {t['function']['name'] for t in (tools or [])} <= {'draft_email', 'draft_calendar_event', 'skill', 'connect_app', 'read_app', 'web_search', 'working_notes', 'generate_image', 'list_image_generators', 'generate_video', 'list_video_generators'}, "A Personal task may only draft, load a skill's instructions, ask for and read its own connected apps, keep its own working notes, or make images and videos with the user's generators (Grok-style, reported 2026-10-07: nothing runs or sends"
     reference=json.dumps(messages)
     assert 'Untrusted connected-app reference data' in reference, 'Reference envelope missing'
     assert 'GMAIL_FETCH_EMAILS' in reference, 'Read tool source missing'

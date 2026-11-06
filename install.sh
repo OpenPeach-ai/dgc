@@ -174,7 +174,10 @@ fetch() {
 
 sha256_of() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | awk '{print $1}'; }
 
-# Install into every discovered editor, including macOS applications without a PATH command.
+# Install into every discovered editor, including macOS applications without a PATH command. What it did is kept
+# for the closing words, which say only that: the editors it installed into, or why it installed it nowhere.
+EXT_DONE=""
+EXT_WHY=""
 install_extension() {
   if [ -n "${DGC_SKIP_EXTENSION:-}" ]; then return 0; fi
   local editors=() e candidate existing duplicate
@@ -199,11 +202,16 @@ install_extension() {
   fi
   if [ "${#editors[@]}" = 0 ]; then
     printf '  note: no local editor found; install the matching extension from %s/vscode/\n' "$BASE"
+    EXT_WHY="no Cursor, VS Code or VSCodium was found"
     return 0
   fi
-  if ! fetch "$BASE/vscode/dgc.vsix" "$TMP/dgc.vsix" 2>/dev/null; then return 0; fi
+  if ! fetch "$BASE/vscode/dgc.vsix" "$TMP/dgc.vsix" 2>/dev/null; then
+    EXT_WHY="it couldn't be downloaded"
+    return 0
+  fi
   if ! fetch "$BASE/vscode/dgc.vsix.sha256" "$TMP/dgc.vsix.sha256" 2>/dev/null; then
     printf '  note: extension checksum is unavailable — skipping automatic extension install\n'
+    EXT_WHY="its checksum couldn't be downloaded"
     return 0
   fi
   local want got
@@ -213,10 +221,12 @@ install_extension() {
   for e in "${editors[@]}"; do
     if "$e" --install-extension "$TMP/dgc.vsix" --force </dev/null >/dev/null 2>&1; then
       say "editor extension installed/updated in $e (reload the window to see the DGC panel)"
+      EXT_DONE="${EXT_DONE:+$EXT_DONE, }$(basename "$e")"
     else
       printf '  note: could not auto-install the extension into %s — get it at %s/vscode/\n' "$e" "$BASE"
     fi
   done
+  if [ -z "$EXT_DONE" ]; then EXT_WHY="no editor took it"; fi
 }
 
 TMP=""
@@ -460,10 +470,9 @@ if [ "$KEPT" -gt 0 ]; then
   printf '  Versions live in %s/versions — switch back with: dgc update --rollback\n\n' "$DATA"
 fi
 if [ -z "${DGC_SKIP_EXTENSION:-}" ] && [ "$LAUNCHER_KIND" = missing ]; then
-  cat <<EOF
-  Editor extension (Cursor / VS Code / VSCodium): installed into each of 'cursor', 'code' and
-  'codium' found on PATH (set DGC_SKIP_EXTENSION=1 to skip); otherwise get it at
-  $BASE/vscode/
-
-EOF
+  if [ -n "$EXT_DONE" ]; then
+    printf '  Editor extension: installed into %s; reload its window to see the DGC panel.\n\n' "$EXT_DONE"
+  else
+    printf '  Editor extension: not installed (%s). Get it at %s/vscode/\n\n' "${EXT_WHY:-it was not tried}" "$BASE"
+  fi
 fi

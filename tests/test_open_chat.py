@@ -186,6 +186,19 @@ class OpenChatTest(unittest.TestCase):
         def open_files():
             return len(os.listdir("/proc/self/fd"))
 
+        def own_files():
+            # The chats' own notes databases, wherever they live. Other tests' background threads open and close files
+            # of their own during a full run, so the process-wide count alone is noisy.
+            found = []
+            for fd in os.listdir("/proc/self/fd"):
+                try:
+                    target = os.readlink(f"/proc/self/fd/{fd}")
+                except OSError:
+                    continue
+                if "notes.sqlite" in os.path.basename(target):
+                    found.append(target)
+            return len(found)
+
         def cycle(n):
             opened = self.open_b(f"open-{n}")
             self.host.chats[opened["chat_id"]].agent.notes()          # what a turn does: the notes store opens
@@ -196,10 +209,13 @@ class OpenChatTest(unittest.TestCase):
             while opened["chat_id"] in self.host.chats and time.monotonic() < deadline:
                 time.sleep(0.02)
         cycle(0)                                                       # whatever the first chat sets up once
-        before = open_files()
+        before, own_before = open_files(), own_files()
         for n in range(1, 11):
             cycle(n)
-        self.assertLessEqual(open_files() - before, 1, "ten chats opened and closed left files open")
+        self.assertLessEqual(own_files() - own_before, 0, "ten chats opened and closed left their files open")
+        # Anything else a chat leaks (a socket, a pipe) shows as one more per chat: ten or more. A full run's other
+        # threads account for a couple at most.
+        self.assertLessEqual(open_files() - before, 5, "ten chats opened and closed left files open")
 
     def test_the_default_chat_cannot_be_closed(self):
         self.open_b()

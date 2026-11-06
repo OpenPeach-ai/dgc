@@ -24,15 +24,26 @@ function harness(t,state,{api=48}={}){
  w.eval(bundle+';window.Strip=Strip;');
  const sent=[],opened=[],timers=[],held=[];
  const answers={list_workspaces:()=>({workspaces:[{id:P,name:'Your Pips',kind:'personal'},{id:Q,name:'demo',kind:'project'}],current_workspace_id:Q}),
-  list_pips:r=>({pips:r.workspace_id===P?state.list:[],total:r.workspace_id===P?state.list.length:0,next_offset:null}),
+  list_pips:r=>({pips:r.workspace_id===P?state.list:(state.projectList||[]),total:r.workspace_id===P?state.list.length:(state.projectList||[]).length,next_offset:null}),
   get_pip_digest:()=>({digest:state.digest}),
-  list_pip_unread:r=>({workspace_id:r.workspace_id,pips:r.workspace_id===P?(state.unread||[]):[],total:r.workspace_id===P?(state.unread||[]).reduce((n,p)=>n+p.count,0):0}),
+  list_pip_unread:r=>({workspace_id:r.workspace_id,pips:r.workspace_id===P?(state.unread||[]):(state.projectUnread||[]),total:(r.workspace_id===P?(state.unread||[]):(state.projectUnread||[])).reduce((n,p)=>n+p.count,0)}),
   list_pip_attention:()=>state.attention||{total:0,items:[],truncated:false,counts:{},by_pip:{}}};
  let strip;
  const reply=(m,ok,result)=>strip.receive({type:'pipsReply',id:m.id,ok,...(ok?{result}:{error:{message:result}})});
  strip=w.Strip.mountHomePips({document:w.document,root:w.document.getElementById('sessions-pips'),
   postMessage:m=>{sent.push(m);if(m.type!=='pipsRequest')return;
-   if(m.request.type==='mark_pip_news_seen'){if(state.hold)held.push(m);else queueMicrotask(()=>reply(m,state.refuse!==true,state.refuse?'Refused':{seen:m.request.pip_ids.map(pip_id=>({pip_id,seen_until:m.request.until}))}));return;}
+   if(m.request.type==='mark_pip_news_seen'){
+    if(state.hold)held.push(m);
+    else queueMicrotask(()=>{
+     if(!state.refuse) state.digest={...state.digest,pips:state.digest.pips.filter(row=>!m.request.pip_ids.includes(row.pip_id))};
+     reply(m,state.refuse!==true,state.refuse?'Refused':{seen:m.request.pip_ids.map(pip_id=>({pip_id,seen_until:m.request.until}))});
+    });
+    return;
+   }
+   if(m.request.type==='mark_pip_read'){
+    if(!state.refuseRead){state.unread=(state.unread||[]).filter(row=>row.pip_id!==m.request.pip_id);state.projectUnread=(state.projectUnread||[]).filter(row=>row.pip_id!==m.request.pip_id);}
+    queueMicrotask(()=>reply(m,!state.refuseRead,state.refuseRead?'Read refused':{pip_id:m.request.pip_id}));return;
+   }
    if(m.request.type==='list_pip_unread'&&state.unreadFail){queueMicrotask(()=>reply(m,false,'Unread updates unavailable.'));return;}
    const make=answers[m.request.type];if(make)queueMicrotask(()=>reply(m,true,make(m.request)));},
   onOpen:v=>opened.push(v),setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval:()=>{}});
@@ -55,8 +66,82 @@ test('latest unread routine results appear with the existing row geometry, even 
  assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{overview:true},'Open Pips leads to the list, not the last selected chat');
  assert.deepEqual(x.rows().map(r=>r.slice(0,2)),[['Mail watch','No new mail since the last check.'],['Daily check','Everything passed.']]);
  assert.equal(x.d.querySelector('.home-pips-quiet-text'),null);
- x.d.querySelector('.home-pips-unread .home-pip-row').click();
+ x.d.querySelector('.home-pip-row').click();
  assert.equal(x.opened.at(-1)?.pip,id(2));
+});
+test('a Pip with attention and unread appears once; its count grows in the same row and profile is current',async t=>{
+ const state={list:[pip(1,'Site traffic',{pending_review_count:2,profile:{body:'lens',color:'lens'}})],
+  digest:digest([]),unread:[{pip_id:id(1),workspace_id:P,name:'Site traffic',pip_type:'scout',count:8,
+   latest:'Traffic report finished.',latest_at:'2026-11-05T00:00:00Z',latest_message_id:'m1'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ assert.deepEqual(x.rows(),[['Site traffic','2 waiting for you',false]]);
+ assert.equal(x.d.querySelector('.home-pip-latest').textContent,'Traffic report finished.');
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'8');
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined,'old saved colours no longer tint accessories');
+ state.unread[0]={...state.unread[0],count:9,latest:'Another report.',latest_message_id:'m2'};
+ state.list[0]={...state.list[0],profile:{body:'quill',color:'quill'}};
+ await x.poll();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'9');
+ assert.equal(x.d.querySelector('.home-pip-face').dataset.tint,undefined);
+});
+test('Read removes the unread Pip and its old digest news while leaving a pending approval alone',async t=>{
+ const state={list:[pip(1,'Company inbox')],digest:digest([failed(1,'Company inbox')]),
+  unread:[{pip_id:id(1),workspace_id:P,name:'Company inbox',pip_type:'scout',count:1,messages:1,posts:0,
+   latest:'The inbox check finished.',latest_message_id:'m1',latest_at:'2026-11-05T00:00:00Z'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ assert.equal(x.d.querySelector('.home-pip-dismiss'),null,'Read is the only row action while this Pip has unread messages');
+ x.d.querySelector('.home-pip-read').click();await flush();
+ assert.equal(x.requests('mark_pip_read').length,1);
+ assert.equal(x.requests('mark_pip_news_seen').length,1);
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,0);
+ assert.equal(x.d.querySelector('.home-pips-quiet-text').textContent,'All quiet. Nothing is waiting for you.');
+ state.list[0]={...state.list[0],pending_review_count:1};
+ await x.poll();
+ assert.deepEqual(x.rows(),[['Company inbox','1 waiting for you',false]]);
+});
+test('a Project Pip’s Read pill clears its unread count and findings row together',async t=>{
+ const state={list:[],projectList:[{...pip(2,'GST watchdog'),workspace_id:Q}],
+  digest:digest([found(2,'GST watchdog',2,{workspace_id:Q,scope:'project'})]),
+  projectUnread:[{pip_id:id(2),workspace_id:Q,name:'GST watchdog',pip_type:'scout',count:1,messages:0,posts:1,
+   latest:'The GST check finished.',latest_post_id:'post-1',latest_at:'2026-11-05T00:00:00Z'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.deepEqual(x.rows(),[['GST watchdog','2 new findings',false]]);
+ assert.equal(x.d.querySelector('.home-pip-dismiss'),null,'the row offers one Read pill instead of a second ×');
+ x.d.querySelector('.home-pip-read').click();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,0,'Read clears the project card immediately');
+ await flush();
+ assert.equal(x.requests('mark_pip_read').length,1);
+ assert.equal(x.requests('mark_pip_news_seen')[0].request.pip_ids[0],id(2));
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,0,'the project Pip card goes away');
+});
+test('a refused Project Pip read restores its card instead of losing the news',async t=>{
+ const state={list:[],projectList:[{...pip(2,'GST watchdog'),workspace_id:Q}],
+  digest:digest([failed(2,'GST watchdog')]),refuseRead:true,
+  projectUnread:[{pip_id:id(2),workspace_id:Q,name:'GST watchdog',pip_type:'scout',count:1,messages:0,posts:1,
+   latest:'The GST check failed.',latest_post_id:'post-1',latest_at:'2026-11-05T00:00:00Z'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ x.d.querySelector('.home-pip-read').click();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,0);
+ await flush();
+ assert.deepEqual(x.rows(),[['GST watchdog','1 run failed',false]]);
+ assert.match(x.d.querySelector('.home-pips-error').textContent,/didn’t mark it read/);
+ assert.equal(x.requests('mark_pip_news_seen').length,0);
+});
+test('a merged unread row still opens its pending computer approval',async t=>{
+ const item={id:`computer_action:compact_${'a'.repeat(32)}`,kind:'computer_action',card:`compact_${'a'.repeat(32)}`,
+  pip_id:id(1),pip_name:'Site traffic',pip_type:'scout',workspace_id:P,title:'Send a form',detail:'Cloudflare verification',
+  created_at:'2026-11-05T00:00:00Z',expires_at:null};
+ const state={list:[pip(1,'Site traffic')],digest:digest([]),attention:{total:1,items:[item],truncated:false,counts:{},by_pip:{[id(1)]:1}},
+  unread:[{pip_id:id(1),workspace_id:P,name:'Site traffic',pip_type:'scout',count:2,latest:'Traffic report finished.',
+   latest_at:'2026-11-05T00:00:00Z',latest_message_id:'m1'}]};
+ const x=harness(t,state,{api:69});await x.connect();
+ assert.equal(x.d.querySelectorAll('.home-pip-item').length,1);
+ x.d.querySelector('.home-pip-row').click();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.opened.at(-1))),{pip:id(1),workspace:P,attention:true,computer:true});
+ assert.equal(x.d.querySelector('.home-pip-read-count').textContent,'2');
 });
 test('an unread request failure never claims all quiet, and Retry recovers the count',async t=>{
  const state={list:[pip(1,'Mail watch')],digest:digest([]),unreadFail:true,unread:[

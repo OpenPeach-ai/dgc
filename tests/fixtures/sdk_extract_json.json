@@ -1,0 +1,70 @@
+[
+ {
+  "why": "a reply that shows the commands it ran first",
+  "text": "Steps I ran:\n```text\nls [src]\n```\nResult:\n```json\n{\"ok\": true}\n```",
+  "value": {
+   "ok": true
+  }
+ },
+ {
+  "why": "one json block",
+  "text": "Here you go:\n```json\n{\"ok\": true}\n```",
+  "value": {
+   "ok": true
+  }
+ },
+ {
+  "why": "a block with no language",
+  "text": "```\n[1, 2]\n```",
+  "value": [
+   1,
+   2
+  ]
+ },
+ {
+  "why": "JSON in capitals",
+  "text": "```JSON\n{\"a\": \"b\"}\n```",
+  "value": {
+   "a": "b"
+  }
+ },
+ {
+  "why": "two blocks: the first one that is JSON",
+  "text": "```bash\necho {}\n```\n```json\n{\"n\": 1}\n```\n```json\n{\"n\": 2}\n```",
+  "value": {
+   "n": 1
+  }
+ },
+ {
+  "why": "no block: from the first bracket",
+  "text": "The answer is {\"x\": [1, 2]}",
+  "value": {
+   "x": [
+    1,
+    2
+   ]
+  }
+ },
+ {
+  "why": "an unclosed block: from the first bracket",
+  "text": "```json\n{\"open\": true}",
+  "value": {
+   "open": true
+  }
+ },
+ {
+  "why": "no JSON at all",
+  "text": "Nothing to report.",
+  "error": true
+ },
+ {
+  "why": "NaN is no JSON",
+  "text": "```json\n{\"x\": NaN}\n```",
+  "error": true
+ },
+ {
+  "why": "a block that is not valid JSON",
+  "text": "```json\n{\"x\": }\n```",
+  "error": true
+ }
+]

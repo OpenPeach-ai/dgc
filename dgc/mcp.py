@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .config import valid_remote_mcp_url
+from .mcp_apps import CLIENT_EXTENSION, tool_meta as _app_meta, visible_to
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
@@ -550,6 +551,18 @@ def _refused_key_message(name: str, spec: dict, error: str) -> str:
         return error
 
 
+LOCAL_SIGN_IN_WAIT = 120
+REMOTE_SIGN_IN_WAIT = 600
+
+
+def remote_session(env=None) -> bool:
+    """Is the user's browser likely on another computer than this DGC? The editor says so for a remote window
+    (``DGC_EDITOR_REMOTE``, from vscode.env.remoteName: SSH, WSL, a dev container, Codespaces); a terminal over SSH
+    has SSH_CONNECTION. Only how long a sign-in waits depends on it."""
+    env = os.environ if env is None else env
+    return bool(str(env.get("DGC_EDITOR_REMOTE") or "").strip() or env.get("SSH_CONNECTION") or env.get("SSH_TTY"))
+
+
 def _runtime_server_args(spec: dict) -> list[str]:
     """Materialize safe remote auth indirection without persisting a header value."""
     args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
@@ -575,7 +588,10 @@ def _runtime_server_args(spec: dict) -> list[str]:
         # arguments now and runs nothing. Older editors still write and expect this exact shape.
         args[1] = MCP_REMOTE_PACKAGE
         if "--auth-timeout" not in args:
-            args.extend(["--auth-timeout", "120"])
+            # Two minutes for a browser on this computer; ten when it is on another one (DGC over SSH, or an editor's
+            # remote window, whose browser is on the user's laptop: signing in there takes longer, and a listener
+            # that closed first leaves the forwarded port answering nothing).
+            args.extend(["--auth-timeout", str(REMOTE_SIGN_IN_WAIT if remote_session() else LOCAL_SIGN_IN_WAIT)])
         if "--static-oauth-client-metadata" not in args:
             args.extend(["--static-oauth-client-metadata", json.dumps({
                 "client_name": "DGC", "client_uri": "https://vibedgc.com"})])
@@ -612,6 +628,10 @@ class MCPServer:
         self.env, self._env_dropped = mcp_process_env(env)
         self.proc: subprocess.Popen | None = None
         self.tools: list[dict] = []
+        # MCP Apps (dgc/mcp_apps.py): each tool's card address, who may call it and the vendor's hints, by name; and
+        # the tools only a card may call (visibility ["app"]), which the model is never offered.
+        self.tool_meta: dict[str, dict] = {}
+        self.app_tools: dict[str, dict] = {}
         self.error: str | None = None
         self.protocol_version: str | None = None
         self.protocol_era: str | None = None
@@ -798,8 +818,8 @@ class MCPServer:
             try:
                 proc = RemoteConnection(
                     self.name, self.args, self.env,
-                    sign_in=lambda url, redirect, code="", reason="": self._browser_sign_in(
-                        url, generation, code=code, reason=reason),
+                    sign_in=lambda url, redirect, code="", reason="", device=False: self._browser_sign_in(
+                        url, generation, code=code, reason=reason, device=device),
                     cancelled=self._sign_in_cancelled)
             except (RemoteError, OSError, ValueError) as exc:
                 self.error = f"could not start: {exc}"
@@ -848,6 +868,8 @@ class MCPServer:
         self._tools_invalidated.clear()
         cursor = None
         tools: list[dict] = []
+        app_tools: dict[str, dict] = {}
+        tool_meta: dict[str, dict] = {}
         names: set[str] = set()
         cursors: set[str] = set()
         ttl_windows: list[float] = []
@@ -888,7 +910,9 @@ class MCPServer:
             raw_tools = page.get("tools")
             if not isinstance(raw_tools, list):
                 return fail("tools/list did not return a tools array")
-            if len(tools) + len(raw_tools) > _MAX_TOOLS:
+            # App-only tools are hidden from the model but still occupy catalog memory.
+            # Count every accepted name across earlier pages, not only exposed tools.
+            if len(names) + len(raw_tools) > _MAX_TOOLS:
                 return fail(f"tools/list exceeded {_MAX_TOOLS} tools")
             for raw_tool in raw_tools:
                 try:
@@ -901,6 +925,13 @@ class MCPServer:
                         f"excluded duplicate tool name: {tool['name'][:128]}")
                     continue
                 names.add(tool["name"])
+                meta = _app_meta(raw_tool)
+                if meta:
+                    tool_meta[tool["name"]] = meta
+                if not visible_to(meta, "model"):
+                    # MCP Apps: a tool only its card calls is never in the model's list (the spec's MUST).
+                    app_tools[tool["name"]] = tool
+                    continue
                 tools.append(tool)
             next_cursor = page.get("nextCursor")
             if next_cursor in (None, ""):
@@ -915,6 +946,7 @@ class MCPServer:
         else:
             return fail(f"tools/list exceeded {_MAX_TOOL_PAGES} pagination pages")
         self.tools = sorted(tools, key=lambda tool: tool["name"])
+        self.tool_meta, self.app_tools = tool_meta, app_tools
         if self.protocol_era == "modern":
             self._tools_expires_at = time.monotonic() + min(ttl_windows or [0.0])
             self.tools_cache_scope = ("private" if "private" in cache_scopes else "public")
@@ -1118,13 +1150,14 @@ class MCPServer:
         self._needs_sign_in = True
         return False
 
-    def _browser_sign_in(self, url: str, generation: int, *, code: str = "", reason: str = "") -> bool:
+    def _browser_sign_in(self, url: str, generation: int, *, code: str = "", reason: str = "", device: bool = False):
         """DGC's remote client needs the user to sign in: ask whoever can (the editor's card, the terminal).
 
         True once they agreed and the browser opened; the client then waits for the service's redirect -- or, with a
         ``code`` (a device sign-in, GitHub's), for the user to enter that code on the page it opened. A ``reason`` says
         why a sign-in that worked has ended (Google signs a testing app out every 7 days); it is what the plugin's
-        page shows instead of a bare "Needs sign-in"."""
+        page shows instead of a bare "Needs sign-in". With ``device`` the service also offers a code on another device:
+        the editor may offer it ("Sign in with a code on another device"), and "device" comes back when it was chosen."""
         self._append_diagnostic("Remote MCP browser sign-in requested")
         self._sign_in_reason = " ".join(str(reason or "").split())[:300]
         if not self._connecting or self._generation != generation:
@@ -1147,6 +1180,8 @@ class MCPServer:
                 params["_dgc_device_code"] = code
             else:
                 params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
+                if device:
+                    params["_dgc_device_offer"] = True
         except MCPInputError as exc:
             self._append_diagnostic(f"Remote MCP sign-in could not be completed ({exc})")
             self._connection_done.set()
@@ -1172,6 +1207,10 @@ class MCPServer:
         if not isinstance(response, dict) or response.get("action") != "accept":
             self._connection_done.set()
             return False
+        content = response.get("content") if isinstance(response.get("content"), dict) else {}
+        if device and content.get("_dgc_device") is True:
+            self._append_diagnostic("Remote MCP sign-in with a code on another device chosen")
+            return "device"
         return True
 
     def _stderr_reader(self, proc: subprocess.Popen) -> None:
@@ -1440,7 +1479,8 @@ class MCPServer:
         return self._write_to(proc, obj, timeout=timeout)[0]
 
     def _client_capabilities(self) -> dict:
-        capabilities = {"roots": {}}
+        # MCP Apps: DGC shows a tool's card (text/html;profile=mcp-app), so a server may offer it.
+        capabilities = {"roots": {}, "extensions": json.loads(json.dumps(CLIENT_EXTENSION))}
         sampling = self._input_capabilities.get("sampling")
         elicitation = self._input_capabilities.get("elicitation")
         if isinstance(sampling, dict):
@@ -1693,7 +1733,7 @@ class MCPServer:
 
     def call_tool(self, tool: str, arguments: dict, timeout: float = 120.0,
                   cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
-                  input_handler=None, on_image=None) -> str:
+                  input_handler=None, on_image=None, on_result=None) -> str:
         from .mcp_context import request_complete
         try:
             res = request_complete(self, "tools/call", {"name": tool, "arguments": arguments},
@@ -1701,6 +1741,12 @@ class MCPServer:
                                    on_log=on_log, input_handler=input_handler)
         except MCPInputError as exc:
             return f"ERROR: MCP tool '{tool}' failed: {exc}"
+        if on_result is not None:
+            # MCP Apps: the whole result (content, structuredContent, _meta) for the tool's card, before it is text.
+            try:
+                on_result(res)
+            except Exception:
+                pass
         parts = []
         image_count = 0
         for block in (res.get("content") or []):
@@ -2183,7 +2229,7 @@ class MCPManager:
 
     def call(self, full_name: str, arguments: dict,
              cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
-             input_handler=None, on_image=None) -> str:
+             input_handler=None, on_image=None, on_result=None) -> str:
         with self._catalog_state_lock:
             route = self._routes.get(full_name)
             server = self.servers.get(route[0]) if route else None
@@ -2209,9 +2255,17 @@ class MCPManager:
             except MCPInputError as exc:
                 return f"ERROR: MCP resource operation failed: {exc}"
         image_kwargs = {"on_image": on_image} if on_image is not None else {}
+        if on_result is not None:
+            image_kwargs["on_result"] = on_result
         return server.call_tool(tool, arguments, cancel=cancel,
                                 on_progress=on_progress, on_log=on_log,
                                 input_handler=input_handler, **image_kwargs)
+
+    def route_of(self, full_name: str) -> tuple[str, str] | None:
+        """(server name, tool) an exposed route calls, or None (MCP Apps: which tool a call ran, for its card)."""
+        with self._catalog_state_lock:
+            route = self._routes.get(full_name)
+        return tuple(route) if route and full_name not in getattr(self, "_context_routes", {}) else None
 
     def context_route(self, server_name: str, kind: str) -> str:
         operation = {"resources": "read_resource", "prompts": "get_prompt"}.get(kind)

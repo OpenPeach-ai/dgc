@@ -289,7 +289,7 @@ class LoginPass:
         if not host or not (host in self.hosts or (not self.exact and site_of(host) == self.site)):
             return False
         from .pip_computer_box import carries_card_number
-        if carries_card_number(post):
+        if carries_card_number(post, loose=True):
             return False
         return carries_value(post, content_type, self.values)
 

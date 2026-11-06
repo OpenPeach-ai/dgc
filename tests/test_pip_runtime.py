@@ -1,6 +1,7 @@
 """Deterministic local supervisor startup, using controlled processes/events."""
 import json
 import os
+import time
 from pathlib import Path
 import subprocess
 import tempfile
@@ -48,15 +49,33 @@ class LocalStartupTests(unittest.TestCase):
              patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
             self.assertEqual(runtime.start_runtime(self.config), self.online)
 
-    def test_older_live_supervisor_refuses_new_runs_and_duplicate_start(self):
-        old = {**self.online, "version": None}
-        with patch.object(runtime, "_state", return_value=(old, "old")), \
+    def test_a_busy_runner_from_an_older_install_is_left_to_finish_and_says_so(self):
+        for version, words in ((None, "an older DGC (an earlier version)"), ("0.0.1", "an older DGC (0.0.1)"),
+                               (__version__ + "+other", f"another DGC install ({__version__}+other)")):
+            old = {**self.online, "version": version}
+            with self.subTest(version=version), patch.object(runtime, "_state", return_value=(old, "old")), \
+                 patch.object(runtime, "supervisor_is_live", return_value=True), \
+                 patch("dgc.pip_daemon.pause_if_idle", return_value=False) as pause, \
+                 patch.object(runtime, "resume_runtime", side_effect=AssertionError("never stopped")), \
+                 patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
+                for operation in (runtime.start_runtime, runtime.require_supervisor):
+                    with self.assertRaises(RegistryError) as caught:
+                        operation(self.config)
+                    self.assertEqual(caught.exception.code, "runner_version_mismatch")
+                    self.assertIn(f"is from {words} and is still working", str(caught.exception))
+                    self.assertIn(f"moves it to this one ({__version__})", str(caught.exception))
+                    self.assertNotIn("Keep Pips running", str(caught.exception))
+                self.assertEqual(pause.call_count, 2)
+
+    def test_a_runner_from_a_newer_install_is_never_replaced_by_this_one(self):
+        newer = {**self.online, "version": "999.0.0"}
+        with patch.object(runtime, "_state", return_value=(newer, "old")), \
              patch.object(runtime, "supervisor_is_live", return_value=True), \
+             patch("dgc.pip_daemon.pause_if_idle", side_effect=AssertionError("never stopped")), \
              patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no duplicate")):
             for operation in (runtime.start_runtime, runtime.require_supervisor):
-                with self.subTest(operation=operation.__name__), self.assertRaises(RegistryError) as caught:
+                with self.assertRaisesRegex(RegistryError, r"newer DGC \(999\.0\.0\) than this one"):
                     operation(self.config)
-                self.assertEqual(caught.exception.code, "runner_version_mismatch")
 
     def test_start_uses_same_package_and_independent_process_without_cloud(self):
         with patch.object(runtime, "_state", side_effect=[(self.offline, "old"), (self.online, "new")]), \
@@ -216,3 +235,107 @@ class LocalStartupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MovingTheRunnerTests(unittest.TestCase):
+    """After an update, a runner the editor started from the previous install keeps running it. When it is idle it is
+    stopped with the runtime stop alone and this install's starts; Stop is cleared again and no Pip is paused."""
+
+    def setUp(self):
+        import threading
+        from dgc import pip_daemon
+        from dgc.workspace_registry import WorkspaceRegistry
+        temp = tempfile.TemporaryDirectory(prefix="dgc-runtime-move-")
+        self.addCleanup(temp.cleanup)
+        self.directory = Path(temp.name)
+        self.config = Mock(project_root=self.directory)
+        self.config.get.side_effect = lambda key, default=None: True if key == "pips_enabled" else default
+        for target in ("dgc.pip_runtime.state_directory", "dgc.pip_daemon.state_directory"):
+            p = patch(target, return_value=self.directory); p.start(); self.addCleanup(p.stop)
+        p = patch("dgc.pips._require_runner_platform"); p.start(); self.addCleanup(p.stop)
+        self.registry = WorkspaceRegistry(self.directory)
+        self.addCleanup(self.registry.close)
+        self.lease = named_process_lock("pips-supervisor", str(self.directory))
+        self.daemon, self.threading = pip_daemon, threading
+
+    def supervisor(self, version, instance):
+        record = {"schema_version": 1, "instance_id": instance, "version": version, "pid": os.getpid(),
+                  "started_at": self.registry.clock(), "heartbeat_at": self.registry.clock(), "status": "running"}
+        with self.registry.transaction():
+            self.daemon._write(self.registry, self.daemon.SUPERVISOR_KEY, record)
+
+    def old_runner(self):
+        """Holds the lease, as the previous install's runner does, until the runtime stop is set."""
+        self.supervisor("0.50.1", "supervisor_old")
+        self.assertTrue(self.lease.acquire(blocking=False))
+        seen = []
+
+        def run():
+            from dgc.workspace_registry import WorkspaceRegistry
+            with WorkspaceRegistry(self.directory) as registry:
+                while not self.daemon.is_runtime_paused(registry):
+                    time.sleep(0.02)
+                seen.append(True)
+            self.lease.release()
+        thread = self.threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        return seen
+
+    def this_install_starts(self, *args, **kwargs):
+        self.supervisor(__version__, "supervisor_new")
+        self.assertTrue(self.lease.acquire(blocking=False))
+        self.addCleanup(self.lease.release)
+        process = Mock()
+        process.poll.return_value = None
+        return process
+
+    def test_an_idle_runner_from_the_previous_install_is_moved_to_this_one(self):
+        stopped = self.old_runner()
+        with patch.object(runtime.subprocess, "Popen", side_effect=self.this_install_starts) as spawn, \
+             patch.object(runtime.threading, "Thread"):
+            status = runtime.require_supervisor(self.config)
+        self.assertEqual(stopped, [True], "the old runner was stopped")
+        spawn.assert_called_once()
+        self.assertEqual(status["version"], __version__)
+        self.assertFalse(self.daemon.is_runtime_paused(self.registry), "Stop is cleared again")
+        self.assertIsNone(self.registry.db.execute("SELECT 1 FROM pips WHERE status='paused'").fetchone())
+
+    def test_a_queued_run_keeps_it_running_and_nothing_is_stopped(self):
+        self.supervisor("0.50.1", "supervisor_old")
+        self.assertTrue(self.lease.acquire(blocking=False))
+        self.addCleanup(self.lease.release)
+        db = self.registry.db
+        db.execute("PRAGMA foreign_keys=OFF")
+        with self.registry.transaction():
+            db.execute("INSERT INTO pip_runs(id,pip_id,workspace_id,binding_id,idempotency_key,requested_by,manifest,"
+                       "status,created_at) VALUES('run_'||hex(randomblob(16)),'pip_x','ws_x','b','k','device','{}',"
+                       "'queued',?)", (self.registry.clock(),))
+        db.execute("PRAGMA foreign_keys=ON")
+        with patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("no second runner")):
+            for operation in (runtime.start_runtime, runtime.require_supervisor):
+                with self.assertRaisesRegex(RegistryError, "is still working"):
+                    operation(self.config)
+        self.assertFalse(self.daemon.is_runtime_paused(self.registry), "never stopped")
+        self.assertEqual(db.execute("SELECT status FROM pip_runs").fetchone()[0], "queued")
+
+    def test_with_keep_pips_running_on_its_service_starts_this_installs_runner(self):
+        stopped = self.old_runner()
+        with patch.object(runtime, "_keep_running", return_value={"on": True, "outdated": False}), \
+             patch("dgc.pip_keep_running.set_on", side_effect=lambda *a, **k: self.this_install_starts()) as service, \
+             patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("the service starts it")):
+            status = runtime.start_runtime(self.config)
+        self.assertEqual(stopped, [True])
+        service.assert_called_once_with(True, runner_online=False)
+        self.assertEqual(status["version"], __version__)
+        self.assertFalse(self.daemon.is_runtime_paused(self.registry))
+
+    def test_a_service_still_on_the_previous_install_is_moved_before_anything_else_starts(self):
+        # Its runner can't start (it refuses the database this install moved on): nothing is live.
+        self.supervisor("0.50.1", "supervisor_old")
+        with patch.object(runtime, "_keep_running", return_value={"on": True, "outdated": True}), \
+             patch("dgc.pip_keep_running.set_on", side_effect=lambda *a, **k: self.this_install_starts()) as service, \
+             patch.object(runtime.subprocess, "Popen", side_effect=AssertionError("the service starts it")):
+            status = runtime.start_runtime(self.config)
+        service.assert_called_once_with(True, runner_online=False)
+        self.assertEqual(status["version"], __version__)

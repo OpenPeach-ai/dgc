@@ -175,7 +175,7 @@ test('the thinking control uses this Pip’s face at every effort stop',async(t)
   const sprite=`data:image/webp;base64,${readFileSync(new URL('../media/pips/plush-bodies.webp',import.meta.url)).toString('base64')}`;
   const control=x.d.querySelector('.composer-effort-control').outerHTML.replaceAll('../media/pips/plush-bodies.webp',sprite);
   await page.setContent(`<style>${plush}\n${css}</style><main class="pip-app-root" style="width:330px;padding:12px"><div class="composer-model-menu" style="position:relative;bottom:auto">${control}</div></main>`);
-  await page.locator('.composer-effort-face image').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
+  await page.locator('.composer-effort-face .dgc-plush-rig > image:first-child').evaluate(async(el)=>{const img=new Image();img.src=el.getAttribute('href');await img.decode();});
   for(const step of [0,2,4]){
    await page.locator('#chat-thinking').evaluate((el,value)=>{el.value=String(value);const control=el.closest('.composer-effort-control');control.style.setProperty('--effort',`${value*25}%`);control.style.setProperty('--face-offset',`${18-value*9}px`);},step);
    const bounds=await page.evaluate(()=>{const a=document.querySelector('.composer-effort-face').getBoundingClientRect(),s=document.querySelector('#chat-thinking').getBoundingClientRect();return{face:a.x+a.width/2,trackLeft:s.x,trackRight:s.right};});
@@ -212,6 +212,23 @@ test('a read that overlaps the prompt box saving its own choice never takes the 
  x.choose('#chat-context','131072');await x.drain(hold);
  x.receive({type:'pipsVisibility',visible:true});await x.drain({set_pip_chat_options:()=>undefined});    // a read while that save waits
  assert.equal(x.control('#chat-context').value,'131072');
+});
+
+test('rapid Pip option changes save in order and the last thinking level survives a reload',async()=>{
+ const x=setup({api:66,chatControls:{...controls(),context_max:1048576}});await x.select('a');
+ const hold={set_pip_chat_options:()=>undefined};
+ x.choose('#chat-context','65536');await x.drain(hold);
+ x.choose('#chat-thinking','high');await x.drain(hold);
+ assert.equal(x.requests('set_pip_chat_options').length,1,'the newer choice waits for the first save');
+ const first=x.requests('set_pip_chat_options')[0];
+ x.answer(first,{chat_controls:{...controls({context_size:65536,thinking:'off'}),context_max:1048576}});
+ await x.drain(hold);
+ const second=x.requests('set_pip_chat_options')[1];
+ assert.equal(second.request.chat_options.thinking,'high');
+ x.answer(second,{chat_controls:{...controls({context_size:65536,thinking:'high'}),context_max:1048576}});
+ await x.drain();
+ x.receive({type:'pipsVisibility',visible:true});await x.drain({list_pip_messages:()=>({pip_id:'a',workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0,continuity:null,chat_controls:{...controls({context_size:65536,thinking:'high'}),context_max:1048576}})});
+ assert.equal(x.d.querySelector('#chat-thinking').value,'3');
 });
 
 test('before API 47 a choice is for the next reply only and nothing is saved',async()=>{

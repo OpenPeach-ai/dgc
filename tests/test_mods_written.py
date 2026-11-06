@@ -130,6 +130,30 @@ class WrittenMods(HarnessCase):
         self.assertEqual(self.entry(listed, "watcher")["state"], "needs_allow")
         self.assertNotIn("watcher", host.running)
 
+    def test_a_written_mod_that_cant_start_is_said_to_the_model_and_in_the_list(self):
+        """A mod DGC wrote that was started and couldn't run: the model hears why in the step's result, and the mods
+        list says it, never an empty answer (seen 11-02 as every Mods call coming back with reason '')."""
+        h, host = self.chat()
+        self.turn(h, "write a counter mod", *writes("counter"))
+        [offer] = h.of("mod_offer")
+        self.answer(h, offer, True)
+        broken = [ToolCall("m-broken", "write_file", {"path": "mods/broken/dgc-mod.json", "content": manifest("broken")}),
+                  ToolCall("c-broken", "write_file", {"path": "mods/broken/main.py",
+                                                      "content": "raise SystemExit('boom: no config')\n"})]
+        self.turn(h, "write a broken mod", *broken)
+        said = [str(m.get("content")) for m in h.agent.messages if m.get("role") == "tool"
+                and m.get("tool_call_id") == "c-broken"]
+        self.assertEqual(len(said), 1)
+        self.assertIn("The mod Broken couldn't start:", said[0])
+        if BOXED:
+            self.assertIn("boom: no config", said[0])
+        entry = self.entry({"mods": host.mods()}, "broken")
+        self.assertEqual(entry["state"], "crashed")
+        self.assertTrue(entry["error"].strip())
+        others = [str(m.get("content")) for m in h.agent.messages if m.get("role") == "tool"
+                  and m.get("tool_call_id") in ("m-counter", "c-counter")]
+        self.assertFalse(any("couldn't start" in text for text in others), "a mod that runs adds nothing")
+
     def test_not_now_runs_nothing_asks_nothing_more_and_the_list_offers_an_allow(self):
         h, host = self.chat()
         self.turn(h, "write a counter mod", *writes("counter"))
@@ -236,6 +260,116 @@ class WrittenMods(HarnessCase):
         (root / "node_modules" / "x").mkdir(parents=True)
         (root / "node_modules" / "x" / "dgc-mod.json").write_text("{}")
         self.assertIsNone(bridge.mod_folder(root, "node_modules/x/dgc-mod.json"))
+
+
+def write_mod(folder: Path, name: str, who: str, **caps) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "dgc-mod.json").write_text(manifest(name, **caps))
+    (folder / "main.py").write_text(CODE.replace("{title} here", who))
+    return folder
+
+
+class AnAllowIsForOneMod(unittest.TestCase):
+    """An Allow holds for the mod it was given to, never for another folder that takes its name: a folder DGC wrote
+    that renames itself to an installed mod's name is asked about again and gets none of that mod's grants."""
+
+    def setUp(self):
+        from dgc.mods import catalog
+        home = Path(os.path.realpath(tempfile.mkdtemp(prefix="dgc-mods-allow-")))
+        env = patch.dict(os.environ, {"DGC_HOME": str(home)})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("DGC_SAFE_MODE", None)
+        self.project = home / "project"
+        self.project.mkdir()
+        self.installed = catalog.install_folder(write_mod(home / "src-notes", "notes", "the installed notes",
+                                                          reads=["project", "transcript"],
+                                                          network=["api.notes.example"]))
+        consent.allow(self.installed, unsandboxed=True)
+
+    def host(self):
+        host = ModHost(project_root=self.project, session_id="s1", surface="work")
+        self.addCleanup(host.stop)
+        return host
+
+    def test_a_written_folder_renamed_to_an_allowed_mods_name_gets_nothing_of_it(self):
+        from dgc.mods import catalog
+        from dgc.mods.manifest import load
+        host, toasts = self.host(), []
+        host.on_ui = lambda kind, data: toasts.append(data) if kind == "toast" else None
+        written = write_mod(self.project / "mods" / "x", "x", "model code")
+        offer = host.wrote(str(written))
+        self.assertIsNotNone(offer)
+        host.answer_offer(offer["id"], False)                     # Not now: nothing runs
+        write_mod(written, "notes", "model code", reads=["project", "transcript"], network=["api.notes.example"])
+        self.assertIsNone(host.wrote(str(written)))
+        self.assertEqual([t["name"] for t in toasts], ["notes"], "said: it can't run here under that name")
+        self.assertNotIn(str(written.resolve()), [str(Path(e).resolve()) for e in host.extra])
+        notes = next(m for m in host.mods() if m["name"] == "notes")
+        self.assertFalse(notes["dev"])
+        self.assertEqual(str(catalog.find("notes", host.extra).folder), str(self.installed.folder))
+        renamed = load(written)
+        self.assertFalse(consent.allowed(renamed))
+        self.assertIsNone(consent.record_for(renamed), "not its grants, nor its unsandboxed")
+        self.assertFalse(host._may_run(renamed))
+        if BOXED:
+            host.reload("notes")
+            end = time.monotonic() + 10
+            while time.monotonic() < end and not host.ui_state.get("notes"):
+                time.sleep(0.05)
+            self.assertEqual(str(host.running["notes"].manifest.folder), str(self.installed.folder))
+            self.assertIn("the installed notes", json.dumps(host.ui_state.get("notes")))
+
+    def test_a_written_folder_allowed_then_renamed_stops_and_asks_again(self):
+        from dgc.mods.manifest import load
+        host = self.host()
+        written = write_mod(self.project / "mods" / "x", "x", "model code")
+        offer = host.wrote(str(written))
+        host.answer_offer(offer["id"], True)
+        self.assertTrue(host._may_run(load(written)))
+        write_mod(written, "notes", "model code", reads=["project"])
+        self.assertIsNone(host.wrote(str(written)))
+        self.assertNotIn("x", host.running)
+        self.assertNotIn("x", host.written)
+        self.assertNotIn("notes", host.written)
+        write_mod(written, "jotter", "model code", reads=["project"])
+        again = host.wrote(str(written))                          # its own name again: asked, as it asks for more
+        self.assertIsNotNone(again)
+        self.assertEqual(again["name"], "jotter")
+        self.assertEqual(host.written, {"jotter": str(written.resolve())})
+
+    def test_the_users_own_dev_folder_of_that_name_asks_for_its_own_allow(self):
+        from dgc.mods.manifest import load
+        dev = load(write_mod(self.project / "dev-notes", "notes", "my dev copy", reads=["project", "transcript"],
+                             network=["api.notes.example"]))
+        self.assertTrue(consent.allowed(self.installed))
+        self.assertFalse(consent.allowed(dev))
+        self.assertEqual(consent.missing(dev), dev.grants())
+        host = ModHost(project_root=self.project, session_id="s1", surface="work", extra=(str(dev.folder),))
+        self.addCleanup(host.stop)
+        self.assertIsNone(host.wrote(str(dev.folder)), "the user's own dev folder is never asked about")
+        self.assertFalse(host._may_run(dev))
+        host.grant_session(dev)                                   # dgc mods dev: the user's own Allow, this session
+        self.assertTrue(host._may_run(dev))
+        consent.allow(dev)
+        self.assertTrue(consent.allowed(dev))
+        self.assertFalse(consent.allowed(self.installed), "one record per name: it now holds for the dev folder")
+
+    def test_an_allow_kept_before_folders_were_recorded_holds_for_the_installed_copy_and_dgcs_own_only(self):
+        from dgc.mods import catalog
+        from dgc.mods.manifest import load
+        with consent.write_lock():
+            data = consent._read()
+            data["notes"].pop("folder")
+            consent._write(data)
+        self.assertTrue(consent.allowed(self.installed))
+        other = load(write_mod(self.project / "other", "notes", "another", reads=["project", "transcript"],
+                               network=["api.notes.example"]))
+        self.assertFalse(consent.allowed(other))
+        builtin = catalog.builtins()[0]
+        consent.allow(builtin)
+        self.assertEqual(consent.record(builtin.name)["folder"], "builtin", "DGC's own: wherever DGC is installed")
+        self.assertTrue(consent.allowed(builtin))
 
 
 class TheProtocol(unittest.TestCase):

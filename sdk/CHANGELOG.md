@@ -1,5 +1,92 @@
 # DGC SDK changelog
 
+## 0.9.0 — 2026-11-06
+
+- Pips API 72 adds local Personal and Project Pip workflow list, detail, create and status controls in both SDKs. A workflow routes exact Personal results or a Project finding through two to four Pips in reviewed or unattended mode without granting the receiving Pip any new external action permission.
+- Pips API 73 accepts a text message during one running Personal Pip conversation as a mid-turn update. It stays in that run's history; no second reply starts.
+- A message to the Primary Core Pip can propose up to three Personal Pip setup cards. Apps use the existing Pips API 23 `list_pip_setups`, `get_pip_setup`, `accept_pip_setup` and `reject_pip_setup` operations to present and decide them; no new SDK mutation or implicit approval is added.
+Pairs with CLI 0.51.0. Linux, macOS (Apple silicon), and Windows through WSL 2 are the
+release test targets. Native Windows remains experimental.
+
+- The protocol copy has `resume_session`'s `saved_mode` (`ready.capabilities.resume_saved_mode`), which an editor
+  sends when the person reopens a chat. The SDK never sends it, so an app's resume still brings back a session's mode
+  only when it asks no less than the app's own.
+- `session.router` (Python, sync and async, and TypeScript): DGC Router, the user's other computers that run models,
+  for sub-agents and Pips. `status(refresh=)`, `update(action, ...)` (`turn_on`, `turn_off`, `add_system`,
+  `edit_system`, `remove_system`, `enable_system`, `disable_system`, `set_model`, `set_jobs`, `set_when_busy`,
+  `apply_suggestion`), `add_system(base_url, ...)`, `set_key(system, key)` / `setKey` (the only way a key travels; it
+  is never read back), `probe(system, model=, checks=)` and `find()`. Needs `capabilities["router"]`; an older CLI
+  raises `DGCUnsupportedError`.
+  - `set_hardware(system, url, token=)` / `setHardware(system, url, { token })` sets up a system's hardware readout,
+    from an exporter the user runs (node_exporter, NVIDIA DCGM, AMD's device-metrics exporter, Glances, Netdata) or a
+    `dgc node`. The token is the only way a `dgc node` pairing token travels, and it is never read back.
+    `suggest(system, context=)` gives workers per model with the memory arithmetic, and
+    `update("apply_suggestion", system=, context=)` uses it. Both need the CLI's `router_hardware` and
+    `router_suggest` commands (`capabilities["router"]["commands"]`); without them they raise `DGCUnsupportedError`
+    before anything is sent.
+  - A context size can be given as 16384, "16384", "16,384", "16K" or "16k" (Python `update(..., context=)`,
+    `add_system(context=)` and `suggest(context=)`; TypeScript `update`, `addSystem` and `suggest`). One that isn't
+    a size raises `DGCConfigError` saying why.
+  - A router status (`status()`, `router_changed`) lists, per system, `available` (every model its server serves,
+    as DGC last read it) and the server's own room (`server_slot_context`, `server_kv_tokens`) when
+    `capabilities["router"]["status"]` is 2. `capabilities["router"]["pips_default"]` says the CLI takes
+    `pips_model` `"router"` or `"router:<system>/<model>"` in `set_config`, so every Pip on Default runs on the
+    Router.
+  - `run(..., system=, system_model=)` and `stream(...)` in Python send the run's helpers to one system, until that
+    turn ends; a helper the model names a system for still goes there. `router.prefer(system, model)` does the same
+    before a run, in both SDKs.
+  - Pips API 70: a Pip's `model_choice` takes `{"mode": "router"}` (any system with the Pips job) or
+    `{"mode": "router", "system": id, "model": name}`. It is refused before it is sent by a runtime below API 70.
+- `session.images` (Python, sync and async, and TypeScript): the user's image generators. `generate(prompt, ...)`
+  makes pictures now, each with a sidecar, in DGC's own folder or in the project with `save_to`. A generator that
+  asks before each image (a paid one) runs only with `approve=True`; otherwise the answer carries its card and
+  `error.kind` `needs_approval`. Also `generators(refresh=)`, `add(provider, ...)`, `update(action, ...)`, `set_key`
+  / `setKey` (never read back), `remove`, `set_default`, `test` and `library`. Needs `capabilities["images"]`; an
+  older CLI raises `DGCUnsupportedError`.
+- `session.videos` (Python, sync and async, and TypeScript): `generate(prompt, approve=True)` starts a video on one of
+  the user's video generators and follows the job until it is made, failed or stopped (`wait=False` returns the started
+  job). Also `generators()` (a generator that makes only videos says its video price in `price`, as `video.price_per_s`
+  does, "about $0.03/s ($0.15 a 5 s clip at 720p)"), `jobs()`, `job()`, `wait()`, `stop()` and `library()`. Without
+  `approve` the answer has `error.kind` `needs_approval` and the card with its price, and a clip that would pass the
+  generator's monthly limit is never sent (`over_limit`). `wait()` raises `DGCTimeoutError` when its timeout passes and
+  the job is still running. Needs `capabilities["videos"]`.
+- `session.cards` (Python, sync and async, and TypeScript): plugins' own cards (MCP Apps). `watch()` opts in, and a
+  tool with a card then shows it as an `mcp_app_card` event (history replays it). `get(card_id)` gives its page, its
+  whole result and the exact CSP header DGC serves it with. `call(card_id, method, params)` passes what the card asks
+  of its server (`tools/call`, `resources/read`) and returns `{"result"}`, `{"error"}` or `{"ask"}`, DGC's Allow card,
+  which `answer(asked, "once" | "always" | "deny")` decides; pass `answer` the question `call` returned, with its
+  `request_id`, and `"always"` only when the question offers it. `context(card_id, content, structured)` is the
+  card's `ui/update-model-context`, and `message_text(card, text)` / `Cards.messageText` labels a card's `ui/message`
+  as the editor does. Needs `capabilities["mcp_apps"]`; an older CLI raises `DGCUnsupportedError`.
+- Token usage by system: `session.get_usage(range, system=...)` (Python, sync and async) and
+  `session.getUsage(range, system)` (TypeScript) keep one system's usage, a DGC Router system, this computer or a
+  cloud service, by a row's `system_id` or a system's name. Each `by_model` row now names where it ran (`system`,
+  `system_id`, `system_kind`; an Ollama cloud model is "Ollama Cloud"). Needs `capabilities["usage_by_system"]`; an
+  older CLI raises `DGCUnsupportedError` and is never sent the field.
+- An `agents` item (`list_agents` / `listAgents`) may carry `system`, the DGC Router system the helper ran on, also
+  for a reopened chat. It is a key inside the item, so readers that don't look for it are unaffected.
+- `PermissionRequest.choices` (Python, a tuple) and `choices` (TypeScript) are the answers a permission request
+  takes. A DGC Router change, a look on the network and a call one of the user's own ask rules asks about offer only
+  `once` and `deny` (`capabilities["permission_choices"]`), and an `always` answer to one counts as once.
+- Pips API 71: a Personal Pip's chat reply that started a video carries `videos`, each the video's job as DGC last
+  saw it; `pips.read` and `pips.mutate` return it with the rest of the reply.
+- `extract_generative_ui` / `extractGenerativeUi` read a number or true/false in a card's text field (a metric's
+  value, a table cell, a label) as its text, as the editor draws it, and return it as a string. Before, such a card
+  was ignored while the editor showed it.
+- The vendored editor protocol knows the CLI's new commands and events: `router_*`, `images_*`, `videos_*`,
+  `video_job`, `video_jobs`, the plugin card ones (`watch_mcp_apps`, `mcp_app_*`), `subagent_settings`,
+  `router_thinking` and `chatdgc_waiting`. The TypeScript SDK's `KNOWN_EVENTS` keeps the new events. No field was
+  added to an existing event.
+- Fixed: Python `AsyncChat.stream` no longer sends a cancel after a finished reply when you stop at the `"reply"`
+  event. That cancel could land after your next message and stop its reply.
+- Fixed: TypeScript `extractJson` (an `output_schema` run's final text) reads the first fenced block that holds JSON,
+  as Python's `extract_json` does, so a reply that shows another block first (the commands it ran) no longer fails.
+  Both read the same way now: a fence marked JSON in capitals is read, and NaN or Infinity is refused, in Python too.
+- Fixed: the Python and TypeScript Generative UI readers (`extract_generative_ui`, `extractGenerativeUi`) give the
+  same cards for the same reply. A step's state is a word or absent (null or a list is refused in both), a choice's
+  reply is checked with its spaces trimmed, NaN is refused in Python too, and lengths count characters in both, so
+  a label of emoji is read alike.
+
 ## 0.8.0 — 2026-11-01
 
 Pairs with CLI 0.50.0.

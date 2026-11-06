@@ -104,6 +104,28 @@ def usual(model: str, endpoint: str) -> float | None:
     return waits[max(0, math.ceil(0.9 * len(waits)) - 1)]
 
 
+def usual_for(model: str, base_url: str) -> float:
+    """How long ``model`` usually takes to start on the server at ``base_url``, whichever of its APIs DGC asked it
+    through (its waits are kept per request URL: /api/chat, /v1/chat/completions …); 0 when DGC hasn't seen it
+    enough. For saying, before the model is asked, how long the wait is likely to be."""
+    try:
+        from urllib.parse import urlsplit
+        from .model_watch import safe_endpoint
+        parts = urlsplit(safe_endpoint(str(base_url or "")))
+        server = f"{parts.scheme}://{parts.netloc}"
+        best = 0.0
+        for key, entry in _load().items():
+            name, _, endpoint = key.rpartition("@")
+            if name != model or not (endpoint == server or endpoint.startswith(server + "/")):
+                continue
+            waits = sorted(entry.get("waits", []))
+            if len(waits) >= MIN_SAMPLES:
+                best = max(best, waits[max(0, math.ceil(0.9 * len(waits)) - 1)])
+        return best
+    except Exception:                        # noqa: BLE001 - only a hint: never fails what asks
+        return 0.0
+
+
 def notice_after(configured: float, model: str, endpoint: str, first_token_s: float = 0.0) -> tuple[float, float]:
     """``(threshold, usual)``: when to say "No response from the model" for this model's first token, and its
     usual wait (0 when unknown). 0 configured stays 0: the notice is off."""

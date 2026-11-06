@@ -174,6 +174,24 @@ class DesktopBoxTests(unittest.TestCase):
         stale.close()
         self.assertFalse(desktop.running())
 
+    def test_running_check_never_opens_a_vnc_connection(self):
+        runtime = self.base / 'runtime'
+        (runtime / 'sock').mkdir(parents=True)
+        desktop = pip_screen.Desktop(runtime, self.base / 'Files', 'Pip')
+        desktop.proc = types.SimpleNamespace(poll=lambda: None)
+        desktop._started_at_ns = time.time_ns()
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(str(desktop.vnc_socket))
+        listener.listen(2)
+        listener.settimeout(0.1)
+        try:
+            for _ in range(20):
+                self.assertTrue(desktop.running())
+            with self.assertRaises(socket.timeout):
+                listener.accept()
+        finally:
+            listener.close()
+
     def test_the_desktop_terminal_is_online_only_through_the_computers_egress(self):
         # Like Grok's: the desktop's Terminal app reaches public sites through DGC's egress proxy, the
         # same way out as the browser; the box itself still has no network.

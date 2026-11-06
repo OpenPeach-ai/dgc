@@ -60,3 +60,14 @@ test('the Pips view answers a logo request with the logos the host found, for va
   bridge.receive({type: 'pipsPluginLogos', plugins: ['../x']});
   assert.equal(posted.length, 1, 'nothing valid: no reply');
 });
+
+test('every plugin the catalog lists has a logo DGC ships (Higgsfield, Runway and Cardboard showed a plug)', () => {
+  const catalog = JSON.parse(readFileSync(path.join(here, '..', '..', 'dgc', 'plugin_catalog.json'), 'utf8'));
+  const items = Array.isArray(catalog) ? catalog : (catalog.plugins || catalog.items || []);
+  const missing = items.filter((p) => !p.unlisted && !p.name?.startsWith('dgc-'))
+    .filter((p) => !pluginLogoData(extension, {name: p.name, developer: p.developer, icon: p.icon}))
+    .map((p) => p.name);
+  assert.deepEqual(missing, []);
+  for (const name of ['higgsfield', 'runway', 'cardboard'])
+    assert.match(pluginLogoData(extension, {name}), /^data:image\/png;base64,/, name);
+});

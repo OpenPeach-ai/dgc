@@ -103,6 +103,10 @@ class SpeakableTests(unittest.TestCase):
         self.assertIn("See the guide.", said)
         self.assertIn("Track it daily.", said)
 
+    def test_the_line_a_pip_puts_between_short_messages_is_not_read(self):
+        said = " ".join(speakable("Hi there.\n---\nYour inbox has 3 new emails.\n\n  ---  \n\nWant a summary?\n***"))
+        self.assertEqual(said, "Hi there. Your inbox has 3 new emails. Want a summary?")
+
     def test_sentences_are_joined_into_short_pieces_and_a_question_ends_one(self):
         chunks = speakable("One. Two. Three? Four. " + "Long sentence here. " * 40)
         self.assertTrue(chunks[0].endswith("Three?"), chunks[0])

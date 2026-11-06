@@ -1,4 +1,5 @@
 """Identical terminal cards must keep their own click handlers after fragment caching."""
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -8,6 +9,33 @@ from dgc.tui import TUI
 
 
 class ClickIdentityTests(unittest.TestCase):
+    def test_browser_card_keeps_its_session_after_selection_changes(self):
+        for running in (False, True):
+            with self.subTest(running=running):
+                tui = object.__new__(TUI)
+                owner = SimpleNamespace(_turn=threading.Event(), _queue=[],
+                                        _queue_lock=threading.Lock(), _wake_turn=False)
+                selected = SimpleNamespace(_turn=threading.Event(), _queue=[],
+                                           _queue_lock=threading.Lock())
+                if running:
+                    owner._turn.set()
+                else:
+                    selected._turn.set()
+                tui._sessions, tui._active_idx = [owner, selected], 1
+                tui._tls = threading.local()
+                scheduled, submitted = [], []
+                tui.app = SimpleNamespace(loop=SimpleNamespace(call_soon_threadsafe=scheduled.append))
+                tui._submit = lambda text: submitted.append((tui._cur_session(), text))
+                tui._flash = lambda text: None
+                tui._invalidate = lambda: None
+                tui._card_message(owner, "from the open card")
+                scheduled.pop()()
+                self.assertEqual(submitted, [] if running else [(owner, "from the open card")])
+                self.assertEqual(owner._queue, [("from the open card", False)] if running else [])
+                self.assertEqual(selected._queue, [])
+                self.assertIs(tui._cur_session(), selected)
+                self.assertFalse(hasattr(tui._tls, "session"))
+
     def test_identical_tool_cards_expand_independently(self):
         tui = object.__new__(TUI)
         tui._width, tui._height, tui._scroll_off = 100, 40, 0

@@ -156,18 +156,29 @@ def mod_folder(project_root, path) -> str | None:
     return None
 
 
-def wrote(agent, path) -> None:
+def wrote(agent, path) -> str:
     """The model wrote a file: when it is part of a mod's folder in the project, the session's mods hear of it (the
-    first time, the user is asked whether to turn on the mods DGC writes). Never fails a step."""
+    first time, the user is asked whether to turn on the mods DGC writes). Never fails a step.
+
+    What the model should know when that mod was started and couldn't run ("The mod Counter couldn't start: …"), so
+    it can fix it rather than believe it works; "" otherwise."""
     host = getattr(agent, "mods", None)
     if host is None or getattr(agent, "depth", 0):
-        return
+        return ""
     try:
         folder = mod_folder(getattr(agent.config, "project_root", None), path)
-        if folder:
-            host.wrote(folder)
+        if not folder:
+            return ""
+        host.wrote(folder)
+        from .manifest import load
+        name = load(folder).name
+        run = host.running.get(name)
+        if run is not None and run.proc.state == "crashed" and str(run.manifest.folder) == str(Path(folder).resolve()):
+            why = " ".join(str(run.proc.error or "it stopped with no error").split())[:400]
+            return f"The mod {run.manifest.title} couldn't start: {why} It isn't running; fix it and write it again."
     except Exception:                                    # noqa: BLE001 -- a mod's trouble never stops a step
         pass
+    return ""
 
 
 def turn_complete(agent) -> None:

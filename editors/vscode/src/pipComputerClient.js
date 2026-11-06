@@ -12,7 +12,7 @@ const TYPES=['core','scout','lens','patch','rook','pulse','lock','quill'];
 // The computer opens on its desktop with nothing open, like a computer you switch on (a user:
 // "show default OS screen, with nothing opened"). The browser comes up when you open it from the
 // dock, or by itself when the Pip starts using it, so you can watch.
-const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',notice:'',
+const S={connected:false,apiVersion:0,generation:0,pip:null,app:'',open:[],computer:null,error:'',actionError:false,notice:'',
  view:null,viewError:'',files:{path:'',entries:[],total:0,more:false,selected:null,preview:null,error:''},
  terminal:{entries:[],error:'',running:false,draft:''},busy:false,
  // What you are typing in the address bar. Every new frame redraws the bar with the page's address,
@@ -29,6 +29,7 @@ const broker=requestBroker(message=>vscode.postMessage({...message,generation:S.
 const $=id=>document.getElementById(id);
 const send=(type,fields={})=>broker.request({type,...fields});
 let frameTimer=null,frameBusy=false,statusTimer=null,terminalTimer=null,desktopTimer=null,setupTimer=null,cleanupFace=null,pointerTimer=null,pointerBusy=false;
+let computerRefreshSerial=0;
 // The Pip's cursor: an arrow with its name, like a person's cursor in a shared document.
 const CURSOR=`<svg width="22" height="26" viewBox="0 0 22 26" aria-hidden="true" focusable="false"><path d="M2 2 L2 21 L7 16.5 L10.5 24 L13.5 22.6 L10 15.2 L17 15.2 Z" fill="#fff" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
 function cursorMarkup(){return `<span class="pc-cursor" id="pc-cursor" hidden aria-hidden="true">${CURSOR}<span class="pc-cursor-name">${esc(S.pip?.name||'Pip')}</span></span>`;}
@@ -98,7 +99,7 @@ function waitingMarkup(){
    // A login to save (API 56) is saved from its chat's card or its page: the form is there, never in this tab.
    ?a.summary.kind==='login'?`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])} Save it from the card in its chat.</span></div><div class="pc-actions"><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
    :`<article class="pc-hold"><div><strong>${esc(words[0])}</strong><span>${esc(words[1])}</span>${a.summary.kind==='text'&&typeof a.summary.text==='string'?`<pre class="pc-held-text">${esc(a.summary.text)}</pre>`:''}</div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">${esc(words[2])}</button><button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Not now</button></div></article>`
-   :`<article class="pc-hold"><div><strong>${a.summary.payment===true?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
+   :`<article class="pc-hold"><div><strong>${a.summary.payment===true?'Pay on':'Send a form to'} ${esc(a.summary.host)}</strong>${sendsMarkup(a.summary)}<span>${a.summary.payment===true?'Sends payment card details. ':''}Nothing has been sent.${a.summary.host==='dash.cloudflare.com'&&a.summary.method?.toUpperCase()==='POST'&&a.summary.path?.startsWith('/cdn-cgi/challenge-platform/h/b/precursor/')?' Always allow covers this Cloudflare verification route for this Pip, including its changing URL token.':''}</span></div><div class="pc-actions"><button type="button" data-send="${esc(a.id)}">Send once</button>${a.summary.payment===true?'':`<button type="button" class="pc-quiet" data-always="${esc(a.id)}">Always allow</button>`}<button type="button" class="pc-quiet" data-reject="${esc(a.id)}">Reject</button></div></article>`;}).join('')}</section>`;
 }
 function browserMarkup(){
  const v=S.view;
@@ -211,8 +212,12 @@ function render(){
 
 async function loadComputer(){
  if(!S.pip||!S.connected)return;
- try{S.computer=pipComputer((await send('get_pip_computer',{pip_id:S.pip.id})).computer,S.pip.id);S.error='';}
- catch(error){S.error=errorText(error);}
+ const pipId=S.pip.id,serial=++computerRefreshSerial;
+ try{
+  const computer=pipComputer((await send('get_pip_computer',{pip_id:pipId})).computer,pipId);
+  if(serial!==computerRefreshSerial||S.pip?.id!==pipId)return;
+  S.computer=computer;if(!S.actionError)S.error='';
+ }catch(error){if(serial!==computerRefreshSerial||S.pip?.id!==pipId)return;S.error=errorText(error);}
  render();
  void loadApps();
 }
@@ -267,11 +272,22 @@ async function runCommand(command){
  finally{S.terminal.running=false;render();$('pc-command')?.focus();}
 }
 async function decide(id,how){
- const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;S.busy=true;render();
+ const a=(S.computer?.actions||[]).find(x=>x.id===id);if(!a||S.busy)return;
+ ++computerRefreshSerial; // A poll started before this decision must not restore its old card.
+ S.busy=true;S.error='';S.actionError=false;S.notice='';render();
  try{
-  if(how==='always'){await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});S.notice='Sent, and allowed from now on for this site.';}
-  else{const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';}
- }catch(error){S.error=errorText(error);}
+  if(how==='always'){
+   const result=await send('always_allow_pip_computer_action',{action_id:a.id,expected_digest:a.digest});
+   const done=pipComputerAction(result.action,S.pip.id);
+   if(done.id!==a.id||done.status!=='approved'||!result.grant)throw Error('The approval did not complete. Refresh and try again.');
+   S.notice='Sent, and allowed from now on for this browser request.';
+  }else{
+   const d=pipComputerAction((await send('decide_pip_computer_action',{action_id:a.id,expected_digest:a.digest,approve:how==='send'})).action,S.pip.id);
+   if(d.id!==a.id||d.status!==(how==='send'?'approved':'rejected'))throw Error('The saved decision differs from your choice. Refresh and try again.');
+   S.notice=a.summary?.kind==='site'?(d.status==='approved'?'Allowed. It opens the site and carries on.':'Not now. It won’t open it.'):a.summary?.kind==='text'?(d.status==='approved'?'Allowed once. It carries on.':'Not now. It won’t do that.'):d.status==='approved'?'Approved. It is sent within a few seconds, exactly as shown.':'Rejected. Nothing was sent.';
+  }
+  S.computer={...S.computer,actions:S.computer.actions.filter(item=>item.id!==a.id)};
+ }catch(error){S.error=errorText(error);S.actionError=true;}
  finally{S.busy=false;await loadComputer();}
 }
 function screenPoint(event){

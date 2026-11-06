@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import socket
 import stat
 import subprocess
 import sys
@@ -210,6 +209,8 @@ mkdir -p /tmp/config/pcmanfm /tmp/config/openbox /home/pip/Desktop
 cp -r /run/dgc/conf/pcmanfm/dgc /tmp/config/pcmanfm/dgc
 # The Terminal's way online: a relay to DGC's egress socket, when DGC bound one (public sites only).
 [ -S /run/dgc/egress.sock ] && python3 /run/dgc/forward.py > /run/dgc/log/forward.log 2>&1 &
+# A stale socket from an earlier desktop must not look like this start's screen.
+rm -f /run/dgc/sock/vnc.sock
 "$DESK_VNC" {DISPLAY} -geometry {WIDTH}x{HEIGHT} -depth 24 -SecurityTypes None -AlwaysShared \\
   -rfbunixpath /run/dgc/sock/vnc.sock -rfbunixmode 0600 -rfbport -1 -nolisten tcp -extension GLX \\
   -desktop {shlex.quote(name[:60] + ' computer')} > /run/dgc/log/vnc.log 2>&1 &
@@ -296,6 +297,7 @@ class Desktop:
         self.runtime, self.files, self.name = Path(runtime), Path(files), name
         self.egress = Path(egress) if egress is not None else None
         self.proc: subprocess.Popen | None = None
+        self._started_at_ns: int | None = None
         self._control_thread = None
         self.on_launch = None             # called with "browser" when the dock asks for the browser
 
@@ -311,14 +313,14 @@ class Desktop:
         return self.proc is not None and self.proc.poll() is None and self._vnc_ready()
 
     def _vnc_ready(self) -> bool:
-        if not self.vnc_socket.exists():
-            return False
+        # Do not open a VNC connection just to ask if the screen is ready.
+        # Closing it after the greeting but before authentication counts as a
+        # security failure in TigerVNC. Repeated status checks then blacklist
+        # every viewer, although the Pip's desktop itself is still running.
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                conn.settimeout(0.25)
-                conn.connect(str(self.vnc_socket))
-                return conn.recv(4) == b"RFB "
-        except (OSError, TimeoutError):
+            info = self.vnc_socket.stat()
+            return self._started_at_ns is not None and stat.S_ISSOCK(info.st_mode)
+        except OSError:
             return False
 
     def start(self, launch=lambda start: start()) -> None:
@@ -344,6 +346,7 @@ class Desktop:
             from .pip_computer_box import FORWARDER
             (self.runtime / "forward.py").write_text(FORWARDER)
         argv = desktop_argv(self.runtime, self.files, self.name, self.egress)
+        self._started_at_ns = time.time_ns()
 
         def begin():
             self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

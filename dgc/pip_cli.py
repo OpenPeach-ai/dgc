@@ -38,6 +38,16 @@ def _restart_on_new_code() -> bool:
     return True                                  # not reached: execv replaced the process
 
 
+def _router_choice(value: str) -> dict:
+    """--router / --router SYSTEM/MODEL as a model choice (API 70)."""
+    if value in ("", "any"):
+        return {"mode": "router"}
+    system, _, model = str(value).partition("/")
+    if not system or not model:
+        raise RegistryError("invalid_model_choice", "--router takes SYSTEM/MODEL, e.g. --router nas/qwen3.5:9b")
+    return {"mode": "router", "system": system, "model": model}
+
+
 def parser():
     value = argparse.ArgumentParser(prog="dgc pips", allow_abbrev=False,
         description="Manage local Pips, reviewed handoffs, bounded execution, schedules and reports.",
@@ -220,6 +230,8 @@ def parser():
     create_models.add_argument("--model", help="explicit model ID from models; omitted inherits DGC default")
     create_models.add_argument("--subscription", choices=("claude", "codex"),
                                help="a Personal Pip on your own Claude Code or Codex (its runs use that plan's usage)")
+    create_models.add_argument("--router", nargs="?", const="any", metavar="SYSTEM/MODEL",
+                               help="run it on DGC Router: any of your systems with the Pips job, or one SYSTEM/MODEL")
     create.add_argument("--source-ref", default="HEAD"); workspace(create)
     job(command("show", "show the complete job and pending proposals"))
     run = command("run", "queue a run for the live foreground supervisor")
@@ -313,6 +325,8 @@ def parser():
     model_flags.add_argument("--model"); model_flags.add_argument("--default-model", action="store_true")
     model_flags.add_argument("--subscription", choices=("claude", "codex"),
                              help="a Personal Pip on your own Claude Code or Codex (its runs use that plan's usage)")
+    model_flags.add_argument("--router", nargs="?", const="any", metavar="SYSTEM/MODEL",
+                             help="run it on DGC Router: any of your systems with the Pips job, or one SYSTEM/MODEL")
     for flag in ("name", "goal", "source-ref", "reason"):
         propose.add_argument("--" + flag)
     propose.add_argument('--source-policy', choices=('committed_only', 'current_tree'),
@@ -753,6 +767,8 @@ def _request(args):
         request["model_choice"] = {"mode": "model", "model": args.model}
     if name == "create" and getattr(args, "subscription", None):
         request["model_choice"] = {"mode": "subscription", "engine": args.subscription}
+    if name == "create" and getattr(args, "router", None):
+        request["model_choice"] = _router_choice(args.router)
     if name in ("run", "send"):
         request["idempotency_key"] = args.idempotency_key or identifier("request")
         if name == 'send' and (args.context_size is not None or args.thinking is not None):
@@ -813,6 +829,8 @@ def _request(args):
             changes["model_choice"] = {"mode": "model", "model": args.model} if args.model else {"mode": "default"}
         if getattr(args, "subscription", None):
             changes["model_choice"] = {"mode": "subscription", "engine": args.subscription}
+        if getattr(args, "router", None):
+            changes["model_choice"] = _router_choice(args.router)
         if args.source_policy:
             # Without --exclude the mode alone is known here; main() completes a list change.
             changes['source_policy'] = _source_policy_from_args(args, args.source_policy)
@@ -1186,11 +1204,27 @@ def _format(value):
         engine = value.get("default_engine") if isinstance(value.get("default_engine"), dict) else None
         lines = ["DGC default: " + (str(engine.get("name")) + " (your subscription)" + (
             "" if engine.get("available") else ": " + str(engine.get("reason", ""))) if engine else str(value["default_model"]))]
+        routed = value.get("router") if isinstance(value.get("router"), dict) else {}
+        pin = str(routed.get("pips_default") or "")
+        if pin:
+            # Settings -> Pips run on the Router: a Pip on Default runs there, not on DGC's own model.
+            where = "DGC Router · any Pip system"
+            if pin.startswith("router:"):
+                system, _, name = pin[7:].partition("/")
+                found = next((item for item in routed.get("systems") or [] if item.get("id") == system), {})
+                where = f'{found.get("name") or system} · {name}'
+            lines = ["Pips on Default run on: " + where]
         lines.extend(item["id"] for item in value["models"])
         if value.get("subscriptions"):
             # API 55: what a Personal Pip may run on: --subscription claude | codex; its runs use that plan's usage.
             lines.append("Your subscriptions, for Personal Pips: " + ", ".join(
                 f'{item["name"]} (--subscription {item["engine"]})' for item in value["subscriptions"]))
+        router = value.get("router") if isinstance(value.get("router"), dict) else None
+        if router and router.get("systems"):
+            # API 70: DGC Router, for any Pip: --router (any Pips system) or --router SYSTEM/MODEL.
+            lines.append("DGC Router, for any Pip (--router, or --router SYSTEM/MODEL):")
+            lines.extend(f'  {system["id"]}/{model["name"]}' + ("" if system.get("online", True) else "  (offline)")
+                         for system in router["systems"] for model in system.get("models") or [])
         if value.get("error"):
             lines.append(value["error"]["message"])
         if value.get("truncated"):

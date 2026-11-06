@@ -1060,6 +1060,25 @@ test("export: the save dialog's choice says where and in which format, and the r
   assert.deepEqual(late.filter((type) => type === "chatdgc_export"), [], `cancelled: nothing written (sent: ${late.join(", ")})`);
 });
 
+test("Open on a file the chat made: one private folder for this window, the file's last copy only, gone on dispose", () => {
+  const { existsSync, statSync } = createRequire(import.meta.url)("node:fs");
+  chat.open(ID(5));
+  const [panel] = world.panels;
+  panel.say({ type: "ready" });
+  opened(panel, { id: ID(5), title: "Budget" });
+  const F = (c) => `att_${c.repeat(32)}`;
+  const open = (fileId, name) => { panel.say({ type: "fileOpen", messageId: MSG(2), fileId, name }); return last("chatdgc_library_file").path; };
+  const first = open(F("a"), "Budget.xlsx"), again = open(F("a"), "Budget.xlsx"), other = open(F("b"), "Notes.md");
+  const parent = dirname(dirname(first));
+  assert.equal(dirname(dirname(again)), parent, "every copy in one folder of this window's");
+  assert.equal(dirname(dirname(other)), parent);
+  assert.equal(statSync(parent).mode & 0o777, 0o700, "a private folder");
+  assert.equal(existsSync(dirname(first)), false, "opening the file again replaces its earlier copy");
+  assert.equal(existsSync(dirname(again)) && existsSync(dirname(other)), true);
+  chat.dispose();
+  assert.equal(existsSync(parent), false, "nothing left in the temp folder");
+});
+
 test("the context window: its commands go as such, and its events reach the tabs showing the chat", () => {
   chat.open(ID(9));
   const [panel] = world.panels;
@@ -1289,6 +1308,24 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path, last("chatdgc_library_file").conversation_id], ["save", "/home/u/budget.csv", ID(7)]);
   chat.onEvent({ type: "chatdgc_library_file", request_id: last("chatdgc_library_file").request_id, op: "save", path: "/home/u/budget.csv", bytes: 15 });
   assert.deepEqual(world.infos.at(-1), "Saved budget.csv.");
+  // Save to project… on a picture: a copy in the folder open in VS Code (assets/ unless you pick); never another file.
+  {
+    const vs = globalThis.__DGC_TEST_VSCODE;
+    const saves = () => sent.filter((c) => c.type === "chatdgc_library_file").length;
+    const before = saves();
+    lib.say({ type: "saveToProject", file: { ...file, type: "document" } });
+    await tick();
+    assert.equal(saves(), before, "only a picture");
+    vs.workspace.workspaceFolders = [{ uri: { fsPath: "/home/u/app", toString: () => "file:///home/u/app" } }];
+    try {
+      world.saveTo = { scheme: "file", fsPath: "/home/u/app/assets/fox.png" };
+      lib.say({ type: "saveToProject", file: { ...file, kind: "image", type: "image", name: "fox.png" } });
+      await tick();
+      assert.deepEqual([last("chatdgc_library_file").op, last("chatdgc_library_file").path], ["save", "/home/u/app/assets/fox.png"]);
+      assert.equal(world.saveAsked.title, "Save to project");
+      assert.match(String(world.saveAsked.defaultUri), /home\/u\/app\/assets\/fox\.png$/);
+    } finally { delete vs.workspace.workspaceFolders; }
+  }
   world.answer = undefined;
   lib.say({ type: "remove", file });
   await tick();
@@ -1303,7 +1340,76 @@ test("the Library: its own tab, its files asked for, and each file's actions thr
   lib.say({ type: "save", file: { ...file, chat_id: "../../etc" } });
   lib.say({ type: "open", file: projectFile });
   assert.equal(world.panels.length, 2, "a project's file opens its project");
-  assert.equal(sent.filter((c) => c.type === "chatdgc_library_file").length, 2, "a file the Library didn't name isn't touched");
+  assert.equal(sent.filter((c) => c.type === "chatdgc_library_file").length, 3, "a file the Library didn't name isn't touched (save, Save to project…, remove)");
+});
+
+test("the Library lists Work's images from DGC (images_library), and only those may be shown, opened or copied", async () => {
+  const fs = globalThis.__DGC_TEST_VSCODE.workspace.fs;
+  const read = [], copied = [];
+  fs.readFile = async (uri) => { read.push(uri.fsPath); return Buffer.from("png-bytes"); };
+  fs.copy = async (from, to) => { copied.push([from.fsPath, to.fsPath]); };
+  const asked = [];
+  const made = { path: "/home/me/app/assets/generated/fox.png", rel: "assets/generated/fox.png", surface: "work", generator: "comfy",
+                 generator_name: "ComfyUI on gpu-box", provider: "comfyui", model: "sdxl", prompt: "a red fox", seed: 4, width: 768, height: 320,
+                 bytes: 46000, cost_usd: 0, created_at: "2026-11-02T08:00:00+00:00", project: "/home/me/app", session: "s-1" };
+  try {
+    // A backend without images_library: the Library is told, and nothing is asked.
+    chat.openLibrary();
+    const [lib] = world.panels;
+    lib.say({ type: "ready", kind: "" });
+    assert.deepEqual(lib.last("workImagesOffered"), { type: "workImagesOffered", on: false });
+    lib.say({ type: "workImages", query: "", offset: 0, limit: 60, seq: 1 });
+    await tick();
+    assert.deepEqual(lib.last("workImagesOffered"), { type: "workImagesOffered", on: false });
+    host.imagesOffered = () => true;
+    host.imagesLibrary = async (cmd) => { asked.push(cmd); return { type: "images_library", images: [made, { path: "/etc/passwd" }], total: 2, next_offset: null }; };
+    lib.say({ type: "ready", kind: "" });
+    assert.deepEqual(lib.last("workImagesOffered"), { type: "workImagesOffered", on: true });
+    lib.say({ type: "workImages", query: "fox", offset: 0, limit: 60, seq: 2 });
+    await tick();
+    assert.deepEqual(asked, [{ query: "fox", surface: "work", limit: 60, offset: 0 }], "Work's own images");
+    const answer = lib.last("workImages");
+    assert.equal(answer.seq, 2);
+    assert.deepEqual(answer.images.map((i) => i.path), [made.path], "only picture files DGC made");
+    assert.equal(answer.images[0].generator_name, "ComfyUI on gpu-box");
+    lib.say({ type: "workImage", path: made.path });
+    await tick();
+    assert.deepEqual(lib.last("workImageData"), { type: "workImageData", path: made.path, data: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}` });
+    lib.say({ type: "workImage", path: "/home/me/.ssh/id_rsa.png" });
+    lib.say({ type: "workImageOpen", path: "/home/me/secret.png" });
+    await tick();
+    assert.deepEqual(read, [made.path], "a path the Library wasn't given is never read");
+    lib.say({ type: "workImageOpen", path: made.path });
+    lib.say({ type: "workImageReveal", path: made.path });
+    await tick();
+    assert.deepEqual(world.commands.map((c) => [c[0], c[1].fsPath]), [["vscode.open", made.path], ["revealFileInOS", made.path]]);
+    world.saveTo = { scheme: "file", fsPath: "/home/me/Desktop/fox.png" };
+    lib.say({ type: "workImageSave", path: made.path });
+    await tick();
+    assert.deepEqual(copied, [[made.path, "/home/me/Desktop/fox.png"]]);
+    assert.equal(world.saveAsked.title, "Save a copy of this image");
+    // Save to project…: a copy in the open project, assets/ unless you pick another place; with no folder open, said.
+    const vs = globalThis.__DGC_TEST_VSCODE;
+    lib.say({ type: "workImageToProject", path: made.path });
+    await tick();
+    assert.equal(copied.length, 1, "no folder open: nothing copied");
+    assert.match(world.infos.at(-1), /Open a folder first: Save to project… copies the picture into it\./);
+    vs.workspace.workspaceFolders = [{ uri: { fsPath: "/home/me/app", toString: () => "file:///home/me/app" } }];
+    vs.workspace.asRelativePath = (uri) => String(uri.fsPath).replace("/home/me/app/", "");
+    try {
+      world.saveTo = { scheme: "file", fsPath: "/home/me/app/assets/fox.png" };
+      lib.say({ type: "workImageToProject", path: "/home/me/secret.png" });
+      lib.say({ type: "workImageToProject", path: made.path });
+      await tick();
+      assert.deepEqual(copied.at(-1), [made.path, "/home/me/app/assets/fox.png"]);
+      assert.equal(copied.length, 2, "only a picture the Library was given");
+      assert.equal(world.saveAsked.title, "Save to project");
+      assert.match(String(world.saveAsked.defaultUri), /home\/me\/app\/assets\/fox\.png$/, "assets/ by default");
+      assert.equal(world.infos.at(-1), "Saved assets/fox.png in the project.");
+    } finally { delete vs.workspace.workspaceFolders; delete vs.workspace.asRelativePath; }
+    chat.imagesMade();
+    assert.deepEqual(lib.last("refresh"), { type: "refresh" }, "a picture made since is listed");
+  } finally { delete fs.readFile; delete fs.copy; }
 });
 
 test("a Library file in a new chat, or from the paperclip, and a send names only files picked for it", async () => {

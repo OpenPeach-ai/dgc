@@ -77,7 +77,7 @@ def _snapshot(config, session_id):
     root = str(canonical_directory(config.project_root))
     directory = state_directory()
     if not directory.exists():
-        yield None, None
+        yield None, None, None
         return
     info = directory.lstat()
     if (not stat.S_ISDIR(info.st_mode) or (os.name == "posix" and
@@ -87,7 +87,7 @@ def _snapshot(config, session_id):
     try:
         before = _database_info(path)
     except FileNotFoundError:
-        yield None, None
+        yield None, None, None
         return
     if os.name == "posix" and before.st_mode & 0o077:
         raise RegistryError("unsafe_state", "The Pip registry must be owner-only.")
@@ -133,7 +133,14 @@ def _snapshot(config, session_id):
         # manufacturing an association. A previously bound chat cannot move scope.
         if association and (not row or tuple(association) != tuple(row[0])):
             raise RegistryError("session_scope", "This chat belongs to a different Pip workspace. Open the matching chat.")
-        yield db, row[0][0] if row else None
+        personal = db.execute("""SELECT w.id FROM metadata m
+            JOIN workspaces w ON w.id=m.value AND w.kind='personal'
+            JOIN bindings b ON b.workspace_id=w.id AND b.runner_id=(SELECT value FROM metadata WHERE key='runner_id')
+            WHERE m.key='personal_workspace' AND length(CAST(w.id AS BLOB))<=128 LIMIT 1""").fetchone()
+        personal_id = personal[0] if personal else None
+        if personal_id is not None and (not isinstance(personal_id, str) or not WORKSPACE_ID.fullmatch(personal_id)):
+            raise RegistryError("invalid_workspace", "The personal Pip workspace identity is malformed.")
+        yield db, row[0][0] if row else None, personal_id
     except sqlite3.Error as exc:
         raise RegistryError("pip_reference_unavailable", "The local Pip reference snapshot is unavailable; reopen Pips and try again.") from exc
     finally:
@@ -198,14 +205,20 @@ def _project(row, config):
 
 def discover(config, session_id, *, query="", after="", limit=20):
     query, after, limit = validate_query(query, after, limit)
-    with _snapshot(config, session_id) as (db, workspace_id):
+    with _snapshot(config, session_id) as (db, workspace_id, personal_id):
         result = {"workspace_id": workspace_id or "", "pips": [], "next_cursor": None}
         if workspace_id is None:
             return result
         matched, total, seen_cursor = [], 0, not after
-        for row in _rows(db, workspace_id):
+        candidates = []
+        for scope, scope_id in (("project", workspace_id), ("personal", personal_id)):
+            if scope_id is None or (scope == "personal" and scope_id == workspace_id):
+                continue
+            for row in _rows(db, scope_id):
+                candidates.append((_project(row, config), scope, scope_id))
+        for item, scope, scope_id in sorted(candidates, key=lambda entry: entry[0]["pip_id"]):
             total += 1
-            item = _project(row, config)
+            item = {**item, "scope": scope, "workspace_id": scope_id}
             if item["pip_id"] == after:
                 seen_cursor = True
             if (not after or item["pip_id"] > after) and (not query or any(
@@ -221,19 +234,26 @@ def discover(config, session_id, *, query="", after="", limit=20):
 
 def resolve(config, session_id, references):
     selected = validate_references(references)
-    with _snapshot(config, session_id) as (db, workspace_id):
+    with _snapshot(config, session_id) as (db, workspace_id, personal_id):
         if workspace_id is None:
             raise RegistryError("not_found", "This chat has no registered Pip workspace. Open Pips first.")
         pinned = []
         for selection in selected:
-            row = next(_rows(db, workspace_id, pip_id=selection["pip_id"]), None)
+            scope, scope_id, row = None, None, None
+            for candidate_scope, candidate_id in (("project", workspace_id), ("personal", personal_id)):
+                if candidate_id is None or candidate_id == scope_id:
+                    continue
+                row = next(_rows(db, candidate_id, pip_id=selection["pip_id"]), None)
+                if row is not None:
+                    scope, scope_id = candidate_scope, candidate_id
+                    break
             if row is None:
                 raise RegistryError("not_found", "A selected Pip is not in this chat's workspace. Select it again.")
             item = _project(row, config)
             if (item["job_version"] != selection["expected_version"]
                     or item["lifecycle_revision"] != selection["expected_lifecycle_revision"]):
                 raise RegistryError("stale_pip_reference", "A selected Pip changed. Remove its reference and select the current Pip before sending.")
-            pinned.append(item)
+            pinned.append({**item, "scope": scope, "workspace_id": scope_id})
         return {"workspace_id": workspace_id, "pips": pinned, "notice": _NOTICE}
 
 

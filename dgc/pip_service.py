@@ -131,14 +131,29 @@ def _executable(value):
     return path
 
 
+def _previous_executable(value):
+    """The interpreter an earlier DGC unit names, checked only for its form and its folder's safety when it no longer
+    runs: an OS upgrade removes the venv's base Python (its link dangles) exactly when that unit most needs replacing,
+    and the replacement unit, not the old one, is what has to run."""
+    path = _path(value, "Previous Python executable")
+    try:
+        path.resolve(strict=True)
+    except OSError:
+        _safe_chain(path.parent, missing=True)
+        return path
+    return _executable(path)
+
+
 def _quote(value):
     # systemd ExecStart syntax, not shell syntax: %% and $$ are literal percent
     # and dollar signs; C-style quoting protects whitespace, quotes and slashes.
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
 
 
-def preview(dgc_home=None, *, unit_directory=None, python_executable=None, package_root=None, server=False):
-    """Pure preview; does not create state, units, registry entries, or subprocesses.
+def preview(dgc_home=None, *, unit_directory=None, python_executable=None, package_root=None, server=False,
+            _previous=False):
+    """Pure preview; does not create state, units, registry entries, or subprocesses. (``_previous``: rebuild an
+    earlier install's unit to compare it byte for byte, whose interpreter may be gone.)
 
     ``server``: the same unit (one per DGC home) running ``pips serve --service --server``, for a server with no
     desktop (pip_server): no desktop notifications or borrowed Chrome, and Pips on a personal subscription refused."""
@@ -167,7 +182,8 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
             who = "anyone" if info.st_mode & 0o002 else f"the {_group_name(info.st_gid)} group"
             _error("invalid_service_source", f"DGC's files in {source} can be changed by {who}, so Pips won't run "
                    f"from them. Fix it once in a terminal: chmod -R go-w {shlex.quote(str(source))}")
-    python = _executable(python_executable if python_executable is not None else sys.executable)
+    python = (_previous_executable if _previous else _executable)(
+        python_executable if python_executable is not None else sys.executable)
     directory = _path(unit_directory if unit_directory is not None else
                       Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd" / "user", "User unit directory")
     _safe_chain(directory, missing=True)
@@ -200,6 +216,15 @@ def preview(dgc_home=None, *, unit_directory=None, python_executable=None, packa
     return {"unit_name": name, "unit_path": str(directory / name), "dgc_home": str(home),
             "argv": argv, "content": content, "sha256": hashlib.sha256(content.encode()).hexdigest(),
             "platform": "linux", "supported": True, "server": bool(server), "notes": notes}
+
+
+def unit_file(dgc_home=None, *, unit_directory=None, **_options) -> Path:
+    """Where this home's unit is when one was ever installed, worked out from the paths alone: asking whether there
+    is one never runs the checks that only matter for writing one (a ~/.dgc that isn't owner-only, say)."""
+    home = _path(dgc_home if dgc_home is not None else os.environ.get("DGC_HOME", str(Path.home())), "DGC home")
+    directory = _path(unit_directory if unit_directory is not None else
+                      Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd" / "user", "User unit directory")
+    return directory / ("dgc-pips-" + hashlib.sha256(os.fsencode(home)).hexdigest()[:24] + ".service")
 
 
 def _ours(dgc_home, options):
@@ -268,17 +293,14 @@ def _older_release(value, spec):
             # installation is still on disk. Only a fully pruned source needs the
             # exact-byte reconstruction below.
             old = preview(spec["dgc_home"], unit_directory=Path(spec["unit_path"]).parent,
-                          python_executable=argv[8], package_root=argv[13], server=len(argv) == 18)
+                          python_executable=argv[8], package_root=argv[13], server=len(argv) == 18, _previous=True)
             return old["content"].encode() == value and old["sha256"] != spec["sha256"]
         # An installer may have pruned the previous version before this refresh ran.
         # Verify every byte against the current template with only its two pinned paths
         # substituted. Requiring the old package to exist made an exact DGC-owned unit
         # look like an unrelated service, leaving Pips running from a deleted path.
         _safe_chain(source, missing=True)
-        if python.exists() or python.is_symlink():
-            _executable(python)
-        else:
-            _safe_chain(python.parent, missing=True)
+        _previous_executable(python)
         previous = list(spec["argv"])
         previous[8], previous[13] = str(python), str(source)
         if previous != argv:

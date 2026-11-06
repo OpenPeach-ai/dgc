@@ -145,6 +145,390 @@ export class Mods {
   }
 }
 
+type CardSend = (command: Frame) => void;
+
+/** `session.cards`: plugins' own cards (MCP Apps, the open MCP extension io.modelcontextprotocol/ui; CLI 0.51+,
+ *  `capabilities.mcp_apps`). Call `watch()` once: from then on a tool whose server gave it a card shows it as an
+ *  `mcp_app_card` event in the run (card_id, plugin, tool, tool_input, the tool's whole tool_result, `url` where the CLI
+ *  serves the page with its CSP, `html` when it fits one frame), and history replays it. To draw one yourself, frame
+ *  `url` (or `get()` it and serve `html` with `csp_header`) in a sandboxed iframe and answer its MCP Apps JSON-RPC:
+ *  `tools/call` and `resources/read` go to `call()`, `ui/update-model-context` to `context()`, and a `ui/message` is the
+ *  user's own prompt, labelled with `messageText()`. A change comes back as `{ask}` (DGC's Allow card) until you
+ *  `answer()` it with the user's choice. */
+export class Cards {
+  private readonly ask: ArtifactRequest;
+  private readonly send: CardSend;
+
+  constructor(ask: ArtifactRequest, send: CardSend) {
+    this.ask = ask;
+    this.send = send;
+  }
+
+  /** This app draws cards: the CLI makes them from now on. */
+  watch(): void {
+    this.send({ type: "watch_mcp_apps" });
+  }
+
+  /** One card with its page (`html`), its whole result and the exact CSP header (`csp_header`) the CLI serves it with. */
+  async get(cardId: string): Promise<Record<string, unknown>> {
+    const event = await this.ask({ type: "mcp_app_get", request_id: newId("card"), card_id: cardId }, "mcp_app_resource");
+    return Object.fromEntries(Object.entries(event).filter(([k]) => !["type", "seq", "request_id"].includes(k)));
+  }
+
+  /** What the card asked of its own server: `{result}`, `{error}`, or `{ask, request_id}` for `answer()`. */
+  async call(cardId: string, method: "tools/call" | "resources/read", params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const requestId = newId("card");
+    const event = await this.ask({ type: "mcp_app_call", request_id: requestId, card_id: cardId, method, params }, "mcp_app_reply");
+    if (event.ask && typeof event.ask === "object") return { ask: { ...event.ask, request_id: requestId }, request_id: requestId };
+    const out = Object.fromEntries(Object.entries(event).filter(([k]) => k === "result" || k === "error"));
+    return Object.keys(out).length ? out : { result: {} };
+  }
+
+  /** The user's choice on an Allow card `call()` returned: "once", "always" (only when `ask.always`) or "deny". */
+  async answer(asked: { ask?: Record<string, unknown>; request_id?: string; ask_id?: string },
+    choice: "once" | "always" | "deny"): Promise<Record<string, unknown>> {
+    if (!["once", "always", "deny"].includes(choice)) throw new TypeError("choice is once, always or deny");
+    const ask = (asked.ask && typeof asked.ask === "object" ? asked.ask : asked) as Record<string, unknown>;
+    if (typeof asked.request_id !== "string" || !asked.request_id.trim()) {
+      throw new TypeError("pass the card question returned by call, including its request_id");
+    }
+    const event = await this.ask({ type: "mcp_app_answer", ask_id: String(ask.ask_id || ""), choice,
+                                   request_id: asked.request_id }, "mcp_app_reply");
+    const out = Object.fromEntries(Object.entries(event).filter(([k]) => k === "result" || k === "error"));
+    return Object.keys(out).length ? out : { result: {} };
+  }
+
+  /** A card's ui/update-model-context: the model's next turn in that chat gets it once, as untrusted plugin content. */
+  context(cardId: string, content: Array<Record<string, unknown>> = [], structured: Record<string, unknown> = {}): void {
+    this.send({ type: "mcp_app_context", card_id: cardId, content: content.slice(0, 32), structured_content: structured });
+  }
+
+  /** A card's ui/message as the user's prompt, labelled as DGC's editor labels it. */
+  static messageText(card: { plugin?: unknown; server?: unknown }, text: string): string {
+    return `From ${String(card.plugin || card.server || "a plugin")}'s card: ${String(text).trim().slice(0, 8000)}`;
+  }
+}
+
+const ROUTER_ACTIONS = ["turn_on", "turn_off", "add_system", "edit_system", "remove_system", "enable_system",
+  "disable_system", "set_model", "set_jobs", "set_when_busy", "set_key", "prefer", "apply_suggestion"];
+const ROUTER_FIELDS = new Set(["system", "name", "base_url", "jobs", "models", "workers", "one_model_at_a_time",
+  "memory_gb", "model", "use", "context", "note", "when_busy", "key"]);
+
+/** `session.router`: DGC Router, the user's other computers that run models, for sub-agents and Pips (CLI 0.51+,
+ *  `capabilities.router`). The answers are the CLI's status objects. A key is set only with `setKey`, never read. */
+/** A context size as Settings' box and `dgc router --context` read it: 16384, "16384", "16,384", "16K" or "16k" (K is
+ *  1,024 tokens), 2,048 to 16,777,216 tokens. Throws DGCConfigError. */
+export function contextTokens(value: unknown): number {
+  let tokens: number;
+  if (typeof value === "number") tokens = value;
+  else if (typeof value === "string") {
+    const raw = value.trim().toLowerCase().replace(/[,_\s]/g, "");
+    const scale = raw.endsWith("k") ? 1024 : 1;
+    const digits = scale > 1 ? raw.slice(0, -1) : raw;
+    if (!/^\d+(\.\d+)?$/.test(digits)) throw new DGCConfigError('context is a number of tokens, like 16384 or "16K"');
+    tokens = Math.round(Number(digits) * scale);
+    if (scale === 1 && !Number.isInteger(Number(digits))) throw new DGCConfigError('context is a whole number of tokens, like 16384 or "16K"');
+  } else throw new DGCConfigError('context is a number of tokens, like 16384 or "16K"');
+  if (!Number.isInteger(tokens) || tokens < 2048 || tokens > 16_777_216) {
+    throw new DGCConfigError("context is between 2,048 and 16,777,216 tokens (2K and up)");
+  }
+  return tokens;
+}
+
+export class Router {
+  private readonly ask: ArtifactRequest;
+  private readonly commands: string[];
+
+  constructor(ask: ArtifactRequest, commands: string[] = []) {
+    this.ask = ask;
+    this.commands = commands;
+  }
+
+  private needs(command: string): void {
+    if (!this.commands.includes(command)) throw new DGCUnsupportedError(`This DGC CLI has no ${command}; update it (dgc update).`);
+  }
+
+  private async send(command: Frame, timeoutMs?: number): Promise<Record<string, unknown>> {
+    return this.ask({ ...command, request_id: newId("router") }, "router_status", timeoutMs);
+  }
+
+  /** Every system with its jobs, models, workers busy and free, health and measured speed. */
+  async status(options: { refresh?: boolean } = {}): Promise<Record<string, unknown>> {
+    const event = await this.send({ type: "router_status", ...(options.refresh ? { refresh: true } : {}) },
+      options.refresh ? 60_000 : undefined);
+    return mapping(event.status);
+  }
+
+  /** One change, made at once: `{change, status}`. The fields are those of the router_update tool. */
+  async update(action: string, fields: Record<string, unknown> = {}): Promise<{ change: string; status: Record<string, unknown> }> {
+    if (!ROUTER_ACTIONS.includes(action)) throw new DGCConfigError(`action must be one of ${ROUTER_ACTIONS.join(", ")}`);
+    if ("key" in fields && action !== "set_key") throw new DGCConfigError("a key goes only with set_key (router.setKey)");
+    const unknown = Object.keys(fields).filter((key) => !ROUTER_FIELDS.has(key)).sort();
+    if (unknown.length) throw new DGCConfigError(`router update has no field "${unknown[0]}"`);
+    const clean = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null));
+    if (clean.context !== undefined) clean.context = contextTokens(clean.context);     // 16384, "16K" or "16k"
+    const event = await this.send({ type: "router_update", action, ...clean }, 60_000);
+    return { change: typeof event.change === "string" ? event.change : "", status: mapping(event.status) };
+  }
+
+  /** Add a computer by its address: DGC detects the server and lists its models. */
+  addSystem(baseUrl: string, fields: Record<string, unknown> = {}): Promise<{ change: string; status: Record<string, unknown> }> {
+    return this.update("add_system", { ...fields, base_url: baseUrl });
+  }
+
+  /** Save (or with "" remove) a system's key in the user's secrets.json, bound to its address. */
+  setKey(system: string, key: string): Promise<{ change: string; status: Record<string, unknown> }> {
+    if (typeof key !== "string") throw new DGCConfigError("key must be a string");
+    return this.update("set_key", { system, key });
+  }
+
+  /** Test one system now (models, speed, parallel, tools) and save the results. */
+  async probe(system: string, options: { model?: string; checks?: string[] } = {}): Promise<Record<string, unknown>> {
+    const command: Frame = { type: "router_probe", system };
+    if (options.model) command.model = options.model;
+    if (options.checks) command.checks = [...options.checks];
+    return mapping((await this.send(command, 300_000)).probe);
+  }
+
+  /** Model servers on this computer's own /24, the known ports only. */
+  async find(): Promise<Record<string, unknown>> {
+    return mapping((await this.send({ type: "router_find" }, 120_000)).found);
+  }
+
+  /** Where the next turn's helpers run (call before `run`); no system lets DGC pick. */
+  prefer(system?: string, model?: string): Promise<{ change: string; status: Record<string, unknown> }> {
+    return this.update("prefer", { system: system ?? "", model: model ?? "" });
+  }
+
+  /** A system's hardware readout (CLI 0.51+): `url` is an exporter's (node_exporter, NVIDIA DCGM, AMD's, Glances,
+   *  Netdata) or a dgc node's address, which the CLI detects; "" stops it. `token` is a dgc node's pairing token, kept
+   *  in the user's secrets.json bound to that address and never read back. With neither, it reads the hardware now. */
+  async setHardware(system: string, url?: string, options: { token?: string } = {}): Promise<{ change: string; status: Record<string, unknown> }> {
+    this.needs("router_hardware");
+    const command: Frame = { type: "router_hardware", system };
+    if (url !== undefined) {
+      if (typeof url !== "string") throw new DGCConfigError("url must be a string");
+      command.url = url;
+    }
+    if (options.token !== undefined) {
+      if (typeof options.token !== "string") throw new DGCConfigError("token must be a string");
+      command.token = options.token;
+    }
+    const event = await this.send(command, 60_000);
+    return { change: typeof event.change === "string" ? event.change : "", status: mapping(event.status) };
+  }
+
+  /** Workers per model for one system (CLI 0.51+), from its memory, what the server reports and what Test measured;
+   *  each model's `line` shows the arithmetic. `update("apply_suggestion", { system, context })` uses it. */
+  async suggest(system: string, options: { context?: number | string } = {}): Promise<Record<string, unknown>> {
+    this.needs("router_suggest");
+    const command: Frame = { type: "router_suggest", system, request_id: newId("router") };
+    if (options.context !== undefined) command.context = contextTokens(options.context);
+    return mapping((await this.ask(command, "router_suggestion", 30_000)).suggestion);
+  }
+}
+
+const IMAGE_ACTIONS = ["add_generator", "edit_generator", "remove_generator", "set_default", "set_project_choice",
+  "set_auto_fallback", "set_save_dir", "set_key", "test"];
+const IMAGE_FIELDS = new Set(["generator", "provider", "base_url", "name", "id", "model", "size", "steps",
+  "negative_prompt", "asks", "good_for", "enabled", "monthly_limit_usd", "system", "default", "workflow", "mapping",
+  "confirm", "auto_fallback", "save_dir", "key", "makes", "video_asks", "video_pips"]);
+
+/** Options for `session.images.generate`. */
+export interface ImageGenerateOptions {
+  size?: string; aspect?: string; count?: number; images?: string[]; mask?: string; generator?: string;
+  model?: string; seed?: number; negativePrompt?: string; saveTo?: string; approve?: boolean; timeoutMs?: number;
+}
+
+/** `session.images`: the user's image generators (CLI 0.51+, `capabilities.images`). `generate` makes pictures now,
+ *  each with a sidecar in DGC's own folder (in the project with `saveTo`); a paid generator that asks before each image runs only with
+ *  `approve: true`. A key is set only with `setKey`, never read back. Once any call is made here, the session's runs
+ *  also carry `images_made` events when the model's generate_image made pictures. */
+export class Images {
+  private readonly ask: ArtifactRequest;
+
+  constructor(ask: ArtifactRequest) {
+    this.ask = ask;
+  }
+
+  private send(command: Frame, answer: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+    return this.ask({ ...command, request_id: newId("images") }, answer, timeoutMs);
+  }
+
+  /** Every generator: what it can do, its price, whether it works now, and this project's choice. */
+  async generators(options: { refresh?: boolean } = {}): Promise<Record<string, unknown>> {
+    const event = await this.send({ type: "images_list", ...(options.refresh ? { refresh: true } : {}) },
+      "images_status", options.refresh ? 60_000 : undefined);
+    return mapping(event.status);
+  }
+
+  /** One change, made at once: `{change, status, pending?, notes?, tested?}`. */
+  async update(action: string, fields: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    if (!IMAGE_ACTIONS.includes(action)) throw new DGCConfigError(`action must be one of ${IMAGE_ACTIONS.join(", ")}`);
+    if ("key" in fields && action !== "set_key") throw new DGCConfigError("a key goes only with set_key (images.setKey)");
+    const unknown = Object.keys(fields).filter((key) => !IMAGE_FIELDS.has(key)).sort();
+    if (unknown.length) throw new DGCConfigError(`images update has no field "${unknown[0]}"`);
+    const clean = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null));
+    const event = await this.send({ type: "images_update", action, ...clean }, "images_status", 60_000);
+    return Object.fromEntries(["change", "status", "pending", "notes", "tested"].filter((key) => key in event)
+      .map((key) => [key, event[key]]));
+  }
+
+  /** Add a generator (comfyui, a1111, openai, xai, together, localai, ollama, openai_compatible, gemini, bfl, fal,
+   *  replicate). A ComfyUI `workflow` comes back as `pending` with the inputs DGC found until `confirm: true`. */
+  add(provider: string, fields: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    return this.update("add_generator", { ...fields, provider });
+  }
+
+  /** Save (or with "" remove) a generator's key in the user's secrets.json, bound to its address. */
+  setKey(generator: string, key: string): Promise<Record<string, unknown>> {
+    if (typeof key !== "string") throw new DGCConfigError("key must be a string");
+    return this.update("set_key", { generator, key });
+  }
+
+  remove(generator: string): Promise<Record<string, unknown>> {
+    return this.update("remove_generator", { generator });
+  }
+
+  setDefault(generator: string): Promise<Record<string, unknown>> {
+    return this.update("set_default", { generator });
+  }
+
+  /** Test one generator (or all) without making an image. */
+  async test(generator?: string): Promise<Record<string, unknown>> {
+    return mapping((await this.update("test", generator ? { generator } : {})).tested);
+  }
+
+  /** Make images now: `{ok, text, images: [{path, rel, sidecar, width, height, seed}], generator, model, cost_usd?,
+   *  error?, card?}`. */
+  async generate(prompt: string, options: ImageGenerateOptions = {}): Promise<Record<string, unknown>> {
+    if (typeof prompt !== "string" || !prompt.trim()) throw new DGCConfigError("prompt must be a non-empty string");
+    const count = options.count ?? 1;
+    if (!Number.isInteger(count) || count < 1 || count > 4) throw new DGCConfigError("count must be 1 to 4");
+    const command: Frame = { type: "images_generate", prompt, count };
+    const names: [keyof ImageGenerateOptions, string][] = [["size", "size"], ["aspect", "aspect"], ["mask", "mask"],
+      ["generator", "generator"], ["model", "model"], ["seed", "seed"], ["negativePrompt", "negative_prompt"],
+      ["saveTo", "save_to"]];
+    for (const [from, to] of names) if (options[from] !== undefined) command[to] = options[from];
+    if (options.images) command.images = [...options.images];
+    if (options.approve) command.approve = true;
+    const event = await this.send(command, "images_result", options.timeoutMs ?? 600_000);
+    const { type: _type, request_id: _rid, ...rest } = event;
+    return rest;
+  }
+
+  /** Every image DGC made, newest first. */
+  async library(options: { query?: string; surface?: string; limit?: number; offset?: number } = {}): Promise<Record<string, unknown>> {
+    const event = await this.send({ type: "images_library", limit: options.limit ?? 60, offset: options.offset ?? 0,
+      ...(options.query ? { query: options.query } : {}), ...(options.surface ? { surface: options.surface } : {}) },
+      "images_library");
+    return { images: event.images, total: event.total, ...(event.next_offset !== undefined ? { next_offset: event.next_offset } : {}) };
+  }
+}
+
+export interface VideoGenerateOptions {
+  durationS?: number; aspect?: "16:9" | "9:16" | "1:1"; resolution?: string; image?: string; audio?: boolean;
+  generator?: string; model?: string; seed?: number; negativePrompt?: string; saveTo?: string; approve?: boolean;
+  /** Follow the job until it ends (default true). */
+  wait?: boolean; timeoutMs?: number; pollMs?: number;
+}
+
+const VIDEO_ENDED = new Set(["done", "failed", "cancelled"]);
+
+/** `session.videos`: video generation (CLI 0.51+, `capabilities.videos`). A video is a long job: `generate` starts it
+ *  and, with `wait` (the default), follows it until it is made, failed or stopped. Every video runs only with
+ *  `approve: true` (or a generator the user set to make videos without asking); without, the answer has
+ *  `error.kind` "needs_approval" and the `card` with its price. */
+export class Videos {
+  private readonly ask: ArtifactRequest;
+
+  constructor(ask: ArtifactRequest) {
+    this.ask = ask;
+  }
+
+  private send(command: Frame, answer: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+    return this.ask({ ...command, request_id: newId("videos") }, answer, timeoutMs);
+  }
+
+  /** The generators that make videos (each one's `video` says lengths, resolutions, sound and price per second). */
+  async generators(options: { refresh?: boolean } = {}): Promise<Record<string, unknown>[]> {
+    const event = await this.ask({ type: "images_list", request_id: newId("images"),
+      ...(options.refresh ? { refresh: true } : {}) }, "images_status", options.refresh ? 60_000 : undefined);
+    const rows = (mapping(event.status).generators as Record<string, unknown>[] | undefined) ?? [];
+    return rows.filter((row) => row.makes === "videos" || row.makes === "both");
+  }
+
+  /** This session's video jobs and every unfinished one (or the one named). */
+  async jobs(job?: string): Promise<Record<string, unknown>[]> {
+    const event = await this.send({ type: "videos_jobs", ...(job ? { job } : {}) }, "video_jobs");
+    return Array.isArray(event.jobs) ? event.jobs as Record<string, unknown>[] : [];
+  }
+
+  async job(job: string): Promise<Record<string, unknown>> {
+    const found = await this.jobs(job);
+    if (!found.length) throw new DGCConfigError(`there is no video job ${job}`);
+    return found[0];
+  }
+
+  /** Stop a job (at the provider where it can): the job, with `charged` saying what it cost. */
+  async stop(job: string): Promise<Record<string, unknown>> {
+    const event = await this.send({ type: "videos_stop", job }, "video_jobs");
+    const jobs = Array.isArray(event.jobs) ? event.jobs as Record<string, unknown>[] : [];
+    return { ...(jobs[0] ?? {}), change: event.change ?? "" };
+  }
+
+  /** Follow a job until it ends; rejects when `timeoutMs` passes first (the job keeps running). */
+  async wait(job: string, options: { timeoutMs?: number; pollMs?: number } = {}): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + (options.timeoutMs ?? 1_800_000);
+    for (;;) {
+      const current = await this.job(job);
+      if (VIDEO_ENDED.has(String(current.state))) return current;
+      if (Date.now() > deadline) throw new DGCTimeoutError(`video job ${job} is still ${String(current.state)}`);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(200, options.pollMs ?? 5000)));
+    }
+  }
+
+  /** Make one video: `{ok, text, job?, card?, error?}`; with `wait`, `job` is the ended job (its `result` has the
+   *  path, sidecar, poster, length and size). */
+  async generate(prompt: string, options: VideoGenerateOptions = {}): Promise<Record<string, unknown>> {
+    if (typeof prompt !== "string" || !prompt.trim()) throw new DGCConfigError("prompt must be a non-empty string");
+    if (options.durationS !== undefined && (!Number.isInteger(options.durationS) || options.durationS < 1 || options.durationS > 60)) {
+      throw new DGCConfigError("durationS must be 1 to 60 seconds");
+    }
+    if (options.aspect !== undefined && !["16:9", "9:16", "1:1"].includes(options.aspect)) {
+      throw new DGCConfigError("aspect must be 16:9, 9:16 or 1:1");
+    }
+    const command: Frame = { type: "videos_generate", prompt };
+    const names: [keyof VideoGenerateOptions, string][] = [["durationS", "duration_s"], ["aspect", "aspect"],
+      ["resolution", "resolution"], ["image", "image"], ["audio", "audio"], ["generator", "generator"],
+      ["model", "model"], ["seed", "seed"], ["negativePrompt", "negative_prompt"], ["saveTo", "save_to"]];
+    for (const [from, to] of names) if (options[from] !== undefined) command[to] = options[from];
+    if (options.approve) command.approve = true;
+    const event = await this.send(command, "video_jobs", 120_000);
+    const jobs = Array.isArray(event.jobs) ? event.jobs as Record<string, unknown>[] : [];
+    const out: Record<string, unknown> = { ok: jobs.length > 0, text: event.change ?? "" };
+    if (event.card !== undefined) out.card = event.card;
+    if (event.error !== undefined) out.error = event.error;
+    if (!jobs.length) return out;
+    let job = jobs[0];
+    if (options.wait !== false) {
+      job = await this.wait(String(job.id), { timeoutMs: options.timeoutMs, pollMs: options.pollMs });
+      out.ok = job.state === "done";
+      if (job.error !== undefined) out.error = job.error;
+    }
+    out.job = job;
+    return out;
+  }
+
+  /** Every video DGC made, newest first. */
+  async library(options: { query?: string; surface?: string; limit?: number; offset?: number } = {}): Promise<Record<string, unknown>> {
+    const event = await this.send({ type: "videos_library", limit: options.limit ?? 60, offset: options.offset ?? 0,
+      ...(options.query ? { query: options.query } : {}), ...(options.surface ? { surface: options.surface } : {}) },
+      "videos_library");
+    return { videos: event.videos, total: event.total, ...(event.next_offset !== undefined ? { next_offset: event.next_offset } : {}) };
+  }
+}
+
 /** `session.artifacts`: the store every part of DGC shares. Each call is one request to the CLI. */
 export class Artifacts {
   private readonly ask: ArtifactRequest;
@@ -712,6 +1096,41 @@ export class Session {
     return new Mods((command, answer) => this.request(command, answer));
   }
 
+  /** Image generation (CLI 0.51+): the user's image generators. Needs `capabilities.images`. */
+  get images(): Images {
+    if (!(this.capabilities.images && typeof this.capabilities.images === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI makes no images; update it (dgc update).");
+    }
+    return new Images((command, answer, timeoutMs) => this.request(command, answer, { timeoutMs }));
+  }
+
+  /** Video generation (CLI 0.51+): long jobs on the user's video generators. Needs `capabilities.videos`. */
+  get videos(): Videos {
+    if (!(this.capabilities.videos && typeof this.capabilities.videos === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI makes no videos; update it (dgc update).");
+    }
+    return new Videos((command, answer, timeoutMs) => this.request(command, answer, { timeoutMs }));
+  }
+
+  /** DGC Router (CLI 0.51+): the user's other computers that run models. Needs `capabilities.router`. */
+  get router(): Router {
+    if (!(this.capabilities.router && typeof this.capabilities.router === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI has no DGC Router; update it (dgc update).");
+    }
+    const router = this.capabilities.router as Record<string, unknown>;
+    const commands = Array.isArray(router.commands) ? router.commands.filter((c): c is string => typeof c === "string") : [];
+    return new Router((command, answer, timeoutMs) => this.request(command, answer, { timeoutMs }), commands);
+  }
+
+  /** Plugins' own cards (MCP Apps, CLI 0.51+): see `Cards`. Needs `capabilities.mcp_apps`. */
+  get cards(): Cards {
+    if (!(this.capabilities.mcp_apps && typeof this.capabilities.mcp_apps === "object")) {
+      throw new DGCUnsupportedError("This DGC CLI shows no plugin cards; update it (dgc update).");
+    }
+    return new Cards((command, answer, timeoutMs) => this.request(command, answer, { timeoutMs }),
+                     (command) => this.transport.send(command));
+  }
+
   /** Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each with
    *  every version. Needs `capabilities.artifacts`. */
   get artifacts(): Artifacts {
@@ -892,8 +1311,16 @@ export class Session {
     return this.request({ type: "get_config", request_id: newId("cfgget") }, "config");
   }
 
-  async getUsage(range = "today"): Promise<Record<string, unknown>> {
-    return this.request({ type: "get_usage", range, request_id: newId("usage") }, "usage_report");
+  /** The CLI's token usage for `range`. Each `by_model` row names the system it ran on (`system`, `system_id`,
+   *  `system_kind`) on a CLI with `capabilities.usage_by_system`; `system` (a row's `system_id`, or a system's name)
+   *  keeps that system's usage only, and needs that CLI. */
+  async getUsage(range = "today", system?: string): Promise<Record<string, unknown>> {
+    const command: Record<string, unknown> = { type: "get_usage", range, request_id: newId("usage") };
+    if (system) {
+      if (!this.capabilities.usage_by_system) throw new DGCUnsupportedError("This DGC CLI can't show usage by system; update it (dgc update).");
+      command.system = String(system);
+    }
+    return this.request(command, "usage_report");
   }
 
   async newSession(): Promise<Record<string, unknown>> {
@@ -1571,6 +1998,9 @@ export class Session {
       callId: typeof event.call_id === "string" ? event.call_id : undefined,
       diff: typeof event.diff === "string" ? event.diff : undefined,
       command: typeof event.command === "string" ? event.command : undefined,
+      choices: Array.isArray(event.choices)
+        ? (event.choices as unknown[]).filter((c): c is PermissionAction => c === "once" || c === "always" || c === "deny")
+        : undefined,
     };
     // Policy denies (tools, paths) are final; command screening defers to a reviewing callback;
     // policy-checked reads are answered here.

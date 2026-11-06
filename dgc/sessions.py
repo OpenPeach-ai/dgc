@@ -244,6 +244,43 @@ def _clean_subscription_sessions(value) -> dict[str, dict[str, str]]:
     return out
 
 
+def _clean_subscription_route(value) -> dict[str, str] | None:
+    """A session's selected CLI route, never a credential or vendor auth reference."""
+    if not isinstance(value, dict) or set(value) != {"engine", "model", "effort"}:
+        return None
+    engine, model, effort = (value.get(key) for key in ("engine", "model", "effort"))
+    if (not isinstance(engine, str) or engine not in _SUBSCRIPTION_ENGINES | {""}
+            or not isinstance(model, str) or len(model) > 256
+            or not isinstance(effort, str) or effort not in ("", "low", "medium", "high", "xhigh", "max")
+            or (not engine and (model or effort)) or any(ord(ch) < 32 for ch in model)):
+        return None
+    return {"engine": engine, "model": model, "effort": effort}
+
+
+def _clean_native_route(value) -> dict[str, str] | None:
+    """A Work chat's non-secret native route; credentials are never session data."""
+    from urllib.parse import urlsplit
+    if not isinstance(value, dict) or set(value) != {"base_url", "model", "api_mode", "thinking"}:
+        return None
+    base_url, model, api_mode, thinking = (value.get(key) for key in
+        ("base_url", "model", "api_mode", "thinking"))
+    if (not all(isinstance(part, str) for part in (base_url, model, api_mode, thinking))
+            or len(base_url) > 2048 or len(model) > 256
+            or any(ord(ch) < 32 for ch in base_url + model)
+            or api_mode not in ("auto", "ollama", "anthropic", "chat_completions", "responses")
+            or thinking not in ("off", "low", "medium", "high", "xhigh")):
+        return None
+    try:
+        parsed = urlsplit(base_url)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            return None
+        _ = parsed.port  # reject a malformed port before a route reaches the session file
+    except ValueError:
+        return None
+    return {"base_url": base_url, "model": model, "api_mode": api_mode, "thinking": thinking}
+
+
 def project_dir(project_root) -> Path:
     d = SESSIONS_DIR / _slug(project_root)
     d.mkdir(parents=True, exist_ok=True)
@@ -429,6 +466,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          goal_details: dict | None = None,
          todos: list | None = None,
          subscription_sessions: dict | None = None,
+         subscription_route: dict | None = None,
+         native_route: dict | None = None,
          chat_changes: dict | None = None,
          images: list | None = None,
          agents: dict | None = None,
@@ -523,6 +562,12 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         clean_subscription_sessions = _clean_subscription_sessions(subscription_sessions)
         if clean_subscription_sessions:
             data["subscription_sessions"] = clean_subscription_sessions
+        clean_route = _clean_subscription_route(subscription_route)
+        if clean_route:
+            data["subscription_route"] = clean_route
+        clean_native_route = _clean_native_route(native_route)
+        if clean_native_route:
+            data["native_route"] = clean_native_route
         if images:
             # images: the viewed-image index, metadata only (the bytes live in <session>.images/).
             # A name is display text a page or tool chose, so it is redacted like any other.
@@ -1279,6 +1324,29 @@ def set_name(path, name: str, project_root, *, expected_revision: int | None = N
             data["name"] = name
             data["revision"] = revision + 1
             data["updated"] = time.time()
+            _atomic_write(p, json.dumps(data, default=str))
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def set_agents(path, agents: dict, project_root, *, expected_revision: int | None = None,
+               expected_exists: bool | None = None,
+               redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
+    """Write only a chat's helper records (what its agent map lists), as set_name writes only its name. For a helper
+    that started or ended between turns (a Pip fix): only a turn's save wrote them, so after a window reload the map
+    had no row for it. The chat's place in the list ("updated") stays where its last turn put it."""
+    try:
+        p = resolve_path(project_root, path, must_exist=True)
+        from .redaction import redact_value
+        with _lock_for(p):
+            data = _load_data(p, project_root)  # the lock is re-entrant; retain it through replace
+            revision = _record_revision(data, p)
+            if not _expected_generation_matches(
+                    True, revision, expected_revision, expected_exists):
+                return False
+            data["agents"] = redact_value(agents, redact_secrets or ())
+            data["revision"] = revision + 1
             _atomic_write(p, json.dumps(data, default=str))
         return True
     except (OSError, TypeError, ValueError):

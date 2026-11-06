@@ -13,6 +13,17 @@ import {
   dgcEventError,
 } from "./protocol.generated";
 import type { Bridge } from "./wslBridge";
+
+/** What every `dgc serve` this window starts is told about the window (setEditorEnv): DGC_EDITOR_REMOTE names a
+ *  remote window's kind (vscode.env.remoteName: ssh-remote, wsl, dev-container…), so a plugin sign-in, whose browser
+ *  is then on another computer, waits ten minutes for it instead of two (dgc/mcp.py remote_session). */
+const editorEnv: Record<string, string> = {};
+export function setEditorEnv(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (!/^DGC_[A-Z_]{1,40}$/.test(key)) continue;
+    if (value) editorEnv[key] = String(value).slice(0, 64); else delete editorEnv[key];
+  }
+}
 import type { Launch } from "./wslHost";
 
 export { DGC_PROTOCOL_VERSION, MAX_COMMAND_BYTES };
@@ -299,8 +310,8 @@ export class DgcBackend extends EventEmitter {
     // session (dgc/serve_relay.py); an older one ignores them. Asked once with the caller's mode; a
     // later start of this instance asks again automatically.
     const attach: Record<string, string> = this.attach?.session
-      ? { DGC_ATTACH_SESSION: this.attach.session, DGC_ATTACH: this.attach.mode,
-          DGC_EDITOR_SESSION: "1" } : { DGC_EDITOR_SESSION: "1" };
+      ? { ...editorEnv, DGC_ATTACH_SESSION: this.attach.session, DGC_ATTACH: this.attach.mode, DGC_EDITOR_SESSION: "1" }
+      : { ...editorEnv, DGC_EDITOR_SESSION: "1" };
     if (this.attach) { this.attach = { session: this.attach.session, mode: "auto" }; }
     try {
       if (this.route) {

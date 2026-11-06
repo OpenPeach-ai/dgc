@@ -66,8 +66,21 @@ function declaredFields(schema) {
 // Methods that send a command only when the CLI declared the capability, and the flag each one
 // must still check. A command sent from inside one of these is exempt from the oldest-CLI rule --
 // and the test below asserts the guard is really there, so the exemption cannot be claimed falsely.
-const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" }].map(g => g.method);
-const GATED_SENDER_GUARDS = { editorState: "editorStateSupported" };
+const GATED_SENDERS = [{ method: "editorState", guard: "editorStateSupported" },
+                       { method: "watchVideos", guard: "videosCapable" },
+                       { method: "videosJobs", guard: "videosCapable" },
+                       { method: "videosStop", guard: "videosCapable" },
+                       { method: "videosLibrary", guard: "videosCapable" },
+                       { method: "watchMcpApps", guard: "mcpAppsSupported" },
+                       { method: "watchRouter", guard: "routerCapable" },
+                       { method: "watchImages", guard: "imagesCapable" },
+                       { method: "imagesLibrary", guard: "imagesLibraryCapable" },
+                       { method: "routerThinking", guard: "routerThinkingCapable" }].map(g => g.method);
+const GATED_SENDER_GUARDS = { editorState: "editorStateSupported", watchMcpApps: "mcpAppsSupported",
+                              watchRouter: "routerCapable", watchImages: "imagesCapable",
+                              imagesLibrary: "imagesLibraryCapable", routerThinking: "routerThinkingCapable",
+                              watchVideos: "videosCapable", videosJobs: "videosCapable", videosStop: "videosCapable",
+                              videosLibrary: "videosCapable" };
 
 /** Is this node inside a method with the given name? */
 function insideMethod(node, name) {
@@ -81,19 +94,21 @@ function insideMethod(node, name) {
 test("a capability-gated sender still refuses to send when the CLI did not declare it", () => {
   // The exemption above is only honest while this holds. A sender that lost its guard would send a
   // command every 20 seconds to a CLI that answers command_rejected every time.
-  const text = readFileSync(join(here, "..", "src/backend.ts"), "utf8");
-  const tree = ts.createSourceFile("src/backend.ts", text, ts.ScriptTarget.Latest, true);
   const found = [];
-  function visit(node) {
-    if (ts.isMethodDeclaration(node) && node.name?.getText?.() in GATED_SENDER_GUARDS) {
-      const name = node.name.getText();
-      found.push(name);
-      assert.match(node.getText(tree), new RegExp(`!this\\.${GATED_SENDER_GUARDS[name]}\\b`),
-        `${name}() must return early unless the CLI declared ${GATED_SENDER_GUARDS[name]}`);
+  for (const rel of ["src/backend.ts", "src/panel.ts"]) {
+    const text = readFileSync(join(here, "..", rel), "utf8");
+    const tree = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+    function visit(node) {
+      if (ts.isMethodDeclaration(node) && node.name?.getText?.() in GATED_SENDER_GUARDS) {
+        const name = node.name.getText();
+        found.push(name);
+        assert.match(node.getText(tree), new RegExp(`!this\\.${GATED_SENDER_GUARDS[name]}\\b`),
+          `${name}() must return early unless the CLI declared ${GATED_SENDER_GUARDS[name]}`);
+      }
+      ts.forEachChild(node, visit);
     }
-    ts.forEachChild(node, visit);
+    visit(tree);
   }
-  visit(tree);
   assert.deepEqual(found.sort(), Object.keys(GATED_SENDER_GUARDS).sort(),
     "every named gated sender must exist; a renamed one would silently lose its exemption");
 });

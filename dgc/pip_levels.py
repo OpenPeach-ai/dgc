@@ -12,10 +12,11 @@ Three levels, OpenMausBot's (docs/approval-levels.md) cut to what a Pip does:
   the page gives what was pressed; anything DGC can't place asks.
 - **Full access** (``full``): no asking for sites, submits or app sends, except payments.
 
-At every level, unchanged: a payment asks (a card number in the request, or a payment's words), a card the user types
-on the Pip's screen is their own approval, the Pip never types a card, a saved login is sent only to its own site,
-careful mode's check of what it read from the user's apps, and the safety floor: a Terminal command that could wipe
-its Files waits for the user (OpenMausBot's safety floor, server/safety-floor.ts).
+At every level, unchanged: a payment asks (a card number in the request, or a payment's words), a plugin the user set
+to Always ask asks before each call, a card the user types on the Pip's screen is their own approval, the Pip never
+types a card, a saved login is sent only to its own site, careful mode's check of what it read from the user's apps,
+and the safety floor: a Terminal command that could wipe its Files waits for the user (OpenMausBot's safety floor,
+server/safety-floor.ts).
 
 Everything here runs in the supervisor (pip_computer.Host, pip_action_grants.dispatch_for_run's neighbour): the Pip's
 own process only ever reads the tool's answer. Each action a level approved is kept (a computer action ``sent`` by
@@ -82,10 +83,9 @@ def level(registry, pip_id) -> str:
     return value
 
 
-# A Personal Pip made from now on starts at Approve for me (reported 2026-10-21): it removed every Allow tap in the
-# bills and shirts tests while orders, payments, new recipients, posts and deletes still ask. A Pip made before has no
-# saved level and stays at DEFAULT (Ask) until someone changes it.
-NEW_PIP = APPROVE
+# New Personal Pips start with Ask. Existing Pips retain their saved level; creating a workflow
+# or accepting a setup card never changes the new Pip's authority to send or submit.
+NEW_PIP = ASK
 
 
 def start(registry, pip_id) -> None:
@@ -509,6 +509,9 @@ def decide_send(registry, pip_id, value, kind, content, *, money=False) -> dict 
     if value not in (APPROVE, FULL) or money:
         return None
     if kind == "connector":
+        from .pip_plugins import always_asks
+        if always_asks(content.get("server")):
+            return None                      # the user set this plugin to Always ask: its Allow card waits for them
         call = content.get("call") or {}
         tool = str(call.get("tool") or "")
         said = words(tool, list((call.get("arguments") or {}).keys()))

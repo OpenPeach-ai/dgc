@@ -386,6 +386,198 @@ class TheEditorIsTold(IsolatedHome):
             self.assertIsNone(event_error(frame), frame)
         return [f for f in frames if not kind or f["type"] == kind]
 
+    def test_agent_construction_preserves_programmatic_route_and_secret(self):
+        cfg = self.config(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        cfg.data.update(model="runtime-model", thinking="high", api_key="runtime-only")
+        agent = self.agent(cfg)
+        self.assertEqual(agent.client.model, "runtime-model")
+        self.assertEqual(cfg.get("thinking"), "high")
+        self.assertEqual(cfg.api_key, "runtime-only")
+
+    def test_new_chat_default_does_not_switch_the_open_chat(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        active = (host.default.config.base_url, host.default.config.model,
+                  host.default.agent.client.model)
+        host.dispatch({"type": "set_model_defaults", "base_url": "https://models.example/v1",
+                       "model": "new-model", "api_mode": "chat_completions",
+                       "api_key": "new-host-only", "request_id": "new-default"})
+        self.assertEqual(self.frames("model_defaults_changed")[-1]["request_id"], "new-default")
+        self.assertEqual((host.default.config.base_url, host.default.config.model,
+                          host.default.agent.client.model), active)
+        disk = json.loads((self.user / "config.json").read_text())
+        self.assertEqual(disk["base_url"], "https://models.example/v1")
+        self.assertEqual(disk["model"], "new-model")
+        self.assertNotIn("new-host-only", json.dumps(disk))
+        host.default.config.set("suggest", True)
+        self.assertEqual(Config(project_root=self.root).api_key, "new-host-only",
+                         "an unrelated save in the old chat must keep the new default key")
+        host.dispatch({"type": "new_session", "request_id": "fresh-default"})
+        self.assertEqual(host.default.config.base_url, "https://models.example/v1")
+        self.assertEqual(host.default.config.model, "new-model")
+        self.assertEqual(host.default.config.api_key, "new-host-only")
+        host.dispatch({"type": "set_model_defaults", "base_url": "https://user:pw@example.test/v1",
+                       "model": "bad", "api_mode": "auto", "request_id": "bad-default"})
+        self.assertEqual(self.frames("command_rejected")[-1]["request_id"], "bad-default")
+        host.dispatch({"type": "set_model_defaults", "base_url": "http://localhost:11434/v1",
+                       "model": "local", "api_mode": "ollama", "request_id": "local-default"})
+        self.assertEqual(self.frames("model_defaults_changed")[-1]["request_id"], "local-default")
+        host.dispatch({"type": "new_session", "request_id": "local-fresh"})
+        self.assertEqual(host.default.config.base_url, "http://localhost:11434/v1")
+        self.assertNotEqual(host.default.config.api_key, "new-host-only",
+                            "a cloud credential must not reach a newly chosen local host")
+
+    def test_subscription_default_needs_no_api_model_and_does_not_switch_open_chat(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        active = (host.default.config.model, host.default.config.get("subscription_engine", ""))
+        with patch("dgc.pip_brain.available", return_value=""):
+            host.dispatch({"type": "set_subscription_default", "engine": "claude",
+                           "model": "sonnet", "effort": "high", "request_id": "sub-default"})
+        changed = self.frames("subscription_default_changed")[-1]
+        self.assertEqual((changed["engine"], changed["model"], changed["effort"]),
+                         ("claude", "sonnet", "high"))
+        self.assertEqual((host.default.config.model, host.default.config.get("subscription_engine", "")), active)
+        self.assertEqual(Config(project_root=self.root).get("subscription_engine"), "claude")
+        host.dispatch({"type": "new_session", "request_id": "new-sub-default"})
+        self.assertEqual(host.default.config.get("subscription_engine"), "claude")
+        with patch("dgc.pip_brain.available", return_value="Claude Code is signed out"):
+            host.dispatch({"type": "set_subscription_default", "engine": "claude",
+                           "request_id": "unavailable-sub-default"})
+        self.assertEqual(self.frames("command_rejected")[-1]["reason"], "route_unavailable")
+
+    def test_new_chat_keeps_a_launch_key_bound_to_the_same_default_endpoint(self):
+        with patch.dict(os.environ, {"DGC_API_KEY": "launch-only"}):
+            host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+            self.assertEqual(host.default.config.api_key, "launch-only")
+            host.dispatch({"type": "new_session", "request_id": "new-with-launch-key"})
+            self.assertEqual(host.default.config.api_key, "launch-only")
+            host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                           "base_url": "https://another.example/v1", "model": "other",
+                           "request_id": "switch-host"})
+            self.assertNotEqual(host.default.config.api_key, "launch-only",
+                                "the launch key must stay bound to its original endpoint")
+
+    def test_session_subscription_switch_does_not_change_the_new_chat_default(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.dispatch({"type": "set_config", "scope": "session", "request_id": "route-1",
+                       "values": {"subscription_engine": "codex"}})
+        self.assertEqual(host.default.config.get("subscription_engine", ""), "codex")
+        self.assertEqual(json.loads((self.user / "config.json").read_text()).get("subscription_engine", ""), "")
+        host.dispatch({"type": "set_config", "scope": "session", "request_id": "route-2",
+                       "values": {"subscription_model": "gpt-5"}})
+        self.assertEqual(host.default.config.get("subscription_model", ""), "gpt-5")
+        self.assertEqual(json.loads((self.user / "config.json").read_text()).get("subscription_model", ""), "")
+        saved = host.default.agent.session_file
+        self.assertEqual(sessions.load_record(saved, self.root)["subscription_route"],
+                         {"engine": "codex", "model": "gpt-5", "effort": ""})
+        host.dispatch({"type": "new_session", "request_id": "fresh-route"})
+        self.assertEqual(host.default.config.get("subscription_engine", ""), "",
+                         "a new Work chat starts from the user's saved default")
+        self.assertEqual(self.frames("config")[-1]["subscription_engine"], "")
+        host.dispatch({"type": "resume_session", "path": str(saved), "saved_mode": True,
+                       "request_id": "resume-route"})
+        self.assertEqual(host.default.config.get("subscription_engine", ""), "codex")
+        self.assertEqual(host.default.config.get("subscription_model", ""), "gpt-5")
+        self.assertEqual(self.frames("config")[-1]["subscription_model"], "gpt-5")
+        host.dispatch({"type": "set_config", "scope": "session", "request_id": "bad-route",
+                       "values": {"base_url": "https://example.test/v1"}})
+        self.assertEqual(self.frames("command_rejected")[-1]["request_id"], "bad-route")
+
+    def test_native_model_and_effort_belong_to_the_work_session(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        baseline = json.loads((self.user / "config.json").read_text())
+        host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                       "model": "big", "request_id": "native-model"})
+        host.dispatch({"type": "set_think", "scope": "session", "level": "high",
+                       "request_id": "native-effort"})
+        self.assertEqual(host.default.config.model, "big")
+        self.assertEqual(host.default.config.get("thinking"), "high")
+        saved = host.default.agent.session_file
+        self.assertEqual(sessions.load_record(saved, self.root)["native_route"]["model"], "big")
+        self.assertEqual(json.loads((self.user / "config.json").read_text()), baseline)
+        host.dispatch({"type": "new_session", "request_id": "fresh-native"})
+        self.assertEqual(host.default.config.model, "qwen2.5-0.5b")
+        self.assertEqual(host.default.config.get("thinking"), baseline.get("thinking", "off"))
+        host.dispatch({"type": "resume_session", "path": str(saved), "saved_mode": True,
+                       "request_id": "resume-native"})
+        self.assertEqual(host.default.config.model, "big")
+        self.assertEqual(host.default.config.get("thinking"), "high")
+        self.assertEqual(host.default.agent.client.model, "big")
+        self.assertEqual(self.frames("config")[-1]["model"], "big")
+
+    def test_session_model_window_stays_out_of_the_new_chat_default(self):
+        self.server.served_models = [VLLM_ENTRY, {"id": "big", "owned_by": "vllm", "max_model_len": 131072}]
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1",
+                         context_size=8192)
+        baseline = json.loads((self.user / "config.json").read_text())
+        host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                       "model": "big", "request_id": "large-window"})
+        self.assertEqual(host.default.config.get("context_size"), 131072)
+        self.assertEqual(host.default.config.model, "big")
+        host.default.config.set("suggest", True)  # Unrelated settings save must not leak the route.
+        saved = json.loads((self.user / "config.json").read_text())
+        self.assertEqual(saved["model"], baseline["model"])
+        self.assertEqual(saved["context_size"], baseline["context_size"])
+        self.assertEqual(saved.get("model_context_sizes"), baseline.get("model_context_sizes"))
+        session_file = host.default.agent.session_file
+        host.dispatch({"type": "new_session", "request_id": "fresh-window"})
+        self.assertEqual(host.default.config.model, "qwen2.5-0.5b")
+        self.assertEqual(host.default.config.get("context_size"), 8192)
+        host.dispatch({"type": "resume_session", "path": str(session_file), "saved_mode": True,
+                       "request_id": "resume-window"})
+        self.assertEqual(host.default.config.model, "big")
+        self.assertEqual(host.default.config.get("context_size"), 131072)
+
+    def test_failed_session_model_save_restores_the_live_route(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        before = (host.default.config.model, host.default.config.base_url,
+                  host.default.config.get("context_size"), host.default.agent.client.model)
+        with patch.object(host.default.agent, "_persist", return_value=False):
+            host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                           "model": "big", "request_id": "failed-save"})
+        self.assertEqual(self.frames("command_rejected")[-1]["reason"], "session_save_failed")
+        self.assertEqual((host.default.config.model, host.default.config.base_url,
+                          host.default.config.get("context_size"), host.default.agent.client.model), before)
+
+    def test_invalid_session_endpoint_does_not_clear_the_active_credential(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        host.default.config.set_runtime_secret("api_key", "runtime-only")
+        before = (host.default.config.base_url, host.default.config.api_key)
+        host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                       "base_url": "https://user:secret@example.test/v1",
+                       "clear_stored_api_key": True, "request_id": "invalid-endpoint"})
+        self.assertEqual(self.frames("command_rejected")[-1]["reason"], "invalid_config_value")
+        self.assertEqual((host.default.config.base_url, host.default.config.api_key), before)
+
+    def test_native_session_route_never_keeps_url_credentials(self):
+        baseline = {"base_url": "https://models.example/v1", "model": "local",
+                    "api_mode": "auto", "thinking": "off"}
+        self.assertEqual(sessions._clean_native_route(baseline), baseline)
+        for address in ("https://models.example/v1?key=private",
+                        "https://models.example/v1#private",
+                        "https://user:private@models.example/v1",
+                        "https://models.example:invalid/v1"):
+            with self.subTest(address=address):
+                self.assertIsNone(sessions._clean_native_route({**baseline, "base_url": address}))
+
+    def test_native_session_endpoint_never_saves_or_reuses_a_different_hosts_key(self):
+        host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")
+        baseline = json.loads((self.user / "config.json").read_text())
+        other = "https://example.test/v1"
+        host.dispatch({"type": "set_model", "scope": "session", "route": "native",
+                       "base_url": other, "api_key": "only-for-example", "model": "remote",
+                       "request_id": "other-provider"})
+        self.assertEqual(host.default.config.base_url, other)
+        self.assertEqual(host.default.config.api_key, "only-for-example")
+        saved = host.default.agent.session_file
+        self.assertNotIn("only-for-example", saved.read_text())
+        self.assertEqual(json.loads((self.user / "config.json").read_text()), baseline)
+        host.dispatch({"type": "new_session", "request_id": "fresh-provider"})
+        self.assertEqual(host.default.config.base_url, self.server.url + "/v1")
+        host.dispatch({"type": "resume_session", "path": str(saved), "saved_mode": True,
+                       "request_id": "resume-provider"})
+        self.assertEqual(host.default.config.base_url, other)
+        self.assertEqual(host.default.config.api_key, "")
+
     def test_ready_offers_it_and_a_client_that_never_asks_never_gets_one(self):
         self.server.served_models = [VLLM_ENTRY]
         host = self.host(model="qwen2.5-0.5b", base_url=self.server.url + "/v1")

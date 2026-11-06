@@ -8,7 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from dgc import pip_chat, pips
+from dgc import pip_chat, pip_steering, pips
 from dgc.llm import ChatResult, LLMClient
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests import test_pips_local as fixtures
@@ -106,8 +106,9 @@ class PipChatTests(unittest.TestCase):
         self.setup_job()
         for index, status in enumerate(("failed", "cancelled", "recovered")):
             sent = self.send(key=str(index))
-            with self.assertRaisesRegex(RegistryError, "already has"):
-                self.send(key="different")
+            steered = self.send(text="One update", key=f"update-{index}")
+            self.assertEqual(steered["run"]["id"], sent["run"]["id"])
+            self.assertEqual(steered["message"]["steer_status"], "pending")
             self.store.claim_next()
             if status == "cancelled":
                 self.store.cancel(sent["run"]["id"], "device_1")
@@ -117,9 +118,62 @@ class PipChatTests(unittest.TestCase):
             else:
                 self.store.recover()
         page = pip_chat.list_messages(self.store, self.job["id"])
-        self.assertEqual(len(page["messages"]), 3)
+        self.assertEqual(len(page["messages"]), 6)
         self.assertTrue(all(m["role"] == "user" for m in page["messages"]))
         self.assertEqual(pip_chat.snapshot(self.store, self.job["id"]), ([], 0))
+
+    def test_mid_turn_updates_share_one_run_and_survive_archive_and_reload(self):
+        self.setup_job()
+        sent = self.send(text="Inspect the invoice", key="first")
+        update = self.send(text="The invoice is number 272", key="update")
+        self.assertEqual(update['run']['id'], sent['run']['id'])
+        self.assertEqual(self.send(text="The invoice is number 272", key="update")['message']['id'],
+                         update['message']['id'])
+        with self.assertRaises(RegistryError):
+            self.send(text="Different invoice", key="update")
+        self.assertEqual(self.registry.db.execute("SELECT count(*) FROM pip_runs").fetchone()[0], 1)
+        folder = self.registry.directory / 'runs' / sent['run']['id']
+        folder.mkdir(parents=True, exist_ok=True)
+        pip_steering.stage(self.registry.db, sent['run']['id'], folder)
+        self.assertEqual(pip_steering.read_worker(folder, set()),
+                         [{'id': update['message']['id'], 'text': 'The invoice is number 272'}])
+        self.store.claim_next()
+        pip_steering.applied(self.store, sent['run']['id'], [update['message']['id']])
+        self.store.finish(sent['run']['id'], result={'text': 'Invoice 272 checked.'})
+        with WorkspaceRegistry(self.registry.directory) as reopened:
+            page = pip_chat.list_messages(pips.PipStore(reopened), self.job['id'])
+            history, omitted = pip_chat.snapshot(pips.PipStore(reopened), self.job['id'])
+        self.assertEqual([m['role'] for m in page['messages']], ['user', 'user', 'assistant'])
+        self.assertEqual(page['messages'][1]['steer_status'], 'applied')
+        self.assertEqual(omitted, 0)
+        self.assertIn('The invoice is number 272', history[0]['content'])
+
+    def test_a_late_mid_turn_update_is_reported_as_missed(self):
+        self.setup_job()
+        sent = self.send(key='first')
+        update = self.send(text='Look at the second tab', key='late')
+        self.store.claim_next()
+        self.store.finish(sent['run']['id'], result={'text': 'Finished.'})
+        pip_steering.miss_pending(self.store, sent['run']['id'])
+        page = pip_chat.list_messages(self.store, self.job['id'])
+        missed = next(m for m in page['messages'] if m['id'] == update['message']['id'])
+        self.assertEqual(missed['steer_status'], 'missed')
+        self.assertEqual(missed['status'], 'failed')
+        self.assertNotIn('Look at the second tab', str(pip_chat.snapshot(self.store, self.job['id'])))
+
+    def test_mid_turn_updates_count_toward_message_page_budget(self):
+        self.setup_job()
+        for turn in range(3):
+            sent = self.send(text=f'Inspect batch {turn}', key=f'batch-{turn}')
+            updates = [self.send(text='x' * 4000, key=f'batch-{turn}-update-{index}')
+                       for index in range(8)]
+            self.store.claim_next()
+            pip_steering.applied(self.store, sent['run']['id'], [item['message']['id'] for item in updates])
+            self.store.finish(sent['run']['id'], result={'text': f'Batch {turn} checked.'})
+        page = pip_chat.list_messages(self.store, self.job['id'], limit=50)
+        self.assertLessEqual(len(json.dumps(page['messages']).encode()), 96 * 1024)
+        self.assertIsNotNone(page['next_before_id'])
+        self.assertEqual(len({item['id'] for item in page['messages']}), len(page['messages']))
 
     def test_a_failed_turn_says_why_under_the_message(self):
         # Battle test: a Pip ran out of steps and the chat said only "No completed reply was recorded."

@@ -1,5 +1,184 @@
 # Changelog
 
+## 0.35.0 — 2026-11-06
+
+- Several Pips created in one Work reply appear in one expandable card with their animated faces and a Dismiss control. Open it for each Pip's status and links.
+- A message sent while a Pip is answering joins that reply without opening another run. Settings → Models keeps saved model hosts and signed-in subscription CLIs in one provider list. One default starts new Work and ChatDGC chats and Pips set to Default. Work and ChatDGC can each choose another saved provider and keep that choice after reload. API keys stay bound to their endpoint. A subscription needs no separate model host.
+- Personal and Project Pips now have Workflows on their home pages. Review an exact two-to-four Pip sequence and choose review at every handoff or unattended routing; pause or remove it there. Project targets are read only. Each Pip's external action approvals remain separate. New Personal Pips start at Ask, while existing Pips keep their saved level.
+- Ask Core to set up Personal Pips. Review each proposed job in the Pips view before it is created; Core's chat can show the waiting reviews.
+- A plugin card whose page never finishes loading now replaces its spinner and empty frame with a compact message after 20 seconds. A page that loads but never starts is compact too. The card can still finish opening if its server recovers.
+- A completed mid-turn Work prompt says “Steered · 11:01 PM” on its timestamp line, in the timestamp's colour and size. Restored chats place it with the right prompt. The two “Worked for” rows still show time before and after the update.
+- Use it with DGC CLI 0.51.0 or newer. DGC Router, pictures, videos, plugin cards and token usage by system need
+  it, and stay hidden with an older CLI.
+- Settings → Models now holds every model choice in one page: Providers, Fallback, Sub-agents, Pips, Images & video
+  and DGC Router ("Use my other computers"). The Agents page's settings moved here. It works in a narrow tab too.
+- DGC Router in Settings. With the Router on, Sub-agents reads "Chosen by DGC Router · 3 systems · 9 workers free",
+  and Systems lists each of your computers live: its status, server and address, jobs, models (use, workers, context
+  each, thinking and a note), the total context with the server's own room check, the last test and how long ago it
+  ran (kept current while Settings is open), its hardware and what it is working on. Each has Test, Suggest (the arithmetic, then Apply), Edit and Remove. + Add system finds
+  the server and its models, asks for a key only when the server wants one, and the new system takes no work until
+  you save it. Look on my network asks first. A system's key and a `dgc node` pairing token go to DGC once and are
+  never shown again.
+- Where each helper ran. The agent map and a helper's page say "on GPU box · qwen3:8b · thinking low", also in a
+  reopened chat. In a narrow map the time and tokens give way first, a whole part at a time, so where it ran stays
+  readable. The status bar shows `Router 9/11` (workers free of total) while the Router is on; click it, or run
+  DGC: Router Settings, to open Settings → DGC Router.
+- A Pip can run on DGC Router: "DGC Router (any Pip system)" or one system and model, in the Pips page's model menu
+  and a Pip's settings. A Pip's model chip reads "Default (NAS · qwen3.5:9b)" on Default, and on the Router
+  "DGC Router · GPU box", the computer the last reply came from, with the whole choice on hover.
+- Thinking for helpers: Settings → Models → Sub-agents → Thinking (Same as the main chat, Off, Low, Medium, High or
+  Extra high), and on DGC Router a Thinking column for each model (Same as the helper, Off, Low, Medium or High;
+  "doesn't think" for a model that can't).
+- A context size is one box you type in or pick from, for DGC Router's "Context each" and Sub-agents' "Context
+  window": 4K to 256K, listed up to the model's own maximum, or any size typed (24K, 24k, 24576, 24,576) and said back
+  as it will be saved. A note says when it is under 2K or past the model's maximum (DGC then uses the maximum), and
+  beside it is what the choice costs on that computer ("≈ 4.4 GB each · 2 workers ≈ 8.8 GB of 53 GB free", or that
+  it won't fit).
+- Settings → Models → Images & video lists your picture and video generators: each one's provider and model, its
+  price (for a video model, its price per second, lengths and resolutions), whether it works right now (works,
+  needs credit, rate limited, bad key, server down, and what the provider said), the Default badge, its key (saved
+  or from the environment, never the key itself) and this month's spend against its limit. Each row has "Asks
+  before each image", or for a video model "Asks before each video", which is on until you turn it off there.
+  - + Add generator asks what it makes (pictures or videos), then the provider, then its address or key. The key
+    goes to DGC once, in a step of its own, and the generator is then tested. A video generator uses the key its
+    pictures use unless you paste another.
+  - A ComfyUI workflow shows where DGC found its prompt, seed, size and input image on one screen, to change and
+    confirm before anything is saved.
+  - Edit, Remove, Make default, Test and Test all sit on each row, with this project's choice, the automatic
+    fallback and Save images in (blank for DGC's own folder, or a folder in the project) beside them. Every change is
+    saved as you make it.
+  - Before you save a fal, Replicate or Gemini key that doesn't look whole, the form says so ("fal keys have two
+    parts with a ':' between them…"), and Add or Save again saves it anyway. A key the provider refused reads "Key not
+    accepted: choose Edit and paste the whole key again".
+- Pictures DGC makes show where you work. In Work a picture shows under the reply that made it, and its step keeps
+  its tiles. In ChatDGC it shows under the reply, with Open and Save a copy, and a Pip's reply shows the pictures it
+  made. Save to project… under a picture, in Work, ChatDGC and the Library, copies it into the folder open in VS
+  Code (`assets/` unless you pick another place); otherwise pictures stay in DGC's own folder. The Library's Images
+  list Work's pictures beside ChatDGC's, and Made in Work shows only those.
+- A paid picture's card reads "Make this image with fal.ai FLUX Schnell?" with how many, the size, the price, this
+  month's spend on its key once there is any or a limit is set ("this month $0.006 so far"), the prompt and, when the
+  model saves it into the project, where it goes ("saves to web/hero.png"). Its buttons are Make it · about $0.003,
+  Edit (ask again with a changed prompt), Always allow and Don't. In ChatDGC the card sits under the reply with the
+  same facts and Make it, Edit and Don't, and nothing is made until you press Make it.
+- Videos are drawn where a picture is, in Work, ChatDGC and a Pip's chat: first the job's progress (the provider's
+  state, the time so far and Stop), then a player with its poster frame, its length and size, Open (your system
+  player), Show in folder and Save to project…. Every video asks first, on a card with its length, resolution, price
+  and this month's spend: Make it · about $0.15, Edit or Don't, and no Always allow. A reload keeps it. The Library
+  has a Videos tab with every video DGC made, newest first, by where it was made.
+- Pictures and videos in a reply fold away. Each block has one header row ("1 picture · a felt fox toy", "3
+  pictures") with a chevron; a click, Enter or Space folds it to that line, and folded it still offers Open. Your
+  choice holds after a reload and when the chat is opened again. Settings → General → Pictures in replies (Shown or
+  Folded, the `dgc.picturesInReplies` setting) sets how a reply starts. In Work, ChatDGC and a Pip's chat.
+- Plugin cards in the chat (MCP Apps). When a plugin offers a card, it shows under the step that used it in Work, above
+  the reply in ChatDGC and under a Pip's reply, in your editor's light or dark theme. A change it asks for shows DGC's
+  Allow card above it, a link to a site it didn't declare asks before it opens in your browser, and a file it makes goes
+  through a save dialog. The button beside its name, or the card itself, opens it in a tab of its own. Cards stay as
+  they are while a reply is still being written, and come back after a reload. A Pip's plugin call that runs after your
+  Allow shows its card under that reply, and Don't leaves "Not run: you chose Don't for get-time." in the card's place.
+  Collapse beside a card's name hides its page while keeping it live; Expand restores it. A failed plugin call no
+  longer leaves a gallery loading, and an older failed card reopens as a compact error row.
+- A plugin wears its own logo on ChatDGC's cards, a Pip's Allow cards and Work's Allow cards for its tools, as the
+  "Used …" line under a reply does, in both themes. It is always the logo of the plugin DGC calls (Composio's for
+  Composio's tools, never the app inside it). Higgsfield, Runway and Cardboard show their logos in Settings →
+  Plugins, and every plugin in DGC's directory now has one.
+- Token usage by system. With usage on more than one system, Settings → Token usage has a System picker under the
+  range (All systems, then your computers, then the cloud services) that shows one system alone: its totals, days and
+  models, in both the Everything and Pips views. All systems adds a By system list with each one's requests, tokens
+  and share (unmetered requests marked); choose a name to see it alone. A model's row says where it ran ("NAS ·
+  ollama"), with the address behind the ⓘ, and an Ollama cloud model counts as Ollama Cloud. With one system the page
+  is as it was. The page fits beside a chat: a model's name wraps whole, and the tables give way (Cached, then
+  Share) before they scroll sideways. The filter box reads "Model, system or host".
+- Plusher Pips. Every Pip's felt now has soft fibres along its edge, a fine pile and a gentle sheen, drawn at twice
+  the resolution so it stays sharp on high-density screens. Their eyes and the way they move are unchanged.
+- Plugin sign-in from a remote window. The editor tells DGC its browser is on another computer, so a sign-in waits
+  ten minutes. Where the service takes a code, you can sign in with a code on another device, and Signed in but
+  nothing happened? on the sign-in card takes the address your browser ended on and finishes the sign-in with it.
+  Set `DGC_EDITOR_REMOTE=1` for an editor shown from another computer some other way (over VNC, say).
+- ChatDGC answers at once. Your message shows the moment you press Enter, and under it the reply waits for the model
+  with its clock, "Waiting for deepseek-v4.1-flash… (4s · usually starts within 12s)", as Work does; Thinking, a
+  search or the words take over when the model starts. A send refused before it started says so with Retry (your
+  text is back in the box), Stop works from the first moment, and a reload mid-wait shows the reply still waiting.
+- Allow cards in plain words. A batch of helpers reads "Start 3 helpers?", with each helper, where it runs when the
+  model chose a system (otherwise DGC Router picks one as it starts), and its brief one click away. A plugin's tool
+  reads "Use Get time from Example?", named as the plugin's card names it. One that sends or changes something
+  shows every input it sends, in full; a read (find, get, list, search…) keeps its inputs one click away. A look on
+  the network reads "Look for model servers on your network?" with the ports it checks.
+- A card offers only the answers it takes. A DGC Router change, a look on the network, and a call one of your own
+  ask rules asks about offer Allow once and Deny, with no Always allow.
+- A Pip's card for a plugin you set to Always ask reads "You set Airtable to Always ask, so Ava asks you every time."
+  and offers Allow once and Don't, with no Always allow.
+- Composio's cards say each app call in plain words in Work and a Pip's chat too, as in ChatDGC ("Gmail · Fetch
+  emails · 5 from Inbox · through Composio"), one line for every call in a batch, without Composio's plumbing.
+  Inputs as sent, one click away on every plugin tool's card, shows everything it sends in full, an email's body
+  included. Edit still edits the real inputs.
+- Approving a plan into Auto, or into Accept edits, applies to that Work chat only, as its dialog says, and is never
+  saved as your default for the terminal and new chats. The chat's mode chip and the status bar then show the mode
+  the plan runs in; they kept saying plan.
+- Settings → General → Permission mode now says it is this Work chat's mode. Auto is chosen for one chat at a time,
+  so a new chat starts in Default, never in Auto.
+- A Work chat reopens in the mode it had: opened from the list, opened again after you closed it, or after
+  Developer: Reload Window. A chat set to Auto comes back in Auto, with "auto" on its mode chip at once and no Allow
+  card for an edit; a chat in Plan comes back in Plan, and one in Default in Default. It reopened in Default whenever
+  that asked more. In a folder that is no longer trusted, a chat saved in Auto or Accept edits reopens in Default and
+  says so in the chat. New chat still starts in your default.
+- Interactive reply cards show numbers. A table cell the model wrote as a number was blank, and a metric with a
+  number value showed the card's raw code instead of the card.
+- Interactive reply cards are live only in DGC's own reply in a chat, in Work, ChatDGC and a Pip's chat. A card in a
+  skill's page, the docs, memory, a routine's post or a helper's report shows as code, and each choice shows the
+  exact words it sends as your message.
+- A plugin card that sends or changes something shows every input it sends before you press Send it now or Allow, in
+  ChatDGC, Work and a Pip's chat: an email's recipient, subject and whole body, under its line, with no click. A
+  read keeps its inputs one click away, in Inputs as sent.
+- ChatDGC shows a plugin's card where it happened in the reply, and folds it into a short row once it's done.
+- Open on a file a ChatDGC chat made no longer leaves another full copy in the temp folder each time. The window
+  keeps each file's last copy only, in a private folder of its own, and removes it when the window closes.
+- Work: scrolling up near the live Thinking row. Your own scroll up always wins, however small (a trackpad's few
+  pixels used to be pulled back down by every tick), and following comes back only at the very end. The live row
+  stays one line as its clocks and counts tick.
+- A Work turn that a finished video woke reads "Woke as a video ended".
+- "Too many pending Pip controls; wait and retry." on the Pips home or in a Pip's chat goes as soon as a later
+  request gets through, instead of staying until a window reload.
+- A Pip decides how its reply reads: one message, or several short ones it marks, so a poem or a draft comes as one
+  piece.
+- A step that failed ("Couldn't delegate", a command that failed) marks itself with a small cross where a step that
+  worked has its round dot, live and after a reload. Its olive was easy to read as done.
+- When a permanent Pip deletion leaves a saved Output it couldn't read, the Pips view says which folder it left, in
+  a notice (not an error) that stays on screen. The home's count drops as soon as the deletion is done; it said
+  "Showing 1 of 2" with one Pip left.
+- A link in a mod's panel, band or command answer is its words: a click opens nothing, no site icon loads for it,
+  and a choice card in a mod's Markdown can't be pressed. A code block's Copy still works.
+- A web fetch step says it read a page, on the page's site: "Read a page on example.com", "Read 2 pages on 2 sites".
+  It said "Searched the web".
+- Settings → Plugins → Mods shows the mods of the Work chat you last worked in, as that chat's /mods does, and
+  follows them as they change. With the chat in an editor tab, it said "Not running" with Turn on for mods the chat
+  showed On.
+- Opening the Turn on Auto mode? dialog no longer leaves a console error ("Blocked autofocusing on a <button>
+  element in a cross-origin subframe"). It still starts at Cancel.
+- A Pip fix or a helper keeps to its Work chat's mode as it is now. Set the chat to Auto after a fix started, and the
+  fix no longer asks before each step with "auto" on the chip. Back in Default it asks again, with the chat in plan it
+  asks before each change, and your ask and deny rules still apply.
+- In a short Work chat (a low window, the terminal panel open, an editor split), the prompt you sent no longer pins
+  over most of the transcript. At the end of a long answer it left only the reply's last line in view: after a
+  video's Stop woke the chat, the reply read as one line under the prompt, with the rest of the turn out of sight
+  under it. A prompt now pins only while it takes at most 40% of the transcript, as well as 30% of the window.
+- Collapsing the diff on an Allow card, or opening its file from there, no longer answers the card. It denied the
+  call, and the chat said "DGC command violated protocol v14: permission_response.decision is required". Only the
+  card's own answers (Allow once, Always allow, Deny, Edit) answer it, on a Pip fix's card too.
+- The agent map shows a Pip fix's Prompt: the brief its fixer was given, also after a window reload. It said "This
+  agent's prompt was not kept in the chat."
+- Pips → Controls shows the Keep Pips running switch again on Linux, in WSL and on a Mac. It said "The
+  keep-running status is invalid" instead (on a Mac since DGC 0.50.0). When the switch still starts an older DGC,
+  a line under it says so, and Refresh moves it to this one; while a Pip is working, Refresh waits.
+- The home page's Pips row has Dismiss all: it clears the unread count there, while every message stays unread on the
+  Pips page until you open its chat. Something new brings the row back with only the new count, also after a reload.
+- On the Pips page, a Pip's purple unread count reads "Read" when you point at it or reach it with the keyboard, and a
+  click marks its whole chat read without opening it, in Personal and Project.
+- The same on the home page's Pips row: a Pip's count reads "Read" on hover or focus, and a click marks it read.
+- Acting on a project Pip's card in a Work chat (Dismiss, its ✕, or Fix) marks that run read, so the Pip's unread count
+  drops on the Pips page and the home page.
+- A Pip's chat keeps its messages clear of the scrollbar. Where the scrollbar is drawn over the page (as on a Mac), your
+  messages ran under it and their times were cut ("12:03 A").
+
 ## 0.34.3 — 2026-11-02
 
 - Auto mode confirmation applies to the current Work chat. New editor sessions start in Default if 0.50.0 saved Auto globally.

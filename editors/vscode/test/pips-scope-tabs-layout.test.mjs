@@ -118,7 +118,7 @@ for (const theme of ["dark-modern", "light-modern"]) {
           await page.screenshot({ path: `${process.env.DGC_SHOTS}/pips-tabs-wide.png` });
         }
         assert.deepEqual([personal.chosen.text, personal.other.text], ["Personal", "Project"]);
-        assert.deepEqual([home.chosen.text, home.other.text], ["Chat", "Work"], "measured against the home's own tabs");
+        assert.deepEqual([home.chosen.text, home.other.text], ["Work", "Chat"], "measured against the home's own tabs");
         // The same box, type and colours as the home's tabs, property by property.
         for (const part of ["bar", "chosen", "other"]) {
           const differs = PROPS.filter((p) => personal[part].style[p] !== home[part].style[p]);

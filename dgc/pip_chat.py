@@ -557,6 +557,23 @@ def request(text, key, chat_options=None, images=None, files=None):
     return result
 
 
+def _answered_by(store, run) -> str:
+    """The model a reply was written by. A DGC Router run's pinned model is "router" (any Pip system) or
+    "router:<system>/<model>"; the system and model it was leased are what answered, so the reply keeps those in words,
+    "glm-5.3:cloud on Workstation (DGC Router)": the chat can say which computer answered."""
+    model = str(run["manifest"].get("model") or "")
+    if model != "router" and not model.startswith("router:"):
+        return model
+    row = store.db.execute("SELECT payload FROM workspace_events WHERE run_id=? AND event_type='pip_run_routed' "
+                           "ORDER BY seq DESC LIMIT 1", (run["id"],)).fetchone()
+    try:
+        routed = json.loads(row[0]) if row else {}
+    except (TypeError, ValueError):
+        routed = {}
+    system, name = str(routed.get("system") or "")[:80], str(routed.get("model") or "")[:200]
+    return f"{name} on {system} (DGC Router)" if system and name else model
+
+
 def _message(row):
     message = {key: row[key] for key in ("id", "pip_id", "workspace_id", "role", "text", "run_id",
                                         "status", "model", "created_at")}
@@ -659,19 +676,48 @@ INTRO = ("This message is from DGC, not the user. The user has just created you 
 CORE_INTRO = ("This message is from DGC, not the user. The user has just created you, Core, their Primary "
               "Pip. Write your first message to them. Say hello and that you are their Primary Pip: you "
               "help with everyday tasks, look after their other Pips and check in when you need them. Say "
-              "what you can see from here (their other Pips or connected apps, if your references show "
-              "any; otherwise say nothing is connected yet). End with one short question asking for the "
+              "what you can see from here: only their other Pips, the direct app links and the DGC plugins your "
+              "instructions and references name as connected or turned on now. A way to connect an app (connect_app, "
+              "Composio, a plugin the user hasn't set up) is not a connection: if nothing is connected, say nothing "
+              "is connected yet. End with one short question asking for the "
               "one thing on their plate today, and offer two or three likely answers with offer_choices. Two or "
               "three short paragraphs, no lists and no headings.")
+PROJECT_INTRO = ("This message is from DGC, not the user. The user has opened your chat for the first time. "
+                 "Your name is \"{name}\" and your reviewed goal is: {goal}. Introduce yourself by that name "
+                 "in one or two short sentences. Say what you can help inspect or prepare within your existing "
+                 "instructions, without claiming that you have checked the repository or run a job yet. "
+                 "Do not run tools, make a card, or change anything in this first message. "
+                 "End with one short question asking what the user wants to start with.")
+# How a reply reads in the chat is the Pip's to decide. The chat split every paragraph into its own bubble, so a poem
+# or an email draft came apart at each stanza (asked 2026-11-03: "leave this to the llm model to decide"). Now a reply
+# is one message, split only at a line of just --- (editors/vscode/src/pipsTranscript.js replyParts). The "short
+# message" asks in DGC's own turns ("carry on ... in a short message") are about the Pip's own words, never a piece.
+BUBBLES = ("Write the way you'd text: when separate short messages read better, put a line with only --- between them, "
+           "and each becomes its own message; anything meant to be read as a whole (a poem, a draft, an explanation, a "
+           "list, steps) goes in one message with no --- inside it, in full, as long as it needs. A rule to keep a "
+           "message short, here or in a message from DGC, is about your own words, never a piece the user asked for.")
+MESSAGE_BREAK = re.compile(r"^[ \t]*---[ \t]*$", re.M)      # the line between two messages (BUBBLES)
+
+
+def without_breaks(text: str) -> str:
+    """A reply for a place that shows it as one piece (a preview, a notification): its message breaks gone."""
+    return MESSAGE_BREAK.sub("", str(text or ""))
 
 
 def introduce(store, pip_id, actor, config):
-    """Queue the Pip's first message once; asking again returns the same one."""
+    """Queue one hidden first turn when the chat is empty; never interrupt an existing conversation."""
     pip = store._job(pip_id)
-    if pip["source_policy"] != {"mode": "personal"}:
-        raise RegistryError("invalid_request", "Only Personal Pips introduce themselves.")
     key = INTRO_KEY + re.sub(r"[^A-Za-z0-9_-]", "", pip_id)[:100]
-    text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=pip["name"][:120].replace('"', "'"))
+    first = store.db.execute("SELECT request_key FROM pip_chat_messages WHERE pip_id=? ORDER BY seq LIMIT 1",
+                             (pip_id,)).fetchone()
+    if first and first["request_key"] != key:
+        return {"already_started": True}
+    name = pip["name"][:120].replace('"', "'")
+    if pip["source_policy"] == {"mode": "personal"}:
+        text = (CORE_INTRO if pip.get("pip_type") == "core" else INTRO).format(name=name)
+    else:
+        goal = str(pip.get("goal") or "Help with this project").replace('"', "'")[:500]
+        text = PROJECT_INTRO.format(name=name, goal=goal)
     return send(store, pip_id, text, key, actor, config, _intro=True)
 
 
@@ -866,8 +912,17 @@ def snapshot(store, pip_id, *, context_size=32768):
         pair = [{"role": item["role"], "content": store.db.execute(
                     "SELECT text FROM pip_chat_messages WHERE seq=? AND pip_id=?",
                     (item["seq"], pip_id)).fetchone()[0]} for item in (user, assistant)]
+        from .pip_steering import applied_text
+        interjections = applied_text(store.db, user['run_id'])
+        if interjections:
+            pair[0]['content'] += ''.join('\n\n[User update during this reply]\n' + text for text in interjections)
+        # Validate each stored message against its own contract. A run may also
+        # have several individually bounded mid-turn updates, so their joined
+        # context is bounded by the pair budget below instead.
         for index, message in enumerate(pair):
-            validate_text(message["content"], reply=index == 1)
+            original = store.db.execute("SELECT text FROM pip_chat_messages WHERE seq=? AND pip_id=?",
+                                        ((user if index == 0 else assistant)["seq"], pip_id)).fetchone()[0]
+            validate_text(original, reply=index == 1)
         amount = len(_json(pair).encode()) - 2 + (1 if history else 0)
         if size + amount > budget:
             break
@@ -1006,6 +1061,12 @@ def prepare(store, pip, req, *, context_size=32768, secrets=()):
     if posts:
         # What its runs posted in this chat, as reference beside last_report: never a turn, never the user's words.
         context["run_posts"] = posts
+    try:
+        cards = card_context(store, pip["id"])
+    except Exception:                       # noqa: BLE001 -- a card's note never costs the reply
+        cards = []
+    if cards:
+        context["card_context"] = cards
     if req.get("images"):
         context["images"] = req["images"]
     elif str(req.get("request_key") or "").startswith(FOLLOW_UP_KEYS):
@@ -1097,9 +1158,63 @@ def reply_plugins(db, run_id):
         return []
 
 
+def card_context(store, pip_id) -> list:
+    """What the user did in plugin cards this Pip showed lately, as each card reported it (MCP Apps
+    ui/update-model-context): [{plugin, tool, text}], the newest of each, at most four from the last ten replies. The
+    Pip reads it as the plugin's content, never as instructions."""
+    from .mcp_apps import cards_of_run
+    out = []
+    rows = store.db.execute("SELECT run_id FROM pip_chat_messages WHERE pip_id=? AND role='assistant' ORDER BY seq DESC "
+                            "LIMIT 10", (pip_id,)).fetchall()
+    for (run_id,) in rows:
+        for record in reversed(cards_of_run(run_id)):
+            said = str(record.get("context") or "").strip()
+            if said and len(out) < 4:
+                out.append({"plugin": str(record.get("plugin") or record.get("server") or "")[:80],
+                            "tool": str(record.get("tool") or "")[:128], "text": said[:4000]})
+    return out
+
+
+def _valid_card_context(value) -> None:
+    if (not isinstance(value, list) or not 1 <= len(value) <= 4 or len(_json(value).encode()) > 20000
+            or any(not isinstance(item, dict) or set(item) != {"plugin", "tool", "text"}
+                   or any(not isinstance(item[key], str) for key in item) for item in value)):
+        raise RegistryError("invalid_history", "The plugin cards' context exceeds its bounded contract.")
+
+
+def reply_apps(db, run_id):
+    """The plugin cards a reply showed (MCP Apps: [{card_id, server, plugin, tool, call_id, created_at}]), or []: its
+    run's, then those of the plugin actions it offered that ran on the user's Allow (pip_plugins.action_cards)."""
+    row = db.execute("SELECT json_extract(result,'$.apps') FROM pip_runs WHERE id=?", (run_id,)).fetchone()
+    try:
+        kept = valid_apps(json.loads(row[0]) if row and row[0] else []) or []
+    except (TypeError, ValueError, RecursionError):
+        kept = []
+    from .pip_plugins import action_cards
+    shown = {item["card_id"] for item in kept}
+    allowed = [item for item in action_cards(db, run_id) if item["card_id"] not in shown]
+    return valid_apps((kept + allowed)[-8:]) or kept
+
+
+def valid_apps(value):
+    """A reply's card summaries as the controller kept them, or None when they aren't."""
+    if not isinstance(value, list) or len(value) > 8:
+        return None
+    keys = {"card_id", "server", "plugin", "tool", "call_id", "created_at"}
+    for item in value:
+        if (not isinstance(item, dict) or set(item) != keys or not isinstance(item["card_id"], str)
+                or not re.fullmatch(r"app_[0-9a-f]{24}", item["card_id"])
+                or any(not isinstance(item[k], str) or len(item[k]) > 128 for k in ("server", "plugin", "tool", "created_at"))
+                or (item["call_id"] is not None and not isinstance(item["call_id"], str))):
+            return None
+    return value
+
+
 def insert_reply(store, run, result, now):
-    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes"}:
+    if set(result) - {"text", "usage", "tools_called", "snapshot", "continuity", "setup_draft", "core_setup_drafts", "message_draft", "calendar_draft", "connector_action_draft", "computer", "choices", "routine_drafts", "memory_notes", "context", "plugins", "eyes", "apps"}:
         raise RegistryError("invalid_reply", "Conversation replies cannot contain source findings or control actions.")
+    if "apps" in result and valid_apps(result["apps"]) is None:
+        raise RegistryError("invalid_reply", "This reply's plugin cards are invalid.")
     if "context" in result:
         # What filled its window besides the chat (pip_chat_breakdown), for the meter's breakdown.
         from .pip_chat_breakdown import validate as validate_context
@@ -1139,6 +1254,8 @@ def insert_reply(store, run, result, now):
         if not validate_pin(run["manifest"]):raise RegistryError("permission_denied", "Email drafting was not pinned for this conversation.")
     from .pip_chat_setup import commit as commit_setup
     commit_setup(store, run, result)
+    from .pip_core_setup import commit as commit_core_setup
+    commit_core_setup(store, run, result)
     from .pip_routines import commit as commit_routines      # routines it suggested: cards to Add
     commit_routines(store, run, result)
     from .pip_notes import commit as commit_notes            # notes it kept about you: on its page
@@ -1155,9 +1272,13 @@ def insert_reply(store, run, result, now):
     reply_id = identifier("message")
     store.db.execute("INSERT INTO pip_chat_messages(id,pip_id,workspace_id,run_id,role,text,model,created_at) "
                      "VALUES(?,?,?,?,?,?,?,?)", (reply_id, run["pip_id"], run["workspace_id"], run["id"],
-                     "assistant", text, run["manifest"]["model"], now))
+                     "assistant", text, _answered_by(store, run), now))
     for index, label in enumerate(choices):
         store.db.execute("INSERT INTO pip_chat_choices VALUES(?,?,?)", (reply_id, index, label))
+    from .pip_images import attach as attach_images         # images it made this run (generate_image): on its reply
+    attach_images(store, run, reply_id)
+    from .pip_videos import attach as attach_videos         # videos it started this run (generate_video): the same
+    attach_videos(store, run, reply_id)
     if "eyes" in result:
         from .pip_eyes import record_card
         record_card(store, run, result["eyes"], reply_id)
@@ -1197,8 +1318,17 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             raise RegistryError("invalid_cursor", "That message cursor does not belong to this Pip.")
         before = cursor[0]
     rows = _bounded_rows(store.db, pip_id, before, limit + 1)
-    messages, size = [], 0
+    from .pip_steering import in_run, message as steer_message
+    selected = []
+    projected = 0
     for row in rows[:limit]:
+        extra = len(in_run(store.db, row['run_id'])) if row['role'] == 'user' else 0
+        if selected and projected + 1 + extra > 50:
+            break
+        selected.append(row)
+        projected += 1 + extra
+    messages, size = [], 0
+    for row in selected:
         message = _message(row)
         if row["role"] == "user" and row["status"] == "failed":
             reason = failure_text(store.db.execute("SELECT error FROM pip_runs WHERE id=?", (row["run_id"],)).fetchone())
@@ -1212,13 +1342,28 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
             if attached:
                 message["files"] = attached
         else:
+            pictures = message_images(store.db, row["id"])   # images the Pip made for this reply (generate_image)
+            if pictures:
+                message["images"] = pictures
             offered = message_choices(store.db, row["id"])
             if offered:
                 message["choices"] = offered
             plugins = reply_plugins(store.db, row["run_id"])
             if plugins:
                 message["plugins"] = plugins
-        amount = len(_json(message).encode())
+            shown = reply_apps(store.db, row["run_id"])
+            if shown:
+                message["apps"] = shown         # the plugin cards it showed (MCP Apps)
+            from .pip_videos import message_videos
+            clips = message_videos(pip_id, row["id"])
+            if clips:
+                message["videos"] = clips       # API 71: the videos it started, each as its job is now
+        # A running reply can have several mid-turn user messages. They are
+        # projected beside its original prompt below, so count them against
+        # the same page budget before accepting the row.
+        steers = ([steer_message(steering, message['status']) for steering in in_run(store.db, row['run_id'])]
+                  if row['role'] == 'user' else [])
+        amount = len(_json(message).encode()) + sum(len(_json(item).encode()) for item in steers)
         if size + amount > 96 * 1024:
             break
         messages.append(message)
@@ -1231,7 +1376,13 @@ def _list_messages(store, pip_id, before_id=None, limit=20, *, context_size=3276
         omitted = max(0, omitted - continuity['summarized_messages'])
     active = store.db.execute("SELECT r.id,r.status,r.created_at,r.started_at FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
                               "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1", (pip_id,)).fetchone()
-    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": list(reversed(messages)),
+    expanded = []
+    for item in reversed(messages):
+        expanded.append(item)
+        if item['role'] == 'user':
+            for steering in in_run(store.db, item['run_id']):
+                expanded.append(steer_message(steering, item['status']))
+    return {"pip_id": pip_id, "workspace_id": pip["workspace_id"], "messages": expanded,
             "next_before_id": next_id, "active_run": {**dict(active), "run_kind": "conversation"} if active else None,
             "history_context_omitted_count": omitted, "continuity": continuity}
 
@@ -1252,6 +1403,16 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
             from .cards import card_number, refusal
             if card_number(text):
                 raise RegistryError("card_in_chat", refusal(store._job(pip_id)["name"]))
+        if images is not None or files is not None or spooled_images is not None or spooled_files is not None:
+            active_for_attachment = store.db.execute(
+                "SELECT 1 FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
+                "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') LIMIT 1",
+                (pip_id,)).fetchone()
+            saved_retry = store.db.execute(
+                "SELECT 1 FROM pip_chat_messages WHERE pip_id=? AND request_key=? LIMIT 1",
+                (pip_id, key)).fetchone()
+            if active_for_attachment and not saved_retry:
+                raise RegistryError('steer_attachments', 'Send photos or files after this Pip finishes its reply. Mid-turn updates are text only.')
         if images is not None or spooled_images is not None:
             job = store._job(pip_id)
             given, spooled_images = spooled_images, None
@@ -1269,8 +1430,22 @@ def send(store, pip_id, text, key, actor, config, *, chat_options=None, images=N
         _drop_spooled(spooled_images if isinstance(spooled_images, list) else None, "name")
         _drop_spooled(spooled_files if isinstance(spooled_files, list) else None, "spool")
     req = request(text, key, chat_options, images=images, files=files)
+    from . import pip_steering
+    steered = store.db.execute('SELECT run_id FROM pip_chat_steers WHERE pip_id=? AND request_key=?',
+                               (pip_id, key)).fetchone()
+    if steered:
+        return pip_steering.send(store, store._job(pip_id), store.run(steered['run_id']), req, actor)
     run = prior(store, pip_id, req, actor)
     if run is None:
+        active = store.db.execute("SELECT r.id FROM pip_runs r JOIN pip_chat_messages m ON m.run_id=r.id "
+                                  "WHERE m.pip_id=? AND m.role='user' AND r.status IN ('queued','running','cancelling') "
+                                  "ORDER BY m.seq DESC LIMIT 1", (pip_id,)).fetchone()
+        if active:
+            if _intro:
+                # Routine, app and computer follow-ups are separate turns. Only the
+                # person's text can steer a live reply; a scheduled event must retry.
+                raise RegistryError("conversation_busy", "This Pip already has a queued or active reply. Wait for it or stop it before sending another message.")
+            return pip_steering.send(store, store._job(pip_id), store.run(active['id']), req, actor)
         # A tap on the card a Pip that couldn't see showed (pip_eyes): applied before the run is queued, so a
         # switch to a model that sees already holds for it.
         from .pip_eyes import answer, bind
@@ -1333,7 +1508,7 @@ def _left_waiting(store, run, result) -> bool:
 
 
 def validate_context(value):
-    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts"} not in (
+    if (not isinstance(value, dict) or set(value) - {"images", "files", "run_posts", "card_context"} not in (
             {"text", "history", "history_omitted_count", "last_report"},
             {"text", "history", "history_omitted_count", "last_report", "continuity"})):
         raise RegistryError("invalid_history", "Conversation context has an unsupported shape.")
@@ -1344,6 +1519,8 @@ def validate_context(value):
     if "run_posts" in value:
         from .pip_run_posts import validate_recent
         validate_recent(value["run_posts"])
+    if "card_context" in value:
+        _valid_card_context(value["card_context"])
     if 'continuity' in value:
         from .pip_chat_continuity import _validate_envelope
         _validate_envelope(value['continuity'])

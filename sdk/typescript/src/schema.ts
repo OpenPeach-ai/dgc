@@ -95,22 +95,29 @@ function isJsonValue(value: unknown, ancestors: Set<object>, depth: number): boo
   }
 }
 
+/** The first fenced block (```, or ```json) whose body is a JSON object or array: a reply may show another block
+ *  (the commands it ran) first. The Python SDK's extract_json reads the same way (tests/fixtures/sdk_extract_json.json). */
+function fenced(raw: string): string | null {
+  let at = 0;
+  for (;;) {
+    const opened = raw.indexOf("```", at);
+    if (opened < 0) return null;
+    let start = opened + 3;
+    if (raw.slice(start, start + 4).toLowerCase() === "json") start += 4;
+    const closed = raw.indexOf("```", start);
+    if (closed < 0) return null;
+    const body = raw.slice(start, closed).trim();
+    if (body[0] === "{" || body[0] === "[") return body;
+    at = closed + 3;
+  }
+}
+
 export function extractJson(text: string): unknown {
   let raw = (text || "").trim();
   if (!raw) throw new Error("final text is empty");
-  const fenceStart = raw.indexOf("```");
-  let fenced = false;
-  if (fenceStart >= 0) {
-    let bodyStart = fenceStart + 3;
-    if (raw.slice(bodyStart, bodyStart + 4).toLowerCase() === "json") bodyStart += 4;
-    while (bodyStart < raw.length && /\s/.test(raw[bodyStart])) bodyStart++;
-    const fenceEnd = raw.indexOf("```", bodyStart);
-    if (fenceEnd >= 0 && (raw[bodyStart] === "{" || raw[bodyStart] === "[")) {
-      raw = raw.slice(bodyStart, fenceEnd).trim();
-      fenced = true;
-    }
-  }
-  if (!fenced) {
+  const body = fenced(raw);
+  if (body !== null) raw = body;
+  else {
     const obj = raw.indexOf("{");
     const arr = raw.indexOf("[");
     const starts = [obj, arr].filter((index) => index >= 0);

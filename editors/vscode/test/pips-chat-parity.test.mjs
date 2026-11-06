@@ -29,11 +29,11 @@ async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 // two paragraphs of its reply.
 function chat(p){
   const [a,b,now]=RUNS[p.id],m=(id,role,run,text,at,status='succeeded')=>({id,pip_id:p.id,workspace_id:p.workspace_id,role,text,run_id:run,model:'m',created_at:iso(at),status});
-  return {messages:[m(p.id+'1','user',a,'What do you look at?',NOW-26*HOUR),m(p.id+'2','assistant',a,'I read what you share.\n\nI never change it.',NOW-26*HOUR+14000),
-    m(p.id+'3','user',b,'Is it serious?',NOW-3*HOUR),m(p.id+'4','assistant',b,'Yes.\n\nIt costs money.',NOW-3*HOUR+14000),m(p.id+'5','user',now,'Explain it in two paragraphs.',NOW-12000,'running')],
+  return {messages:[m(p.id+'1','user',a,'What do you look at?',NOW-26*HOUR),m(p.id+'2','assistant',a,'I read what you share.\n---\nI never change it.',NOW-26*HOUR+14000),
+    m(p.id+'3','user',b,'Is it serious?',NOW-3*HOUR),m(p.id+'4','assistant',b,'Yes.\n\n---\n\nIt costs money.',NOW-3*HOUR+14000),m(p.id+'5','user',now,'Explain it in two paragraphs.',NOW-12000,'running')],
     active:{id:now,status:'running',created_at:iso(NOW-12000),started_at:iso(NOW-12000)},
     events:[{seq:1,run_id:now,pip_id:p.id,workspace_id:p.workspace_id,event_type:'pip_run_progress',payload:{kind:'progress',state:'thinking',message:'Thinking'},created_at:iso(NOW-11000)},
-      {seq:2,run_id:now,pip_id:p.id,workspace_id:p.workspace_id,event_type:'pip_run_progress',payload:{kind:'text_delta',text:'The loop overwrites the subtotal.\n\nSo only the last line counts.'},created_at:iso(NOW-9000)}]};
+      {seq:2,run_id:now,pip_id:p.id,workspace_id:p.workspace_id,event_type:'pip_run_progress',payload:{kind:'text_delta',text:'The loop overwrites the subtotal.\n---\nSo only the last line counts.'},created_at:iso(NOW-9000)}]};
 }
 const FOUND={run_id:POST,pip_id:AUDIT,name:'Billing audit',pip_type:'rook',kind:'audit',trigger:'you',text:'x',outcome:'findings',posted_at:iso(NOW-2*HOUR),finished_at:iso(NOW-2*HOUR),
   total:1,counts:{high:1},findings:[{title:'apply_discount divides by 10',severity:'high',path:'billing.py',line:20}]};
@@ -118,10 +118,10 @@ test('a Project Pip’s chat draws the Personal Pip’s pieces: the Pip at work,
   assert.equal(project.workingFace,true,'with the Pip’s face');
   assert.equal(project.typingDots,false,'no typing dots');
   assert.equal(project.stillWriting,false,'no “Still writing…” block');
-  assert.equal(project.liveParts,2,'the reply written into short bubbles as it comes');
+  assert.equal(project.liveParts,2,'the reply written into the short bubbles it parts, as it comes');
   assert.equal(project.workingBelowLive,true,'the Pip at work under what it has written so far');
   assert.equal(project.timeMarks,3,'a time mark wherever half an hour passed: yesterday, this morning, now');
-  assert.deepEqual(project.replyParts,[2,2],'a finished reply is short bubbles, one a paragraph');
+  assert.deepEqual(project.replyParts,[2,2],'a finished reply is the short bubbles the Pip parted with ---');
   assert.equal(project.placeholder,'Ask NAME');
   assert.ok(x.$('.pip-conversation.chat-style .composer-hint'),'the source line is kept for a screen reader, hidden as the Personal box hides it');
 });

@@ -93,7 +93,7 @@ textarea{height:auto;padding:7px 8px}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:.85}
 :is(input,select,textarea):focus{border-color:var(--focus)}
 input[type=password]{font-family:var(--mono)}
-.field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control{width:300px;max-width:56%;flex:none}
+.field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control,.field>.ctx-combo{width:300px;max-width:56%;flex:none}
 .field .switch{max-width:none}
 .field:has(>textarea){flex-direction:column;align-items:stretch;gap:8px}.field>textarea{width:100%;min-height:84px;resize:vertical;line-height:1.5}
 .field.is-off .name{color:var(--muted)}
@@ -120,6 +120,8 @@ details.more>summary::-webkit-details-marker{display:none}
 details.more>summary::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .12s ease}
 details.more[open]>summary::before{transform:rotate(45deg)}
 details.more>summary:hover{color:var(--text)}
+/* This form sits inside the Saved providers card; a second inset border shifts its controls by 1px. */
+details.more[data-more="saved-providers"]>.rows{border-inline:0;border-bottom:0;border-radius:0;margin:0}
 .host-control{display:flex;gap:6px;flex:none}.host-control input{flex:1;min-width:0}.host-control select{flex:none;width:86px}
 .wait-control{display:flex;gap:6px;flex:none}.wait-control select{flex:1;min-width:0}.wait-control input{flex:none;width:96px}.wait-control input[hidden]{display:none}
 .field>.search-key-control{display:flex;align-items:center;gap:8px}.field>.search-key-control input{flex:1;min-width:0}
@@ -287,7 +289,7 @@ details.more>summary:hover{color:var(--text)}
   .sidebar .nav-divider{margin-inline:4px}
   main{padding:18px 16px 0}
   .field{flex-wrap:wrap;gap:8px}.field>span:first-child,.field>.words{flex-basis:100%}
-  .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control{width:100%;max-width:none}
+  .field>input,.field>select,.field>.model-box,.field>.host-control,.field>.search-key-control,.field>.wait-control,.field>.ctx-combo{width:100%;max-width:none}
   .field:has(>.switch){flex-wrap:nowrap}.field:has(>.switch)>.words{flex-basis:auto}
   .card{padding-inline:12px}.row{gap:10px}.row-open{gap:10px}.banner{flex-wrap:wrap}
   .meta{grid-template-columns:92px minmax(0,1fr);gap:10px}.hero{gap:12px}.hero .copy{min-width:150px}
@@ -330,3 +332,145 @@ body.vscode-light .mod-state[data-tone="ok"]{color:#1D7A44}
 .mod-empty{color:var(--muted)}
 .mod-about{margin-top:12px;color:var(--muted)}.mod-about p{margin:0 0 4px}.mod-about code{font-family:var(--mono);color:var(--text)}
 .review-mods{display:flex;flex-direction:column;gap:10px}.review-mod p{margin:0 0 4px}.review-mod-more{color:var(--need-text)}
+
+/* Settings -> Models -> DGC Router (0.51): the switch, then the Systems list. One card per system in the page's own
+   tokens; a narrow tab stacks each model's facts under its name. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.row-line{display:flex;align-items:center;min-height:48px;padding:10px 14px;border-top:1px solid var(--border)}
+.rows>.row-line:first-child{border-top:0}.row-line .words{flex:1;min-width:0}
+.row-line .name{display:block;font-size:13px;color:var(--text)}.row-line .hint{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+.row-line.is-off .name{color:var(--muted)}
+.router-chosen .name{font-weight:var(--w-med)}.router-chosen .link{font-size:12px;margin-left:4px}
+.router-note{margin:8px 0 0;font-size:12px;color:var(--muted)}.router-note.error{color:var(--error)}
+.router-systems{margin-top:14px}
+.router-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+.router-head h4{margin:0;font-size:13px;font-weight:var(--w-semi);color:var(--text-strong)}
+.router-list{display:flex;flex-direction:column;gap:10px}
+.router-empty{margin:0;padding:12px 14px;border:1px dashed var(--border-strong);border-radius:var(--r-md);color:var(--muted)}
+.router-card{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);min-width:0}
+.router-card.adding,.router-card.finding{border-style:dashed}
+.router-card.editing{border-color:var(--border-strong)}
+.router-card>p,.router-card p{margin:0}
+.router-card-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;min-width:0}
+.router-name{font-size:13px;font-weight:var(--w-semi);color:var(--text-strong);overflow-wrap:anywhere}
+.router-where{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.router-free{margin-left:auto;color:var(--muted);white-space:nowrap}
+.router-dot{flex:none;align-self:center;width:8px;height:8px;border-radius:50%;background:var(--muted);opacity:.7}
+.router-dot.online{background:var(--good);opacity:1}
+.router-dot.offline{background:transparent;border:1.5px solid var(--muted)}
+.router-dot.off{background:transparent;border:1.5px dashed var(--muted)}
+.router-line{color:var(--text);font-size:12px;overflow-wrap:anywhere}.router-line.muted,.router-card .muted{color:var(--muted)}
+.router-ok{color:var(--good)}body.vscode-light .router-ok{color:#1D7A44}.router-bad{color:var(--error)}
+.router-warn{display:block;color:var(--need-text)}
+.router-one{font-weight:var(--w-med)}
+.router-leases{color:var(--text)}
+.router-models{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--r-sm);overflow:visible}
+.router-models>.router-model:first-child{border-radius:var(--r-sm) var(--r-sm) 0 0}
+.router-model{display:grid;grid-template-columns:minmax(0,2.2fr) 44px 90px 92px minmax(0,1.4fr);gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12px;min-width:0}
+.router-model:first-child{border-top:0}
+.router-model.head{color:var(--muted);font-size:11px;background:var(--surface2)}
+.router-model.unused{color:var(--muted)}
+.router-model-name{overflow-wrap:anywhere}.router-model small{color:var(--muted)}
+.router-model.edit{grid-template-columns:minmax(0,2.2fr) 76px 150px minmax(0,1.4fr);align-items:start}
+/* With the Thinking column a saved system's row has six cells: five columns put Note on a line of its own, under Model
+   (release check, 2026-11-03). */
+.router-model.thinking{grid-template-columns:minmax(0,1.6fr) 44px 90px 92px minmax(0,1.2fr) minmax(0,1.2fr)}
+.router-model.edit.thinking{grid-template-columns:minmax(0,2fr) 64px 150px 132px minmax(0,1.2fr)}
+.router-model.edit input:not([type=checkbox]){width:100%;height:26px}
+.router-use{display:flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}
+.router-none{margin:0;padding:8px 10px}
+.router-buttons{margin-top:4px}
+.router-result{padding:8px 10px;border-radius:var(--r-sm);background:var(--surface2);font-size:12px}
+.router-result ul{margin:4px 0 0;padding-left:18px}.router-result li+li{margin-top:2px}.router-result .actions{margin-top:8px}
+/* A button in the grey result box (Test NAME (loads it), Suggest's Close): VS Code's secondary button is the same grey
+   as the box in Dark Modern, so it read as plain text. Here it sits on the card's own ground with a border that
+   clears 3:1 against the box, as a button does elsewhere on the page. */
+.router-result .actions .secondary{background:var(--surface);color:var(--text-strong);border:1px solid color-mix(in srgb,var(--text) 55%,transparent)}
+.router-result .actions .secondary:hover{background:var(--button2-hover)}
+.router-result .actions .secondary:disabled{opacity:.6}
+.router-confirm{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border-radius:var(--r-sm);background:color-mix(in srgb,var(--error) 8%,var(--bg))}
+.router-confirm span{flex:1 1 200px}
+.router-form{display:flex;flex-direction:column;gap:10px;min-width:0}
+.router-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.router-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;color:var(--text)}
+.router-field small,.router-check small{color:var(--muted)}
+.router-field.wants{padding:8px 10px;border:1px solid var(--need);border-radius:var(--r-sm)}
+.router-field input,.router-field select{width:100%}
+.router-inline{display:flex;gap:8px;align-items:center;min-width:0}.router-inline input,.router-inline select{flex:1;min-width:0}
+.router-jobs,.router-hardware{margin:0;padding:8px 10px 10px;border:1px solid var(--border);border-radius:var(--r-sm);min-width:0}
+.router-jobs legend,.router-hardware legend{padding:0 4px;font-size:12px;color:var(--muted)}
+.router-jobs label{margin-right:16px;font-size:12px}
+.router-hardware .router-grid{margin-top:4px}
+.router-how{margin-top:8px;border-top:0}.router-how>summary{padding:4px 0}.router-how p{margin:6px 0;color:var(--muted);font-size:12px}
+.router-how pre{margin:6px 0;padding:6px 8px;border-radius:var(--r-sm);background:var(--surface2);overflow-x:auto}.router-how pre code{background:none;padding:0}
+.router-check{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:12px}
+.router-found{list-style:none;margin:4px 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.router-found li{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
+.router-busy{display:flex;align-items:center;flex-wrap:wrap;gap:6px 16px;margin:12px 0 0;font-size:12px}
+.router-busy-label{color:var(--muted)}
+.router-busy label{display:inline-flex;align-items:center;gap:6px}
+.router-saved{margin:6px 0 0;color:var(--muted);font-size:11px}
+input[type=checkbox],input[type=radio]{height:auto;padding:0;accent-color:var(--accent-fill)}
+/* Settings -> Models -> Images (settingsImages.js): a generator's card, its state in words, its "Asks before each image"
+   switch, and the one screen where a ComfyUI workflow's inputs are confirmed. Built on the Router's card. */
+.images-gens{margin-top:2px}
+.images-card .router-card-head{align-items:center}
+.images-badge{padding:1px 7px;border-radius:999px;border:1px solid var(--border-strong);color:var(--text);font-size:11px;line-height:16px}
+.images-state{margin-left:auto;font-size:12px;white-space:nowrap;color:var(--muted)}
+.images-state.ok{color:var(--good)}body.vscode-light .images-state.ok{color:#1D7A44}
+.images-state.bad{color:var(--error)}
+.images-detail{overflow-wrap:anywhere}
+.images-asks{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin-top:2px}
+.images-asks .name{font-size:12px;color:var(--text)}.images-asks .hint{color:var(--muted);font-size:12px}
+.images-about{margin:-4px 0 0;font-size:12px}
+.images-workflow textarea{width:100%;min-height:90px;font-family:var(--vscode-editor-font-family,monospace);font-size:12px}
+.images-workflow p{margin:4px 0}.images-paste{margin-top:6px}.images-paste>summary{padding:2px 0}
+.images-mapping .router-model{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.6fr)}
+.images-mapping input{width:100%;height:26px}
+.images-notes{margin:0;padding-left:18px;font-size:12px;color:var(--need-text)}
+.images-options{margin:14px 0 0}
+.images-options>.field:first-child{border-top:0}
+.images-dir .router-inline{flex:0 1 320px}
+.images-plugins{margin:10px 0 0;font-size:12px;color:var(--muted)}.images-plugins .link{font-size:12px}
+/* A model's facts stack under its name once the tab is too narrow for five columns (a Settings tab beside the chat). */
+@media(max-width:760px){
+  .router-model,.router-model.edit,.router-model.thinking{grid-template-columns:1fr 1fr;gap:4px 10px}
+  .router-model.head{display:none}
+  .router-model>:first-child{grid-column:1/-1;font-weight:var(--w-med)}
+  .router-model>[data-label]::before{content:attr(data-label) ": ";color:var(--muted)}
+  .router-model.edit>[data-label]{display:flex;flex-direction:column;gap:2px}
+  .router-model.edit>[data-label]::before{content:attr(data-label)}
+  /* A model's fields wrap whole, each at least wide enough for its control (the context box, a Thinking choice). */
+  .router-model.edit,.router-model.edit.thinking{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .router-model.edit select,.router-model.edit input:not([type=checkbox]){max-width:100%;min-width:0}
+  .router-model.edit .ctx-combo{max-width:none}
+  .router-grid{grid-template-columns:1fr}
+  .router-free{margin-left:0;flex-basis:100%}
+  .images-mapping .router-model{grid-template-columns:1fr}
+  .images-state{margin-left:0;flex-basis:100%}
+  .images-dir .router-inline{flex-basis:100%}
+}
+/* The sign-in card's fallback when the browser is on another computer (0.51). */
+.signin-return{flex-basis:100%;margin-top:8px;font-size:12px}
+.signin-return>summary{cursor:pointer;color:var(--muted)}.signin-return>summary:hover{color:var(--text)}
+.signin-return .note{margin:6px 0}
+.signin-return-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.signin-return-row input{flex:1 1 220px;min-width:0}
+.signin-return-note{margin:6px 0 0}
+.banner:has(.signin-return){flex-wrap:wrap}
+/* A context size, typed or picked (src/contextCombo.js): DGC Router's Context each and Sub-agents' Context window. */
+.ctx-combo{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;max-width:220px}
+.ctx-combo-box{display:flex;align-items:center;min-width:0;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface2)}
+.ctx-combo-box:focus-within{outline:1px solid var(--vscode-focusBorder,#0078d4);outline-offset:-1px}
+.router-model.edit>[data-label]{min-width:0}
+.ctx-combo .ctx-combo-input,.router-model.edit .ctx-combo .ctx-combo-input{flex:1 1 0;width:0;min-width:0;height:26px;border:0;outline:0;background:transparent;color:var(--text);padding:0 6px;font:inherit;font-variant-numeric:tabular-nums}
+.ctx-combo-input[aria-invalid="true"]{color:var(--vscode-inputValidation-errorForeground,var(--text))}
+.ctx-combo-toggle{flex:none;display:flex;align-items:center;justify-content:center;width:22px;height:26px;border:0;background:transparent;color:var(--muted);cursor:pointer;padding:0}
+.ctx-combo-toggle:hover{color:var(--text)}
+.ctx-combo-list{position:absolute;top:30px;left:0;min-width:100%;z-index:30;margin:0;padding:3px;list-style:none;background:var(--vscode-dropdown-background,var(--surface2));color:var(--vscode-dropdown-foreground,var(--text));border:1px solid var(--border-strong);border-radius:4px;max-height:232px;overflow:auto;box-shadow:0 4px 14px rgba(0,0,0,.28)}
+.ctx-combo-list[hidden]{display:none}
+.ctx-combo-list li{padding:3px 10px;border-radius:3px;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ctx-combo-list li:hover{background:var(--vscode-list-hoverBackground,rgba(127,127,127,.14))}
+.ctx-combo-list li.active{background:var(--vscode-list-activeSelectionBackground,rgba(0,120,212,.3));color:var(--vscode-list-activeSelectionForeground,var(--text));outline:1px solid var(--vscode-focusBorder,#0078d4);outline-offset:-1px}
+.ctx-combo-said,.ctx-combo-note,.ctx-combo-cost{font-size:11px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere}
+.ctx-combo-note,.ctx-combo-cost.over{color:var(--vscode-editorWarning-foreground,var(--text))}
+.ctx-combo-note[hidden],.ctx-combo-cost[hidden]{display:none}

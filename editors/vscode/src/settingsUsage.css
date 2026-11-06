@@ -46,7 +46,7 @@
 /* A long id clips its head and keeps its tail (":Q4_K_M", "-FP8", ":11434"); the column grows
    with the panel instead of stopping at a fixed width. A table cell ignores max-width in
    automatic layout, so the clip line carries it. */
-.usage-clip { display: flex; min-width: 0; max-width: clamp(108px, 34vw, 320px); }
+.usage-clip { display: flex; min-width: 0; max-width: clamp(120px, 40vw, 360px); }
 .usage-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-tail { flex: none; white-space: nowrap; }
 .usage-name { color: var(--text-strong); font: var(--w-reg) var(--t-xs)/1.45 var(--mono); }
@@ -80,9 +80,40 @@
 .usage-readout { min-height: 1.45em; margin: var(--sp-1) 0 0; color: var(--text); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 .usage-privacy { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
 /* The filter box takes its own width, but never more than the page has: it scrolled a narrow tab sideways. */
-.usage-find { max-width: 100%; }
+.usage-find { width: min(100%, 240px); max-width: 100%; }
 
 /* Everything / Pips: which usage the page shows. The range below is shared. */
 .usage-views { margin: 0 0 var(--sp-3, 12px); }
 /* A Pip's name is words, not a model id: the page's own font, not the id's monospace. */
 .pip-usage-section .usage-name { font-family: inherit; }
+
+/* Token usage by system (DGC Router). The System picker is a row under the range, like it; it shows only when the
+   range has usage on more than one system. A system's name in By system is a link: it shows that system alone. */
+.usage-systems .usage-system-name { min-height: 0; padding: 0; font: var(--w-med) var(--t-sm)/1.45 var(--sans); color: var(--link);
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.usage-systems .usage-name { font-family: inherit; }
+/* Its hint is short: it gives way first, so the picker stays beside it as long as the range's does. */
+.usage-section > label.usage-system-pick .set-hint { flex: 1 1 90px; }
+/* What a system is, and how many of its requests were unmetered, wraps rather than clipping. */
+.usage-systems .usage-where .usage-head { white-space: normal; }
+/* A model row that names its system keeps the address one hover (or Tab) away, behind the info mark. */
+/* "Ollama Cloud · ollama" wraps at a space in a narrow column rather than losing its end, its info mark following
+   the last word. */
+.usage-system-where { display: block; }
+.usage-system-where .usage-head { display: inline; white-space: normal; }
+.usage-system-where .usage-host-info { margin-left: 4px; }
+.usage-system-where-wrap { display: block; }
+.usage-host-info { flex: none; min-height: 0; padding: 0 2px; border: 0; background: none; color: var(--muted);
+  font-size: var(--t-xs); line-height: 1.2; cursor: pointer; border-radius: var(--r-sm); }
+.usage-host-info:hover, .usage-host-info:focus-visible, .usage-host-info[aria-expanded="true"] { color: var(--text); }
+.usage-host { font-family: var(--mono); }
+
+/* The tables give way before they scroll sideways: a model's name wraps onto a second line, then Cached, then Share
+   step aside as their box narrows (beside a chat, in a narrow tab). Only a tab too narrow for the name and three
+   numbers scrolls inside its box, the name staying put. */
+.usage-table-wrap { container-type: inline-size; }
+.usage-table .usage-wrap { display: block; min-width: 96px; max-width: clamp(120px, 40vw, 360px); white-space: normal;
+  overflow-wrap: anywhere; }
+@container (max-width: 600px) { .usage-table-wrap .usage-table th, .usage-table-wrap .usage-table td { padding-left: 6px; padding-right: 6px; } }
+@container (max-width: 500px) { .usage-table .col-cached { display: none; } }
+@container (max-width: 400px) { .usage-table .col-share { display: none; } }

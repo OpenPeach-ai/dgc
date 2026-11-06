@@ -454,6 +454,426 @@ class Artifacts:
         return _artifact_info(self._ask(command, "artifact_changed")["artifact"])
 
 
+class Cards:
+    """``session.cards``: plugins' own cards (MCP Apps, the open MCP extension ``io.modelcontextprotocol/ui``; CLI 0.51+,
+    ``capabilities["mcp_apps"]``).
+
+    Call :meth:`watch` once: from then on a tool whose server gave it a card shows it as an ``mcp_app_card`` event in
+    the run (``card_id``, ``plugin``, ``tool``, ``tool_input``, the tool's whole ``tool_result``, ``url`` where the CLI
+    serves the page with its CSP, ``html`` when it fits one frame), and :meth:`Session.history` replays it. To draw one
+    yourself, frame ``url`` (or :meth:`get` it and serve ``html`` with ``csp_header``) in a sandboxed iframe and answer
+    its MCP Apps JSON-RPC: pass ``tools/call`` and ``resources/read`` to :meth:`call`, ``ui/update-model-context`` to
+    :meth:`context`, and send a ``ui/message`` as the user's own prompt, labelled with :meth:`message_text`. The CLI
+    decides what a card may run: a read runs; a change comes back as ``{"ask": ...}`` (DGC's Allow card) until you
+    :meth:`answer` it with the user's choice."""
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def watch(self) -> None:
+        """This app draws cards: the CLI makes them from now on (before this, a tool's text is all there is)."""
+        self._session._client.send({"type": "watch_mcp_apps"})
+
+    def get(self, card_id: str) -> dict[str, Any]:
+        """One card as ``mcp_app_card`` carries it, with its page (``html``), its whole result and the exact
+        Content-Security-Policy header (``csp_header``) the CLI serves the page with."""
+        got = self._session._request({"type": "mcp_app_get", "request_id": _new_id("card"), "card_id": card_id},
+                                     "mcp_app_resource")
+        return {k: v for k, v in got.items() if k not in ("type", "seq", "request_id")}
+
+    def call(self, card_id: str, method: str, params: Mapping[str, Any] | None = None, *,
+             timeout: float | None = None) -> dict[str, Any]:
+        """What the card asked of its own server (``tools/call`` or ``resources/read``): ``{"result": ...}``,
+        ``{"error": {...}}``, or ``{"ask": {...}, "request_id": ...}`` -- show the user DGC's Allow card (``ask``
+        names the tool, its arguments, and whether ``always`` may be offered) and pass their choice to :meth:`answer`."""
+        rid = _new_id("card")
+        got = self._session._request({"type": "mcp_app_call", "request_id": rid, "card_id": card_id, "method": method,
+                                      "params": dict(params or {})}, "mcp_app_reply", timeout=timeout)
+        if isinstance(got.get("ask"), Mapping):
+            return {"ask": {**got["ask"], "request_id": rid}, "request_id": rid}
+        return {k: got[k] for k in ("result", "error") if k in got} or {"result": {}}
+
+    def answer(self, asked: Mapping[str, Any], choice: str, *, timeout: float | None = None) -> dict[str, Any]:
+        """The user's choice on an Allow card :meth:`call` returned: ``"once"``, ``"always"`` (only when the ask's
+        ``always`` is true) or ``"deny"``. Pass the wrapper or inner ask returned by :meth:`call`, including its
+        ``request_id``. Returns the call's outcome: ``{"result": ...}`` or ``{"error": {...}}``."""
+        if choice not in ("once", "always", "deny"):
+            raise ValueError("choice is once, always or deny")
+        ask = asked.get("ask") if isinstance(asked.get("ask"), Mapping) else asked
+        request_id = asked.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("pass the card question returned by call, including its request_id")
+        got = self._session._request({"type": "mcp_app_answer", "ask_id": str(ask.get("ask_id") or ""), "choice": choice,
+                                      "request_id": request_id},
+                                     "mcp_app_reply", timeout=timeout)
+        return {k: got[k] for k in ("result", "error") if k in got} or {"result": {}}
+
+    def context(self, card_id: str, content: Sequence[Mapping[str, Any]] | None = None,
+                structured: Mapping[str, Any] | None = None) -> None:
+        """A card's ``ui/update-model-context``: the model's next turn in that chat gets it once, as untrusted plugin
+        content (the card's latest replaces its earlier)."""
+        self._session._client.send({"type": "mcp_app_context", "card_id": card_id,
+                                    "content": [dict(block) for block in (content or [])][:32],
+                                    "structured_content": dict(structured or {})})
+
+    @staticmethod
+    def message_text(card: Mapping[str, Any], text: str) -> str:
+        """A card's ``ui/message`` as the user's prompt, labelled as DGC's editor labels it."""
+        return f"From {card.get('plugin') or card.get('server') or 'a plugin'}'s card: {str(text).strip()[:8000]}"
+
+
+def context_tokens(value: Any) -> int:
+    """A context size as Settings' box and ``dgc router --context`` read it: 16384, "16384", "16,384", "16K" or "16k"
+    (K is 1,024 tokens), 2,048 to 16,777,216 tokens. Raises DGCConfigError."""
+    if isinstance(value, bool):
+        raise DGCConfigError("context is a number of tokens, like 16384 or \"16K\"")
+    if isinstance(value, int):
+        tokens = value
+    else:
+        raw = str(value or "").strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+        scale = 1024 if raw.endswith("k") else 1
+        digits = raw[:-1] if scale > 1 else raw
+        # Digits only, as the CLI and the TypeScript SDK read them: never "nan", "inf" or "1e5" through float().
+        if not re.fullmatch(r"\d+(\.\d+)?", digits):
+            raise DGCConfigError("context is a number of tokens, like 16384 or \"16K\"")
+        if scale == 1 and "." in digits:
+            raise DGCConfigError("context is a whole number of tokens, like 16384 or \"16K\"")
+        tokens = round(float(digits) * scale)
+    if not 2048 <= tokens <= 16_777_216:
+        raise DGCConfigError("context is between 2,048 and 16,777,216 tokens (2K and up)")
+    return tokens
+
+
+class Router:
+    """``session.router``: DGC Router, the user's other computers that run models, for sub-agents and Pips (CLI 0.51+,
+    ``capabilities["router"]``). Each call is one request to the CLI; the answers are plain dicts (the CLI's status:
+    ``{enabled, when_busy, workers, systems: [...], line}``). A key is set only with :meth:`set_key`, and never read
+    back (a system says ``has_key``); a dgc node's pairing token only with :meth:`set_hardware` (``has_token``)."""
+
+    ACTIONS = ("turn_on", "turn_off", "add_system", "edit_system", "remove_system", "enable_system", "disable_system",
+               "set_model", "set_jobs", "set_when_busy", "set_key", "prefer", "apply_suggestion")
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def _ask(self, command: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        got = self._session._request({**command, "request_id": _new_id("router")}, "router_status", timeout=timeout)
+        return {key: got[key] for key in ("status", "change", "probe", "found") if key in got}
+
+    def status(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Every system with its jobs, models, workers busy and free, health and measured speed. ``refresh`` checks
+        every system and re-reads what it serves first (a few seconds)."""
+        command: dict[str, Any] = {"type": "router_status"}
+        if refresh:
+            command["refresh"] = True
+        return self._ask(command, timeout=60 if refresh else None)["status"]
+
+    def update(self, action: str, **fields: Any) -> dict[str, Any]:
+        """One change, made at once: ``{"change": "<in words>", "status": {...}}``. ``action`` is one of
+        :attr:`ACTIONS`; the fields are those of the router_update tool (system, name, base_url, jobs, models,
+        workers, one_model_at_a_time, memory_gb, model, use, context, note, when_busy)."""
+        if action not in self.ACTIONS:
+            raise DGCConfigError(f"action must be one of {', '.join(self.ACTIONS)}")
+        if "key" in fields and action != "set_key":
+            raise DGCConfigError("a key goes only with set_key (session.router.set_key)")
+        allowed = {"system", "name", "base_url", "jobs", "models", "workers", "one_model_at_a_time", "memory_gb",
+                   "model", "use", "context", "note", "when_busy", "key"}
+        unknown = sorted(set(fields) - allowed)
+        if unknown:
+            raise DGCConfigError(f"router update has no field {unknown[0]!r}")
+        if fields.get("context") is not None:
+            fields = {**fields, "context": context_tokens(fields["context"])}     # 16384, "16K" or "16k"
+        command = {"type": "router_update", "action": action,
+                   **{key: (list(value) if key in ("jobs", "models") else value)
+                      for key, value in fields.items() if value is not None}}
+        got = self._ask(command, timeout=60)
+        return {"change": got.get("change", ""), "status": got["status"]}
+
+    def add_system(self, base_url: str, *, name: str | None = None, system: str | None = None,
+                   jobs: Sequence[str] | None = None, models: Sequence[str] | None = None, workers: int | None = None,
+                   one_model_at_a_time: bool | None = None, memory_gb: float | None = None,
+                   context: int | str | None = None) -> dict[str, Any]:
+        """Add a computer by its address (``gpu-box.local``, ``nas.local:11434``, ``http://10.0.0.5:8080``): DGC
+        detects the server and lists its models. ``context`` (16384 or "16K") is each model's context there."""
+        return self.update("add_system", base_url=base_url, name=name, system=system, jobs=jobs, models=models,
+                           workers=workers, one_model_at_a_time=one_model_at_a_time, memory_gb=memory_gb,
+                           context=context)
+
+    def set_key(self, system: str, key: str) -> dict[str, Any]:
+        """Save (or with "" remove) a system's key in the user's secrets.json, bound to its address."""
+        if not isinstance(key, str):
+            raise DGCConfigError("key must be a string")
+        return self.update("set_key", system=system, key=key)
+
+    def probe(self, system: str, *, model: str | None = None,
+              checks: Sequence[str] | None = None) -> dict[str, Any]:
+        """Test one system now and save the results: models, speed, parallel, tools (default all four). Uses a few
+        seconds of that computer's GPU. Returns ``{"system", "results": {model: {...}}, "models"?}``."""
+        command: dict[str, Any] = {"type": "router_probe", "system": system}
+        if model:
+            command["model"] = model
+        if checks is not None:
+            command["checks"] = list(checks)
+        return self._ask(command, timeout=300).get("probe", {})
+
+    def find(self) -> dict[str, Any]:
+        """Model servers on this computer's own /24, the known ports only: ``{"network", "ports", "found": [...]}``."""
+        return self._ask({"type": "router_find"}, timeout=120).get("found", {})
+
+    def _needs(self, command: str) -> None:
+        router = self._session.capabilities.get("router")
+        if not isinstance(router, Mapping) or command not in (router.get("commands") or ()):
+            raise DGCUnsupportedError(f"This DGC CLI has no {command}; update it (dgc update).")
+
+    def set_hardware(self, system: str, url: str | None = None, *, token: str | None = None) -> dict[str, Any]:
+        """A system's hardware readout (CLI 0.51+): ``url`` is an exporter's (node_exporter, NVIDIA DCGM, AMD's,
+        Glances, Netdata) or a dgc node's address, which the CLI detects; ``""`` stops it. ``token`` is a dgc node's
+        pairing token, kept in the user's secrets.json bound to that address and never read back. With neither, it
+        reads the hardware now. Returns ``{"change", "status"}``; the system's ``hardware`` is in the status."""
+        self._needs("router_hardware")
+        command: dict[str, Any] = {"type": "router_hardware", "system": system}
+        if url is not None:
+            if not isinstance(url, str):
+                raise DGCConfigError("url must be a string")
+            command["url"] = url
+        if token is not None:
+            if not isinstance(token, str):
+                raise DGCConfigError("token must be a string")
+            command["token"] = token
+        got = self._ask(command, timeout=60)
+        return {"change": got.get("change", ""), "status": got["status"]}
+
+    def suggest(self, system: str, *, context: int | str | None = None) -> dict[str, Any]:
+        """Workers per model for one system (CLI 0.51+), from its memory (the hardware readout or memory_gb), what
+        the server reports and what Test measured; each model's ``line`` shows the arithmetic, and ``workers`` is None
+        where nothing backs a number. ``update("apply_suggestion", system=..., context=...)`` makes it the settings."""
+        self._needs("router_suggest")
+        command: dict[str, Any] = {"type": "router_suggest", "system": system}
+        if context is not None:
+            command["context"] = context_tokens(context)       # 16384, "16K" or "16k"
+        got = self._session._request({**command, "request_id": _new_id("router")}, "router_suggestion", timeout=30)
+        return dict(got.get("suggestion") or {})
+
+    def prefer(self, system: str | None = None, model: str | None = None) -> dict[str, Any]:
+        """Where the next turn's helpers run (``run(..., system=)`` does this for you); ``None`` lets DGC pick."""
+        return self.update("prefer", system=system or "", model=model or "")
+
+
+class Images:
+    """``session.images``: the user's image generators (CLI 0.51+, ``capabilities["images"]``). Each call is one
+    request to the CLI; the answers are plain dicts. ``generate`` makes pictures now (each with a sidecar in
+    DGC's own folder, in the project with ``save_to``); a paid generator that asks before each image runs only with ``approve=True``. A key is set only
+    with :meth:`set_key`, and never read back (a generator says ``has_key``). Once any of these is called, the
+    session's runs also carry ``images_made`` events when the model's generate_image made pictures."""
+
+    ACTIONS = ("add_generator", "edit_generator", "remove_generator", "set_default", "set_project_choice",
+               "set_auto_fallback", "set_save_dir", "set_key", "test")
+    _FIELDS = frozenset({"generator", "provider", "base_url", "name", "id", "model", "size", "steps", "negative_prompt",
+                         "asks", "good_for", "enabled", "monthly_limit_usd", "system", "default", "workflow", "mapping",
+                         "confirm", "auto_fallback", "save_dir", "key", "makes", "video_asks", "video_pips"})
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def _ask(self, command: dict[str, Any], answer: str, *, timeout: float | None = None) -> dict[str, Any]:
+        return self._session._request({**command, "request_id": _new_id("images")}, answer, timeout=timeout)
+
+    def generators(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Every generator: what it can do, its price, whether it works now, and this project's choice
+        (``{generators: [...], default, project_choice, ...}``). ``refresh`` tests each one first (no image made)."""
+        command: dict[str, Any] = {"type": "images_list"}
+        if refresh:
+            command["refresh"] = True
+        return self._ask(command, "images_status", timeout=60 if refresh else None)["status"]
+
+    def watch(self) -> dict[str, Any]:
+        """Ask for ``images_made`` events in this session's runs (any call here does it too)."""
+        return self.generators()
+
+    def update(self, action: str, **fields: Any) -> dict[str, Any]:
+        """One change, made at once: ``{"change", "status", "pending"?, "notes"?, "tested"?}``."""
+        if action not in self.ACTIONS:
+            raise DGCConfigError(f"action must be one of {', '.join(self.ACTIONS)}")
+        if "key" in fields and action != "set_key":
+            raise DGCConfigError("a key goes only with set_key (session.images.set_key)")
+        unknown = sorted(set(fields) - self._FIELDS)
+        if unknown:
+            raise DGCConfigError(f"images update has no field {unknown[0]!r}")
+        command = {"type": "images_update", "action": action,
+                   **{key: value for key, value in fields.items() if value is not None}}
+        got = self._ask(command, "images_status", timeout=60)
+        return {key: got[key] for key in ("change", "status", "pending", "notes", "tested") if key in got}
+
+    def add(self, provider: str, *, base_url: str | None = None, key: str | None = None, **fields: Any) -> dict[str, Any]:
+        """Add a generator: ``provider`` is comfyui, a1111, openai, xai, together, localai, ollama, openai_compatible,
+        gemini, bfl, fal or replicate. A ComfyUI ``workflow`` (API format) comes back first as ``pending`` with the
+        inputs DGC found; add it again with ``confirm=True`` (or a ``mapping``). ``key`` is saved after it is added."""
+        out = self.update("add_generator", provider=provider, base_url=base_url, **fields)
+        if key is not None and not out.get("pending"):
+            added = (out.get("status") or {}).get("generators") or []
+            if added:
+                # The CLI appends the saved generator and may suffix a requested id that is already taken.
+                # Bind the key to the id it actually saved, never the caller's unallocated suggestion.
+                self.set_key(added[-1]["id"], key)
+                out["status"] = self.generators()
+        return out
+
+    def set_key(self, generator: str, key: str) -> dict[str, Any]:
+        """Save (or with "" remove) a generator's key in the user's secrets.json, bound to its address."""
+        if not isinstance(key, str):
+            raise DGCConfigError("key must be a string")
+        return self.update("set_key", generator=generator, key=key)
+
+    def remove(self, generator: str) -> dict[str, Any]:
+        return self.update("remove_generator", generator=generator)
+
+    def set_default(self, generator: str) -> dict[str, Any]:
+        return self.update("set_default", generator=generator)
+
+    def test(self, generator: str | None = None) -> dict[str, Any]:
+        """Test one generator (or all) now, without making an image: ``{id: {ok, kind?, detail}}``."""
+        return self.update("test", generator=generator).get("tested", {})
+
+    def generate(self, prompt: str, *, size: str | None = None, aspect: str | None = None, count: int = 1,
+                 images: Sequence[str] | None = None, mask: str | None = None, generator: str | None = None,
+                 model: str | None = None, seed: int | None = None, negative_prompt: str | None = None,
+                 save_to: str | None = None, approve: bool = False, timeout: float = 600) -> dict[str, Any]:
+        """Make ``count`` images now: ``{ok, text, images: [{path, rel, sidecar, width, height, seed, ...}],
+        generator, model, cost_usd?, error?, card?}``. A generator that asks before each image runs only with
+        ``approve=True``; without, ``ok`` is False, ``error.kind`` "needs_approval" and ``card`` has its price."""
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise DGCConfigError("prompt must be a non-empty string")
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 4:
+            raise DGCConfigError("count must be 1 to 4")
+        command: dict[str, Any] = {"type": "images_generate", "prompt": prompt, "count": count}
+        for name, value in (("size", size), ("aspect", aspect), ("mask", mask), ("generator", generator),
+                            ("model", model), ("seed", seed), ("negative_prompt", negative_prompt),
+                            ("save_to", save_to)):
+            if value is not None:
+                command[name] = value
+        if images is not None:
+            command["images"] = [str(path) for path in images]
+        if approve:
+            command["approve"] = True
+        got = self._ask(command, "images_result", timeout=timeout)
+        return {key: value for key, value in got.items() if key not in ("type", "request_id")}
+
+    def library(self, *, query: str | None = None, surface: str | None = None, limit: int = 60,
+                offset: int = 0) -> dict[str, Any]:
+        """Every image DGC made, newest first: ``{images: [...], total, next_offset?}``."""
+        command: dict[str, Any] = {"type": "images_library", "limit": limit, "offset": offset}
+        if query:
+            command["query"] = query
+        if surface:
+            command["surface"] = surface
+        got = self._ask(command, "images_library")
+        return {key: got[key] for key in ("images", "total", "next_offset") if key in got}
+
+
+class Videos:
+    """``session.videos``: video generation (CLI 0.51+, ``capabilities["videos"]``). A video is a long job: ``generate``
+    starts it and, with ``wait=True`` (the default), follows it until it is made, failed or stopped. Every video runs
+    only with ``approve=True`` (or a generator the user set to make videos without asking); without, the answer has
+    ``error.kind`` "needs_approval" and the ``card`` with its price. The generators are the image generators whose
+    ``makes`` is videos (or both): ``generators()`` lists those, with what each makes and costs."""
+
+    def __init__(self, session: "Session"):
+        self._session = session
+
+    def _ask(self, command: dict[str, Any], answer: str, *, timeout: float | None = None) -> dict[str, Any]:
+        return self._session._request({**command, "request_id": _new_id("videos")}, answer, timeout=timeout)
+
+    def generators(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        """The generators that make videos (their ``video`` says lengths, resolutions, sound and price per second)."""
+        command: dict[str, Any] = {"type": "images_list"}
+        if refresh:
+            command["refresh"] = True
+        status = self._session._request({**command, "request_id": _new_id("images")}, "images_status",
+                                        timeout=60 if refresh else None)["status"]
+        return [row for row in status.get("generators") or [] if row.get("makes") in ("videos", "both")]
+
+    def jobs(self, job: str | None = None) -> list[dict[str, Any]]:
+        """This session's video jobs and every unfinished one (or the one named): ``[{id, state, status, ...}]``."""
+        command: dict[str, Any] = {"type": "videos_jobs"}
+        if job:
+            command["job"] = job
+        return list(self._ask(command, "video_jobs").get("jobs") or [])
+
+    def job(self, job: str) -> dict[str, Any]:
+        found = self.jobs(job)
+        if not found:
+            raise DGCConfigError(f"there is no video job {job}")
+        return found[0]
+
+    def stop(self, job: str) -> dict[str, Any]:
+        """Stop a job (at the provider where it can): the job, with ``charged`` saying what it cost."""
+        got = self._ask({"type": "videos_stop", "job": job}, "video_jobs")
+        return {**(got.get("jobs") or [{}])[0], "change": got.get("change", "")}
+
+    def wait(self, job: str, *, timeout: float = 1800, poll_s: float = 5.0) -> dict[str, Any]:
+        """Follow a job until it ends; DGCTimeoutError when ``timeout`` passes first (the job keeps running)."""
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        while True:
+            current = self.job(job)
+            if current.get("state") in ("done", "failed", "cancelled"):
+                return current
+            if _time.monotonic() > deadline:
+                from .errors import DGCTimeoutError
+                raise DGCTimeoutError(f"video job {job} is still {current.get('state')} after {int(timeout)} s")
+            _time.sleep(max(0.2, poll_s))
+
+    def generate(self, prompt: str, *, duration_s: int | None = None, aspect: str | None = None,
+                 resolution: str | None = None, image: str | None = None, audio: bool | None = None,
+                 generator: str | None = None, model: str | None = None, seed: int | None = None,
+                 negative_prompt: str | None = None, save_to: str | None = None, approve: bool = False,
+                 wait: bool = True, timeout: float = 1800, poll_s: float = 5.0) -> dict[str, Any]:
+        """Make one video: ``{ok, text, job?, card?, error?}``; with ``wait``, ``job`` is the ended job (its ``result``
+        has the path, sidecar, poster, length and size)."""
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise DGCConfigError("prompt must be a non-empty string")
+        if duration_s is not None and (isinstance(duration_s, bool) or not isinstance(duration_s, int)
+                                       or not 1 <= duration_s <= 60):
+            raise DGCConfigError("duration_s must be 1 to 60 seconds")
+        if aspect is not None and aspect not in ("16:9", "9:16", "1:1"):
+            raise DGCConfigError("aspect must be 16:9, 9:16 or 1:1")
+        command: dict[str, Any] = {"type": "videos_generate", "prompt": prompt}
+        for name, value in (("duration_s", duration_s), ("aspect", aspect), ("resolution", resolution),
+                            ("image", image), ("audio", audio), ("generator", generator), ("model", model),
+                            ("seed", seed), ("negative_prompt", negative_prompt), ("save_to", save_to)):
+            if value is not None:
+                command[name] = value
+        if approve:
+            command["approve"] = True
+        got = self._ask(command, "video_jobs", timeout=120)
+        jobs = list(got.get("jobs") or [])
+        out: dict[str, Any] = {"ok": bool(jobs), "text": got.get("change", "")}
+        for key in ("card", "error"):
+            if key in got:
+                out[key] = got[key]
+        if not jobs:
+            return out
+        job = jobs[0]
+        if wait:
+            job = self.wait(job["id"], timeout=timeout, poll_s=poll_s)
+            out["ok"] = job.get("state") == "done"
+            if job.get("error"):
+                out["error"] = job["error"]
+        out["job"] = job
+        return out
+
+    def library(self, *, query: str | None = None, surface: str | None = None, limit: int = 60,
+                offset: int = 0) -> dict[str, Any]:
+        """Every video DGC made, newest first: ``{videos: [...], total, next_offset?}``."""
+        command: dict[str, Any] = {"type": "videos_library", "limit": limit, "offset": offset}
+        if query:
+            command["query"] = query
+        if surface:
+            command["surface"] = surface
+        got = self._ask(command, "videos_library")
+        return {key: got[key] for key in ("videos", "total", "next_offset") if key in got}
+
+
 class _Run:
     """Pump-side state of one run. Outcome events for its prompt ids land here, whoever reads
     them off the pipe."""
@@ -766,10 +1186,13 @@ class Session:
         workflow: str | None = None,
         repair_attempts: int = 1,
         output: str | None = None,
+        system: str | None = None,
+        system_model: str | None = None,
     ) -> RunResult:
         handle = self.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
             skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output,
+            system=system, system_model=system_model,
         )
         return handle.result(timeout=None)
 
@@ -784,11 +1207,16 @@ class Session:
         workflow: str | None = None,
         repair_attempts: int = 1,
         output: str | None = None,
+        system: str | None = None,
+        system_model: str | None = None,
     ) -> RunHandle:
         """Send ``prompt`` and return a handle over its events.
 
         ``output`` (CLI 0.50+) asks the reply to make that kind of artifact, as DGC's Output chip does: document,
         slides, spreadsheet, page or dashboard; the run's ``made_artifacts`` holds what it made.
+
+        ``system`` (and ``system_model``; CLI 0.51+, DGC Router) is where the sub-agents this run delegates go: a
+        system's id or name from ``session.router.status()``. A helper the model names a system for still goes there.
 
         ``timeout`` is seconds for each turn of the run; the default, None, is no limit (a big local
         model can take tens of minutes before its first word, and DGC itself never gives up on a
@@ -805,6 +1233,11 @@ class Session:
             raise DGCConfigError(f"output must be one of {', '.join(OUTPUTS)}")
         if output not in (None, "auto") and not isinstance(self.capabilities.get("artifacts"), Mapping):
             raise DGCUnsupportedError("This DGC CLI can't make artifacts; update it (dgc update).")
+        for name, value in (("system", system), ("system_model", system_model)):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise DGCConfigError(f"{name} must be a non-empty string")
+        if (system or system_model) and not isinstance(self.capabilities.get("router"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI has no DGC Router; update it (dgc update).")
         _check_timeout(timeout)
         if max_turns is not None:
             if isinstance(max_turns, bool) or not isinstance(max_turns, int) or max_turns < 0:
@@ -818,6 +1251,9 @@ class Session:
             idle = self._run is None and not self._queued
         if idle and self._max_turns_dirty:
             self._restore_max_turns()     # an abandoned run left its own max_turns behind
+        if (system or system_model) and idle:
+            # Said before the prompt and answered first: this run's turn routes its helpers there, and its end clears it.
+            Router(self).prefer(system, system_model)
         with self._lock:
             if self._closed:
                 raise DGCRuntimeError("this session is closed")
@@ -995,6 +1431,34 @@ class Session:
         return Mods(self)
 
     @property
+    def router(self) -> "Router":
+        """DGC Router (CLI 0.51+): the user's other computers that run models. Needs ``capabilities["router"]``."""
+        if not isinstance(self.capabilities.get("router"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI has no DGC Router; update it (dgc update).")
+        return Router(self)
+
+    @property
+    def cards(self) -> "Cards":
+        """Plugins' own cards (MCP Apps, CLI 0.51+): see :class:`Cards`. Needs ``capabilities["mcp_apps"]``."""
+        if not isinstance(self.capabilities.get("mcp_apps"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI shows no plugin cards; update it (dgc update).")
+        return Cards(self)
+
+    @property
+    def images(self) -> "Images":
+        """Image generation (CLI 0.51+): the user's image generators. Needs ``capabilities["images"]``."""
+        if not isinstance(self.capabilities.get("images"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI makes no images; update it (dgc update).")
+        return Images(self)
+
+    @property
+    def videos(self) -> "Videos":
+        """Video generation (CLI 0.51+): long jobs on the user's video generators. Needs ``capabilities["videos"]``."""
+        if not isinstance(self.capabilities.get("videos"), Mapping):
+            raise DGCUnsupportedError("This DGC CLI makes no videos; update it (dgc update).")
+        return Videos(self)
+
+    @property
     def artifacts(self) -> "Artifacts":
         """Everything DGC made that the user keeps (CLI 0.50+): documents, decks, sheets, dashboards and pages, each
         with every version. Needs ``capabilities["artifacts"]``."""
@@ -1076,9 +1540,16 @@ class Session:
     def history(self) -> dict[str, Any]:
         return self._request({"type": "get_history", "request_id": _new_id("hist")}, "history")
 
-    def get_usage(self, range: str = "today") -> dict[str, Any]:
-        return self._request({"type": "get_usage", "range": range, "request_id": _new_id("usage")},
-                             "usage_report")
+    def get_usage(self, range: str = "today", *, system: str | None = None) -> dict[str, Any]:
+        """The CLI's token usage for ``range``. Each ``by_model`` row names the system it ran on (``system``,
+        ``system_id``, ``system_kind``) on a CLI with ``capabilities["usage_by_system"]``; ``system`` (a row's
+        ``system_id``, or a system's name) keeps that system's usage only, and needs that CLI."""
+        command: dict[str, Any] = {"type": "get_usage", "range": range, "request_id": _new_id("usage")}
+        if system:
+            if not self.capabilities.get("usage_by_system"):
+                raise DGCUnsupportedError("This DGC CLI can't show usage by system; update it (dgc update).")
+            command["system"] = str(system)
+        return self._request(command, "usage_report")
 
     def list_skills(self) -> list[SkillInfo]:
         event = self._request({"type": "list_skills", "request_id": _new_id("skills")},
@@ -2061,6 +2532,8 @@ class Session:
             call_id=event.get("call_id") if isinstance(event.get("call_id"), str) else None,
             diff=event.get("diff") if isinstance(event.get("diff"), str) else None,
             command=event.get("command") if isinstance(event.get("command"), str) else None,
+            choices=tuple(item for item in (event.get("choices") or []) if item in ("once", "always", "deny"))
+            if isinstance(event.get("choices"), list) else (),
         )
         # Policy denies (tools, paths) are final; command screening defers to a reviewing
         # callback so staff see the Bash ask; policy-checked reads are answered here.

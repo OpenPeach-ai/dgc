@@ -79,7 +79,7 @@ def _linux_status(home, options):
     on = bool(value["installed"]) and value.get("enabled_state") == "enabled"
     linger = _linger_state() if on else False
     return {"platform": "linux", "supported": True, "reason": "", "on": on, "starts_at_login": on,
-            "restarts_after_failure": on, "while_logged_out": on and linger}
+            "restarts_after_failure": on, "while_logged_out": on and linger, "outdated": bool(value.get("outdated"))}
 
 
 def _linger_mark(home):
@@ -104,38 +104,91 @@ def _linux_on(home, options, runner_online):
     return _linux_status(home, options)
 
 
-def upgrade_after_install():
-    """Refresh an enabled, idle DGC-owned runner after a CLI update.
+BUSY_NOTE = ("The Pips runner is busy, so it finishes its current work on the previous DGC. It moves to this one "
+             "by itself once that work is done, the next time you use Pips.")
+UPDATED_NOTE = "Updated the enabled Pips runner to this DGC install."
+WSL_NOTE = ("Keep Pips running now starts this DGC. The Pips runner running now moves to it by itself the next time "
+            "you use Pips.")
 
-    The installer calls this after the new launcher is complete. Never create a service,
-    enable a disabled one, clear Stop, or interrupt an active or queued Pip run.
+
+def _busy(directory) -> bool:
+    """Whether a Pip is queued or running, read without opening the registry: opening it with this install's code
+    moves the database on to this install's version under the runner still using it. When it can't tell, busy."""
+    import sqlite3
+    from urllib.parse import quote
+    path = Path(directory) / "registry.sqlite3"
+    if not path.is_file():
+        return False
+    try:
+        db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error:
+        return True
+    try:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pip_runs'").fetchone() is None:
+            return False
+        return db.execute("SELECT 1 FROM pip_runs WHERE status IN ('queued','running','cancelling') "
+                          "LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return True
+    finally:
+        db.close()
+
+
+def upgrade_after_install():
+    """Move an enabled, DGC-owned runner service to this install after a CLI update.
+
+    The installer calls this after the new launcher is complete. Never create a service, enable a disabled one,
+    clear Stop, interrupt an active or queued Pip run, or open the registry with this install's code (that migrates
+    it under the runner still using it). A busy runner is moved once it is idle (pip_runtime), and on Linux its unit
+    names this install at once, so whenever systemd starts it again it starts this one.
     """
-    from .workspace_registry import WorkspaceRegistry, state_directory
+    from .workspace_registry import state_directory
     if sys.platform == "darwin":
-        spec = _agent_spec(_home(None))
+        home = _home(None)
+        # Never set up: nothing to refresh, and nothing to check (the checks are for writing an agent).
+        if not _agent_file(home).exists():
+            return ""
+        spec = _agent_spec(home)
         if not _agent_old(spec) or _agent_disabled(spec):
             return ""
-        refresh = lambda: _mac_on(spec, runner_online=True)
-    elif sys.platform.startswith("linux") and not wsl.version() and _has_systemd():
+        if _busy(state_directory()):
+            # launchd keeps the job it loaded until it is loaded again, which stops its runner.
+            return BUSY_NOTE
+        _mac_on(spec, runner_online=True)
+        return UPDATED_NOTE
+    if sys.platform.startswith("linux") and wsl.version():
+        # Windows starts the runner loop at sign-in; its script names the install it runs. Rewriting it never touches
+        # the loop running now, and the runner it runs moves once it is idle (pip_runtime), as on the other systems.
+        if _wsl_reason():
+            return ""
         home = _home(None)
+        if not (Path(home) / ".dgc" / "pips-keep-running.on").is_file():
+            return ""                                      # off: never turned on, or turned off
+        spec = _wsl_spec(home)
+        if not _wsl_outdated(spec):
+            return ""
+        _wsl_write(spec)
+        return BUSY_NOTE if _busy(state_directory()) else WSL_NOTE
+    if sys.platform.startswith("linux") and not wsl.version() and _has_systemd():
+        home = _home(None)
+        unit = pip_service.unit_file(home)
+        if not unit.exists() and not unit.is_symlink():
+            return ""
         current = pip_service.status(home)
         if not current["installed"] or not current.get("outdated") or current.get("enabled_state") != "enabled":
             return ""
-        def refresh():
-            updated = pip_service.install(home, upgrade=True)
-            # A runner from the older package may already be in systemd's restart loop
-            # after the new CLI migrated its database. Restart the updated unit in that
-            # case too; leave a deliberately stopped (inactive) service alone.
-            if updated["changed"] and current.get("active_state") in ("active", "activating", "failed"):
-                pip_service.restart(home)
-    else:
-        return ""
-    with WorkspaceRegistry(state_directory()) as registry:
-        busy = registry.db.execute("SELECT 1 FROM pip_runs WHERE status IN ('queued','running','cancelling') LIMIT 1").fetchone()
-    if busy:
-        return "Pips runner update deferred until its current work is finished. Turn Keep Pips running off and on afterward."
-    refresh()
-    return "Updated the enabled Pips runner to this DGC install."
+        busy = _busy(state_directory())
+        # Writing the unit never touches the runner running now. systemd starts the next one from it, after a failure
+        # too, so a runner from the previous install never comes back on a database this install moved on.
+        updated = pip_service.install(home, upgrade=True)
+        if busy:
+            return BUSY_NOTE
+        # A runner from the older package may already be in systemd's restart loop after the new CLI migrated its
+        # database. Restart the updated unit in that case too; leave a deliberately stopped (inactive) service alone.
+        if updated["changed"] and current.get("active_state") in ("active", "activating", "failed"):
+            pip_service.restart(home)
+        return UPDATED_NOTE
+    return ""
 
 
 def _linux_off(home, options):
@@ -153,9 +206,17 @@ def _linux_off(home, options):
 # ---------------------------------------------------------------- macOS: a LaunchAgent
 
 
-def _agent_spec(home, *, agent_directory=None, python_executable=None, package_root=None):
+def _agent_file(home, agent_directory=None):
+    """Where this home's LaunchAgent is when one was ever written, from the paths alone."""
+    directory = Path(agent_directory) if agent_directory is not None else Path.home() / "Library" / "LaunchAgents"
+    return directory / (LABEL_PREFIX + hashlib.sha256(os.fsencode(home)).hexdigest()[:24] + ".plist")
+
+
+def _agent_spec(home, *, agent_directory=None, python_executable=None, package_root=None, _previous=False):
     source = pip_service._path(package_root if package_root is not None else Path(__file__).resolve().parent.parent, "DGC package root")
-    python = pip_service._executable(python_executable if python_executable is not None else sys.executable)
+    # An earlier install's agent is rebuilt to compare it byte for byte; its interpreter may be gone (pip_service).
+    python = (pip_service._previous_executable if _previous else pip_service._executable)(
+        python_executable if python_executable is not None else sys.executable)
     directory = Path(agent_directory) if agent_directory is not None else Path.home() / "Library" / "LaunchAgents"
     key = hashlib.sha256(os.fsencode(home)).hexdigest()[:24]
     label = LABEL_PREFIX + key
@@ -222,17 +283,13 @@ def _agent_old(spec):
                 if not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid()) or info.st_mode & 0o022:
                     return False
             old = _agent_spec(spec["home"], agent_directory=spec["directory"],
-                              python_executable=argv[0], package_root=source)
+                              python_executable=argv[0], package_root=source, _previous=True)
             return old["content"] == raw
         # The old release may already have been pruned. Reconstruct the exact
         # LaunchAgent bytes from the current template with only its pinned paths
         # changed; no similarly named or edited agent is accepted.
-        python = pip_service._path(argv[0], "Previous Python executable")
+        python = pip_service._previous_executable(argv[0])
         pip_service._safe_chain(source, missing=True)
-        if python.exists() or python.is_symlink():
-            pip_service._executable(python)
-        else:
-            pip_service._safe_chain(python.parent, missing=True)
         expected = plistlib.loads(spec["content"])
         previous = list(expected["ProgramArguments"])
         previous[0], previous[5] = str(python), str(source)
@@ -360,12 +417,30 @@ def _wsl_registered(spec) -> bool:
     return done.returncode == 0
 
 
+WSL_HEADER = "#!/bin/sh\n# DGC: Keep Pips running, in WSL."
+
+
+def _wsl_outdated(spec) -> bool:
+    """The runner loop DGC wrote for this home from another install: it names that install's Python and package."""
+    path = spec["script"]
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > 16_384:
+            return False
+        raw = stream.read(16_385)
+    return raw != spec["content"].encode("utf-8") and raw.startswith(WSL_HEADER.encode())
+
+
 def _wsl_status(spec, reason=""):
     if reason:
-        return {**_unsupported(reason), "platform": "wsl"}
+        return {**_unsupported(reason), "platform": "wsl", "outdated": False}
     on = spec["mark"].is_file() and spec["script"].is_file() and _wsl_registered(spec)
     return {"platform": "wsl", "supported": True, "reason": "", "on": on, "starts_at_login": on,
-            "restarts_after_failure": on, "while_logged_out": False}
+            "restarts_after_failure": on, "while_logged_out": False, "outdated": on and _wsl_outdated(spec)}
 
 
 def _powershell(script):
@@ -377,15 +452,20 @@ def _powershell(script):
         raise RegistryError("service_manager_error", "Windows refused the change.")
 
 
-def _wsl_on(spec, runner_online):
-    if not spec["launcher"]:
-        raise RegistryError("service_unsupported", "Keeping Pips running needs a current WSL. Run `wsl --update` in Windows, then try again.")
+def _wsl_write(spec):
+    """The runner loop, replaced whole. A loop already running keeps the script it read; the next one runs this."""
     folder = spec["script"].parent
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     staged = spec["script"].with_name("." + spec["script"].name + ".tmp")
     staged.write_text(spec["content"], encoding="utf-8")
     os.chmod(staged, 0o700)
     os.replace(staged, spec["script"])
+
+
+def _wsl_on(spec, runner_online):
+    if not spec["launcher"]:
+        raise RegistryError("service_unsupported", "Keeping Pips running needs a current WSL. Run `wsl --update` in Windows, then try again.")
+    _wsl_write(spec)
     spec["mark"].write_text("Keep Pips running is on. Turning it off in the Pips view removes this.\n", encoding="utf-8")
     path = "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'"
     _powershell(f"Set-ItemProperty -Path {path} -Name ({wsl.ps_text(spec['name'])}) -Value ({wsl.ps_text(spec['command'])})")

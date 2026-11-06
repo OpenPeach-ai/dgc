@@ -22,7 +22,7 @@ test('Save says it applies to every workspace, which is where it writes',()=>{
   // the tab said nothing about that at all -- the statement existed only on the surface nobody
   // could open. Checked on every page that offers Save, because each renders its own button.
   const x=setup();
-  for(const nav of ['general','models','agents','web','chatdgc','security']){
+  for(const nav of ['general','models','web','chatdgc','security']){
     x.click(`[data-nav=${nav}]`);
     const save=x.d.querySelector('#save');
     assert.ok(save,`${nav} offers Save`);
@@ -64,14 +64,14 @@ test('a backend config never populates a secret field in the webview',()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,api_key:'sk-live-secret',fallback_api_key:'sk-live-fallback'}});
   x.click('[data-nav=models]');
-  assert.equal(x.d.querySelector('#api_key').value,'','the backend may hold a key; the webview may not');
-  x.click('[data-nav=agents]');
+  assert.equal(x.d.querySelector('#saved_provider_key').value,'','the backend may hold a key; the provider form may not display it');
+  x.click('[data-nav=models]');
   const fallback=x.d.querySelector('#fallback_api_key');
   if(fallback)assert.equal(fallback.value,'','nor the fallback route\'s key');
   assert.equal(JSON.stringify(x.sent).includes('sk-live-'),false,'and none of it is echoed back');
 });
 test('Save from General retains routes and false/zero values from other pages',()=>{const x=setup();x.message({type:'event',event:{...x.config,capability_cache_ttl_s:0}});x.click('#ultra_mode');x.click('#save');const values=x.sent.at(-1).values;assert.equal(values.subagent_model,'agent');assert.equal(values.subagent_base_url,'https://agent.example/v1');assert.equal(values.fallback_model,'backup');assert.equal(values.prompt_cache,false);assert.equal(values.capability_cache_ttl_s,0);assert.equal(values.sandbox,true);assert.equal(values.ultra_mode,true);assert.equal(values.base_url,x.config.base_url);});
-test('unsaved edits survive navigation and background config responses',()=>{const x=setup();x.click('[data-nav=models]');x.input('#model','edited');x.input('#api_key','not-persisted-by-ui');x.click('[data-nav=security]');x.click('#sandbox_network');x.message({type:'event',event:x.config});x.click('[data-nav=models]');assert.equal(x.d.querySelector('#model').value,'edited');assert.equal(x.d.querySelector('#api_key').value,'not-persisted-by-ui');x.click('#save');assert.equal(x.sent.at(-1).values.sandbox_network,true);x.message({type:'settingsSaved',ok:true});assert.equal(x.d.querySelector('#api_key').value,'');});
+test('unsaved edits survive navigation and background config responses',()=>{const x=setup();x.click('[data-nav=models]');x.input('#fallback_model','edited');x.input('#fallback_api_key','not-persisted-by-ui');x.click('[data-nav=security]');x.click('#sandbox_network');x.message({type:'event',event:x.config});x.click('[data-nav=models]');assert.equal(x.d.querySelector('#fallback_model').value,'edited');assert.equal(x.d.querySelector('#fallback_api_key').value,'not-persisted-by-ui');x.click('#save');assert.equal(x.sent.at(-1).values.sandbox_network,true);x.message({type:'settingsSaved',ok:true});assert.equal(x.d.querySelector('#fallback_api_key').value,'');});
 test('installed switch enables mixed skills consistently without opening details',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-plugin=fixture]');const messages=x.sent.filter(m=>m.type==='skillToggle');assert.deepEqual(messages.map(m=>[m.name,m.enabled]),[['second',true]]);assert.ok(!x.d.querySelector('#back'));x.click('[data-open=fixture]');assert.ok(x.d.querySelector('#back'));assert.match(x.d.body.textContent,/First frontmatter/);});
 test('Apps and MCPs show their declared entries, not duplicate package titles',()=>{const x=setup();x.message({type:'plugins',items:[plugin]});x.click('[data-nav=plugins]');x.click('[data-lane=apps]');assert.equal(x.d.querySelector('#plugin-list strong').textContent,'Declared service');assert.match(x.d.querySelector('#plugin-list').textContent,/Uses MCP/);assert.equal(x.d.querySelector('[data-lane=mcp]'),null,'one door to MCP servers: its own page');x.click('[data-nav=mcp]');assert.equal(x.d.querySelector('#page>h2').textContent,'MCP servers');assert.equal(x.sent.at(-1).type,'listMcp');});
 test('Save and connect on an MCP server says to finish in the browser, beside the button',()=>{
@@ -248,7 +248,7 @@ test('installed plugin reconnect uses the branded dialog and only actual sign-in
  x.click('#confirm-connect');assert.equal(x.sent.at(-1).type,'installPlugin');assert.equal(x.sent.filter(m=>m.type==='inspectPlugin').length,0);
  x.message({type:'signin',server:'unrelated',title:'Other'});assert.equal(x.d.querySelector('dialog [data-browser]'),null);
  x.message({type:'signin',server:'figma',title:'Figma'});assert.match(x.d.querySelector('dialog').textContent,/Finish connecting Figma/);x.click('dialog [data-browser]');assert.equal(x.sent.at(-1).type,'openSignIn');
- x.message({type:'plugins',items:[{...row,connected:true}]});assert.match(x.d.querySelector('dialog').textContent,/Figma is connected/);assert.doesNotMatch(x.d.querySelector('dialog').textContent,/approval required/);x.click('#connection-done');assert.equal(x.d.querySelector('dialog'),null);
+ x.message({type:'plugins',items:[{...row,connected:true}]});assert.match(x.d.querySelector('dialog').textContent,/Figma is connected/);assert.equal(x.d.querySelector('#dialog-cancel'),null,'nothing left to cancel: Done closes it');assert.doesNotMatch(x.d.querySelector('dialog').textContent,/approval required/);x.click('#connection-done');assert.equal(x.d.querySelector('dialog'),null);
 });
 
 test('cancelling branded browser progress sends the existing cancellation command',()=>{
@@ -1088,7 +1088,7 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
   // had since 0.40 (subagent_context_size: 0 is the main model's, else 2,048 to 16,777,216 tokens).
   const hintOf=x=>x.d.querySelector('#subagent_context_size').closest('.field').querySelector('.hint').textContent;
   const older=setup();
-  older.click('[data-nav=agents]');
+  older.click('[data-nav=models]');
   const box=older.d.querySelector('#subagent_context_size');
   assert.ok(box,'the card has the field');
   assert.equal(box.disabled,true,'a CLI that never answered it would refuse the save');
@@ -1096,23 +1096,24 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
 
   const x=setup();
   x.message({type:'event',event:{...x.config,subagent_context_size:0}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const size=()=>x.d.querySelector('#subagent_context_size');
   assert.equal(size().disabled,false);
   assert.equal(size().value,'','0 is shown as blank');
-  assert.equal(size().placeholder,'Same as the main model');
+  // 0.51: the same box as DGC Router's Context each, its first choice "Same as the main chat" (src/contextCombo.js).
+  assert.equal(size().placeholder,'Same as the main chat');
   assert.equal(size().closest('.group').querySelector('h3').textContent,'Sub-agents');
   x.message({type:'event',event:{...x.config,subagent_context_size:65536}});
-  assert.equal(size().value,'65536');
+  assert.equal(size().value,'64K','a size, as the list says it');
 
   const saves=()=>x.sent.filter(m=>m.type==='saveSettings');
-  for(const bad of ['1024','50000','33554432','-2048']){
+  for(const bad of ['1024','33554432','-2048','lots']){
     x.input('#subagent_context_size',bad);
     const before=saves().length;
     x.click('#save');
     assert.equal(saves().length,before,`${bad} is refused on the page, as the main Context size refuses one`);
   }
-  for(const [typed,posted] of [['131072','131072'],['','' ],['0','0'],['2048','2048']]){
+  for(const [typed,posted] of [['131072','131072'],['','' ],['0','0'],['2048','2048'],['24K','24576'],['24,576','24576'],['50000','50000']]){
     x.input('#subagent_context_size',typed);
     x.click('#save');
     assert.equal(saves().at(-1)?.values.subagent_context_size,posted,typed||'blank');
@@ -1127,150 +1128,62 @@ test('Agents: the sub-agents\' Context size, blank for the main model\'s window,
 // ---- Model boxes: each lists the models at its own card's host (list_models_at) ------------------------------
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const asks=x=>x.sent.filter(m=>m.type==='listModelsAt');
+const mainAsks=x=>asks(x).filter(m=>m.token.startsWith('model-'));
 const answer=(x,ask,fields)=>x.message({type:'modelsAt',token:ask.token,role:ask.role,...fields});
 const openList=(x,id)=>x.d.querySelector(`[data-model-open=${id}]`).dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
 const optionsOf=(x,id)=>[...x.d.querySelectorAll(`#${id}-list [role=option]`)].map(li=>li.textContent);
 
-test('Model boxes stay text boxes with a CLI that can\'t list a host\'s models',()=>{
-  const x=setup();
-  for(const [nav,ids] of [['models',['model']],['agents',['subagent_model','fallback_model']]]){
-    x.click(`[data-nav=${nav}]`);
-    for(const id of ids){
-      const box=x.d.querySelector('#'+id);
-      assert.equal(box.tagName,'INPUT');
-      assert.equal(box.getAttribute('role'),null,`${id}: no list to offer`);
-      assert.equal(x.d.querySelector(`[data-model-open=${id}]`),null);
-    }
-  }
-  assert.deepEqual(asks(x),[],'and nothing is asked of the CLI');
-});
-
-test('Models: the Model box lists the models at the host as typed, and still takes any name',async()=>{
-  const x=setup();
-  x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama'}});
-  x.click('[data-nav=models]');
-  const box=x.d.querySelector('#model');
-  assert.equal(box.getAttribute('role'),'combobox');
-  const first=asks(x).at(-1);
-  assert.deepEqual({role:first.role,base_url:first.base_url,api_mode:first.api_mode,key:'api_key' in first},
-    {role:'main',base_url:'https://model.example/v1',api_mode:'ollama',key:false},'the saved host, and no key: none was typed');
-  answer(x,first,{ids:['glm-5.3:cloud','original','qwen3:8b']});
-  openList(x,'model');
-  assert.deepEqual(optionsOf(x,'model'),['glm-5.3:cloud','original','qwen3:8b'],'opened on a listed name: every model, to pick another');
-  assert.equal(x.d.querySelector('#model-list [aria-selected=true]').textContent,'original');
-  assert.equal(box.getAttribute('aria-expanded'),'true');
-  x.d.querySelector('#model-list [data-model="qwen3:8b"]').dispatchEvent(new x.w.MouseEvent('mousedown',{bubbles:true,cancelable:true}));
-  assert.equal(box.value,'qwen3:8b');
-  assert.equal(x.d.querySelector('#model-list').hidden,true);
-  // Typing filters; a name it doesn't list is kept.
-  x.input('#model','glm');
-  assert.deepEqual(optionsOf(x,'model'),['glm-5.3:cloud']);
-  x.input('#model','my-own-model');
-  assert.deepEqual(optionsOf(x,'model'),[]);
-  assert.match(x.d.querySelector('#model-list').textContent,/Keep typing to use that name/);
-  x.click('#save');
-  assert.equal(x.sent.filter(m=>m.type==='saveSettings').pop().values.model,'my-own-model');
-  x.message({type:'settingsSaved',ok:true});
-
-  // Another host typed: listed again after a pause, without saving, and with no saved key.
-  const before=asks(x).length;
-  x.input('#base_url','http://127.0.0.1:11434/v1');
-  x.input('#base_url','http://127.0.0.1:11434/v1/');
-  assert.equal(asks(x).length,before,'not on every keystroke');
-  await pause(750);
-  assert.equal(asks(x).length,before+1,'once, after the pause');
-  const local=asks(x).at(-1);
-  assert.equal(local.base_url,'http://127.0.0.1:11434/v1/');
-  assert.equal('api_key' in local,false);
-  assert.equal(x.sent.filter(m=>m.type==='saveSettings').length,1,'nothing was saved to list it');
-  // A key typed in the form goes with it; a transport chosen lists again.
-  x.input('#api_key','typed-key');
-  await pause(750);
-  assert.equal(asks(x).at(-1).api_key,'typed-key');
-  x.d.querySelector('#api_mode').value='chat_completions';
-  x.d.querySelector('#api_mode').dispatchEvent(new x.w.Event('change',{bubbles:true}));
-  await pause(750);
-  assert.equal(asks(x).at(-1).api_mode,'chat_completions');
-  // A late answer to an older request is not this box's any more.
-  answer(x,local,{ids:['stale-model']});
-  answer(x,asks(x).at(-1),{ids:[],error:'it needs an API key (HTTP 401)'});
-  const status=x.d.querySelector('#model-status');
-  assert.equal(status.hidden,false);
-  assert.equal(status.textContent,"Couldn't list the models at this host: it needs an API key (HTTP 401).");
-  x.input('#model','');
-  openList(x,'model');
-  assert.doesNotMatch(x.d.querySelector('#model-list').textContent,/stale-model/);
-});
-
-test('Models: the Model box works from the keyboard',()=>{
-  const x=setup();
-  x.message({type:'event',event:{...x.config,list_models_at:true}});
-  x.click('[data-nav=models]');
-  answer(x,asks(x).at(-1),{ids:['a-model','b-model','original']});
-  const box=x.d.querySelector('#model');
-  const key=k=>box.dispatchEvent(new x.w.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
-  box.focus();
-  key('ArrowDown');
-  assert.equal(x.d.querySelector('#model-list').hidden,false,'Down opens it');
-  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-0');
-  key('ArrowDown');
-  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-1');
-  key('Enter');
-  assert.equal(box.value,'b-model');
-  assert.equal(x.d.querySelector('#model-list').hidden,true);
-  key('ArrowUp');
-  assert.equal(box.getAttribute('aria-activedescendant'),'model-opt-2');
-  key('Escape');
-  assert.equal(x.d.querySelector('#model-list').hidden,true,'Esc closes it');
-  assert.equal(box.value,'b-model','and keeps what is there');
-});
-
-test('Agents: each Model box lists its own card\'s host; Subscription model stays text',async()=>{
-  const x=setup();
-  x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',fallback_base_url:'',subagent_api_mode:'chat_completions'}});
-  x.click('[data-nav=agents]');
-  const of=role=>asks(x).filter(m=>m.role===role).at(-1);
-  assert.deepEqual([of('subagent').base_url,of('subagent').api_mode],['https://agent.example/v1','chat_completions']);
-  assert.deepEqual([of('fallback').base_url,of('fallback').api_mode],['https://model.example/v1','ollama'],
-    'a blank host is the main one, with its transport ("Inherit")');
-  answer(x,of('subagent'),{ids:['agent','worker-7b']});
-  answer(x,of('fallback'),{ids:['backup','original']});
-  openList(x,'subagent_model');
-  assert.deepEqual(optionsOf(x,'subagent_model'),['agent','worker-7b']);
-  openList(x,'fallback_model');
-  assert.deepEqual(optionsOf(x,'fallback_model'),['backup','original']);
-  // The fallback gets a host of its own: its box lists that one, and only that box asks again.
-  const before=asks(x).length;
-  x.input('#fallback_base_url','https://other.example/v1');
-  await pause(750);
-  const fresh=asks(x).slice(before);
-  assert.deepEqual(fresh.map(m=>[m.role,m.base_url,m.api_mode]),[['fallback','https://other.example/v1','auto']],
-    'another host is Auto when the transport is Inherit');
-  x.input('#subagent_api_key','sub-typed');
-  await pause(750);
-  assert.equal(asks(x).at(-1).role,'subagent');
-  assert.equal(asks(x).at(-1).api_key,'sub-typed');
-  x.click('[data-nav=models]');
-  assert.equal(x.d.querySelector('#subscription_model').getAttribute('role'),null,'a subscription CLI has no list');
-});
-
-test('a provider preset lists the host it fills in',async()=>{
+test('provider setup keeps the form open and uses a saved route, not the old direct model field',()=>{
   const x=setup();
   x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'}]});
-  x.message({type:'event',event:{...x.config,list_models_at:true}});
   x.click('[data-nav=models]');
-  const before=asks(x).length;
-  const preset=x.d.querySelector('#provider');
+  assert.equal(x.d.querySelector('#model'),null,'one provider list replaces the legacy main model field');
+  x.click('details[data-more=saved-providers] summary');
+  const preset=x.d.querySelector('#saved_provider_preset');
   preset.value='ollama';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
-  await pause(750);
-  assert.equal(asks(x).length,before+1);
-  assert.equal(asks(x).at(-1).base_url,'http://127.0.0.1:11434/v1');
+  assert.equal(x.d.querySelector('details[data-more=saved-providers]').open,true,'the next fields stay visible');
+  assert.equal(x.d.querySelector('#saved_provider_url').value,'http://127.0.0.1:11434/v1');
+  x.input('#saved_provider_model','deepseek-v4.1-flash:cloud');
+  x.click('#saved-provider-add');
+  const added=x.sent.at(-1);
+  assert.equal(added.type,'addProviderProfile');
+  assert.equal(added.profile.model,'deepseek-v4.1-flash:cloud');
+  assert.equal(added.profile.base_url,'http://127.0.0.1:11434/v1');
+  x.message({type:'providerProfileError',message:'Sign in on this computer first.'});
+  assert.equal(x.d.querySelector('details[data-more=saved-providers]').open,true);
+  assert.match(x.d.querySelector('#saved-provider-status').textContent,/Sign in on this computer first/);
 });
 
-test('Agents: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
+test('saved provider list hides already added presets and changes the default explicitly',()=>{
+  const x=setup();
+  x.message({type:'providers',providers:[{id:'ollama',label:'Ollama',url:'http://127.0.0.1:11434/v1'},
+    {id:'vllm',label:'vLLM',url:'http://127.0.0.1:8000/v1'}]});
+  x.message({type:'providerProfiles',profiles:[{id:'provider_'+'a'.repeat(32),kind:'native',name:'Ollama',base_url:'http://127.0.0.1:11434/v1',model:'qwen',api_mode:'auto'}],defaultId:'provider_'+'a'.repeat(32)});
+  x.click('[data-nav=models]');
+  const values=[...x.d.querySelector('#saved_provider_preset').options].map(o=>o.value);
+  assert.equal(values.includes('ollama'),false);
+  assert.equal(values.includes('vllm'),true);
+  assert.match(x.d.querySelector('[data-provider-default]').textContent,/Default/);
+});
+
+test('saved subscription shows its own model field while fallback and agent controls remain reachable',()=>{
+  const x=setup();x.click('[data-nav=models]');
+  x.click('details[data-more=saved-providers] summary');
+  const preset=x.d.querySelector('#saved_provider_preset');
+  preset.value='claude';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
+  assert.equal(x.d.querySelector('details[data-more=saved-providers]').open,true);
+  assert.equal(x.d.querySelector('#saved_provider_url'),null,'a signed-in CLI needs no host URL');
+  assert.equal(x.d.querySelector('#saved_provider_key'),null,'a signed-in CLI needs no API key');
+  x.input('#saved_provider_model','sonnet');x.click('#saved-provider-add');
+  assert.deepEqual({kind:x.sent.at(-1).profile.kind,engine:x.sent.at(-1).profile.engine,model:x.sent.at(-1).profile.model},
+    {kind:'subscription',engine:'claude',model:'sonnet'});
+  for(const id of ['subagent_model','fallback_model','pips_model'])assert.ok(x.d.querySelector('#'+id));
+});
+
+test('Models: Model for Pips, a Pips-wide default that every Pip on Default follows',()=>{
   const older=setup();
-  older.click('[data-nav=agents]');
-  const card=[...older.d.querySelectorAll('.group')].find(c=>c.querySelector('h3').textContent==='Pips');
+  older.click('[data-nav=models]');
+  const card=[...older.d.querySelectorAll('.group')].find(c=>c.querySelector('h3')?.textContent==='Pips');
   assert.ok(card,'a Pips group');
   assert.equal(card.querySelector('#pips_model').disabled,true,'a CLI that never answered pips_settings would refuse the save');
   assert.match(card.textContent,/Model for Pips/);
@@ -1278,7 +1191,7 @@ test('Agents: Model for Pips, a Pips-wide default that every Pip on Default foll
 
   const x=setup();
   x.message({type:'event',event:{...x.config,list_models_at:true,api_mode:'ollama',pips_settable:true,pips_model:''}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=()=>x.d.querySelector('#pips_model');
   assert.equal(box().disabled,false);
   assert.equal(box().value,'');
@@ -1306,7 +1219,7 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   const x=setup();
   x.click('[data-nav=general]');
   assert.equal(x.d.querySelector('#max_parallel_tasks'),null,'one place for it');
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=x.d.querySelector('#max_parallel_tasks');
   assert.equal(box.closest('.group').querySelector('h3').textContent,'Sub-agents');
   assert.equal([box.min,box.max,box.step].join(' '),'1 32 1');
@@ -1331,65 +1244,31 @@ test('Agents: sub-agents Run at once takes up to 32 and says plainly what more c
   assert.match(rowSaid(x.d.querySelector('#max_parallel_tasks')),/^Pinned here; Ultra would run 8\. Set 4 to let Ultra choose/);
 });
 
-test('Models and Agents: every setting still reachable, detail one click away',()=>{
+test('Models and Agents: providers and advanced controls remain reachable',()=>{
   const x=setup();
-  x.message({type:'event',event:{...x.config,list_models_at:true,cache_settable:true,subagent_context_size:0,pips_settable:true,pips_model:''}});
+  x.message({type:'event',event:{...x.config,cache_settable:true,subagent_context_size:0,pips_settable:true,pips_model:''}});
   x.click('[data-nav=models]');
-  for(const id of ['base_url','provider','api_key','model','subscription_engine','subscription_model','subscription_effort','prompt_cache','api_mode','provider_state','prompt_cache_ttl','capability_cache_ttl_s'])
+  for(const id of ['saved_provider_preset','saved_provider_name','saved_provider_url','saved_provider_model','saved_provider_key','prompt_cache','api_mode','provider_state','capability_cache_ttl_s'])
     assert.ok(x.d.querySelector('#'+id),`Models still has ${id}`);
   const advanced=x.d.querySelector('details[data-more=models-advanced]');
   assert.equal(advanced.open,false,'Advanced starts closed');
-  for(const id of ['api_mode','provider_state','capability_cache_ttl_s','prompt_cache_ttl'])
-    assert.ok(advanced.contains(x.d.querySelector('#'+id)),`${id} is under Advanced for a host that isn't Anthropic`);
-  // A subscription's model and effort show only when one is on.
-  const subs=x.d.querySelector('[data-when-engine]');
-  assert.equal(subs.hidden,true);
-  const engine=x.d.querySelector('#subscription_engine');
-  engine.value='codex';engine.dispatchEvent(new x.w.Event('change',{bubbles:true}));
-  assert.equal(subs.hidden,false);
-  // Advanced stays open through a redraw (a config reply re-renders the page).
-  advanced.open=true;advanced.dispatchEvent(new x.w.Event('toggle'));
-  x.message({type:'event',event:{...x.config,list_models_at:true,cache_settable:true}});
-  assert.equal(x.d.querySelector('details[data-more=models-advanced]').open,true);
-  // An Anthropic host: its cache lifetime is a Cache row, not Advanced.
+  for(const id of ['api_mode','provider_state','capability_cache_ttl_s'])
+    assert.ok(advanced.contains(x.d.querySelector('#'+id)),`${id} is under Advanced`);
   x.message({type:'event',event:{...x.config,base_url:'https://api.anthropic.com/v1',cache_settable:true}});
-  assert.equal(x.d.querySelector('details[data-more=models-advanced]').contains(x.d.querySelector('#prompt_cache_ttl')),false);
-  // A preset fills the host and goes back to reading "Presets".
-  x.message({type:'providers',providers:[{id:'ollama',label:'Ollama (local)',url:'http://127.0.0.1:11434/v1'}]});
-  const preset=x.d.querySelector('#provider');
-  preset.value='ollama';preset.dispatchEvent(new x.w.Event('change',{bubbles:true}));
-  assert.equal(x.d.querySelector('#base_url').value,'http://127.0.0.1:11434/v1');
-  assert.equal(preset.value,'');
-  assert.equal(preset.selectedOptions[0].textContent,'Presets');
-
-  x.click('[data-nav=agents]');
+  assert.ok(x.d.querySelector('#prompt_cache_ttl'),'Anthropic cache lifetime remains reachable');
   for(const id of ['subagent_model','max_parallel_tasks','subagent_context_size','subagent_provider','subagent_base_url','subagent_api_mode','subagent_api_key','fallback_model','fallback_base_url','fallback_api_mode','fallback_api_key','pips_model'])
     assert.ok(x.d.querySelector('#'+id),`Agents still has ${id}`);
-  // The sub-agents' own host is here (it is set); the fallback has none, so its host waits one click away.
-  const subHost=x.d.querySelector('details[data-more=subagent-host]'),fbHost=x.d.querySelector('details[data-more=fallback-host]');
-  assert.equal(subHost.open,true);
-  assert.match(subHost.querySelector('summary').textContent,/Another host · agent\.example/);
-  assert.equal(fbHost.open,false);
-  assert.equal(x.d.querySelector('#fallback_base_url').placeholder,'Same as the main host');
-  assert.equal(x.d.querySelector('#subagent_model').placeholder,'Same as the main model');
-  assert.equal(x.d.querySelector('#fallback_model').placeholder,'None');
-  assert.equal(rowHint(x.d.querySelector('#fallback_model')),'Tried when the main model fails.');
-  // Save stays in a bar of its own, and still saves every page's edits.
   assert.ok(x.d.querySelector('.save-bar #save'));
-  x.input('#fallback_model','backup-2');
-  x.click('#save');
-  const saved=x.sent.filter(m=>m.type==='saveSettings').pop().values;
-  assert.equal(saved.fallback_model,'backup-2');
-  assert.equal(saved.base_url,'http://127.0.0.1:11434/v1','the Models page\'s edit goes with it');
-  x.click('[data-nav=security]');
-  assert.ok(x.d.querySelector('.save-bar #save'),'and every settings page has the same one Save');
+  x.input('#fallback_model','backup-2');x.click('#save');
+  assert.equal(x.sent.filter(m=>m.type==='saveSettings').pop().values.fallback_model,'backup-2');
+  x.click('[data-nav=security]');assert.ok(x.d.querySelector('.save-bar #save'));
 });
 
 // ---- Settings everywhere (24 Oct 2026): one-line hints, "?" for the rest, one Save, plain words, safe danger ----
 test('a hint is one line and the rest is behind "?": open, remembered through a redraw, closed again',()=>{
   const x=setup();
   x.message({type:'event',event:{...x.config,turn_token_budget:0}});
-  x.click('[data-nav=agents]');
+  x.click('[data-nav=models]');
   const box=x.d.querySelector('#max_parallel_tasks');
   const info=box.closest('.field').querySelector('.info');
   assert.ok(info,'a "?" beside Run at once');
@@ -1418,7 +1297,7 @@ test('one Save for every page: it says so, and names the pages with unsaved chan
   assert.equal(save().textContent,'Save all');
   assert.match(save().title,/every page/);
   assert.equal(x.d.querySelector('#save-status').textContent,'','nothing changed yet');
-  x.input('#model','edited');
+  x.input('#fallback_model','edited');
   assert.equal(x.d.querySelector('#save-status').textContent,'Unsaved changes on Models');
   // The sandbox is on in this config, so its network switch is live.
   x.click('[data-nav=security]');x.click('#sandbox_network');
@@ -1426,7 +1305,7 @@ test('one Save for every page: it says so, and names the pages with unsaved chan
   assert.equal(x.d.querySelector('#save-status').textContent,'Unsaved changes on Models and Security','said on every page');
   x.click('#save');
   const values=x.sent.filter(m=>m.type==='saveSettings').pop().values;
-  assert.equal(values.model,'edited','one Save carries every page\'s change');
+  assert.equal(values.fallback_model,'edited','one Save carries every page\'s change');
   x.message({type:'settingsSaved',ok:true});
   assert.equal(x.d.querySelector('#save-status').textContent,'Saved');
 });
@@ -1522,4 +1401,17 @@ test('a plugin\'s page: no maintainers\' notes, no "Not provided" rows; director
   assert.match(x.d.querySelector('.meta').textContent,/License/);
   x.click('#back');x.click('#browse-directory');
   assert.doesNotMatch(x.d.querySelector('.directory-card-footer').textContent,/dgc-curated|MIT|License/);
+});
+
+test('Permission mode says it is this Work chat\'s, and that a new chat never starts in Auto',()=>{
+  // The field sends set_mode, which since 0.50.1 changes only this Work chat, and an editor process holds a saved
+  // Auto to Default. Read as a default for every chat, Auto chosen here was quietly undone by the next reload.
+  const x=setup();
+  x.click('[data-nav=general]');
+  const mode=x.d.querySelector('#mode');
+  assert.deepEqual([...mode.options].map(o=>o.value),['default','acceptEdits','plan','auto']);
+  assert.match(rowHint(mode),/this Work chat/);
+  assert.match(rowDetail(mode),/Auto[^.]*one Work chat at a time/);
+  assert.match(rowDetail(mode),/new chat[^.]*starts in Default/);
+  assert.match(rowDetail(mode),/chat you reopen, or this one after a reload, comes back in the mode it had/);
 });

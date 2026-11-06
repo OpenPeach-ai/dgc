@@ -24,6 +24,46 @@ class ModRuntimeAuditTests(unittest.TestCase):
             self.assertIn(root / 'other', hidden)
             self.assertTrue(all(not (path == allowed or path in allowed.parents) for path in hidden))
 
+    def test_macos_profile_lets_the_sandbox_follow_every_link_to_the_interpreter(self):
+        # A Python DGC's installer set up on a Mac: venv/bin/python -> python3.13 -> ~/.local/bin/python3.13 (uv's link)
+        # -> uv's version alias folder -> the real interpreter. macOS refused to exec it ("Operation not permitted")
+        # because ~/.local/bin was hidden, so no mod could start on such a Mac. Simulated here: the profile must let
+        # each link be read, and keep the folder's other files hidden.
+        from unittest import mock
+        from dgc import sandbox
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as scratch:
+            home = Path(tmp).resolve() / 'Users' / 'me'
+            real = home / '.local' / 'share' / 'uv' / 'python' / 'cpython-3.13.14' / 'bin'
+            real.mkdir(parents=True)
+            (real / 'python3.13').write_text('')
+            alias = home / '.local' / 'share' / 'uv' / 'python' / 'cpython-3.13'
+            alias.symlink_to(real.parent)
+            local_bin = home / '.local' / 'bin'
+            local_bin.mkdir(parents=True)
+            (local_bin / 'python3.13').symlink_to(alias / 'bin' / 'python3.13')
+            (local_bin / 'private-tool').write_text('not for mods')
+            venv_bin = home / '.local' / 'share' / 'dgc' / 'versions' / '9.9.9' / '.venv' / 'bin'
+            venv_bin.mkdir(parents=True)
+            (venv_bin / 'python3.13').symlink_to(local_bin / 'python3.13')
+            (venv_bin / 'python').symlink_to('python3.13')
+            folder = home / 'mod'
+            folder.mkdir()
+            (folder / 'main.py').write_text('')
+            m = parse({'name': 'audit', 'version': '1.0.0', 'entry': 'main.py'}, folder)
+            from dgc.mods import runtime
+            real_hidden = runtime._hidden_siblings
+            # The fake account lives under /tmp: list hidden siblings within it only, not all of /tmp.
+            only_home = lambda readable, root: real_hidden([p for p in readable if p == home or home in p.parents], home)
+            with mock.patch.object(sandbox, '_backend', return_value=('sandbox-exec', '/usr/bin/sandbox-exec')), \
+                 mock.patch.object(sandbox, '_account_home', return_value=home), \
+                 mock.patch.object(runtime, '_hidden_siblings', side_effect=only_home):
+                argv = sandboxed_argv(m, [str(venv_bin / 'python'), '-c', 'pass'], Path(scratch))
+            allowed = {line for line in argv[2].replace(')(', ')\n(').splitlines() if line.startswith('(allow file-read*')}
+            for link in (venv_bin / 'python', venv_bin / 'python3.13', local_bin / 'python3.13', alias):
+                self.assertIn(f'(allow file-read* (subpath "{link}"))', allowed, link)
+            self.assertNotIn(f'(allow file-read* (subpath "{local_bin}"))', allowed, 'only the link, not the folder')
+            self.assertIn(f'(deny file-read* (subpath "{local_bin / "private-tool"}"))', argv[2])
+
     def process(self, code, on_request=None):
         folder=tempfile.TemporaryDirectory(prefix='dgc-mod-audit-')
         self.addCleanup(folder.cleanup)
@@ -61,7 +101,10 @@ class ModRuntimeAuditTests(unittest.TestCase):
         self.assertTrue(finished, 'a child kept the stopped mod pipes open')
         if Path('/proc').is_dir():
             path=Path(f'/proc/{children[0]}/stat')
-            self.assertTrue(not path.exists() or path.read_text().rsplit(')',1)[1].split()[0]=='Z')
+            # The child may exit between the check and the read: gone counts as ended, like a zombie does.
+            try: state=path.read_text().rsplit(')',1)[1].split()[0]
+            except (FileNotFoundError, ProcessLookupError): state='gone'
+            self.assertIn(state, ('Z', 'gone'), 'the stopped mod left a child running')
 
     def test_a_request_flood_is_bounded_and_stops_the_mod(self):
         release=threading.Event(); self.addCleanup(release.set)

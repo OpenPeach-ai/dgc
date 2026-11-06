@@ -54,6 +54,19 @@ class ArtifactCli(unittest.TestCase):
         code, text = self.run_cli("restore", self.doc["id"], "1")
         self.assertIn("as version 3", text)
 
+    def test_an_export_leaves_no_private_copy_behind(self):
+        out = self.tmp / "out"
+        out.mkdir()
+        self.assertEqual(self.run_cli("export", self.doc["id"], "md", "--to", str(out))[0], 0)
+        exports = S._store(None).export_dir(self.doc["id"])
+        self.assertEqual(list(exports.glob("export-*")), [])
+        # With no --to, the file stays where the terminal says, as one file per title and format.
+        code, text = self.run_cli("export", self.doc["id"], "md")
+        self.assertEqual((code, text), (0, str(exports / "Launch plan.md")))
+        self.assertEqual(Path(text).read_text(), "# Launch\n\nShip Monday.\n")
+        self.assertEqual(self.run_cli("export", self.doc["id"], "md")[1], text)
+        self.assertEqual(sorted(p.name for p in exports.iterdir()), ["Launch plan.md"])
+
     def test_open_writes_its_page_and_opens_the_file(self):
         with patch("webbrowser.open", return_value=True) as opened:
             code, text = self.run_cli("open", self.doc["id"])

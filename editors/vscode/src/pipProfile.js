@@ -4,8 +4,19 @@
 import { pickerMarkup } from './pipPicker.js';
 
 export const BODIES = ['core', 'scout', 'lens', 'patch', 'rook', 'pulse', 'lock', 'quill'];
-// A colour is a tint over the plush: grey it, warm it (sepia), turn the hue, then saturate.
+// Older profiles can contain a colour. Keep reading it for data compatibility, but the
+// editor no longer offers CSS recolouring: its filter also changed parts of accessories.
 export const COLORS = [
+  ['core', 'Core violet', '#A07ABD', 'grayscale(1) sepia(1) hue-rotate(205deg) saturate(1.9) brightness(1.03)'],
+  ['scout', 'Scout mint', '#7CB08C', 'grayscale(1) sepia(1) hue-rotate(95deg) saturate(1.5) brightness(1.03)'],
+  ['lens', 'Lens blue', '#759CCE', 'grayscale(1) sepia(1) hue-rotate(168deg) saturate(1.6) brightness(1.03)'],
+  ['patch', 'Patch peach', '#D19875', 'grayscale(1) sepia(1) hue-rotate(-16deg) saturate(1.6) brightness(1.03)'],
+  ['rook', 'Rook periwinkle', '#7482B7', 'grayscale(1) sepia(1) hue-rotate(188deg) saturate(1.4) brightness(1.03)'],
+  ['pulse', 'Pulse gold', '#D4B36A', 'grayscale(1) sepia(1) hue-rotate(8deg) saturate(1.5) brightness(1.03)'],
+  ['lock', 'Lock teal', '#7AAFAD', 'grayscale(1) sepia(1) hue-rotate(125deg) saturate(1.5) brightness(1.03)'],
+  ['quill', 'Quill pink', '#D3909F', 'grayscale(1) sepia(1) hue-rotate(-52deg) saturate(1.6) brightness(1.03)'],
+];
+const LEGACY_COLORS = [
   ['peach', 'Peach', '#F2A07B', 'grayscale(1) sepia(1) hue-rotate(-18deg) saturate(2.2) brightness(1.05)'],
   ['rose', 'Rose', '#E58BA8', 'grayscale(1) sepia(1) hue-rotate(-62deg) saturate(2.3) brightness(1.02)'],
   ['lilac', 'Lilac', '#A98BE8', 'grayscale(1) sepia(1) hue-rotate(218deg) saturate(2.1) brightness(1.04)'],
@@ -22,11 +33,8 @@ export function profile(value) {
   if (!record(value)) return { title: '', body: null, color: null, notify: true };
   const title = typeof value.title === 'string' && value.title.length <= 60 ? value.title : '';
   return { title, body: BODIES.includes(value.body) ? value.body : null,
-    color: COLORS.some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
+    color: [...COLORS, ...LEGACY_COLORS].some(c => c[0] === value.color) ? value.color : null, notify: value.notify !== false };
 }
-
-/** The CSS for the colour tints: one rule per colour, on the plush's picture only (its eyes keep theirs). */
-export const tintStyles = COLORS.map(([id, , , filter]) => `.avatar[data-tint=${id}] .dgc-plush-rig image{filter:${filter}}`).join('');
 
 export function sharedPage(value, pip, kind) {
   const fail = () => { throw new Error('This list didn’t load. Refresh to try again.'); };
@@ -98,15 +106,12 @@ export function instructionsMarkup({ esc, goal, busy = false, error = '', pipNam
     + `<div class="actions"><button type="submit" class="primary pill"${off}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-setup-chat${off}>Change it in the chat instead</button></div></form>`;
 }
 
-/** Choose its face (one of the eight Pips) and a colour; Reset to default puts both back. The face is picked as New Pip
- * picks a Personal Pip's character: its big face, in the colour chosen, and a dropdown of the faces with their names. */
-export function characterMarkup({ esc, avatarFor, body, color, busy = false, changed = false }) {
+/** Choose one of the eight original Pip faces. */
+export function characterMarkup({ esc, avatarFor, body, busy = false, changed = false }) {
   const off = busy ? ' disabled' : '';
-  const faces = pickerMarkup({ id: 'pip-face', label: 'Face', value: body, size: 'large', disabled: busy, face: avatarFor(body, color, 'face-preview', 'listening'),
-    options: BODIES.map(id => ({ value: id, label: id[0].toUpperCase() + id.slice(1), face: avatarFor(id, color, `face-${id}`) })) });
-  const swatches = [['', 'Its own', '', ''], ...COLORS].map(([id, label, swatch]) => `<button type="button" class="swatch" role="radio" aria-checked="${(color || '') === id}" data-pip-color="${id}" title="${label}" aria-label="${label}"${off}><span style="${swatch ? `background:${swatch}` : ''}"${swatch ? '' : ' class="swatch-own"'}></span></button>`).join('');
+  const faces = pickerMarkup({ id: 'pip-face', label: 'Face', value: body, size: 'large', disabled: busy, face: avatarFor(body, 'face-preview', 'listening'),
+    options: BODIES.map(id => ({ value: id, label: id[0].toUpperCase() + id.slice(1), face: avatarFor(id, `face-${id}`) })) });
   return `<section class="pip-character" aria-label="Edit its face">${faces}`
-    + `<h3 class="pip-page-label">Colour</h3><div class="swatches" role="radiogroup" aria-label="Colour">${swatches}</div>`
     + `<div class="actions"><button type="button" class="primary pill" data-pip-character-save${off || !changed ? ' disabled' : ''}>Save</button><button type="button" class="quiet pill" data-pip-page="info"${off}>Cancel</button><button type="button" class="link" data-pip-character-reset${off}>Reset to default</button></div></section>`;
 }
 

@@ -8,7 +8,7 @@
 //
 // A mod's tree (dgc/mods/ui.py: Box, Row, Column, Text, Markdown, Button, Input, Select, Bar, Table, Sparkline) is
 // drawn safely by construction: every piece of its text goes in with textContent, Markdown goes through the
-// panel's own renderer (DgcMarkdown: no HTML, links inert), and the tones are the theme's tokens (main.css .mod-*).
+// panel's own renderer (DgcMarkdown: no HTML, links as words), and the tones are the theme's tokens (main.css .mod-*).
 //
 // DgcMods.create(options) for a chat page:
 //   surface      "work" or "chat" (ChatDGC's own mods)
@@ -99,7 +99,7 @@
         const render = window.DgcMarkdown && typeof window.DgcMarkdown.render === "function" ? window.DgcMarkdown.render : null;
         // The panel's own renderer: it writes no HTML of its own from the source (markdown-it, html off), so this is
         // the one way a mod's words become markup. Without it, the words as they are.
-        if (render) box.innerHTML = render(str(node.text)); else box.textContent = str(node.text);
+        if (render) box.append(wordsOnly(render(str(node.text)))); else box.textContent = str(node.text);
         return tone(box, node.tone);
       }
       case "Button": {
@@ -227,9 +227,26 @@
     }
   }
 
-  // A link a mod's Markdown holds never navigates: its words are the mod's, and the page is the user's.
+  // A mod's Markdown is its words only. It is laid out in a template, where nothing loads (a link's favicon would
+  // fetch the mod's address), and each link or picture becomes its words: a mod with no network has no way out
+  // through the user's click. A choice card in it can't be pressed; a code block's Copy still works.
+  function wordsOnly(html) {
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    for (const link of t.content.querySelectorAll("a, .md-link")) link.replaceWith(el("span", "mod-link", link.textContent || ""));
+    for (const button of t.content.querySelectorAll("button:not(.copy)")) button.disabled = true;
+    return document.importNode(t.content, true);
+  }
+
+  // Nothing a mod draws acts for it through the page: a click on a link or a button in its Markdown is stopped here,
+  // before the page's own link and card handlers hear it. Its own Buttons, Inputs and Selects talk only to the mod.
   function inert(root) {
-    root.addEventListener("click", (e) => { const a = e.target?.closest?.("a"); if (a) e.preventDefault(); });
+    root.addEventListener("click", (e) => {
+      const hit = e.target?.closest?.("a, .md-link, .mod-md button");
+      if (!hit || !root.contains(hit) || hit.classList.contains("copy")) return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
     return root;
   }
 

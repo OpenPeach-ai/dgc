@@ -5,6 +5,7 @@ import copy
 import hashlib
 import contextlib
 import json
+import math
 import os
 import re
 import stat
@@ -568,6 +569,7 @@ DEFAULTS: dict = {
     "subagent_api_key": "",                     # key for another sub-agent endpoint
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
     "subagent_context_size": 0,                 # sub-agents' context window in tokens (0: the main one's)
+    "subagent_thinking": "",                    # helpers' thinking: "" the main chat's | off | low | medium | high | xhigh
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "subagent_link_paths": [],                   # opt-in: ignored dirs shared INTO task checkouts (e.g. node_modules)
     "fleet_worktree_root": "",                   # private TUI fleet checkouts (empty: ~/.dgc/fleet-worktrees)
@@ -709,6 +711,616 @@ def bound_provider_key(config, secret_key: str, base_url: str) -> str:
     return key if bound and bound == asked else ""
 
 
+# ---- DGC Router (0.51): the user's other computers that run models --------------------------------
+# The `router` block is NOT in DEFAULTS: with the Router never set up, config.json, the editor's config event and every
+# listing stay exactly as 0.50 had them. router_block() reads it (validated, with defaults); set_router() writes it.
+# A system's key is never in the block: it lives in secrets.json as router_key_<id>, bound to that system's address
+# the way subagent_api_key is bound to subagent_base_url (Config.router_key).
+ROUTER_SERVERS = ("ollama", "llamacpp", "vllm", "sglang", "lmstudio", "tgi", "openai_compatible", "comfyui", "a1111")
+# "images": an image generator that names the system holds one of its workers while it makes a picture (dgc/images.py).
+ROUTER_JOBS = ("subagents", "pips", "images")
+ROUTER_IMAGE_SERVERS = ("comfyui", "a1111")         # image servers: the images job only, and no models
+ROUTER_WHEN_BUSY = ("wait", "default")
+ROUTER_HARDWARE = ("none", "exporter", "node", "ssh")
+ROUTER_API_MODES = ("", "auto", "ollama", "anthropic", "chat_completions", "responses")
+ROUTER_MAX_SYSTEMS = 32
+ROUTER_MAX_MODELS = 64
+ROUTER_MAX_WORKERS = 64
+ROUTER_DEFAULT_CONTEXT = 32_768
+ROUTER_KEY_PREFIX = "router_key_"
+_ROUTER_ID_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
+_ROUTER_MODEL_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._:/@+\-]{0,255}\Z")
+_ROUTER_SYSTEM_KEYS = frozenset({"id", "name", "base_url", "server", "api_mode", "enabled", "jobs", "workers",
+                                 "one_model_at_a_time", "memory_gb", "models", "hardware"})
+_ROUTER_MODEL_KEYS = frozenset({"name", "workers", "context", "note", "use", "params_b", "tools", "thinking"})
+# How hard a helper thinks (Settings → Models → Sub-agents → Thinking): "" is the main chat's level.
+SUBAGENT_THINKING = ("", "off", "low", "medium", "high", "xhigh")
+# A DGC Router model's own choice: "" is the helper's level; a small model on a NAS usually runs best Off or Low.
+ROUTER_MODEL_THINKING = ("", "off", "low", "medium", "high")
+
+
+def router_defaults() -> dict:
+    return {"enabled": False, "when_busy": "wait", "systems": []}
+
+
+def router_slug(text) -> str:
+    """A system id from a name: lowercase letters, digits and dashes, at most 32 ("" when nothing is left)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(text or "").strip().lower()).strip("-")[:32].strip("-")
+    return slug
+
+
+def router_base_url(value) -> tuple[str, str]:
+    """(canonical address, problem). A bare host (``gpu-box.local``) becomes ``http://gpu-box.local``; a trailing
+    ``/v1`` is dropped (DGC adds the path each server needs). Never credentials, a query or a fragment."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "", "an address is needed"
+    if len(raw) > 2048 or any(ord(c) < 33 or ord(c) == 127 for c in raw):
+        return "", "the address has spaces or control characters"
+    if "://" not in raw:
+        raw = "http://" + raw
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        return "", "the address is not a valid URL"
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return "", "the address must be http:// or https:// and name a host"
+    if parts.username or parts.password or "@" in parts.netloc:
+        return "", "the address must not hold a user name or password (keys go in the key field)"
+    if parts.query or parts.fragment:
+        return "", "the address must not have a query or fragment"
+    host = parts.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = host + (f":{port}" if port is not None else "")
+    path = parts.path.rstrip("/")
+    if re.search(r"/v1\Z", path, re.IGNORECASE):
+        path = path[:-3]
+    return urlunsplit((parts.scheme.lower(), netloc, path, "", "")), ""
+
+
+def router_hardware_url(value) -> tuple[str, str]:
+    """(canonical address, problem) of a hardware readout: an exporter's page (``http://nas.local:9100/metrics``),
+    Glances' API (``http://mac.local:61208/api/4``), Netdata's (``http://nas.local:19999/api/v1``) or a dgc node
+    (``http://gpu-box.local:8577``). A bare host becomes ``http://host``; the path is kept. Never credentials, a
+    query or a fragment: a token goes in secrets.json."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "", "an address is needed"
+    if len(raw) > 2048 or any(ord(c) < 33 or ord(c) == 127 for c in raw):
+        return "", "the address has spaces or control characters"
+    if "://" not in raw:
+        raw = "http://" + raw
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        return "", "the address is not a valid URL"
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return "", "the address must be http:// or https:// and name a host"
+    if parts.username or parts.password or "@" in parts.netloc:
+        return "", "the address must not hold a user name or password (a token goes in its own field)"
+    if parts.query or parts.fragment:
+        return "", "the address must not have a query or fragment (a token goes in its own field)"
+    host = parts.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = host + (f":{port}" if port is not None else "")
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path.rstrip("/"), "", "")), ""
+
+
+def _router_int(value, low: int, high: int, default: int, what: str, problems: list[str]) -> int:
+    if value is None:
+        return default
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or isinstance(value, float) and (not math.isfinite(value) or not value.is_integer())):
+        problems.append(f"{what} must be a whole number")
+        return default
+    value = int(value)
+    if not low <= value <= high:
+        problems.append(f"{what} must be between {low:,} and {high:,}")
+        return min(high, max(low, value))
+    return value
+
+
+def _router_model(raw, where: str, problems: list[str]) -> dict | None:
+    if isinstance(raw, str):
+        raw = {"name": raw}
+    if not isinstance(raw, dict):
+        problems.append(f"{where} must be an object with a model name")
+        return None
+    extra = sorted(set(raw) - _ROUTER_MODEL_KEYS)
+    if extra:
+        problems.append(f"{where} has an unknown setting: {extra[0]}")
+    name = raw.get("name")
+    if not isinstance(name, str) or not _ROUTER_MODEL_RE.fullmatch(name) or "://" in name:
+        problems.append(f"{where} needs a model name (letters, digits and . _ : / @ + -)")
+        return None
+    model = {"name": name,
+             "workers": _router_int(raw.get("workers"), 1, ROUTER_MAX_WORKERS, 1, f"{where}.workers", problems),
+             "context": _router_int(raw.get("context"), 2_048, 16_777_216, ROUTER_DEFAULT_CONTEXT,
+                                    f"{where}.context", problems)}
+    note = raw.get("note", "")
+    if not isinstance(note, str):
+        problems.append(f"{where}.note must be text")
+        note = ""
+    note = " ".join(note.split())
+    if len(note) > 200:
+        problems.append(f"{where}.note is longer than 200 characters")
+        note = note[:200]
+    if note:
+        model["note"] = note
+    if "use" in raw:
+        if not isinstance(raw["use"], bool):
+            problems.append(f"{where}.use must be true or false")
+        elif raw["use"] is False:
+            model["use"] = False
+    if raw.get("params_b") is not None:
+        size = raw["params_b"]
+        if isinstance(size, bool) or not isinstance(size, (int, float)) or not 0 < float(size) <= 100_000:
+            problems.append(f"{where}.params_b must be the model's size in billions of parameters")
+        else:
+            model["params_b"] = round(float(size), 3)
+    if "tools" in raw:
+        if not isinstance(raw["tools"], bool):
+            problems.append(f"{where}.tools must be true or false")
+        else:
+            model["tools"] = raw["tools"]
+    if raw.get("thinking") not in (None, ""):
+        if raw["thinking"] not in ROUTER_MODEL_THINKING:
+            problems.append(f"{where}.thinking must be off, low, medium or high (or empty: the helper's own level)")
+        else:
+            model["thinking"] = raw["thinking"]
+    return model
+
+
+def _router_system(raw, place: int, problems: list[str]) -> dict | None:
+    where = f"systems[{place}]"
+    if not isinstance(raw, dict):
+        problems.append(f"{where} must be an object")
+        return None
+    if any(str(key).lower() in ("key", "api_key", "token") for key in raw):
+        problems.append(f"{where}: a key is never kept in the router settings; it goes in secrets.json "
+                        f"(Settings, /router key or dgc router edit --key)")
+    extra = sorted(str(key) for key in set(raw) - _ROUTER_SYSTEM_KEYS
+                   if str(key).lower() not in ("key", "api_key", "token"))
+    if extra:
+        problems.append(f"{where} has an unknown setting: {extra[0]}")
+    name = raw.get("name")
+    system_id = raw.get("id")
+    if system_id is None or system_id == "":
+        system_id = router_slug(name)
+    if not isinstance(system_id, str) or not _ROUTER_ID_RE.fullmatch(system_id):
+        problems.append(f"{where}.id must be 1-32 lowercase letters, digits or dashes")
+        return None
+    if name is None or name == "":
+        name = system_id
+    if not isinstance(name, str) or not 1 <= len(" ".join(name.split())) <= 64:
+        problems.append(f"{where}.name must be 1-64 characters")
+        name = system_id
+    base_url, problem = router_base_url(raw.get("base_url"))
+    if problem:
+        problems.append(f"{where}.base_url: {problem}")
+        return None
+    server = raw.get("server") or "openai_compatible"
+    if server not in ROUTER_SERVERS:
+        problems.append(f"{where}.server must be one of {', '.join(ROUTER_SERVERS)}")
+        server = "openai_compatible"
+    api_mode = raw.get("api_mode") or ""
+    if api_mode not in ROUTER_API_MODES:
+        problems.append(f"{where}.api_mode must be one of {', '.join(m for m in ROUTER_API_MODES if m)} or empty")
+        api_mode = ""
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        problems.append(f"{where}.enabled must be true or false")
+        enabled = True
+    standard = ["images"] if server in ROUTER_IMAGE_SERVERS else ["subagents", "pips"]
+    jobs = raw.get("jobs", standard)
+    if not isinstance(jobs, list) or any(job not in ROUTER_JOBS for job in jobs):
+        problems.append(f"{where}.jobs takes {', '.join(ROUTER_JOBS)}")
+        jobs = [job for job in jobs if job in ROUTER_JOBS] if isinstance(jobs, list) else standard
+    jobs = [job for job in ROUTER_JOBS if job in jobs]
+    if server in ROUTER_IMAGE_SERVERS and set(jobs) - {"images"}:
+        problems.append(f"{where}: an image server ({server}) does the images job only")
+        jobs = ["images"]
+    one = raw.get("one_model_at_a_time", False)
+    if not isinstance(one, bool):
+        problems.append(f"{where}.one_model_at_a_time must be true or false")
+        one = False
+    models_raw = raw.get("models", [])
+    if not isinstance(models_raw, list):
+        problems.append(f"{where}.models must be a list")
+        models_raw = []
+    if len(models_raw) > ROUTER_MAX_MODELS:
+        problems.append(f"{where} lists more than {ROUTER_MAX_MODELS} models")
+        models_raw = models_raw[:ROUTER_MAX_MODELS]
+    models, seen = [], set()
+    for index, item in enumerate(models_raw, 1):
+        model = _router_model(item, f"{where}.models[{index}]", problems)
+        if model is None:
+            continue
+        if model["name"] in seen:
+            problems.append(f"{where} lists {model['name']} twice")
+            continue
+        seen.add(model["name"])
+        models.append(model)
+    workers = _router_int(raw.get("workers"), 1, ROUTER_MAX_WORKERS,
+                          max([1, *(m["workers"] for m in models)]), f"{where}.workers", problems)
+    system = {"id": system_id, "name": " ".join(name.split()), "base_url": base_url, "server": server,
+              "api_mode": api_mode, "enabled": enabled, "jobs": jobs, "workers": workers,
+              "one_model_at_a_time": one, "models": models}
+    memory = raw.get("memory_gb")
+    if memory not in (None, 0):
+        if isinstance(memory, bool) or not isinstance(memory, (int, float)) or not 0 < float(memory) <= 65_536:
+            problems.append(f"{where}.memory_gb must be the computer's memory in GB")
+        else:
+            system["memory_gb"] = round(float(memory), 1)
+    hardware = raw.get("hardware", {"source": "none"})
+    if not isinstance(hardware, dict) or set(hardware) - {"source", "url"} \
+            or hardware.get("source", "none") not in ROUTER_HARDWARE:
+        problems.append(f"{where}.hardware takes source ({', '.join(ROUTER_HARDWARE)}) and url")
+        hardware = {"source": "none"}
+    source = hardware.get("source", "none")
+    system["hardware"] = {"source": source}
+    if source in ("exporter", "node"):
+        # Read by DGC itself, never the model: an exporter the user runs, or a dgc node (its token in secrets.json).
+        url, problem = router_hardware_url(hardware.get("url"))
+        if problem:
+            problems.append(f"{where}.hardware.url: {problem}")
+            system["hardware"] = {"source": "none"}
+        else:
+            system["hardware"]["url"] = url
+    return system
+
+
+def validate_router(value) -> tuple[dict, list[str]]:
+    """The `router` block cleaned, and what is wrong with it as written ([] when nothing is).
+
+    Callers that change it refuse a block with problems (set_router); reading it (router_block) uses the cleaned
+    block, which leaves out a system or model that can't be used rather than guessing at it."""
+    problems: list[str] = []
+    block = router_defaults()
+    if value is None:
+        return block, problems
+    if not isinstance(value, dict):
+        return block, ["router must be an object"]
+    extra = sorted(set(value) - {"enabled", "when_busy", "systems"})
+    if extra:
+        problems.append(f"router has an unknown setting: {extra[0]}")
+    enabled = value.get("enabled", False)
+    if not isinstance(enabled, bool):
+        problems.append("router.enabled must be true or false")
+        enabled = False
+    block["enabled"] = enabled
+    when_busy = value.get("when_busy", "wait")
+    if when_busy not in ROUTER_WHEN_BUSY:
+        problems.append("router.when_busy must be wait or default")
+        when_busy = "wait"
+    block["when_busy"] = when_busy
+    systems = value.get("systems", [])
+    if not isinstance(systems, list):
+        problems.append("router.systems must be a list")
+        systems = []
+    if len(systems) > ROUTER_MAX_SYSTEMS:
+        problems.append(f"router lists more than {ROUTER_MAX_SYSTEMS} systems")
+        systems = systems[:ROUTER_MAX_SYSTEMS]
+    seen = set()
+    for place, raw in enumerate(systems, 1):
+        system = _router_system(raw, place, problems)
+        if system is None:
+            continue
+        if system["id"] in seen:
+            problems.append(f"two systems have the id {system['id']}")
+            continue
+        seen.add(system["id"])
+        block["systems"].append(system)
+    return block, problems
+
+
+ROUTER_HARDWARE_SLOT = ":hardware"
+
+
+def _disk_json(path):
+    """A settings file's JSON object as it is on disk now, or None when it is missing or unreadable."""
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _router_identity(block, system_id: str) -> str:
+    """The endpoint identity a system's key is bound to: its address, canonical, hashed. ``<id>:hardware`` is its
+    dgc node's pairing token, bound to the readout's address the same way."""
+    systems = block.get("systems") if isinstance(block, dict) else None
+    system_id, hardware = (system_id[:-len(ROUTER_HARDWARE_SLOT)], True) \
+        if str(system_id).endswith(ROUTER_HARDWARE_SLOT) else (system_id, False)
+    for system in systems if isinstance(systems, list) else ():
+        if isinstance(system, dict) and system.get("id") == system_id:
+            if hardware:
+                readout = system.get("hardware") if isinstance(system.get("hardware"), dict) else {}
+                if readout.get("source") != "node":
+                    return ""
+                base, problem = router_hardware_url(readout.get("url"))
+                normalized = _normalized_provider_endpoint(base) if not problem else ""
+                return hashlib.sha256(("hardware|" + normalized).encode("utf-8")).hexdigest() if normalized else ""
+            base, problem = router_base_url(system.get("base_url"))
+            normalized = _normalized_provider_endpoint(base) if not problem else ""
+            return hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else ""
+    return ""
+
+
+# ---- Image generation (0.51): the user's image generators ----------------------------------------
+# Like `router`, the `images` block is NOT in DEFAULTS: never set up, config.json and every listing stay as 0.50 had
+# them. images_block() reads it (validated, with defaults); set_images() writes it. A generator's key is never in the
+# block: it lives in secrets.json as image_key_<id>, bound to that generator's address (Config.image_key), and the
+# model's tools never read or set one.
+IMAGE_PROVIDERS = ("comfyui", "a1111", "openai", "xai", "together", "localai", "ollama", "openai_compatible",
+                   "gemini", "bfl", "fal", "replicate")
+# Where each provider answers when no address is given (the official API for a cloud one, the usual local port for
+# a server on this computer). An OpenAI-compatible server has no default: its address is asked for.
+IMAGE_PROVIDER_URLS = {
+    "comfyui": "http://localhost:8188", "a1111": "http://localhost:7860", "openai": "https://api.openai.com",
+    "xai": "https://api.x.ai", "together": "https://api.together.xyz", "localai": "http://localhost:8080",
+    "ollama": "http://localhost:11434", "gemini": "https://generativelanguage.googleapis.com",
+    "bfl": "https://api.bfl.ai", "fal": "https://fal.run", "replicate": "https://api.replicate.com"}
+# The providers that charge for an image: "asks before each image" starts on for these, off for local servers.
+IMAGE_PAID_PROVIDERS = frozenset({"openai", "xai", "together", "gemini", "bfl", "fal", "replicate"})
+IMAGE_KEY_PREFIX = "image_key_"
+IMAGES_MAX_GENERATORS = 32
+# Where pictures go: "" is DGC's own folder (~/.dgc/images/<kind>/<session or chat>/);
+# a folder here puts them in the project. 0.51's first builds wrote "assets/generated" as the default into
+# every images block: without save_dir_set (written only when someone chooses a folder) that value is read as "".
+IMAGES_DEFAULT_DIR = ""
+IMAGES_OLD_DEFAULT_DIR = "assets/generated"
+IMAGE_MAX_SIDE = 8192
+_IMAGE_BLOCK_KEYS = frozenset({"default", "auto_fallback", "save_dir", "save_dir_set", "generators"})
+_IMAGE_GENERATOR_KEYS = frozenset({"id", "name", "provider", "base_url", "model", "workflow", "mapping", "size",
+                                   "steps", "negative_prompt", "asks", "good_for", "enabled", "monthly_limit_usd",
+                                   "system", "makes", "video_asks", "video_pips"})
+# Video (0.51, dgc/videos.py): a generator says what it makes. "images" is every generator written before video; a
+# video model is its own generator on the same provider (and key). Every video asks before it is made unless the user
+# turned that off in Settings for this generator (video_asks false); a Pip's routine makes one only for the Pips the
+# user listed for this generator (video_pips).
+IMAGE_MAKES = ("images", "videos", "both")
+VIDEO_PROVIDERS = ("comfyui", "gemini", "fal", "replicate")
+IMAGE_MAPPING_FIELDS = ("prompt", "negative", "seed", "steps", "width", "height", "batch", "image", "mask", "denoise",
+                        "frames", "fps")
+_IMAGE_MAPPING_RE = re.compile(r"[A-Za-z0-9_:.-]{1,64}\.[A-Za-z0-9_]{1,64}\Z")
+_IMAGE_WORKFLOW_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\.json\Z")
+_IMAGE_SIZE_RE = re.compile(r"(\d{2,5})\s*[xX×]\s*(\d{2,5})\Z")
+
+
+def images_defaults() -> dict:
+    return {"default": "", "auto_fallback": False, "save_dir": IMAGES_DEFAULT_DIR, "generators": []}
+
+
+def image_asks_by_default(provider: str, base_url: str) -> bool:
+    """Whether a new generator asks before each image: a paid provider does, and so does an OpenAI-compatible server
+    outside the user's own network (a hosted service that charges, as images.is_paid counts it). A server on this
+    computer or the local network doesn't."""
+    if provider in IMAGE_PAID_PROVIDERS:
+        return True
+    if provider == "openai_compatible":
+        from .router import _private_host
+        return not _private_host(base_url)
+    return False
+
+
+def image_size(value) -> tuple[int, int] | None:
+    """(width, height) from "1024x1024" (or 1024×768), each 64-8192; None when it is not one."""
+    match = _IMAGE_SIZE_RE.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    width, height = int(match.group(1)), int(match.group(2))
+    if not (64 <= width <= IMAGE_MAX_SIDE and 64 <= height <= IMAGE_MAX_SIDE):
+        return None
+    return width, height
+
+
+def image_save_dir(value) -> tuple[str, str]:
+    """(a project-relative folder, problem): never absolute, never above the project, never into .git or .dgc. "" is
+    DGC's own folder, outside the project."""
+    raw = str(value or "").strip().replace("\\", "/").strip("/")
+    if not raw:
+        return IMAGES_DEFAULT_DIR, ""
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+    if (str(value).strip().startswith(("/", "~")) or re.match(r"[A-Za-z]:", raw) or ".." in parts
+            or any(part.lower() in (".git", ".dgc") for part in parts) or len(raw) > 240
+            or any(ord(c) < 32 for c in raw)):
+        return IMAGES_DEFAULT_DIR, ("save_dir must be a folder inside the project, such as assets/images (or empty for "
+                                    "DGC's own folder)")
+    return "/".join(parts) or IMAGES_DEFAULT_DIR, ""
+
+
+def _image_generator(raw, place: int, problems: list[str]) -> dict | None:
+    where = f"images.generators[{place}]"
+    if not isinstance(raw, dict):
+        problems.append(f"{where} must be an object")
+        return None
+    if any(str(key).lower() in ("key", "api_key", "token", "secret") for key in raw):
+        problems.append(f"{where}: a key is never kept in the image settings; it goes in secrets.json "
+                        f"(Settings, /images key or dgc images edit --key)")
+    extra = sorted(str(key) for key in set(raw) - _IMAGE_GENERATOR_KEYS
+                   if str(key).lower() not in ("key", "api_key", "token", "secret"))
+    if extra:
+        problems.append(f"{where} has an unknown setting: {extra[0]}")
+    provider = raw.get("provider")
+    if provider not in IMAGE_PROVIDERS:
+        problems.append(f"{where}.provider must be one of {', '.join(IMAGE_PROVIDERS)}")
+        return None
+    name = raw.get("name")
+    gen_id = raw.get("id")
+    if gen_id is None or gen_id == "":
+        gen_id = router_slug(name) or provider.replace("_", "-")
+    if not isinstance(gen_id, str) or not _ROUTER_ID_RE.fullmatch(gen_id):
+        problems.append(f"{where}.id must be 1-32 lowercase letters, digits or dashes")
+        return None
+    if name is None or name == "":
+        name = gen_id
+    if not isinstance(name, str) or not 1 <= len(" ".join(name.split())) <= 64:
+        problems.append(f"{where}.name must be 1-64 characters")
+        name = gen_id
+    address = raw.get("base_url") or IMAGE_PROVIDER_URLS.get(provider, "")
+    base_url, problem = router_base_url(address)
+    if problem:
+        problems.append(f"{where}.base_url: {problem}" if address else
+                        f"{where}.base_url: an OpenAI-compatible server needs its address")
+        return None
+    model = raw.get("model", "")
+    if not isinstance(model, str) or len(model) > 256 or (model and (not _ROUTER_MODEL_RE.fullmatch(model)
+                                                                    or "://" in model)):
+        problems.append(f"{where}.model must be a model name (letters, digits and . _ : / @ + -)")
+        model = ""
+    size = raw.get("size", "1024x1024")
+    if image_size(size) is None:
+        problems.append(f"{where}.size must be WIDTHxHEIGHT, each 64-{IMAGE_MAX_SIDE}")
+        size = "1024x1024"
+    width, height = image_size(size)
+    generator = {"id": gen_id, "name": " ".join(name.split()), "provider": provider, "base_url": base_url,
+                 "model": model, "size": f"{width}x{height}",
+                 "asks": image_asks_by_default(provider, base_url), "enabled": True}
+    for key in ("asks", "enabled"):
+        if key in raw:
+            if not isinstance(raw[key], bool):
+                problems.append(f"{where}.{key} must be true or false")
+            else:
+                generator[key] = raw[key]
+    workflow = raw.get("workflow", "")
+    if workflow:
+        if provider != "comfyui":
+            problems.append(f"{where}.workflow is for a ComfyUI generator")
+        elif not isinstance(workflow, str) or not _IMAGE_WORKFLOW_RE.fullmatch(workflow):
+            problems.append(f"{where}.workflow must be the name of a saved workflow (NAME.json)")
+        else:
+            generator["workflow"] = workflow
+    mapping = raw.get("mapping")
+    if mapping is not None:
+        if not isinstance(mapping, dict) or any(key not in IMAGE_MAPPING_FIELDS for key in mapping) or any(
+                not isinstance(value, str) or not _IMAGE_MAPPING_RE.fullmatch(value) for value in mapping.values()):
+            problems.append(f"{where}.mapping takes {', '.join(IMAGE_MAPPING_FIELDS)}, each \"NODE.input\"")
+        elif "prompt" not in mapping:
+            problems.append(f"{where}.mapping needs where the prompt goes (prompt)")
+        else:
+            generator["mapping"] = {key: mapping[key] for key in IMAGE_MAPPING_FIELDS if key in mapping}
+    steps = raw.get("steps")
+    if steps is not None:
+        generator["steps"] = _router_int(steps, 1, 200, 20, f"{where}.steps", problems)
+    for key, limit in (("negative_prompt", 2000), ("good_for", 200)):
+        text = raw.get(key, "")
+        if not isinstance(text, str):
+            problems.append(f"{where}.{key} must be text")
+            continue
+        text = " ".join(text.split())
+        if len(text) > limit:
+            problems.append(f"{where}.{key} is longer than {limit} characters")
+            text = text[:limit]
+        if text:
+            generator[key] = text
+    cap = raw.get("monthly_limit_usd")
+    if cap is not None:
+        if isinstance(cap, bool) or not isinstance(cap, (int, float)) or not 0 <= float(cap) <= 100_000:
+            problems.append(f"{where}.monthly_limit_usd must be an amount in US dollars")
+        else:
+            generator["monthly_limit_usd"] = round(float(cap), 2)
+    system = raw.get("system", "")
+    if system:
+        if not isinstance(system, str) or not _ROUTER_ID_RE.fullmatch(system):
+            problems.append(f"{where}.system must be a DGC Router system's id")
+        else:
+            generator["system"] = system
+    makes = raw.get("makes", "images")
+    if makes not in IMAGE_MAKES:
+        problems.append(f"{where}.makes must be one of {', '.join(IMAGE_MAKES)}")
+    elif makes != "images":
+        if provider not in VIDEO_PROVIDERS:
+            problems.append(f"{where}: DGC makes videos with {', '.join(VIDEO_PROVIDERS)} only")
+        else:
+            generator["makes"] = makes
+            generator["video_asks"] = True
+            if "video_asks" in raw:
+                if not isinstance(raw["video_asks"], bool):
+                    problems.append(f"{where}.video_asks must be true or false")
+                else:
+                    generator["video_asks"] = raw["video_asks"]
+            pips = raw.get("video_pips", [])
+            if not isinstance(pips, list) or len(pips) > 64 or any(
+                    not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", item) for item in pips):
+                problems.append(f"{where}.video_pips must be a list of Pip ids")
+            elif pips:
+                generator["video_pips"] = sorted(set(pips))
+    return generator
+
+
+def validate_images(value) -> tuple[dict, list[str]]:
+    """The `images` block cleaned, and what is wrong with it as written ([] when nothing is). set_images refuses a
+    block with problems; images_block uses the cleaned one, which leaves out a generator it can't use."""
+    problems: list[str] = []
+    block = images_defaults()
+    if value is None:
+        return block, problems
+    if not isinstance(value, dict):
+        return block, ["images must be an object"]
+    extra = sorted(set(value) - _IMAGE_BLOCK_KEYS)
+    if extra:
+        problems.append(f"images has an unknown setting: {extra[0]}")
+    fallback = value.get("auto_fallback", False)
+    if not isinstance(fallback, bool):
+        problems.append("images.auto_fallback must be true or false")
+        fallback = False
+    block["auto_fallback"] = fallback
+    save_dir, problem = image_save_dir(value.get("save_dir"))
+    if problem:
+        problems.append(f"images.{problem}")
+    chosen = value.get("save_dir_set", False)
+    if not isinstance(chosen, bool):
+        problems.append("images.save_dir_set must be true or false")
+        chosen = False
+    if save_dir == IMAGES_OLD_DEFAULT_DIR and not chosen:
+        save_dir = IMAGES_DEFAULT_DIR          # the first builds' default, never chosen: DGC's own folder now
+    block["save_dir"] = save_dir
+    if save_dir and chosen:
+        block["save_dir_set"] = True
+    generators = value.get("generators", [])
+    if not isinstance(generators, list):
+        problems.append("images.generators must be a list")
+        generators = []
+    if len(generators) > IMAGES_MAX_GENERATORS:
+        problems.append(f"images lists more than {IMAGES_MAX_GENERATORS} generators")
+        generators = generators[:IMAGES_MAX_GENERATORS]
+    seen = set()
+    for place, raw in enumerate(generators, 1):
+        generator = _image_generator(raw, place, problems)
+        if generator is None:
+            continue
+        if generator["id"] in seen:
+            problems.append(f"two generators have the id {generator['id']}")
+            continue
+        seen.add(generator["id"])
+        block["generators"].append(generator)
+    default = value.get("default", "")
+    if default and (not isinstance(default, str) or default not in seen):
+        problems.append("images.default must be the id of one of the generators")
+        default = ""
+    block["default"] = default or ""
+    return block, problems
+
+
+def _image_identity(block, generator_id: str) -> str:
+    """The endpoint identity a generator's key is bound to: its address (and provider), canonical, hashed."""
+    generators = block.get("generators") if isinstance(block, dict) else None
+    for generator in generators if isinstance(generators, list) else ():
+        if isinstance(generator, dict) and generator.get("id") == generator_id:
+            provider = generator.get("provider")
+            address = generator.get("base_url") or IMAGE_PROVIDER_URLS.get(str(provider), "")
+            base, problem = router_base_url(address)
+            normalized = _normalized_provider_endpoint(base) if not problem else ""
+            return (hashlib.sha256(f"{provider}|{normalized}".encode("utf-8")).hexdigest()
+                    if normalized and provider in IMAGE_PROVIDERS else "")
+    return ""
+
+
 def subagent_window_arg(text: str) -> int | None:
     """``/subagent context N``: a token count of at least 2048, a size like ``64k``, or 0 for the
     main model's window. None when it is neither."""
@@ -773,8 +1385,8 @@ def find_project_root(start: Path | None = None) -> Path:
 
 
 # What a running conversation is: its permission mode, its model route (and the credentials bound
-# to it), and how it samples. A change in one session is still written -- it is the default the
-# next session starts from -- but no OTHER running session adopts it at its next save. Adopted, a
+# to it), and how it samples. Settings owns the default for NEW chats; a model choice in a Work
+# chat is saved with that chat. No other running session adopts it at its next save. Adopted, a
 # model switch in one window moved every other window's chat to that model mid-conversation, a
 # mode switch put a chat sitting in `default` into `auto`, and an endpoint switch left the other
 # sessions on the new endpoint holding the old endpoint's key.
@@ -784,7 +1396,7 @@ _SESSION_KEYS = frozenset({
     "tool_profile", "tool_profile_chosen", "subscription_engine", "subscription_model",
     "subscription_effort", "provider_state", "prompt_cache", "prompt_cache_key", "prompt_cache_ttl",
     "provider_capabilities", "fallback_model", "fallback_base_url", "fallback_api_mode",
-    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size",
+    "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_context_size", "subagent_thinking",
 })
 
 
@@ -907,6 +1519,10 @@ class Config:
         self._stored_mcp_env: dict[str, dict[str, str]] = {}
         self._stored_mcp_identity: dict[str, str] = {}
         self._env_secret_keys: set[str] = set()
+        # DGC Router keys, by system id: (key, the identity of the address it was saved for).
+        self._router_keys: dict[str, tuple[str, str]] = {}
+        # Image generators' keys, by generator id, the same way: (key, the identity of the address it was saved for).
+        self._image_keys: dict[str, tuple[str, str]] = {}
         self.credential_warnings: tuple[str, ...] = ()
         self.permissions: dict[str, list[str]] = {"allow": [], "ask": [], "deny": []}
         self.load()
@@ -935,6 +1551,15 @@ class Config:
                 if key in _PROVIDER_SECRET_KEYS:
                     migrated_provider_keys.add(key)
                 migrated = True
+        # A DGC Router key written into config.json by hand belongs in secrets.json, bound to its system's address.
+        moved_router_keys = {key[len(ROUTER_KEY_PREFIX):]: raw.pop(key) for key in list(raw)
+                             if isinstance(key, str) and key.startswith(ROUTER_KEY_PREFIX)}
+        if moved_router_keys:
+            migrated = True
+        moved_image_keys = {key[len(IMAGE_KEY_PREFIX):]: raw.pop(key) for key in list(raw)
+                            if isinstance(key, str) and key.startswith(IMAGE_KEY_PREFIX)}
+        if moved_image_keys:
+            migrated = True
         self._stored_mcp_env = _clean_mcp_secret_map(secrets.get("mcp_env", {}))
         prior_mcp_identity = _clean_mcp_identity_map(secrets.get("mcp_identity", {}))
         moved_mcp_names: set[str] = set()
@@ -1193,6 +1818,42 @@ class Config:
                         f"{endpoint_key}; re-enter it or set {SECRET_ENV[key]} for this launch.")
         if set(prior_provider_identity) != set(accepted_provider_identity):
             migrated = True
+        # DGC Router keys: each is used only while its system still has the address it was saved for. One that
+        # isn't bound (the address changed in config.json, the system was removed) is never guessed at: it is
+        # scrubbed from disk, and the user enters it again for the new address.
+        router_identity = secrets.get("router_identity")
+        router_identity = router_identity if isinstance(router_identity, dict) else {}
+        router_keys: dict[str, tuple[str, str]] = {}
+        router_block = self.data.get("router")
+        stored_router = {key[len(ROUTER_KEY_PREFIX):]: value for key, value in secrets.items()
+                         if isinstance(key, str) and key.startswith(ROUTER_KEY_PREFIX)}
+        for system_id, value in {**stored_router, **moved_router_keys}.items():
+            identity = _router_identity(router_block, system_id)
+            bound = identity and (system_id in moved_router_keys or router_identity.get(system_id) == identity)
+            if isinstance(value, str) and value and bound and len(value) <= 16_384:
+                router_keys[system_id] = (value, identity)
+            else:
+                migrated = True
+        if set(router_identity) != set(router_keys):
+            migrated = True
+        self._router_keys = router_keys
+        # Image generators' keys: as the Router's, used only while the generator keeps the address they were saved for.
+        image_identity = secrets.get("image_identity")
+        image_identity = image_identity if isinstance(image_identity, dict) else {}
+        image_keys: dict[str, tuple[str, str]] = {}
+        images_block = self.data.get("images")
+        stored_images = {key[len(IMAGE_KEY_PREFIX):]: value for key, value in secrets.items()
+                         if isinstance(key, str) and key.startswith(IMAGE_KEY_PREFIX)}
+        for generator_id, value in {**stored_images, **moved_image_keys}.items():
+            identity = _image_identity(images_block, generator_id)
+            bound = identity and (generator_id in moved_image_keys or image_identity.get(generator_id) == identity)
+            if isinstance(value, str) and value and bound and len(value) <= 16_384:
+                image_keys[generator_id] = (value, identity)
+            else:
+                migrated = True
+        if set(image_identity) != set(image_keys):
+            migrated = True
+        self._image_keys = image_keys
         self._stored_secrets = accepted_secrets
         self._stored_provider_identity = accepted_provider_identity
         self.data.update(accepted_secrets)
@@ -1306,6 +1967,83 @@ class Config:
         silently made `auto` the permanent permission mode.
         """
         self.__dict__.setdefault("_ephemeral_keys", set()).update(k for k in keys if k)
+
+    def restore_subscription_route(self, saved: dict | None = None) -> None:
+        """Use a saved chat's CLI route, or the current default for a new chat.
+
+        The route contains model names only. Vendor sign-in remains in the vendor CLI,
+        and this per-chat choice must never become the next chat's default during an
+        unrelated config save.
+        """
+        from .sessions import _clean_subscription_route
+        route = _clean_subscription_route(saved)
+        if route is None:
+            defaults = _read_config_payload(USER_CONFIG) or {}
+            route = _clean_subscription_route({
+                "engine": defaults.get("subscription_engine", DEFAULTS["subscription_engine"]),
+                "model": defaults.get("subscription_model", DEFAULTS["subscription_model"]),
+                "effort": defaults.get("subscription_effort", DEFAULTS["subscription_effort"]),
+            }) or {"engine": "", "model": "", "effort": ""}
+        for key, value in (("subscription_engine", route["engine"]),
+                           ("subscription_model", route["model"]),
+                           ("subscription_effort", route["effort"])):
+            self.hold(key, value)
+
+    def restore_native_route(self, saved: dict | None = None) -> None:
+        """Restore a chat's native endpoint/model without borrowing another host's key.
+
+        A session file never contains credentials. For the user's saved default, use only its
+        separately bound key. An editor may supply a different endpoint's key from its own
+        SecretStorage after the route is restored; until then that route has no credential.
+        """
+        from .sessions import _clean_native_route
+        route = _clean_native_route(saved)
+        defaults = _read_config_payload(USER_CONFIG) or {}
+        default_route = _clean_native_route({
+            key: defaults.get(key, DEFAULTS[key])
+            for key in ("base_url", "model", "api_mode", "thinking")
+        })
+        route = route or default_route or {key: DEFAULTS[key]
+                                           for key in ("base_url", "model", "api_mode", "thinking")}
+        identity = _provider_secret_identity({**self.data, "base_url": route["base_url"]}, "api_key")
+        secret = ""
+        if default_route and route["base_url"] == default_route["base_url"]:
+            stored = _read_config_payload(USER_SECRETS) or {}
+            bindings = stored.get("provider_identity")
+            if isinstance(bindings, dict) and bindings.get("api_key") == identity:
+                value = stored.get("api_key")
+                if isinstance(value, str):
+                    secret = value
+            elif route["base_url"] == DEFAULTS["base_url"]:
+                secret = DEFAULTS["api_key"]
+        if not secret and getattr(self, "_provider_secret_identity", {}).get("api_key") == identity:
+            # A launcher may have supplied this endpoint's key through
+            # DGC_API_KEY(_FILE), or the editor may have supplied it at runtime.
+            # It is already bound to this URL; clearing it on New chat would
+            # make the same provider stop working until the process restarts.
+            current = self.data.get("api_key")
+            if isinstance(current, str):
+                secret = current
+        for key in ("base_url", "model", "api_mode", "thinking"):
+            self.hold(key, route[key])
+        # A Work chat may have selected a larger window for a different model.
+        # Return to the saved default before opening a new chat or restoring
+        # another one; that chat can then select its own model's window.
+        self.hold("context_size", defaults.get("context_size", DEFAULTS["context_size"]))
+        self._window_from_switch = ""
+        previous = self.data.get("api_key")
+        if isinstance(previous, str) and previous != secret and 8 <= len(previous) <= 16_384:
+            # A previous route's credential must not authorize the restored route, but it
+            # can still occur in saved text. Keep it redacted after clearing the live key.
+            remembered = tuple(getattr(self, "_session_secret_values", ()))
+            if previous not in remembered:
+                self._session_secret_values = (*remembered[-255:], previous)
+        self.hold("api_key", secret)
+        bindings = self.__dict__.setdefault("_provider_secret_identity", {})
+        if secret and identity:
+            bindings["api_key"] = identity
+        else:
+            bindings.pop("api_key", None)
 
     def _my_changes(self) -> tuple[dict, dict, set]:
         """(changed keys, permission rules added, permission rules removed) since the baseline."""
@@ -1438,6 +2176,9 @@ class Config:
                                                       self.data.get(key))
                 for key in SECRET_KEYS:
                     payload.pop(key, None)
+                for key in [key for key in payload if isinstance(key, str)
+                            and key.startswith((ROUTER_KEY_PREFIX, IMAGE_KEY_PREFIX))]:
+                    payload.pop(key)            # a DGC Router or image generator key load() moved to secrets.json
                 base = on_disk.get("permissions")
                 base = base if isinstance(base, dict) else {}
                 merged = {a: [rule for rule in base.get(a, []) if isinstance(rule, str)]
@@ -1533,6 +2274,14 @@ class Config:
                 own[key] = ("", "")
         own["mcp"] = {name: (copy.deepcopy(env), self._stored_mcp_identity.get(name, ""))
                       for name, env in self._stored_mcp_env.items()}
+        block = self._router_raw()
+        own["router"] = {system_id: (value, identity)
+                         for system_id, (value, identity) in getattr(self, "_router_keys", {}).items()
+                         if value and identity and _router_identity(block, system_id) == identity}
+        images = self._images_raw()
+        own["images"] = {generator_id: (value, identity)
+                         for generator_id, (value, identity) in getattr(self, "_image_keys", {}).items()
+                         if value and identity and _image_identity(images, generator_id) == identity}
         return own
 
     def _save_secrets(self) -> None:
@@ -1582,6 +2331,58 @@ class Config:
         if mcp_env:
             secrets["mcp_env"] = copy.deepcopy(mcp_env)
             secrets["mcp_identity"] = {name: mcp_identity.get(name, "") for name in mcp_env}
+        # DGC Router keys, merged as the MCP ones are: disk's stand, and this process's own changes apply.
+        router: dict[str, tuple[str, str]] = {}
+        if was is not None:
+            disk_router_identity = disk.get("router_identity")
+            disk_router_identity = disk_router_identity if isinstance(disk_router_identity, dict) else {}
+            for key, value in disk.items():
+                if isinstance(key, str) and key.startswith(ROUTER_KEY_PREFIX) and isinstance(value, str) and value:
+                    system_id = key[len(ROUTER_KEY_PREFIX):]
+                    identity = disk_router_identity.get(system_id)
+                    if isinstance(identity, str) and identity:
+                        router[system_id] = (value, identity)
+        before_router = (was or {}).get("router", {})
+        for system_id in set(now["router"]) | set(before_router):
+            if was is not None and now["router"].get(system_id) == before_router.get(system_id):
+                continue
+            router.pop(system_id, None)
+            if system_id in now["router"]:
+                router[system_id] = now["router"][system_id]
+        block = self._router_raw()
+        router = {system_id: pair for system_id, pair in router.items()
+                  if _router_identity(block, system_id) == pair[1]}
+        if router:
+            for system_id in sorted(router):
+                secrets[ROUTER_KEY_PREFIX + system_id] = router[system_id][0]
+            secrets["router_identity"] = {system_id: router[system_id][1] for system_id in sorted(router)}
+        self._router_keys = dict(router)
+        # Image generators' keys, merged the same way.
+        images: dict[str, tuple[str, str]] = {}
+        if was is not None:
+            disk_image_identity = disk.get("image_identity")
+            disk_image_identity = disk_image_identity if isinstance(disk_image_identity, dict) else {}
+            for key, value in disk.items():
+                if isinstance(key, str) and key.startswith(IMAGE_KEY_PREFIX) and isinstance(value, str) and value:
+                    generator_id = key[len(IMAGE_KEY_PREFIX):]
+                    identity = disk_image_identity.get(generator_id)
+                    if isinstance(identity, str) and identity:
+                        images[generator_id] = (value, identity)
+        before_images = (was or {}).get("images", {})
+        for generator_id in set(now["images"]) | set(before_images):
+            if was is not None and now["images"].get(generator_id) == before_images.get(generator_id):
+                continue
+            images.pop(generator_id, None)
+            if generator_id in now["images"]:
+                images[generator_id] = now["images"][generator_id]
+        images_block = self._images_raw()
+        images = {generator_id: pair for generator_id, pair in images.items()
+                  if _image_identity(images_block, generator_id) == pair[1]}
+        if images:
+            for generator_id in sorted(images):
+                secrets[IMAGE_KEY_PREFIX + generator_id] = images[generator_id][0]
+            secrets["image_identity"] = {generator_id: images[generator_id][1] for generator_id in sorted(images)}
+        self._image_keys = dict(images)
         _write_private_json(USER_SECRETS, secrets)
         self._baseline_secrets = self._own_secrets()
 
@@ -1601,12 +2402,16 @@ class Config:
         clone._stored_secrets = dict(self._stored_secrets)
         clone._stored_provider_identity = dict(self._stored_provider_identity)
         clone._provider_secret_identity = dict(self._provider_secret_identity)
+        clone._session_secret_values = tuple(getattr(self, "_session_secret_values", ()))
         clone._stored_mcp_env = copy.deepcopy(self._stored_mcp_env)
         clone._stored_mcp_identity = dict(self._stored_mcp_identity)
         clone._env_secret_keys = set(self._env_secret_keys)
+        clone._router_keys = dict(getattr(self, "_router_keys", {}))
+        clone._image_keys = dict(getattr(self, "_image_keys", {}))
         clone._explicit_keys = set(getattr(self, "_explicit_keys", set()))
         clone.credential_warnings = tuple(self.credential_warnings)
         clone.permissions = self.permissions
+        clone._pinned_run_route = getattr(self, "_pinned_run_route", False)
         if hasattr(self, "session_permissions"):
             clone.session_permissions = self.session_permissions
         return clone
@@ -1728,6 +2533,184 @@ class Config:
                     held.add(key)
                     self._ephemeral_keys.add(key)
                 raise
+
+    # ---- DGC Router ---------------------------------------------------------------------------
+    def _router_raw(self):
+        """The `router` block as it is now. A long-running process (`dgc serve`, the Pips supervisor) reads it from
+        config.json each time, as the `images` block: a system or a hardware readout set up in a terminal (`dgc router
+        hardware ID ADDRESS --token`) counts in a window that was open before it, and that window's own saves keep it
+        (release check, 2026-11-03: Settings showed no readout until a window reload)."""
+        raw = self.data.get("router") if isinstance(getattr(self, "data", None), dict) else None
+        if getattr(self, "_persist", False):
+            disk = _disk_json(USER_CONFIG)
+            if isinstance(disk, dict) and "router" in disk:
+                raw = disk["router"]
+        return raw
+
+    def router_block(self) -> dict:
+        """The `router` settings, validated: defaults when never set up; a system or model that can't be used is
+        left out (validate_router)."""
+        return validate_router(self._router_raw())[0]
+
+    def set_router(self, block, *, persist: bool = True) -> dict:
+        """Replace the `router` settings with ``block``, or raise ValueError naming every problem. Returns what
+        was saved. A key never travels in the block; a system whose address changes loses its saved key."""
+        cleaned, problems = validate_router(block)
+        if problems:
+            raise ValueError("; ".join(problems[:6]))
+        # Changed against what config.json holds now (_router_raw), as set_images: against this process's last write, a
+        # change back to it looked like no change, and save() kept the other process's block.
+        if persist and getattr(self, "_persist", False) and isinstance(getattr(self, "_baseline_data", None), dict):
+            disk = self._router_raw()
+            if disk is None:
+                self._baseline_data.pop("router", None)
+            else:
+                self._baseline_data["router"] = copy.deepcopy(disk)
+        self.set("router", cleaned, persist=persist)
+        return cleaned
+
+    def _router_pair(self, system_id: str):
+        """(key, the identity it is bound to) for ``system_id``, or None. As the block, read from secrets.json in a
+        long-running process: a key or a dgc node's pairing token saved by another DGC since this one started counts."""
+        pair = getattr(self, "_router_keys", {}).get(system_id)
+        if getattr(self, "_persist", False):
+            disk = _disk_json(USER_SECRETS)
+            if isinstance(disk, dict):
+                bound = disk.get("router_identity") if isinstance(disk.get("router_identity"), dict) else {}
+                value = disk.get(ROUTER_KEY_PREFIX + system_id)
+                pair = (value, str(bound.get(system_id) or "")) if isinstance(value, str) and value else None
+        return pair
+
+    def router_key(self, system_id: str) -> str:
+        """The key saved for ``system_id``, while that system still has the address it was saved for; else ""."""
+        system_id = str(system_id or "")
+        pair = self._router_pair(system_id)
+        if not pair:
+            return ""
+        value, identity = pair
+        return value if identity and _router_identity(self._router_raw(), system_id) == identity else ""
+
+    def router_key_ids(self) -> list[str]:
+        """The systems that have a usable key saved (never the keys)."""
+        ids = set(getattr(self, "_router_keys", {}))
+        if getattr(self, "_persist", False):
+            disk = _disk_json(USER_SECRETS)
+            if isinstance(disk, dict):
+                ids |= {key[len(ROUTER_KEY_PREFIX):] for key in disk
+                        if isinstance(key, str) and key.startswith(ROUTER_KEY_PREFIX)}
+        return sorted(system_id for system_id in ids
+                      if not system_id.endswith(ROUTER_HARDWARE_SLOT) and self.router_key(system_id))
+
+    def router_hardware_token(self, system_id: str) -> str:
+        """The pairing token of a system's dgc node, while the readout still has the address it was saved for."""
+        return self.router_key(str(system_id or "") + ROUTER_HARDWARE_SLOT)
+
+    def set_router_hardware_token(self, system_id: str, value: str, *, persist: bool = True) -> None:
+        """Save (or, with "", remove) a system's dgc node pairing token in secrets.json, bound to the readout's
+        address. Raises ValueError when the system has no dgc node readout."""
+        system_id = str(system_id or "")
+        if not _router_identity(self._router_raw(), system_id + ROUTER_HARDWARE_SLOT):
+            raise ValueError(f"{system_id!r} has no dgc node readout to keep a token for "
+                             "(dgc router hardware SYSTEM URL first)")
+        self.set_router_key(system_id + ROUTER_HARDWARE_SLOT, value, persist=persist)
+
+    def set_router_key(self, system_id: str, value: str, *, persist: bool = True) -> None:
+        """Save (or, with "", remove) a system's key in secrets.json, bound to its current address."""
+        system_id = str(system_id or "")
+        identity = _router_identity(self._router_raw(), system_id)
+        if not identity:
+            raise ValueError(f"there is no system {system_id!r} to keep a key for")
+        value = str(value or "")
+        if len(value) > 16_384 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("the key is too long or holds control characters")
+        keys = dict(getattr(self, "_router_keys", {}))
+        if value:
+            keys[system_id] = (value, identity)
+        else:
+            keys.pop(system_id, None)
+        self._router_keys = keys
+        if persist:
+            self.save()
+
+    # ---- Image generators (0.51) ---------------------------------------------------------------
+    def _images_raw(self):
+        """The `images` block as it is now. A long-running process (the Pips supervisor, `dgc serve`) reads it from
+        config.json each time: a generator the user told to ask again (`dgc images edit fal --asks`) must ask in a
+        process that started before that, never spend on what it remembered."""
+        raw = self.data.get("images") if isinstance(getattr(self, "data", None), dict) else None
+        if getattr(self, "_persist", False):
+            try:
+                disk = json.loads(USER_CONFIG.read_text())
+            except (OSError, ValueError):
+                disk = None
+            if isinstance(disk, dict) and "images" in disk:
+                raw = disk["images"]
+        return raw
+
+    def images_block(self) -> dict:
+        """The `images` settings, validated: defaults when never set up; a generator that can't be used is left out."""
+        return validate_images(self._images_raw())[0]
+
+    def set_images(self, block, *, persist: bool = True) -> dict:
+        """Replace the `images` settings with ``block``, or raise ValueError naming its problems. Returns what was
+        saved. A key never travels in the block; a generator whose address changes loses its saved key."""
+        cleaned, problems = validate_images(block)
+        if problems:
+            raise ValueError("; ".join(problems[:6]))
+        # The block is read from config.json each time (_images_raw), so it is changed against what is there now:
+        # against this process's last write, a change back to it (asking turned on again in Settings after a chat's
+        # Always allow turned it off) looked like no change, and save() kept the other process's value.
+        if persist and getattr(self, "_persist", False) and isinstance(getattr(self, "_baseline_data", None), dict):
+            import copy
+            disk = self._images_raw()
+            if disk is None:
+                self._baseline_data.pop("images", None)
+            else:
+                self._baseline_data["images"] = copy.deepcopy(disk)
+        self.set("images", cleaned, persist=persist)
+        return cleaned
+
+    def image_key(self, generator_id: str) -> str:
+        """The key saved for ``generator_id``, while it still has the address it was saved for; else ""."""
+        generator_id = str(generator_id or "")
+        pair = getattr(self, "_image_keys", {}).get(generator_id)
+        if getattr(self, "_persist", False):
+            # As the block: a key saved (or removed) by another DGC since this one started counts now.
+            try:
+                disk = json.loads(USER_SECRETS.read_text())
+            except (OSError, ValueError):
+                disk = None
+            if isinstance(disk, dict):
+                bound = disk.get("image_identity") if isinstance(disk.get("image_identity"), dict) else {}
+                value = disk.get(IMAGE_KEY_PREFIX + generator_id)
+                pair = (value, str(bound.get(generator_id) or "")) if isinstance(value, str) and value else None
+        if not pair:
+            return ""
+        value, identity = pair
+        return value if identity and _image_identity(self._images_raw(), generator_id) == identity else ""
+
+    def image_key_ids(self) -> list[str]:
+        """The generators that have a usable key saved (never the keys)."""
+        ids = {g["id"] for g in self.images_block()["generators"]} | set(getattr(self, "_image_keys", {}))
+        return sorted(gid for gid in ids if self.image_key(gid))
+
+    def set_image_key(self, generator_id: str, value: str, *, persist: bool = True) -> None:
+        """Save (or, with "", remove) a generator's key in secrets.json, bound to its current address."""
+        generator_id = str(generator_id or "")
+        identity = _image_identity(self._images_raw(), generator_id)
+        if not identity:
+            raise ValueError(f"there is no image generator {generator_id!r} to keep a key for")
+        value = str(value or "")
+        if len(value) > 16_384 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("the key is too long or holds control characters")
+        keys = dict(getattr(self, "_image_keys", {}))
+        if value:
+            keys[generator_id] = (value, identity)
+        else:
+            keys.pop(generator_id, None)
+        self._image_keys = keys
+        if persist:
+            self.save()
 
     def adopt_runtime_secrets(self, base: "Config") -> None:
         """Take the runtime credentials the process's first Config was given.

@@ -41,7 +41,7 @@ const hostFor = (kind) => `(${function (PIP, kind) {
     thinking_levels: ["off", "low", "medium", "high", "xhigh"], reasoning_control: "provider_dependent", reasoning_note: "n", context_note: "n" };
   const run = "run_" + "5".repeat(32);
   const messages = [{ id: "u1", pip_id: PIP, workspace_id: W, role: "user", text: "Is the discount one serious?", run_id: run, status: "succeeded", model: "m", created_at: "2026-10-17T08:59:30.000Z" },
-    { id: "a1", pip_id: PIP, workspace_id: W, role: "assistant", text: "Yes. A 10% discount takes the whole total off.\n\nAny order with a discount is charged the wrong amount.", run_id: run, status: "succeeded", model: "m", created_at: "2026-10-17T09:00:00.000Z" }];
+    { id: "a1", pip_id: PIP, workspace_id: W, role: "assistant", text: "Yes. A 10% discount takes the whole total off.\n---\nAny order with a discount is charged the wrong amount.", run_id: run, status: "succeeded", model: "m", created_at: "2026-10-17T09:00:00.000Z" }];
   window.__pipMessages = messages;
   const nativeInterval = window.setInterval.bind(window);
   window.setInterval = (fn, ms, ...args) => { if (ms === 4000) window.__pipPoll = fn; return nativeInterval(fn, ms, ...args); };
@@ -107,12 +107,12 @@ test("a Project Pip’s chat paints as a Personal Pip’s, in the same page", as
   assert.deepEqual(projectChat, personalChat, "the same chat");
   assert.equal(project.you.color, "rgb(255, 255, 255)", "your message: white on the accent");
   assert.equal(project.you.backgroundColor, "rgb(109, 73, 232)");
-  assert.equal(project.reply.borderTopLeftRadius, "18px", "its reply: short rounded bubbles");
-  assert.equal(project.parts, 2, "a bubble a paragraph");
+  assert.equal(project.reply.borderTopLeftRadius, "17px", "its reply: short rounded bubbles");
+  assert.equal(project.parts, 2, "a bubble for each short message the Pip parted with ---");
   assert.equal(project.buttons, 0, "the buttons wait for the pointer");
   assert.equal(project.time, 1, "the time shows without it");
   assert.equal(project.whatItDid.display, "none", "What it did is one click away, in the reply's details");
-  assert.equal(project.box.borderTopLeftRadius, "22px");
+  assert.equal(project.box.borderTopLeftRadius, "19px");
   assert.equal(project.hint.display, "none");
 });
 

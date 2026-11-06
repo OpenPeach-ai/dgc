@@ -5,14 +5,24 @@ written in plain words, and keeps it: reviewing a project's committed code every
 morning, drafting documentation when a folder changes, running a fixed set of test
 commands on a schedule, or helping you plan your week.
 
-Pips are careful by design. Everything a Pip does that matters, from its own setup
-to a file fix or an email, is a proposal that you review first. The model drafts;
-you approve.
+Pips work within the access level and action rules you set. Actions outside those
+rules wait for your review. An unattended workflow can pass a result between Pips,
+but it does not grant either Pip new tool permissions.
 
-Pips ship in DGC CLI 0.50.0 (`dgc pips …` and the main chat's Pips tools), the VS
-Code extension 0.34.x (the Pips view, setup cards and review dialogs) and SDK 0.8.0
-(`session.pips`). For contracts and limits in detail, see
+Pips were introduced in DGC CLI 0.50.0, VS Code extension 0.34.0, and SDK 0.8.0.
+This guide covers the 0.51.0 CLI, 0.35.0 extension, and 0.9.0 SDK (`session.pips`).
+For contracts and limits in detail, see
 [PIPS_REFERENCE.md](PIPS_REFERENCE.md).
+
+### Personal Pip workflows
+
+In **Pips → Personal → Workflows**, choose two to four distinct active Personal Pips and write the exact task for each receiving Pip. A manual task or a scheduled routine result from the first Pip starts the sequence. **Review each handoff** leaves the next result for your decision. **Unattended handoffs** pass that result to the next Pip without another routing question, up to three starts in any 24 hours. The previous Pip's result is shared exactly; an oversized or held result pauses that step. Pause stops future handoffs, while runs already queued may finish. Changing a Pip, its model, or its app access pauses the workflow until you create a new reviewed one.
+
+If Core proposed a team in one reply, create each Pip from its separate setup card. When all of those cards have been accepted, **Workflows** offers that team in Core's proposed order. Select **Set up workflow**, write the receiving tasks, choose the routing mode, and review the exact sequence. Core's suggestion never starts a workflow by itself.
+
+Workflow routing never changes a Pip's tool permissions. New Personal Pips start at **Ask**, and existing Pips keep their saved level. Sending mail, publishing, paid generation, computer actions and other changes still follow each Pip's own approval rules.
+
+**Project Pips → Workflows** routes the first source checked finding from a completed audit to the next read only Project Pip on the same committed source. Choose review at each handoff or unattended routing, again capped at three starts in any 24 hours. Scout, Lens, Rook and Lock can join; Patch and Pulse still require their own exact action review. A Project workflow cannot include Personal Pips.
 
 ## The characters
 
@@ -22,7 +32,7 @@ page.
 
 | Character | Role | What it does in a project |
 | --- | --- | --- |
-| Core | Main chat | Core is your main DGC chat. It coordinates the conversation and cannot be created as a Pip. |
+| Core | Main chat and Primary Pip | Core is the main DGC chat's character and your Primary Personal Pip. The Primary Pip can propose other Personal Pips for your review. |
 | Scout | Repository exploration | Reads the approved source to orient a review: layout, entry points, component boundaries. It runs no commands. |
 | Lens | Repository research | Investigates one question using the approved source files. It does no web research. |
 | Patch | File fixes | Edits only reviewed paths in a private copy of the project. Every fix needs its own approved handoff. |
@@ -184,6 +194,22 @@ dgc pips setup list
 dgc pips setup show SETUP_ID
 dgc pips setup accept SETUP_ID --expected-digest DIGEST
 ```
+
+## On your other computers (DGC Router)
+
+With DGC Router on (see its page in `/docs`), a Pip's model can be **DGC Router (any Pip system)**, or one
+system and model. Its runs take a worker from a computer with the Pips job when they start and give it back
+when they end. While every such worker is busy, the run waits in the queue; `pips_parallel_runs` still caps
+how many Pip runs go at once. From the CLI: `dgc pips models` lists the systems, and
+`dgc pips create NAME --goal ... --router` (or `--router nas/qwen3.5:9b`) chooses one.
+
+## Images (Personal Pips)
+
+A Personal Pip makes images with your image generators (see Image generation in `/docs`), in its chat and its
+tasks: they're made by DGC itself, never inside the Pip's run, kept with its reply (its chat shows them) and in
+`~/.dgc/images/pips/<pip>/`. A generator that costs money is never used on the Pip's own say-so: it tells you the
+price in its reply and makes the image only after your yes. A routine's run never makes a paid image; it says what it
+would make. A free generator, or one you allowed (Always allow), makes the image at once.
 
 ## Your own Claude Code or Codex (Personal Pips)
 
@@ -523,8 +549,9 @@ keeps each fix's record, and the message reads it. The status beside the Pip's n
 its last run found ("Today's audit: 5 findings") and goes to its message.
 
 **One chat for every Pip.** A Project Pip's chat looks and answers like a Personal Pip's: the Pip at work with its
-face, its name, what it is doing and its clock; its reply written into short bubbles as it comes; time marks between
-messages; the buttons under a message when you point at it; the same box. Its page is the same too (see
+face, its name, what it is doing and its clock; its reply written in as it comes, as one message or the few short
+messages the Pip chose (it parts them with a line of just `---`); time marks between messages; the buttons under a
+message when you point at it; the same box. Its page is the same too (see
 [A Project Pip's page](#a-project-pips-page)), and its runs with Ask DGC to fix are in its chat. Which code it reads
 (committed, or your current files) is under **What this Pip can do** beside the box.
 
@@ -1033,7 +1060,7 @@ with **Change**.
 
 ## Pips settings
 
-**One model for every Pip on Default.** DGC **Settings → Agents → Pips → Model for Pips** is the
+**One model for every Pip on Default.** DGC **Settings → Models → Pips → Model for Pips** is the
 model every Pip set to **Default** uses, on DGC's own connection (the host under **Models**); the
 box lists that host's models, and any name can be typed. Blank, it is the same as DGC: DGC's own
 model, or the Claude Code or Codex DGC runs on. New Pips start on Default, and a Pip's model menu
@@ -1064,6 +1091,10 @@ The gear on **Your Pips** opens settings for all of them:
 
   In a run you aren't watching (a routine or a schedule), a Pip always asks before it changes
   anything, whatever you chose.
+
+  A plugin that comes with a card (MCP Apps, such as Cardboard's project list) shows it under the
+  Pip's reply, and the chat keeps it: a card a Pip opened while you were away is there when you look.
+  See **Plugin cards** in `/docs`.
 
 Each Pip still has its own computer: a separate home, browser profile and sign-ins, so one Pip's
 sites never see another's. Settings are shared; computers are not.
@@ -1244,8 +1275,8 @@ without.
 ### How much it asks
 
 Each Personal Pip has a level, on its page under **How much it asks** (Pips API 58), the way OpenMausBot's bots do.
-Only you change it, on this computer. A new Personal Pip starts at **Approve for me**; a Pip made before levels keeps
-**Ask** until you change it.
+Only you change it, on this computer. A new Personal Pip starts at **Ask**. Existing Pips keep
+the level you chose for them.
 
 | Level | What goes by itself | What still asks |
 |---|---|---|

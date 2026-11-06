@@ -28,10 +28,10 @@ from .agent import Agent
 from .attachments import validate_image_data_uris
 from .commands import custom_command_names
 from .config import Config
-from .permissions import MODE_DESCRIPTIONS, MODES, rule_for
+from .permissions import NO_ALWAYS_TOOLS, MODE_DESCRIPTIONS, MODES, rule_for
 from .protocol import strict_json_loads
 from .redaction import redact_text, redact_value, secret_values, sensitive_name
-from .ui import arg_summary, split_diff, tool_output_is_error
+from .ui import arg_summary, shown_output, split_diff, tool_output_is_error
 
 _KIND = {  # DGC tool -> ACP tool-call kind
     "read_file": "read", "view_image": "read", "repo_map": "read", "code_intel": "read", "glob": "read", "grep": "read",
@@ -674,7 +674,7 @@ class _ACPUi:
                       "content": {"type": "text", "text": f"{message}{amount}"}}]})
 
     def tool_result(self, name, out, call_id=None):
-        out = self.s._safe_text(out)
+        out = shown_output(name, self.s._safe_text(out))     # no sentence written for the model alone
         is_diff, diff = split_diff(out)
         content = [{"type": "content", "content": {"type": "text", "text": out[:8000]}}]
         if is_diff:
@@ -735,13 +735,17 @@ class _ACPUi:
                       "kind": _KIND.get(name, "other"), "status": "pending",
                       "rawInput": args, "content": [{"type": "content",
                       "content": {"type": "text", "text": arg_summary(name, args)}}]})
+        options = [{"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+                   {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+                   {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]
+        from .agent import interaction_offers_always
+        if name in NO_ALWAYS_TOOLS or not interaction_offers_always():
+            # A DGC Router change, a look on the network, and a call the user's own ask rule asks about: asked every time.
+            options = [option for option in options if option["optionId"] != "always"]
         res = self.s.request("session/request_permission", {
             "sessionId": self.sid,
             "toolCall": {"toolCallId": tcid, "title": name, "rawInput": args},
-            "options": [
-                {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
-                {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
-                {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]},
+            "options": options},
             timeout=None, cancel=self.cancelled)
         outcome = (res or {}).get("outcome", {})
         if outcome.get("outcome") == "selected":

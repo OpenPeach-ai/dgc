@@ -31,10 +31,13 @@ const signInProviders = {
 // What a plugin's sign-in lets DGC do in one app (Google's, Microsoft's), in the catalog's plain words: "Read your email · …".
 const appPermissions = (row, app) => (row.sign_in_permissions || []).filter(p => p.app === app?.id);
 import { contextSizeHint, contextSizeMore, contextSizeShown, renderFields } from './settingsFields.js';
+import { bindContextCombos, parseContext } from './contextCombo.js';
 import { createUsage } from './settingsUsage.js';
 import { usageMarkup } from './settingsUsageMarkup.js';
 import { createPipUsage, pipUsageMarkup } from './settingsPipUsage.js';
 import { createModelBoxes, modelBoxMarkup } from './settingsModelBox.js';
+import { createRouter } from './settingsRouter.js';
+import { createImages } from './settingsImages.js';
 // The user's mods, listed as the chats' /mods lists them (window.DgcMods.listView: every word goes in as text).
 import '../media/mods.js';
 const vscode = acquireVsCodeApi();
@@ -42,12 +45,18 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const paths = { voice: 'M10 2a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M5 10a5 5 0 0 0 10 0 M10 15v3 M7 18h6', web: 'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15z M3 10.5h15 M10.5 3c-2.2 2.1-3.2 4.6-3.2 7.5s1 5.4 3.2 7.5 M10.5 3c2.2 2.1 3.2 4.6 3.2 7.5s-1 5.4-3.2 7.5', chatdgc: 'M5 4h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9.5L6 17v-3H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M7.6 11.4l1.3-4.3 M10 11.4l1.3-4.3 M12.4 11.4l1.3-4.3', memory: 'M6 3h9a1 1 0 0 1 1 1v14l-5.5-3.5L5 18V4a1 1 0 0 1 1-1z M8.5 8h4', general: 'M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1z M13 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0', models: 'M4 6h14M4 11h14M4 16h14M7 4v4M14 9v4M9 14v4', agents: 'M9 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 17v-3a3 3 0 0 1 6 0v3M13 5h5M13 10h5M13 15h5', usage: 'M4 17V9M10 17V3M16 17v-6', security: 'M10 2l7 3v5c0 5-7 8-7 8S3 15 3 10V5z M7 10l2 2 4-4', plugins: 'M3 7h5V3h4v4h5v5h-4v5H8v-5H3z', mcp: 'M7 3v5M13 3v5M5 8h10v3a5 5 0 0 1-10 0z M10 16v3', panel: 'M3 3h15v15H3z M8 3v15', gear: 'M8 3h4l1 3 3 1v4l-3 1-1 3H8l-1-3-3-1V7l3-1z M12 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0', app: 'M4 3h13v14H4z M4 7h13', running: 'M3 5h9v8H3z M15 9h3v8H8v-2 M6 9l2 2 3-3' };
 const icon = name => `<svg viewBox="0 0 21 21" aria-hidden="true"><path d="${paths[name] || paths.plugins}"/></svg>`;
-const sections = [['general', 'General'], ['models', 'Models'], ['agents', 'Agents'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
-let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+// Agents was its own page until 0.51: its Sub-agents, Fallback and Pips are blocks of Models now (an old link to
+// "agents" opens Models at Sub-agents).
+const sections = [['general', 'General'], ['models', 'Models'], ['web', 'Web search'], ['chatdgc', 'ChatDGC'], ['memory', 'Memory'], ['voice', 'Voice'], ['running', 'Running sessions'], ['usage', 'Token usage'], ['security', 'Security'], ['plugins', 'Plugins'], ['mcp', 'MCP servers']];
+let section = 'general', lane = 'plugins', detail = '', query = '', items = [], servers = [], providers = [], savedProfiles = [], signin = null, config = null, draft = {}, dirty = new Set(), usage = null, range = '7d', saving = false, saveStatus = '', mcpEditing = null, mcpSubmitted = '';
+let providerForm = {preset:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''}, defaultProviderId = '';
 let mcpError = "";
 let mcpConfirm = '';     // a pending confirm in the MCP form's danger zone: '', 'forget' or 'remove'
 // Token usage shows Everything or the Pips' share of it; the range is shared by both.
 let usageView = 'all', pipUsage = null;
+// Token usage by system: the System both views show, kept like the range ("" is All systems).
+let usageSystem = '';
+const usageShared = { getSystem: () => usageSystem, setSystem: (id) => { usageSystem = String(id || ''); } };
 let sequence = 0;
 let directory = false, marketFilter = 'all', marketplaces = [], pluginNotice = '', modal = null, modalKind = '', reviewName = '', preview = null, dialogReturn = null, createdPath = '';
 let operationPending = false;
@@ -109,12 +118,41 @@ function modelRoute(id) {
 }
 const modelBoxes = createModelBoxes({ send: m => vscode.postMessage(m), route: modelRoute,
     fields: id => (MODEL_ROUTES[id] || []).slice(1) });
-const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', pips_model: '', wait_first_word: 'auto', wait_first_word_minutes: '', wait_between_words: '5' };
+// Settings -> Models -> DGC Router (settingsRouter.js): its switch and Systems list save at once, apart from Save all.
+// When the Router goes on or off the page is drawn again (Sub-agents and Pips read differently); otherwise only the
+// Router's own block and the Sub-agents line follow its status.
+let routerShownOn = null;
+// A place on Models that was asked for (DGC Router from the status line or the palette, Images): scrolled to once the
+// page holds it, and kept at the top while the blocks above it fill in (the Images list and the Systems list arrive
+// after the page is drawn, and a first open draws the page before DGC's settings arrive), until the person scrolls.
+let placeWanted = null;      // {id, until}: until is set when the place is first there
+function keepPlace() {
+    if (!placeWanted) return;
+    const target = $(placeWanted.id);
+    if (section !== 'models' || (placeWanted.until && Date.now() > placeWanted.until) || Date.now() > placeWanted.asked + 60000) { placeWanted = null; return; }
+    if (!target) return;
+    if (!placeWanted.until) placeWanted.until = Date.now() + 3000;
+    target.scrollIntoView?.({ block: 'start' });
+}
+for (const kind of ['wheel', 'mousedown', 'touchstart', 'keydown'])
+    document.addEventListener(kind, () => { if (placeWanted?.until) placeWanted = null; }, { passive: true, capture: true });
+const router = createRouter({ send, esc, switchHTML, ui, onPaint: () => {
+    if (section !== 'models' || !config || saving) return;
+    if (routerShownOn !== null && routerShownOn !== router.on()) { snapshot(); render(); keepPlace(); return; }
+    const line = $('router-subagents-line');
+    if (line) line.textContent = router.summary();
+    keepPlace();
+} });
+ui.router = router;
+// Settings -> Models -> Images (settingsImages.js): its generators save at once, apart from Save all, as the Router's do.
+const images = createImages({ send, esc, switchHTML, ui, onPaint: () => keepPlace() });
+ui.images = images;
+const defaults = { base_url: '', api_key: '', model: '', api_mode: 'auto', provider_state: 'stateless', prompt_cache: true, capability_cache_ttl_s: 3600, subscription_engine: '', subscription_model: '', subscription_effort: '', subagent_model: '', subagent_base_url: '', subagent_api_mode: '', subagent_api_key: '', fallback_model: '', fallback_base_url: '', fallback_api_mode: '', fallback_api_key: '', mode: 'default', think: 'off', context_size: 32768, show_reasoning: true, thinking_inline: true, ultra_mode: false, suggest: true, monitor_wake: true, tool_profile: 'standard', max_parallel_tasks: 4, sandbox: false, sandbox_network: false, plan_artifact: true, artifact_autostart: true, artifact_in_plan: false, search_provider: 'duckduckgo', search_url: '', search_api_key: '', chatdgc_about: '', chatdgc_style: '', chatdgc_personality: 'default', chatdgc_window: '32k', chatdgc_web: true, chatdgc_followups: true, turn_token_budget: 0, prompt_cache_ttl: '5m', ollama_keep_alive: '30m', subagent_context_size: '', subagent_thinking: '', pips_model: '', wait_first_word: 'auto', wait_first_word_minutes: '', wait_between_words: '5' };
 const PAGE_OF = {};
 for (const [page, keys] of Object.entries({
     general: ['mode', 'think', 'ultra_mode', 'turn_token_budget', 'context_size', 'show_reasoning', 'thinking_inline', 'suggest', 'monitor_wake', 'tool_profile'],
-    models: ['base_url', 'api_key', 'model', 'api_mode', 'provider_state', 'prompt_cache', 'capability_cache_ttl_s', 'subscription_engine', 'subscription_model', 'subscription_effort', 'prompt_cache_ttl', 'ollama_keep_alive', 'wait_first_word', 'wait_first_word_minutes', 'wait_between_words'],
-    agents: ['subagent_model', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key', 'subagent_context_size', 'max_parallel_tasks', 'fallback_model', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key', 'pips_model'],
+    models: ['base_url', 'api_key', 'model', 'api_mode', 'provider_state', 'prompt_cache', 'capability_cache_ttl_s', 'subscription_engine', 'subscription_model', 'subscription_effort', 'prompt_cache_ttl', 'ollama_keep_alive', 'wait_first_word', 'wait_first_word_minutes', 'wait_between_words',
+        'subagent_model', 'subagent_base_url', 'subagent_api_mode', 'subagent_api_key', 'subagent_context_size', 'subagent_thinking', 'max_parallel_tasks', 'fallback_model', 'fallback_base_url', 'fallback_api_mode', 'fallback_api_key', 'pips_model'],
     web: ['search_provider', 'search_url', 'search_api_key'],
     chatdgc: ['chatdgc_about', 'chatdgc_style', 'chatdgc_personality', 'chatdgc_window', 'chatdgc_web', 'chatdgc_followups'],
     security: ['sandbox', 'sandbox_network', 'plan_artifact', 'artifact_autostart', 'artifact_in_plan'] })) for (const key of keys) PAGE_OF[key] = page;
@@ -128,6 +166,7 @@ function setDraft(key, value) { draft[key] = value; dirty.add(key); saveStatus =
     $('save-status').textContent = saveStatus; }
 function applyConfig(ev) {
     config = ev;
+    draft.subscription_engines = Array.isArray(ev.subscription_engines) ? ev.subscription_engines : [];
     for (const [key, fallback] of Object.entries(defaults)) {
         if (!dirty.has(key))
             draft[key] = key.endsWith('api_key') ? '' : ev[key] ?? fallback;
@@ -154,6 +193,8 @@ function applyConfig(ev) {
     draft.models_at = ev.list_models_at === true;
     // The model every Pip on Default uses, from a CLI that answers pips_settings (the extension adds it to the config).
     draft.pips_settable = ev.pips_settable === true;
+    // How hard helpers think, from a CLI that answers subagent_settings (the extension adds it to the config).
+    draft.subagent_thinking_settable = ev.subagent_thinking_settable === true;
     if (!dirty.has('subagent_context_size'))
         draft.subagent_context_size = Number(ev.subagent_context_size) > 0 ? String(ev.subagent_context_size) : '';
     // The prompt-cache lifetime and Ollama's keep-loaded time come from a CLI that answers cache_settings (0.48).
@@ -162,8 +203,19 @@ function applyConfig(ev) {
     draft.wait_settable = ev.wait_settable === true;
     // The window a vLLM, SGLang or llama.cpp server was started with (the extension adds the last server_window event).
     draft.server_window = ev.server_window && typeof ev.server_window === 'object' ? { ...ev.server_window } : null;
-    if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section) && !saving)
+    // DGC Router, from a CLI that offers it (ready.capabilities.router; the extension adds these, not protocol fields).
+    draft.router_capable = ev.router_capable === true;
+    draft.router_pips_default = ev.router_pips_default === true;
+    draft.router_thinking = ev.router_thinking === true;       // each model's Thinking (router.thinking)
+    router.setCapability(draft);
+    // Image generation, from a CLI that makes images (ready.capabilities.images; the extension adds it).
+    draft.images_capable = ev.images_capable === true;
+    draft.videos_capable = ev.videos_capable === true;     // video models in + Add generator (ready.capabilities.videos)
+    images.setCapability(draft);
+    if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section) && !saving) {
         render();
+        keepPlace();
+    }
 }
 function snapshot() {
     if (!config)
@@ -173,6 +225,13 @@ function snapshot() {
         if (!(key in defaults))
             return;
         let value = el.value.trim();
+        if (el.dataset.keepRouter && !value) return;          // the Pips default on DGC Router, kept while it is off
+        if (key === 'subagent_context_size') {
+            // "24K", "24k", "24,576" or "24576": kept as the tokens it means ("" is the main chat's own). Text that
+            // isn't a size stays as typed, and the box says so.
+            const tokens = parseContext(value);
+            value = typeof tokens === 'number' ? String(tokens) : value;
+        }
         if (key === 'show_reasoning') {
             const shown = value;
             if (draft.show_reasoning !== (shown !== 'hidden'))
@@ -194,8 +253,15 @@ function snapshot() {
 }
 // A failure belongs to the visit it happened in: leaving the section drops the banner, and the
 // `mcp_servers` reply that every arrival at this page asks for repaints a live one.
-function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false; section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpConfirm = ''; mcpError = ''; if (nextRange)
-    range = nextRange; render(); $('main').scrollTop = 0; }
+// Old names for a place on Models: Agents (until 0.51) and its blocks, and DGC Router.
+const MODEL_PLACES = { agents: 'models-subagents', subagents: 'models-subagents', router: 'models-router', pips: 'models-pips', images: 'models-images' };
+function navTo(next, nextRange) { snapshot(); if (next === 'running') running.asked = false; directory = false;
+    const place = MODEL_PLACES[next] || '';
+    if (place) next = 'models';
+    section = sections.some(([id]) => id === next) ? next : 'general'; detail = ''; mcpEditing = null; mcpConfirm = ''; mcpError = ''; if (nextRange)
+    range = nextRange; render(); $('main').scrollTop = 0;
+    placeWanted = place ? { id: place, asked: Date.now(), until: 0 } : null;
+    if (place) queueMicrotask(keepPlace); }
 document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-info]');
     if (!button) return;
@@ -266,9 +332,9 @@ function render() {
         pipUsage?.dispose?.();
         usage = pipUsage = null;
         if (usageView === 'pips')
-            pipUsage = createPipUsage(main.querySelector('.pip-usage-section'), vscode);
+            pipUsage = createPipUsage(main.querySelector('.pip-usage-section'), vscode, usageShared);
         else
-            usage = createUsage(main.querySelector('.usage-section'), vscode);
+            usage = createUsage(main.querySelector('.usage-section'), vscode, usageShared);
         $('usage-range').value = range;
         (pipUsage || usage).request();
         $('usage-range').addEventListener('change', () => range = $('usage-range').value);
@@ -284,7 +350,55 @@ function render() {
         main.innerHTML = '<h2>' + sections.find(([id]) => id === section)[1] + '</h2><p class="sub" role="status">Reading settings from DGC…</p>';
         return;
     }
+    ui.providerProfiles=savedProfiles;ui.providerDraft=providerForm;ui.defaultProviderId=defaultProviderId;
+    const savedFormOpen=section==='models' && main.querySelector('details[data-more="saved-providers"]')?.open;
     renderFields(section, main, draft, providers, ui);
+    if(section==='models'){
+        if(savedFormOpen)main.querySelector('details[data-more="saved-providers"]').open=true;
+        const form={saved_provider_name:'name',saved_provider_url:'base_url',saved_provider_model:'model',saved_provider_mode:'api_mode',saved_provider_key:'api_key'};
+        for(const [id,key] of Object.entries(form))main.querySelector('#'+id)?.addEventListener('input',event=>{providerForm[key]=event.target.value;});
+        main.querySelector('#saved_provider_preset')?.addEventListener('change',event=>{
+            const id=String(event.target.value||'');
+            const chosen=providers.find(row=>row.id===id);
+            providerForm.preset=id;
+            if(id==='claude'||id==='codex'){
+                providerForm.kind='subscription';providerForm.engine=id;
+                providerForm.name=id==='claude'?'Claude Code':'Codex';
+                providerForm.base_url='';providerForm.model='';providerForm.api_mode='auto';providerForm.api_key='';
+            }else if(chosen){
+                providerForm.kind='native';providerForm.engine='';
+                providerForm.name=chosen.label;
+                providerForm.base_url=chosen.url;
+                providerForm.model='';
+                providerForm.api_mode=id==='anthropic'?'anthropic':'auto';
+                providerForm.api_key='';
+            }else if(id==='custom'){
+                providerForm.kind='native';providerForm.engine='';
+                providerForm.name='';providerForm.base_url='';providerForm.model='';providerForm.api_mode='auto';providerForm.api_key='';
+            }
+            snapshot();render();
+            // Switching presets rebuilds the form. Keep it expanded so the model
+            // and sign-in fields remain visible for the next step.
+            main.querySelector('details[data-more="saved-providers"]').open=true;
+            main.querySelector('#saved_provider_model')?.focus();
+        });
+        main.querySelector('#saved-provider-add')?.addEventListener('click',()=>{
+            const status=main.querySelector('#saved-provider-status');if(status)status.textContent='Saving provider…';
+            if(!providerForm.preset){if(status)status.textContent='Choose a provider first.';return;}
+            send({type:'addProviderProfile',profile:{...providerForm}});
+        });
+        main.querySelectorAll('[data-provider-remove]').forEach(button=>button.addEventListener('click',()=>send({type:'removeProviderProfile',id:button.dataset.providerRemove})));
+        main.querySelectorAll('[data-provider-default]').forEach(button=>button.addEventListener('click',()=>{
+            button.disabled=true;send({type:'setProviderDefault',id:button.dataset.providerDefault});
+        }));
+    }
+    // Sub-agents' Context window: a size typed or picked (src/contextCombo.js), as DGC Router's Context each.
+    const subWindow = main.querySelector('#subagent_context_size')?.closest('[data-ctx-combo]');
+    if (subWindow) bindContextCombos(subWindow.parentElement);
+    // Pictures in replies is the editor's own setting (dgc.picturesInReplies): it applies at once, apart from Save all.
+    const pictures = $('pictures_in_replies');
+    if (pictures) pictures.onchange = () => { draft.pictures_in_replies = pictures.value; send({ type: 'picturesInReplies', value: pictures.value }); };
+    if (section === 'models') routerShownOn = router.on();
     if (draft.models_at) modelBoxes.bind(main);
     const save = $('save');
     // One Save for every page: a page whose CLI can't take its values has its fields disabled, and the host never sends
@@ -296,7 +410,7 @@ function render() {
         const input = $(id);
         if (input) { input.min = String(min); input.step = String(step); if (max) input.max = String(max); }
     }
-    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', values: { ...draft } }); };
+    save.onclick = () => { if ([...main.querySelectorAll('input')].some(input => !input.reportValidity())) return; snapshot(); saving = true; save.disabled = true; save.textContent = 'Saving…'; send({ type: 'saveSettings', section, values: { ...draft } }); };
     // Web search -> Remove: the chosen provider's own key, cleared at once (the rest of the page waits for Save).
     const removeKey = $('search-key-remove');
     if (removeKey) removeKey.onclick = () => {
@@ -311,7 +425,12 @@ function render() {
     for (const [presetId, urlId] of [['provider', 'base_url'], ['subagent_provider', 'subagent_base_url']]) {
         const el = $(presetId);
         if (el)
-            el.onchange = () => { const p = providers.find(x => x.id === el.value); if (p) {
+            el.onchange = () => {
+                const p = providers.find(x => x.id === el.value); if (p) {
+                if (presetId === 'provider') {
+                    const choice = $('subscription_engine');
+                    if (choice && choice.value) { choice.value = ''; choice.dispatchEvent(new Event('change', { bubbles: true })); }
+                }
                 $(urlId).value = p.url;
                 setDraft(urlId, p.url);
                 $(urlId).dispatchEvent(new Event('input', { bubbles: true }));    // its Model box lists the new host
@@ -327,7 +446,27 @@ function logo(row, big = false) { if (connectorLogos[row.name]) row = {...row, l
 function banner(row) { if (!signin || row && signin.server !== row.name && !(row.server_names || []).includes(signin.server))
     return ''; const code = /^[A-Za-z0-9-]{4,24}$/.test(signin.code || '') ? signin.code : '';
     // A device sign-in (GitHub's): the code to enter on the page that opened, to copy again if it was lost.
-    return `<div class="banner" role="status"><p>${code ? `Enter the code <code class="signin-code">${esc(code)}</code> on the page that opened to finish connecting ${esc(signin.title)}` : `Finish connecting ${esc(signin.title)} in your browser`}</p><div class="actions">${code ? `<button class="secondary" data-copy-code="${esc(code)}">Copy code</button>` : ''}<button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div></div>`; }
+    return `<div class="banner" role="status"><p>${code ? `Enter the code <code class="signin-code">${esc(code)}</code> on the page that opened to finish connecting ${esc(signin.title)}` : `Finish connecting ${esc(signin.title)} in your browser`}</p><div class="actions">${code ? `<button class="secondary" data-copy-code="${esc(code)}">Copy code</button>` : ''}<button class="secondary" data-browser>Open browser</button><button class="secondary" data-cancel-connect>Cancel</button></div>${code ? '' : signInReturnMarkup()}</div>`; }
+// "Signed in but nothing happened?" (0.51): when the browser is on another computer its return to DGC can go nowhere
+// (a forwarded port that answers nothing). The address it ended on, pasted here, goes to the sign-in still waiting.
+let signInReturnNote = null;
+function signInReturnMarkup() {
+    if (!signin?.callback) return '';
+    const note = signInReturnNote ? `<p class="signin-return-note${signInReturnNote.ok ? '' : ' error-message'}" role="status">${esc(signInReturnNote.message)}</p>` : '';
+    return `<details class="signin-return"${signInReturnNote ? ' open' : ''}><summary>Signed in but nothing happened? Paste the address your browser ended on</summary>`
+        + '<p class="note">After you sign in, the browser goes to an address starting with http://localhost. If that page shows an error, copy the whole address from its address bar.</p>'
+        + '<div class="signin-return-row"><label class="sr-only" for="signin-return-url">The address your browser ended on</label><input id="signin-return-url" type="url" placeholder="http://localhost:…/oauth/callback?code=…" autocomplete="off" spellcheck="false">'
+        + '<button class="secondary" data-signin-return>Finish signing in</button></div>' + note + '</details>'; }
+document.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-signin-return]');
+    if (!button) return;
+    event.preventDefault();
+    const box = button.closest('.signin-return')?.querySelector('input');
+    const url = String(box?.value || '').trim();
+    if (!url) { box?.focus(); return; }
+    button.disabled = true; button.textContent = 'Handing it over…';
+    send({ type: 'signInReturn', url });
+});
 function cancelledSignIn(message) { return /^Sign-in cancelled\./.test(String(message || '')); }
 function issue(row) { const message = errors.get(row.name) || row.connection_error; return message ? `<div class="banner${cancelledSignIn(message) ? '' : ' error'}" role="${cancelledSignIn(message) ? 'status' : 'alert'}"><p>${esc(message)}</p></div>` : ''; }
 function pluginControl(row) {
@@ -667,13 +806,15 @@ function renderDirectory(main) {
     bindPlugins(main); bindAddMenu(main);
 }
 function closeDialog() { modal?.remove(); modal = null; modalKind = ''; preview = null; connectingPlugin = null; operationPending = false; dialogReturn?.focus?.(); }
-function dialog(kind, title, body, footer='') {
+// `cancel`: the secondary button's words; '' for a sheet that reports something finished (a connection made), where
+// there is nothing left to cancel and its own button closes it.
+function dialog(kind, title, body, footer='', cancel='Cancel') {
     if (!modal) dialogReturn = document.activeElement;
     modal?.remove(); modal = document.createElement('dialog'); modal.className = 'plugin-dialog'; modalKind = kind;
     modal.setAttribute('aria-labelledby','dialog-title');
-    modal.innerHTML = `<div class="dialog-heading"><h2 id="dialog-title">${esc(title)}</h2><button class="icon-button" id="dialog-close" aria-label="Close">×</button></div><div class="dialog-body">${body}</div><div class="dialog-footer">${footer}<button class="secondary" id="dialog-cancel">Cancel</button></div>`;
+    modal.innerHTML = `<div class="dialog-heading"><h2 id="dialog-title">${esc(title)}</h2><button class="icon-button" id="dialog-close" aria-label="Close">×</button></div><div class="dialog-body">${body}</div><div class="dialog-footer">${footer}${cancel ? `<button class="secondary" id="dialog-cancel">${esc(cancel)}</button>` : ''}</div>`;
     document.body.append(modal);
-    $('dialog-close').onclick = closeDialog; $('dialog-cancel').onclick = closeDialog;
+    $('dialog-close').onclick = closeDialog; if ($('dialog-cancel')) $('dialog-cancel').onclick = closeDialog;
     modal.addEventListener('cancel', e => { e.preventDefault(); closeDialog(); });
     if (typeof modal.showModal === 'function') modal.showModal(); else modal.setAttribute('open','');
     bindPlugins(modal);
@@ -726,14 +867,14 @@ function showConnection(row, state = 'confirm') {
     const error = errors.get(row.name) || row.connection_error;
     const body = state === 'error' ? `<div class="banner${cancelledSignIn(error) ? '' : ' error'}" role="${cancelledSignIn(error) ? 'status' : 'alert'}"><p>${esc(error || 'The connection did not finish.')}</p></div>`
         : state === 'connected' ? `<p class="connection-intro" role="status">Connected. ${esc(title)} tools are ready for DGC.</p>`
-        : state === 'browser' ? `<p class="connection-intro" role="status">Finish connecting ${esc(title)} in your browser.</p>`
+        : state === 'browser' ? `<p class="connection-intro" role="status">Finish connecting ${esc(title)} in your browser.</p>${signInReturnMarkup()}`
         : state === 'pending' ? '<p class="connection-intro" role="status">Requesting a connection. Your browser opens only if the service provides a sign-in link.</p>'
         : `<p class="connection-intro">Connect the installed plugin to use its tools in DGC.</p>`;
     const action = state === 'connected' ? '<button class="save" id="connection-done">Done</button>'
         : state === 'browser' ? '<button class="save" data-browser>Open browser</button>'
         : state === 'pending' ? '<button class="save" disabled>Connecting…</button>'
         : `<button class="save" id="confirm-connect">${state === 'error' ? 'Try again' : 'Connect'}</button>`;
-    dialog('connection', `Connect ${title}`, body, action);
+    dialog('connection', `Connect ${title}`, body, action, state === 'connected' ? '' : 'Cancel');
     decorateConnection(row, state === 'connected' ? `${title} is connected` : `Connect ${title}`);
     if ($('confirm-connect')) $('confirm-connect').onclick = () => {
         pending.set(row.name, true); errors.delete(row.name); detail = row.name;
@@ -1175,13 +1316,34 @@ $('collapse-nav').innerHTML = icon('panel');
 $('collapse-nav').onclick = () => { const collapsed = document.querySelector('.shell').classList.toggle('collapsed'); $('collapse-nav').setAttribute('aria-expanded', String(!collapsed)); $('collapse-nav').setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation'); $('collapse-nav').title = collapsed ? 'Expand navigation' : 'Collapse navigation'; };
 window.addEventListener('message', event => {
     const msg = event.data || {};
+    if (router.receive(msg)) return;
+    if (images.receive(msg)) return;
     if (msg.type === 'show') {
         navTo(msg.section, msg.range);
     }
+    else if (msg.type === 'picturesInReplies') {
+        draft.pictures_in_replies = msg.value === 'folded' ? 'folded' : 'shown';
+        const select = $('pictures_in_replies');
+        if (select && select.value !== draft.pictures_in_replies) select.value = draft.pictures_in_replies;
+    }
     else if (msg.type === 'providers') {
         providers = msg.providers || [];
-        if (config && !dirty.size)
+        if (config) {
+            // The preset catalogue may arrive after the person has edited another field.
+            // Preserve that draft, then expose the new choices in the existing selector.
+            snapshot();
             render();
+        }
+    }
+    else if(msg.type==='providerProfiles'){
+        savedProfiles=Array.isArray(msg.profiles)?msg.profiles:[];
+        defaultProviderId=String(msg.defaultId||'');
+        if(msg.saved){providerForm={preset:'',kind:'native',engine:'',name:'',base_url:'',model:'',api_mode:'auto',api_key:''};}
+        if(config&&section==='models'){snapshot();render();}
+    }
+    else if(msg.type==='providerProfileError'){
+        const form=$('page').querySelector('details[data-more="saved-providers"]');if(form)form.open=true;
+        const status=$('saved-provider-status');if(status)status.textContent=String(msg.message||'Could not save provider.');
     }
     else if (msg.type === 'plugins') {
         items = Array.isArray(msg.items) ? msg.items : [];
@@ -1225,7 +1387,17 @@ window.addEventListener('message', event => {
         operationPending=false; pluginNotice=msg.message;
         if (modal) statusDialog(msg.message,true); else if (['plugins','mcp'].includes(section)) render();
     }
+    else if (msg.type === 'signInReturned') {
+        signInReturnNote = { ok: msg.ok === true, message: String(msg.message || '') };
+        document.querySelectorAll('[data-signin-return]').forEach(b => { b.disabled = msg.ok === true; b.textContent = msg.ok === true ? 'Handed over' : 'Finish signing in'; });
+        document.querySelectorAll('.signin-return').forEach(box => {
+            box.open = true;
+            box.querySelector('.signin-return-note')?.remove();
+            box.insertAdjacentHTML('beforeend', `<p class="signin-return-note${msg.ok === true ? '' : ' error-message'}" role="status">${esc(signInReturnNote.message)}</p>`);
+        });
+    }
     else if (msg.type === 'signin') {
+        if (msg.clear || msg.id !== signin?.id) signInReturnNote = null;
         signin = msg.clear ? null : msg;
         if (modalKind === 'connector' && signin?.server === modal.dataset.connector) {
             statusDialog('Finish connecting '+APP_CONNECTORS[signin.server].name+' in your browser.');
@@ -1278,14 +1450,14 @@ window.addEventListener('message', event => {
             dirty.clear();
             draft.api_key = draft.subagent_api_key = draft.fallback_api_key = draft.search_api_key = '';
         }
-        if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section))
+        if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section))
             render();
     }
     else if (msg.type === 'settingsSaveFinished') {
         if (saving) {
             saving = false;
             saveStatus = 'Save cancelled. Your edits are still here.';
-            if (['general', 'models', 'agents', 'web', 'chatdgc', 'security'].includes(section))
+            if (['general', 'models', 'web', 'chatdgc', 'security'].includes(section))
                 render();
         }
     }

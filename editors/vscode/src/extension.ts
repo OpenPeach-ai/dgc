@@ -7,6 +7,7 @@ import { checkForExtensionUpdates } from "./extensionupdate";
 import { resolveDgcExecutable } from "./configuration";
 import { heldCliTerminalOptions, updateCliWithProgress } from "./cliupdate";
 import { wslCli } from "./wslSetup";
+import { setEditorEnv } from "./backend";
 
 export function activate(context: vscode.ExtensionContext): void | object {
   if (vscode.workspace.isTrusted === false) {
@@ -14,6 +15,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
       "DGC is disabled in Restricted Mode. Trust this workspace before starting the coding agent.");
     return;
   }
+  // A remote window (SSH, WSL, a container): its browser is on another computer, so a plugin sign-in waits longer.
+  setEditorEnv({ DGC_EDITOR_REMOTE: vscode.env?.remoteName || undefined });
   const provider = new DgcViewProvider(context);
   // Artifacts: everything DGC makes that you keep, opened from any chat's cards and the Library, answered by the side
   // bar's dgc serve (as ChatDGC is) whichever chat made them.
@@ -161,6 +164,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     }),
     vscode.commands.registerCommand("dgc.openPips", () => provider.openPips()),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
+    // The status line's `Router 9/11`: Settings -> Models, at DGC Router.
+    vscode.commands.registerCommand("dgc.routerSettings", () => provider.openSettings("router")),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc.command")) {
         // The backend is the configured executable; a new path used to take effect only on the

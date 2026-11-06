@@ -131,6 +131,22 @@ class ChatCliTests(unittest.TestCase):
         Printer(out, False).event(event)
         self.assertEqual(out.getvalue(), "· Searching the web: IRA rules\n")
 
+    def test_the_terminal_says_at_once_which_model_it_waits_for(self):
+        """0.51: the terminal's ChatDGC printed nothing until the model's first word; it prints a waiting line at once,
+        with how long that model usually takes when DGC knows, then thinking and the words as before."""
+        from dgc.chat_cli import Printer
+        out = io.StringIO()
+        printer = Printer(out, False)
+        printer.event({"type": "chatdgc_waiting", "conversation_id": "chat_x", "message_id": "m", "model": "deepseek-v4.1-flash:cloud",
+                       "usual_s": 11.2})
+        printer.event({"type": "chatdgc_delta", "conversation_id": "chat_x", "message_id": "m", "thinking": "hm"})
+        printer.event({"type": "chatdgc_delta", "conversation_id": "chat_x", "message_id": "m", "text": "Hi."})
+        self.assertEqual(out.getvalue(), "· waiting for deepseek-v4.1-flash:cloud (it usually starts within 12s)…\n"
+                                         "· thinking\nHi.")
+        fresh = io.StringIO()
+        Printer(fresh, False).event({"type": "chatdgc_waiting", "model": "qwen3:8b", "usual_s": 0})
+        self.assertEqual(fresh.getvalue(), "· waiting for qwen3:8b…\n")
+
     def test_the_chat_you_type_into(self):
         # In this process, so its ~/.dgc is patched where dgc.config keeps it (fixed when it was first imported, which
         # in a full run was long before this test set HOME).

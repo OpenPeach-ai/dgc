@@ -55,7 +55,40 @@ const host = `(${function () {
     wait_settable: true, wait_first_word: "minutes", wait_first_word_minutes: "40", wait_between_words: "5",
     search: "ollama", search_url: "", search_api_key_set: false, search_providers: ["duckduckgo", "brave", "tavily", "searxng", "ollama"],
     search_keys: { brave: true, tavily: false, ollama: false }, chatdgc_personality: "default", chatdgc_window: "32k", chatdgc_about: "", chatdgc_style: "",
-    chatdgc_web: true, chatdgc_followups: true, sandbox: false };
+    chatdgc_web: true, chatdgc_followups: true, sandbox: false, router_capable: true, router_pips_default: true, images_capable: true };
+  // Image generators (0.51): a local one with a workflow, a paid one at its limit, one that needs credit.
+  const imagesStatus = { default: "comfy", auto_fallback: false, save_dir: "assets/generated", project_choice: "", chosen: "",
+    through_plugins: ["Runway", "Higgsfield"], generators: [
+      { id: "comfy", name: "ComfyUI on gpu-box", provider: "comfyui", provider_name: "ComfyUI", base_url: "http://gpu-box.local:8188", model: "",
+        workflow: "comfy.json", mapping: { prompt: "6.text", seed: "3.seed", width: "5.width", height: "5.height" }, size: "1024x1024", enabled: true, asks: false,
+        paid: false, local: true, price_usd: 0, price: "free", default: true, has_key: false, key_from: "", spent_this_month_usd: 0, system: "gpu",
+        state: { ok: true, detail: "", at: Date.now() / 1000 } },
+      { id: "fal", name: "fal.ai FLUX Schnell", provider: "fal", provider_name: "fal.ai", base_url: "https://fal.run", model: "fal-ai/flux/schnell",
+        size: "1024x1024", enabled: true, asks: true, paid: true, local: false, price_usd: 0.003, price: "about $0.003", default: false, has_key: true,
+        key_from: "env:FAL_KEY", spent_this_month_usd: 4.25, monthly_limit_usd: 5, state: { ok: true, detail: "", at: Date.now() / 1000 } },
+      { id: "gemini", name: "Gemini 2.5 Flash Image", provider: "gemini", provider_name: "Google Gemini", base_url: "https://generativelanguage.googleapis.com",
+        model: "gemini-2.5-flash-image-preview-with-a-long-name", size: "1024x1024", enabled: true, asks: true, paid: true, local: false, price_usd: 0.039,
+        price: "about $0.039", default: false, has_key: true, key_from: "saved", spent_this_month_usd: 0,
+        state: { ok: false, kind: "needs_credit", detail: "The Gemini API free tier is not available for this project. To use the Gemini API, please set up billing to upgrade to the paid tier at https://aistudio.google.com/billing.", at: Date.now() / 1000 } }] };
+  const pending = { generator: { name: "ComfyUI on gpu-box" }, mapping: { prompt: "6.text", negative: "7.text", seed: "3.seed", width: "5.width", height: "5.height", batch: "5.batch_size" },
+    mapping_lines: ['Prompt → node 6 (CLIPTextEncode, "Positive").text', 'Negative prompt → node 7 (CLIPTextEncode, "Negative").text', "Seed → node 3 (KSampler).seed",
+      'Width → node 5 (EmptyLatentImage, "Empty Latent Image").width', 'Height → node 5 (EmptyLatentImage, "Empty Latent Image").height',
+      'Images at once → node 5 (EmptyLatentImage, "Empty Latent Image").batch_size'], notes: ["No LoadImage node: this workflow can't edit an image."] };
+  // DGC Router on (0.51): three systems, one offline, one busy, so Models draws its Systems list.
+  const at = Date.now() / 1000;
+  const routerStatus = { enabled: true, when_busy: "wait", workers: { total: 7, free: 5, busy: 2 }, systems: [
+    { id: "gpu", name: "GPU box", base_url: "http://gpu-box.local:11434", server: "ollama", enabled: true, jobs: ["subagents", "pips"], workers: 4,
+      busy: 1, free: 3, one_model_at_a_time: true, health: { state: "online" }, has_key: false,
+      hardware: { source: "node", url: "http://gpu-box.local:8577", line: "GB10 · 92 of 128 GB · 34% · 61°C", has_token: true },
+      leases: [{ owner: "a1", label: "count the bolts in the drawings", model: "qwen3:8b" }],
+      models: [{ name: "qwen3.8:32b-instruct-q4_K_M-long-name", workers: 3, free: 3, context: 65536, note: "design, debugging, anything risky", params_b: 32, quant: "Q4_K_M", tools: true, tokens_per_s: 41.2, ttft_ms: 320, parallel: 2, speed_at: at - 600 },
+        { name: "qwen3:8b", workers: 4, free: 3, context: 32768, note: "search, small edits", params_b: 8.2, tools: true }],
+      available: [{ name: "qwen3.8:32b-instruct-q4_K_M-long-name" }, { name: "qwen3:8b" }, { name: "llama3.1:8b-instruct-q8_0", params_b: 8 }] },
+    { id: "nas", name: "NAS", base_url: "http://nas.local:8080", server: "llamacpp", enabled: true, jobs: ["pips"], workers: 2, free: 2,
+      one_model_at_a_time: false, health: { state: "online" }, server_slots: 2, server_slot_context: 16384, leases: [],
+      models: [{ name: "qwen3:4b", workers: 2, free: 2, context: 16384, tools: false, subagents: "not for sub-agents: it can't call a tool" }] },
+    { id: "mac", name: "Mac Studio", base_url: "http://mac.local:1234", server: "lmstudio", enabled: true, jobs: ["subagents"], workers: 1, free: 0,
+      one_model_at_a_time: true, health: { state: "offline", offline_since: at - 3600 }, leases: [], models: [{ name: "qwen3.6:35b-a3b", workers: 1, context: 32768 }] }] };
   const plugin = (name, extra = {}) => ({ name, display_name: name[0].toUpperCase() + name.slice(1), summary: "Short writing templates for a status note, a decision, a plan and a letter.",
     installed: false, license: "MIT", marketplace: "dgc-curated", skills: [{ name: "status-note", description: "Write a one-page project status in plain Markdown.", enabled: true }], ...extra });
   const plugins = [plugin("templates", { installed: true }), plugin("granola"), plugin("airtable", { requirements: "An Airtable account (all plans)." })];
@@ -64,6 +97,10 @@ const host = `(${function () {
   window.acquireVsCodeApi = () => ({ getState: () => undefined, setState() {}, postMessage(m) {
     if (m.type === "ready") { event(config); post({ type: "plugins", items: plugins }); }
     else if (m.type === "listModelsAt") post({ type: "modelsAt", token: m.token, role: m.role, ids: ["deepseek-v4.1-flash:cloud", "glm-5.3:cloud"] });
+    else if (m.type === "routerCommand") post({ type: "routerReply", token: m.token, ok: true, status: routerStatus,
+      ...(m.command.type === "router_suggest" ? { suggestion: { applicable: true, models: [{ name: "qwen3:8b", workers: 4, line: "qwen3:8b: 8.2B Q4 ≈ 4.9 GB + 4 × 32K context ≈ 9 GB → 4 workers fit in 128 GB (16 GB kept free)" }] } } : {}) });
+    else if (m.type === "imagesCommand") post({ type: "imagesReply", token: m.token, ok: true, status: imagesStatus,
+      ...(m.command.action === "add_generator" && m.command.workflow && !m.command.mapping ? { pending } : {}) });
     else if (m.type === "getMemory") event({ type: "memory_state", enabled: true, facts: [{ id: "f1", text: "Prefers metric units and short answers", source: { surface: "chat", where: "Weekend in Lisbon" }, updated_at: "2026-10-17T10:00:00Z" }],
       projects: [{ name: "notes-app", folder: "/home/me/notes-app", when: "today", remember: true, recent: ["Fix the narrow settings layout"] }] });
     else if (m.type === "getMemoryHistory") event({ type: "memory_history", entries: [] });
@@ -98,7 +135,16 @@ const STATES = [
   ["general"], ["models"],
   // Models -> Advanced open: Wait for the first word (with its minutes box) and Wait between words, one-line hints.
   ["models-advanced", "models", async (p) => { await p.click('details[data-more="models-advanced"] > summary'); await p.waitForSelector("#wait_first_word_minutes:not([hidden])"); }],
-  ["agents"], ["web"], ["chatdgc"], ["security"], ["memory"], ["voice"], ["running"], ["usage"],
+  // Models with DGC Router on: the Systems list, a system's form open, and Suggest's arithmetic.
+  ["models-router", "models", async (p) => { await p.waitForSelector("[data-router-system=gpu]"); }],
+  ["models-router-edit", "models", async (p) => { await p.click("[data-router-edit=gpu]"); await p.click(".router-how > summary"); }],
+  ["models-router-suggest", "models", async (p) => { await p.click("[data-router-edit-cancel=gpu]"); await p.click("[data-router-suggest=gpu]"); await p.waitForSelector(".router-suggest"); await p.click("[data-router-find]"); }],
+  // Models -> Images (0.51): the generators, + Add generator for ComfyUI (with the workflow box), its workflow's mapping, an Edit.
+  ["models-images", "models", async (p) => { await p.waitForSelector("[data-images-gen=gemini]"); }],
+  ["models-images-add", "models", async (p) => { await p.click("[data-images-add]"); await p.click(".images-paste > summary"); }],
+  ["models-images-mapping", "models", async (p) => { await p.fill("#images-add-workflow", '{"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "a fox"}}}'); await p.click("[data-images-add-go]"); await p.waitForSelector("[data-images-mapping]"); }],
+  ["models-images-edit", "models", async (p) => { await p.click("[data-images-add-cancel]"); await p.click("[data-images-edit=comfy]"); }],
+  ["web"], ["chatdgc"], ["security"], ["memory"], ["voice"], ["running"], ["usage"],
   ["plugins"], ["plugins-directory", "plugins", async (p) => { await p.click("#browse-directory"); }],
   ["plugin-page", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('.directory-open[data-open="airtable"]'); }],
   ["plugin-review", "plugins", async (p) => { await p.click("#browse-directory"); await p.click('[data-install="granola"]'); await p.waitForSelector("#confirm-plugin"); }],

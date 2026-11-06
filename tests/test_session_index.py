@@ -46,6 +46,22 @@ class SessionIndexTests(unittest.TestCase):
             [repaired] = session_index.page(self.dir)
             self.assertEqual((repaired[2], repaired[3], repaired[4]), ("Review the ERP", 2, "ERP review"))
 
+    def test_large_unnamed_session_keeps_its_preview_and_message_count(self):
+        # sessions.save writes "name" only when a chat has one, so most large files go from
+        # "messages" straight to later fields such as the checkpoints.
+        path = self.dir / "large-unnamed.json"
+        path.write_text(json.dumps({
+            "schema_version": 3, "id": "large-unnamed", "project": "/home/me/app", "updated": 18.0,
+            "messages": [{"role": "user", "content": "fix the login bug"},
+                         {"role": "assistant", "content": "The session cookie is fixed."}],
+            "mode": "default",
+            "checkpoints": {"snapshots": "x" * 2048},
+        }))
+        with patch.object(session_index, "MAX_INDEX_FILE_BYTES", 512):
+            [row] = session_index.page(self.dir)
+            self.assertEqual((row[2], row[3], row[4]), ("fix the login bug", 2, ""))
+            self.assertEqual(session_index.page(self.dir, query="cookie")[0][0], path)
+
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
 

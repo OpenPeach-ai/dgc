@@ -81,8 +81,10 @@ def _csv_rows(raw: bytes, name: str) -> list[list]:
 _DATE_FORMATS = set(range(14, 23)) | {45, 46, 47}
 
 
-def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
-    """Each sheet's rows as values: shared and inline strings, numbers, booleans, and dates (by their format) as ISO."""
+def _xlsx_sheets(raw: bytes, *, partial: bool = False) -> list[tuple[str, list[list] | None]]:
+    """Each sheet's rows as values: shared and inline strings, numbers, booleans, and dates (by their format) as ISO.
+    Past ``MAX_ROWS`` rows in all this raises, or with ``partial`` gives that sheet's rows as None (left out) and goes
+    on with the next sheet, so a workbook keeps the sheets that fit."""
     ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rel = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
     try:
@@ -124,6 +126,7 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
             if data is None:
                 continue
             rows = []
+            over = False
             for row in data.findall("m:sheetData/m:row", ns):
                 cells = {}
                 for c in row.findall("m:c", ns):
@@ -152,11 +155,15 @@ def _xlsx_sheets(raw: bytes) -> list[tuple[str, list[list]]]:
                     if 0 <= col < MAX_COLUMNS:
                         cells[col] = value
                 if cells:
-                    total_rows += 1
-                    if total_rows > MAX_ROWS:
-                        raise DataError(f"That workbook has more than {MAX_ROWS:,} rows; use a smaller workbook.")
+                    if total_rows + len(rows) >= MAX_ROWS:
+                        if not partial:
+                            raise DataError(f"That workbook has more than {MAX_ROWS:,} rows; use a smaller workbook.")
+                        over = True
+                        break
                     rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
-            out.append((sheet.get("name") or "Sheet", rows))
+            if not over:
+                total_rows += len(rows)
+            out.append((sheet.get("name") or "Sheet", None if over else rows))
         return out
     except (zipfile.BadZipFile, ElementTree.ParseError, KeyError, ValueError) as exc:
         raise DataError(f"That workbook couldn't be read ({type(exc).__name__}).") from None
@@ -176,16 +183,16 @@ class Data:
         loaded = 0
         for name, raw in files:
             try:
-                sheets = _xlsx_sheets(raw) if name.lower().endswith(".xlsx") else [("", _csv_rows(raw, name))]
+                sheets = _xlsx_sheets(raw, partial=True) if name.lower().endswith(".xlsx") else [("", _csv_rows(raw, name))]
             except DataError as exc:
                 self.problems.append(f"{name}: {exc}")
                 continue
             stem = re.sub(r"\.(csv|tsv|xlsx)$", "", name, flags=re.I)
             for sheet, rows in sheets:
-                rows = [r for r in rows if any(str(c).strip() for c in r)]
-                if len(rows) < 2:
+                rows = [r for r in rows if any(str(c).strip() for c in r)] if rows is not None else None
+                if rows is not None and len(rows) < 2:
                     continue
-                if loaded + len(rows) > MAX_ROWS:
+                if rows is None or loaded + len(rows) > MAX_ROWS:
                     self.problems.append(f"{name}{' / ' + sheet if sheet else ''}: left out, past {MAX_ROWS:,} rows in all")
                     continue
                 table = _ident(stem if len(sheets) == 1 else f"{stem} {sheet}", used, "data")

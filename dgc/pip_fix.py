@@ -51,6 +51,7 @@ RUN_ID = re.compile(r"run_[0-9a-f]{32}\Z")
 KEEP_UNUSED_S = 14 * 24 * 3600          # a copy nobody used for 14 days is removed
 STALE_S = 12 * 3600                     # a fix another process has not touched for this long is gone (pid reuse)
 MAX_RECORDS = 40                        # fixes kept per project, newest first
+PROMPT_CHARS = 20_000                   # the fixer's brief in its record: the agent map's cap for a prompt
 MAX_FILES_SHOWN = 50                    # files a record lists
 MAX_REMEMBERED = 16                     # ignored files a project's copy gets
 MAX_REMEMBERED_BYTES = 256 * 1024       # a .env, not a database
@@ -268,10 +269,12 @@ def _settled(row: dict) -> dict:
 
 
 def wire(record: dict) -> dict:
-    """What the editor sees of a record: never its owner, session or folders."""
+    """What the editor sees of a record: never its owner, session or folders. `prompt` is the brief the fixer was
+    given (PROMPT_CHARS at most): no task call started it, so the agent map shows it as that agent's prompt. The
+    protocol's `fix` is an open object (dgc/editor_protocol.py), so no client is asked to know it."""
     keep = ("fix_id", "run_id", "pip_id", "name", "pip_type", "agent_id", "state", "step", "queued_behind",
             "created_at", "started_at", "ended_at", "files", "held", "merged", "tests", "summary", "message",
-            "undo", "deps")
+            "undo", "deps", "prompt")
     return {key: record[key] for key in keep if key in record and record[key] not in (None, "")}
 
 
@@ -1115,6 +1118,9 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
     fix_id = "fix_" + uuid.uuid4().hex
     name = _clip(report.get("name") or "a Pip", 120)
     description = f"Fix what {name} found"
+    # What the fixer is told, as it is told it: the agent map shows it as this agent's Prompt (no task call started
+    # it, so the chat has no other copy), live and from the stored record after a window reload.
+    brief_text = child_prompt(brief)
     cancel = threading.Event()
     sub_ui = _fix_ui_class()(agent.ui, description, cancel=cancel)
     registry = agent.subagents
@@ -1123,7 +1129,7 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
     record = {"fix_id": fix_id, "session_id": session_id, "run_id": report.get("run_id"),
               "pip_id": report.get("pip_id"), "name": name, "pip_type": report.get("pip_type"),
               "agent_id": agent_id, "state": "queued", "created_at": _now(),
-              "owner": {"pid": os.getpid(), "token": _TOKEN}}
+              "prompt": _clip_block(brief_text, PROMPT_CHARS), "owner": {"pid": os.getpid(), "token": _TOKEN}}
     lock = threading.Lock()
 
     def update(**fields) -> dict:
@@ -1150,6 +1156,16 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
     first = update()
     registry.start(id=agent_id, description=description, depth=1, isolated=True, queued=True,
                    background=True, turn_hint="")
+
+    def keep_map() -> None:
+        # The chat's saved helper records: after a window reload the agent map still lists this fix, with its Prompt.
+        save = getattr(agent, "save_helper_records", None)
+        if callable(save):
+            try:
+                save()
+            except Exception:
+                pass                    # display data: a failed write never fails the fix
+    keep_map()
     handle = {"cancel": cancel, "description": description, "agent": None, "parent_id": None,
               "worktree": str(project.copy), "branch": "", "base_commit": "", "keeper": None,
               "started_at": time.time(), "queued": False, "queue_seq": 0, "pip_fix": fix_id}
@@ -1244,7 +1260,7 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
                 sub._refresh_system()
 
             failure, result, start_error = agent._execute_prepared_subagent(
-                description, child_prompt(brief), "", workspace, sub_ui, None, cancel=cancel, handle=handle,
+                description, brief_text, "", workspace, sub_ui, None, cancel=cancel, handle=handle,
                 prepare_child=prepare_child)
             outcome_text = result or failure or start_error
             if start_error or failure:
@@ -1278,6 +1294,7 @@ def start(agent, brief: dict, *, session_id: str, emit) -> dict:
                 project.touch()
             except OSError:
                 pass
+            keep_map()                                 # however it ended: the map lists it after a reload
             from .agent import _TaskOutcome
             agent._remember_finished(agent_id, description, _TaskOutcome(
                 _clip(outcome_text or record.get("message") or record.get("state"), 2000),

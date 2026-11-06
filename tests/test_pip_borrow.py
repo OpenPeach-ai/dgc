@@ -261,15 +261,46 @@ class LentChromeTests(Borrow):
         for odd in ("https://evil.example\\@shop.example/", "https://me@shop.example/orders"):
             self.assertTrue(session.use({"op": "open", "url": odd}).startswith("error"), odd)
 
-    def test_fetch_gate_keeps_subframes_resources_and_background_posts_on_card_sites(self):
-        tab = pip_borrow.BorrowedTab({SHOP})
+    def test_fetch_gate_lets_a_card_sites_page_load_its_own_resources_and_sends_only_to_the_card(self):
+        # A card names the site the Pip asked for; the site keeps its styles, scripts, pictures, API and sign-in or
+        # payment frames on other origins (static., images CDN, api., accounts.), as most real sites do.
+        tab = pip_borrow.BorrowedTab({"https://www.shop.example"},
+                                     deny=lambda url: "denied in settings" if "tracker.example" in url else "")
+        tab._session_id, tab._target_id = "tab", "frame-top"
         fired = []
-        tab._fire = lambda method, params, session: fired.append((method, params, session))
-        for index, (kind, method) in enumerate((("Document", "GET"), ("Image", "GET"), ("XHR", "POST"))):
-            tab._gate({"requestId": str(index), "resourceType": kind,
-                       "request": {"method": method, "url": ELSEWHERE + "/collect"}}, "child")
-        self.assertEqual([method for method, _, _ in fired], ["Fetch.failRequest"] * 3)
-        self.assertEqual([kind for kind, _ in tab.refused], ["site", "resource", "elsewhere"])
+        tab._fire = lambda method, params, session: fired.append((params["requestId"], method))
+        loads = [("Stylesheet", "https://static.shop.example/app.css"), ("Script", "https://static.shop.example/app.js"),
+                 ("Image", "https://images.shop-cdn.example/p/1.jpg"), ("Font", "https://fonts.shop-cdn.example/a.woff2"),
+                 ("XHR", "https://api.shop.example/orders?page=1"), ("Fetch", "https://api.shop.example/me"),
+                 ("Document", "https://accounts.shop.example/frame")]
+        for index, (kind, url) in enumerate(loads):
+            tab._gate({"requestId": f"load{index}", "resourceType": kind, "frameId": "sub",
+                       "request": {"method": "GET", "url": url}}, "tab" if kind != "Document" else "child")
+        self.assertEqual(fired, [(f"load{i}", "Fetch.continueRequest") for i in range(len(loads))], tab.refused)
+        self.assertEqual(tab.refused, [])
+        fired.clear()
+        # The tab's own page goes only to the card's sites (each redirect hop is a request like this one).
+        tab._gate({"requestId": "top", "resourceType": "Document", "frameId": "frame-top",
+                   "request": {"method": "GET", "url": ELSEWHERE + "/"}}, "tab")
+        # What the Pip's step would send goes to the card's sites only, at any level.
+        tab.level, tab.acted_at = pip_levels.FULL, time.monotonic()
+        tab._gate({"requestId": "send", "resourceType": "XHR", "frameId": "frame-top",
+                   "request": {"method": "POST", "url": "https://api.shop.example/collect", "postData": "a=1"}}, "tab")
+        tab._gate({"requestId": "form", "resourceType": "Document", "frameId": "sub",
+                   "request": {"method": "POST", "url": ELSEWHERE + "/form", "postData": "a=1"}}, "child")
+        # The user's own deny rules hold for everything the page loads too.
+        tab._gate({"requestId": "rule", "resourceType": "Script", "frameId": "sub",
+                   "request": {"method": "GET", "url": "https://tracker.example/t.js"}}, "tab")
+        self.assertEqual(fired, [("top", "Fetch.failRequest"), ("send", "Fetch.failRequest"),
+                                 ("form", "Fetch.failRequest"), ("rule", "Fetch.failRequest")])
+        self.assertEqual([kind for kind, _ in tab.refused], ["site", "elsewhere", "elsewhere", "resource"])
+        fired.clear(); tab.refused.clear()
+        # The tab's own form post on a card site, with no step of the Pip's behind it, is decided by its level.
+        tab.level, tab.acted_at = pip_levels.ASK, 0.0
+        tab._gate({"requestId": "post", "resourceType": "Document", "frameId": "frame-top",
+                   "request": {"method": "POST", "url": "https://www.shop.example/search", "postData": "q=x"}}, "tab")
+        self.assertEqual(fired, [("post", "Fetch.failRequest")])
+        self.assertEqual([kind for kind, _ in tab.refused], ["asks"])
 
     def test_what_it_would_send_goes_only_as_its_level_allows_and_a_payment_never(self):
         sent = lambda fake: [u for m, u, _ in fake.sent_requests if m == "POST"]
@@ -614,6 +645,16 @@ class LiveBorrowTests(Borrow):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(lambda: (server.shutdown(), server.server_close()))
         shop = f"http://127.0.0.1:{port}"
+        # The site's own other origin (as its CDN, its API and its sign-in frame are): what its page loads from there
+        # loads, as in the user's own tab.
+        other = f"http://localhost:{port}"
+        (site / "static").mkdir()
+        (site / "static" / "app.css").write_text("h1 { color: rgb(1, 2, 3); }")
+        (site / "static" / "p.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (site / "frame.html").write_text("<p>a frame of the site</p>")
+        (site / "orders.html").write_text((site / "orders.html").read_text()
+            + f"<link rel=stylesheet href='{other}/static/app.css'><img src='{other}/static/p.png'>"
+              f"<iframe src='{other}/frame.html'></iframe><script>fetch('{other}/api/orders').catch(() => 0)</script>")
         profile = Path(tempfile.mkdtemp(prefix="dgc-standin-chrome-"))
         users_page = f"{shop}/receipt.html?the-users-own-tab"
         chrome = subprocess.Popen([str(binary), "--headless=new", "--no-sandbox", "--no-first-run", "--disable-gpu",
@@ -635,6 +676,9 @@ class LiveBorrowTests(Borrow):
         for secret in ("hunter2-saved", "4111111111111111", "SHOWN-PASSWORD", CARD):
             self.assertNotIn(secret, page)
         time.sleep(0.5)
+        for loaded in ("/static/app.css", "/static/p.png", "/frame.html", "/api/orders"):
+            self.assertIn(("GET", loaded), hits, f"{loaded}: the page's own resources from its other origin load")
+        self.assertNotIn("DGC stopped a request", page)
         self.assertEqual(sockets, [], "a WebSocket from DGC's tab never connects: the gate can't see what it carries")
         worker = session.use({"op": "open", "url": f"{shop}/worker.html"})
         self.assertIn("worker page", worker)

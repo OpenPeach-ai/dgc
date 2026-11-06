@@ -117,9 +117,10 @@ class WorkChatHeicTests(unittest.TestCase):
         self.assertEqual(len(started), 1)
 
     def test_the_ready_capabilities_say_heic_is_taken(self):
-        import inspect
         from dgc import headless
-        self.assertIn('"heic_images": True', inspect.getsource(headless.Backend._ready_payload))
+        # Read the module directly: other tests reload headless, which can make
+        # inspect.getsource resolve a stale line number from its cache.
+        self.assertIn('"heic_images": True', Path(headless.__file__).read_text())
 
 
 if __name__ == "__main__":

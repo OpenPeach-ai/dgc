@@ -572,7 +572,9 @@ class NewDirTest(unittest.TestCase):
             sess = self.opened(ui, str(self.other))
         self.assertEqual(self.decide(sess.agent, "nc -l 9"), "deny")
 
-    def test_a_reopened_chat_in_a_folder_agent_never_raises_its_mode(self):
+    def test_a_chat_reopened_in_a_folder_agent_comes_back_in_its_own_mode_while_the_folder_is_trusted(self):
+        # The person picks it from /resume, so it comes back in the mode it had (0.51.0), Auto included, even over a
+        # Default; the folder's own trust is checked again, and a folder no longer trusted reopens it in Default.
         stored = json.loads(self.user_config.read_text())
         stored["mode"] = "default"
         self.user_config.write_text(json.dumps(stored))
@@ -583,15 +585,23 @@ class NewDirTest(unittest.TestCase):
             sessions.save(sessions.new_path(self.other),
                           [{"role": "system", "content": "s"}, {"role": "user", "content": name}],
                           self.other, name=name, mode=mode)
-        expected = {"ran in auto": "default", "was planning": "plan"}
-        for name, mode in expected.items():
+
+        def resume(name):
+            ui._handle_slash("/resume")
+            labels = [row["label"] for row in ui._overlay_rows()]
+            ui._overlay["sel"] = next(i for i, label in enumerate(labels) if name in label)
+            ui._overlay_select()
+        for name, mode in (("ran in auto", "auto"), ("was planning", "plan")):
             with self.subTest(chat=name):
-                ui._handle_slash("/resume")
-                labels = [row["label"] for row in ui._overlay_rows()]
-                ui._overlay["sel"] = next(i for i, label in enumerate(labels) if name in label)
-                ui._overlay_select()
-                self.assertEqual(sess.agent.mode, mode,
-                                 "a reopened chat lowers the mode, never raises it")
+                resume(name)
+                self.assertEqual(sess.agent.mode, mode, "the person's reopened chat lost its own mode")
+        with self.subTest(chat="ran in auto", trusted=False):
+            trust.revoke_trust(sess.agent.config, self.other)
+            resume("ran in auto")
+            self.assertEqual(sess.agent.mode, "default", "a folder no longer trusted reopened in auto")
+            shown = " ".join(self.plain_text(block) for block in ui.blocks if isinstance(block, str))
+            self.assertIn("This chat ran in Auto. This folder is not trusted now, so it reopened in Default", shown)
+        self.assertEqual(json.loads(self.user_config.read_text())["mode"], "default", "the default was rewritten")
 
     # ---- peers -----------------------------------------------------------------------------------
     def test_the_note_names_every_agent_and_any_of_them_refuses_a_takeover(self):

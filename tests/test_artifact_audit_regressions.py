@@ -1,6 +1,8 @@
 """Artifact regressions: saved identity, malformed inputs, and consistent snapshots."""
 import json
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -108,6 +110,18 @@ class ArtifactAuditTests(unittest.TestCase):
         self.assertNotEqual(before, after)
         self.assertEqual(before.read_text(), "old")
         self.assertEqual(after.read_text(), "new")
+
+    def test_old_export_folders_are_removed_and_recent_ones_kept(self):
+        art = self.make("doc", "notes")
+        first = service.export(art.id, "md", store=self.store)
+        second = service.export(art.id, "md", store=self.store)
+        hours_ago = time.time() - 2 * 3600       # every caller copies its file at once; nothing reads it later
+        os.utime(first.parent, (hours_ago, hours_ago))
+        third = service.export(art.id, "md", store=self.store)
+        self.assertFalse(first.parent.exists())
+        self.assertEqual(sorted(p.name for p in self.store.export_dir(art.id).iterdir()),
+                         sorted([second.parent.name, third.parent.name]))
+        self.assertEqual(third.read_text(), "notes")
 
     def test_a_stale_allow_cannot_authorize_a_replaced_source(self):
         old = {"sources": [{"id": "sales", "kind": "file", "path": "old.csv"}], "widgets": []}

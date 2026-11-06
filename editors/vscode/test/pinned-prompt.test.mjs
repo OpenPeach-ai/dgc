@@ -590,6 +590,40 @@ test("a prompt pins only while its strip fits in 30% of the window, decided from
   assert.deepEqual(p.errors, []);
 });
 
+test("a prompt never pins over more than 40% of the transcript; its height is read when a pin is decided, never per keystroke", () => {
+  // 0.51.0 release candidate, a short Work chat: a prompt that fitted 30% of a 308px window pinned over a 134px
+  // transcript, and the end of a long wake turn showed as its reply's last line under it.
+  const p = panel({ resizeObservers: true });
+  Object.defineProperty(p.win, "innerHeight", { configurable: true, value: 308 });
+  let shown = 134;
+  Object.defineProperty(p.log, "clientHeight", { configurable: true, get: () => shown });
+  p.events(turn("t1", "generate another one"));
+  const head = p.heads()[0];
+  p.resize(head, { borderBoxSize: [{ blockSize: 57 }] });
+  assert.ok(head.classList.contains("pin-off"), "85px of strip over 134px of transcript: more than 40% (54)");
+  shown = 400;
+  p.resize(p.log);
+  assert.equal(head.classList.contains("pin-off"), false, "the transcript grew (the window did not): 85 fits in 92 and in 160");
+  // A draft growing in the composer takes the transcript's height: nothing flips while it is there.
+  p.input.value = "a draft\nof several\nlines";
+  shown = 120;
+  p.resize(p.log);
+  assert.equal(head.classList.contains("pin-off"), false, "a draft is in the composer: the pin stands");
+  p.input.value = "";
+  shown = 121;
+  p.resize(p.log);
+  assert.ok(head.classList.contains("pin-off"), "with the composer at rest a short transcript decides again");
+  shown = 0;
+  p.resize(p.log);
+  assert.ok(head.classList.contains("pin-off"), "not laid out (a hidden panel): the decision stands");
+  shown = 600;
+  Object.defineProperty(p.win, "innerHeight", { configurable: true, value: 800 });
+  p.win.dispatchEvent(new p.win.Event("resize"));
+  assert.equal(head.classList.contains("pin-off"), false, "a taller window with room in the transcript pins it");
+  assert.match(mainJs, /const PIN_LOG_SHARE = 0\.4;/);
+  assert.deepEqual(p.errors, []);
+});
+
 // ---- focus --------------------------------------------------------------------------------------------
 
 test("keyboard focus is brought out from under a pinned prompt; mouse focus and the prompt's own controls are left alone", () => {

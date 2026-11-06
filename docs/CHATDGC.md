@@ -285,15 +285,22 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     chats move back to your chats.
 - **Plugins in chat**, as ChatGPT uses its apps: every plugin turned on in **Settings → Plugins** is ChatDGC's
   to use, with no "use this plugin?" question. Ask for something one of them does and it uses it in the reply.
-  - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once. For a Composio
-    multi-action call, DGC checks every inner action against its reviewed reads; a mixed, unknown or
-    sending batch still waits for review.
+  - **Reads** (what the vendor marks read-only, or DGC's reviewed list) run at once. Composio's multi-execute
+    tool counts as a read when every app call inside it is one DGC reviewed (Gmail's Fetch emails, Google
+    Calendar's Find event, Google Drive's Find file, Notion's page search, Google Contacts' search) with the
+    inputs DGC's review allows (your own Gmail account, at most 20 items, the searches' own fields), whatever
+    marks Composio gives the multi-execute tool itself; one send or any other app call inside it keeps the card.
+    Its own lookups of which tools exist run at once too.
   - **Changes** (sending, creating, editing, deleting, sharing, paying) show a card under the reply with the
-    exact tool and inputs. Nothing happens until you choose: **Send it now** (after **Edit**, if you like),
-    **Hand it to a Pip** (one of your Personal Pips takes it on: that's offered first for something recurring,
-    on a schedule, or that has to wait), or **Don't**. The card then says what came of it, and the chat's next
-    reply knows. After **Send it now**, the bounded result is passed back as untrusted data and the
-    same reply finishes with what happened. **Don't** and **Hand it to a Pip** leave that reply as it is.
+    exact tool and inputs, and the plugin's own logo. Nothing happens until you choose: **Send it now** (after
+    **Edit**, if you like), **Hand it to a Pip** (one of your Personal Pips takes it on: that's offered first for
+    something recurring, on a schedule, or that has to wait), or **Don't**. The card then says what came of it.
+  - **After Send it now the reply carries on**, in the same message: the model reads what the action answered
+    (as untrusted data) and finishes, "Sent to …" or the summary it promised. A card it raises then is a new
+    card, as ever. **Don't** and **Hand it to a Pip** don't carry on; the chat's next reply knows either way.
+  - **Composio's cards say each app call in plain words**: "Gmail · Fetch emails · 5 from Inbox · through
+    Composio", without Composio's own fields (its session, its "thought") or raw JSON. The logo is Composio's,
+    the service that holds the access and sees the data. **Edit** shows the app calls as one field and keeps Composio's own fields as they were.
   - **How much asks** is each plugin's level in Settings → Pips → Plugins (Always ask, Any changes, Important
     actions, Never ask), shared with your Pips. A plugin that can move money always asks.
   - **No made-up addresses:** a wallet address in a plugin call has to be one you gave or a plugin answered
@@ -303,6 +310,10 @@ research, files, data and charts, the canvas, memory, plugins, dictation, read a
     said yourself isn't held back.
   - A plugin whose sign-in only the editor holds can't be reached from a chat (as from a Pip): sign it in from
     Settings → Plugins.
+  - **Plugin cards:** a plugin that comes with a card (MCP Apps: its own small app, such as Cardboard's project
+    list) shows it above the reply that used it, in your editor's theme, and again when you reopen the chat. What
+    the card asks of its plugin follows the same level; DGC's Allow card asks first for a change. See **Plugin
+    cards** in `/docs`.
 - **Data analysis**, as ChatGPT has it: attach a spreadsheet (CSV, TSV or Excel; each sheet is a table) and ask
   about it. ChatDGC answers with exact numbers by asking the data in SQL, read-only and in memory, rather than
   reading rows by eye: totals, groups, monthly trends, averages, medians, spreads and correlations. Nothing it

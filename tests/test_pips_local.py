@@ -257,11 +257,16 @@ class LocalPipsTests(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "Finish or cancel"):
             self.registry.rebind(self.workspace["id"], self.root, expected_root=self.root)
 
-    def test_delegated_route_refused(self):
+    def test_project_pip_can_pin_a_subscription_without_loosening_its_policy(self):
         self.commit()
-        self.cfg.data["subscription_engine"] = "codex"
-        with self.assertRaisesRegex(RegistryError, "local or API model"):
-            self.enqueue()
+        pip = self.store.create(self.workspace["id"], "Auditor", "Inspect correctness.", "device_1",
+                                model_choice={"mode": "subscription", "engine": "codex"})
+        with patch("dgc.pip_brain.available", return_value=""):
+            settings = pips._model_settings(self.cfg, pip["model_choice"])
+            run = self.enqueue(pip)
+        self.assertEqual(settings["brain"], {"engine": "codex", "model": "", "effort": ""})
+        self.assertNotIn("api_key", settings)
+        self.assertEqual(self.store.run(run["id"])["manifest"]["model"], "codex")
 
     def test_uncommitted_folder_refused(self):
         with self.assertRaisesRegex(RegistryError, "source is unavailable"):

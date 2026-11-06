@@ -70,6 +70,23 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(refused["error"]["code"], "local_only")
         self.assertIsNone(pip_profile.get(self.registry.db, self.pip["id"])["color"])
 
+    def test_eight_character_colours_migrate_without_losing_existing_profiles(self):
+        pip_profile.update(self.store, self.pip["id"], {"color": "mint", "notify": False}, "editor-user")
+        with self.registry.transaction():
+            self.registry.db.execute(pip_profile.SCHEMA.replace("pip_profiles (", "pip_profiles_old (")
+                .replace("IF NOT EXISTS pip_profiles_old", "pip_profiles_old")
+                .replace("'core','scout','lens','patch','rook','pulse','lock','quill','peach','rose','lilac','sky','mint','sun','slate'",
+                         "'peach','rose','lilac','sky','mint','sun','slate'"))
+            self.registry.db.execute("INSERT INTO pip_profiles_old SELECT * FROM pip_profiles")
+            self.registry.db.execute("DROP TABLE pip_profiles")
+            self.registry.db.execute("ALTER TABLE pip_profiles_old RENAME TO pip_profiles")
+            self.registry.db.execute("PRAGMA user_version=50")
+        with WorkspaceRegistry(self.registry.directory) as upgraded:
+            self.assertEqual(upgraded.db.execute("PRAGMA user_version").fetchone()[0], 51)
+            self.assertEqual(pip_profile.get(upgraded.db, self.pip["id"])["color"], "mint")
+            self.assertFalse(pip_profile.get(upgraded.db, self.pip["id"])["notify"])
+            self.assertEqual(pip_profile.update(self.store, self.pip["id"], {"color": "lens"}, "editor-user")["profile"]["color"], "lens")
+
     # ---------------------------------------------------------------- Links, Media, Files
 
     def test_links_media_and_files_list_what_was_shared_in_its_chat_newest_first(self):
@@ -149,8 +166,9 @@ class ProfileTests(unittest.TestCase):
         key = pip_routines.KEY + routine["id"][-16:] + "_" + "0" * 24
         sent = pip_chat.send(self.store, self.pip["id"], "It is time.", key, "local-routine", self.cfg, _intro=True)
         self.store.claim_next()
-        self.store.finish(sent["run"]["id"], result={"text": "Good morning! Three stories today."})
-        self.assertEqual(notifier.tick(self.registry), "Ava: Good morning! Three stories today.")
+        self.store.finish(sent["run"]["id"], result={"text": "Good morning!\n---\nThree stories today."})
+        self.assertEqual(notifier.tick(self.registry), "Ava: Good morning! Three stories today.",
+                         "the line between its short messages is not said")
         self.assertIsNone(notifier.tick(self.registry), "once")
         self.link(self.pip["id"], "googlecalendar", "requested", suffix="e")
         self.assertEqual(notifier.tick(self.registry), "Ava asks to use Google Calendar. Answer in its chat.")

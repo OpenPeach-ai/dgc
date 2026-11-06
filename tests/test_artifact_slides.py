@@ -160,6 +160,39 @@ class Normalize(unittest.TestCase):
         with self.assertRaisesRegex(SlidesError, "says it's image/png but its bytes aren't"):
             slides.normalize(deck_with("data:image/png;base64," + base64.b64encode(svg).decode()))
 
+    def test_common_passive_svgs_are_kept_and_active_or_external_ones_refused(self):
+        def deck_with(svg):
+            return {"slides": [{"layout": "image", "image": {"src": "data:image/svg+xml;base64,"
+                                                                    + base64.b64encode(svg).decode()}}]}
+        ns = b'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"'
+        for passive in (
+            # Illustrator-style class rules, the standard SVG 1.1 doctype, and a quoted local gradient.
+            b"<svg " + ns + b'><style>.a{fill:#c00}</style><rect class="a" width="10" height="10"/></svg>',
+            b'<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" '
+            b'"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg ' + ns + b'><rect width="10" height="10"/></svg>',
+            b"<svg " + ns + b'><defs><linearGradient id="g"/></defs><rect fill="url(\'#g\')" width="10" height="10"/>'
+            b'<style>rect{fill:url("#g")}</style></svg>',
+        ):
+            with self.subTest(passive=passive):
+                d = slides.normalize(deck_with(passive))
+                self.assertEqual(slides.normalize(d), d)
+        for declares in (
+            b'<!DOCTYPE svg [<!ENTITY a "aaaa">]><svg ' + ns + b"><text>&a;</text></svg>",
+            b'<!DOCTYPE svg SYSTEM "https://example.com/x.dtd" [<!ENTITY a "a">]><svg ' + ns + b"/>",
+        ):
+            with self.subTest(declares=declares), self.assertRaises(SlidesError):
+                slides.normalize(deck_with(declares))
+        for active in (
+            b"<!DOCTYPE svg [ ]><svg " + ns + b"/>",
+            b"<svg " + ns + b"><style>@import url(https://example.com/a.css);</style></svg>",
+            b"<svg " + ns + b"><style>rect{fill:url(https://example.com/p.svg#a)}</style><rect/></svg>",
+            b"<svg " + ns + b"><style>rect{fill:u\\72l(https://example.com/p.svg#a)}</style><rect/></svg>",
+            b"<svg " + ns + b'><rect style="fill:url(\'https://example.com/p.svg#a\')"/></svg>',
+        ):
+            with self.subTest(active=active):
+                with self.assertRaisesRegex(SlidesError, "active or external SVG content"):
+                    slides.normalize(deck_with(active))
+
     def test_errors_name_the_slide_and_the_field_and_say_what_to_change(self):
         cases = [
             ({"slides": [{"title": "x", "body": "y"}]}, r'Slide 1 has "body".*fields are: layout, title'),

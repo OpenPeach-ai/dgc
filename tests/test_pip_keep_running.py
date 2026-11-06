@@ -85,41 +85,97 @@ class LinuxSwitchTests(unittest.TestCase):
         self.assertEqual(self.unit.read_text(), self.spec["content"])
         self.assertIn(["restart", self.spec["unit_name"]], self.calls)
 
-    def test_install_reconcile_skips_busy_work_then_restarts_idle_old_runner(self):
-        status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "active"}
-        registry = MagicMock()
-        context = MagicMock()
-        context.__enter__.return_value = registry
-        with patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
+    def registry_file(self, *, busy):
+        """The previous install's registry, a schema behind this install's, as an update finds it."""
+        import sqlite3
+        from dgc.workspace_registry import SCHEMA_VERSION
+        directory = self.home.parent / "state"
+        directory.mkdir(exist_ok=True)
+        path = directory / "registry.sqlite3"
+        path.unlink(missing_ok=True)
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE pip_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+        db.execute("INSERT INTO pip_runs VALUES('run_old','succeeded')")
+        if busy:
+            db.execute("INSERT INTO pip_runs VALUES('run_now','running')")
+        db.execute(f"PRAGMA user_version={SCHEMA_VERSION - 1}")
+        db.commit(); db.close()
+        return directory, SCHEMA_VERSION - 1
+
+    def user_version(self, directory):
+        import sqlite3
+        db = sqlite3.connect(directory / "registry.sqlite3")
+        try:
+            return db.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            db.close()
+
+    @contextlib.contextmanager
+    def updating(self, status, directory):
+        config = self.home.parent / "config"
+        unit = config / "systemd" / "user" / self.spec["unit_name"]          # the outdated unit, as installed
+        unit.parent.mkdir(parents=True, exist_ok=True)
+        unit.write_text("# an earlier install's unit\n")
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config)}), \
+             patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
              patch.object(keep, "_home", return_value=self.home), patch.object(service, "status", return_value=status), \
-             patch("dgc.workspace_registry.WorkspaceRegistry", return_value=context), \
+             patch("dgc.workspace_registry.state_directory", return_value=directory), \
+             patch("dgc.workspace_registry.WorkspaceRegistry", side_effect=AssertionError("opening it migrates it")), \
              patch.object(service, "install", return_value={"changed": True}) as install, \
              patch.object(service, "restart") as restart:
-            registry.db.execute.return_value.fetchone.return_value = (1,)
-            self.assertIn("deferred", keep.upgrade_after_install())
-            install.assert_not_called()
-            registry.db.execute.return_value.fetchone.return_value = None
-            self.assertIn("Updated", keep.upgrade_after_install())
+            yield install, restart
+
+    def test_install_reconcile_never_migrates_and_moves_a_busy_runners_unit_without_restarting_it(self):
+        status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "active"}
+        directory, before = self.registry_file(busy=True)
+        with self.updating(status, directory) as (install, restart):
+            said = keep.upgrade_after_install()
+            self.assertEqual(said, keep.BUSY_NOTE)
+            # The unit names this install now: whenever systemd starts the runner again, it starts this one.
+            install.assert_called_once_with(self.home, upgrade=True)
+            restart.assert_not_called()
+        self.assertEqual(self.user_version(directory), before, "the old runner's database is left as it was")
+        self.registry_file(busy=False)
+        with self.updating(status, directory) as (install, restart):
+            self.assertEqual(keep.upgrade_after_install(), keep.UPDATED_NOTE)
             install.assert_called_once_with(self.home, upgrade=True)
             restart.assert_called_once_with(self.home)
+        self.assertEqual(self.user_version(directory), before)
 
     def test_install_reconcile_recovers_old_runner_in_restart_loop(self):
         status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "activating"}
-        registry = MagicMock()
-        registry.db.execute.return_value.fetchone.return_value = None
-        context = MagicMock()
-        context.__enter__.return_value = registry
-        with patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
-             patch.object(keep, "_home", return_value=self.home), patch.object(service, "status", return_value=status), \
-             patch("dgc.workspace_registry.WorkspaceRegistry", return_value=context), \
-             patch.object(service, "install", return_value={"changed": True}), \
-             patch.object(service, "restart") as restart:
+        directory, _ = self.registry_file(busy=False)
+        with self.updating(status, directory) as (install, restart):
             self.assertIn("Updated", keep.upgrade_after_install())
             restart.assert_called_once_with(self.home)
             restart.reset_mock()
             status["active_state"] = "inactive"
             self.assertIn("Updated", keep.upgrade_after_install())
             restart.assert_not_called()
+
+    def test_install_reconcile_counts_a_registry_it_cannot_read_as_busy(self):
+        status = {"installed": True, "outdated": True, "enabled_state": "enabled", "active_state": "active"}
+        directory = self.home.parent / "state"
+        directory.mkdir()
+        (directory / "registry.sqlite3").write_bytes(b"not a database")
+        with self.updating(status, directory) as (_, restart):
+            self.assertEqual(keep.upgrade_after_install(), keep.BUSY_NOTE)
+            restart.assert_not_called()
+
+    def test_install_refresh_says_nothing_to_someone_who_never_turned_it_on(self):
+        (self.home / ".dgc").mkdir(mode=0o755)          # not owner-only: only writing a unit would need that
+        config = self.home.parent / "config"
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config)}), \
+             patch.object(keep.wsl, "version", return_value=None), patch.object(keep, "_has_systemd", return_value=True), \
+             patch.object(keep, "_home", return_value=self.home):
+            self.assertEqual(keep.upgrade_after_install(), "")
+            self.assertEqual(self.calls, [])
+            unit = service.unit_file(self.home)
+            self.assertEqual(unit, config / "systemd" / "user" / self.spec["unit_name"])
+            unit.parent.mkdir(parents=True)
+            unit.write_text(self.spec["content"]); unit.chmod(0o600)
+            with self.assertRaisesRegex(RegistryError, "owner-only"):
+                keep.upgrade_after_install()            # one that is there is still checked
 
     def test_a_runner_already_running_is_not_started_twice(self):
         keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
@@ -302,6 +358,74 @@ class MacSwitchTests(unittest.TestCase):
         source.rmdir()
         with self.assertRaisesRegex(RegistryError, "differs"):
             keep.set_on(True, runner_online=True, dgc_home=self.home, **self.options)
+
+    def test_an_agent_whose_interpreter_vanished_is_still_refreshed_and_turned_off(self):
+        for pruned in (False, True):
+            with self.subTest(pruned=pruned):
+                base = self.home.parent
+                source = base / f"old-release-{pruned}"
+                (source / "dgc").mkdir(parents=True)
+                (source / "dgc" / "__init__.py").write_text('')
+                (source / "dgc" / "cli.py").write_text('')
+                real = base / f"brew-python-{pruned}" / "python3.12"
+                real.parent.mkdir()
+                real.write_text("#!/bin/sh\n")
+                real.chmod(0o755)
+                link = base / f"old-venv-{pruned}" / "bin" / "python3"
+                link.parent.mkdir(parents=True)
+                link.symlink_to(real)
+                old = keep._agent_spec(self.home.resolve(), agent_directory=self.options["agent_directory"],
+                                       python_executable=link, package_root=source)
+                self.spec["path"].parent.mkdir(exist_ok=True)
+                self.spec["path"].write_bytes(old["content"])
+                self.spec["path"].chmod(0o644)
+                real.unlink()                          # Homebrew's python@3.12 was uninstalled
+                if pruned:
+                    import shutil
+                    shutil.rmtree(source)
+                self.loaded = True
+                self.assertTrue(keep._mac_status(self.spec)["outdated"])
+                keep.set_on(False, runner_online=False, dgc_home=self.home, **self.options)
+                self.assertFalse(self.spec["path"].exists())
+                self.spec["path"].write_bytes(old["content"])
+                self.spec["path"].chmod(0o644)
+                keep.set_on(True, runner_online=False, dgc_home=self.home, **self.options)
+                self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+
+    def test_install_reconcile_leaves_a_busy_runners_agent_and_database_alone(self):
+        import sqlite3
+        from dgc.workspace_registry import SCHEMA_VERSION
+        source = self.home.parent / "old-release"
+        (source / "dgc").mkdir(parents=True)
+        (source / "dgc" / "__init__.py").write_text('')
+        (source / "dgc" / "cli.py").write_text('')
+        old = keep._agent_spec(self.home.resolve(), package_root=source, **self.options)
+        self.spec["path"].parent.mkdir()
+        self.spec["path"].write_bytes(old["content"])
+        self.spec["path"].chmod(0o644)
+        self.loaded = True
+        directory = self.home.parent / "state"
+        directory.mkdir()
+        db = sqlite3.connect(directory / "registry.sqlite3")
+        db.execute("CREATE TABLE pip_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+        db.execute("INSERT INTO pip_runs VALUES('run_now','queued')")
+        db.execute(f"PRAGMA user_version={SCHEMA_VERSION - 1}")
+        db.commit(); db.close()
+        with patch.object(keep, "_home", return_value=self.home.resolve()), \
+             patch.object(keep, "_agent_file", return_value=self.spec["path"], create=True), \
+             patch.object(keep, "_agent_spec", side_effect=lambda home, _real=keep._agent_spec, **kw:
+                          _real(home, **{**self.options, **kw})), \
+             patch("dgc.workspace_registry.state_directory", return_value=directory), \
+             patch("dgc.workspace_registry.WorkspaceRegistry", side_effect=AssertionError("opening it migrates it")):
+            self.assertEqual(keep.upgrade_after_install(), keep.BUSY_NOTE)
+            self.assertEqual(self.spec["path"].read_bytes(), old["content"])
+            self.assertNotIn("bootout", [c[0] for c in self.calls])
+            db = sqlite3.connect(directory / "registry.sqlite3")
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION - 1)
+            db.execute("UPDATE pip_runs SET status='succeeded'"); db.commit(); db.close()
+            self.assertEqual(keep.upgrade_after_install(), keep.UPDATED_NOTE)
+        self.assertEqual(self.spec["path"].read_bytes(), self.spec["content"])
+        self.assertIn("bootstrap", [c[0] for c in self.calls])
 
     def test_a_link_at_the_agent_path_is_never_followed(self):
         self.spec["path"].parent.mkdir(parents=True)

@@ -43,6 +43,20 @@ class EditorStateTests(unittest.TestCase):
         self.assertEqual(history[5]["text"], "Tests failed.")
         self.assertEqual(history[-1]["final_message_id"], history[6]["message_id"])
 
+    def test_large_pip_setup_result_replays_the_identity_for_its_card(self):
+        backend = self.backend()
+        setup_id = "setup_" + "a" * 32
+        backend.agent.messages = [
+            {"role": "user", "content": "Set up Pips"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "create-five", "function": {
+                "name": "pips_setup", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "create-five", "content": json.dumps({
+                "setup": {"id": setup_id, "goal": "x" * 5000}})},
+        ]
+        result = next(item for item in backend._history() if item.get("type") == "tool_result")
+        self.assertEqual(json.loads(result["output"]), {"setup": {"id": setup_id}})
+        self.assertEqual(result["call_id"], "create-five")
+
     def test_history_recovers_a_reviewed_diff_from_the_saved_output_alone(self):
         # No session-file migration: split_diff is a pure function of the output string, so a
         # restored patch comes back as a diff card exactly as the live one did.

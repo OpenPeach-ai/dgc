@@ -124,32 +124,20 @@ class SupportedTests(unittest.TestCase):
 
 
 class DesktopReadinessTests(unittest.TestCase):
-    def test_published_socket_needs_an_rfb_greeting(self):
+    def test_readiness_does_not_open_an_incomplete_vnc_handshake(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "vnc.sock"
             listener = socket.socket(socket.AF_UNIX)
             listener.bind(str(path))
             listener.listen(2)
-            listener.settimeout(2)
+            listener.settimeout(0.1)
             desktop = pip_container.ContainerDesktop.__new__(pip_container.ContainerDesktop)
             desktop.computer = SimpleNamespace(socket=lambda name: path)
-
-            def greet():
-                try:
-                    for response in (b"", b"RFB 003.008\n"):
-                        connection, _ = listener.accept()
-                        with connection:
-                            if response:
-                                connection.sendall(response)
-                finally:
-                    listener.close()
-
-            thread = threading.Thread(target=greet)
-            thread.start()
-            self.assertFalse(desktop._vnc_ready(), "a socket can connect before the screen is ready")
             self.assertTrue(desktop._vnc_ready())
-            thread.join(2)
-            self.assertFalse(thread.is_alive())
+            self.assertTrue(desktop._vnc_ready())
+            with self.assertRaises(socket.timeout):
+                listener.accept()
+            listener.close()
 
 
 class ToolTests(unittest.TestCase):

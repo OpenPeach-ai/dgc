@@ -155,8 +155,9 @@ test("Continue in Work: the brief is written with its progress shown, what's sen
     await s.page.keyboard.press("Enter");
     assert.deepEqual(await s.posted("send"), [], "a message sent meanwhile waits its turn");
     await s.send({ type: "briefing", on: false });
-    assert.equal(await s.page.locator(".cd-working").count(), 0);
+    assert.equal(await s.page.locator(".cd-working:not(.cd-waiting)").count(), 0, "the brief's line is gone");
     assert.equal((await s.posted("send")).length, 1, "and goes once the brief is done");
+    assert.equal(await s.page.locator(".cd-working.cd-waiting").count(), 1, "its reply waits for the model at once");
     assert.equal((await work(s)).disabled, true, "its reply comes first");
     await s.send({ type: "turn", state: "started", replyId: M(3) });
     await s.send({ type: "turn", state: "ended" });

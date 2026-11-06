@@ -98,7 +98,7 @@ class LocalPipsBridgeTests(unittest.TestCase):
         value = self.backend._ready_payload()
         self.assertIsNone(ep.event_error({"type": "ready", "seq": 0, **value}))
         self.assertTrue(value["capabilities"]["pips_supported"])
-        self.assertEqual(value["capabilities"]["pips_api_version"], 69)
+        self.assertEqual(value["capabilities"]["pips_api_version"], 73)
         self.assertFalse(value["capabilities"]["pips_enabled"])
         self.assertNotIn("pips_enabled", value)
         self.assertEqual(value["capabilities"]["workspace_identity"], {})
@@ -260,6 +260,32 @@ class LocalPipsBridgeTests(unittest.TestCase):
         self.assertEqual(event["error"]["code"], "busy")
         self.assertEqual(len(self.backend._pips_commands), headless._MAX_PIPS_PENDING)
 
+    def test_the_editors_own_bursts_are_never_busy(self):
+        # Release check, 2026-11-03: opening a Pip's chat sends about 15 controls at once and the 4-second refresh six
+        # more; with 16 waiting, the rest came back "Too many pending Pip controls; wait and retry." and the page
+        # showed it. The editor's page keeps at most 48 in flight, its host 64.
+        self.config.data["pips_enabled"] = True
+        for number in range(48):
+            self.send({"type": "pips_control", "request": {"type": "list_workspaces", "request_id": f"burst-{number}"}},
+                      drain=False)
+        self.assertEqual([e for e in self.events if (e.get("error") or {}).get("code") == "busy"], [])
+        self.backend._drain_pips_commands()
+        answered = [e for e in self.events if e["type"] == "pips_result"]
+        self.assertEqual([e["request_id"] for e in answered], [f"burst-{n}" for n in range(48)])
+        self.assertTrue(all(e["ok"] for e in answered))
+
+    def test_a_worker_that_dies_never_leaves_later_controls_waiting(self):
+        self.config.data["pips_enabled"] = True
+        first = {"type": "pips_control", "request": {"type": "list_workspaces", "request_id": "first"}}
+        self.send(first, drain=False)
+        with patch.object(self.backend, "_perform_pips_command", side_effect=SystemExit(1)), self.assertRaises(SystemExit):
+            self.backend._drain_pips_commands()
+        with patch.object(headless.threading, "Thread") as worker:
+            self.backend._dispatch({"type": "pips_control", "request": {"type": "list_workspaces", "request_id": "next"}})
+        worker.assert_called_once()
+        self.backend._drain_pips_commands()
+        self.assertEqual((self.events[-1]["request_id"], self.events[-1]["ok"]), ("next", True))
+
     def test_enable_uses_existing_save_path_and_never_starts_worker(self):
         with patch.object(self.config, "save", wraps=self.config.save) as save, \
              patch("dgc.pips.start_queued", side_effect=AssertionError("enable is not a run")):
@@ -267,7 +293,7 @@ class LocalPipsBridgeTests(unittest.TestCase):
         save.assert_called_once_with()
         self.assertTrue(self.config.get("pips_enabled"))
         self.assertEqual((event["type"], event["enabled"], event["restart_required"]), ("pips_status", True, False))
-        self.assertEqual(event["api_version"], 69)
+        self.assertEqual(event["api_version"], 73)
 
     def test_disable_persists_global_stop_before_save_and_reenable_keeps_it(self):
         self.config.data["pips_enabled"] = True

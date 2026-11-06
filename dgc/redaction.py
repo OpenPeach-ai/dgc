@@ -182,6 +182,27 @@ def secret_values(config=None) -> tuple[str, ...]:
                     add(value)
         for value in getattr(config, "_session_secret_values", ()):
             add(value)
+        # DGC Router keys (secrets.json router_key_<id>), bound or not: a key is redacted wherever it turns up.
+        router_keys = getattr(config, "_router_keys", None)
+        if isinstance(router_keys, dict):
+            for pair in list(router_keys.values())[:64]:
+                if isinstance(pair, tuple) and pair:
+                    add(pair[0])
+        # Image generators' keys (secrets.json image_key_<id>), and a provider's key taken from the environment.
+        image_keys = getattr(config, "_image_keys", None)
+        if isinstance(image_keys, dict):
+            for pair in list(image_keys.values())[:64]:
+                if isinstance(pair, tuple) and pair:
+                    add(pair[0])
+        try:
+            from .image_providers import ENV_KEYS
+            for names in ENV_KEYS.values():
+                for env_name in names:
+                    value = os.environ.get(env_name)
+                    if value:
+                        add(value)
+        except Exception:                       # noqa: BLE001 -- redaction never fails on a missing module
+            pass
     # A plugin's key saved on its page (plugin_keys): known here once this process saved or sent it, never by
     # reading the keychain, so a server that echoes it back is redacted like any other credential.
     try:

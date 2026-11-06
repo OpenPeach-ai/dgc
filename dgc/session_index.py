@@ -98,6 +98,14 @@ def _read(path: Path):
     return updated, preview, len(msgs), name, text
 
 
+# Keys sessions.save writes after "name". Reaching one means an unnamed chat: stop before its
+# value, which may be the large checkpoint tail.
+_AFTER_NAME = frozenset({
+    "mode", "plan_return_mode", "todos", "goal", "goal_status", "goal_details", "goal_elapsed_seconds",
+    "goal_active_since", "usage", "prompt_cache", "activity", "timing", "agents", "checkpoints",
+    "chat_changes", "subscription_sessions", "images", "revision"})
+
+
 def _large_prefix(raw: bytes) -> dict:
     """Decode listing fields from a large JSON file without reading its checkpoint tail."""
     try:
@@ -122,15 +130,20 @@ def _large_prefix(raw: bytes) -> dict:
         raise ValueError("session is not an object")
     at += 1
     while at < len(source):
-        at = spaces(at)
-        key, at = decoder.raw_decode(source, at)
-        if not isinstance(key, str):
-            raise ValueError("session key is not text")
-        at = spaces(at)
-        if at >= len(source) or source[at] != ":":
-            raise ValueError("session key has no value")
-        at = spaces(at + 1)
-        value, at = decoder.raw_decode(source, at)
+        try:
+            at = spaces(at)
+            key, at = decoder.raw_decode(source, at)
+            if not isinstance(key, str):
+                raise ValueError("session key is not text")
+            if key in _AFTER_NAME and "updated" in fields and "messages" in fields:
+                break          # sessions.save writes "name" before these, and only when a chat has one
+            at = spaces(at)
+            if at >= len(source) or source[at] != ":":
+                raise ValueError("session key has no value")
+            at = spaces(at + 1)
+            value, at = decoder.raw_decode(source, at)
+        except ValueError:
+            break              # a later field runs past the bounded prefix
         if key in ("updated", "messages", "name"):
             fields[key] = value
         if all(key in fields for key in ("updated", "messages", "name")):
@@ -139,6 +152,8 @@ def _large_prefix(raw: bytes) -> dict:
         if at >= len(source) or source[at] != ",":
             break
         at += 1
+    if "updated" in fields and "messages" in fields:
+        return fields          # a chat with no name has no "name" key
     raise ValueError("listing fields are outside the bounded prefix")
 
 

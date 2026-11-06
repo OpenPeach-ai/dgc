@@ -729,6 +729,33 @@ class AsyncRunHandle:
                 raise
 
 
+class AsyncCards:
+    """``AsyncSession.cards``: Session.cards (plugins' own cards, MCP Apps), awaited."""
+
+    def __init__(self, sync):
+        self._sync = sync
+
+    def watch(self) -> None:
+        self._sync.watch()
+
+    async def get(self, card_id: str):
+        return await asyncio.to_thread(self._sync.get, card_id)
+
+    async def call(self, card_id: str, method: str, params=None, *, timeout: float | None = None):
+        return await asyncio.to_thread(self._sync.call, card_id, method, params, timeout=timeout)
+
+    async def answer(self, asked, choice: str, *, timeout: float | None = None):
+        return await asyncio.to_thread(self._sync.answer, asked, choice, timeout=timeout)
+
+    async def context(self, card_id: str, content=None, structured=None) -> None:
+        await asyncio.to_thread(self._sync.context, card_id, content, structured)
+
+    @staticmethod
+    def message_text(card, text: str) -> str:
+        from .session import Cards
+        return Cards.message_text(card, text)
+
+
 class AsyncArtifacts:
     """``AsyncSession.artifacts``: Session.artifacts, awaited."""
 
@@ -767,6 +794,105 @@ class AsyncArtifacts:
 
     async def allow_source(self, artifact_id: str, source: str, allowed: bool = True, *, base_version: int | None = None):
         return await asyncio.to_thread(self._sync.allow_source, artifact_id, source, allowed, base_version=base_version)
+
+
+class AsyncRouter:
+    """``AsyncSession.router``: Session.router, awaited."""
+
+    def __init__(self, sync):
+        self._sync = sync
+
+    async def status(self, *, refresh: bool = False):
+        return await asyncio.to_thread(self._sync.status, refresh=refresh)
+
+    async def update(self, action: str, **fields):
+        return await asyncio.to_thread(lambda: self._sync.update(action, **fields))
+
+    async def add_system(self, base_url: str, **fields):
+        return await asyncio.to_thread(lambda: self._sync.add_system(base_url, **fields))
+
+    async def set_key(self, system: str, key: str):
+        return await asyncio.to_thread(self._sync.set_key, system, key)
+
+    async def probe(self, system: str, *, model: str | None = None, checks=None):
+        return await asyncio.to_thread(lambda: self._sync.probe(system, model=model, checks=checks))
+
+    async def find(self):
+        return await asyncio.to_thread(self._sync.find)
+
+    async def prefer(self, system: str | None = None, model: str | None = None):
+        return await asyncio.to_thread(self._sync.prefer, system, model)
+
+    async def set_hardware(self, system: str, url: str | None = None, *, token: str | None = None):
+        return await asyncio.to_thread(lambda: self._sync.set_hardware(system, url, token=token))
+
+    async def suggest(self, system: str, *, context: int | str | None = None):
+        return await asyncio.to_thread(lambda: self._sync.suggest(system, context=context))
+
+
+class AsyncVideos:
+    """``AsyncSession.videos``: Session.videos, awaited."""
+
+    def __init__(self, sync):
+        self._sync = sync
+
+    async def generators(self, *, refresh: bool = False):
+        return await asyncio.to_thread(self._sync.generators, refresh=refresh)
+
+    async def jobs(self, job: str | None = None):
+        return await asyncio.to_thread(self._sync.jobs, job)
+
+    async def job(self, job: str):
+        return await asyncio.to_thread(self._sync.job, job)
+
+    async def stop(self, job: str):
+        return await asyncio.to_thread(self._sync.stop, job)
+
+    async def wait(self, job: str, **options):
+        return await asyncio.to_thread(lambda: self._sync.wait(job, **options))
+
+    async def generate(self, prompt: str, **options):
+        return await asyncio.to_thread(lambda: self._sync.generate(prompt, **options))
+
+    async def library(self, **options):
+        return await asyncio.to_thread(lambda: self._sync.library(**options))
+
+
+class AsyncImages:
+    """``AsyncSession.images``: Session.images, awaited."""
+
+    def __init__(self, sync):
+        self._sync = sync
+
+    async def generators(self, *, refresh: bool = False):
+        return await asyncio.to_thread(self._sync.generators, refresh=refresh)
+
+    async def watch(self):
+        return await asyncio.to_thread(self._sync.watch)
+
+    async def update(self, action: str, **fields):
+        return await asyncio.to_thread(lambda: self._sync.update(action, **fields))
+
+    async def add(self, provider: str, **fields):
+        return await asyncio.to_thread(lambda: self._sync.add(provider, **fields))
+
+    async def set_key(self, generator: str, key: str):
+        return await asyncio.to_thread(self._sync.set_key, generator, key)
+
+    async def remove(self, generator: str):
+        return await asyncio.to_thread(self._sync.remove, generator)
+
+    async def set_default(self, generator: str):
+        return await asyncio.to_thread(self._sync.set_default, generator)
+
+    async def test(self, generator: str | None = None):
+        return await asyncio.to_thread(self._sync.test, generator)
+
+    async def generate(self, prompt: str, **options):
+        return await asyncio.to_thread(lambda: self._sync.generate(prompt, **options))
+
+    async def library(self, **options):
+        return await asyncio.to_thread(lambda: self._sync.library(**options))
 
 
 class AsyncSession:
@@ -818,10 +944,13 @@ class AsyncSession:
         workflow: str | None = None,
         repair_attempts: int = 1,
         output: str | None = None,
+        system: str | None = None,
+        system_model: str | None = None,
     ) -> RunResult:
         handle = await self.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
-            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output)
+            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output,
+            system=system, system_model=system_model)
         return await handle.result()
 
     async def stream(
@@ -835,10 +964,13 @@ class AsyncSession:
         workflow: str | None = None,
         repair_attempts: int = 1,
         output: str | None = None,
+        system: str | None = None,
+        system_model: str | None = None,
     ) -> AsyncRunHandle:
         return await self._start(lambda: self._sync.stream(
             prompt, timeout=timeout, max_turns=max_turns, output_schema=output_schema,
-            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output))
+            skills=skills, workflow=workflow, repair_attempts=repair_attempts, output=output,
+            system=system, system_model=system_model))
 
     async def followup(
         self,
@@ -885,9 +1017,29 @@ class AsyncSession:
         return await asyncio.to_thread(self._sync.context_breakdown)
 
     @property
+    def cards(self) -> "AsyncCards":
+        """Plugins' own cards, MCP Apps (see Session.cards)."""
+        return AsyncCards(self._sync.cards)
+
+    @property
     def artifacts(self) -> "AsyncArtifacts":
         """Everything DGC made that the user keeps (see Session.artifacts)."""
         return AsyncArtifacts(self._sync.artifacts)
+
+    @property
+    def images(self) -> "AsyncImages":
+        """Image generation (see Session.images)."""
+        return AsyncImages(self._sync.images)
+
+    @property
+    def videos(self) -> "AsyncVideos":
+        """Video generation (see Session.videos)."""
+        return AsyncVideos(self._sync.videos)
+
+    @property
+    def router(self) -> "AsyncRouter":
+        """DGC Router (see Session.router)."""
+        return AsyncRouter(self._sync.router)
 
     async def list_checkpoints(self) -> list[Checkpoint]:
         return await asyncio.to_thread(self._sync.list_checkpoints)
@@ -907,8 +1059,8 @@ class AsyncSession:
     async def history(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._sync.history)
 
-    async def get_usage(self, range: str = "today") -> dict[str, Any]:
-        return await asyncio.to_thread(self._sync.get_usage, range)
+    async def get_usage(self, range: str = "today", *, system: str | None = None) -> dict[str, Any]:
+        return await asyncio.to_thread(self._sync.get_usage, range, system=system)
 
     async def list_skills(self) -> list[SkillInfo]:
         return await asyncio.to_thread(self._sync.list_skills)

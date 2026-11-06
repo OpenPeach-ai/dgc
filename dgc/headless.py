@@ -28,7 +28,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .chatdgc.window import WINDOWS as CHATDGC_WINDOWS
-from .agent import Agent, interaction_cancel
+from .agent import Agent, interaction_cancel, interaction_offers_always
 from .attachments import (MAX_EDITOR_IMAGE_TOTAL_BYTES, editor_image_mentions,
                           read_spooled_images, spool_root, validate_image_data_uris)
 from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
@@ -39,7 +39,7 @@ from .config import (MAX_PARALLEL_TASKS, SEARCH_KEY_PROVIDERS, SEARCH_KEYS, SEAR
                      search_key_name, search_settings)
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
-from .permissions import Rule, rule_for
+from .permissions import NO_ALWAYS_TOOLS, Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .history_stream import HistoryEmitter
@@ -47,11 +47,12 @@ from . import shown_files
 from . import prompt_images
 from . import reasoning as reasoning_mod
 from .redaction import redact_value, secret_values
+from .model_discovery import embedding_only
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
 from .subagents import task_batch_child_id, task_batch_items, task_batch_outputs
-from .ui import (activity_verb, arg_summary, edit_preview, split_diff,
+from .ui import (activity_verb, arg_summary, edit_preview, shown_output, split_diff,
                  tool_output_is_error)
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
@@ -74,7 +75,11 @@ _AGENT_MESSAGE_WIRE_REASON = {
     "finished": "finished", "stopping": "stopping", "queue_full": "queue_full"}
 _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 _MAX_PIPS_REQUEST_BYTES = 32768
-_MAX_PIPS_PENDING = 16
+# Pip controls waiting for the one worker that runs them. The editor keeps up to 64 in flight itself (pipsView.ts; its
+# page 48), and opening a Pip's chat sends about 15 at once while the 4-second refresh adds six more: at 16 those
+# came back "busy" in normal use (release check, 2026-11-03). Each runs in milliseconds; a client that floods past
+# this is still told to wait.
+_MAX_PIPS_PENDING = 64
 
 
 # Fields that carry bytes as base64 -- the voice's speech, a Pip computer's screen, an image a tool viewed (a data URI,
@@ -198,7 +203,8 @@ _MAX_MCP_SERVERS = 64
 # that proves it: it is read only when a sub-agent starts, and a running one keeps the client it
 # started with, so a new sub-agent model (as a new main model) applies from the next one on.
 _LIVE_SAFE_CONFIG_KEYS = frozenset({
-    "context_size", "subagent_context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "context_size", "subagent_context_size", "subagent_thinking", "show_reasoning", "preserve_thinking", "suggest",
+    "plan_artifact",
     "subagent_model", "subagent_base_url", "subagent_api_mode", "subagent_api_key",
     "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
     "capability_cache_ttl_s", "search_provider", "search_url", "search_api_key",
@@ -223,6 +229,12 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "list_mcp_servers", "list_permissions", "get_memory", "list_hooks", "get_goal", "get_plan",
     "get_recall", "list_sessions", "list_checkpoints", "rewind_preview", "list_retained_tasks", "list_artifacts",
     "artifact_list", "artifact_get", "mods_list",
+    # DGC Router: reading it, testing a system or looking on the network is not the person acting on the chat.
+    "router_status", "router_probe", "router_find", "router_suggest",
+    # Image generators: reading them, or the Library of images DGC made.
+    "images_list", "images_library",
+    # Video jobs: reading them, or the Library's videos (a Stop is the person acting, so it isn't here).
+    "videos_jobs", "videos_library",
     # A client saying it shows the card for the mods DGC writes: nothing changes but what it is sent.
     "watch_mod_offers",
     # The person saved a file in the editor: a fact for the command watch, not the person acting on the chat.
@@ -241,6 +253,8 @@ _WAKE_NEUTRAL_COMMANDS = frozenset({
     "watch_agent_runs",
     # The Edited card's files: asked once, then sent before each turn_end.
     "watch_turn_files",
+    # A client saying it draws plugins' cards (MCP Apps): nothing changes but what it is sent.
+    "watch_mcp_apps",
     # A client saying it shows a session another process has open read-only: nothing changes but what it is sent.
     "watch_session_owner",
     # Ask DGC to fix: reading a chat's fixes or one file a fix changed.
@@ -373,7 +387,19 @@ _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 # API 67: get_pip_artifacts and set_pip_artifacts (artifact_pips): a Pip's report_as ("chat", "doc", "sheet": each
 # finished review also kept as the newest version of its own document or sheet) and the dashboards it refreshes after
 # each run it finishes (a Pulse keeps one current on its schedule).
-PIPS_API_VERSION = 69
+# API 70: DGC Router. model_choice also takes {"mode": "router"} (any of the user's systems with the Pips job) and
+# {"mode": "router", "system": id, "model": name} (that one; a pinned Pip waits for its own system). The worker is
+# leased when the run leaves the queue, and while every one that could take it is busy the run waits there.
+# While the Router is on, list_pip_models carries `router`: {enabled, systems: [{id, name, online, models: [{name,
+# context_window}]}]} (absent while it is off, so the list is exactly API 69's).
+# API 71: video generation in a Personal Pip's chat (dgc/pip_videos.py). A reply that started a video carries `videos`:
+# [job], each as dgc/videos.py's view of it now ({id, state, status, label, duration_s, resolution, price, result?:
+# {path, poster?, bytes, seconds?, width?, height?}, error?, charged?}); a client reads it only from a runtime
+# advertising 71. API 72 adds local, reviewed Pip workflow controls; routing a result
+# never changes either Pip's authority to use apps, send, or operate its computer.
+# API 73 lets a new text message join one running Pip conversation. It keeps the
+# same run and session history instead of starting a competing reply.
+PIPS_API_VERSION = 73
 
 
 def _pips_platform_supported() -> bool:
@@ -411,11 +437,11 @@ from .artifact_commands import CAPABILITY as _ARTIFACT_CAPABILITY     # noqa: E4
 
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "pips_enable", "pips_runtime", "list_prompt_pips", "watch_pip_reports", "pip_report_dismiss", "watch_pip_runs",
-    "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs",
+    "watch_agent_reports", "watch_turn_files", "watch_session_owner", "watch_agent_runs", "watch_mcp_apps",
     "start_pip_fix", "undo_pip_fix", "list_pip_fixes",
     "prompt", "start_goal", "resume_turn",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
-    "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
+    "set_workspace_roots", "set_mode", "set_model", "set_model_defaults", "set_subscription_default", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "undo_to", "list_retained_tasks",
     "resolve_retained_task", "compact", "context_breakdown", "server_window", "list_artifacts", "stop_artifact",
@@ -483,6 +509,8 @@ _CONFIG_ENUMS = {
     # ChatDGC's context window: a preset, clamped to the model's real limit (dgc/chatdgc/window.py).
     "chatdgc_window": frozenset(CHATDGC_WINDOWS),
     "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
+    # How hard helpers think (Settings -> Models -> Sub-agents -> Thinking): "" is the main chat's level.
+    "subagent_thinking": frozenset({"", "off", "low", "medium", "high", "xhigh"}),
     "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
     # How long an Anthropic prompt-cache entry lives (dgc/llm.py PROMPT_CACHE_TTLS).
     "prompt_cache_ttl": frozenset({"5m", "1h"}),
@@ -1035,7 +1063,7 @@ def _history_vision_items(seen) -> list:
 
 
 _MID_TURN_ITEMS = ("permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
-                   "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "options_resolved",
+                   "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "mcp_app_card", "options_resolved",
                    "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_files", "turn_end")
 
 
@@ -1450,14 +1478,28 @@ def _options_resolved_item(record, call_id, *, allow_empty: bool = False) -> dic
     return item
 
 
+def _plugin_names() -> dict:
+    from .plugins import server_display_names
+    return server_display_names()
+
+
+def permission_choices(name: str) -> list[str]:
+    """The answers a ``permission_request`` takes, its card's buttons (ready.capabilities.permission_choices): a DGC
+    Router change and a look on the network ask every time, and so does a call the user's own ask rule asks about
+    (interaction_offers_always), so theirs has no "always" (one sent anyway counts as once)."""
+    return (["once", "deny"] if name in NO_ALWAYS_TOOLS or not interaction_offers_always()
+            else ["once", "always", "deny"])
+
+
 def permission_request_fields(name: str, args: dict, call_id, preview_root) -> dict:
     """A ``permission_request`` event's fields (bar its id): what the editor, or a phone watching
     a terminal session, shows on the card."""
-    preview = edit_preview(name, args, preview_root) if preview_root else ""
+    # A DGC Router change carries its own diff (it is the user's settings, not a project file): shown with no root.
+    preview = edit_preview(name, args, preview_root) if (preview_root or name == "router_update") else ""
     return dict(call_id=call_id, name=name, args=args,
                 command=(args.get("command") if name in ("bash", "monitor") else None),
                 summary=arg_summary(name, args, preview_root), diff=preview or None,
-                suggested_rule=str(rule_for(name, args)), choices=["once", "always", "deny"])
+                suggested_rule=str(rule_for(name, args)), choices=permission_choices(name))
 
 
 class HeadlessUI:
@@ -1854,13 +1896,25 @@ class HeadlessUI:
 
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         self.turn_activity("waiting", "Waiting for the model")
-        is_diff, diff = split_diff(out)
         failed = tool_output_is_error(out)
+        out = shown_output(name, out)              # the person's row: no sentence written for the model alone
+        is_diff, diff = split_diff(out)
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
                      is_error=failed, is_diff=is_diff, diff=diff)
         hook = getattr(self, "_pips_settings_hook", None)
         if name == "pips_settings" and not failed and callable(hook):
             hook()          # the chat changed the Pips default: an open Settings page shows it at once
+
+    def images_made(self, call_id, result) -> None:
+        """The model's generate_image made pictures: to a client that has asked about images (images_*)."""
+        if not getattr(self, "_images_watch", False):
+            return
+        rows = [{"path": str(item.path), "rel": item.rel, "sidecar": str(item.sidecar), "width": item.width,
+                 "height": item.height, "bytes": item.bytes, "seed": item.seed, "mime": item.mime}
+                for item in result.saved]
+        self.em.emit("images_made", call_id=call_id if isinstance(call_id, str) else None, images=rows,
+                     generator=result.generator["id"], model=result.model or "",
+                     **({"cost_usd": result.cost} if result.cost is not None else {}))
 
     def tool_images(self, call_id: str | None, images: list, caption: str = "", *, items=None,
                     omitted: int = 0, meta=None) -> None:
@@ -1975,6 +2029,19 @@ class HeadlessUI:
         if rows:
             self.em.emit("files_ready", call_id=call_id or None, items=rows[:8],
                          caption=rows[0].get("caption") or "")
+
+    # MCP Apps (dgc/mcp_apps.py): a plugin's card under its tool's row, once the client says it draws them
+    # (watch_mcp_apps). Until then no card is made and the model is told nothing about one.
+    def mcp_apps_shown(self) -> bool:
+        return getattr(self, "_mcp_apps_on", False) is True
+
+    def mcp_app_card(self, record: dict) -> None:
+        from .mcp_apps import event_fields
+        if not self.mcp_apps_shown():
+            return
+        shown = self.__dict__.setdefault("_mcp_app_cards", set())
+        shown.add(record["card_id"])
+        self.em.emit("mcp_app_card", **event_fields(record))
 
     def goal_changed(self, goal: str, status: str) -> None:
         hook = getattr(self, "_goal_hook", None)
@@ -2109,6 +2176,12 @@ class HeadlessUI:
         if decision in _PLAN_MODES:
             self.plan_feedback = ""
         return decision if decision in _PLAN_MODES else None
+
+    def current_mode(self, mode: str) -> None:
+        """The mode an approved plan runs in. The editor's chip and status bar follow mode_changed, which a
+        plan's approval never sent, so they said "plan" while the chat ran in auto."""
+        if mode in _PLAN_MODES or mode == "plan":
+            self.em.emit("mode_changed", mode=mode)
 
     def ask_open_question(self, ask_id: str, question: str, context: str,
                           suggestions: list, call_id=None, options=None) -> bool:
@@ -2488,6 +2561,9 @@ class Backend:
                           # carries match (dgc/session_index).
                           "session_paging": True,
                           "plugin_management": True, "plugin_keys": True,
+                          # Each installed plugin's name by its servers ({"example": "MCP Apps example"}): an Allow
+                          # card for a plugin's tool names the plugin as its card does, before the plugin list loads.
+                          "plugin_names": _plugin_names(),
                           # set_plugin_sign_in_scopes: what a plugin's sign-in may do (GitHub's checklist), and
                           # Sign in again with it; the plugin list's keys carry sign_in_scopes and signed_in.
                           "plugin_sign_in_scopes": True, "app_connectors": True, "composio_connections": False, "mcp_context": True, "mcp_management": True, "history_snapshot": True,
@@ -2496,6 +2572,15 @@ class Backend:
                           "goal_inputs": True, "goal_replace_guard": True, "live_goal_replace": not bool(self.config.get("subscription_engine", "")), "live_goal_edit": not bool(self.config.get("subscription_engine", "")), "live_goal_start": not bool(self.config.get("subscription_engine", "")), "workflows": True, "workspace_inspection": True, "chat_inspection": True,
                           "live_steering": True, "steer_queued": True, "live_modes": True, "question_forms": True,
                           "open_asks": True,
+                          # resume_session takes saved_mode: true, sent when the person reopens a chat themselves
+                          # (the editor's list, a tab after a reload): it comes back in the mode it had, re-checked
+                          # against trust. Without it a reopen only lowers the mode, as an SDK app's always does.
+                          "resume_saved_mode": True,
+                          # set_model and set_config with scope=session keep the provider,
+                          # model and effort in this Work chat only, even after reload.
+                          "session_model_route": True,
+                          "model_defaults": True,
+                          "subscription_defaults": True,
                           # The client answers with set_workspace_roots.ask_options when it can
                           # draw the options too; ready.capabilities is a free-form object, so
                           # advertising one costs an older client nothing.
@@ -2504,6 +2589,12 @@ class Backend:
                           # the registry's face slots; only then do agent frames carry face_slot.
                           "agent_faces": True,
                           "resume_turn": True, "monitors": True, "usage_ledger": True, "pip_usage_report": True,
+                          # get_usage / get_pip_usage_report take `system`, and each by_model row names the
+                          # system it ran on (system, system_id, system_kind): Token usage by system.
+                          "usage_by_system": True,
+                          # set_config takes subagent_thinking, and get_config `fields` "subagent_settings" sends it
+                          # back as a subagent_settings event (Settings -> Models -> Sub-agents -> Thinking).
+                          "subagent_thinking": 1,
                           # A reopened chat starts again the monitors DGC's stopping ended and says
                           # so with `monitor_restart`; `restart_monitor {key}` is that note's Restart.
                           "monitor_restart": True,
@@ -2551,6 +2642,7 @@ class Backend:
                           "pips_supported": _pips_platform_supported(), "pips_api_version": PIPS_API_VERSION,
                           "pips_setup_notifications": 1,
                           "pip_references": 1,
+                          "display_mentions": 2,
                           # A finished Pip run reaches the chats it reports to as a card in the
                           # transcript (pip_report events, {role: "pip_report"} history markers),
                           # once the client sends watch_pip_reports; pip_report_dismiss removes one.
@@ -2610,12 +2702,28 @@ class Backend:
                           "heic_images": True,
                           # context_breakdown is understood: what fills the window, part by part.
                           "context_breakdown": 1,
+                          # MCP Apps (dgc/mcp_apps.py): plugins' cards, once the client sends watch_mcp_apps; what a
+                          # card asks is mcp_app_call / mcp_app_answer / mcp_app_message / mcp_app_context, and
+                          # mcp_app_get gives one card's page. `protocol` is the MCP Apps revision the bridge speaks.
+                          "mcp_apps": {"version": 1, "protocol": "2026-01-26"},
                           # server_window is understood: the window a vLLM, SGLang or llama.cpp server was
                           # started with, asked once and then sent as it changes.
                           "server_window": 1,
                           # list_models_at is understood: the models at a host as Settings has it typed, with a
                           # saved key only for the host it is bound to (models_at answers).
                           "list_models_at": 1,
+                          # DGC Router (dgc/router.py): router_status / router_update / router_probe / router_find,
+                          # each answered by router_status; router_changed follows once a client has asked.
+                          "router": self._router_capability(),
+                          # permission_request.choices is exactly the answers its card offers: one without
+                          # "always" (a DGC Router change, a look on the network) is asked every time.
+                          "permission_choices": 1,
+                          # Image generation (dgc/images.py): images_list / images_update / images_generate /
+                          # images_library; images_made follows once a client has sent one of them.
+                          "images": self._images_capability(),
+                          # Video generation (dgc/videos.py): videos_jobs / videos_stop / videos_generate /
+                          # videos_library; video_job follows once a client has sent one of them.
+                          "videos": self._videos_capability(),
                           # The web search providers set_config's search_provider takes (Settings -> Web search
                           # offers only these): an older CLI refuses the whole save on one it doesn't know.
                           "search_providers": list(SEARCH_PROVIDERS),
@@ -2626,6 +2734,425 @@ class Backend:
                           "session_policy": self._session_policy_capability(),
                           **self._chats_capability(), **self._chatdgc_capability()},
             **self._chat_fields())
+
+    # ---- DGC Router (0.51, dgc/router.py) ------------------------------------------------------------------------
+    _ROUTER_COMMANDS = ("router_status", "router_update", "router_probe", "router_find", "router_hardware",
+                        "router_suggest", "router_thinking")
+
+    def _router_capability(self) -> dict:
+        from . import router as router_mod
+        try:
+            enabled = router_mod.enabled(self.config)
+        except Exception:                      # noqa: BLE001 -- a stub config in a test harness
+            enabled = False
+        # pips_default: Settings may set the Pips default to the Router (pips_model "router" or
+        # "router:<system>/<model>", dgc/pip_models.py pips_router_default). status: each system's row also carries
+        # `available` (every model its server serves) and the server's own room (server_slot_context, server_kv_tokens).
+        # thinking: each model row of a system carries `thinking` (its choice; absent: the helper's own level) and
+        # `thinks` (whether its server says it can), each lease the level its helper uses, and router_thinking sets it.
+        return {"version": 1, "commands": list(self._ROUTER_COMMANDS), "enabled": bool(enabled), "pips_default": 1,
+                "status": 2, "thinking": 1}
+
+    def _router_command(self, cmd: dict) -> None:
+        """One router_* command, on a thread of its own (a probe or a look on the network takes seconds), answered by
+        router_status naming its request, or command_rejected. From then on this client hears router_changed."""
+        t = str(cmd.get("type") or "")
+        request_id = str(cmd.get("request_id") or "")
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        self._router_watch()
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command=t, reason=reason,
+                         message=redact_value(message, secret_values(self.config)), request_id=request_id)
+
+        if t == "router_update" and cmd.get("action") == "prefer":
+            # The next turn's helpers run here (an SDK run with system=). Answered at once, in order, so the prompt
+            # that follows sees it; the turn's end clears it. Nothing is saved.
+            from . import router as router_mod
+            system, model = str(cmd.get("system") or ""), str(cmd.get("model") or "")
+            if system or model:
+                try:
+                    router_mod.ROUTER.candidates(self.config, "subagents", system=system, model=model)
+                except router_mod.RouteRefused as exc:
+                    return reject("unknown_system", str(exc))
+            self.agent._router_prefer = {"system": system, "model": model} if (system or model) else None
+            change = (f"The next turn's helpers run on {system or 'any system'}" + (f" ({model})" if model else "")
+                      if (system or model) else "DGC picks a system for each helper")
+            self.em.emit("router_status", request_id=request_id, status=router_mod.status(self.config), change=change)
+            return
+
+        def work() -> None:
+            from . import router as router_mod
+            from . import router_tools
+            config = self.config
+            extra: dict = {}
+            try:
+                if t == "router_update":
+                    change = {key: value for key, value in cmd.items() if key not in ("type", "request_id", "chat_id")}
+                    if change.get("action") == "set_key":
+                        system = router_mod.find_system(router_mod.settings(config), str(change.get("system") or ""))
+                        if system is None:
+                            return reject("unknown_system", f"There is no system {change.get('system')!r}.")
+                        config.set_router_key(system["id"], str(change.get("key") or ""))
+                        extra["change"] = (f"Saved the key for {system['name']}" if change.get("key")
+                                           else f"Removed the key for {system['name']}")
+                        router_mod.ROUTER._changed("settings")
+                    else:
+                        if "key" in change:
+                            return reject("key_not_here", "A key goes only with action set_key.")
+                        # Settings' Add picks the models itself when the server has none loaded (pick_later).
+                        plan = router_tools.plan_update(config, change, pick_later=True)
+                        router_tools.apply_plan(config, plan)
+                        extra["change"] = plan.said()
+                elif t == "router_thinking":
+                    # How hard a helper on one model of one system thinks ("" = the helper's own level).
+                    plan = router_tools.plan_update(config, {"action": "set_model", "system": str(cmd.get("system") or ""),
+                                                             "model": str(cmd.get("model") or ""),
+                                                             "thinking": str(cmd.get("thinking") or "")})
+                    router_tools.apply_plan(config, plan)
+                    level, where = str(cmd.get("thinking") or ""), router_mod.find_system(plan.after, plan.system_id)
+                    named = f"{cmd.get('model')} on {where['name'] if where else plan.system_id}"
+                    extra["change"] = (f"{named}: thinking {router_tools.thinking_words(level)}" if level
+                                       else f"{named}: thinking as the helper does")
+                elif t == "router_probe":
+                    checks = cmd.get("checks") if isinstance(cmd.get("checks"), list) else None
+                    extra["probe"] = router_tools.probe(config, str(cmd.get("system") or ""),
+                                                        model=str(cmd.get("model") or ""), checks=checks)
+                elif t == "router_find":
+                    from .router_probe import ProbeError, find
+                    try:
+                        extra["found"] = find()
+                    except ProbeError as exc:
+                        return reject("find_failed", str(exc))
+                elif t == "router_hardware":
+                    from . import router_hardware
+                    system = router_mod.find_system(router_mod.settings(config), str(cmd.get("system") or ""))
+                    if system is None:
+                        return reject("unknown_system", f"There is no system {cmd.get('system')!r}.")
+                    said = []
+                    if "url" in cmd:
+                        plan = router_tools.plan_update(config, {"action": "set_hardware", "system": system["id"],
+                                                                 "hardware_url": str(cmd.get("url") or "")})
+                        router_tools.apply_plan(config, plan)
+                        said.append(plan.summary + ".")
+                        said += [note for note in plan.notes if not ("token" in cmd and "pairing token" in note)]
+                        system = router_mod.find_system(router_mod.settings(config), system["id"])
+                    if "token" in cmd:
+                        config.set_router_hardware_token(system["id"], str(cmd.get("token") or ""))
+                        said.append(("Saved the pairing token for " if cmd.get("token") else
+                                     "Removed the pairing token for ") + system["name"] + ".")
+                    if (system.get("hardware") or {}).get("source", "none") != "none":
+                        router_hardware.read_system(config, system, max_age=0)
+                        row = router_hardware.status_row(config, system) or {}
+                        said.append(f"{system['name']}: " + router_tools.hardware_text(row))
+                    extra["change"] = " ".join(said) or f"{system['name']} has no hardware readout."
+                    router_mod.ROUTER._changed("settings")
+                elif t == "router_suggest":
+                    from .router_suggest import SuggestError, suggest
+                    try:
+                        suggestion = suggest(config, str(cmd.get("system") or ""), context=cmd.get("context"))
+                    except SuggestError as exc:
+                        return reject("unknown_system" if "no system" in str(exc) else "invalid_change", str(exc))
+                    self.em.emit("router_suggestion", request_id=request_id, suggestion=suggestion)
+                    return
+                status = router_mod.status(config, refresh=bool(cmd.get("refresh")) and t == "router_status")
+            except router_tools.UpdateError as exc:
+                return reject("invalid_change", str(exc))
+            except ValueError as exc:
+                return reject("invalid_change", str(exc))
+            except Exception as exc:               # noqa: BLE001 -- said, never a dead backend
+                return reject("router_failed", f"{type(exc).__name__}: {exc}")
+            self.em.emit("router_status", request_id=request_id, status=status, **extra)
+        threading.Thread(target=work, name=f"dgc-{t}", daemon=True).start()
+
+    # ---- Image generation (0.51, dgc/images.py) ------------------------------------------------------------------
+    _IMAGES_COMMANDS = ("images_list", "images_update", "images_generate", "images_library")
+
+    def _images_capability(self) -> dict:
+        from . import images as images_mod
+        try:
+            count = len(images_mod.settings(self.config).get("generators") or [])
+        except Exception:                      # noqa: BLE001 -- a stub config in a test harness
+            count = 0
+        return {"version": 1, "commands": list(self._IMAGES_COMMANDS), "generators": count}
+
+    def _images_status(self, refresh: bool = False) -> dict:
+        from . import images as images_mod
+        return images_mod.listing(self.config, project_root=getattr(self.config, "project_root", None),
+                                  refresh=refresh)
+
+    def _images_command(self, cmd: dict) -> None:
+        """One images_* command, on a thread of its own (a test or a generation takes seconds), answered by one event
+        naming its request, or command_rejected. From then on this client hears images_made."""
+        t = str(cmd.get("type") or "")
+        request_id = str(cmd.get("request_id") or "")
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        ui = getattr(self, "ui", None)
+        if ui is not None:
+            ui._images_watch = True
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command=t, reason=reason, message=message, request_id=request_id)
+
+        def work() -> None:
+            from . import images as images_mod
+            from . import images_admin
+            config = self.config
+            try:
+                if t == "images_list":
+                    self.em.emit("images_status", request_id=request_id,
+                                 status=self._images_status(bool(cmd.get("refresh"))))
+                elif t == "images_library":
+                    found = images_mod.library(query=str(cmd.get("query") or ""), surface=str(cmd.get("surface") or ""),
+                                               limit=int(cmd.get("limit") or 60), offset=max(0, int(cmd.get("offset") or 0)))
+                    self.em.emit("images_library", request_id=request_id, images=found["images"], total=found["total"],
+                                 **({"next_offset": found["next_offset"]} if found["next_offset"] is not None else {}))
+                elif t == "images_update":
+                    fields = {key: value for key, value in cmd.items() if key not in ("type", "request_id", "action",
+                                                                                      "chat_id")}
+                    out = images_admin.apply(config, str(cmd.get("action") or ""), fields,
+                                             project_root=getattr(config, "project_root", None))
+                    extra = {}
+                    if out.get("pending"):
+                        extra["pending"] = {key: out[key] for key in ("generator", "mapping", "mapping_lines", "notes")
+                                            if key in out}
+                    if out.get("notes"):
+                        extra["notes"] = list(out["notes"])
+                    if out.get("tested") or out.get("check"):
+                        extra["tested"] = out.get("tested") or {out["generator"]["id"]: out["check"]}
+                    self.em.emit("images_status", request_id=request_id, status=self._images_status(),
+                                 change=out.get("summary", ""), **extra)
+                else:
+                    self.em.emit("images_result", request_id=request_id, **self._images_generate(cmd))
+            except images_admin.ChangeError as exc:
+                return reject("invalid_change", str(exc))
+            except (ValueError, OSError) as exc:
+                return reject("images_failed", str(exc))
+            except Exception as exc:               # noqa: BLE001 -- said, never a dead backend
+                return reject("images_failed", f"{type(exc).__name__}: {exc}")
+        threading.Thread(target=work, name=f"dgc-{t}", daemon=True).start()
+
+    def _images_generate(self, cmd: dict) -> dict:
+        """images_generate: one generation outside a turn. A generator that asks runs only with approve: true."""
+        from pathlib import Path
+        from . import image_tools
+        config = self.config
+        root = Path(getattr(config, "project_root", ".") or ".")
+        approve = cmd.get("approve") is True
+        from .images import session_folder
+        surface = image_tools.Surface(name="sdk", root=root, project_root=root, interactive=False,
+                                      approve=lambda card: "once" if approve else "no",
+                                      where={"project": str(root)}, owner="images_generate",
+                                      home=session_folder("sdk"))
+        args = {key: cmd[key] for key in ("prompt", "size", "aspect", "count", "images", "mask", "generator", "model",
+                                          "seed", "negative_prompt", "save_to") if cmd.get(key) not in (None, "")}
+        try:
+            plan = image_tools.prepare(config, args, surface)
+        except image_tools.Refused as exc:
+            return {"ok": False, "text": f"error: {exc}", "images": [], "error": {"kind": "bad_request",
+                                                                               "message": str(exc)}}
+        if plan.asks and not approve:
+            return {"ok": False, "text": f"{plan.generator['name']} asks before each image: send approve: true to "
+                    "make it", "images": [], "generator": plan.generator["id"], "card": plan.card(),
+                    "error": {"kind": "needs_approval", "message": plan.summary()}}
+        outcome = image_tools.execute(config, plan, surface)
+        result = outcome.result
+        rows = [{"path": str(item.path), "rel": item.rel, "sidecar": str(item.sidecar), "mime": item.mime,
+                 "width": item.width, "height": item.height, "bytes": item.bytes, "seed": item.seed}
+                for item in (result.saved if result else [])]
+        return {"ok": result is not None, "text": outcome.text, "images": rows,
+                **({"generator": result.generator["id"], "model": result.model} if result else {}),
+                **({"cost_usd": result.cost} if result is not None and result.cost is not None else {}),
+                **({"error": outcome.error.as_dict()} if outcome.error is not None and result is None else {})}
+
+    # ---- Video generation (0.51, dgc/videos.py) ------------------------------------------------------------------
+    _VIDEOS_COMMANDS = ("videos_jobs", "videos_stop", "videos_generate", "videos_library")
+
+    def _videos_capability(self) -> dict:
+        from . import images as images_mod, videos as videos_mod
+        try:
+            count = len(videos_mod.generators(images_mod.settings(self.config)))
+        except Exception:                      # noqa: BLE001 -- a stub config in a test harness
+            count = 0
+        return {"version": 1, "commands": list(self._VIDEOS_COMMANDS), "generators": count}
+
+    def _videos_watch(self) -> None:
+        """This client asked about videos: from now on it hears video_job for this chat's jobs, the ones it started
+        outside a turn, and the ones it asked about."""
+        if getattr(self, "_video_listener", None) is not None:
+            return
+        from . import videos as videos_mod
+        import weakref
+        ref = weakref.ref(self)
+        self.__dict__.setdefault("_videos_asked", set())
+
+        def heard(job: dict, change: str) -> None:
+            backend = ref()
+            if backend is None:
+                videos_mod.JOBS.remove_listener(heard)
+                return
+            backend._video_heard(job, change)
+        self._video_listener = heard
+        videos_mod.JOBS.add_listener(heard)
+
+    def _video_heard(self, job: dict, change: str) -> None:
+        from . import videos as videos_mod
+        target = job.get("target") or {}
+        session = getattr(getattr(getattr(self, "agent", None), "session_file", None), "stem", "") or ""
+        if not ((session and target.get("session") == session) or job["id"] in self.__dict__.get("_videos_asked", ())):
+            return
+        try:
+            self.em.emit("video_job", job=redact_value(videos_mod.view(job), secret_values(self.config)))
+        except Exception:                      # noqa: BLE001 -- a closed wire
+            pass
+
+    def _videos_command(self, cmd: dict) -> None:
+        """One videos_* command, answered by one event naming its request (video_jobs or videos_library), or
+        command_rejected. Read and Stop work while a turn runs."""
+        t = str(cmd.get("type") or "")
+        request_id = str(cmd.get("request_id") or "")
+        if not 1 <= len(request_id) <= 128:
+            self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                         message="request_id must contain 1-128 characters")
+            return
+        self._videos_watch()
+
+        def reject(reason: str, message: str) -> None:
+            self.em.emit("command_rejected", command=t, reason=reason, message=message, request_id=request_id)
+
+        def work() -> None:
+            from . import videos as videos_mod
+            config = self.config
+            secrets = secret_values(config)
+            try:
+                if t == "videos_library":
+                    found = videos_mod.library(query=str(cmd.get("query") or ""), surface=str(cmd.get("surface") or ""),
+                                               limit=int(cmd.get("limit") or 60), offset=max(0, int(cmd.get("offset") or 0)))
+                    self.em.emit("videos_library", request_id=request_id,
+                                 videos=redact_value(found["videos"], secrets), total=found["total"],
+                                 **({"next_offset": found["next_offset"]} if found["next_offset"] is not None else {}))
+                    return
+                if t == "videos_jobs":
+                    wanted = str(cmd.get("job") or "")
+                    session = getattr(getattr(self.agent, "session_file", None), "stem", "") or ""
+                    try:
+                        # A job a reload left behind is polled again here (or watched, while another DGC polls it):
+                        # the one asked about, or this chat's own and those no chat owns (the SDK's, the terminal's).
+                        if wanted:
+                            videos_mod.JOBS.follow(config, wanted)
+                        else:
+                            videos_mod.JOBS.resume(config, keep=lambda job: not any((job.get("target") or {}).get(k)
+                                                                                    for k in ("session", "chat", "pip"))
+                                                   or (session and (job.get("target") or {}).get("session") == session))
+                    except Exception:                    # noqa: BLE001
+                        pass
+                    if wanted:
+                        job = videos_mod.load(wanted)
+                        if job is None:
+                            return reject("unknown_job", f"there is no video job {wanted}")
+                        rows = [job]
+                    else:
+                        rows = [job for job in videos_mod.all_jobs(limit=50)
+                                if not session or (job.get("target") or {}).get("session") == session
+                                or job.get("state") not in videos_mod.TERMINAL]
+                    self.__dict__.setdefault("_videos_asked", set()).update(job["id"] for job in rows)
+                    self.em.emit("video_jobs", request_id=request_id,
+                                 jobs=[redact_value(videos_mod.view(job), secrets) for job in rows])
+                    return
+                if t == "videos_stop":
+                    job = videos_mod.JOBS.stop(config, str(cmd.get("job") or ""))
+                    self.em.emit("video_jobs", request_id=request_id,
+                                 jobs=[redact_value(videos_mod.view(job), secrets)],
+                                 change=redact_value(videos_mod.line(job), secrets))
+                    return
+                self.em.emit("video_jobs", request_id=request_id,
+                             **redact_value(self._videos_generate(cmd), secrets))
+            except ValueError as exc:
+                return reject("invalid_change", str(exc))
+            except Exception as exc:               # noqa: BLE001 -- said, never a dead backend
+                return reject("videos_failed", f"{type(exc).__name__}: {exc}")
+        threading.Thread(target=work, name=f"dgc-{t}", daemon=True).start()
+
+    def _videos_generate(self, cmd: dict) -> dict:
+        """videos_generate: one video outside a turn (the SDK's session.videos.generate). It runs only with
+        approve: true; without, the answer is error.kind "needs_approval" with the card."""
+        from pathlib import Path
+        from . import image_tools, video_tools
+        from . import videos as videos_mod
+        config = self.config
+        root = Path(getattr(config, "project_root", ".") or ".")
+        surface = image_tools.Surface(name="sdk", root=root, project_root=root, interactive=False,
+                                      where={"project": str(root)}, owner="videos_generate",
+                                      video_home=videos_mod.session_folder("sdk"))
+        args = {key: cmd[key] for key in ("prompt", "duration_s", "aspect", "resolution", "image", "audio", "generator",
+                                          "model", "seed", "negative_prompt", "save_to", "replace")
+                if cmd.get(key) not in (None, "")}
+        try:
+            plan = video_tools.prepare(config, args, surface)
+        except video_tools.Refused as exc:
+            return {"jobs": [], "change": f"error: {exc}", "error": {"kind": "bad_request", "message": str(exc)}}
+        if plan.over_limit or (plan.asks and cmd.get("approve") is not True):
+            return {"jobs": [], "card": plan.card(), "change": f"{plan.summary()}: send approve: true to make it",
+                    "error": {"kind": "over_limit" if plan.over_limit else "needs_approval",
+                              "message": plan.card().get("note") or plan.summary()}}
+        started = video_tools.start(config, plan, surface, target={"sdk": True})
+        if started.job is None:
+            error = started.error.as_dict() if started.error is not None else {"kind": "failed",
+                                                                                "message": started.text}
+            return {"jobs": [], "change": started.text, "error": error}
+        self.__dict__.setdefault("_videos_asked", set()).add(started.job["id"])
+        return {"jobs": [videos_mod.view(started.job)], "change": started.text}
+
+    def _router_watch(self) -> None:
+        """This client asked about DGC Router: it hears router_changed from now on (debounced to one a second)."""
+        if getattr(self, "_router_listener", None) is not None:
+            return
+        from . import router as router_mod
+        state = {"timer": None, "why": ""}
+        lock = threading.Lock()
+
+        def send():
+            with lock:
+                state["timer"], why = None, state["why"]
+            try:
+                self.em.emit("router_changed", status=router_mod.status(self.config), why=why or "settings")
+            except Exception:                      # noqa: BLE001 -- a closed wire or a stub config
+                pass
+
+        def changed(why: str) -> None:
+            with lock:
+                state["why"] = why
+                if state["timer"] is None:
+                    state["timer"] = threading.Timer(1.0, send)
+                    state["timer"].daemon = True
+                    state["timer"].start()
+        self._router_listener = changed
+        router_mod.ROUTER.listen(changed)
+        # A change made outside this backend (`dgc router hardware ID ADDRESS --token` in a terminal, another window)
+        # reaches the open Settings too, and so does each minute's new hardware reading (release check, 2026-11-03:
+        # the readout showed only after a window reload).
+        stop = threading.Event()
+        self._router_watch_stop = stop
+
+        def watch():
+            seen = None
+            while True:
+                try:
+                    now = router_mod.change_marks(self.config)
+                except Exception:                  # noqa: BLE001 -- a file being written: look again next time
+                    now = seen
+                if seen is not None and now is not None and now != seen:
+                    changed("settings" if now[0] != seen[0] else "state")
+                seen = now
+                if stop.wait(router_mod.WATCH_EVERY_S):
+                    return
+        threading.Thread(target=watch, name="dgc-router-watch", daemon=True).start()
 
     def _search_keys_capability(self) -> dict:
         """ready.capabilities.search_keys: the web search providers that keep a key of their own, and which of them
@@ -3130,7 +3657,8 @@ class Backend:
         return lock
 
     def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
-                    request_id="", kind: str = "prompt", pip_references=None) -> tuple[str, int]:
+                    request_id="", kind: str = "prompt", pip_references=None,
+                    display_mentions=None) -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         if kind in ("prompt", "continue"):
             self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
@@ -3142,6 +3670,10 @@ class Backend:
         payload = (text, images, context, kind, request_id or "")
         if pip_references:
             payload += (pip_references,)
+        if display_mentions:
+            if not pip_references:
+                payload += (None,)
+            payload += (display_mentions,)
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
@@ -3511,6 +4043,7 @@ class Backend:
                     turn_kind = item[3] if len(item) > 3 else "prompt"
                     turn_request = item[4] if len(item) > 4 and isinstance(item[4], str) else ""
                     pip_references = item[5] if len(item) > 5 else None
+                    display_mentions = item[6] if len(item) > 6 else None
                     notification = None
                     agent_notice = None
                     if turn_kind == "monitor":
@@ -3540,6 +4073,7 @@ class Backend:
                     self.agent.cancelled.clear()
 
                 self.agent._pending_images = images
+                self.agent._prompt_display_mentions = display_mentions or []
                 # The Output chip's choice for this prompt (empty for Auto, and for every turn DGC starts itself).
                 turn_output = (self.__dict__.get("_turn_outputs", {}).pop(turn_request, "")
                                if turn_kind == "prompt" else "")
@@ -3590,6 +4124,8 @@ class Backend:
                 self.em.emit("turn_start", turn_id=tid,
                              prompt=turn_prompt,
                              kind=turn_kind,
+                             **({"display_mentions": display_mentions}
+                                if display_mentions and turn_kind == "prompt" and turn_prompt == text else {}),
                              **({"request_id": turn_request} if turn_request else {}))
                 # The note says "working" now, not at its next minute: another window's Open here line reads it.
                 self._announce_peer("working")
@@ -3847,6 +4383,8 @@ class Backend:
 
     def _emit_monitor_events(self, notification, delivery: str, turn_id: str = "") -> None:
         for batch in notification.batches:
+            if batch.kind == "video_ended":
+                continue                         # the screen has the video's own event (video_job): no monitor card
             self.em.emit("monitor_event", id=batch.monitor_id, description=batch.description,
                          event_index=int(batch.event_index), lines=list(batch.lines),
                          omitted_lines=int(batch.omitted_lines), kind=batch.kind,
@@ -4457,28 +4995,41 @@ class Backend:
         items = catalog()
         self.em.emit("docs_catalog", request_id=request_id, items=items, total=len(items))
 
-    def _emit_usage(self, request_id: str, range_name: str) -> None:
+    def _usage_systems(self) -> list | None:
+        """The DGC Router systems to name usage rows by: this backend's own settings (None: the user's config)."""
+        try:
+            from .usage_systems import router_systems
+            return router_systems(self.config)
+        except Exception:                   # noqa: BLE001 -- names are presentation
+            return None
+
+    def _emit_usage(self, request_id: str, range_name: str, system: str = "") -> None:
         """Answer get_usage from the local ledger on a short-lived thread.
 
         An all-time aggregate over a busy year is a few hundred milliseconds of sqlite; the command
         reader must stay free for a Stop meanwhile. The report never contains prompt or reply text.
+        ``system`` keeps one system's usage (Token usage by system).
         """
+        systems = self._usage_systems()
+
         def run() -> None:
             from . import usage_ledger
             try:
-                report = usage_ledger.report(range_name)
+                report = usage_ledger.report(range_name, system=system or None, systems=systems)
             except Exception as exc:        # a report is informational; say why and carry on
                 report = usage_ledger.empty_report(range_name, error=f"{type(exc).__name__}: {exc}")
             self.em.emit("usage_report", request_id=request_id, **report)
         threading.Thread(target=run, name="dgc-usage-report", daemon=True).start()
 
-    def _emit_pip_usage(self, request_id: str, range_name: str) -> None:
+    def _emit_pip_usage(self, request_id: str, range_name: str, system: str = "") -> None:
         """Answer get_pip_usage_report: the Pips tab of Token Usage, on a short-lived thread like
         get_usage. Reads the registry even with Pips off, so their past usage still shows."""
+        systems = self._usage_systems()
+
         def run() -> None:
             from . import pip_usage_report, usage_ledger
             try:
-                report = pip_usage_report.report(range_name)
+                report = pip_usage_report.report(range_name, system=system or None, systems=systems)
             except Exception as exc:        # informational; say why and carry on
                 empty = usage_ledger.empty_report(range_name)
                 report = {"range": empty["range"], "generated_at": empty["generated_at"], "timezone": empty["timezone"],
@@ -4747,6 +5298,16 @@ class Backend:
             mod_bridge.stop(self.agent)             # this chat's mods end with it
         except Exception:
             pass
+        listener = self.__dict__.get("_router_listener")
+        if listener is not None:                    # this chat no longer hears router_changed
+            try:
+                from . import router as router_mod
+                router_mod.ROUTER.unlisten(listener)
+            except Exception:
+                pass
+        watching = self.__dict__.get("_router_watch_stop")
+        if watching is not None:
+            watching.set()
         try:
             stop = getattr(self, "_peer_stop", None)
             if stop is not None:
@@ -5081,8 +5642,12 @@ class Backend:
             answer(error=_models_at_reason(exc, bool(key)))
             return
         ids = []
+        families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
         for item in listed[:4096] if isinstance(listed, list) else []:
             if isinstance(item, str) and item and item != "?":
+                family = families.get(item, "") if isinstance(families, dict) else ""
+                if embedding_only(item, family):
+                    continue
                 shown = redact_value(item, secrets)[:512]
                 if shown == item and shown not in ids:
                     ids.append(shown)
@@ -5115,6 +5680,11 @@ class Backend:
             self._emit_model_wait_settings(request_id)
         if getattr(self, "_pips_settings_wanted", False):
             self.em.emit("pips_settings", model=str(c.get("pips_model", "") or "")[:256], **_request_fields(request_id))
+        if getattr(self, "_subagent_settings_wanted", False):
+            # Settings -> Models -> Sub-agents -> Thinking, in an event of its own (never a new field on `config`).
+            level = str(c.get("subagent_thinking", "") or "")
+            self.em.emit("subagent_settings", thinking=level if level in ("off", "low", "medium", "high", "xhigh") else "",
+                         **_request_fields(request_id))
         extra = {}
         for key, fallback in (("chatdgc_about", ""), ("chatdgc_style", ""), ("chatdgc_personality", "default"),
                               ("chatdgc_window", "32k")):
@@ -5440,7 +6010,7 @@ class Backend:
             turn = None
 
         def open_turn(prompt: str, kind: str, attachments: list | None = None,
-                      answer_question: str = "") -> None:
+                      answer_question: str = "", display_mentions=None) -> None:
             nonlocal turn, turn_n
             close_turn()
             turn_n += 1
@@ -5452,6 +6022,8 @@ class Backend:
                 started["attachments"] = attachments
             if answer_question:
                 started["answer_question"] = answer_question
+            if display_mentions:
+                started["display_mentions"] = display_mentions
             items.append(started)
 
         def answered_question(text: str) -> tuple[str, str]:
@@ -5559,6 +6131,8 @@ class Backend:
                               "wake" if agents_only else "monitor")
                 current = ensure_turn()
                 for row in rows:
+                    if row.get("kind") == "video_ended":
+                        continue                 # the player under the reply that asked for it says it
                     if reports_on and row.get("kind") == "subtask_ended":
                         from .agent_reports import notice_from_item
                         items.append(agent_report(notice_from_item(row), current["id"]))
@@ -5683,12 +6257,17 @@ class Backend:
                 if text.startswith("<tool_results>") and m.get("_dgc_files"):
                     ensure_turn()
                     items.extend(shown_files.events(m))
+                if text.startswith("<tool_results>") and isinstance(m.get("_dgc_mcp_apps"), list):
+                    ensure_turn()
+                    items.extend(self._history_mcp_apps(m["_dgc_mcp_apps"][:16]))
                 if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
                     continue
                 if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 question, answer = answered_question(text)
-                open_turn(answer, "prompt", image_items, question)
+                from .prompt_display import checked_mentions
+                open_turn(answer, "prompt", image_items, question,
+                          checked_mentions(m.get("_dgc_display_mentions"), answer))
                 sent_at = _history_written_at(m)
                 if sent_at is not None:
                     items.append({"role": "time", "of": "prompt", "at": sent_at})
@@ -5752,17 +6331,29 @@ class Backend:
                 if name is None:        # a result whose call is no longer in the transcript
                     continue
                 ensure_turn()
-                output = str(content or "")
+                saved = str(content or "")
+                output = shown_output(name, saved)    # the row as it read live: no sentence for the model alone
+                # A Pip setup card reads only the proposal ID, then fetches its authoritative
+                # record from the registry. Truncating a large JSON result in the middle made
+                # otherwise successful Pips disappear from a restored chat (one five-Pip setup
+                # had a 4,105-character fifth result). Preserve that identity across replay.
+                if name == "pips_setup":
+                    try:
+                        setup_id = json.loads(output).get("setup", {}).get("id")
+                    except (TypeError, ValueError, AttributeError):
+                        setup_id = None
+                    if isinstance(setup_id, str) and re.fullmatch(r"setup_[a-f0-9]{32}", setup_id):
+                        output = json.dumps({"setup": {"id": setup_id}}, separators=(",", ":"))
                 output = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
                 # Both of these are pure functions of the saved output string, so a reviewed patch
                 # comes back as a diff card and a failed command comes back red, with no migration.
                 is_diff, diff = split_diff(output)
-                repaired = "tool result unavailable after session interruption" in output
+                repaired = "tool result unavailable after session interruption" in saved
                 if repaired:
                     turn["interrupted"] = True
                 items.extend(self._history_before_tool_result(m, call_id, turn))
                 approval = m.get("_dgc_approval")
-                denied_result = (output.startswith(("The user DENIED this action", "PERMISSION DENIED:"))
+                denied_result = (saved.startswith(("The user DENIED this action", "PERMISSION DENIED:"))
                                  or (isinstance(approval, dict) and
                                      (approval.get("decision") == "no" or approval.get("denied_reason"))))
                 # A step the session stopped under remains stopped, exactly as the reconnect drew
@@ -5779,12 +6370,15 @@ class Backend:
                                       "is_diff": helper_is_diff, "diff": helper_diff})
                 if not repaired and not denied_result:
                     items.append({"type": "tool_result", "call_id": call_id or None, "name": name,
-                                  "output": output, "is_error": tool_output_is_error(output),
+                                  "output": output, "is_error": tool_output_is_error(saved),
                                   "is_diff": is_diff, "diff": diff})
                 items.extend(self._history_after_tool_result(m, call_id, turn))
                 if not repaired and not denied_result:
                     items.extend(shown_files.events(m))
                 items.extend(self._history_approval(m.get("_dgc_approval"), call_id))
+                if not repaired and not denied_result:
+                    # Under its step and the step's Allowed line, as it was drawn live.
+                    items.extend(self._history_mcp_apps([m.get("_dgc_mcp_app")]))
                 if denied_result and not (isinstance(approval, dict) and
                         (approval.get("decision") == "no" or approval.get("denied_reason"))):
                     # Older sessions did not save the decision card, but this canonical result
@@ -6264,18 +6858,28 @@ class Backend:
                 self._pips_failure(detached, "runner_error", "The local Pip control worker could not start.")
 
     def _drain_pips_commands(self):
-        while True:
-            with self._pips_command_lock:
-                if not self._pips_commands:
+        finished = False
+        try:
+            while True:
+                with self._pips_command_lock:
+                    if not self._pips_commands:
+                        self._pips_control_thread = None
+                        finished = True
+                        return
+                    cmd = self._pips_commands.pop(0)
+                try:
+                    self._perform_pips_command(cmd)
+                except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                    self._pips_failure(cmd, getattr(exc, "code", "runner_error"), str(exc))
+                except Exception:
+                    self._pips_failure(cmd, "runner_error", "The local Pip control failed; inspect the backend output and retry.")
+        finally:
+            # A worker that ends any other way (SystemExit from deep inside a control) must not stay registered: the
+            # controls queued after it would wait for it forever, and every later one would be "busy". It is still the
+            # registered worker here (no other starts while one is), so the next control starts a new one.
+            if not finished:
+                with self._pips_command_lock:
                     self._pips_control_thread = None
-                    return
-                cmd = self._pips_commands.pop(0)
-            try:
-                self._perform_pips_command(cmd)
-            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
-                self._pips_failure(cmd, getattr(exc, "code", "runner_error"), str(exc))
-            except Exception:
-                self._pips_failure(cmd, "runner_error", "The local Pip control failed; inspect the backend output and retry.")
 
     def _pip_desktop(self, cmd):
         """A Pip computer's screen in the editor: refused exactly where Pips controls are."""
@@ -6690,6 +7294,18 @@ class Backend:
             self._pip_desktop(cmd)
             return
 
+        if t in ("images_list", "images_update", "images_generate", "images_library"):
+            self._images_command(cmd)
+            return
+
+        if t in self._VIDEOS_COMMANDS:
+            self._videos_command(cmd)
+            return
+
+        if t in self._ROUTER_COMMANDS:
+            self._router_command(cmd)
+            return
+
         if t == "list_prompt_pips":
             from .pip_references import discover
             from .workspace_registry import RegistryError
@@ -6774,6 +7390,9 @@ class Backend:
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))
+            display_text = text
+            from .prompt_display import checked_mentions
+            display_mentions = checked_mentions(cmd.get("display_mentions"), text)
             pip_references = None
             if "pip_references" in cmd:
                 from .pip_references import resolve
@@ -6925,12 +7544,16 @@ class Backend:
                     self.em.emit("mode_changed", mode=self.agent.mode,
                                  workspace_trusted=self.workspace_trusted)
                     state, count = self._start_turn(text, images, context,
-                        **({"pip_references": pip_references} if pip_references else {}))
+                        **({"pip_references": pip_references} if pip_references else {}),
+                        **({"display_mentions": display_mentions}
+                           if display_mentions and text == display_text else {}))
             else:
                 # The request id travels with a queued prompt so close() can hand it back if the
                 # backend stops before it runs; the delivery mode only when the editor chose one.
                 state, count = self._start_turn(text, images, context,
                     **({"pip_references": pip_references} if pip_references else {}),
+                    **({"display_mentions": display_mentions}
+                       if display_mentions and text == display_text else {}),
                     **({"request_id": request_id} if request_id else {}),
                     **({"delivery": cmd["delivery"]} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
@@ -7142,21 +7765,19 @@ class Backend:
             else:
                 self._request_image(image_request, cmd.get("ref"))
 
-        elif t == "get_usage":
+        elif t in ("get_usage", "get_pip_usage_report"):
             usage_request = str(cmd.get("request_id") or "")
+            usage_system = str(cmd.get("system") or "").strip()
             if not usage_request or len(usage_request) > 128:
                 self.em.emit("command_rejected", command=t, reason="invalid_request_id",
                              message="request_id must contain 1-128 characters")
+            elif len(usage_system) > 300 or any(ord(c) < 32 or ord(c) == 127 for c in usage_system):
+                self.em.emit("command_rejected", command=t, reason="invalid_system", request_id=usage_request,
+                             message="system must be a system's id or name (at most 300 characters)")
+            elif t == "get_usage":
+                self._emit_usage(usage_request, str(cmd["range"]), usage_system)
             else:
-                self._emit_usage(usage_request, str(cmd["range"]))
-
-        elif t == "get_pip_usage_report":
-            usage_request = str(cmd.get("request_id") or "")
-            if not usage_request or len(usage_request) > 128:
-                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
-                             message="request_id must contain 1-128 characters")
-            else:
-                self._emit_pip_usage(usage_request, str(cmd["range"]))
+                self._emit_pip_usage(usage_request, str(cmd["range"]), usage_system)
 
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))
@@ -7414,8 +8035,76 @@ class Backend:
                          **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}
                             if active_engine and self._busy() else {}),
                          **_request_fields(request_id))
+        elif t == "set_subscription_default":
+            from .config import Config
+            from .pip_brain import available as subscription_available
+            engine = str(cmd.get("engine") or "")
+            model = str(cmd.get("model") or "").strip()
+            effort = str(cmd.get("effort") or "").strip().lower()
+            if (engine not in ("claude", "codex") or len(model) > 256
+                    or any(ord(char) < 32 for char in model)
+                    or effort not in ("", "low", "medium", "high", "xhigh", "max")):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="Choose a supported subscription, model and effort.",
+                             **_request_fields(request_id))
+                return
+            reason = subscription_available(engine)
+            if reason:
+                self.em.emit("command_rejected", command=t, reason="route_unavailable",
+                             message=reason, **_request_fields(request_id))
+                return
+            try:
+                defaults = Config(project_root=self.config.project_root)
+                defaults._persist = False
+                defaults.set("subscription_engine", engine, persist=False)
+                defaults.set("subscription_model", model, persist=False)
+                defaults.set("subscription_effort", effort, persist=False)
+                defaults._persist = True
+                defaults.save()
+            except Exception:
+                self.em.emit("command_rejected", command=t, reason="defaults_save_failed",
+                             message="DGC could not save the default subscription.",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("subscription_default_changed", engine=engine, model=model, effort=effort,
+                         **_request_fields(request_id))
+        elif t == "set_model_defaults":
+            from .sessions import _clean_native_route
+            from .config import Config
+            route = {key: cmd.get(key) for key in ("base_url", "model", "api_mode")}
+            route["thinking"] = "off"
+            cleaned = _clean_native_route(route)
+            key = cmd.get("api_key", "")
+            if (cleaned is None or not cleaned.get("model")
+                    or not isinstance(key, str) or len(key) > 16384
+                    or any(ord(char) < 32 for char in key)):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="Choose a valid provider URL, model and single-line key.",
+                             **_request_fields(request_id))
+                return
+            try:
+                # A fresh Config owns the global default. The running chat's Config, model
+                # client and session snapshot stay untouched. Config saves the key only in its
+                # owner-private secret store, bound to this exact endpoint.
+                defaults = Config(project_root=self.config.project_root)
+                defaults._persist = False
+                for name in ("base_url", "api_mode", "model"):
+                    defaults.set(name, cleaned[name], persist=False)
+                defaults.set("api_key", key, persist=False)
+                for name in ("subscription_engine", "subscription_model", "subscription_effort"):
+                    defaults.set(name, "", persist=False)
+                defaults._persist = True
+                defaults.save()
+            except Exception:
+                self.em.emit("command_rejected", command=t, reason="defaults_save_failed",
+                             message="DGC could not save the default model.",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("model_defaults_changed", base_url=cleaned["base_url"],
+                         model=cleaned["model"], **_request_fields(request_id))
         elif t == "set_model":
             config_get = getattr(self.config, "get", None)
+            session_route = cmd.get("scope") == "session"
             active_engine = str(
                 config_get("subscription_engine", "") if callable(config_get)
                 else getattr(self.config, "data", {}).get("subscription_engine", "")
@@ -7452,7 +8141,16 @@ class Backend:
                                  **_request_fields(request_id))
                     return
                 previous = str(config_get("subscription_model", "") if callable(config_get) else "").strip()
-                self.config.set("subscription_model", model)
+                if session_route:
+                    self.config.hold("subscription_model", model)
+                    if not self.agent._persist():
+                        self.config.hold("subscription_model", previous)
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its model choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("subscription_model", model)
                 self.em.emit("model_changed", model=model, base_url=self.config.base_url,
                              **_request_fields(request_id))
                 if model and model != previous:
@@ -7460,14 +8158,34 @@ class Backend:
                         f"Model → {model} · applies when the next subscription turn starts"
                         if self._busy() else f"Switched to {model}"))
                 return
+            route_before = None
+            if session_route:
+                if cmd.get("base_url"):
+                    from .sessions import _clean_native_route
+                    proposed = {key: str(self.config.get(key, "") or "")
+                                for key in ("base_url", "model", "api_mode", "thinking")}
+                    proposed["base_url"] = cmd["base_url"]
+                    if _clean_native_route(proposed) is None:
+                        self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                     message="the provider endpoint must be a plain HTTP or HTTPS URL",
+                                     **_request_fields(request_id))
+                        return
+                route_before = {
+                    'data': copy.deepcopy(self.config.data),
+                    'ephemeral': set(getattr(self.config, '_ephemeral_keys', set())),
+                    'held': set(getattr(self.config, '_held_keys', set())),
+                    'bindings': dict(getattr(self.config, '_provider_secret_identity', {})),
+                    'env_keys': set(getattr(self.config, '_env_secret_keys', set())),
+                    'window_switch': getattr(self.config, '_window_from_switch', ''),
+                }
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
                 # switches provider, erase any older CLI secret so a later CLI launch cannot
                 # attach that credential to the newly persisted endpoint.
                 self.config.data["api_key"] = ""
-                if hasattr(self.config, "_stored_secrets"):
+                if not session_route and hasattr(self.config, "_stored_secrets"):
                     self.config._stored_secrets["api_key"] = ""
-                if hasattr(self.config, "_stored_provider_identity"):
+                if not session_route and hasattr(self.config, "_stored_provider_identity"):
                     self.config._stored_provider_identity.pop("api_key", None)
                 runtime_secret = getattr(self.config, "set_runtime_secret", None)
                 if callable(runtime_secret):
@@ -7475,7 +8193,17 @@ class Backend:
                 else:
                     self.config._env_secret_keys.add("api_key")
             if cmd.get("base_url"):
-                self.config.set("base_url", cmd["base_url"])
+                if session_route:
+                    self.config.hold("base_url", cmd["base_url"])
+                    if "api_key" not in cmd:
+                        self.config.set_runtime_secret("api_key", "")
+                else:
+                    self.config.set("base_url", cmd["base_url"])
+            if "api_mode" in cmd:
+                if session_route:
+                    self.config.hold("api_mode", cmd["api_mode"])
+                else:
+                    self.config.set("api_mode", cmd["api_mode"])
             if "api_key" in cmd:
                 # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
                 # a later non-secret config save preserves any existing CLI secret instead of
@@ -7488,13 +8216,28 @@ class Backend:
                     self.config._env_secret_keys.add("api_key")
             previous = str(self.config.model or "")
             if cmd.get("model"):
-                self.config.set("model", cmd["model"])
+                if session_route:
+                    self.config.hold("model", cmd["model"])
+                else:
+                    self.config.set("model", cmd["model"])
             self.agent.refresh_client()
             # The previous model keeps the window chosen for it; the new one gets its own (remembered,
             # reported, or recommended for a local model), never just a name-table guess.
             switch_window = getattr(self.agent, "window_after_switch", None)
             context_changed = bool(cmd.get("model") and callable(switch_window)
-                                   and switch_window(previous))
+                                   and switch_window(previous, scoped=session_route))
+            if session_route and not self.agent._persist():
+                self.config.data = route_before['data']
+                self.config._ephemeral_keys = route_before['ephemeral']
+                self.config._held_keys = route_before['held']
+                self.config._provider_secret_identity = route_before['bindings']
+                self.config._env_secret_keys = route_before['env_keys']
+                self.config._window_from_switch = route_before['window_switch']
+                self.agent.refresh_client()
+                self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                             message="The session could not save its provider choice.",
+                             **_request_fields(request_id))
+                return
             # While delegation is active, keep the public model control aligned with the route a
             # prompt will use even when a settings operation updates the native fallback.
             shown_model = (str(config_get("subscription_model", "")).strip()
@@ -7533,9 +8276,12 @@ class Backend:
                     # transport state. It still shares bounded endpoint+model capability evidence.
                     client = self.agent._new_client(
                         self.config.base_url, self.config.api_key, self.config.model)
+                    listed = client.list_models()
+                    families = getattr(client, "_listed_ollama_families", {}) if client.api_mode == "ollama" else {}
                     ids = [redact_value(item, secret_values(self.config))[:512]
-                           for item in client.list_models()[:4096]
-                           if isinstance(item, str)]
+                           for item in listed[:4096]
+                           if isinstance(item, str) and not embedding_only(
+                               item, families.get(item, "") if isinstance(families, dict) else "")]
                     self.em.emit("models", request_id=request_id, ids=ids,
                                  base_url=self.config.base_url, api_mode=client.api_mode)
                 except Exception as exc:
@@ -7549,6 +8295,7 @@ class Backend:
             self._list_models_at(cmd)
         elif t == "set_think":
             level = str(cmd.get("level", "off"))
+            session_route = cmd.get("scope") == "session"
             config_get = getattr(self.config, "get", None)
             active_engine = str(
                 config_get("subscription_engine", "") if callable(config_get)
@@ -7571,7 +8318,16 @@ class Backend:
                         **_request_fields(request_id))
                     return
                 previous = str(config_get("subscription_effort", "") if callable(config_get) else "") or "off"
-                self.config.set("subscription_effort", effort)
+                if session_route:
+                    self.config.hold("subscription_effort", effort)
+                    if not self.agent._persist():
+                        self.config.hold("subscription_effort", previous if previous != "off" else "")
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its reasoning choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("subscription_effort", effort)
                 shown = effort or "off"
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
@@ -7586,7 +8342,16 @@ class Backend:
                         **_request_fields(request_id))
                     return
                 previous = str(self.config.get("thinking", "off") or "off")
-                self.config.set("thinking", level)   # persisted native route
+                if session_route:
+                    self.config.hold("thinking", level)
+                    if not self.agent._persist():
+                        self.config.hold("thinking", previous)
+                        self.em.emit("command_rejected", command=t, reason="session_save_failed",
+                                     message="The session could not save its reasoning choice.",
+                                     **_request_fields(request_id))
+                        return
+                else:
+                    self.config.set("thinking", level)
                 shown = str(self.config.get("thinking", "off") or "off")
                 self.em.emit("think_changed", think=shown, **_request_fields(request_id))
                 if shown != previous:
@@ -7708,6 +8473,7 @@ class Backend:
                          **_request_fields(request_id))
             self._emit_mode_if_changed(mode_before)
             self._emit_context(request_id)
+            self._emit_config()
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
@@ -7752,6 +8518,7 @@ class Backend:
             self._emit_mode_if_changed(mode_before)
             self.em.emit("history", items=[])
             self._emit_context()
+            self._emit_config()
             self._emit_goal()
             self._emit_monitors()
             self._emit_agents()
@@ -7779,7 +8546,10 @@ class Backend:
                                  **_request_fields(request_id))
                     return
                 try:
-                    n = self.agent.load_session(path)
+                    # saved_mode (ready.capabilities.resume_saved_mode): the person reopened this chat in the editor, so it
+                    # comes back in the mode it had, even one that asks less than this one. Without it (the SDK, an
+                    # older editor) a reopen only lowers the mode (Agent._restore_session_mode).
+                    n = self.agent.load_session(path, saved_mode=cmd.get("saved_mode") is True)
                 except (OSError, ValueError) as exc:
                     self.em.emit("command_rejected", command=t, reason="session_unavailable",
                                  message=redact_value(str(exc), secret_values(self.config)),
@@ -7796,11 +8566,16 @@ class Backend:
                 note = getattr(self.agent, "take_stale_monitor_note", lambda: "")()
                 if note:
                     self.em.emit("info", message=note)
+                # Saved in Auto or Accept edits in a folder that is not trusted now: it reopened in Default, said once.
+                note = getattr(self.agent, "take_mode_restore_note", lambda: "")()
+                if note:
+                    self.em.emit("info", message=note)
                 self._emit_monitors()
                 # After the replay, not before it: published SDK 0.6.9 drains a resume's replay
                 # until the first event it does not know as one, and mode_changed is new to a
                 # resume -- sent first, the whole history landed in the app's first stream().
                 self._emit_mode_if_changed(mode_before)
+                self._emit_config()
                 self._forget_ended_shells()
                 if held:
                     # Shown to be read: what runs there runs there; nothing is started or offered here.
@@ -7813,6 +8588,12 @@ class Backend:
                 # Last: the chat is on screen, in the mode it reopened in. Monitors DGC's stopping
                 # ended start again (once) and each says so.
                 self._bring_back_monitors(self.agent.restart_monitors)
+                # Its videos: the ones that finished while it was closed are told to the model now (a wake), and the
+                # unfinished ones are polled again (a reload left them on disk).
+                try:
+                    self.agent.tell_finished_videos()
+                except Exception:                      # noqa: BLE001 -- a video never costs the resume
+                    pass
                 self._await_previous_owner()
                 self._announce_interrupted()
                 # The prompt cache's clock, with whether it went cold while the chat was closed. Last:
@@ -7851,6 +8632,11 @@ class Backend:
             self._emit_agent_runs(request_id=request_id)
         elif t == "continue_agent":
             self._continue_agent(cmd, request_id)
+        elif t == "watch_mcp_apps":
+            # This client draws a plugin's card under its tool's row (MCP Apps, dgc/mcp_apps.py): from now on a tool
+            # with a card shows it (mcp_app_card) and get_history replays it. Until a client asks, none is made (an older
+            # editor, the SDK, ACP): the tool's text answer is all there is, as before. On the chat's UI.
+            self.ui._mcp_apps_on = True
         elif t == "watch_turn_files":
             # This client draws the Edited card from what the CLI counted: from now on each turn's
             # turn_files is sent before its turn_end. Until a client asks none is (an older editor,
@@ -7867,9 +8653,12 @@ class Backend:
             run_id = cmd.get("run_id")
             if self._pip_report_state().dismiss(self.agent, run_id):
                 from .pip_digest import mark_run_seen
-                from .workspace_registry import WorkspaceRegistry
-                with WorkspaceRegistry() as registry:
-                    mark_run_seen(registry, run_id, "editor-user")
+                from .workspace_registry import RegistryError, WorkspaceRegistry
+                try:
+                    with WorkspaceRegistry() as registry:
+                        mark_run_seen(registry, run_id, "editor-user")
+                except (RegistryError, OSError, sqlite3.Error):
+                    pass   # the run is gone (its Pip was erased) or the registry is busy: the chat's dismissal is what counts
             with self._turn_state_lock():
                 idle = not self._busy()
             if idle:
@@ -8185,6 +8974,7 @@ class Backend:
             self._emit_artifacts(request_id)
         elif t == "set_config":
             from .subscriptions import ENGINE_KEYS as _sub_keys
+            session_route = cmd.get("scope") == "session"
             if self._busy():
                 # An editor saves the whole settings form, so ~25 keys ride along with the one the
                 # user actually moved. Rejecting on key NAMES made every mid-turn save fail on an
@@ -8202,6 +8992,12 @@ class Backend:
             if problem or values is None:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message=problem or "invalid settings values",
+                             **_request_fields(request_id))
+                return
+            if session_route and not set(values).issubset({
+                    "subscription_engine", "subscription_model", "subscription_effort"}):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="session route may only change its subscription engine, model and effort",
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)
@@ -8263,7 +9059,8 @@ class Backend:
             attr_before = {
                 attr: copy.deepcopy(getattr(self.config, attr))
                 for attr in ("_stored_secrets", "_stored_provider_identity",
-                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys")
+                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys",
+                             "_ephemeral_keys", "_held_keys")
                 if hasattr(self.config, attr)
             }
             missing = object()
@@ -8278,6 +9075,8 @@ class Backend:
                 for key, value in values.items():
                     if key not in secret_keys:
                         self.config.set(key, value)
+                if session_route:
+                    self.config.mark_ephemeral(*values.keys())
                 if has_persist_flag:
                     self.config._persist = persist_before
                 for key in secret_keys:
@@ -8303,6 +9102,9 @@ class Backend:
                     self.agent.autonomous_gate = values["autonomous_gate"]
                 if "autonomous_max_turns" in values:
                     self.agent.autonomous_max_turns = values["autonomous_max_turns"]
+                if session_route and values and not self.agent._persist():
+                    raise RuntimeError(getattr(self.agent, "_last_persist_error", "")
+                                       or "the Work session could not save its model route")
             except Exception as exc:
                 if has_persist_flag:
                     self.config._persist = persist_before
@@ -8355,6 +9157,9 @@ class Backend:
                 # How long DGC waits on a model (Settings -> Models -> Advanced), in an event of its own too.
                 if "model_wait_settings" in fields:
                     self._model_wait_settings_wanted = True
+                # How hard helpers think (Settings -> Models -> Sub-agents), in an event of its own too.
+                if "subagent_settings" in fields:
+                    self._subagent_settings_wanted = True
             self._emit_config(request_id)
         elif t == "status":
             active_engine = str(self.config.get("subscription_engine", "") or "").strip()
@@ -8615,10 +9420,13 @@ class Backend:
         if registry is None:
             return
         faces = self._agent_faces_on()
+        # A row's DGC Router system (`system`, a name) travels inside its item, as by_model rows carry theirs: live, an
+        # editor also hears it from router_status's leases, but a reopened chat has no lease left, only its records.
+        # A key inside an item never fails a client (an SDK reads the keys it knows); face_slot keeps its handshake.
+        dropped = set() if faces else {"face_slot"}
         registry.snapshot(emit=lambda snap: self.em.emit(
             "agents",
-            items=snap["items"] if faces else [{key: value for key, value in item.items()
-                                                if key != "face_slot"} for item in snap["items"]],
+            items=[{key: value for key, value in item.items() if key not in dropped} for item in snap["items"]],
             total=snap["total"], active=snap["active"], **_request_fields(request_id)))
         self._emit_agent_runs()                 # its helpers' runs, after the rows they belong to
 
@@ -8810,6 +9618,22 @@ class Backend:
         finally:
             with self.__dict__.setdefault("_image_lock", threading.Lock()):
                 self._image_requests = max(0, self.__dict__.get("_image_requests", 1) - 1)
+
+    def _history_mcp_apps(self, kept: list) -> list:
+        """The plugin cards a saved tool result showed (MCP Apps), as ``mcp_app_card`` items without their page (the
+        client loads it from ``url``, or asks with mcp_app_get): only for a client that draws them."""
+        ui = getattr(self, "ui", None)
+        if not (callable(getattr(ui, "mcp_apps_shown", None)) and ui.mcp_apps_shown()):
+            return []
+        from .mcp_apps import event_fields, load_card
+        items = []
+        for entry in kept:
+            record = load_card(entry.get("card_id")) if isinstance(entry, dict) else None
+            if record is None or record.get("surface") != "work":
+                continue
+            ui.__dict__.setdefault("_mcp_app_cards", set()).add(record["card_id"])
+            items.append({"type": "mcp_app_card", **event_fields(record, with_html=False)})
+        return items
 
     @staticmethod
     def _history_image_item(call_id, records: list) -> dict:
@@ -9479,6 +10303,7 @@ class Host:
         # and the heartbeat). Keep snapshot and replace in one order: an older snapshot must
         # never land after a newer handoff and claim that this process still holds a chat.
         self._peer_announce_lock = threading.RLock()
+        self._mcp_app_lock = threading.RLock()
         self._opening: set[str] = set()      # minted, still being built off the stdin thread
         self._closing: set[str] = set()      # still emitting their last events
         self._retired_secrets: set[str] = set()
@@ -9868,6 +10693,8 @@ class Host:
             if self._chatdgc is None:
                 from .chatdgc.service import ChatService
                 self._chatdgc = ChatService(self.core.emit, self.default.config, generative_ui_supported=True)
+                # Plugins' cards in a reply (MCP Apps), once ChatDGC's screens say they draw them.
+                self._chatdgc.engine.mcp_apps_watched = lambda: self.mcp_apps_watched("chat")
                 # A reply starting or ending is news for the process's note: dgc ps and Settings -> Running
                 # sessions name the chats it is answering, and a backend with no window is kept for them.
                 self._chatdgc.on_turns_changed = self.announce_peers
@@ -9921,6 +10748,10 @@ class Host:
         if isinstance(kind, str) and kind.startswith("artifact_"):
             # The process's: an artifact belongs to the account, not to a folder (dgc/artifact_commands).
             return self.artifacts().dispatch({key: value for key, value in cmd.items() if key != "chat_id"})
+        if (isinstance(kind, str) and kind.startswith("mcp_app_")) or (
+                kind == "watch_mcp_apps" and cmd.get("surface") in ("chat", "pip")):
+            # A plugin's card (MCP Apps): named by its own id, whichever chat, tab or Pip shows it.
+            return self._mcp_apps_command(cmd)
         if kind in ("mods_list", "mod_set", "mod_command", "mod_action", "watch_mod_offers",
                     "mod_offer_answer") and cmd.get("surface") == "chat":
             # ChatDGC's own mods: the process's, one set for every chat (dgc/chatdgc/service).
@@ -9948,6 +10779,107 @@ class Host:
             return self._reject(cmd, "unknown_chat", "no open chat has that id",
                                 chat_id if isinstance(chat_id, str) else "")
         self._deliver(chat, {key: value for key, value in cmd.items() if key != "chat_id"})
+
+    # ---- MCP Apps: what a card asks (dgc/mcp_apps.py) ----------------------------------------------------------
+    def mcp_apps_watched(self, surface: str) -> bool:
+        """ChatDGC's and Pips' screens say they draw plugins' cards with watch_mcp_apps {surface}."""
+        return surface in self.__dict__.get("_mcp_apps_watch", set())
+
+    def _mcp_app_owner(self, record: dict):
+        """(link, emit, chat) for a card: a Work chat's own connection and rules, or the user's plugins as ChatDGC and
+        Pips use them. A Work card belongs to the open chat that showed it (or has its session)."""
+        from . import mcp_apps
+        surface = record.get("surface")
+        if surface == "work":
+            with self._chats_lock:
+                chats = list(self.chats.values())
+            chat = next((c for c in chats if record["card_id"] in getattr(c.ui, "__dict__", {}).get("_mcp_app_cards", ())),
+                        None)
+            if chat is None:
+                chat = next((c for c in chats if getattr(getattr(c, "agent", None), "session_file", None) is not None
+                             and c.agent.session_file.stem == record.get("session_id")), None)
+            if chat is None:
+                return None, None, None
+            return (mcp_apps.WorkLink(chat.agent, add_rule=lambda route, ui=chat.ui: ui.add_permission_rule(route, {})),
+                    chat.em.emit, chat)
+        with self._chats_lock:
+            if self._shutting_down:
+                return None, None, None
+            links = self.__dict__.setdefault("_mcp_app_links", {})
+            if surface not in links:
+                links[surface] = mcp_apps.PluginLink(self.default.config, surface)
+            return links[surface], self.em.emit, None
+
+    def _run_mcp_app_operation(self, operation) -> None:
+        # Shutdown waits for a call/answer already using a link. Queued workers cannot reconnect it afterward.
+        with self._mcp_app_lock:
+            if not self._shutting_down:
+                operation()
+
+    def _mcp_apps_command(self, cmd: dict) -> None:
+        from . import mcp_apps
+        problem = command_error(cmd)
+        if problem:
+            return self._reject(cmd, "invalid_command", f"invalid command: {problem}")
+        kind = cmd["type"]
+        if kind == "watch_mcp_apps":
+            self.__dict__.setdefault("_mcp_apps_watch", set()).add(cmd["surface"])
+            return
+        request_id = cmd.get("request_id") if isinstance(cmd.get("request_id"), str) else ""
+        if kind == "mcp_app_answer":
+            asked = self.__dict__.setdefault("_mcp_app_asked", {}).pop(cmd["ask_id"], None)
+            if asked is None:
+                if request_id:
+                    return self.em.emit("mcp_app_reply", card_id="", request_id=request_id,
+                                        error={"code": -32000, "message": "That card's question was already answered."})
+                return self._reject(cmd, "unknown_ask", "that card's question was already answered")
+            card_id, request_id, emit = asked
+
+            def answer():
+                _ask, out = mcp_apps.CALLS.answer(cmd["ask_id"], cmd["choice"])
+                emit("mcp_app_reply", card_id=card_id, request_id=request_id, **out)
+            threading.Thread(target=lambda: self._run_mcp_app_operation(answer), daemon=True, name="dgc-mcp-app-answer").start()
+            return
+        record = mcp_apps.load_card(cmd.get("card_id"))
+        link, emit, chat = self._mcp_app_owner(record) if record is not None else (None, None, None)
+        if record is None or link is None:
+            if kind == "mcp_app_call":
+                (emit or self.em.emit)("mcp_app_reply", card_id=str(cmd.get("card_id") or "")[:64], request_id=request_id,
+                                       error={"code": -32000, "message": "This card isn't open in DGC now."})
+            elif kind == "mcp_app_get":
+                self._reject(cmd, "unknown_card", "This card isn't open in DGC now.")
+            return
+        if kind == "mcp_app_get":
+            return emit("mcp_app_resource", request_id=request_id, **mcp_apps.resource_fields(record))
+        if kind == "mcp_app_context":
+            text = mcp_apps.context_text(record, cmd.get("content"), cmd.get("structured_content"))
+            self._mcp_app_context(record, text, chat)
+            return
+        # mcp_app_call: off the wire's thread (a plugin can take a while), answered by mcp_app_reply, or by an Allow
+        # card (mcp_app_ask) that mcp_app_answer decides.
+
+        def call():
+            try:
+                out = mcp_apps.CALLS.begin(record, link, cmd["method"], cmd.get("params"))
+            except Exception as exc:            # noqa: BLE001 -- said to the card, never raised past it
+                out = {"error": {"code": -32603, "message": f"DGC couldn't send it ({type(exc).__name__})"}}
+            if "ask" in out:
+                asked = self.__dict__.setdefault("_mcp_app_asked", {})
+                if len(asked) > 256:
+                    asked.pop(next(iter(asked)))
+                asked[out["ask"]["ask_id"]] = (record["card_id"], request_id, emit)
+            emit("mcp_app_reply", card_id=record["card_id"], request_id=request_id, **out)
+        threading.Thread(target=lambda: self._run_mcp_app_operation(call), daemon=True, name="dgc-mcp-app-call").start()
+
+    def _mcp_app_context(self, record: dict, text: str, chat) -> None:
+        """A card's ui/update-model-context: kept on the card (its latest only), and given to the model once in the next
+        turn of the chat that shows it, as untrusted plugin content."""
+        from . import mcp_apps
+        mcp_apps.update_card(record["card_id"], context=text, context_at=time.time(), context_used=False)
+        if chat is not None and text:
+            agent = getattr(chat, "agent", None)
+            if agent is not None:
+                mcp_apps.stage_context(agent, record, text)
 
     def _deliver(self, chat: "Backend", cmd: dict) -> None:
         """Run a chat's command: inline while the client holds one chat -- exactly as a lone
@@ -10055,6 +10987,14 @@ class Host:
             chatdgc = self._chatdgc
             queues, self._queues = list(self._queues.values()), {}
             drains, self._drains = list(self._drains.values()), {}
+        with self._mcp_app_lock:
+            links, self._mcp_app_links = list(self.__dict__.get("_mcp_app_links", {}).values()), {}
+            self._mcp_app_asked = {}
+            for link in links:
+                try:
+                    link.close()
+                except Exception:
+                    pass                       # one broken connection cannot prevent the others closing
         chat_closer = None
         voice = getattr(self, "_voice", None)
         if voice is not None:

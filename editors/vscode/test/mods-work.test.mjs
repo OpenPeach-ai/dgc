@@ -144,6 +144,26 @@ test("a panel opens in a drawer titled From <mod>, and what it holds talks back 
   assert.equal(p.doc.activeElement, p.$("mod-strip").querySelector(".mod-status-item"), "the focus goes back where it was");
 });
 
+test("a link or a choice card in a mod's Markdown is its words: a click opens nothing and sends nothing", () => {
+  const p = chat();
+  withMods(p);
+  p.event({ type: "mod_ui", name: "tally", mod: "Tally", slot: "status", tree: { type: "Text", text: "3 steps" }, surface: "work" });
+  p.event({ type: "mod_ui", name: "tally", mod: "Tally", slot: "pane", surface: "work", tree: { type: "Markdown", text:
+    "[Open the docs](https://example.com/?leak=project-file-text) and [a file](src/secret.py) and ![pic](https://example.com/p.png)\n\n"
+    + "```dgc-ui\n" + JSON.stringify({ type: "choices", title: "Next", choices: [{ label: "Go", reply: "send this" }] }) + "\n```\n\n```text\ncopy me\n```" } });
+  p.$("mod-strip").querySelector(".mod-status-item").click();
+  const drawer = p.doc.querySelector(".mod-drawer");
+  assert.equal(drawer.querySelector(".md-link, a"), null, "no link to press");
+  assert.equal(drawer.querySelector("img"), null, "nothing of the mod's address loads (no favicon)");
+  assert.deepEqual([...drawer.querySelectorAll(".mod-link")].map((n) => n.textContent), ["Open the docs", "a file", "pic"]);
+  for (const node of drawer.querySelectorAll(".mod-md *")) node.click();
+  const out = JSON.parse(JSON.stringify(p.posted.filter((m) => ["openExternal", "openFile", "openLink", "send", "prompt"].includes(m?.type))));
+  assert.deepEqual(out, [], "a mod with no network has no way out through a click");
+  assert.ok([...drawer.querySelectorAll(".mod-md button")].every((b) => b.disabled || b.classList.contains("copy")));
+  const copies = () => p.posted.filter((m) => m?.type === "copy").length, before = copies();
+  drawer.querySelector(".mod-md .copy").click();
+  assert.equal(copies(), before + 1, "a code block's Copy still copies");
+});
 test("a mod's notice is a quiet line in the transcript under its title, and the same words again count up", () => {
   const p = chat();
   withMods(p);

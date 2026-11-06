@@ -1,5 +1,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
+  // Plugins' cards (MCP Apps, media/mcpApps.js): what one asks goes to the extension host from here.
+  window.DgcMcpApps?.setup({ post: (message) => vscode.postMessage(message), surface: "work" });
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const composerPlaceholder = input.dataset.placeholder;
@@ -244,12 +246,59 @@
   // that pin "Review  after" are asserting exactly that. The attribute's PRESENCE marks a pill;
   // its value is what the model reads. contenteditable=false makes it one object to the caret, so
   // the browser steps over it and selects it whole.
-  function pillElement(kind, label, wire = "") {
+  function ensurePlushStyles() {
+    const plush = window.PipConcepts?.plush;
+    if (plush?.styles && !document.getElementById("dgc-composer-plush-styles")) {
+      const style = document.createElement("style");
+      style.id = "dgc-composer-plush-styles";
+      style.textContent = plush.styles;
+      document.head.appendChild(style);
+    }
+  }
+  function pillElement(kind, label, wire = "", identity = "", pipType = "") {
     const pill = document.createElement("span");
     pill.className = `composer-pill pill-${kind}`;
     pill.setAttribute("contenteditable", "false");
     pill.setAttribute("data-pill", wire);
     pill.dataset.kind = kind;
+    if (kind === "pip") {
+      pill.dataset.pipId = identity;
+      const type = pipType || attachments.find(a => a.pipReference?.pip_id === identity)?.pipReference?.pip_type;
+      const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(type);
+      const face = document.createElement("span"); face.className = "composer-pip-face"; face.setAttribute("aria-hidden", "true");
+      if (index >= 0 && window.PipConcepts?.plush) {
+        ensurePlushStyles();
+        face.innerHTML = window.PipConcepts.plush.markup(
+          { index, name: label }, "idle", `composerPip${Math.random().toString(36).slice(2, 12)}`,
+          { includeStyles: false });
+      }
+      else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
+      const name = document.createElement("span"); name.className = "composer-pip-name"; name.textContent = label;
+      pill.append(face, name);
+      pill.title = `${label} · Pip reference`;
+      return pill;
+    }
+    if (kind === "plugin") {
+      pill.dataset.pluginId = identity;
+      const mark = document.createElement("span"); mark.className = "composer-plugin-mark"; mark.setAttribute("aria-hidden", "true");
+      const logo = pluginLogos[identity];
+      if (logo) { const img = document.createElement("img"); img.alt = ""; img.src = logo; mark.appendChild(img); }
+      else mark.innerHTML = '<span class="codicon codicon-plug"></span>';
+      const name = document.createElement("span"); name.className = "composer-plugin-name"; name.textContent = label;
+      pill.append(mark, name);
+      pill.title = `${label} · connected plugin`;
+      return pill;
+    }
+    if (kind === "artifact") {
+      pill.dataset.artifactKind = identity;
+      const glyph = OUTPUT_CHOICES.find(([value]) => value === identity)?.[3] || "output";
+      const mark = document.createElement("span"); mark.className = `composer-artifact-mark codicon codicon-${glyph}`;
+      mark.setAttribute("aria-hidden", "true");
+      const name = document.createElement("span"); name.className = "composer-artifact-name"; name.textContent = label;
+      pill.append(mark, name);
+      pill.title = `${label} · Artifact format`;
+      return pill;
+    }
     if (kind === "link") {
       // NO FAVICON HERE, and that is the whole point. Setting img.src fetches from Google's icon
       // service the instant the element is built -- on a DETACHED node, before insertComposerPill
@@ -275,15 +324,15 @@
   // A null `start` puts the pill at the caret as it stands. Text offsets cannot say which side of
   // a pill whose wire text is "" they mean, so a paste that rebuilds several pills in a row places
   // each one where the last left the caret.
-  function insertComposerPill(start, end, kind, label, wire = "") {
-    return recordComposerEdit(() => placeComposerPill(start, end, kind, label, wire));
+  function insertComposerPill(start, end, kind, label, wire = "", identity = "") {
+    return recordComposerEdit(() => placeComposerPill(start, end, kind, label, wire, identity));
   }
-  function placeComposerPill(start, end, kind, label, wire) {
+  function placeComposerPill(start, end, kind, label, wire, identity = "") {
     // Through execCommand still, because insertHTML is what puts the caret, the selection and the
     // surrounding text right; the undo step itself is the composer's own (recordComposerEdit).
     input.focus({ preventScroll: true });
     if (start != null) setComposerRange(start, end);
-    const built = pillElement(kind, label, wire);
+    const built = pillElement(kind, label, wire, identity);
     // Tag it so the caret repair below can find exactly the node just inserted, rather than
     // guessing at "the last pill" -- there may already be others, in any order.
     const stamp = `p${Math.random().toString(36).slice(2, 10)}`;
@@ -337,7 +386,7 @@
     // Skills surface has no pill and must not be governed by one; reconcilePills() below only
     // withdraws the ones that came in this way.
     const owner = attachments.find((a) => (kind === "file" ? a.label === label && a.resource
-      : a[kind] === label));
+      : kind === "pip" ? a.pipReference?.pip_id === identity : a[kind] === label));
     if (owner) owner.fromPill = true;
     // The row was drawn before this pill existed -- attachInvocation renders it, then the pill is
     // inserted -- so redraw now that there is something inline to defer to.
@@ -389,9 +438,11 @@
     for (let i = attachments.length - 1; i >= 0; i--) {
       const a = attachments[i];
       if (!a.fromPill) continue;
-      const kind = a.skill ? "skill" : a.template ? "template" : (a.resource ? "file" : "");
-      const name = kind === "file" ? a.label : a[kind];
-      if (kind && !shown.has(`${kind}\u0000${name}`)) { attachments.splice(i, 1); dropped = true; }
+      const kind = a.skill ? "skill" : a.template ? "template" : a.resource ? "file" : a.pipReference ? "pip" : "";
+      const name = kind === "file" ? a.label : kind === "pip" ? a.pipReference.name : a[kind];
+      const present = kind === "pip" ? [...input.querySelectorAll('[data-kind="pip"]')]
+        .some(pill => pill.dataset.pipId === a.pipReference.pip_id) : shown.has(`${kind}\u0000${name}`);
+      if (kind && !present) { attachments.splice(i, 1); dropped = true; }
     }
     if (dropped) { renderAtts(); scheduleDraftSave(); }
   }
@@ -406,9 +457,11 @@
     // with no skills at all. Only the last pill standing for a selection gives it back. Files are
     // exempt: the @file branch pushes unconditionally, so those are already one-to-one.
     if (kind !== "file" && [...input.querySelectorAll(".composer-pill")].some((other) =>
-      other !== pill && other.dataset.kind === kind && other.textContent === name)) return;
+      other !== pill && other.dataset.kind === kind && (kind === "pip"
+        ? other.dataset.pipId === pill.dataset.pipId : other.textContent === name))) return;
     const index = attachments.findIndex((a) => (
-      kind === "file" ? a.label === name && a.resource : a[kind] === name));
+      kind === "file" ? a.label === name && a.resource
+        : kind === "pip" ? a.pipReference?.pip_id === pill.dataset.pipId : a[kind] === name));
     if (index >= 0) { attachments.splice(index, 1); renderAtts(); }
   }
 
@@ -777,10 +830,14 @@
   // panel's memory of its last copy, and only when the clipboard still holds that exact text.
   const PILL_MARK = "";
   var composerCopy = null;
+  function pillLabel(pill) {
+    // Plush faces include a scoped <style>. textContent on the whole Pip pill copies that CSS.
+    return pill.dataset.kind === "pip" ? pill.querySelector(".composer-pip-name")?.textContent || pill.lastChild?.textContent || "" : pill.textContent;
+  }
   function pillToken(pill) {
-    const kind = pill.dataset.kind, name = pill.textContent;
+    const kind = pill.dataset.kind, name = pillLabel(pill);
     if (kind === "link") return pill.dataset.pill || pill.title || name;
-    return (kind === "skill" ? "$" : kind === "file" ? "@" : "/") + name;
+    return (kind === "skill" ? "$" : ["file", "pip", "plugin", "artifact"].includes(kind) ? "@" : "/") + name;
   }
   function copyComposerSelection(event) {
     const sel = window.getSelection();
@@ -799,10 +856,13 @@
       const parts = [];
       marked.split(PILL_MARK).forEach((piece, i) => {
         if (i) {
-          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pill.textContent;
-          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent) : null;
+          const pill = pills[i - 1], kind = pill.dataset.kind, label = pill.title && kind === "link" ? pill.title : pillLabel(pill);
+          const att = kind === "file" ? attachments.find((a) => a.resource && a.label === pill.textContent)
+            : kind === "pip" ? attachments.find((a) => a.pipReference?.pip_id === pill.dataset.pipId) : null;
           parts.push({ kind, label, wire: pill.dataset.pill || "", token: pillToken(pill),
-            resource: att ? { ...att.resource } : null });
+            identity: kind === "plugin" ? pill.dataset.pluginId : kind === "artifact" ? pill.dataset.artifactKind : "",
+            resource: att?.resource ? { ...att.resource } : null,
+            pipReference: att?.pipReference ? { ...att.pipReference } : null });
         }
         if (piece) parts.push(piece);
       });
@@ -823,15 +883,24 @@
       if (sel && sel.rangeCount && !sel.isCollapsed) deleteComposerSelection();
       for (const part of parts) {
         if (typeof part === "string") { insertComposerText(part); continue; }
-        const { kind, label, wire, token, resource } = part;
+        const { kind, label, wire, token, resource, pipReference, identity } = part;
         let ok = true;
         if (kind === "skill" || kind === "template") ok = attachInvocation(kind, label);
         else if (kind === "file") {
           // One selection per @file pill, as the picker makes them: releasePill relies on it.
           ok = !!resource && canAttach();
           if (ok) attachments.push({ label, resource: { ...resource }, fromPill: true });
+        } else if (kind === "pip") {
+          ok = validPipReference(pipReference) && canAttach()
+            && !attachments.some(a => a.pipReference?.pip_id === pipReference.pip_id);
+          if (ok) attachments.push({ label: pipReferenceLabel(pipReference), pipReference: { ...pipReference }, fromPill: true });
+        } else if (kind === "plugin") {
+          ok = pluginRows.some(row => row.name === identity && row.connected === true
+            && (row.display_name || row.name) === label && wire === label);
+        } else if (kind === "artifact") {
+          ok = offeredOutputs().some(([value, name]) => value === identity && name === label && wire === label);
         } else if (kind === "command") ok = !input.querySelector('[data-kind="command"]');   // one per prompt
-        if (ok) insertComposerPill(null, null, kind, label, wire);
+        if (ok) insertComposerPill(null, null, kind, label, wire, pipReference?.pip_id || identity || "");
         else insertComposerText(token);
       }
       reconcilePills();
@@ -865,6 +934,11 @@
         dock: { show: dockPipCard, hide: undockPipCard },
         // The Pip runs this chat started are background tasks: the pill counts them, the map lists them.
         onRunsChange: () => renderAgents(),
+        getDismissed: () => {
+          const saved = vscode.getState();
+          return saved?.pipSetupScope === draftScope ? saved.pipSetupDismissed : [];
+        },
+        setDismissed: ids => vscode.setState({...(vscode.getState() || {}), pipSetupScope: draftScope, pipSetupDismissed: ids}),
       });
     }
     return pipSetupCards;
@@ -921,6 +995,12 @@
     if (!host || !window.DgcPips?.mount) return;
     if (!pipsApp) {
       const root = host.attachShadow({mode:"open"});
+      if (host.dataset.cardsStyleUri) {
+        // A plugin's card under a Pip's reply (media/mcpApps.js) is drawn inside this root: its look comes in with it.
+        const cardsStyle = document.createElement("link");
+        cardsStyle.rel = "stylesheet"; cardsStyle.href = host.dataset.cardsStyleUri;
+        root.append(cardsStyle);
+      }
       pipsApp = window.DgcPips.mount({
         root, stylesheetUri:host.dataset.styleUri,
         postMessage:message => vscode.postMessage({...message,documentId:document.documentElement.dataset.pipsDocumentId}),
@@ -1280,10 +1360,10 @@
   $("projects-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcProjectNew" }));
   $("chats-library")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcLibrary" }));
   $("work-library")?.addEventListener("click", () => vscode.postMessage({ type: "workLibrary" }));
-  // Chat | Work: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
+  // Work | Chat: two tabs when ChatDGC is here, so each list has the whole height (stacked, a long list of chats
   // pushed this project's sessions out of sight). The one search covers both, and while it's on, each tab says how
   // much it found. Without ChatDGC (an older CLI) there are no tabs: the sessions, as before.
-  let homeTab = (() => { try { return vscode.getState()?.homeTab === "work" ? "work" : "chat"; } catch { return "chat"; } })();
+  let homeTab = (() => { try { return vscode.getState()?.homeTab === "chat" ? "chat" : "work"; } catch { return "work"; } })();
   function homeTabs() {
     const bar = $("home-tabs"), panels = { chat: $("chats-home"), work: $("work-home") };
     if (!bar || !panels.chat || !panels.work) return;
@@ -1299,7 +1379,7 @@
       else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", name === "chat" ? "chats-title" : "sessions-title"); }
     }
   }
-  // ChatDGC was here last time: Chat | Work show at once, rather than when this window's backend has started. Its
+  // ChatDGC was here last time: Work | Chat show at once, rather than when this window's backend has started. Its
   // answer still decides (renderChats): a CLI without ChatDGC takes the tabs away again.
   if (chatPlace === "home" && document.documentElement.dataset.chatdgcSeen === "1") {
     chatsAvailable = true;
@@ -1335,7 +1415,7 @@
     $(`home-tab-${name}`)?.addEventListener("keydown", (e) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
       e.preventDefault();
-      showHomeTab(e.key === "Home" ? "chat" : e.key === "End" ? "work" : homeTab === "chat" ? "work" : "chat", true);
+      showHomeTab(e.key === "Home" ? "work" : e.key === "End" ? "chat" : homeTab === "chat" ? "work" : "chat", true);
     });
   }
   $("chats-new")?.addEventListener("click", () => vscode.postMessage({ type: "chatdgcNew" }));
@@ -1387,10 +1467,12 @@
   let continueAgentLive = false;
   const agentRuns = new Map(), agentMore = new Map();
   let pipReportsLive = false;            // ready.capabilities.pip_reports: Dismiss is saved with the chat
+  let displayMentionsVersion = 0;       // display-only inline marks replayed in sent prompts
   let pipFixLive = false;                // ready.capabilities.pip_fix: Ask DGC to fix runs in the background
   // Declared up here: the rail's chip line reads them while the panel is still starting up.
   const pipFixes = new Map();            // run_id -> the latest fix record of that report in this chat
   const pipFixSteps = new Map();         // agent id -> what the fixer is doing now ("Running npm test")
+  const pipFixPrompts = new Map();       // agent id -> the brief its fixer was given (the fix record's prompt)
   const PIP_FIX_ACTIVE = ["queued", "preparing", "running", "applying"];
   // ready.capabilities.pip_runs_running: which of this chat's Pips are running now, as the backend says (the chip).
   let pipRunsLive = false;
@@ -1516,7 +1598,7 @@
       <p class="auto-mode-risk"><strong>Mistakes or malicious instructions can cause data loss or expose private information.</strong> You can switch back to Default at any time.</p>
       <p class="auto-mode-limits">Your deny and ask rules still apply. Auto does not grant new account permissions or remove sandbox restrictions.</p>
       <p class="auto-mode-trust" hidden>This workspace is not trusted. Continuing also trusts this workspace.</p>
-      </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel" autofocus>Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
+      </div><div class="auto-mode-buttons"><button type="button" class="auto-mode-cancel">Cancel</button><button type="button" class="auto-mode-confirm"><span class="codicon codicon-warning" aria-hidden="true"></span><span>Enable Auto</span></button></div>`;
     if (message.needsTrust === true) {
       dialog.querySelector(".auto-mode-trust").hidden = false;
       dialog.querySelector(".auto-mode-confirm span:last-child").textContent = "Trust and enable Auto";
@@ -1532,6 +1614,8 @@
     document.body.appendChild(dialog);
     if (typeof dialog.showModal === "function") dialog.showModal();
     else { closeAutoModePrompt(false); return; }
+    // Focused here, not by an autofocus attribute: VS Code's webview is a cross-origin frame, where Chromium refuses
+    // autofocus with a console error ("Blocked autofocusing on a <button> element in a cross-origin subframe.").
     dialog.querySelector(".auto-mode-cancel").focus();
   }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
@@ -1887,11 +1971,12 @@
     const options = el("div", "model-options"); options.hidden = true;
     [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
     mm.appendChild(options);
+    // Thinking is a primary control of this menu. The model-list disclosure must never hide it.
+    card.querySelector(".effort-control").hidden = false;
     const toggle = card.querySelector(".model-summary");
     toggle.onclick = () => {
       options.hidden = !options.hidden;
       toggle.setAttribute("aria-expanded", String(!options.hidden));
-      card.querySelector(".effort-control").hidden = !options.hidden;
       if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
     };
     slider.oninput = () => {
@@ -1910,31 +1995,86 @@
       hideModelMenu();
     };
   }
-  function renderModelMenu(ids, current, err, subscription, label, supportsEffort) {
+  let lastModelMenu = null;
+  function showProviderStep() {
+    if (!lastModelMenu) return;
+    renderProviderChoices();
+  }
+  function renderModelMenu(ids, current, err, subscription, label, supportsEffort, routes, cliDefaultModel, cliDefaultListed, currentRouteKey) {
+    lastModelMenu = { ids, current, err, subscription, label, supportsEffort, routes,
+                      cliDefaultModel, cliDefaultListed, currentRouteKey };
+    renderProviderModels(lastModelMenu);
+  }
+  function renderProviderChoices() {
+    const { routes, currentRouteKey } = lastModelMenu;
+    const mm = $("modelmenu");
+    const options = mm.querySelector(".model-options");
+    if (!options) return;
+    const choices = (Array.isArray(routes) ? routes : [{ key: "native", label: "Current host" }])
+      .filter(row => row && row.key);
+    // Keep the same model/effort control mounted while only the lower list changes.
+    options.innerHTML = `<div class="mhead"><span>Provider</span></div>`
+      + choices.map((row, i) => {
+        const selected = row.key === currentRouteKey;
+        const note = row.installed === false ? " · install CLI first"
+          : row.auth_state === "signed_out" ? " · sign in first" : "";
+        return `<button type="button" role="menuitemradio" aria-checked="${selected}" class="mrow${selected ? " sel" : ""}" data-provider-i="${i}"><span class="mi ${selected ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(String(row.label || row.key).split(" (")[0] + note)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`;
+      }).join("")
+      + `<button type="button" role="menuitem" class="mrow" data-manage-providers="1"><span class="mi codicon codicon-add" aria-hidden="true"></span><span>Add provider in Settings…</span></button>`;
+    options.hidden = false;
+    mm.querySelector(".model-summary")?.setAttribute("aria-expanded", "true");
+    options.querySelectorAll("[data-provider-i]").forEach(button => button.onclick = (event) => {
+      event.stopPropagation();
+      const row = choices[Number(button.dataset.providerI)];
+      if (row.key === currentRouteKey) {
+        renderProviderModels(lastModelMenu);
+      } else {
+        vscode.postMessage({ type: "setSubscription", engine: row.key === "native" ? "" : row.key });
+        hideModelMenu();
+      }
+    });
+    options.querySelector("[data-manage-providers]").onclick = () => {
+      vscode.postMessage({ type: "openSettings", section: "models" }); hideModelMenu();
+    };
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
+    (options.querySelector(".sel") || options.querySelector("button"))?.focus();
+  }
+  function renderProviderModels({ ids, current, err, subscription, label, supportsEffort,
+                                  cliDefaultModel, cliDefaultListed }) {
     const mm = $("modelmenu");
     const profile = profileMenu(subscription, supportsEffort);
+    const back = `<button type="button" role="menuitem" class="mrow" data-provider-back="1"><span class="mi codicon codicon-arrow-left" aria-hidden="true"></span><span>Providers</span></button>`;
     if (subscription) {
       mm.innerHTML = profile + `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
-        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>CLI default</span></button>`
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"${cliDefaultListed === false ? " disabled" : ""}><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(cliDefaultModel ? `CLI default · ${cliDefaultModel}${cliDefaultListed === false ? " (not listed)" : ""}` : "CLI default")}</span></button>`
         + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
         + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
       bindProfiles(mm);
+      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+      mm.querySelector(".model-summary")?.click();
       mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
       mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
       mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
+      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
       mm.querySelector(".model-summary")?.focus(); return;
     }
     if (err || !ids.length) {
       mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
       bindProfiles(mm);
+      mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+      mm.querySelector(".model-summary")?.click();
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
+      mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
     mm.innerHTML = profile + `<div class="mhead"><span>Model</span></div>` +
       ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
     bindProfiles(mm);
+    mm.querySelector(".model-options").insertAdjacentHTML("afterbegin", back);
+    mm.querySelector(".model-summary")?.click();
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+    mm.querySelector("[data-provider-back]").onclick = (event) => { event.stopPropagation(); showProviderStep(); };
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     mm.querySelector(".model-summary")?.focus();
   }
@@ -2076,7 +2216,7 @@
   // sentence it already prints, so "Read files, ran a command" is a book and not a terminal.
   const BUCKET_ICON = {
     read: "book-open", edited: "pencil", created: "file-plus", ran: "square-terminal",
-    searched: "search", mapped: "folder-tree", looked: "globe", viewed: "image", web: "globe",
+    searched: "search", mapped: "folder-tree", looked: "globe", viewed: "image", web: "globe", fetched: "globe",
     other: "wrench",
   };
   const ICON_FALLBACK = "wrench";        // the one deliberately generic mark: "no better word"
@@ -2206,6 +2346,7 @@
     return p && typeof p === "object" && !Array.isArray(p)
       && typeof p.pip_id === "string" && /^pip_[a-f0-9]{32}$/.test(p.pip_id) && p.pip_id.length === 36
       && typeof p.workspace_id === "string" && /^ws_[a-f0-9]{32}$/.test(p.workspace_id) && p.workspace_id.length === 35
+      && (p.scope === undefined || p.scope === "project" || p.scope === "personal")
       && typeof p.name === "string" && p.name.length > 0 && [...p.name].length <= 160 && new TextEncoder().encode(p.name).length <= 640
       && ["core","scout","lens","patch","rook","pulse","lock","quill"].includes(p.pip_type)
       && ["active","paused","archived"].includes(p.status)
@@ -2247,6 +2388,73 @@
   let backendExitNotice = null;
   let draftWarning = false, unconfirmedDrafts = [];
   const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
+  function draftParts() {
+    const pills = [...input.querySelectorAll('[data-pill]')];
+    if (!pills.length) return null;
+    const marker = [...Array(32)].map((_, i) => String.fromCharCode(0xe000 + i))
+      .find(c => !composerText().includes(c));
+    if (!marker) return null;
+    const marked = walk(input, null, 0, () => marker)[0].split(marker);
+    if (marked.length !== pills.length + 1) return null;
+    const parts = [];
+    marked.forEach((words, i) => {
+      if (words) parts.push(words);
+      if (i < pills.length) {
+        const pill = pills[i], kind = pill.dataset.kind;
+        const label = kind === 'link' ? pill.title : pill.lastChild?.textContent || '';
+        const identity = kind === 'pip' ? pill.dataset.pipId
+          : kind === 'plugin' ? pill.dataset.pluginId : kind === 'artifact' ? pill.dataset.artifactKind : '';
+        parts.push({kind, label, wire: pill.dataset.pill || '', identity: identity || ''});
+      }
+    });
+    return parts;
+  }
+  function promptDisplayMentions(text) {
+    const parts = draftParts();
+    if (!parts || parts.length > 49) return [];
+    const rich = displayMentionsVersion >= 2;
+    const raw = parts.map(part => typeof part === "string" ? part : part.wire).join("");
+    if (raw.trim() !== text) return [];
+    const leading = Array.from(raw.slice(0, raw.length - raw.trimStart().length)).length;
+    let offset = -leading;
+    const mentions = [];
+    for (const part of parts) {
+      if (typeof part === "string") { offset += Array.from(part).length; continue; }
+      if (["plugin", "artifact", "pip"].includes(part.kind)
+          || (rich && ["skill", "template", "file", "command"].includes(part.kind)
+              && part.label.length <= 120)) {
+        // References and selected attachments contribute no prompt text. A trailing space before
+        // one is removed by submit(), so anchor an end-of-prompt mark at the trimmed text's end.
+        const entry = {start: ["pip", "skill", "template", "file"].includes(part.kind)
+          ? Math.min(offset, Array.from(text).length) : offset,
+          kind: part.kind, label: part.label, identity: part.identity || part.kind};
+        if (part.kind === "pip") {
+          const ref = attachments.find(a => a.pipReference?.pip_id === part.identity)?.pipReference;
+          if (ref?.pip_type) entry.pip_type = ref.pip_type;
+        }
+        mentions.push(entry);
+      }
+      offset += Array.from(part.wire).length;
+    }
+    return mentions.length <= 24 && mentions.every(m => m.start >= 0) ? mentions : [];
+  }
+  function restoreDraftParts(parts, text) {
+    if (!parts?.length) return;
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        part.split('\n').forEach((line, i) => { if (i) frag.appendChild(document.createElement('br')); if (line) frag.appendChild(document.createTextNode(line)); });
+      } else {
+        frag.appendChild(pillElement(part.kind, part.label, part.wire, part.identity));
+        const a = attachments.find(item => part.kind === 'pip' ? item.pipReference?.pip_id === part.identity
+          : item.label === part.label);
+        if (a) a.fromPill = true;
+      }
+    }
+    if (text.endsWith('\n')) frag.appendChild(document.createElement('br'));
+    input.replaceChildren(frag);
+    markComposerEmpty();
+  }
   function cleanDraft(value) {
     if (!value || typeof value !== "object" || typeof value.text !== "string" || value.text.length > 1_000_000
         || !Array.isArray(value.attachments) || value.attachments.length > 64) return null;
@@ -2280,12 +2488,28 @@
       const end = Math.max(start, Math.min(text.length, Number(value.end) || start));
       const clean = { text, attachments: items, start, end,
         updated: Number(value.updated) || Date.now() };
+      if (Array.isArray(value.parts) && value.parts.length <= 256) {
+        const parts = [], allowed = new Set(['pip','plugin','artifact','skill','template','file','link','command']);
+        for (const part of value.parts) {
+          if (typeof part === 'string' && part.length <= 1_000_000) { parts.push(part); continue; }
+          if (!part || typeof part !== 'object' || !allowed.has(part.kind)
+              || typeof part.label !== 'string' || part.label.length > 8192
+              || typeof part.wire !== 'string' || part.wire.length > 8192
+              || typeof part.identity !== 'string' || part.identity.length > 128) { parts.length = 0; break; }
+          if (part.kind === 'pip' && (!/^pip_[a-f0-9]{32}$/.test(part.identity)
+              || !items.some(a => a.pipReference?.pip_id === part.identity))) { parts.length = 0; break; }
+          if (part.kind === 'plugin' && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(part.identity)) { parts.length = 0; break; }
+          if (part.kind === 'artifact' && !OUTPUT_CHOICES.some(([id, label]) => id === part.identity && label === part.label)) { parts.length = 0; break; }
+          parts.push({kind: part.kind, label: part.label, wire: part.wire, identity: part.identity});
+        }
+        if (parts.length && parts.map(p => typeof p === 'string' ? p : p.wire).join('') === text) clean.parts = parts;
+      }
       if (value.goal === true) clean.goal = true;
       return clean;
     } catch { return null; }
   }
   function captureDraft() {
-    return { text: composerText(), attachments: [...attachments], start: composerSelection()[0],
+    return { text: composerText(), parts: draftParts(), attachments: [...attachments], start: composerSelection()[0],
       end: composerSelection()[1], goal: goalDraftArmed, updated: Date.now() };
   }
   function persistDraft() {
@@ -2358,6 +2582,7 @@
       || { text: "", attachments: [], start: 0, end: 0, goal: false };
     restoringDraft = true;
     setComposerValue(draft.text); attachments.splice(0, attachments.length, ...draft.attachments);
+    restoreDraftParts(draft.parts, draft.text);
     setGoalDraftArmed(draft.goal);
     // Another chat gets its own undo history: Ctrl+Z in a new chat must not bring back the prompt
     // sent in the chat that was left, nor that chat's draft.
@@ -2391,7 +2616,7 @@
       const draft = draftEntries.get(draftSession);
       if (draft) {
         restoringDraft = true;
-        setComposerValue(draft.text); attachments.push(...draft.attachments);
+        setComposerValue(draft.text); attachments.push(...draft.attachments); restoreDraftParts(draft.parts, draft.text);
         setGoalDraftArmed(draft.goal);
         setComposerRange(draft.start, draft.end);
         renderAtts(); autosizeComposer();
@@ -2411,7 +2636,7 @@
         if (composerText() || attachments.length) { sysLine("Send or clear the current draft first."); return; }
         // One step, so Cmd+Z puts the box back as it was before the restore.
         recordComposerEdit(() => {
-          setComposerValue(row.draft.text); attachments.push(...row.draft.attachments);
+          setComposerValue(row.draft.text); attachments.push(...row.draft.attachments); restoreDraftParts(row.draft.parts, row.draft.text);
           setGoalDraftArmed(row.draft.goal);
         });
         unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
@@ -2467,7 +2692,7 @@
   function promptEntry(item, label) {
     const draft = cleanDraft({ ...(item?.draft || {}), start: 0, end: 0 })
       || { text: String(item?.text || "").slice(0, 1_000_000), attachments: [] };
-    const node = el("div", "msg user"); node.appendChild(el("div", "role", label));
+    const node = el("div", "msg user"); node.appendChild(textEl("div", "role", label));
     const bubble = el("div", "bubble");
     fillUserBubble(bubble, String(item?.text || "").slice(0, 1_000_000), draft.attachments);
     node.appendChild(bubble);
@@ -2538,6 +2763,9 @@
   // before anything renders, or `dgc.linkFavicons: false` would still emit an <img> per link.
   DgcMarkdown.setFavicons?.(document.body.dataset.linkFavicons !== "off");
   const md = (source) => DgcMarkdown.render(source);
+  // DGC's own reply in this chat: the one place a ```dgc-ui card is live. Skills, docs, memory, goals, helpers' and
+  // Pips' reports and thinking keep it as code (md above).
+  const mdReply = (source) => DgcMarkdown.render(source, { cards: true });
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function textEl(tag, cls, value) { const e = el(tag, cls); e.textContent = String(value); return e; }
   // ---- hover labels ----
@@ -2682,7 +2910,8 @@
     recordPin(node, height);
     return true;
   }
-  // What became of a message you sent mid-turn, as a line UNDER the bubble.
+  // Pending and queued messages keep a line under the bubble. Once the model reads one,
+  // its delivery state joins the timestamp in the same quiet type and colour.
   //
   // It sat inside the bubble for a while, which was wrong twice over: a status line about the
   // message read as words you had typed, and it was only in there to keep the transcript's own
@@ -2691,16 +2920,25 @@
   const STEER_NOTE = {
     pending: "\u21b3 steering \u2026",
     queued: "\u21b3 queued for the next turn",
-    applied: "\u21b3 steered \u2014 the model has read this",
   };
+  function syncSteerTime(node) {
+    const time = node?.querySelector(":scope > .msg-time");
+    if (!time) return;
+    time.querySelector(":scope > .steer-time-prefix")?.remove();
+    if (node.dataset.steer === "applied") {
+      time.prepend(el("span", "steer-time-prefix", "Steered \u00b7 "));
+      node.querySelector(":scope > .steer-note")?.remove();
+    }
+  }
   function setSteerState(node, state) {
     if (!node) return;
     node.dataset.steer = state;
-    const words = STEER_NOTE[state];
+    const words = state === "applied" && !node.querySelector(":scope > .msg-time") ? "Steered" : STEER_NOTE[state];
     let note = node.querySelector(":scope > .steer-note");
-    if (!words) { if (note) note.remove(); return; }
+    if (!words) { if (note) note.remove(); syncSteerTime(node); return; }
     if (!note) { note = el("div", "steer-note"); node.appendChild(note); }
     note.textContent = words;
+    syncSteerTime(node);
     // A queued message can be steered into the running turn instead of waiting for it to end (reported
     // 19 Oct): the same as pressing Enter while the model works, so it keeps going and reads it at its next step.
     if (state === "queued" && steerQueuedLive && !replaying) {
@@ -2879,6 +3117,12 @@
   window.__dgcPanelBuild = "follow-5";   // proves which panel code a recording actually ran
   let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
+  // At the very end, not merely near it: where following may start again. "Near" (atBottom's 60px) re-armed it
+  // while a person scrolled up a few pixels at a time near the live row, and the next tick pulled them back down:
+  // "it flickers and won't scroll up" (seen in testing).
+  // Every event's "was it at the end?" (stick) reads this too: read as "within 60px", an event arriving while a person
+  // had scrolled up a little took them back down.
+  function atEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 2; }
   function scroll() { if (replaying) return; log.scrollTop = log.scrollHeight; following = true; }
   // ---- reading back without losing the end ----
   // Scrolling up during a run is normal; being stranded there is not. The pill appears only
@@ -2888,7 +3132,8 @@
   let unread = false;
   function renderToLatest() {
     const away = !atBottom();
-    if (!away) { unread = false; following = true; }
+    if (!away) unread = false;
+    if (atEnd()) following = true;
     toLatest.hidden = !away;
     toLatest.classList.toggle("unread", away && unread);
     $("to-latest-label").textContent = away && unread ? "New" : "Latest";
@@ -2913,8 +3158,12 @@
       readingBack();
     }
   }, { passive: true });
+  let lastScrollTop = log.scrollTop;
   log.addEventListener("scroll", () => {
-    if (Date.now() - userScrolledAt < 700) following = atBottom();
+    // A person's own scroll up always wins, however small; following comes back only at the very end.
+    const up = log.scrollTop < lastScrollTop - 0.5;
+    lastScrollTop = log.scrollTop;
+    if (Date.now() - userScrolledAt < 700) following = up ? false : atEnd() || (following && atBottom());
     // Pins still waiting for the width (or the fonts) to hold still are exactly what a scroll is
     // about to reach: re-measure the blocks nearest the view now, before they come into view at
     // their old height, rather than after the debounce -- a scroll inside that window jumped ~200px.
@@ -2930,7 +3179,7 @@
   // the newest content off the bottom of the view — the end-of-turn summary went with it. If we
   // were following the run, keep following it.
   if (typeof ResizeObserver === "function") {
-    new ResizeObserver(() => { if (atBottom() || following) scroll(); })
+    new ResizeObserver(() => { if (following) scroll(); })
       .observe(document.querySelector("footer"));
   }
 
@@ -2946,24 +3195,50 @@
   const PIN_GROUND_PX = 28;        // the strip around a pinned bubble: 16px of ground above it, a 12px fade below
   const PIN_FADE_PX = 12;          // = --sp-3, the fade under the bubble
   const PIN_SHARE = 0.3;           // a strip taller than this share of the window does not pin
+  const PIN_LOG_SHARE = 0.4;       // nor one taller than this share of the transcript: the answer keeps the rest
   const PIN_JUMP_DELAY_MS = 300;   // a single click waits this long for a second one (the reference's 300ms)
   function fitPin(head, room) {
     if (head._pinH > 0) head.classList.toggle("pin-off", head._pinH + PIN_GROUND_PX > room);
   }
-  // Reads no layout: the observer hands over each head's height, kept on the head. The window's height
-  // is the measure, not #log's: a draft growing in the composer must not flip a pin per keystroke.
+  // The window's height is the measure, so that a draft growing in the composer never flips a pin per keystroke. But
+  // the window is not what the transcript gets: in a short Work chat (a low window, the terminal panel open, an editor
+  // split) the header and the composer take most of it, and a prompt that fitted 30% of a 308px window pinned over
+  // 134px of transcript with its ground. At the end of a long turn the reply then showed as its last line under the
+  // prompt, with everything above it out of sight: a wake turn's reply after a video Stop, reported on the 0.51.0
+  // release candidate. So the strip may take at most 40% of the transcript too. The transcript is read only when a
+  // pin is decided (a prompt's size changed, the window was resized, the transcript's height moved with no draft in
+  // the composer), never as a draft grows; not laid out (jsdom, a hidden panel), the window decides alone, as before.
+  function pinRoom() {
+    const byWindow = window.innerHeight * PIN_SHARE;
+    const shown = log.clientHeight;
+    return shown > 0 ? Math.min(byWindow, shown * PIN_LOG_SHARE) : byWindow;
+  }
+  // Reads one height per decision: the observer hands over each head's height, kept on the head.
   const pinFit = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
-    const room = window.innerHeight * PIN_SHARE;
+    const room = pinRoom();
     for (const entry of entries) {
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect?.height ?? 0;
       if (height > 0) entry.target._pinH = height;   // 0: not rendered (agent page, hidden panel); keep the last
       fitPin(entry.target, room);
     }
   }) : null;
-  window.addEventListener("resize", () => {
-    const room = window.innerHeight * PIN_SHARE;
+  const refitPins = () => {
+    const room = pinRoom();
     for (const head of log.querySelectorAll(".turn > .msg.user.turn-head, .turn > .msg.dgc > .msg.user.turn-steer")) fitPin(head, room);
-  });
+  };
+  window.addEventListener("resize", refitPins);
+  // The transcript's own height moves too, with no change to the window: a turn's controls and the rails under it come
+  // and go, a question docks above the composer. Decided again then, except while the composer holds a draft: that is
+  // the draft growing, and a pin never flips per keystroke.
+  if (typeof ResizeObserver === "function") {
+    let shownHeight = -1;
+    new ResizeObserver(() => {
+      const height = log.clientHeight;
+      if (height <= 0 || height === shownHeight) return;
+      shownHeight = height;
+      if (!input.value) refitPins();
+    }).observe(log);
+  }
   // Where a head is laid out: the top of its box (it is always the box's first child) plus its own
   // margin. Its rect says where it is drawn, which while it is pinned is the rest line.
   function laidOutTop(head) {
@@ -3400,9 +3675,24 @@
     }
     renderToLatest();   // the Latest pill while away; following again once back at the end
   }
-  function fillUserBubble(bubble, text, attachments) {
+  function fillUserBubble(bubble, text, attachments, displayMentions = []) {
     bubble.replaceChildren();
-    const items = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    const body = String(text || "");
+    // Only move an attachment into the sentence when every saved position is usable.
+    // A malformed mark must leave its ordinary attachment chip visible.
+    const marks = validPromptMentions(body, displayMentions) ? displayMentions : [];
+    const pipIds = new Set(marks
+      .filter(m => m?.kind === "pip").map(m => m.identity));
+    const attached = Array.isArray(attachments) ? attachments : [];
+    const inline = new Map(), inlineIndexes = new Set();
+    for (const mark of marks) {
+      if (!["skill", "template", "file"].includes(mark?.kind)) continue;
+      const i = attached.findIndex((item, index) => item && (mark.kind !== "file" || !inlineIndexes.has(index)) &&
+        (mark.kind === "file" ? item.resource && item.label === mark.label : item[mark.kind] === mark.label));
+      if (i >= 0) { inline.set(mark, attached[i]); inlineIndexes.add(i); }
+    }
+    const items = attached.filter((item, index) => item && !inlineIndexes.has(index) &&
+      !(item.pipReference && pipIds.has(item.pipReference.pip_id)));
     if (items.length) {
       const row = el("ul", "prompt-atts");
       row.setAttribute("role", "list");
@@ -3416,8 +3706,69 @@
       if (images.length) bubble._images = images;
       bubble.appendChild(row);
     }
-    const body = String(text || "");
-    if (body || !items.length) bubble.appendChild(promptText(body));
+    if (body || !items.length) bubble.appendChild(promptTextWithMentions(body, marks, inline));
+  }
+  function validPromptMentions(body, mentions) {
+    if (!Array.isArray(mentions) || mentions.length > 24) return false;
+    const chars = Array.from(body);
+    let at = 0;
+    for (const mention of mentions) {
+      const {start, kind, label, identity, pip_type: pipType} = mention || {};
+      if (!Number.isInteger(start) || start < at || start > chars.length ||
+          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) ||
+          typeof label !== "string" || typeof identity !== "string" ||
+          (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) return false;
+      const end = start + (["pip", "skill", "template", "file"].includes(kind)
+        ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
+      if (end > chars.length || (end > start && chars.slice(start, end).join("") !==
+          (kind === "command" ? "/" + label : label))) return false;
+      at = end;
+    }
+    return true;
+  }
+  function promptTextWithMentions(body, mentions, inline = new Map()) {
+    if (!Array.isArray(mentions) || !mentions.length || mentions.length > 24) return promptText(body);
+    const chars = Array.from(body), host = el("div", "prompt-text");
+    let at = 0;
+    for (const mention of mentions) {
+      const { start, kind, label, identity, pip_type: pipType } = mention || {};
+      if (!Number.isInteger(start) || start < at || start > chars.length ||
+          !["plugin", "artifact", "pip", "skill", "template", "file", "command"].includes(kind) || typeof label !== "string" ||
+          typeof identity !== "string" || (kind === "pip" && !["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].includes(pipType))) {
+        return promptText(body);
+      }
+      const zeroWidth = ["pip", "skill", "template", "file"].includes(kind);
+      const end = start + (zeroWidth ? 0 : Array.from(label).length + (kind === "command" ? 1 : 0));
+      if (end > chars.length || (!zeroWidth && chars.slice(start, end).join("") !==
+          (kind === "command" ? "/" + label : label))) return promptText(body);
+      host.append(...promptText(chars.slice(at, start).join("")).childNodes);
+      const pill = pillElement(kind, label, "", identity, pipType);
+      // History can contain a plugin mention even when the composer is empty after a reload.
+      // Fetch its logo once for the whole batch of restored prompts, then upgrade the mark in place.
+      if (kind === "plugin" && !pluginLogos[identity] &&
+          (!pluginListRequestedAt || Date.now() - pluginListRequestedAt > 30000)) {
+        pluginListRequestedAt = Math.max(1, Date.now());
+        vscode.postMessage({ type: "requestPlugins" });
+      }
+      if (kind === "command") pill.textContent = "/" + label;
+      pill.classList.add("sent-mention");
+      pill.removeAttribute("contenteditable");
+      pill.removeAttribute("data-pill");
+      const item = inline.get(mention);
+      if (item) {
+        pill.classList.add("sent-attachment");
+        pill.setAttribute("role", "button"); pill.tabIndex = 0;
+        pill.setAttribute("aria-label", `Open attachment ${item.label || label}`);
+        pill.onclick = event => { event.stopPropagation(); openPromptAttachment(item); };
+        pill.onkeydown = event => { if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault(); event.stopPropagation(); openPromptAttachment(item);
+        } };
+      }
+      host.appendChild(pill);
+      at = end;
+    }
+    host.append(...promptText(chars.slice(at).join("")).childNodes);
+    return host;
   }
   // A URL the user typed is a link they can open, not grey text to select and copy by hand.
   //
@@ -3492,7 +3843,13 @@
   function promptAttachmentChip(item, images, bubble) {
     if (item.pipReference) {
       const chip = el("span", "prompt-att chip pip-reference-chip");
-      chip.textContent = pipReferenceLabel(item.pipReference);
+      const ref = item.pipReference;
+      const index = ["core", "scout", "lens", "patch", "rook", "pulse", "lock", "quill"].indexOf(ref.pip_type);
+      const face = el("span", "pip-reference-face"); face.setAttribute("aria-hidden", "true");
+      if (index >= 0 && window.PipConcepts?.plush) face.innerHTML = window.PipConcepts.plush.markup(
+        { index, name: ref.name }, "idle", `sentPip${Math.random().toString(36).slice(2, 12)}`, { paused: true });
+      else face.innerHTML = '<span class="codicon codicon-hubot"></span>';
+      chip.append(face, textEl("span", "pip-reference-name", ref.name.replace(/\s+/g," ").trim()));
       chip.title = `${item.pipReference.pip_id} · ${item.pipReference.status} · lifecycle ${item.pipReference.lifecycle_revision} · Reference only`;
       return chip;
     }
@@ -3578,6 +3935,94 @@
   function clearFileThumbs() {
     for (const id of fileThumbs.keys()) finishFileThumb(id);
   }
+  /** The pictures a turn's generate_image steps made, as the made-files row a shown image uses (one alone at the
+   *  reply's width, several as tiles), each opening the image viewer. Each is its own record beside the step's (a
+   *  twin by ref), so a picture that arrives by ref later fills both. Null when the turn made none. */
+  function madePictures(block) {
+    const records = [...block.querySelectorAll('.tool[data-tool-name="generate_image"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId)).flatMap((card) => card._images || []).slice(0, 8);
+    // The videos this turn started (generate_video), drawn in the same row as pictures: a figure each, its job's
+    // progress first and then its player (media/videoPlayer.js), so a turn's pictures and videos fold together.
+    const clips = [...block.querySelectorAll('.tool[data-tool-name="generate_video"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId) && card.dataset.videoJob).map((card) => card.dataset.videoJob)
+      .slice(0, 4);
+    if (!records.length && !clips.length) return null;
+    const row = el("ul", "made-files made-pictures");
+    row.setAttribute("role", "list");
+    row.setAttribute("aria-label", clips.length && !records.length
+      ? (clips.length === 1 ? "The video this turn made" : "The videos this turn made")
+      : records.length === 1 ? "The picture this turn made" : "The pictures this turn made");
+    for (const id of clips) {
+      if (!window.DgcVideo) break;
+      const li = el("li");
+      li.appendChild(window.DgcVideo.figure(videoJobs.get(id) || { id, state: "queued" }));
+      row.appendChild(li);
+    }
+    if (!records.length) return row;
+    row._images = records.map((record) => {
+      const twin = { ...record, owner: row, chip: null };
+      if (twin.ref) trackImageRef(twin);
+      return twin;
+    });
+    row._images.forEach((twin, index) => {
+      const li = el("li");
+      const figure = el("figure", "made-image");
+      figure.appendChild(imageChip(twin, index, row._images.length));
+      const caption = el("figcaption", "made-image-caption", esc(imageFileName(twin.name) || twin.name || "Image"));
+      // The picture is in DGC's own folder (~/.dgc/images): a copy goes into the project only when you put it there.
+      const save = el("button", "made-image-save");
+      save.type = "button";
+      save.textContent = "Save to project…";
+      save.title = "Save a copy into this project (assets/ unless you choose another place)";
+      save.addEventListener("click", () => {
+        if (twin.state !== "ready" || !twin.src) return;          // still loading: nothing to copy yet
+        vscode.postMessage({ type: "saveImage", name: imageFileName(twin.name) || twin.name || "image.png", data: twin.src, project: true });
+      });
+      figure.appendChild(caption);
+      figure.appendChild(save);
+      li.appendChild(figure);
+      row.appendChild(li);
+    });
+    requestImages(row._images.filter((twin) => twin.state === "pending"));
+    return row;
+  }
+  /** A reply's pictures and videos in a block that folds to one header row (media/pictureFold.js): "1 picture · a felt
+   *  purple ball", "3 pictures". Its key is what it holds (the pictures' names, the videos' jobs), so a reload and a
+   *  reopened session find the same choice. */
+  function foldPictures(row, block = null) {
+    if (!window.DgcPictureFold) return row;
+    const names = (row._images || []).map((image) => String(image.name || image.ref || ""));
+    const jobs = [...row.querySelectorAll(":scope > li > figure.made-video[data-video-job]")].map((n) => n.dataset.videoJob);
+    const steps = block ? [...block.querySelectorAll('.tool[data-tool-name="generate_image"], .tool[data-tool-name="generate_video"]')]
+      .filter((card) => !agentIdFromCall(card.dataset.callId)) : [];
+    const videos = jobs.length;
+    const pictures = (row._images || []).length;
+    const label = steps.map((c) => c.dataset.prompt).find(Boolean)
+      || (pictures === 1 ? imageFileName((row._images || [])[0]?.name || "") : "");
+    const key = window.DgcPictureFold.keyOf("work", [...names, ...jobs].filter(Boolean).length ? [...names, ...jobs] : [label || "pictures"]);
+    return window.DgcPictureFold.element(key, row, { pictures, videos, label });
+  }
+  // ---- videos (0.51): each generate_video step's job, by id, as the backend last said it ----
+  const videoJobs = new Map();
+  /** A generate_video step's result names its job ("(job vid_…)"): the step keeps it, and the job's state is asked
+   *  for (a reloaded chat's steps come back this way, with their players). */
+  function videoStep(card, output) {
+    const id = /\(job (vid_[0-9a-f]{12})\)/.exec(output)?.[1];
+    if (!id) return;
+    card.dataset.videoJob = id;
+    if (!videoJobs.has(id)) videoJobs.set(id, { id, state: "queued" });
+    vscode.postMessage({ type: "videoJobs", job: id });
+  }
+  function videoJobEvent(job) {
+    if (!job || typeof job.id !== "string") return;
+    videoJobs.set(job.id, { ...(videoJobs.get(job.id) || {}), ...job });
+    window.DgcVideo?.update(videoJobs.get(job.id));
+    // The step's own line follows it too: "fal Wan 2.2 5B: in fal's queue" until it ends.
+    const step = [...document.querySelectorAll('.tool[data-tool-name="generate_video"]')]
+      .find((card) => card.dataset.videoJob === job.id);
+    const badge = step?.querySelector(".badge");
+    if (badge) badge.textContent = { done: "made", failed: "not made", cancelled: "stopped" }[job.state] || job.status || "";
+  }
   function producedImage(item, row) {
     const rel = String(item.rel || "");
     const name = String(item.name || rel.split("/").pop() || "image");
@@ -3655,7 +4100,7 @@
   }
   // The row that heads a turn (0.47 pinned prompt): the one this panel already drew for it, or one
   // drawn now, or null for a turn with nothing to show.
-  function echoPrompt(text, requestId = "", savedAttachments = [], answerQuestion = "") {
+  function echoPrompt(text, requestId = "", savedAttachments = [], answerQuestion = "", displayMentions = []) {
     // The row drawn for this request -- the composer's, a goal's, an answer to a question, a queued
     // message put back after a reload -- found by its id whether or not prompt_accepted came first.
     // It used to be found only as "the last bubble", and only while still pending: turn_start comes
@@ -3685,7 +4130,8 @@
     // included. (Comparing with the last bubble on the page dropped the second of two.)
     const m = el("div", replaying ? "msg user hist" : "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments);
+    fillUserBubble(bubble, parsed.text, savedAttachments.length ? savedAttachments : parsed.attachments,
+      displayMentions);
     if (answerQuestion) bubble.prepend(el("p", "answered-q", esc(answerQuestion)));
     m.appendChild(bubble);
     appendTarget.appendChild(m); if (!replaying) settleBlock(m);
@@ -3809,7 +4255,7 @@
     renderTurnMeta();
   }
   // `requestId`: the id turn_start carries for a prompt someone sent (its row is found by it).
-  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "") {
+  function startTurn(prompt = "", kind = "prompt", id = "", promptNode = null, requestId = "", savedAttachments = [], answerQuestion = "", displayMentions = []) {
     // A page of restored turns is a sequence of finished turns, not one turn interrupting another.
     if (turn) endTurn(replaying ? "completed" : "cancelled");
     speak("DGC is working");
@@ -3841,14 +4287,16 @@
       // DGC started this turn because a background monitor printed something, or a detached
       // specialist finished. The label is backend-written, never a "you" bubble.
       const note = el("div", replaying ? "resume-note monitor-note hist" : "resume-note monitor-note");
-      const lead = kind === "wake" ? "Woke on agent" : "Woke on monitor";
-      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : "activity"}">`
-        + `${icon(kind === "wake" ? "bot" : "activity")}</span>`
-        + `<span>${lead} · ${esc(String(prompt || "").slice(0, 200))}</span>`;
+      // A video this chat started ended (dgc/videos.py): the backend's label is "video: NAME · ended".
+      const clip = kind === "monitor" ? /^video: (.+?) · ended$/.exec(String(prompt || "")) : null;
+      const lead = kind === "wake" ? "Woke on agent" : clip ? "Woke as a video ended" : "Woke on monitor";
+      note.innerHTML = `<span class="note-icon" data-icon="${kind === "wake" ? "bot" : clip ? "play" : "activity"}">`
+        + `${icon(kind === "wake" ? "bot" : clip ? "play" : "activity")}</span>`
+        + `<span>${lead} · ${esc(String(clip ? clip[1] : prompt || "").slice(0, 200))}</span>`;
       appendTarget.appendChild(note);
       wakeNote = note; head = note;
     } else if (!promptNode) {
-      head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion);
+      head = echoPrompt(prompt, requestId, savedAttachments, answerQuestion, displayMentions);
     }
     const block = el("div", replaying ? "msg dgc hist" : "msg dgc");
     if (!replaying) block.classList.add("motion-arrive");
@@ -3909,6 +4357,7 @@
     const old = node.querySelector(":scope > .msg-time");
     const bubble = node.querySelector(":scope > .bubble");
     if (old) old.replaceWith(time); else if (bubble) bubble.after(time); else node.appendChild(time);
+    syncSteerTime(node);
   }
   // ---- the box a turn goes in (0.47 pinned prompt) ----
   // A prompt opens a box: its row, then anything the log wrote between that prompt and its turn
@@ -4376,6 +4825,10 @@
       const box = el("div", complete ? "answer complete" : "answer partial");
       answer.replaceWith(box);
       box.appendChild(answer);
+      // The pictures this turn made (generate_image) under the reply, as ChatDGC and a Pip's reply show theirs; the
+      // step keeps its own tiles. Before, a picture was three folds deep and the reply only named its path.
+      const pictures = madePictures(turn.block);
+      if (pictures) box.appendChild(foldPictures(pictures, turn.block));
       // The CLI's count of what this turn's recovery point restores, when it sent one (turn_files); else the
       // diffs this turn's own edit tools drew, as an older CLI (or a subscription engine's turn) leaves it.
       const summary = complete ? turnSummaryCard(turn.files ? turn.files.edits : turn.edits, turn.prompt, turn.files) : null;
@@ -5154,7 +5607,7 @@
     clearTimeout(turn.renderTimer); turn.renderTimer = null;
     if (turn.textEl && turn._buf) {
       turn.textEl._markdown = turn._buf;
-      turn.textEl.innerHTML = md(turn._buf); turn.renderedAt = Date.now();
+      turn.textEl.innerHTML = mdReply(turn._buf); turn.renderedAt = Date.now();
       enrichMarkdown(turn.textEl);
     }
   }
@@ -5177,7 +5630,7 @@
     // Replay renders inline: a batch timer would hand the fragment back to the pager half empty.
     if (replaying || !turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
-      const stick = atBottom(); flushText(); if (stick || following) scroll(); else noteNewContent();
+      const stick = atEnd(); flushText(); if (stick || following) scroll(); else noteNewContent();
     }, 48);
   }
   function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
@@ -5199,9 +5652,22 @@
     read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
     code_intel: "mapped", write_file: "created", create_file: "created",
     edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
-    bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
+    bash: "ran", browser: "looked", web_search: "web", web_fetch: "fetched",
     view_image: "viewed",
   };
+  // The pages web_fetch read, by site: "read a page on example.com", "read 3 pages on 2 sites". A fetch is no search,
+  // and its step said "Searched the web". The site is the address's host (its summary), never more of the address.
+  const siteOf = (address) => {
+    try { const u = new URL(String(address || "").trim()); return /^https?:$/.test(u.protocol) ? u.hostname.replace(/^www\./, "") : ""; }
+    catch { return ""; }
+  };
+  function fetchedPhrase(cards, past) {
+    const sites = cards.filter((card) => TOOL_BUCKET[canonicalTool(card.dataset.toolName)] === "fetched")
+      .map((card) => siteOf(card.dataset.summary));
+    const n = sites.length, known = [...new Set(sites.filter(Boolean))];
+    const where = known.length === 1 && sites.every(Boolean) ? ` on ${known[0]}` : known.length > 1 ? ` on ${known.length} sites` : "";
+    return `${past ? "read" : "reading"} ${n === 1 ? "a page" : `${n} pages`}${where}`;
+  }
   // "viewed 2 images" counts the images the viewing steps returned, not the steps. Finished, it also
   // counts the images other steps in the group produced (a screenshot), so the count is said once.
   function viewedPhrase(cards, past) {
@@ -5242,7 +5708,9 @@
       counts.looked && `${past ? "looked at" : "looking at"} ${some(counts.looked, "page", "pages")}`,
       counts.viewed && viewedPhrase(cards, past),
       counts.web && (past ? "searched the web" : "searching the web"),
-      counts.other && (past ? named || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
+      counts.fetched && fetchedPhrase(cards, past),
+      // A failed helper step that names no helper (a batch sent without its `tasks`) says only that it failed.
+      counts.other && (past ? named || failedAgentStep(loneOther).toLowerCase() || `used ${plural(counts.other, "tool", "tools")}` : otherPresent),
     ].filter(Boolean);
     const sentence = phrases.length > 1
       ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
@@ -5251,7 +5719,7 @@
   }
   // The order toolSentence() joins its phrases in. "The first phrase" is therefore already a
   // computed thing, and the header can wear it.
-  const BUCKET_ORDER = ["read", "edited", "created", "ran", "searched", "mapped", "looked", "viewed", "web", "other"];
+  const BUCKET_ORDER = ["read", "edited", "created", "ran", "searched", "mapped", "looked", "viewed", "web", "fetched", "other"];
   // The header wears the leading action of the sentence it already prints — and, when one kind of
   // tool did that action, that tool's own mark. The counts come from the same buckets that wrote
   // the words, so the icon and the sentence can never disagree: "Read files, ran a command" is a
@@ -5659,7 +6127,14 @@
     // The prompt a delegation was given, which its agent's card in the agent map shows. Not drawn on
     // the card itself: the transcript names the agent, its page shows the work.
     if (canonicalTool(ev.name) === "task" && typeof ev.args?.prompt === "string") c._agentPrompt = ev.args.prompt.slice(0, 20000);
-    const detail = [copy.target, described || ev.summary || ""].filter(Boolean).join(" · ");
+    // What a picture or video was asked for: its folded block's header names it ("1 picture · a felt purple ball").
+    if (["generate_image", "generate_video"].includes(canonicalTool(ev.name)) && typeof ev.args?.prompt === "string") {
+      c.dataset.prompt = ev.args.prompt.replace(/\s+/g, " ").trim().slice(0, 200);
+    }
+    // A batch that named no helper (its `tasks` missing): an older CLI summed it up as "0 helpers", and the failed
+    // step read "Couldn't delegate 0 helpers". It never had a helper to count; its reason is the card's output.
+    const summary = canonicalTool(ev.name) === "task" && /^0 helpers?\b/.test(String(ev.summary || "")) ? "" : ev.summary;
+    const detail = [copy.target, described || summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
     const pluginMark = pluginLogoHtml(ev.name);
     c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${pluginMark || icon(iconForTool(ev.name))}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
@@ -6032,6 +6507,16 @@
       return `<dl class="pip-permission">${row("Model for Pips", String(args.default_model || "") || "Same as DGC")}${row("Why", args.reason)}</dl>`
         + `<div class="muted pip-permission-note">Allow saves it in Settings, Agents, Pips: every Pip on Default uses it from its next run. A Pip with a model of its own keeps it.</div>`;
     }
+    if (name === "pips_workflow") {
+      const ids = Array.isArray(args.pip_ids) ? args.pip_ids : [];
+      const names = Array.isArray(args.pip_names) ? args.pip_names : [];
+      const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+      return `<dl class="pip-permission">${row("Workflow", args.name)}${row("Pips", `${ids.length} ${args.scope || ""}`)}`
+        + ids.map((id, i) => row(i ? `Step ${i + 1}` : "Start", `${names[i] || "Pip"} · ${id.slice(-8)}`)
+          + (i ? row("Handoff task", tasks[i - 1]) : "")).join("")
+        + `${row("Routing", args.mode === "unattended" ? "Unattended handoffs" : "Review each handoff")}</dl>`
+        + `<div class="muted pip-permission-note">Allow turns on this exact workflow. It routes results only; every Pip keeps its own approval rules. This choice cannot be set to Always allow.</div>`;
+    }
     if (name !== "pips_setup") return "";
     const reads = args.web_plan && Array.isArray(args.web_plan.reads) ? args.web_plan.reads : [];
     const readText = reads.map((r) => (r && r.kind === "search" ? `Search: ${r.query || ""}` : String((r && r.url) || ""))).join("\n");
@@ -6051,9 +6536,16 @@
   }
   // `decision`: what settled the card, in words ("Allowed once"). An answered card used to keep only
   // its question, so one answered "Allow once" read like one still waiting.
+  // A plan's text folds under its header (the header opens and closes it), open while it waits for an answer and
+  // folded once answered, as a finished step folds; the buttons and feedback stay outside it.
+  function planFold(title, plan) {
+    return `<details class="plan-fold" open><summary class="q">${icon("clipboard-list")} <span class="plan-fold-title">${esc(title)}</span>`
+      + `<span class="plan-fold-chev" aria-hidden="true">${icon("chevron-down", "sm")}</span></summary><pre>${esc(plan)}</pre></details>`;
+  }
   function resolveCard(c, decision = "") {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved");
+    c.querySelectorAll(":scope > details.plan-fold").forEach((fold) => { fold.open = false; });
     if (!replaying) c.classList.add("motion-resolved");
     c.setAttribute("aria-disabled", "true");
     c.querySelectorAll("button, input, select, textarea")
@@ -6069,6 +6561,117 @@
   function expireOpenRequests() {
     document.querySelectorAll(".card[data-request-id]:not(.resolved)")
       .forEach((card) => resolveCard(card, "Not answered: DGC's backend stopped"));
+  }
+  // The answers a permission card offers: the event's `choices` (ready.capabilities.permission_choices), once and
+// deny always among them so a card can never be left without a way to answer; none listed, all three.
+function permissionChoices(ev) {
+    const listed = Array.isArray(ev && ev.choices) ? ev.choices.filter((c) => c === "once" || c === "always" || c === "deny") : [];
+    return listed.length ? new Set([...listed, "once", "deny"]) : new Set(["once", "always", "deny"]);
+  }
+  // A card in plain words for the steps a person decides on by what they do rather than by their arguments: a paid
+  // picture (as ChatDGC's card: the generator, how many at what size, the price, the prompt) and a look on the network.
+  // {name, title, detail, labels, edit}; null for every other tool, whose card shows its summary and arguments.
+  const ROUTER_FIND_PORTS = "11434, 8080, 1234, 8000, 30000, 8188";        // dgc/router_probe.py KNOWN_PORTS
+  /** Composio's multi-execute on a Work Allow card: each app call it makes, in plain words (media/pluginCalls.js),
+   *  with the plugin DGC calls named; null for any other tool. */
+  function pluginCalls(name, args) {
+    const match = /^mcp__([a-z0-9_-]+)__/.exec(String(name || ""));
+    if (!match || !globalThis.DgcPluginCalls) return null;
+    const plugin = match[1] === "composio" ? "Composio" : match[1];
+    const lines = globalThis.DgcPluginCalls.describe(name, args, plugin);
+    return lines ? { plugin, lines } : null;
+  }
+  /** Every app call the Allow covers; one that sends or changes something shows every input it sends under its
+   *  line, in full and with no click (an email's recipient, subject and body). All of it as sent is one click away. */
+  function pluginCallsDetail(name, args) {
+    const calls = pluginCalls(name, args);
+    const fields = (c) => c.fields.length
+      ? `<dl class="perm-call-inputs">${c.fields.map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join("")}</dl>` : "";
+    return calls ? `<ul class="perm-calls">${calls.lines.map((c) => `<li>${esc(c.line)}${fields(c)}</li>`).join("")}</ul>`
+      + `<details class="perm-brief"><summary>Inputs as sent</summary><pre>${esc(globalThis.DgcPluginCalls.sent(name, args))}</pre></details>` : "";
+  }
+  function plainPermission(name, args) {
+    const a = args && typeof args === "object" ? args : {};
+    if (name === "generate_image" && typeof a.generator === "string" && a.generator) {
+      const count = Number.isSafeInteger(a.count) && a.count > 0 ? a.count : 1;
+      const price = String(a.price || "");
+      // Into the project (save_to): where it's written, as write_file's card says what it writes.
+      const into = typeof a.saves_to === "string" && a.saves_to ? `${a.replaces ? "replaces" : "saves to"} ${a.saves_to}` : "";
+      const facts = [`${count} × ${String(a.size || "").replace("x", "×")}`, price,
+        a.this_month ? `this month ${a.this_month}` : "", into].filter(Boolean).join(" · ");
+      return { name: `Picture with ${a.generator}`,
+        title: `Make ${count === 1 ? "this image" : `these ${count} images`} with <b>${esc(a.generator)}</b>?`,
+        detail: `<p class="muted perm-facts">${esc(facts)}</p>${a.note ? `<p class="perm-note">${esc(a.note)}</p>` : ""}`
+          + (a.prompt ? `<blockquote class="perm-prompt">${esc(a.prompt)}</blockquote>` : ""),
+        labels: { once: price && price !== "free" ? `Make it · ${price.split(" (")[0]}` : "Make it", always: "Always allow", deny: "Don't" },
+        edit: typeof a.prompt === "string" ? a.prompt : null };
+    }
+    if (name === "generate_video" && a.video === true) {
+      // Every video asks (its card has no Always: that is the user's own switch in Settings). One that would pass the
+      // month's limit says so and can't be made from here.
+      const price = String(a.price || "");
+      const into = typeof a.saves_to === "string" && a.saves_to ? `${a.replaces ? "replaces" : "saves to"} ${a.saves_to}` : "";
+      const facts = [String(a.facts || ""), a.this_month ? `this month ${a.this_month}` : "", a.minutes || "", into]
+        .filter(Boolean).join(" · ");
+      return { name: `Video with ${a.generator}`, video: true, blocked: a.over_limit === true,
+        title: `Make this video with <b>${esc(a.label || a.generator)}</b>?`,
+        detail: `<p class="muted perm-facts">${esc(facts)}</p>${a.start_image ? `<p class="muted">From ${esc(a.start_image)}</p>` : ""}`
+          + `${a.note ? `<p class="perm-note">${esc(a.note)}</p>` : ""}`
+          + (a.prompt ? `<blockquote class="perm-prompt">${esc(a.prompt)}</blockquote>` : ""),
+        labels: { once: price && price !== "free" ? `Make it · ${price}` : "Make it", deny: "Don't" },
+        edit: typeof a.prompt === "string" ? a.prompt : null };
+    }
+    if (name === "router_find") {
+      return { name: "Look on the network", title: "Look for model servers on your network?",
+        detail: `<p>On this computer's network, on the ports ${ROUTER_FIND_PORTS}, once. Nothing is added until you choose.</p>`,
+        labels: {}, edit: null };
+    }
+    if (canonicalTool(name) === "task") return helpersPermission(a);
+    const mcp = /^mcp__([a-z0-9_-]+)__(.+)$/.exec(String(name || ""));
+    if (mcp && !pluginCalls(name, a)) return pluginToolPermission(mcp[1], mcp[2], a);
+    return null;
+  }
+  const plainWords = (value, limit = 160) => {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    return text.length > limit ? text.slice(0, limit - 1).trimEnd() + "…" : text;
+  };
+  // Helpers (the task tool): each one by what it's asked to do, where it runs when the model said, and its brief one
+  // click away. It read "Run task 3 helpers · … {"tasks":[…]}" (seen in testing).
+  function helpersPermission(a) {
+    const listed = Array.isArray(a.tasks) ? a.tasks.filter((t) => t && typeof t === "object" && !Array.isArray(t)).slice(0, 32) : [a];
+    const helpers = listed.map((t) => {
+      const where = [t.system, t.model].filter((v) => typeof v === "string" && v.trim()).map((v) => plainWords(v, 60)).join(" · ");
+      const facts = [typeof t.agent === "string" && t.agent && t.agent !== "worker" ? `${plainWords(t.agent, 40)} agent` : "",
+        where ? `on ${where}` : typeof t.size === "string" && t.size ? `a ${t.size} model` : "",
+        typeof t.effort === "string" && t.effort ? `thinking ${t.effort}` : ""].filter(Boolean).join(" · ");
+      return { label: plainWords(t.description, 120) || "A helper", facts, brief: typeof t.prompt === "string" ? t.prompt.slice(0, 4000) : "" };
+    });
+    const n = helpers.length;
+    const items = helpers.map((h) => `<li><b>${esc(h.label)}</b>${h.facts ? ` <span class="muted">· ${esc(h.facts)}</span>` : ""}`
+      + (h.brief ? `<details class="perm-brief"><summary>What it's asked</summary><p>${esc(h.brief)}</p></details>` : "") + "</li>").join("");
+    return { name: n === 1 ? `Helper · ${helpers[0].label}` : `${n} helpers`,
+      title: n === 1 ? "Start a helper?" : `Start ${n} helpers?`,
+      detail: `<ul class="perm-helpers">${items}</ul>`
+        + (a.background === true ? `<p class="muted perm-facts">In the background: the reply goes on without waiting for ${n === 1 ? "it" : "them"}.</p>` : ""),
+      labels: { once: n === 1 ? "Start it" : "Start them" }, edit: null, note: true };
+  }
+  // A plugin's tool that isn't Composio's multi-execute: the tool and the plugin by name. One that sends or changes
+  // something shows every input it sends, in full and with no click; a read keeps its inputs one click away, in Inputs
+  // as sent, as in ChatDGC and a Pip's chat (media/pluginCalls.js decides which). It read "Run mcp__example__get-time
+  // {}", and then cut every input at 200 characters, a read's too.
+  function pluginToolPermission(server, tool, a) {
+    const plugin = pluginNames[server] || readyPluginNames[server] || server.replace(/--.*$/, "").replace(/[-_]+/g, " ").replace(/^./, (c) => c.toUpperCase());
+    const action = String(tool).replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) || "Its tool";
+    const name = `mcp__${server}__${tool}`, calls = globalThis.DgcPluginCalls;
+    // Without pluginCalls.js (never so in the panel) every input shows, as a change's would.
+    const fields = calls ? calls.tool(name, a).fields
+      : Object.entries(a).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]);
+    const detail = Object.keys(calls ? calls.shownInputs(name, a) || {} : a).length
+      ? (fields.length ? `<dl class="perm-inputs">${fields.map(([key, value]) => `<dt>${esc(String(key).replace(/[_-]+/g, " "))}</dt><dd>${esc(value)}</dd>`).join("")}</dl>` : "")
+        + `<details class="perm-brief"><summary>Inputs as sent</summary><pre>${esc(calls ? calls.sent(name, a) : JSON.stringify(a, null, 2))}</pre></details>`
+      : `<p class="muted perm-facts">No inputs.</p>`;
+    return { name: `${action} · ${plugin}`, title: `Use <b>${esc(action)}</b> from <b>${esc(plugin)}</b>?`, detail,
+      labels: {}, edit: null, note: true };
   }
   function permissionDecision(decision, rule, note) {
     if (decision === "once") return "Allowed once";
@@ -7223,7 +7826,13 @@
     memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
-  let pluginLogos = {};
+  let pluginLogos = Object.create(null);
+  let pluginRows = [];
+  let pluginListRequestedAt = 0;
+  let pluginNames = Object.create(null); // each plugin's own name, by the server its tools come from
+  // The same names as DGC gives them on start (ready.capabilities.plugin_names), before the plugin list has loaded: an
+  // Allow card for a plugin's tool names the plugin as its card does ("MCP Apps example", not "Example").
+  let readyPluginNames = {};
   const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
 
   function openSurface(kind) {
@@ -7294,9 +7903,28 @@
   // The catalog still arrives here, for one live consumer: a tool card belonging to a plugin's MCP
   // server draws that package's own mark (pluginLogoHtml, above). This is where that cache fills.
   function cachePluginLogos(items) {
-    pluginLogos = {};
+    pluginLogos = Object.create(null);
+    pluginNames = Object.create(null);
+    pluginRows = (Array.isArray(items) ? items : []).filter(row => row && typeof row.name === "string"
+      && /^[a-z0-9_-]{1,64}$/.test(row.name) && row.connected === true);
     for (const row of Array.isArray(items) ? items : []) {
-      if (row.logo) pluginLogos[row.name] = row.logo;
+      if (!row || typeof row.name !== "string" || !/^[a-z0-9_-]{1,64}$/.test(row.name)) continue;
+      if (typeof row.logo === "string" && /^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(row.logo)) pluginLogos[row.name] = row.logo;
+      const named = typeof row.display_name === "string" ? row.display_name.trim().slice(0, 80) : "";
+      if (named) for (const server of [row.name, ...(Array.isArray(row.server_names) ? row.server_names : [])]) {
+        if (typeof server === "string" && /^[a-z0-9_-]{1,64}$/.test(server)) pluginNames[server] = named;
+      }
+    }
+    // A saved inline mention can be restored before the catalog arrives. Upgrade its fallback
+    // mark in place so the draft keeps both its caret and the plugin's actual logo.
+    for (const pill of document.querySelectorAll('.composer-pill.pill-plugin')) {
+      const logo = pluginLogos[pill.dataset.pluginId], mark = pill.querySelector('.composer-plugin-mark');
+      if (!logo || !mark || mark.querySelector('img')) continue;
+      const img = document.createElement('img'); img.alt = ''; img.src = logo; mark.replaceChildren(img);
+    }
+    if ((popMode === "@" || popAwaitingPlugins) && !pipPicker.active) {
+      popAwaitingPlugins = false;
+      onInput();
     }
   }
   function renderSkills(items) {
@@ -7523,7 +8151,7 @@
       setChatChanges({ files: [], total: 0 });
       $("changes-review").hidden = true;
     }
-    const stick = atBottom();
+    const stick = atEnd();
     // A mod's frames, and the answers to what the mods asked (media/mods.js): never a chat event of their own.
     if (ev.type !== "ready" && modsUi?.event(ev)) return;
     switch (ev.type) {
@@ -7541,6 +8169,13 @@
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
         reasoningControl = ev.provider_capabilities?.reasoning_control || "provider";
         skillManagement = ev.capabilities?.skill_management === true;
+        const named = ev.capabilities?.plugin_names;
+        readyPluginNames = {};
+        if (named && typeof named === "object" && !Array.isArray(named)) {
+          for (const [server, shown] of Object.entries(named).slice(0, 256)) {
+            if (/^[a-z0-9_-]{1,128}$/.test(server) && typeof shown === "string" && shown.trim()) readyPluginNames[server] = shown.trim().slice(0, 80);
+          }
+        }
         liveSteering = ev.capabilities?.live_steering === true;
         nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         agentsLive = ev.capabilities?.agents === true;
@@ -7567,6 +8202,8 @@
         imageSpool = ev.capabilities?.image_spool === true;
         heicImages = imageSpool && ev.capabilities?.heic_images === true;
         pipReferencesSupported = ev.capabilities?.pip_references === 1;
+        displayMentionsVersion = Number(ev.capabilities?.display_mentions) || 0;
+        if (input.querySelector('.composer-pill.pill-plugin')) vscode.postMessage({type: 'requestPlugins'});
         artifactsOffered(ev.capabilities?.artifacts);
         pipsOffered = ev.capabilities?.pips_supported === true && ev.capabilities?.pips_enabled === true
           && Number(ev.capabilities?.pips_api_version) >= 41;
@@ -7666,7 +8303,8 @@
           replaying || ["resume", "continue", "monitor"].includes(ev.kind) ? null : claimQueuedPrompt(ev.request_id),
           typeof ev.request_id === "string" ? ev.request_id : "",
           Array.isArray(ev.attachments) ? ev.attachments : [],
-          typeof ev.answer_question === "string" ? ev.answer_question : "");
+          typeof ev.answer_question === "string" ? ev.answer_question : "",
+          Array.isArray(ev.display_mentions) ? ev.display_mentions : []);
         if (!replaying) customCommandPending = "";
         if (!replaying) returnedPrompts.length = 0;   // given back before this turn: ordinary transcript now
         // The next message moves on from a troupe that has ended; its own wake-up turn (a monitor turn) does not.
@@ -7835,6 +8473,9 @@
       }
       // Images a step produced go inside that step's card (see the 0.40 images section).
       case "tool_images": imagesOnToolImages(ev); break;
+      // A video job this chat started changed (dgc/videos.py): its player figure follows it.
+      case "video_job": videoJobEvent(ev.job); return;
+      case "video_jobs": (Array.isArray(ev.jobs) ? ev.jobs : []).forEach(videoJobEvent); return;
       case "image": imagesOnAnswer(ev); break;     // a getImage answer (the host answers for a backend without one)
       case "tool_result": {
         const childId = agentIdFromCall(ev.call_id);
@@ -7895,6 +8536,7 @@
         else {
           const out = setToolOutput(c, String(ev.output || "").slice(0, 4000));
           c.querySelector(".badge").textContent = out.split("\n").length + " ln";
+          if (ev.name === "generate_video" && !ev.is_error) videoStep(c, String(ev.output || ""));
           enrichToolResult(c, ev);
           setupCards()?.toolResult(c, ev);
           if (c.classList.contains("pip-run-owned")) refreshToolGroup(c.closest(".tool-group"));
@@ -7917,13 +8559,15 @@
       }
       case "permission_decision": {
         ensureTurn();
-        const detail = ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
+        const plainDecision = plainPermission(ev.name, ev.args);
+        const detail = plainDecision ? plainDecision.detail : ev.args?.command ? `<pre>$ ${esc(ev.args.command)}</pre>`
           : Object.keys(ev.args || {}).length ? `<pre>${esc(JSON.stringify(ev.args))}</pre>` : "";
-        const c = decisionCard(`<div class="q">${icon("shield")}<span>Permission for <b>${esc(ev.name)}</b></span></div>${detail}`, "Recorded permission decision");
+        const asked = plainDecision ? plainDecision.title : `Permission for <b>${esc(ev.name)}</b>`;
+        const c = decisionCard(`<div class="q">${icon("shield")}<span>${asked}</span></div>${detail}`, "Recorded permission decision");
         c.dataset.historyApproval = "true";
         // No request id, response handler or editable controls: replay is display only.
         resolveCard(c, String(ev.message || "Recorded decision"));
-        compactPermissionCard(c, ev.name);
+        compactPermissionCard(c, plainDecision ? plainDecision.name : ev.name);
         break;
       }
       case "permission_request": {
@@ -7943,29 +8587,63 @@
         // The user's own Chrome, signed in as them: say so, and name the site, not the tool's arguments.
         const signedIn = ev.name === "browser" && ev.args && ev.args.signed_in === true;
         const site = signedIn ? (() => { try { return new URL(String(ev.args.url || "")).host; } catch { return ""; } })() : "";
-        const detail = signedIn ? `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a window of its own in your Chrome, where you're signed in. It can read and act on that site as you.</p><pre>${esc(String(ev.args.url || ""))}</pre>`
+        const plain = fixAsk ? null : plainPermission(ev.name, ev.args);
+        const detail = plain ? plain.detail : signedIn ? `<p>DGC wants to open <b>${esc(site || "a site")}</b> in a window of its own in your Chrome, where you're signed in. It can read and act on that site as you.</p><pre>${esc(String(ev.args.url || ""))}</pre>`
           : ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
-          : ev.diff ? "" : (pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
+          : ev.diff ? "" : (pluginCallsDetail(ev.name, ev.args) || pipPermissionDetail(ev.name, ev.args) || `<pre>${esc(JSON.stringify(ev.args))}</pre>`);
         const restates = ev.summary && detail.includes(esc(String(ev.summary)));
-        const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
+        const summary = ev.summary && !restates && !plain ? `<div class="muted">${esc(ev.summary)}</div>` : "";
         // In a fix: installing the project's dependencies in the fix copy, or copying an ignored file into it.
         const fixInstall = fixAsk && ev.name === "bash" && /:install-\d+$/.test(String(ev.call_id || ""));
         const fixFile = fixAsk && ev.name === "request_project_file";
         const fixQuestion = fixInstall ? "Install the project's dependencies in the fix copy?"
           : fixFile ? `Copy <b>${esc(String(ev.args?.path || "a file"))}</b> from your project into the fix copy?` : "";
         const fixDetail = fixFile ? `<p>${esc(String(ev.args?.why || "A test needs it."))}</p><p class="muted">It is copied, never linked, and later fixes of this project get it too.</p>` : "";
-        const title = fixQuestion || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        const calls = fixAsk ? null : pluginCalls(ev.name, ev.args);
+        const title = fixQuestion || plain?.title || (calls ? `Do this in <b>${esc(calls.plugin)}</b>?` : "") || (ev.name === "pips_setup" ? "Set up a Pip" : ev.name === "pips_workflow" ? "Set up a Pip workflow" : ev.name === "pips_propose" ? "Change a Pip" : ev.name === "pips_settings" ? "Change the Pips default model" : ev.name === "troupe" ? (ev.args && ev.args.routine ? "Schedule a troupe?" : "Start a troupe?") : signedIn ? `Use your signed-in Chrome on <b>${esc(site || "this site")}</b>?` : `Run <b>${esc(ev.name)}</b>`);
+        // ev.choices is exactly the answers this card takes (ready.capabilities.permission_choices): a DGC Router change
+        // (router_update) and a look on the network (router_find) send ["once", "deny"], asked every time, so they get
+        // no Always allow. An older CLI sends no list (or all three): every button, as before.
+        const offered = permissionChoices(ev);
         const buttons = fixFile
           ? `<button type="button" class="act primary" data-d="once">Copy it</button><button type="button" class="act" data-d="deny">Not now</button>`
-          : `<button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : "Always allow"}</button><button type="button" class="act" data-d="deny">Deny</button>`;
-        const inner = `<div class="q">${icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>`;
+          : (offered.has("once") ? `<button type="button" class="act primary" data-d="once"${plain?.blocked ? ' disabled title="It would pass this month\'s limit"' : ""}>${esc(plain?.labels.once || "Allow once")}</button>` : "")
+            + (plain?.edit != null && offered.has("deny") ? '<button type="button" class="act" data-edit-prompt aria-expanded="false">Edit</button>' : "")
+            + (offered.has("always") ? `<button type="button" class="act" data-d="always">${signedIn ? `Always allow ${esc(site || "this site")}` : esc(plain?.labels.always || "Always allow")}</button>` : "")
+            + (offered.has("deny") ? `<button type="button" class="act" data-d="deny">${esc(plain?.labels.deny || "Deny")}</button>` : "");
+        // Edit: the prompt in a box; "Ask again with this prompt" answers the card with the new prompt for the model,
+        // which asks again with it (a new card, its price), so nothing is made from words you didn't see.
+        const editor = plain?.edit != null ? `<div class="perm-edit" hidden><label class="sr-only" for="perm-edit-${esc(ev.id)}">The prompt</label>`
+          + `<textarea class="perm-edit-text" id="perm-edit-${esc(ev.id)}" rows="3">${esc(plain.edit)}</textarea>`
+          + '<button type="button" class="act primary" data-d="deny" data-edited>Ask again with this prompt</button></div>' : "";
+        // A plugin's tool wears the plugin's own logo (the one DGC calls: Composio's for Composio's tools), else the shield.
+        const logo = !fixAsk && pluginLogoHtml(ev.name);
+        // A plugin's tool whose logo this page doesn't have yet: the shield for now, and the host is asked for it.
+        const logoFor = !fixAsk && !logo ? (/^mcp__([a-z0-9_-]{1,64})__/.exec(String(ev.name || "")) || [])[1] : "";
+        if (logoFor) vscode.postMessage({ type: "pluginLogos", plugins: [logoFor] });
+        const inner = `<div class="q">${logo ? `<span class="perm-logo">${logo}</span>` : logoFor ? `<span data-logo-for="${esc(logoFor)}">${icon("shield")}</span>` : icon("shield")}<span>${title}</span></div>${helperHeading}${signedIn || fixFile ? "" : summary}${fixFile ? fixDetail : detail}${fixFile || plain && !plain.note ? "" : `<textarea class="feedback deny-note" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea>`}<div class="btns">${buttons}</div>${editor}`;
         // On the fix's card it is built there: drawn into a running turn first, it would break that turn's prose.
         const c = requestCard(fixAsk ? fixAskCard(fixAsk, inner) : decisionCard(inner, "Tool permission request"), ev.id);
-        if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-          const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
-          if (!resolveCard(c, permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
-          compactPermissionCard(c, ev.name);
+        const logoMark = c.querySelector(".q .perm-logo");
+        if (logoMark) globalThis.DgcPluginCalls?.backdrop(logoMark.querySelector("img"), logoMark);
+        if (ev.diff) { c.querySelector(".feedback")?.before(renderDiff(String(ev.diff))); }
+        // Only the answers answer. The diff's own toggle and open button are buttons too: given this handler, collapsing
+        // the diff on a fix's Allow card sent an answer with no decision, which denied the call (0.51.0 release candidate).
+        c.querySelectorAll("button[data-d], button[data-edit-prompt]").forEach((b) => b.onclick = () => {
+          if (b.hasAttribute("data-edit-prompt")) {
+            const box = c.querySelector(".perm-edit");
+            box.hidden = !box.hidden;
+            b.setAttribute("aria-expanded", String(!box.hidden));
+            if (!box.hidden) box.querySelector("textarea").focus();
+            return;
+          }
+          const edited = b.hasAttribute("data-edited") ? (c.querySelector(".perm-edit-text")?.value || "").trim().slice(0, 2000) : "";
+          if (b.hasAttribute("data-edited") && !edited) return;
+          // Read by the model and shown in the step's row: plain words for both.
+          const note = edited ? `Changed the prompt to: ${edited} — make it with this prompt instead (same generator, ${plain?.video ? "length and resolution" : "size and count"}).`
+            : (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
+          if (!resolveCard(c, edited ? "Asked again with your prompt" : permissionDecision(b.dataset.d, ev.suggested_rule, note))) return;
+          compactPermissionCard(c, plain ? plain.name : ev.name);
           vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
             rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
             reason: b.dataset.d === "deny" && note ? note : undefined });
@@ -7977,8 +8655,8 @@
         ensureTurn();
         imageViewerAttention("plan_proposal");
         speak("Plan ready for review");
-        const c = requestCard(decisionCard(`<div class="q">${icon("clipboard-list")} Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+        const c = requestCard(decisionCard(`${planFold("Plan ready", ev.plan)}<textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
+        c.querySelectorAll("button[data-d]").forEach((b) => b.onclick = () => {
           const feedback = c.querySelector(".feedback").value.trim();
           const choice = b.dataset.d;
           if (!resolveCard(c, choice === "auto" ? "Auto requested · awaiting confirmation" : planDecision(choice, feedback))) return;
@@ -8020,7 +8698,7 @@
             : "Share this generated response with the server?";
           const c = decisionCard(`<div class="q">${icon("shield")} ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
-          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
@@ -8032,7 +8710,7 @@
             ? `<div class="err">Punycode host — inspect carefully for lookalike characters.</div>` : "";
           const c = decisionCard(`<div class="q">${icon("external-link")} Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
           requestCard(c, ev.id);
-          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
             if (!resolveCard(c, MCP_DECISIONS[b.dataset.a])) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
           });
@@ -8192,10 +8870,26 @@
         // A helper's runs (Continued, its dividers) and whether it can be asked to do more. Never in the chat.
         receiveAgentRuns(ev);
         return;
+      case "router_status": case "router_changed":
+        // DGC Router: which system each helper's worker is on (a lease's owner is its agent id). Never in the chat.
+        noteRouterLeases(ev.status);
+        return;
       case "agents":
         renderAgentsSnapshot(ev);
         for (const fix of pipFixes.values()) if (fix.agent_id) pipFixAgentChanged(fix.agent_id);
         if (stick || following) scroll();
+        return;
+      case "mcp_app_card": {
+        // A plugin's own card (MCP Apps), under the step that showed it: its page in a sandboxed frame, at the address
+        // DGC serves it from. A replay brings it back the same way (its page and whole result are asked for again).
+        if (!window.DgcMcpApps) break;
+        ensureTurn();
+        const card = window.DgcMcpApps.card(ev, { sendMessage: sendCardMessage });
+        appendTurnContent(card); breakText();
+        break;
+      }
+      case "mcp_app_reply": case "mcp_app_resource":
+        window.DgcMcpApps?.event(ev);
         return;
       case "files_ready": {
         // A file the model made, as a chip under the step that made it. Codex's model exactly:
@@ -8212,7 +8906,13 @@
           li.appendChild(PRODUCED_IMAGE.test(String(item.rel)) ? producedImage(item, row) : producedFileChip(item));
           row.appendChild(li);
         }
-        appendTurnContent(row); breakText();
+        // Pictures shown under the reply (show_file of an image) fold away as a made picture does.
+        const shownPictures = items.slice(0, 8).filter((item) => PRODUCED_IMAGE.test(String(item.rel)));
+        const shown = shownPictures.length && window.DgcPictureFold
+          ? window.DgcPictureFold.element(window.DgcPictureFold.keyOf("work", items.slice(0, 8).map((item) => String(item.rel))), row,
+            { pictures: shownPictures.length, label: shownPictures.length === 1 ? String(shownPictures[0].caption || shownPictures[0].name || String(shownPictures[0].rel).split("/").pop()) : "" })
+          : row;
+        appendTurnContent(shown); breakText();
         break;
       }
       case "agent_step": {
@@ -8297,7 +8997,7 @@
         break;
       }
       case "saved_plan":
-        if (ev.exists) decisionCard(`<div class="q">${icon("clipboard-list")} Saved plan</div><pre>${esc(ev.plan)}</pre>`);
+        if (ev.exists) decisionCard(planFold("Saved plan", ev.plan));
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "plugin_catalog": cachePluginLogos(ev.items); break;
@@ -8673,6 +9373,7 @@
     // model receives exactly what was pasted.
     const pastes = attachments.filter((a) => a.pasted);
     const typed = composerText().trim();
+    const displayMentions = pastes.length ? [] : promptDisplayMentions(typed);
     const text = pastes.length
       ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
       : typed;
@@ -8744,7 +9445,7 @@
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     const bubble = el("div", "bubble");
-    fillUserBubble(bubble, typed, attachments);
+    fillUserBubble(bubble, typed, attachments, displayMentions);
     m.appendChild(bubble); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     m.dataset.promptId = requestId;        // which request this row is: its turn_start finds it by this
@@ -8762,6 +9463,7 @@
       attachments: attachments.map((a) => a.img ? { label: a.label, img: true, bytes: a.bytes } : a) };
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined, restore,
       delivery,
+      ...(displayMentions.length ? {display_mentions: displayMentions} : {}),
       ...(references.length ? {pip_references: references.map(a => ({pip_id:a.pipReference.pip_id,expected_version:a.pipReference.job_version,expected_lifecycle_revision:a.pipReference.lifecycle_revision}))} : {}),
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       ...(outputOffered && outputPick !== "auto" ? { output: outputPick } : {}),
@@ -8818,6 +9520,7 @@
       if (kind === "skill" && a.skill === name) return true;
       if (kind === "template" && a.template === name) return true;
       if (kind === "file" && a.resource && a.label === name) return true;
+      if (kind === "pip" && a.pipReference?.pip_id === pill.dataset.pipId) return true;
     }
     return false;
   }
@@ -8871,6 +9574,7 @@
 
   // ---- @file / slash popover ----
   let popAwaitingFiles = false;   // an "@" opened before the workspace file list had arrived
+  let popAwaitingPlugins = false; // the connected-plugin catalog may arrive after the first "@"
   function hidePop() { clearPipPicker(); pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
   function showPop(items) {
     popItems = items; popIdx = 0;
@@ -8881,13 +9585,19 @@
     // is a rendering change only.
     const rowIcon = (it) => (it.skill ? "codicon-package"
       : it.template ? "codicon-symbol-snippet" : it.modCommand || it.action === "mods" ? "codicon-extensions" : "codicon-terminal");
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label"><span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => { const ref=it.pipReference,index=ref?["core","scout","lens","patch","rook","pulse","lock","quill"].indexOf(ref.pip_type):-1;
+      const logo = it.pluginId && pluginLogos[it.pluginId];
+      const icon=index>=0&&window.PipConcepts?.plush?`<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({index,name:ref.name},"idle",`pickerPip${i}`)}</span>`
+        : logo ? `<span class="pi-icon pi-plugin-mark" aria-hidden="true"><img src="${esc(logo)}" alt=""></span>`
+        : it.artifactKind ? `<span class="pi-icon codicon codicon-${esc(it.artifactGlyph)}" aria-hidden="true"></span>`
+        :`<span class="pi-icon codicon ${rowIcon(it)}" aria-hidden="true"></span>`;
+      return `<div id="pop-option-${i}" role="option" aria-disabled="${it.disabled===true}" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${icon}${esc(String(it.label || "").replace(/^[/$@]/, ""))}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`; }).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
   function renderPipPicker() {
     if (!pipPicker.active) return;
-    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.status} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
+    const items=pipPicker.rows.map(p => ({label:p.name.replace(/\s+/g," "),kind:`${p.pip_type} Pip`,detail:`${p.scope === "personal" ? "Personal" : "Project"} · v${p.job_version} · ${p.pip_id.slice(-8)}`,pipReference:p}));
     if (pipPicker.loading) items.push({label:"Loading Pips…",disabled:true});
     else if (pipPicker.error) items.push({label:pipPicker.error,disabled:true},{label:"Retry Pip list",pipRetry:true});
     else if (pipPicker.cursor && pipPicker.rows.length < 100) items.push({label:"Load more Pips",pipMore:true});
@@ -8909,7 +9619,7 @@
     if(!pipPicker.active || ev.request_id!==pipPicker.id) return;
     clearTimeout(pipPicker.timeout);pipPicker.loading=false;
     if(ev.workspace_id===""&&Array.isArray(ev.pips)&&!ev.pips.length&&ev.next_cursor===null&&!pipPicker.workspace){pipPicker.rows=[];pipPicker.cursor=null;pipPicker.emptyLabel="No Pips are registered for this chat’s workspace.";renderPipPicker();return;}
-    const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:ev.workspace_id})):null;
+    const rows=Array.isArray(ev.pips)?ev.pips.map(p=>({...p,workspace_id:p.workspace_id||ev.workspace_id})):null;
     if(!rows||rows.length>20||!rows.every(validPipReference)||new Set(rows.map(p=>p.pip_id)).size!==rows.length
       ||typeof ev.workspace_id!=="string"||!/^ws_[a-f0-9]{32}$/.test(ev.workspace_id)||ev.workspace_id.length!==35
       ||(pipPicker.workspace&&pipPicker.workspace!==ev.workspace_id)
@@ -8945,7 +9655,18 @@
       if(attachments.some(a=>a.pipReference?.pip_id===it.pipReference.pip_id)){sysLine("This Pip is already referenced.");return;}
       if(attachments.filter(a=>a.pipReference).length>=8){sysLine("Reference at most eight Pips in one message.",true);return;}
       if(!canAttach())return;
-      attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});renderAtts();replacePopToken();hidePop();input.focus();return;
+      attachments.push({label:pipReferenceLabel(it.pipReference),pipReference:{...it.pipReference}});
+      insertComposerPill(popStart,popEnd,"pip",it.pipReference.name.replace(/\s+/g," ").trim(),"",it.pipReference.pip_id);
+      hidePop();input.focus();return;
+    }
+    if (it.pluginId || it.artifactKind) {
+      const name = String(it.label || "").trim();
+      const valid = it.pluginId ? pluginRows.some(row => row.name === it.pluginId && row.connected === true
+        && (row.display_name || row.name) === name)
+        : offeredOutputs().some(([value, label]) => value === it.artifactKind && label === name);
+      if (!valid) { hidePop(); return; }
+      insertComposerPill(popStart, popEnd, it.pluginId ? "plugin" : "artifact", name, name, it.pluginId || it.artifactKind);
+      hidePop();input.focus();return;
     }
     if (it.skill || it.template) {
       const kind = it.skill ? "skill" : "template";
@@ -9140,7 +9861,8 @@
   // A click is the user's follow-up request. Use the normal send path and its permission checks.
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
-    if (!button || button.closest("#pips-host")) return;
+    // Only a card in DGC's own reply in this chat sends (the Pips page answers its own).
+    if (!button || button.closest("#pips-host") || !button.closest("#log .msg.dgc .text:not(.agent-answer)")) return;
     const prompt = String(button.dataset.genuiSend || "").slice(0, 500);
     if (!prompt) return;
     if (attachments.length) { sysLine("Remove the composer attachments before sending a card choice.", true); return; }
@@ -9207,7 +9929,8 @@
     popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
     popMode = token[2][0];
     const query = token[2].slice(1).toLowerCase();
-    if(pipPicker.active){if(query!==pipPicker.query)requestPromptPips(query);else renderPipPicker();return;}
+    if(pipPicker.active){const search=query==="pip"?"":query.startsWith("pip:")?query.slice(4):query;
+      if(search!==pipPicker.query)requestPromptPips(search);else renderPipPicker();return;}
     // Codex turns the complete `/goal` token into a pinned composer choice immediately. Requiring
     // a second Enter or Tab leaves it as highlighted inline text and gives no visible draft state.
     // A pasted `/goal pause` still remains a management command because its final token is `pause`.
@@ -9234,15 +9957,31 @@
       showPop(matches);
     }
     else if (popMode === "@") {
+      if(query==="pip"&&pipReferencesSupported){pipPicker.active=true;requestPromptPips("");return;}
+      if (Date.now() - pluginListRequestedAt > 30000) {
+        pluginListRequestedAt = Date.now();
+        popAwaitingPlugins = true;
+        vscode.postMessage({ type: "requestPlugins" });
+      }
       // The list is fetched lazily, so the FIRST "@" in a fresh panel has nothing to show. Note
       // that a picker is waiting before showPop runs: with no items showPop calls hidePop, which
       // clears popMode, and the retry in the "files" handler was guarded on popMode === "@" --
       // so the list arrived and nothing reopened. You typed "@", saw nothing, and only got the
       // picker by typing another character.
       if (files.length === 0) { popAwaitingFiles = true; vscode.postMessage({ type: "reqFiles" }); }
-      const candidates=files.filter((f) => f.label.toLowerCase().includes(query)).slice(0,30);
+      const candidates = [];
+      for (const row of pluginRows) {
+        const label = String(row.display_name || row.name).trim().slice(0, 80);
+        if (label && `${label} ${row.name}`.toLowerCase().includes(query))
+          candidates.push({ label, kind: "Plugin", detail: "Connected", pluginId: row.name });
+      }
+      if (outputOffered) for (const [value, label, , glyph] of offeredOutputs()) {
+        if (value !== "auto" && `${label} ${value}`.toLowerCase().includes(query))
+          candidates.push({ label, kind: "Artifact", detail: `Create ${label.toLowerCase()}`, artifactKind: value, artifactGlyph: glyph });
+      }
+      candidates.push(...files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
       if(pipReferencesSupported && (!query||"pips".includes(query)))candidates.unshift({label:"Reference a Pip…",kind:"Pips",detail:"This chat’s workspace · no work starts",pipPicker:true});
-      showPop(candidates);
+      showPop(candidates.slice(0, 40));
     } else hidePop();
   }
   input.addEventListener("input", onInput);
@@ -9823,10 +10562,15 @@
     $("sessions-new").onclick = () => vscode.postMessage({ type: "newSessionInEditor" });
     // Your Pips, above your sessions: the ones that need you, or a quiet row of faces.
     if (window.DgcPips?.mountHomePips && document.documentElement.dataset.pipsDocumentId) {
+      let dismissed = {};
+      try { dismissed = JSON.parse(document.documentElement.dataset.pipHomeDismissed || "{}"); } catch { dismissed = {}; }
       homePips = window.DgcPips.mountHomePips({
         document, root: $("sessions-pips"),
         postMessage: (message) => vscode.postMessage({ ...message, documentId: document.documentElement.dataset.pipsDocumentId }),
         onOpen: (navigation) => openPipsAt(navigation),
+        // Dismiss all's unread, kept by the host (src/pipHomeDismiss.ts) so a reload doesn't bring the old count back.
+        dismissed,
+        onDismissed: (change) => vscode.postMessage({ type: "pipHomeDismissed", set: change.set, drop: change.drop }),
       });
     }
     showSessions();
@@ -9843,7 +10587,7 @@
   // `onEvent` carries cases with real side effects (posting to the extension host, registering
   // approval cards, flipping the composer), and a reload must not fire any of them.
   const REPLAYABLE = new Set(["turn_start", "permission_decision", "text_delta", "thinking_delta", "thinking_end", "stream_end",
-                              "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "options_resolved",
+                              "tool_call", "tool_result", "tool_denied", "tool_images", "files_ready", "mcp_app_card", "options_resolved",
                               "model_retry", "monitor_event", "agent_report", "turn_activity", "turn_eta", "turn_files", "turn_end"]);
   function prepareCompleteHistory(items) {
     // The host may have forwarded the end of A and start of queued B while this webview was
@@ -10040,6 +10784,22 @@
     setSending(true); scroll();
     speak(`Asked DGC to fix what ${r.name} reported.`);
   }
+  // A plugin's card asked to send a message as yours (MCP Apps ui/message, labelled with its plugin): sent the way the
+  // composer sends one, so it queues behind a running turn and comes back if the backend refuses it.
+  function sendCardMessage(text) {
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Try the card again in a moment."); return false; }
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return false; }
+    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    const bubble = el("div", "bubble");
+    fillUserBubble(bubble, text, []);
+    m.appendChild(bubble); log.appendChild(m); settleBlock(m);
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    m.dataset.promptId = requestId;
+    pendingPrompts.set(requestId, { text, attachments: [], node: m, session: draftSession });
+    vscode.postMessage({ type: "prompt", text, requestId, restore: { text, attachments: [] }, delivery: "queue" });
+    setSending(true); scroll();
+    return true;
+  }
   // From a Pip's own chat. A page with a chat sends it here, as the card would. The side bar's Sessions home has no
   // chat: the host opens the chat the Pip reports to (or a new one) in its tab, and that chat sends it (pipAskDgc).
   function askDgcFromPips(r, session) {
@@ -10159,15 +10919,20 @@
       ? "DGC fixes it in the background, in a copy of the project, while you keep working. It never changes live data or services; Undo puts your files back."
       : "Send DGC a message asking it to read this report and fix what it found. It asks you before changing live data or services.";
     const openReport = () => openPipsAt({ pip: r.pip_id, section: "runs", run: r.run_id });
+    // Acting on the card (Dismiss, its ✕ or Fix) reads its run: the Pip's unread count drops on the Pips page and the home.
+    // The host marks that run's post read (mark_pip_read, Pips API 69); an older DGC has no unread to drop.
+    const read = () => vscode.postMessage({ type: "pipReportRead", pip_id: r.pip_id, run_id: r.run_id });
+    const fix = () => { read(); askDgcToFix(r, card); };
     const dismiss = () => {
       const group = card.parentElement?.closest(".pip-report-group");
       const next = card.nextElementSibling || group?.nextElementSibling;
       card.remove();
       if (group) paintPipReportGroup(group);
       if (pipReportsLive) vscode.postMessage({ type: "pipReportDismiss", run_id: r.run_id });
+      read();
       (next?.querySelector?.("button, [tabindex='0']") || input).focus({ preventScroll: true });
     };
-    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, () => askDgcToFix(r, card));
+    if (!quiet) button("Ask DGC to fix", "act primary pip-report-fix", fixTitle, fix);
     button("Open report", "act pip-report-open", `Open this run of ${r.name} in Pips`, openReport);
     button("Dismiss", "act pip-report-dismiss", "Remove this card from the chat. The report stays in Pips.", dismiss);
     main.append(actions);
@@ -10187,7 +10952,7 @@
     const time1 = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-line-when");
     if (time1) line1.append(time1);
     const slimActs = el("span", "pip-report-slim-actions");
-    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, () => askDgcToFix(r, card), slimActs);
+    if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
     button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
     const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
     x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
@@ -10298,7 +11063,7 @@
       if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
       return;
     }
-    const stick = atBottom();
+    const stick = atEnd();
     log.appendChild(card);
     if (fix) paintPipFixCard(card, fix); else groupPipReports(card);
     speak(`Pip ${r.name} ${pipReportState(r)}`);
@@ -10328,6 +11093,13 @@
     const was = had?.fix_id === fix.fix_id ? had.state : "";
     const next = { ...fix, _seen: quiet || (had?.fix_id === fix.fix_id && had._seen && !(pipFixActive(had) && !pipFixActive(fix))) };
     pipFixes.set(fix.run_id, next);
+    // Its agent's Prompt in the agent map: a fix is started by its report's Fix, not by a task call, so the brief the
+    // fixer was given comes with its record (kept by agent, so a second fix of the same report keeps the first's).
+    if (/^sub-[0-9a-f]{12}$/.test(String(next.agent_id || "")) && typeof next.prompt === "string" && next.prompt) {
+      pipFixPrompts.delete(next.agent_id);
+      pipFixPrompts.set(next.agent_id, next.prompt.slice(0, 20000));
+      while (pipFixPrompts.size > 64) pipFixPrompts.delete(pipFixPrompts.keys().next().value);
+    }
     if (next.agent_id && agentLineOf(next.agent_id)?.provisional) pruneProvisionalLines();   // the card is its line
     for (const card of pipFixCards(fix.run_id)) paintPipFixCard(card, next);
     if (!quiet && was !== next.state && !pipFixActive(next) && was) speak(`${next.name || "The Pip"}'s fix ${pipFixHeadline(next).toLowerCase()}`);
@@ -10622,7 +11394,7 @@
   }
   function pipFixesReset(kind) {
     if (kind === "rewound") return;               // the same chat: its history brings each card's fix back
-    pipFixes.clear(); pipFixSteps.clear();
+    pipFixes.clear(); pipFixSteps.clear(); pipFixPrompts.clear();
     syncPipFixTick();
     agentMapChanged();
     if (pipFixLive && kind === "resumed") vscode.postMessage({ type: "listPipFixes" });
@@ -10735,7 +11507,6 @@
     if (it.role === "steering") {
       ensureTurn();
       const node = el("div", "msg user"); node.appendChild(el("div", "role", "you · steering"));
-      setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       const parsed = splitPromptMarks(String(it.text || "").slice(0, 50000));
       const bubble = el("div", "bubble");
       fillUserBubble(bubble, parsed.text,
@@ -10744,6 +11515,10 @@
         bubble.prepend(el("p", "answered-q", esc(it.answer_question)));
       node.appendChild(bubble);
       if (steeringAt !== null) { stampPrompt(node, steeringAt); steeringAt = null; }
+      // Replayed history must use the same order as a live steer: bubble, time, then
+      // status. Adding the status before the bubble put "steered" above the message
+      // after reload, where it looked attached to the previous Worked for row.
+      setSteerState(node, "applied");        // it is in the transcript, so the model did read it
       placeSteering(node);
       return;
     }
@@ -10841,7 +11616,7 @@
         } else {
           const m = el("div", "msg dgc hist archived");
           m.appendChild(el("div", "role dgc", "DGC"));
-          const text = el("div", "text", md(String(it.text || "")));
+          const text = el("div", "text", mdReply(String(it.text || "")));
           text._markdown = it.text;
           m.appendChild(text);
           (box || frag).appendChild(m);
@@ -10898,8 +11673,15 @@
     }
   });
 
+  window.DgcVideo?.host((message) => vscode.postMessage(message));
+  // A reply's pictures fold away (media/pictureFold.js): a choice goes to the host, which keeps it; the setting's
+  // default is on the page from the start, and the host's kept choices follow.
+  window.DgcPictureFold?.setDefault(document.body.dataset.picturesFolded === "1");
+  window.DgcPictureFold?.host((message) => vscode.postMessage(message));
   window.addEventListener("message", (e) => {
     const msg = e.data;
+    if (window.DgcVideo?.message(msg)) return;     // a video's bytes, its state or its Stop (src/videoHost.ts)
+    if (window.DgcPictureFold?.message(msg)) return;   // which pictures stay folded, and the setting
     if (msg?.type === "autoModePrompt") { showAutoModePrompt(msg); return; }
     if (msg?.type === "autoModeDismiss") {
       if (msg.requestId === autoModeDialog?.id) closeAutoModePrompt();
@@ -10921,6 +11703,20 @@
       // which only the Pips box has here.)
       if (msg.from === "chat") { if (msg.type.startsWith("speak")) reader?.receive(msg); else if (msg.type !== "voiceReady") onMic(msg); }
       else if (msg.from === "pips") for (const listener of pipsListeners) listener(msg);
+      return;
+    }
+    if (msg.type === "pluginLogos") {
+      // A plugin's logo the host read for an Allow card (the catalog hadn't come yet): it replaces the card's shield.
+      for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
+        if (!/^[a-z0-9_-]{1,64}$/.test(id) || typeof src !== "string" || !/^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(src)) continue;
+        pluginLogos[id] = src;
+        for (const mark of document.querySelectorAll(`.q [data-logo-for="${id}"]`)) {
+          const wrap = el("span", "perm-logo");
+          wrap.innerHTML = `<img class="plugin-logo" alt="" src="${esc(src)}">`;
+          mark.replaceWith(wrap);
+          globalThis.DgcPluginCalls?.backdrop(wrap.querySelector("img"), wrap);
+        }
+      }
       return;
     }
     if (msg.type === "fileThumb") {
@@ -10964,7 +11760,9 @@
     }
     if (msg.type === "artifactNews") { artifactNews(msg.artifact, msg.op); return; }
     if (msg.type === "chat_tab") { rememberTab(msg.session); return; }
-    if (msg.type === "pipsPluginLogos") { for (const listener of pipsListeners) listener(msg); return; }
+    // pipsModelsChanged: Settings or the Router changed, so the embedded Pips page reads its model list again.
+    // pipsUnreadChanged: a Pip was marked read somewhere (its pill, its chat, a card acted on): it reads its counts again.
+    if (["pipsPluginLogos", "pipsModelsChanged", "pipsUnreadChanged"].includes(msg.type)) { for (const listener of pipsListeners) listener(msg); return; }
     if (["pipsConnection","pipsReply","pipsVisibility"].includes(msg.type)) {
       pipSetupCards?.receive(msg);
       pipDigestBar?.receive(msg);
@@ -10975,6 +11773,7 @@
       } else for (const listener of pipsListeners) listener(msg);
       return;
     }
+    if (window.DgcMcpApps?.host(msg)) return;            // a card's link, download, address or message, answered
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "chat_slots") { promptChat = String(msg.activeId || promptChat); renderChatBar(msg); }
     else if (msg.type === "chat_switched") {
@@ -11007,7 +11806,7 @@
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort, msg.routes, msg.cliDefaultModel, msg.cliDefaultListed, msg.currentRouteKey); }
     else if (msg.type === "chat_changes") {
       if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
     }
@@ -11891,7 +12690,7 @@
     }
     const m = el("div", "msg user agent-prompt");
     const role = m.appendChild(el("div", "role"));
-    role.textContent = record.parent_id ? "its parent agent" : "the main agent";
+    role.textContent = record.parent_id ? "its parent agent" : pipFixPrompts.has(String(record.id)) ? "Ask DGC to fix" : "the main agent";
     const bubble = m.appendChild(el("div", "bubble"));
     fillUserBubble(bubble, prompt, []);
     stampPrompt(m, Number(record.started_at) * 1000);
@@ -11964,7 +12763,8 @@
     const working = AGENT_ACTIVE.has(record.state);
     const ms = working ? agentLiveMs(record) : Number(record.duration_ms || 0);
     // Where the agent worked, which the chat's "↳ isolated checkout" notice used to say.
-    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${record.isolated ? " · isolated checkout" : ""}`;
+    const where = agentWhere(record) || agentThinking(record);
+    meta.textContent = `${working ? "Working" : "Worked"} for ${elapsedWords(ms)}${where ? ` · ${where}` : ""}${record.isolated ? " · isolated checkout" : ""}`;
   }
   // The spawn's own result says whether the agent's changes reached your checkout; its line only says
   // it finished. The page says what was integrated, above the agent's report -- and says it plainly
@@ -12261,6 +13061,44 @@
     return c;
   }
 
+  // ---- where a helper ran (DGC Router, 0.51) ----
+  // agent id -> {system, model}: from router_status / router_changed, whose leases name the agent that holds each
+  // worker, and kept after it gives the worker back, so a finished helper still says where it ran. An agents snapshot
+  // carries the system's name too (`system`), which covers a helper this page never saw lease.
+  const agentSystems = new Map();
+  function noteRouterLeases(status) {
+    let changed = false;
+    for (const sys of Array.isArray(status?.systems) ? status.systems : []) {
+      for (const lease of Array.isArray(sys?.leases) ? sys.leases : []) {
+        const owner = String(lease?.owner || "");
+        if (!owner || owner === "probe" || owner === "main turn" || owner.startsWith("Pip run ")) continue;
+        const where = { system: String(sys.name || sys.id || ""), model: String(lease.model || ""), thinking: String(lease.thinking || "") };
+        const was = agentSystems.get(owner);
+        if (was && was.system === where.system && was.model === where.model && was.thinking === where.thinking) continue;
+        agentSystems.set(owner, where);
+        if (agentSystems.size > 512) agentSystems.delete(agentSystems.keys().next().value);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    agentMapChanged();
+    if (agentPageId) paintAgentPageMeta(agentPageId);
+  }
+  /** "on GPU box · qwen3:8b · thinking low", or "" for a helper the Router didn't place. */
+  function agentWhere(record) {
+    if (!record) return "";
+    const where = agentSystems.get(String(record.id || ""))
+      || (record.system ? { system: String(record.system), model: String(record.model || "") } : null);
+    if (!where || !where.system) return "";
+    const thinking = agentThinking({ thinking: where.thinking || record.thinking });
+    return `on ${where.system}${where.model ? ` · ${where.model}` : ""}${thinking ? ` · ${thinking}` : ""}`;
+  }
+  /** "thinking low": the level a helper thinks at (the agents snapshot's `thinking`, a Router lease's), else "". */
+  const AGENT_THINKING = { off: "off", low: "low", medium: "medium", high: "high", xhigh: "extra high", max: "max" };
+  function agentThinking(record) {
+    const level = AGENT_THINKING[String(record?.thinking || "")];
+    return level ? `thinking ${level}` : "";
+  }
   function agentRecordFrom(fields, receivedAt) {
     const record = { ...fields, receivedAt, order: agentOrder++ };
     delete record.type; delete record.seq; delete record.request_id;
@@ -12596,7 +13434,12 @@
       if (time) parts.push(time);
       if (Number(record.tokens || 0) > 0) parts.push(`${amTokens(record.tokens)} tokens`);
     }
-    if (record.model && record.model !== curModel) parts.push(String(record.model));
+    const where = agentWhere(record);
+    if (where) parts.push(where);
+    else {
+      if (record.model && record.model !== curModel) parts.push(String(record.model));
+      if (agentThinking(record)) parts.push(agentThinking(record));
+    }
     return parts;
   }
 
@@ -12671,6 +13514,68 @@
     text.append(desc, meta);
     row.append(dot, text);
     return { row, dot, desc, meta, tip: "", label: "" };
+  }
+  // A helper's line: its state, time and tokens, then where it ran ("on NAS · qwen3.5:9b"). Where it ran tells two
+  // helpers apart, so in a narrow row the line's start gives way and the system and model stay whole; only a row too
+  // narrow for them alone clips them. The start gives way a whole part at a time, last first (" tokens", then its
+  // number, then the time, then the state): in a 1440 px window it was cut mid-number ("Finished · 6s · 4.1… · on
+  // Workstation"). The line's text is the same either way (amFitMeta hides parts, it never changes their words).
+  function amSetMeta(meta, parts, fallback, where) {
+    const split = !!where && parts.length > 0 && parts[parts.length - 1] === where;
+    if (!split) {
+      if (meta.classList.contains("am-meta-split")) { meta.classList.remove("am-meta-split"); meta.replaceChildren(); }
+      agentsSetText(meta, parts.join(" · ") || fallback);
+      return;
+    }
+    let lead = meta.querySelector(":scope > .am-meta-lead"), sep = meta.querySelector(":scope > .am-meta-sep"),
+      place = meta.querySelector(":scope > .am-meta-where");
+    if (!meta.classList.contains("am-meta-split") || !lead || !sep || !place) {
+      meta.classList.add("am-meta-split");
+      lead = el("span", "am-meta-lead");
+      sep = el("span", "am-meta-sep");
+      place = el("span", "am-meta-where");
+      meta.replaceChildren(lead, sep, place);
+    }
+    const head = parts.slice(0, -1).join(" · ");
+    if (lead.textContent !== head) {
+      const pieces = [];
+      parts.slice(0, -1).forEach((part, i) => {
+        const text = (i ? " · " : "") + part;
+        const counted = /^(.*\S)( tokens?)$/.exec(text);
+        for (const piece of counted ? [counted[1], counted[2]] : [text]) {
+          const node = el("span", "am-meta-part");
+          node.textContent = piece;
+          pieces.push(node);
+        }
+      });
+      lead.replaceChildren(...pieces);
+    }
+    agentsSetText(sep, head ? " · " : "");
+    agentsSetText(place, where);
+    amFitMeta(meta);
+  }
+  // Shows the longest start of a helper's line that fits beside where it ran, whole parts only. A row not laid out
+  // yet (the map closed, a row not placed) is fitted once it is (agentMapChanged and the map's resize call it).
+  function amFitMeta(meta) {
+    const lead = meta.querySelector(":scope > .am-meta-lead"), sep = meta.querySelector(":scope > .am-meta-sep"),
+      place = meta.querySelector(":scope > .am-meta-where");
+    if (!lead || !sep || !place) return;
+    const pieces = [...lead.children];
+    for (const piece of pieces) piece.hidden = false;
+    lead.hidden = sep.hidden = !pieces.length;
+    const room = meta.clientWidth;
+    if (!room) return;
+    let left = room - place.scrollWidth - (pieces.length ? sep.getBoundingClientRect().width : 0), shown = 0;
+    for (const piece of pieces) {
+      const width = piece.getBoundingClientRect().width;
+      if (width > left + 0.5) break;
+      left -= width; shown += 1;
+    }
+    pieces.forEach((piece, i) => { piece.hidden = i >= shown; });
+    lead.hidden = sep.hidden = shown === 0;
+  }
+  function amFitAll() {
+    for (const meta of document.querySelectorAll("#agent-map .am-meta.am-meta-split")) amFitMeta(meta);
   }
   function amLabel(entry, label, tip) {
     if (entry.label !== label) { entry.label = label; entry.row.setAttribute("aria-label", label); }
@@ -12761,7 +13666,7 @@
     const stats = [amContinuedWords(record), ...amAgentStats(record)].filter(Boolean);
     agentsSetText(desc, name);
     // The word leads for every state but working, so no state rests on the dot's colour alone.
-    agentsSetText(meta, (record.state === "running" ? stats : [word, ...stats]).join(" · ") || word);
+    amSetMeta(meta, record.state === "running" ? stats : [word, ...stats], word, agentWhere(record));
     const why = (record.state === "failed" || record.state === "stopped") && record.message ? agentFirstLine(record.message) : "";
     const forPip = fix && pipType >= 0 ? `Pip fix for ${String(fix.name || "Pip").slice(0, 120)}` : "";
     amLabel(entry, [name, word, ...stats, forPip].filter(Boolean).join(", "),
@@ -12890,6 +13795,7 @@
       for (const [id] of agentStopping) if (!AGENT_ACTIVE.has(agentRecords.get(id)?.state)) agentStopping.delete(id);
       // Every open level stays live: the ones underneath show through the dimmed backdrop.
       paintAmMap();
+      amFitAll();                         // rows placed just now are laid out now: their lines fit
       if (amCard) paintAmCard();
       if (amTx) paintAmTranscript();
     } finally { amPainting = false; }
@@ -13426,7 +14332,9 @@
     const parent = record.parent_id ? agentRecords.get(String(record.parent_id)) : null;
     const step = (Array.isArray(parent?.log) ? parent.log : [])
       .find((ev) => ev?.type === "tool_call" && ev.call_id === record.call_id && typeof ev.args?.prompt === "string");
-    return step ? String(step.args.prompt).slice(0, 20000) : "";
+    if (step) return String(step.args.prompt).slice(0, 20000);
+    // A Pip fix's agent: no task call started it (the report's Fix did), and its record carries the fixer's brief.
+    return pipFixPrompts.get(String(record.id)) || "";
   }
   // The calls it made, from the same source its page draws: its own cards in the chat (a child's call
   // id carries its agent's id), else its step log.
@@ -13681,7 +14589,8 @@
   }
   // "Finished · general-purpose · qwen3.8:27b · background": the card's and the transcript's meta line.
   function amAgentMetaLine(record) {
-    return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "", String(record.model || curModel || ""),
+    return [amStateWord(record), amContinuedWords(record), record.agent_type ? String(record.agent_type) : "",
+      agentWhere(record) || [String(record.model || curModel || ""), agentThinking(record)].filter(Boolean).join(" · "),
       record.background ? "background" : "foreground"].filter(Boolean).join(" · ");
   }
   function amAgentNumbers(record) {
@@ -14465,7 +15374,7 @@
     const records = imageRecordsFor(ev);
     const omitted = Number.isSafeInteger(ev.omitted) && ev.omitted > 0 ? Math.min(ev.omitted, 10000) : 0;
     if (!records.length && !omitted) return;
-    const stick = atBottom();
+    const stick = atEnd();
     const owner = imageOwnerFor(ev);
     owner._images = [...(owner._images || []), ...records];
     owner._imagesOmitted = (owner._imagesOmitted || 0) + omitted;
@@ -14541,6 +15450,7 @@
     const chip = el("button", record.compact ? "image-chip prompt-att chip" : "image-chip");
     chip.type = "button";
     chip.dataset.state = record.state;
+    chip.dataset.picOpen = "";                       // a folded block's Open opens this (media/pictureFold.js)
     const dims = imageDims(record);
     const failure = record.state === "failed" ? (IMAGE_FAILURES[record.reason] || IMAGE_FAILURES.unreadable) : null;
     chip.setAttribute("aria-label", `Open image ${index + 1} of ${count}: ${record.name}${dims ? `, ${record.width} by ${record.height}` : ""}`);

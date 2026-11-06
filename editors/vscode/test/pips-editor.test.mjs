@@ -321,6 +321,23 @@ test('a Generative UI choice sends one Pip message and preserves an existing dra
  assert.equal(sent[0].request.text,'Check the alert first.');
  assert.equal(x.d.querySelector('#chatText').value,'My unfinished note');
 });
+test('a Generative UI card is live only in the Pip\'s own chat reply, never in a routine\'s post',async()=>{
+ const calls=[];
+ const x=setup({conversation:true,messages:[chatMessage('ask','a',{text:'What next?',run_id:'r1'}),
+  chatMessage('answer','a',{role:'assistant',text:'Reply text',run_id:'r1'}),
+  chatMessage('intro','a',{text:'This message is from DGC, not the user. Your routine "Morning brief" is due.',intro:true,run_id:'r2'}),
+  chatMessage('routine','a',{role:'assistant',text:'Routine text',run_id:'r2'})]});
+ x.w.DgcMarkdown={render:(text,options)=>{calls.push([text,options?.cards===true]);
+  return `<button type="button" class="genui-send" data-genui-send="Sent from ${text}">Choice</button>`;}};
+ await x.drain();
+ assert.ok(calls.some(([text,cards])=>text==='Reply text'&&cards),'the reply is drawn with its cards');
+ assert.ok(calls.some(([text])=>text==='Routine text'),'the routine post is drawn');
+ assert.ok(calls.every(([text,cards])=>text!=='Routine text'||!cards),'a routine post keeps a card as code');
+ x.d.querySelector('.routine-reply .genui-send').click();
+ assert.equal(x.requests('send_pip_message').length,0,'a button outside the Pip\'s reply sends nothing');
+ x.d.querySelector('.pip-message.assistant:not(.routine-reply) .genui-send').click();
+ assert.deepEqual(x.requests('send_pip_message').map(r=>r.request.text),['Sent from Reply text']);
+});
 test('late messages and unrelated conversation records cannot cross Pip identities',async()=>{
  const x=setup({conversation:true,jobs:[job('a'),job('b')]});await x.drain({list_pip_messages:req=>req.pip_id==='a'?undefined:{pip_id:'b',workspace_id:'ws',messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0}});const old=x.requests('list_pip_messages')[0];x.click('[data-job=b]');await x.drain();x.answer(old,{pip_id:'a',workspace_id:'ws',messages:[chatMessage('old','a',{text:'Wrong thread'})],next_before_id:null,active_run:null,history_context_omitted_count:0});await flush();assert.doesNotMatch(x.d.querySelector('.pip-conversation').textContent,/Wrong thread/);x.click('#refresh');await x.drain({list_pip_messages:()=>({pip_id:'b',workspace_id:'ws',messages:[chatMessage('bad','a')],next_before_id:null,active_run:null,history_context_omitted_count:0})});assert.match(x.d.querySelector('.pip-conversation').textContent,/invalid or unrelated message/);
 });
@@ -365,6 +382,9 @@ test('a saved model change that differs from the choice is never accepted',async
  choose(x,'#pipModel','model:model-a');x.submit('#model-form');const req=x.requests('propose_pip_update')[0];
  x.answer(req,{proposal:{...proposal(),definition:{...proposal().definition,model_choice:{mode:'model',model:'model-b'}}}});await x.drain();
  assert.equal(x.requests('accept_pip_update').length,0);assert.match(x.d.body.textContent,/differs from your choice/);
+});
+test('a streaming reply never draws its bubble marker as a heading or a rule',async()=>{
+ const activeRun={id:'chat-run',status:'running'},messages=[chatMessage('pending','a',{status:'running'})],x=setup({conversation:true,chatActive:activeRun,messages});await x.drain();const request=x.requests('list_pip_run_activity')[0];x.answer(request,{...activityPage([activityEvent(1,{run_id:'chat-run',payload:{kind:'text_delta',text:'Here is the first part\n---\nAnd the second part'}})]),run_id:'chat-run'});await flush();const live=x.d.querySelector('[aria-label="Live reply preview"]');assert.match(live.textContent,/Here is the first part/);assert.match(live.textContent,/And the second part/);assert.equal(live.querySelector('h1,h2,hr'),null,'the --- under a line is a bubble break, not a heading');assert.doesNotMatch(live.textContent,/---/);
 });
 test('real stream deltas stay provisional and disappear on cancelled conversation without saving a reply',async()=>{
  const activeRun={id:'chat-run',status:'running'},messages=[chatMessage('pending','a',{status:'running'})],x=setup({conversation:true,chatActive:activeRun,messages});await x.drain();const request=x.requests('list_pip_run_activity')[0];x.answer(request,{...activityPage([activityEvent(1,{run_id:'chat-run',payload:{kind:'text_delta',text:'Reading the real result…'}})]),run_id:'chat-run'});await flush();assert.match(x.d.querySelector('[aria-label="Live reply preview"]').textContent,/Reading the real result/);assert.match(x.d.querySelector('[aria-label="Live reply preview"]').textContent,/Still writing…/);x.click('#chat-stop');assert.equal(x.requests('cancel_pip_run')[0].request.run_id,'chat-run');x.answer(x.requests('cancel_pip_run')[0],{run:run('chat-run','a',{status:'cancelled'})});messages[0].status='cancelled';await x.drain({list_pip_messages:()=>({pip_id:'a',workspace_id:'ws',messages,next_before_id:null,active_run:null,history_context_omitted_count:0})});assert.equal(x.d.querySelector('[aria-label="Live reply preview"]'),null);assert.equal(x.d.querySelectorAll('.pip-message.assistant').length,0);assert.match(x.d.querySelector('.message-status').textContent,/Stopped · No reply/);
@@ -1057,6 +1077,37 @@ test('archived Pip deletion requires its exact name and removes it from the home
  const pending=x.requests('delete_archived_pip')[0];assert.deepEqual(JSON.parse(JSON.stringify(pending.request)),{type:'delete_archived_pip',pip_id:pip.id,expected_version:1,expected_lifecycle_revision:3,expected_name:pip.name});
  x.answer(pending,{deleted:true,pip_id:pip.id});await x.drain();
  assert.equal(x.d.querySelector('[data-job]'),null);assert.doesNotMatch(x.d.body.textContent,/Delete .* permanently\?/);
+});
+test('a deletion that left an Output it could not read says which one, and where',async()=>{
+ const pip=lifecycleJob({status:'archived',lifecycle_revision:3});
+ const x=lifecycleSetup({apiVersion:68,jobs:[pip],autoSelect:false});await x.drain();
+ x.click('#show-archived');x.click('[data-job]');await x.drain();x.click('[data-tab=job]');
+ x.click('#delete-archived-pip');x.input('#deletePipName',pip.name);x.click('#review-confirm');
+ const left='/home/me/.dgc/artifacts/ar_0123456789abcdef';
+ x.answer(x.requests('delete_archived_pip')[0],{deleted:true,pip_id:pip.id,outputs_left:[left]});await x.drain();
+ assert.equal(x.d.querySelector('[data-job]'),null);
+ // A notice, not an error: nothing failed. It was drawn in the red error style beside the green "deleted" notice.
+ assert.equal(x.d.querySelector('[role=alert]'),null,'no error is shown');
+ const notice=x.d.querySelector('.notice[role=status]');assert.ok(notice);assert.equal(notice.classList.contains('error'),false);
+ assert.match(notice.textContent,/^.+ was deleted permanently\. DGC couldn’t read a saved Output, so it left it in place: \/home\/me\/\.dgc\/artifacts\/ar_0123456789abcdef\. Delete it if it was this Pip’s\.$/);
+});
+// The home said "Showing 1 of 2" with only one Pip left after a permanent deletion: the count kept the deleted one.
+test('a permanent deletion takes the Pip out of the home count too, and a left-in-place notice stays on screen',async()=>{
+ const pip=lifecycleJob({status:'archived',lifecycle_revision:3}),other=job('b',{workspace_id:memoryWorkspace,name:'Core helper'});
+ const x=lifecycleSetup({apiVersion:68,jobs:[other,pip],autoSelect:false});
+ const counted={list_pips:()=>({pips:[other,pip],total:2,next_offset:null})};
+ await x.drain(counted);
+ const timers=[];x.w.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length;};x.w.clearTimeout=()=>{};
+ x.click('#show-archived');x.click(`[data-job="${pip.id}"]`);await x.drain(counted);x.click('[data-tab=job]');
+ x.click('#delete-archived-pip');x.input('#deletePipName',pip.name);x.click('#review-confirm');
+ x.answer(x.requests('delete_archived_pip')[0],{deleted:true,pip_id:pip.id,outputs_left:['/home/me/.dgc/artifacts/ar_00000000000000bb']});
+ await x.drain(counted);
+ assert.deepEqual([...x.d.querySelectorAll('[data-job]')].map(e=>e.dataset.job),[other.id]);
+ assert.doesNotMatch(x.d.body.textContent,/Showing 1 of 2/);
+ const count=x.d.querySelector('.pip-search-count');assert.ok(!count||!/of 2/.test(count.textContent),count?.textContent);
+ // Notices fade; this one names a folder to deal with, so no timer takes it away.
+ for(const t of timers.splice(0))t.fn();
+ assert.match(x.d.querySelector('.notice[role=status]')?.textContent||'',/left it in place: \/home\/me\/\.dgc\/artifacts\/ar_00000000000000bb/);
 });
 test('archival receipt binds exact job/lifecycle while replay returns current later state honestly',()=>{
  const v=lifecycleResponse(),req=lifecycleRequest();assert.equal(model.exports.archivalResult(v,req,memoryWorkspace),v);

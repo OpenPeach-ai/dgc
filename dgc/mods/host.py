@@ -108,12 +108,13 @@ class ModHost:
         # The mods DGC wrote in this session's project: name -> folder; every grant the user allowed for them; their
         # one answer ("allow", "not_now", or None before the question); the question open now, and any waiting.
         self.written: dict[str, str] = {}
+        self.written_folders: set[str] = set()       # every folder DGC wrote: written whatever name it gives later
         self.written_grants: set[str] = set()
         self.written_answer: str | None = None
         self.offer: dict | None = None
         self._offers_waiting: list[str] = []
         self._watched: set[str] = set()
-        self._clashed: set[str] = set()
+        self._clashed: set[tuple[str, str]] = set()
         self._watching = True
 
     # -- what there is -------------------------------------------------------------------------------------------
@@ -127,7 +128,7 @@ class ModHost:
         out = []
         for m in catalog.available(self.extra):
             run = self.running.get(m.name)
-            record = consent.record(m.name)
+            record = consent.record_for(m)
             written = self.written.get(m.name) == str(m.folder)
             if written:
                 missing = sorted(m.grants() - self.written_grants) if m.name in self.session_allowed \
@@ -181,7 +182,7 @@ class ModHost:
 
     def _start(self, m: Manifest) -> Running | None:
         from .. import sandbox
-        record = consent.record(m.name) or {}
+        record = consent.record_for(m) or {}
         boxed = sandbox._backend() is not None
         # DGC's own mods run anyway where there's no sandbox; another's only when the user said so for it.
         sandboxed = boxed or not (m.builtin or record.get("unsandboxed"))
@@ -202,7 +203,9 @@ class ModHost:
                                               "capabilities": m.capabilities()}, timeout=10)
             run.hooks = {h for h in (got or {}).get("hooks") or [] if h in m.events}
         except ModError as error:
-            proc.error = f"It didn't start: {error}"
+            why = proc.error or str(error)
+            # Said once: "It couldn't start: its sandbox can't see …" is already the whole sentence.
+            proc.error = why if why.startswith(("It couldn't start", "It didn't start")) else f"It didn't start: {why}"
             proc.stop()
             self._changed()
             return run
@@ -315,21 +318,41 @@ class ModHost:
         where = str(m.folder)
         known = self.written.get(m.name)
         if known != where:
-            other = catalog.find(m.name, self.extra)
-            if other is not None and known is None and str(other.folder) == where:
+            ours = where in self.written_folders
+            # A folder DGC wrote is never the user's own, under whatever name it gives later: look for another mod
+            # of that name without it.
+            others = tuple(e for e in self.extra if str(Path(e).resolve()) != where) if ours else self.extra
+            other = catalog.find(m.name, others)
+            if other is not None and not ours and str(other.folder) == where:
                 return None                                   # the user's own dev folder (dgc mods dev)
+            if ours:
+                # It gave itself another name: what it was is gone, and so is any question about it.
+                for name, folder in list(self.written.items()):
+                    if folder == where:
+                        del self.written[name]
+                        self._offers_waiting = [n for n in self._offers_waiting if n != name]
+                        if self.offer is not None and self.offer["name"] == name:
+                            self.offer = None
+                        run = self.running.get(name)
+                        if run is not None and str(run.manifest.folder) == where:
+                            self.stop(name)
             if other is not None:
                 # Its name is another mod's (DGC's own, an installed one, a dev folder, another folder DGC wrote):
-                # beside it, this folder would hide that mod for the rest of the session. Said once; never run.
-                if where not in self._clashed:
-                    self._clashed.add(where)
+                # beside it, this folder would hide that mod for the rest of the session, and could pass for it.
+                # Said once; never run.
+                self.extra = tuple(e for e in self.extra if str(Path(e).resolve()) != where)
+                if (where, m.name) not in self._clashed:
+                    self._clashed.add((where, m.name))
                     self._emit("toast", {"mod": "DGC", "name": m.name, "tone": "warn", "at": time.time(),
                                          "text": f"DGC wrote a mod named {m.name}, the name of one you already "
                                                  "have, so it can't run here. Give it another name in its "
                                                  "dgc-mod.json."})
+                self._changed()
                 return None
             self.written[m.name] = where
-            self.extra = self.extra + (where,)
+            self.written_folders.add(where)
+            if where not in {str(Path(e).resolve()) for e in self.extra}:
+                self.extra = self.extra + (where,)
         if m.name in self.running and self._may_run(m):
             return None                                       # its watcher reloads it
         if self.written_answer == "not_now":

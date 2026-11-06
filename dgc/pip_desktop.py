@@ -212,7 +212,8 @@ class Notifier:
                     "JOIN pips p ON p.id=a.pip_id JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "
                     "WHERE a.role='assistant' AND u.request_key LIKE 'routine\\_%' ESCAPE '\\' ORDER BY a.seq DESC LIMIT 20"):
                 if pip_id not in quiet:
-                    finished.append(("chat:" + message_id, f"{name(definition)}: {_plain(text, 160)}"))
+                    from .pip_chat import without_breaks          # its --- between short messages is not said
+                    finished.append(("chat:" + message_id, f"{name(definition)}: {_plain(without_breaks(text), 160)}"))
             for routine_id, pip_id, title, definition in registry.db.execute(
                     "SELECT r.id,r.pip_id,r.title,v.definition FROM pip_routines r JOIN pips p ON p.id=r.pip_id "
                     "JOIN pip_versions v ON v.pip_id=p.id AND v.version=p.current_version "

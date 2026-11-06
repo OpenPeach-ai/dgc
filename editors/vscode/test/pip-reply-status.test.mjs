@@ -81,5 +81,5 @@ test('each finished reply says what it took',async()=>{
 test('a Personal Pip’s model chip names the model as soon as its chat opens',async()=>{
  const x=setup();await openChat(x);
  assert.equal(x.requests('list_pip_models').length,1,'read once, when the chat opens');
- assert.equal(x.d.querySelector('#chat-model .composer-model-name').textContent,'m','the model, not "Same as DGC"');
+ assert.equal(x.d.querySelector('#chat-model .composer-model-name').textContent,'Default (m)','the model, not "Same as DGC"; on Default, as the menu says it');
 });

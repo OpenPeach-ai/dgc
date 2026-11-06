@@ -44,6 +44,21 @@ class ServiceTest(unittest.TestCase):
             S.edit(doc["id"], edits=[{"find": "Tuesday", "replace": "x"}], store=self.store)
         self.assertEqual(S.view(doc["id"], store=self.store)["version"], 2)
 
+    def test_a_deck_with_a_styled_svg_saved_earlier_can_still_be_edited(self):
+        import base64
+        svg = (b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">'
+               b'<style>.a{fill:#c00}</style><rect class="a" width="10" height="10"/></svg>')
+        src = "data:image/svg+xml;base64," + base64.b64encode(svg).decode()
+        # What an older store holds: the deck as data, with the picture embedded.
+        art = self.store.create("slides", "Deck", {"size": "16:9", "theme": "paper", "slides": [
+            {"layout": "title", "title": "Q3"}, {"layout": "image", "title": "Logo", "image": {"src": src}}]},
+            origin={"surface": "cli"})
+        changed = S.edit(art.id, edits=[{"op": "set", "slide": 1, "field": "title", "value": "Q3 review"}],
+                         store=self.store)
+        self.assertEqual(changed["version"], 2)
+        deck = self.store.source(art.id)
+        self.assertEqual((deck["slides"][0]["title"], deck["slides"][1]["image"]["src"]), ("Q3 review", src))
+
     def test_a_stale_edit_is_refused_and_nothing_is_written(self):
         doc = S.make("doc", "D", "one\n", origin=self.chat, store=self.store)
         S.edit(doc["id"], content="two\n", store=self.store, author="you")

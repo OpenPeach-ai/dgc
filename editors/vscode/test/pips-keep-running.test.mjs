@@ -65,6 +65,54 @@ test('a malformed status is refused, an older CLI and the Remote are never asked
  assert.throws(()=>model.pipsKeepRunning(status({supported:false,on:true,reason:'x'})),/invalid/,'unsupported is never on');
 });
 
+// The backend's shapes, as pip_keep_running.status() builds them on each system.
+const linuxOn=status({on:true,starts_at_login:true,restarts_after_failure:true,outdated:false});
+const shapes={
+ linux:linuxOn,
+ 'linux, no systemd':status({supported:false,reason:'This computer has no systemd (a container, say).'}),
+ wsl:status({platform:'wsl',on:true,starts_at_login:true,restarts_after_failure:true,outdated:false}),
+ 'wsl 1':{...status({platform:'wsl',supported:false,reason:'Keeping Pips running needs WSL 2.'}),outdated:false},
+ macOS:status({platform:'darwin',on:true,starts_at_login:true,restarts_after_failure:true,outdated:false}),
+ 'macOS, off':status({platform:'darwin',outdated:false}),
+};
+test('the status Linux, WSL and macOS send, with outdated, shows the switch or the reason', async()=>{
+ for(const [name,keep] of Object.entries(shapes)){
+  assert.doesNotThrow(()=>model.pipsKeepRunning(keep),name);
+  const x=setup({keep});await x.drain();
+  assert.doesNotMatch(x.d.body.textContent,/keep-running status is invalid/,name);
+  if(keep.supported){assert.ok(x.d.getElementById('keep-running'),name);assert.equal(x.d.getElementById('keep-running').checked,keep.on,name);}
+  else{assert.equal(x.d.getElementById('keep-running'),null,name);assert.ok(x.d.body.textContent.includes(keep.reason),name);}
+  assert.equal(x.d.getElementById('keep-running-refresh'),null,name+': nothing to refresh');
+ }
+ for(const bad of [{...linuxOn,outdated:'yes'},{...linuxOn,outdated:null},{...linuxOn,extra:1},{...status(),outdated:false,older:true}])
+  assert.throws(()=>model.pipsKeepRunning(bad),/invalid/,JSON.stringify(bad));
+});
+
+test('a service that still starts an older DGC says so, and Refresh turns it on again for this one', async()=>{
+ for(const platform of ['linux','wsl','darwin']){
+  const keep=status({platform,on:true,starts_at_login:true,restarts_after_failure:true,outdated:true});
+  const x=setup({keep});await x.drain();
+  assert.equal(x.d.getElementById('keep-running').checked,true,platform);
+  assert.match(x.d.body.textContent,/It still starts an older DGC\. Refresh moves it to this one\./,platform);
+  const refresh=x.d.getElementById('keep-running-refresh');assert.ok(refresh,platform);assert.equal(refresh.disabled,false,platform);
+  refresh.click();
+  const sent=x.requests('set_pips_keep_running');assert.equal(sent.length,1,platform);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[0].request)),{type:'set_pips_keep_running',enabled:true},platform);
+  x.answer(sent[0],{keep_running:{...keep,outdated:false}});await x.drain();
+  assert.equal(x.d.getElementById('keep-running-refresh'),null,platform);
+  assert.doesNotMatch(x.d.body.textContent,/older DGC/,platform);
+  assert.match(x.d.body.textContent,/Keep Pips running now starts this DGC\./,platform);
+ }
+ // Off: turning it on writes it for this install anyway, so there is nothing to say.
+ const off=setup({keep:status({platform:'darwin',outdated:true})});await off.drain();
+ assert.equal(off.d.getElementById('keep-running-refresh'),null);assert.doesNotMatch(off.d.body.textContent,/older DGC/);
+ // While a Pip works, Refresh (which restarts the runner) waits.
+ const busy=setup({keep:status({on:true,starts_at_login:true,restarts_after_failure:true,outdated:true})});
+ await busy.drain({get_pip_runner:()=>({runner:{runner_id:'r',status:'running',online:true,paused:false,counts:{queued:0,running:1,cancelling:0}}})});
+ assert.equal(busy.d.getElementById('keep-running-refresh').disabled,true);
+ assert.match(busy.d.body.textContent,/once no Pip is working/);
+});
+
 test('the extension host passes the switch only to an API 41 CLI', ()=>{
  for(const api of [40,41]){const posted=[],sent=[];const {PipsEditor}=load(viewCode,name=>name==='vscode'?{}:require(name));const bridge=new PipsEditor({},m=>{sent.push(m);return true;},()=>{});bridge.attach(m=>posted.push(m));bridge.ready({pips_supported:true,pips_enabled:true,pips_api_version:api},{});
   bridge.receive({type:'pipsRequest',id:'g',request:{type:'get_pips_keep_running'}});bridge.receive({type:'pipsRequest',id:'s',request:{type:'set_pips_keep_running',enabled:true}});

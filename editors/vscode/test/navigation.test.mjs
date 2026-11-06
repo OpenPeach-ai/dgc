@@ -19,7 +19,7 @@ const { workspaceFile, workspaceImage, THUMB_MAX_BYTES } = await moduleAt("../sr
 const { linkTarget, render } = await moduleAt("../src/markdown.ts");
 
 test("a preview refuses a file replaced by an external symlink after workspace validation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "dgc-thumb-race-"));
+  const root = await fsp.realpath(await mkdtemp(join(tmpdir(), "dgc-thumb-race-")));
   try {
     const project = join(root, "project"), target = join(project, "shot.png"), outside = join(root, "private.png");
     await mkdir(project);
@@ -40,7 +40,7 @@ test("a preview refuses a file replaced by an external symlink after workspace v
 });
 
 test("file navigation follows only canonical paths within currently open roots", async () => {
-  const root = await mkdtemp(join(tmpdir(), "dgc-navigation-"));
+  const root = await fsp.realpath(await mkdtemp(join(tmpdir(), "dgc-navigation-")));
   try {
     const project = join(root, "project"), secondary = join(root, "secondary");
     await mkdir(project); await mkdir(secondary);

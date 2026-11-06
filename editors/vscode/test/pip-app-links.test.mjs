@@ -197,7 +197,11 @@ const gmail=()=>link({status:'connected',label:'me@example.com',server:'composio
 test('the email a Pip wrote is an Allow card; Send prepares that exact draft on its Gmail account and sends it once',async()=>{
  const x=setup({links:[gmail()],drafts:[draft()]});await openChat(x);
  const card=x.d.querySelector(`[data-allow-card="${DRAFT}"]`);assert.ok(card,'inline in the chat');
- assert.match(card.textContent,/Send this email\?From me@example\.com.*To.*friend@example\.test.*A short note.*Lunch on Friday\? <img src=x>/);
+ assert.match(card.textContent,/Send email to friend@example\.test\?From me@example\.comSubject: A short note/);
+ const details=card.querySelector('details.allow-details');
+ assert.ok(details && !details.open,'the compact card shows the recipient and subject, with the body folded');
+ details.open=true;
+ assert.match(details.textContent,/Tofriend@example\.testSubjectA short noteLunch on Friday\? <img src=x>/);
  assert.equal(card.querySelector('img'),null,'the body is text');
  assert.deepEqual([...card.querySelectorAll('button')].map(b=>b.textContent),['Send','Always allow','Edit','Don’t send']);
  x.click(`[data-allow-send="${DRAFT}"]`);await flush();

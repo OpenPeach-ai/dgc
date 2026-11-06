@@ -649,6 +649,10 @@ class AsyncChat:
                     return
                 if isinstance(item, BaseException):
                     raise item
+                if item.kind == "reply":
+                    # The last event, as Chat.stream and the TypeScript SDK have it: a caller that stops here stopped
+                    # a finished reply, and a cancel sent now could stop the next one.
+                    completed = True
                 yield item
         finally:
             abandoned.set()

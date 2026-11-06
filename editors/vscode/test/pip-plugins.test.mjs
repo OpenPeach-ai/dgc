@@ -120,6 +120,24 @@ test('Always allow runs it and saves the grant; Don’t dismisses it',async()=>{
  const no=y.requests('dismiss_pip_connector_draft').at(-1);assert.deepEqual(clean(no.request),{type:'dismiss_pip_connector_draft',draft_id:DRAFT,expected_digest:'c'.repeat(64)});
 });
 
+test('Don’t says it did not run, where the card was, also after a reload, until a newer reply',async()=>{
+ // Release check, 2026-11-03: Don't left only "Not run." above the chat, out of sight, under a reply that still said its
+ // Allow card was below.
+ const reply={id:'message_'+'9'.repeat(32),pip_id:PIP,workspace_id:PW,run_id:RUN,role:'assistant',text:'The Allow card for create_record is below.',status:'succeeded',model:'m',created_at:'2026-10-07T09:00:00.000Z'};
+ const x=setup({plugins:[card({status:'allowed'})],drafts:[draft()],messages:[reply]});await openChat(x);
+ x.click(`[data-plugin-skip="${DRAFT}"]`);await flush();
+ x.setDrafts([draft('airtable',{status:'dismissed'})]);
+ x.answer(x.requests('dismiss_pip_connector_draft').at(-1),{draft:draft('airtable',{status:'dismissed'})});await x.drain();
+ assert.equal(x.d.querySelector(`[data-plugin-action="${DRAFT}"]`),null,'the card goes');
+ const line=x.d.querySelector(`[data-plugin-not-run="${DRAFT}"]`);
+ assert.ok(line,'a line says so where it was');assert.equal(line.textContent,'Not run: you chose Don’t for create_record.');
+ const reloaded=setup({plugins:[card({status:'allowed'})],drafts:[draft('airtable',{status:'dismissed'})],messages:[reply]});await openChat(reloaded);
+ assert.ok(reloaded.d.querySelector(`[data-plugin-not-run="${DRAFT}"]`),'and after a reload');
+ const later={...reply,id:'message_'+'8'.repeat(32),run_id:'run_'+'6'.repeat(32),text:'Something else.',created_at:'2026-10-07T09:05:00.000Z'};
+ const moved=setup({plugins:[card({status:'allowed'})],drafts:[draft('airtable',{status:'dismissed'})],messages:[reply,later]});await openChat(moved);
+ assert.equal(moved.d.querySelector('[data-plugin-not-run]'),null,'a newer reply: it is said no more');
+});
+
 test('a plugin that can move money asks every time: no Always allow on its card',async()=>{
  const x=setup({plugins:[aave({status:'allowed'})],drafts:[draft('aave')]});await openChat(x);
  const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);
@@ -159,6 +177,18 @@ test('Pips API 45: with no per-Pip cards, a plugin action is still its Allow car
  const unknown=z.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(unknown);
  assert.match(unknown.textContent,/Run create_record in airtable\?/);
  assert.deepEqual([...unknown.querySelectorAll('button')].map(b=>b.textContent),['Allow','Edit','Don’t'],'not knowing, it asks every time');
+});
+
+test('a plugin you set to Always ask offers Allow once and Don’t only: no Always allow on its card',async()=>{
+ const owned=[{plugin:'airtable',name:'Airtable',money:false,servers:['airtable'],asks:true}];
+ const x=setup({apiVersion:45,plugins:[],drafts:[draft()],uses:{plugins:[],installed:owned}});
+ x.setInstalled(owned);await openChat(x);
+ const el=x.d.querySelector(`[data-plugin-action="${DRAFT}"]`);assert.ok(el);
+ assert.match(el.textContent,/Run create_record in Airtable\?You set Airtable to Always ask, so Ava asks you every time\./);
+ assert.deepEqual([...el.querySelectorAll('button')].map(b=>b.textContent),['Allow once','Edit','Don’t']);
+ assert.equal(el.querySelector('[data-plugin-always]'),null);
+ x.click(`[data-plugin-run="${DRAFT}"]`);await flush();
+ assert.equal(x.requests('prepare_pip_connector_draft').length,1,'Allow once runs it once');
 });
 
 test('a connector draft for a server no allowed plugin owns stays a Review row',async()=>{

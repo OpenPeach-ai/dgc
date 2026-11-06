@@ -71,10 +71,10 @@ async function open(width, section, theme = "dark") {
   return { p, close: () => context.close() };
 }
 
-test("Models and Agents follow the VS Code theme, light included", async (t) => {
+test("Models (which holds what Agents did) follows the VS Code theme, light included", async (t) => {
   if (skipOrFail(t)) return;
   for (const theme of ["dark", "light"]) {
-    for (const section of ["models", "agents"]) {
+    for (const section of ["models"]) {
       const { p, close } = await open(900, section, theme);
       try {
         const seen = await p.evaluate(() => {
@@ -93,7 +93,7 @@ test("Models and Agents follow the VS Code theme, light included", async (t) => 
 
 test("at 900 px the controls line up; at 460 px each sits under its words; nothing scrolls sideways", async (t) => {
   if (skipOrFail(t)) return;
-  for (const section of ["models", "agents"]) {
+  for (const section of ["models"]) {
     let { p, close } = await open(900, section);
     try {
       await p.evaluate(() => document.querySelectorAll("#page details.more").forEach((d) => { d.open = true; }));
@@ -117,7 +117,7 @@ test("at 900 px the controls line up; at 460 px each sits under its words; nothi
 
 test("Save stays in reach at the foot of the tab while the page scrolls", async (t) => {
   if (skipOrFail(t)) return;
-  const { p, close } = await open(460, "agents");
+  const { p, close } = await open(460, "models");
   try {
     await p.setViewportSize({ width: 460, height: 520 });
     const bar = await p.evaluate(() => {

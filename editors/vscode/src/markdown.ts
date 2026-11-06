@@ -170,9 +170,11 @@ parser.renderer.rules.image = (tokens, index) => {
   const kind = target.kind === "file" ? ` data-file-kind="${fileKind(target.target)}"` : "";
   return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${kind} title="${escape(target.target)}">${label}</button>`;
 };
-parser.renderer.rules.fence = (tokens, index) => {
+parser.renderer.rules.fence = (tokens, index, _options, env) => {
   const info = String(tokens[index].info || "").trim().toLowerCase();
-  if (info === "dgc-ui") {
+  // A card is live only in DGC's own reply in a chat (render(..., { cards: true })). A skill's page, the docs, a
+  // helper's or a Pip's report and the rest show its JSON as code: their author isn't the one answering you.
+  if (info === "dgc-ui" && env?.cards === true) {
     const card = renderGenerativeUi(tokens[index].content);
     if (card) return card;
   }
@@ -283,10 +285,12 @@ parser.renderer.rules.math_block = (tokens, index) => {
   return `<div class="md-math md-math-display" data-tex="${escape(t.content)}">${escape(t.markup + t.content + t.info)}</div>\n`;
 };
 
-export function render(source: string): string {
+/** Markdown as inert HTML. ``cards``: draw ```dgc-ui fences as interactive cards, for DGC's own reply in a chat
+ *  only; everywhere else they stay code. */
+export function render(source: string, options: { cards?: boolean } = {}): string {
   // JSON can carry lone UTF-16 surrogates; URI encoding in copy controls must not crash a turn.
   const cleaned = String(source).replace(
     /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
   // The env carries the source so a block rule can quote it back exactly (see quoteSource).
-  return parser.render(cleaned, { src: cleaned });
+  return parser.render(cleaned, { src: cleaned, cards: options?.cards === true });
 }

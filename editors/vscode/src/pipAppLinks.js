@@ -83,9 +83,10 @@ export function allowCardMarkup(draft, { esc, link = null, busy = false, pipName
   const shown = editing
     ? `<div class="allow-fields">${field(esc, draft.id, 'recipient_email', 'To', edit.values.recipient_email, { type: 'email', max: 254, disabled: busy })}`
       + `${field(esc, draft.id, 'subject', 'Subject', edit.values.subject, { max: 200, disabled: busy })}${field(esc, draft.id, 'body', 'Message', edit.values.body, { area: 8, max: 12000, disabled: busy })}</div>`
-    : `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div>`;
+    : `<details class="allow-details"><summary><span class="allow-preview">Subject: ${esc(m.subject)}</span><span>Details</span></summary>`
+      + `<dl class="allow-meta"><dt>To</dt><dd>${esc(m.recipient_email)}</dd><dt>Subject</dt><dd>${esc(m.subject)}</dd></dl><div class="allow-body">${esc(m.body)}</div></details>`;
   return `<div class="allow-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Send this email?">`
-    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send this email?</strong><small>${from}</small></div></div>`
+    + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">@</span><div class="app-link-words"><strong>Send email to ${esc(m.recipient_email)}?</strong><small>${from}</small></div></div>`
     + shown + editError(esc, edit)
     + `<div class="app-link-actions">${actions}<button type="button" class="quiet" data-allow-dismiss="${id}"${off}>Don’t send</button></div></div>`;
 }
@@ -109,10 +110,10 @@ export function calendarCardMarkup(draft, { esc, link = null, busy = false, pipN
       + field(esc, draft.id, 'description', 'Description', edit.values.description, { area: 4, max: 8000, disabled: busy })
       // A series stays a series: say so while editing, so a new time never quietly becomes many events.
       + (repeat ? `<p class="app-link-note">Repeats ${esc(repeatWords(repeat))}, as ${esc(pipName)} drafted it. Each one moves with the new time.</p>` : '') + '</div>'
-    : `<dl class="allow-meta"><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>When</dt><dd>${esc(when(e))}</dd>`
+    : `<details class="allow-details"><summary><span class="allow-preview">${esc(e.summary)}</span><span>Details</span></summary><dl class="allow-meta"><dt>Title</dt><dd>${esc(e.summary)}</dd><dt>When</dt><dd>${esc(when(e))}</dd>`
       + (guests.length ? `<dt>Guests</dt><dd>${esc(guests.join(', '))} · invited</dd>` : '')
       + (repeat ? `<dt>Repeats</dt><dd>${esc(repeatWords(repeat))}</dd>` : '')
-      + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '');
+      + '</dl>' + (e.description ? `<div class="allow-body">${esc(e.description)}</div>` : '') + '</details>';
   return `<div class="allow-card calendar-card" data-allow-card="${id}"${editing ? ' data-editing' : ''} role="group" aria-label="Add this event?">`
     + `<div class="app-link-head"><span class="app-link-mark" aria-hidden="true">▦</span><div class="app-link-words"><strong>Add this event?</strong><small>${to}</small></div></div>`
     + shown + editError(esc, edit)

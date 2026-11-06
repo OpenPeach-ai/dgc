@@ -315,3 +315,26 @@ test("a webview reloaded mid-stretch draws the line and its live row again", () 
   send({ type: "event", event: { type: "text_delta", text: "Found it." } });
   assert.equal(doc.querySelector(".tg-live"), null);
 });
+
+// A web_fetch step read "Searched the web": a fetch is no search. It says it read a page, and the page's site.
+test("a fetched page says it read a page on its site, never that it searched the web", () => {
+  const label = (calls) => {
+    const { event, doc } = panel();
+    event({ type: "turn_start", turn_id: "t1", prompt: "Fetch it", kind: "prompt" });
+    const live = [];
+    calls.forEach(([name, summary], i) => {
+      event({ type: "tool_call", call_id: `w${i}`, name, args: name === "web_fetch" ? { url: summary } : { query: summary }, summary });
+      live.push(squash(doc.querySelector(".tool-group-label").textContent));
+      event({ type: "tool_result", call_id: `w${i}`, name, output: "Example Domain", is_error: false });
+    });
+    return { live, done: squash(doc.querySelector(".tool-group-label").textContent) };
+  };
+  const one = label([["web_fetch", "https://www.example.com/docs/page?x=1"]]);
+  assert.equal(one.live[0], "Reading a page on example.com");
+  assert.equal(one.done, "Read a page on example.com");
+  assert.equal(label([["web_search", "carrot fly"], ["web_fetch", "https://example.com"]]).done,
+    "Searched the web and read a page on example.com");
+  assert.equal(label([["web_fetch", "https://example.com/a"], ["web_fetch", "https://example.com/b"]]).done, "Read 2 pages on example.com");
+  assert.equal(label([["web_fetch", "https://example.com"], ["web_fetch", "https://example.org"]]).done, "Read 2 pages on 2 sites");
+  assert.equal(label([["web_search", "carrot fly"]]).done, "Searched the web");
+});

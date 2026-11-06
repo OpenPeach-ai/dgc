@@ -402,6 +402,8 @@ or set one with `/mode`.
   prompts remain user-gated. Use only in a sandbox or a throwaway repo.
 
 Explicit `/permissions` rules are evaluated deny → ask → allow before those baseline decisions.
+When one of your own `ask` rules is what asks, the card offers **Allow once** and **Deny** only: an
+allow rule never beats an ask rule, so an Always allow there would save a rule that never applies.
 Subscription turns map the mode into the selected vendor CLI's own flags and policy instead.
 `/sandbox on` uses the strongest supported host boundary for native-loop spawned shell commands
 and hooks; it does not confine parent-process structured file tools or delegated vendor CLIs, and
@@ -419,12 +421,16 @@ The **Sandbox** page covers backends, what is confined, and what is not.
 Each chat keeps its own mode, so a risky refactor can sit in **default** while a scratch chat
 beside it runs **auto**. Choosing a mode also makes it the default for chats you start
 afterwards; it never moves a chat that is already open, in this window or another one.
-Reopening a session brings back the mode it ran in when that mode asks no less than the one you
-are in: a chat that was planning comes back planning, and one that ran in **auto** comes back in
-**auto** when **auto** is your mode. It is checked again rather than trusted from the file:
-**acceptEdits** and **auto** only while that folder is still trusted. A mode you name for the run
-wins (`dgc --mode plan --continue` runs in **plan**), and a new chat after a reopened one starts
-in the mode the reopened chat replaced.
+A chat you reopen yourself comes back in the mode it had, even one that asks less than your
+default: in the editor (a chat opened from the list, a Work tab after a window reload, a closed
+chat opened again) and in the terminal (`dgc --resume`, `dgc --continue`, `/resume`). A chat you
+set to **auto** comes back in **auto**. It is checked again rather than trusted from the file:
+**acceptEdits** and **auto** only while that folder is still trusted; otherwise the chat reopens in
+**default** and says so. A script or an app only lowers it: `dgc -p --continue`, an SDK app and an
+ACP client bring back a session's mode only when it asks no less than the one they run in, so a
+chat that was planning comes back planning. A mode you name for the run wins
+(`dgc --mode plan --continue` runs in **plan**). Reopening never changes your default, and a new
+chat after a reopened one starts in the mode the reopened chat replaced.
 
 In a folder you have not trusted, **acceptEdits** and **auto** start as **default**, for that
 session only — your stored default is left as it was. Approving a plan into **auto** there runs
@@ -600,6 +606,67 @@ apply to any action it requests. The card never silently verifies a claim or exe
 In an SDK host, use `extract_generative_ui` (Python) or `extractGenerativeUi` (TypeScript) to
 read validated cards from a Work, ChatDGC or Pip reply. Render the returned data in your app;
 route a choice through your usual SDK send method. See the SDK guide for an example.
+""".strip()),
+    ("Plugin cards", "a plugin's own card in the chat (MCP Apps), in Work, ChatDGC, Pips and the terminal", """
+# Plugin cards
+
+Some plugins come with a **card**: their own small app, such as Cardboard's project list or a map,
+that shows up in the chat right under the step that asked for it. DGC shows it automatically
+whenever the plugin offers one. Cards use the open MCP Apps standard, so a plugin built for
+Claude, ChatGPT or VS Code's chat shows the same card here.
+
+## Where you see them
+
+- **Work.** Under the tool's row in the chat, with the plugin's name and the step above it.
+- **ChatDGC.** Above the words of the reply that used the plugin.
+- **A Pip's chat.** Under the Pip's reply. A Pip that opens a card while you're away keeps it in
+  its chat for when you look.
+- **The terminal.** A card can't be drawn there, so one line says *Cardboard opened a card ·
+  Open it*. Click **Open it**, or type `/cards`, and the card opens in your browser on a page DGC
+  serves on this computer for that chat alone. The tool's own text still shows as before.
+
+A card comes back when you reopen the chat or reload the window. The model is told in one line
+that a card was shown; it never reads the card's page.
+Use **Collapse** beside its name to make room for the conversation; **Expand** brings the same live
+card back. A failed plugin call leaves its error in the tool result and opens no empty card.
+
+## What a card can do
+
+A card is the plugin's own page, and it looks the way the plugin designed it. DGC gives it your
+editor's light or dark theme and its colours, and the room to grow up to a comfortable height.
+
+- **Ask its plugin for something.** A read runs: a tool its plugin marks read-only, or one on DGC's
+  reviewed list of reads that its plugin doesn't mark otherwise (a tool marked destructive is never
+  a read). A change shows DGC's own **Allow** card above the card first: **Allow**, **Always allow**
+  or **Don't**. A plugin that can move money asks every time and never offers Always allow, and
+  neither does a call one of your own ask rules asks about. In Work your permission mode and rules
+  decide as they do for the model's own calls (a deny rule refuses it, an ask rule asks, auto mode
+  lets other changes through, plan mode refuses them); in ChatDGC and Pips the plugin's own setting
+  in Settings ▸ Plugins does. Always allow is the same rule Settings ▸ Permissions lists, so you can
+  remove it there. Your answer is checked again before the call runs: a question that expired, a
+  plugin turned off or a deny rule added since runs nothing.
+- **Send a message for you.** It arrives as your message, starting *From Cardboard's card:*.
+- **Tell the model what you did in it.** The next reply in that chat sees it once, marked as the
+  plugin's content, never as instructions.
+- **Open a link.** It opens in your browser. A site the card didn't say it would use asks you
+  first.
+- **Save a file.** You choose where, in a save dialog.
+- **Use the whole window.** The card opens in an editor tab of its own. The button at the right of
+  the card's name does the same.
+
+## How it is kept safe
+
+The card runs in a sandboxed frame at an address of its own on this computer: one address per
+plugin, so two plugins' cards can't reach each other, and nothing in DGC's chat, your editor or
+your other chats is visible to it. It can reach only the sites its plugin declared for it; a card
+that declared none can reach nothing. Everything it asks goes through DGC, only to its own
+plugin, and a tool its plugin keeps for the model alone is refused. DGC listens to a card only at
+its own address, so another page loaded into its frame can't speak for it.
+
+## In the SDK
+
+An SDK app opts in with `session.cards.watch()` and gets each card as an `mcp_app_card` event:
+draw it yourself, and pass what it asks to `session.cards.call(...)`. See the SDK guide.
 """.strip()),
     ("Artifacts", "documents, decks, sheets, dashboards and pages DGC makes and keeps", """
 # Artifacts
@@ -1011,7 +1078,7 @@ plugin's own page in Settings → Plugins and choose **Save**, then **Connect**;
 the key is made and says what permissions it needs. DGC keeps the key with your sign-ins (the system
 keychain, or the owner-only file) and the page only ever shows **Saved**, never the key; **Remove**
 deletes it, and so does uninstalling the plugin. `dgc plugin key NAME` does the same in a terminal.
-A key in the environment DGC starts with (`GITHUB_PAT_TOKEN`, as Codex uses) still works; a saved
+A key in the environment DGC starts with (`GITHUB_PAT_TOKEN`) still works; a saved
 key is used instead of it. A key saved for a server is only ever sent to that server's address.
 
 **Sign in with GitHub.** GitHub's sign-in server admits only apps registered with it and still
@@ -1681,6 +1748,547 @@ turn started them lists every agent, as before.
   line of a failure message.
 """.strip()),
 
+    ("Image generation", "your image generators: ComfyUI, Automatic1111, OpenAI, Gemini, BFL, fal.ai, Replicate", """
+# Image generation
+
+DGC makes images with **your own image generators**: ComfyUI or an Automatic1111-style server on a computer of
+yours, and the online services you have a key for. Ask for a picture in plain words, in Work, in ChatDGC or of a Pip,
+and the model makes it with `generate_image`. Nothing is set up by default.
+
+## Generators
+
+Add as many as you like, side by side. Each one has a provider, an address or a key, a model (or a ComfyUI
+workflow), a default size, and a short "good for" that DGC fills in and you can change.
+
+| Provider | What it covers | Costs |
+|---|---|---|
+| ComfyUI | any model you run in ComfyUI (FLUX.2, Qwen-Image, SDXL, Z-Image…), with your own workflow | free, on your computer |
+| Automatic1111-compatible | Automatic1111, Forge, reForge, SD.Next, and Draw Things' HTTP API | free, on your computer |
+| OpenAI-compatible | OpenAI's GPT Image models, xAI, Together, LocalAI, and any server with `/v1/images/generations` | per image, or free locally |
+| Google Gemini | Gemini image models for generation and editing | per image |
+| Black Forest Labs | FLUX.2, FLUX 1.1 Pro and Kontext editing | per image |
+| fal.ai, Replicate | one key, hundreds of models (FLUX, Seedream, Qwen-Image, Ideogram, Recraft, Imagen…) | per image |
+
+Runway and Higgsfield make images and videos through their plugins (Settings → Plugins), not here. Ollama's own
+image generation is still experimental and has no settled HTTP endpoint; DGC tries `/v1/images/generations` there and
+says plainly when the server has none.
+
+### Adding one
+
+In plain words: *"add my ComfyUI at gpu-box.local:8188"*. Or from a terminal:
+
+```
+dgc images add comfyui gpu-box.local:8188 --name "ComfyUI on gpu-box"
+dgc images add fal --key            # the key is read from the terminal or a pipe, never the command line
+dgc images add gemini --model gemini-3.1-flash-image --key
+dgc images add a1111 mac.local:7860
+dgc images test
+```
+
+In the terminal app: `/images`, `/images add comfyui gpu-box.local:8188`, `/images key fal`, `/images test`.
+
+A ComfyUI generator with no workflow uses DGC's own text-to-image workflow with the checkpoint you name (or the
+server's first one), with the few steps a Turbo or Lightning model needs. To use your own, export it from ComfyUI with
+**Workflow → Export (API)** and add it with `--workflow file.json`. DGC finds where it takes the prompt, the negative
+prompt, the seed, the steps, the size and the input image, and shows you that mapping first:
+
+```
+DGC found these inputs in the workflow:
+  Prompt → node 6 (CLIPTextEncode, "Positive").text
+  Negative prompt → node 7 (CLIPTextEncode, "Negative").text
+  Seed → node 3 (KSampler).seed
+  Width → node 5 (EmptyLatentImage).width
+Use these? [Y/n]
+```
+
+## Which one is used
+
+- The one you name ("use ComfyUI for this") is used for that image.
+- Otherwise this project's choice. The first time a project needs an image and more than one generator fits, DGC
+  asks you which, and remembers the answer in the project's `.dgc/images.json`. `dgc images default ID --project`
+  changes it.
+- Where nobody can be asked (`dgc -p`, the SDK), the default generator (`dgc images default ID`), else a free one
+  first.
+- An edit (an image to change) goes only to a generator that can edit; the model sees what each can do: edit, mask,
+  text in the image, the largest size, and whether it works right now (key valid, credit left, server up).
+
+## Money
+
+- A paid generator **asks before each image**: its Allow card shows the provider, model, size, how many and the price
+  (DGC's estimate from the provider's published price). This holds in every mode, auto included.
+- An **OpenAI-compatible server outside your own network** (a hosted service) counts as paid, so it asks too. One on
+  this computer or your local network doesn't; moving it to an outside address makes it ask again.
+- **Always allow** on that card makes it stop asking. You can set a **monthly limit** for a generator
+  (`dgc images edit fal --limit 5`): once this month's spend would pass it, DGC asks again.
+  - The limit counts everything on the generator's key this month: pictures and videos made, pictures being made
+    right now and videos still running, in every DGC window. It is checked again just before each picture is sent,
+    so two windows (or two requests worked out before either ran) can't both use the same room under it.
+  - A price DGC doesn't know (a model it has no price for) can't be held to a limit, so under one it always shows
+    its card, saying so, even for a generator that doesn't ask.
+  - A picture the provider made counts, even if DGC couldn't save it; one the provider refused costs nothing.
+- A free or local generator never asks.
+
+When a provider says you're **out of credit** (Gemini's "free tier is not available for this project", fal's "User is
+locked. Reason: TOP_UP", OpenAI's `insufficient_quota`), DGC uses a free generator instead by itself, and says so. It
+never moves to a paid one on its own: it offers you the others that fit, unless you turned on automatic fallback
+(and even then a paid one still shows its card). A rate limit, a bad key or a server that is down is handled the
+same way. A refusal by the provider's policy is said as it is.
+
+## Where the images go
+
+- **Work:** into DGC's own folder, one per session (`~/.dgc/images/sessions/<session>/`): nothing lands in your project
+  unless you want it there. The picture shows under the reply and in the
+  Library either way. Each image has a sidecar `NAME.json` beside it: the prompt, provider, model, seed, size and
+  cost.
+  - **Into the project when it's wanted:** the model gives `save_to`, a path in the project, when you name a place or
+    the task needs the file there ("add a hero image to the landing page"). The same checks as writing a file apply:
+    inside the project, never into `.git` or `.dgc`, no replacing a file without asking (`replace: true` only after you
+    say so), and in Work the same permission a write of that path gets (default mode asks, on the one card that also
+    shows any price).
+  - **Save to project…** under each picture (Work, ChatDGC and the Library) copies it into the folder open in VS Code,
+    `assets/` unless you pick another place.
+  - **Save images in** (Settings → Models → Images & video, or `images.save_dir`) still sends every picture to a folder of the
+    project for anyone who sets one. Pictures already saved in a project stay where they are.
+  - `dgc images generate` and the SDK's `images_generate` save in DGC's folder too (`--out` / `save_to` for the
+    project).
+- **ChatDGC:** into the chat's folder (`~/.dgc/images/chats/<chat>/`), under the reply, and in the Library (Images,
+  Made by ChatDGC). A paid generator there puts a card under the reply with its price; nothing is made until you send
+  it.
+- **Pips:** a Personal Pip makes images in its chat and its tasks; they're kept with its reply and in
+  `~/.dgc/images/pips/<pip>/`. A Pip never spends on its own say-so: it asks you in its reply, with the price, and
+  makes the image only after your yes. A routine's run never makes a paid image.
+
+The image is saved exactly as the provider sent it: watermarks and C2PA or SynthID metadata are kept, never stripped.
+Every image DGC made is listed in `~/.dgc/images/library.jsonl` (the editor's `images_library`).
+
+## In the editor
+
+**Settings → Models → Images & video** lists your generators, each with its provider and model, its price, whether it works
+right now (works, needs credit, rate limited, bad key, server down, with what the provider said), the **Default**
+badge, its key (saved, or from `FAL_KEY` and the like; never the key itself) and this month's spend against its
+limit. **Asks before each image** switches on each row, and an **Always allow** on a card turns it off there too.
+
+- **+ Add generator**: choose the provider, then its address (for a server on your computer) or its key. The key goes
+  to DGC once, in a step of its own, and is never shown again; DGC then tests the new generator and says how it went.
+- **A ComfyUI workflow**: choose the file you exported with **Workflow → Export (API)**. DGC shows, on one screen,
+  where it found the prompt, the negative prompt, the seed, the size and the input image (`node 6 (CLIPTextEncode,
+  "Positive").text`), and anything missing. Change a target if it's wrong, then **Add with these**. Nothing is saved
+  before that.
+- **Edit**, **Remove** (asked first), **Make default**, **Test** and **Test all** on each row; changing a generator's
+  address drops its saved key, and the form says so.
+- **This project uses** (or "Ask me when several fit"), **When one needs credit** (automatic fallback; a paid one
+  still asks) and **Save images in** (blank: DGC's own folder; or a folder in the project) sit under the list.
+- A generator on a DGC Router system names it, with a link to the Systems list. Runway and Higgsfield work through
+  their plugins.
+
+Every change is saved as you make it. An older DGC CLI shows no Images section.
+
+In Work, the pictures a turn made show under its reply (its steps keep their tiles), and a paid generator's
+Allow card says what it will make, with which generator, how many, the size, the price and the prompt: **Make it**,
+**Edit** (ask again with a changed prompt), **Always allow** or **Don't**.
+
+The **Library**'s Images show the images DGC made in Work beside ChatDGC's, newest first, and **Made in Work** shows
+only those: open one, show it in its folder, or save a copy into the project.
+
+In a step's row, a generated image reads *Made 1 image with ComfyUI · 768×320 · free* and where it was saved; the
+sentences DGC writes for the model (the sidecar, which other generators it may offer) stay in what the model reads.
+
+## DGC Router
+
+A Router system can carry the **images** job: a ComfyUI or Automatic1111 box, or a computer that also runs your chat
+models. Give a generator that system (`dgc images edit comfy --system gpu-box`) and, while the Router is on, each
+picture holds one of that system's workers while it is made. On a one-model-at-a-time computer a picture and a big
+chat model never run there together.
+
+```
+dgc router add gpu-box.local:8188 --name "GPU box images"     # found as ComfyUI: the images job
+```
+
+## Commands and the model's tools
+
+- `/images` (list) · `/images add PROVIDER [ADDRESS] [NAME]` · `/images test [ID]` · `/images default ID` ·
+  `/images use ID` (this project) · `/images key ID`.
+- `dgc images list|add|edit|remove|test|default|generate`, each with `--json` for scripts. `dgc images generate
+  "a red fox" --count 2` makes images from the terminal; a paid one asks, or `--yes`.
+- The model's tools: `generate_image` (prompt, size or aspect, count 1-4, images to edit, mask, generator, model, seed,
+  save_to) and `list_image_generators`. They are offered every turn; the model decides.
+- The SDK: `session.images.generate(...)`, `.generators()`, `.add()`, `.set_key()`, `.test()`, `.library()`, and
+  `images_made` events in a run.
+
+The settings live in `~/.dgc/config.json` under `images`; each generator's key in `~/.dgc/secrets.json`, bound to its
+address (change the address and the key is dropped). A provider's own environment variable (`FAL_KEY`,
+`GEMINI_API_KEY`, `OPENAI_API_KEY`, `BFL_API_KEY`, `REPLICATE_API_TOKEN`, `XAI_API_KEY`, `TOGETHER_API_KEY`) is used
+for its official address when no key is saved. The model's tools never read or set a key.
+"""),
+    ("Videos", "video generation: fal.ai, Gemini, Replicate or a ComfyUI workflow, a card before every clip", """
+# Videos
+
+DGC makes short video clips with **your own video generators**: a video model on fal.ai, Gemini or Replicate (with the
+key you already use for pictures), or a ComfyUI video workflow on a computer of yours. Ask in plain words, in Work, in
+ChatDGC or in a Pip's chat, and the model makes it with `generate_video`. Nothing is set up by default.
+
+A clip costs real money (about $0.10 to $2, against a fraction of a cent for a picture) and takes from half a minute
+to several minutes. So every video shows its card with the price before anything is sent, and DGC makes one at a time
+unless you ask for more.
+
+## Generators
+
+A video model is a generator of its own, beside your picture generators in Settings → Models → **Images & video**. A
+generator is one model on one provider, so a fal video model is its own generator and uses the same saved fal key as
+your fal picture generator. Each one says what it makes (pictures, videos or both) and, for video, its price per
+second.
+
+| Provider | How DGC talks to it | Default model |
+|---|---|---|
+| fal.ai | its queue: submit, then status, then the result; Stop cancels it there | Wan 2.2 5B (the cheapest good one) |
+| Google Gemini | Gemini Omni Flash through the Interactions API, in the background; a Veo model as a long-running operation | Gemini Omni Flash |
+| Replicate | a prediction: create, then read it; Stop cancels it there | Wan 2.2 fast |
+| ComfyUI | your video workflow (Wan, LTX-Video) in API format, mapped like a picture workflow; on DGC Router too | your workflow |
+
+Runway and Higgsfield make videos through their plugins (Settings → Plugins), not here.
+
+Gemini video has no free tier: a key whose project has no billing gets "needs credit", said plainly ("Gemini video
+needs a paid Gemini API project"). Google shut Veo down in the Gemini API on 2026-10-22 (its deprecations page); DGC
+still speaks Veo's operation API for a model that answers it, and uses Gemini Omni Flash by default.
+
+### Adding one
+
+```
+dgc videos add fal                          # fal Wan 2.2 5B, on the key your fal pictures use
+dgc videos add fal --model fal-ai/kling-video/v2.5-turbo/pro/text-to-video
+dgc videos add gemini                       # Gemini Omni Flash
+dgc videos add comfyui gpu-box.local:8188 --workflow wan22-api.json
+```
+
+Or in Settings → Models → Images & video → + Add generator → It makes: Videos. For ComfyUI, export your workflow with
+Workflow → Export (API); DGC finds its prompt, negative prompt, seed, size, length (frames), frames per second and
+start image, and shows you that first.
+
+## Prices
+
+DGC's estimate, from each provider's own page, read on **2026-11-02**. Prices change often; the provider's bill is what
+counts. DGC shows "about".
+
+| Model | Price | Page |
+|---|---|---|
+| fal Wan 2.2 5B (default) | $0.15 a clip, up to about 5 s at 720p | [fal.ai](https://fal.ai/models/fal-ai/wan/v2.2-5b/text-to-video) |
+| fal LTX-Video 13B distilled | $0.02 a second | [fal.ai](https://fal.ai/models/fal-ai/ltxv-13b-098-distilled) |
+| fal Hailuo 02 Standard | $0.045 a second (768p) | [fal.ai](https://fal.ai/models/fal-ai/minimax/hailuo-02/standard/text-to-video) |
+| fal Kling 2.5 Turbo Pro | $0.07 a second | [fal.ai](https://fal.ai/models/fal-ai/kling-video/v2.5-turbo/pro/text-to-video) |
+| fal Wan 2.5 | $0.05 / $0.10 / $0.15 a second at 480p / 720p / 1080p | [fal.ai](https://fal.ai/models/fal-ai/wan-25-preview/text-to-video) |
+| fal Veo 3.1 Fast | $0.15 a second, with sound | [fal.ai](https://fal.ai/models/fal-ai/veo3/fast) |
+| Gemini Omni Flash | about $0.10 a second at 720p (token-priced) | [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) |
+| Gemini Veo 3.1 Fast / Veo 3.1 | $0.15 / $0.40 a second (shut down in the Gemini API) | [Gemini API deprecations](https://ai.google.dev/gemini-api/docs/deprecations) |
+| Replicate Wan 2.2 fast | about $0.05 a clip at 480p, $0.10 at 720p | [Replicate](https://replicate.com/wan-video/wan-2.2-t2v-fast) |
+| ComfyUI | free, on your computer | |
+
+## The card
+
+Every video shows its card first: the generator, the length and resolution, the price ("5 s · 720p · about $0.15"),
+this month's spend against the generator's limit, and the prompt. Its buttons are **Make it · about $0.15**, **Edit**
+(change the prompt and it asks again) and **Don't**. There is no Always allow on the card: in Settings each video
+generator has **Asks before each video**, on by default; turning it off there is the only way to make videos without
+asking. A model in auto mode, a permission rule or a monitor's wake never answers a video's card.
+
+DGC never falls back by itself to another paid generator. A provider's own failure ("needs credit", "bad key", a
+content refusal) is said in plain words, to you and to the model, which is told to stop and tell you what to fix.
+
+### The monthly limit
+
+A generator's monthly limit (`dgc images edit ID --limit 5`) is read against everything made **on its key** this
+month: pictures and videos alike, the videos still running and the pictures being made, in every DGC window. A clip
+that would pass it says so on its card and is never sent. The limit is checked again just before a clip is sent, and
+the job is written down at that moment, so two windows (or two cards made before either was sent) can't both use the
+same room under it.
+
+- What the provider may have charged stays counted: a clip stopped once it had started, one the provider finished,
+  one DGC couldn't download or save. It comes off only when the provider says nothing was charged (it stopped the
+  clip before it started, or said the job itself failed).
+- A price DGC doesn't know (a model it has no price for) can't be held to a limit: under one, the clip always shows
+  its card, saying so, even with **Asks before each video** off, and a Pip's routine never makes it.
+
+## A long job
+
+- **Work:** the call starts the job and comes back at once ("Started a 5 s video with fal Wan 2.2 5B (720p, about
+  $0.15), about 1–2 min"). The chat carries on. The step shows the provider's state, the time so far and Stop; when
+  the video is ready the model is told (the chat wakes, as for a background sub-task's result) and the player appears
+  under the reply that asked for it.
+- **ChatDGC:** the card under the reply turns into the job's progress and then its player. It is kept with the chat.
+- **Pips:** in a Pip's chat, the Pip asks in its reply with the price; only your yes in your next message makes it.
+  A routine never makes a video unless you allowed that Pip for that generator (`video_pips` in the generator's
+  settings, listed in Settings). The reply shows the video when it's ready.
+- **Stop** cancels the job, at the provider too where it can (fal, Replicate, ComfyUI), and says what was charged:
+  nothing when it hadn't started, "may still charge" once it had, and plainly when the provider can't stop it.
+- **A reload** never loses a job: it is kept on disk (`~/.dgc/videos/jobs/`) from the moment it starts, the next DGC
+  polls it again, and a reopened chat is told of a video that finished while it was closed.
+
+## Where videos go
+
+- By default into DGC's own folder: `~/.dgc/videos/sessions/<session>/` for Work, `chats/<chat>/` for ChatDGC,
+  `pips/<pip>/` for a Pip. Beside each one, a sidecar `<name>.json` (prompt, provider, model, seed, length, size,
+  cost) and, when ffmpeg is on the computer, a poster frame `<name>.jpg`.
+- Into the project only with `save_to` (a path in the project, which the model gives when you name a place) or the
+  player's **Save to project…**, with the same checks as writing a file.
+- **Size:** at most 300 MB a file. A 5–10 s clip from these providers is 2–30 MB; 300 MB leaves room for a long 4K
+  clip and still stops a runaway download from filling a disk.
+
+## The player
+
+In Work, ChatDGC and a Pip's chat the video is drawn where a picture is: a `<video>` with its poster frame, its length
+and size, and **Open** (your system player), **Show in folder** and **Save to project…**. The Library has a
+**Videos** tab: every video DGC made, newest first, by where it was made.
+
+## Terminal and SDK
+
+```
+dgc videos                         # the video generators and the jobs running
+dgc videos make "a felt ball rolls across a desk" --duration 5      # asks first; --yes for a script
+dgc videos jobs · dgc videos show JOB · dgc videos stop JOB · dgc videos open JOB · dgc videos library
+```
+
+In the terminal app, `/videos`, `/videos jobs`, `/videos stop JOB`, `/videos open JOB`; a finished video says
+"Made a 5 s video with fal Wan 2.2 5B · 720p · $0.15", its path, and `/videos open JOB`.
+
+The SDK has `session.videos` (Python and TypeScript): `generators()`, `generate(prompt, approve=True)` (it follows the
+job until it ends unless `wait=False`), `jobs()`, `stop(job)`, `wait(job)` and `library()`. On the wire:
+`videos_jobs`, `videos_stop`, `videos_generate` and `videos_library`, answered by `video_jobs` and `videos_library`,
+with `video_job` events once a client has asked (`ready.capabilities.videos`).
+"""),
+    ("DGC Router", "your other computers that run models, for sub-agents and Pips", """
+# DGC Router
+
+Most people who run their own models have more than one computer that can run them: a GPU box under the
+desk, a mini PC with lots of unified memory, a Mac, a NAS with a small graphics card. **DGC Router** lets
+DGC use all of them. The main model in your chat decides what each helper needs; DGC sends the helper to a
+computer that has a free worker and a fitting model.
+
+It is **off** until you turn it on. Off, DGC works exactly as it always has.
+
+## What a "system" is
+
+A system is one model server on your network: Ollama, llama.cpp `llama-server`, vLLM, SGLang, TGI,
+LM Studio, or anything that speaks the OpenAI API. Nothing is installed on that computer and DGC never logs
+in to it: a helper's tools (reading files, running commands, its own checkout) still run on **this**
+computer. Only its model requests go to the other one. Those requests carry the same project text the main
+model sees, so add only computers you trust. An `http://` address on another network is not encrypted
+unless it uses `https`.
+
+For each system you choose:
+
+- **Jobs**: sub-agents, Pips, or both; and **images** for a computer an image generator uses (a ComfyUI or
+  Automatic1111 server is added with the images job only). A generator that names the system holds one of its workers
+  while it makes a picture (see Image generation).
+- **Workers**: the most requests it works on at once, all models together.
+- **Models**: which of its models to use, how many workers each may have, the **context** each always
+  runs with, and a short note ("search, small edits").
+- **One model at a time**: for a computer with unified memory that holds one big model. While it is working
+  DGC never asks it for a different model.
+
+Each model has one fixed context on each system. For Ollama DGC sends that context with every request, so
+the model is never reloaded for a different window. When a model is already loaded, DGC suggests the
+context it is loaded with.
+
+When you add a system, DGC chooses the model(s) it has loaded right now, never one it would have to load
+(that computer may be busy with other work), a cloud model or an embedding model. If nothing is loaded, it
+chooses none and you pick: in Settings from its list, with `--models` on the command line, or by telling
+the model which.
+
+## A homelab example
+
+Three computers on one home network:
+
+| System | Server | Models | Jobs |
+|---|---|---|---|
+| `gpu-box.local` | Ollama | `qwen3.8:32b` (2 workers, 64K), `qwen3:8b` (4 workers, 32K) | sub-agents, Pips |
+| `nas.local` | Ollama | `qwen3.5:9b` (1 worker, 16K) | Pips |
+| `mac.local:1234` | LM Studio | `qwen3.6:35b-a3b` (2 workers, 32K, one model at a time) | sub-agents |
+
+Ask DGC in plain words, and it sets it up with its tools (each change shows you an Allow card with the
+exact change first):
+
+> add my GPU box at gpu-box.local for sub-agents and Pips, and the NAS for Pips only
+
+Or from a terminal:
+
+```
+dgc router add gpu-box.local --name "GPU box"
+dgc router add nas.local --name NAS --jobs pips
+dgc router add mac.local:1234 --name Mac --jobs subagents --one-model
+dgc router test gpu-box
+dgc router on
+```
+
+Now when you ask for a review of six files, the main model can send the quick searches to `qwen3:8b` on the
+GPU box and the tricky part to `qwen3.8:32b`, and your Pips' routines run on the NAS.
+
+## How a helper is placed
+
+The main model sees one line listing the systems, their models and free workers, and the `task` tool takes
+`system`, `model` and `size` (small, medium or large). If it names none, DGC picks: a free worker on an
+online system with the sub-agents job, the closest size to what was asked, then the fastest measured model.
+An agent definition that sets its own model still uses it.
+
+- **Every worker busy**: the helper waits for one (the default), or with *When busy: use the sub-agent
+  model* it runs on your usual sub-agent model. Its result says which.
+- **A system stops answering mid-task**: after DGC's usual retries, the helper moves to another system with
+  the same model, else another that does sub-agent work, and carries on from where it was. Its result says
+  what moved and why. If nowhere can take it, it fails as before, with the reason.
+- **Health**: while the Router is on, DGC checks each system once a minute with one small request. A system
+  is offline after two missed checks and back after one answer.
+- **Several DGC windows** share the same workers: a worker held by another window or terminal counts. A
+  window that closes without saying gives its workers back within 30 seconds.
+- **Your main model** counts too: if it runs on one of the systems, a turn in progress uses one of its
+  workers while the model answers, and gives it back while the turn's own tools run, so a helper or a picture it
+  starts on that system doesn't wait for the turn. A cloud model behind the same address (Ollama's `:cloud`
+  models) runs elsewhere and uses none.
+
+## How hard a helper thinks
+
+A helper's thinking level is decided in this order, the first that is set winning:
+
+1. **The DGC Router model's own Thinking** (Settings → DGC Router → Edit → a model's Thinking, `dgc router edit ID
+   --model NAME --thinking low`, or the model's `router_update set_model thinking`), unless it is *Same as the
+   helper*. A small model on a NAS usually runs best Off or Low, even when your main chat is on High.
+2. **The agent file's `effort:`** (`.dgc/agents/NAME.md`).
+3. **Settings → Models → Sub-agents → Thinking** (`subagent_thinking`, `/subagent thinking low`).
+4. **What the model asks for that helper**: the `task` call's own `effort` (off, low, medium, high), low for a quick
+   lookup, high for a hard review. Its choice, described in the tool; used only when none of the above is set.
+5. **The main chat's level**, as before.
+
+A model whose server says it can't think gets none: its row says "doesn't think", and nothing is chosen for it. The
+level used shows where you look: the helper's card and the agent map ("on NAS · qwen3.5:9b · thinking low"), the
+terminal's agents list, and `router_status` / `dgc router status` (each model's choice).
+
+## Testing a system
+
+**Test** (or `dgc router test ID`, `/router test ID`) measures what the server can't tell DGC:
+
+- **speed**: time to the first token and tokens a second, on a fixed prompt;
+- **parallel**: 1, then 2, then 4 small requests at once; DGC keeps the widest batch that finishes about as
+  fast as one, so you know how many it really runs together;
+- **tool calls**: one request with one tool. A model that can't call a tool is never given sub-agent work.
+
+It uses a few seconds of that computer's model. The results are kept with the time they were taken.
+Test checks only the models the system uses, and never loads one that isn't loaded there now: it says so
+instead, and testing that model by name (**Test it** in Settings, `dgc router test ID --model NAME`) loads it.
+
+## In the editor
+
+Settings → **Models** holds every model choice, in blocks: Providers, Fallback, Sub-agents, Pips, Images & video
+and **DGC Router**. Save a model host or a signed-in subscription CLI in Providers. The first one becomes the
+default for new Work and ChatDGC chats and Pips set to Default. With several providers, choose the default there;
+Work and ChatDGC can switch providers in each chat without changing the default. A subscription needs no separate
+model host. DGC Router's switch reads **Use my other computers**. Switch it on and:
+
+- **Sub-agents** reads "Chosen by DGC Router · 3 systems · 9 workers free"; the usual sub-agent model, used when
+  the Router is off (or every worker is busy and you chose so), is one click away.
+- **Pips run on** any Pip system, or one system and model (a Pip can still choose its own).
+- **Systems** lists each computer, live: online or not, its server and address, jobs, models (use, workers,
+  context each, thinking, note), the total context they can hold at once with the server's own check where it reports one
+  (llama.cpp's slots, vLLM's and SGLang's room for context), the last test, the hardware line and what it is working
+  on. **Test**, **Suggest** (the arithmetic, then **Apply**), **Edit** and **Remove** sit on each.
+- **+ Add system** takes an address, finds the server and its models (asking for a key only when the server wants
+  one), and lets you choose models, jobs, workers and context, **Test**, then **Save**. Until you save it, the
+  new system takes no work. **Look on my network** asks first, then lists what it found, each with **Add**.
+- Under **Edit**, **Hardware** takes an exporter's or a `dgc node`'s address and its pairing token, with how to
+  set one up.
+
+Every change there is saved at once, apart from the page's Save all. The agent map and each helper's page say where
+it ran ("on GPU box · qwen3:8b"), and the status bar shows `Router 9/11` (workers free / total) while the Router is
+on; click it for these settings.
+
+Settings → **Token usage** shows what each system did: pick one under **System**, or read the **By system** list
+(`dgc usage --system NAS` in the terminal). An Ollama cloud model counts as Ollama Cloud, not as the computer it was
+sent through.
+
+## Hardware (optional)
+
+DGC can also show what each computer's GPU and memory are doing: "RTX 4090 · 18 of 24 GB · 34% · 61°C". It
+is off until you set it up for a system, and routing never depends on it; it makes **Suggest** exact and
+shows up in `/router` and `dgc router status`. DGC reads it itself, at most once a minute with the health
+check, and the model never gets a shell on your other computers. Two ways:
+
+- **An exporter you already run.** Prometheus `node_exporter` (`:9100`), NVIDIA's DCGM exporter (`:9400`),
+  AMD's device-metrics exporter, Glances (`:61208`, works on a Mac too) or Netdata (`:19999`). Give its
+  address and DGC detects which it is:
+
+  ```
+  dgc router hardware nas http://nas.local:9100/metrics
+  dgc router hardware mac mac.local:61208
+  ```
+
+  Whatever an exporter doesn't report is left out (`node_exporter` sees no NVIDIA GPU; DCGM on a GPU that
+  shares the computer's memory reports no memory of its own).
+- **`dgc node`**, a tiny read-only stats service that comes with DGC. On the other computer:
+
+  ```
+  dgc node serve                   # prints a pairing token once
+  dgc node install-service         # start it with the computer (a systemd user unit, or a LaunchAgent)
+  ```
+
+  On a Mac you reach only over SSH, use `dgc node install-service --system` (a LaunchDaemon that runs as you,
+  with nobody logged in). It answers one request, `GET /v1/stats` with the token, on port 8577. It has no
+  shell, reads no file of yours and talks to no model: it runs `nvidia-smi`, `amd-smi` or `rocm-smi` (also
+  found in `/opt/rocm/bin`), `rocminfo` and reads amdgpu's own counters and `/proc` on Linux, and `sysctl`,
+  `vm_stat` and `ioreg` on a Mac (no temperature there: that needs root). Then on this computer:
+
+  ```
+  dgc router hardware gpu-box http://gpu-box.local:8577 --token
+  ```
+
+  and paste the token. It is kept in `~/.dgc/secrets.json`, bound to that address, like a system's key;
+  `/router token ID` and Settings take it too. The model's tools never see it.
+
+On a computer whose GPU shares its memory (an Apple chip, a GB10, an AMD APU) the GPU's memory is the
+computer's, and that is what DGC counts.
+
+## Suggest
+
+**Suggest** works out how many workers each model can have at a context, from what DGC knows, and shows
+the arithmetic in one line:
+
+```
+qwen3:8b: 8.2B Q4 ≈ 4.9 GB + 2 × 32K context ≈ 9 GB → 2 workers fit in 16 GB (1.6 GB kept free)
+```
+
+- the model's size (from the server, else its parameters and quantization);
+- what a context takes, from the model's layers in Ollama's `/api/show`;
+- the memory, from the hardware readout or the system's `memory_gb`, with some kept free for the computer;
+- what the server says itself: llama.cpp's slots, vLLM's and SGLang's room for context;
+- how many it really runs at once, from **Test**.
+
+When DGC doesn't know the memory it says so and suggests from what Test measured; with nothing to back a
+number it suggests none. `dgc router suggest ID [--context 32k]` shows it, `--apply` uses it (showing the
+exact change), `/router suggest ID` and Test show it too, and the model applies it with `router_update`
+when you ask.
+
+## Pips
+
+A Pip's model can be **DGC Router (any Pip system)**, or one system and model. Its runs take a worker from a
+system with the Pips job when they start and give it back when they end; while every such worker is busy,
+the run waits in the Pip queue. `pips_parallel_runs` stays the most Pip runs at once. From the terminal:
+`dgc pips create NAME --goal ... --router` (or `--router nas/qwen3.5:9b`).
+
+## Keys
+
+A system that needs a key keeps it in `~/.dgc/secrets.json`, bound to that system's address: change the
+address and the key is dropped. You paste it in Settings, with `/router key ID`, or with
+`dgc router edit ID --key` (read from the terminal or a pipe, never the command line). The model's tools never
+read or set a key.
+
+## Commands
+
+- `/router` — status · `/router add ADDRESS [NAME]` · `/router test ID` · `/router on` · `/router off` ·
+  `/router key ID` · `/router hardware ID [ADDRESS|off]` · `/router token ID` · `/router suggest ID [CONTEXT]`.
+- `dgc router status|add|edit|remove|test|on|off|find|hardware|suggest`, each with `--json` for scripts.
+  `find` looks for model servers on this computer's own network (its /24, the known ports only) and only
+  when you run it.
+- `dgc node serve|token|stats|install-service|uninstall-service`, on the other computer.
+- The model's tools: `router_status`, `router_probe`, `router_update` (always asks you, with the exact
+  change; Allow once or Deny, never Always) and `router_find` (asks first).
+
+The settings live in `~/.dgc/config.json` under `router`; what DGC measured is in `~/.dgc/router/`.
+"""),
     ("Troupes", "many sub-agents on one fixed work order, in the background, under Ultra", """
 # Troupes
 
@@ -2118,7 +2726,7 @@ when it is full, saying so on the same line. Deleting a session deletes it too.
 
 DGC opens on your project's **Sessions** in the side bar: every saved session of this project,
 newest first, with when it was last used and how many messages it has. **Open in Editor**, a
-double-click or Enter opens one in an editor tab of its own, the way Claude Code does; **New
+double-click or Enter opens one in an editor tab of its own; **New
 session**, *DGC: New Session* and the **+** in a session's tab start a new one in a new tab. A
 session already open says **Open in a tab**, and opening it again brings that tab forward. Each tab
 is a full chat, named by its session's name or else its first prompt, with a `dgc serve` of its own
@@ -2214,7 +2822,7 @@ a pulsing dot means that chat is mid-turn, a square amber dot means it is waitin
 only you can make, and a number is how much it has said since you last looked. Click a tab to
 switch, the **×** to close one. *DGC: Switch Chat* does the same from the command palette.
 
-All of them run in one `dgc serve`, the way Codex runs its threads: one process, each chat in its
+All of them run in one `dgc serve`: one process, each chat in its
 own folder. Each still starts the MCP servers its own folder configures. What one chat does stays
 in that chat — a Stop ends only its own turn and its own approval cards, and a slow command in one
 (a compaction, a rewind, reconnecting MCP servers) never holds another chat's Stop or approvals.
@@ -2835,10 +3443,8 @@ The DGC SDK runs the same agent inside your own program: an application, a servi
 It is **free and local**. You do not pay DGC to use it; optional `Pricing` only attributes the
 model-token spend your provider bills you.
 
-The published **dgc-sdk 0.8.0** pairs with CLI **0.50.0 and 0.50.1** over editor protocol v14.
-Its release dry run passed on Linux, macOS 26.5.1 (Apple silicon), and Windows 11 through WSL 2
-(Ubuntu 24.04). Native Windows remains experimental; focused SDK checks passed there, but the full
-suite was not run natively. The guide and API reference are in
+**dgc-sdk 0.9.0** pairs with CLI **0.51.0** over editor protocol v14. The release targets Linux,
+Apple-silicon macOS and Windows through WSL 2. Native Windows is experimental. The guide and API reference are in
 [docs/SDK.md](https://github.com/OpenPeach-ai/dgc/blob/main/docs/SDK.md). Check
 [PyPI](https://pypi.org/project/dgc-sdk/) or [npm](https://www.npmjs.com/package/@vibedgc/sdk)
 for the published version before installing.
@@ -2934,6 +3540,13 @@ that call. [sdk/PIPS.md](https://github.com/OpenPeach-ai/dgc/blob/main/sdk/PIPS.
 and field with the Pips API it needs, such as a live-data Pip's `changes.live_plan` (API 60).
 `DGC.chat()` is ChatDGC from your program: `ask`, `stream`, `research` and `answer`, with numbered
 sources. TypeScript has the same API.
+
+## DGC Router, pictures, videos and plugin cards
+
+With CLI 0.51 or newer, `session.router` reads and changes DGC Router (your other computers that run
+models), `session.images` and `session.videos` make pictures and videos with your own generators
+(one that asks first runs only when your code passes `approve=True`), and `session.cards` shows a
+plugin's own cards. Each checks that the CLI offers it first; docs/SDK.md has the details.
 
 Product page: [vibedgc.com/sdk](https://vibedgc.com/sdk/). Source: [github.com/OpenPeach-ai/dgc](https://github.com/OpenPeach-ai/dgc) (`sdk/`).
 """.strip()),
@@ -3050,6 +3663,8 @@ DGC ends an answer with what it changed and what you can do about it.
 When DGC needs permission, the card shows what will actually happen — the command, or the diff
 the edit would apply — not the raw arguments. **Allow once**, **Always allow** (which writes a
 permission rule) or **Deny**, and a denial can carry a note that reaches the model as the reason.
+The card offers only the answers that apply: no Always allow when one of your own ask rules asks, or
+for a DGC Router change or a look on the network.
 
 ## When DGC asks you to decide
 
@@ -3194,6 +3809,19 @@ researches a question, Rook reviews, Lock looks for security issues, Quill draft
 Patch prepares a fix in a private copy, Pulse runs the exact commands you reviewed. A **Personal
 Pip** belongs to your DGC profile and helps with errands, plans and replies.
 
+Your Primary Pip, Core, can propose up to three new Personal Pips in one conversation. Each is a
+separate review in Personal Pips: only your Create Pip decision makes it real. Core can plan a
+researcher, writer and image designer together, but creating them does not automatically connect
+apps or pass results between them. An image Pip uses your configured generators under their cost
+approvals; never put a generator key in its goal.
+
+After you accept all of Core's proposed Pips, **Personal → Workflows** offers their order as a
+starting point. Write the exact receiving tasks and review the route. A workflow can ask you at
+each handoff or pass each exact result unattended, up to three starts in any 24 hours. Project workflows can
+pass the first source-checked finding to another read-only Project Pip on the same committed
+source. Neither route changes a Pip's Ask setting or grants a send, purchase, paid image, file edit
+or computer action. New Personal Pips start at Ask; existing Pips keep the level you chose.
+
 Work shows the latest unread messages from your Pips, including all-clear routine results. The
 Personal and Project tabs show unread counts, and each Pip's row previews its latest unread note.
 Opening its chat at the newest messages marks the replies and run results you saw as read; a later
@@ -3274,7 +3902,7 @@ bubblewrap profile is missing; DGC does not fall back to an unsandboxed browser.
 - **How much it asks.** Each Personal Pip has a level you set on its page: **Ask** (every submit and
   send waits for you), **Approve for me** (routine steps such as a search, adding to a cart or saving a
   draft go by themselves; orders, posting, deleting and sending to someone new still ask) or **Full
-  access**. New Pips start at Approve for me. Payments ask at every level.
+  access**. New Pips start at Ask; existing Pips keep their chosen level. Payments ask at every level.
 - **Always allow** lets one exact kind of action through from then on, for the same account, tool or
   site; its page lists them, with **Stop allowing**. A payment never offers it.
 - **Saved logins.** Save a site's login once, with its authenticator key if it has one, and DGC types
@@ -4168,7 +4796,7 @@ multi-turn coherence but costs context tokens, and only affects the
 chat-completions path (the Anthropic/Ollama paths are untouched).
 """.strip()),
 
-    ("Token usage", "tokens and requests counted on this machine, by model and day", """
+    ("Token usage", "tokens and requests counted on this machine, by system, model and day", """
 # Token usage
 
 DGC keeps a small local record of what every model request cost in tokens, so you can see which
@@ -4185,6 +4813,34 @@ and so on.
   `dgc usage --range 30d`. Add `--json` for a machine-readable report.
 
 Days follow this computer's local time, and the report says which time zone it used.
+
+## By system
+
+See what each of your computers did, and what went to cloud services. Every request is counted
+under the *system* it ran on:
+
+- **A DGC Router system** ("NAS", "GPU box"): a request DGC Router sent there, or any request to
+  that system's address. DGC keeps the system with each request, so a system you rename shows its
+  new name for all of its history, and one whose address changes keeps its history too.
+- **This computer:** a request to a model server on this computer. When one DGC Router system is
+  this computer, its name is used instead.
+- **A cloud service:** Anthropic, OpenAI, DeepSeek, Ollama Cloud and so on, by the service's
+  address; an address DGC doesn't know is shown as itself.
+- **Ollama Cloud models** (`:cloud`, `-cloud`) run on Ollama's servers even when they are sent
+  through a local Ollama, so they count as **Ollama Cloud**, never as the computer they passed
+  through. That computer did no work for them.
+
+When a range has usage on more than one system:
+
+- **In the editor,** a **System** picker sits under the range: All systems, then each computer,
+  then each cloud service. Choosing one shows that system alone: its totals, its days and its
+  models, in both the Everything and Pips views. All systems adds a **By system** list with each
+  system's requests, tokens and share (choose a name to see it alone), and each model row says
+  where it ran ("NAS · ollama"), with the address behind the ⓘ.
+- **In the terminal,** `dgc usage` and `/usage` add a **By system** block. One system alone:
+  `dgc usage --system NAS` (a name or an id; `--json` adds `by_system`), or `/usage 7d NAS`.
+
+With one system, the page and the report read as they always did.
 
 ## What is counted
 
@@ -4490,13 +5146,19 @@ Useful keys:
   Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
   redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
 - `pips_model` — the model every Pip on Default uses, on DGC's own connection; empty (the default)
-  follows DGC: its model, or its subscription CLI. Settings → Agents → Pips sets it in the editor, and
-  the Pips runner picks a change up without a restart while its connection is unchanged.
+  follows DGC: its model, or its subscription CLI. With DGC Router on, `router` runs them on any Pip system and
+  `router:<system>/<model>` on that one (off, Default follows DGC again). Settings → Models → Pips sets it in the
+  editor, and the Pips runner picks a change up without a restart while its connection is unchanged.
 - `subagent_context_size` — each sub-agent's context window in tokens, as `context_size` is the main
   model's (0, the default, uses the main window). A named agent's own `context_size:` frontmatter
-  wins. `/subagent context 64k` sets it; so does Settings → Agents in the editor. The sub-agent
+  wins. `/subagent context 64k` sets it; so does Settings → Models → Sub-agents in the editor. The sub-agent
   route (`subagent_model`, host, transport, key, window) may change mid-turn: it applies from the
   next sub-agent, as a new main model applies from the next request.
+- `subagent_thinking` — how hard each helper thinks: empty (the default) is the main chat's level, else `off`,
+  `low`, `medium`, `high` or `xhigh`. An agent file's `effort:` wins over it, a DGC Router model's own Thinking
+  wins over both, and it wins over the `task` call's own `effort` (the order is under DGC Router → How hard a helper
+  thinks). `/subagent thinking low` sets it; so
+  does Settings → Models → Sub-agents → Thinking.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
 - `subagent_link_paths` — empty by default, and normally left that way. A delegated checkout holds

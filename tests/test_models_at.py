@@ -49,6 +49,7 @@ from dgc import config as config_module  # noqa: E402
 from dgc import editor_protocol as ep  # noqa: E402
 from dgc import headless, sessions  # noqa: E402
 from dgc.config import Config, bound_provider_key  # noqa: E402
+from dgc.redaction import secret_values  # noqa: E402
 
 MAIN_KEY = "sk-main-saved-0123456789"
 SUB_KEY = "sk-subagent-saved-0123456789"
@@ -87,10 +88,13 @@ class StubHost:
                 if status != 200:        # a refusal that quotes a key: it must never reach a frame
                     body = {"error": f"bad key {MAIN_KEY}"}
                 elif self.path.endswith("/api/tags"):
-                    body = {"models": [{"name": "qwen3:8b"}, {"name": "glm-5.3:cloud"}]}
+                    body = {"models": [{"name": "qwen3:8b"}, {"name": "glm-5.3:cloud"},
+                                       {"name": "nomic-embed-text:latest"},
+                                       {"name": "mystery:latest", "details": {"family": "bert"}}]}
                 elif "/models" in self.path:
                     body = {"object": "list", "data": [{"id": "served-a", "type": "model"},
-                                                       {"id": "served-b", "type": "model"}]}
+                                                       {"id": "served-b", "type": "model"},
+                                                       {"id": "mxbai-embed-large", "type": "model"}]}
                 else:
                     status, body = 404, {"error": "not found"}
                 raw = json.dumps(body).encode()
@@ -198,6 +202,31 @@ class ListModelsAt(unittest.TestCase):
         self.assertEqual(sub["ids"], ["served-a", "served-b"], sub)
         self.assertEqual(self.sub.keys_received(), {SUB_KEY}, "the sub-agents' own key, never the main one")
         self.assertNoSavedKeyOnTheWire()
+
+    def test_work_model_picker_hides_embedding_models_and_ollama_aliases(self):
+        host = self.host()
+        host.dispatch({"type": "list_models", "request_id": "work-models"})
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            frames = [frame for frame in self.frames("models")
+                      if frame.get("request_id") == "work-models"]
+            if frames:
+                self.assertEqual(frames[-1]["ids"], ["glm-5.3:cloud", "qwen3:8b"])
+                return
+            time.sleep(0.02)
+        self.fail("Work model picker did not answer")
+
+    def test_restoring_another_provider_drops_the_old_key_but_keeps_it_redacted(self):
+        host = self.host()
+        config = host.default.config
+        self.assertEqual(config.get("api_key"), MAIN_KEY)
+        config.restore_native_route({"base_url": self.other.url + "/v1", "model": "served-a",
+                                     "api_mode": "chat_completions", "thinking": "off"})
+        self.assertEqual(config.get("api_key"), "", "the old key must not authorize another host")
+        self.assertIn(MAIN_KEY, secret_values(config), "old transcript text still needs redaction")
+        child = config.clone_for_root(self.root)
+        self.assertEqual(child.get("api_key"), "")
+        self.assertIn(MAIN_KEY, secret_values(child), "a helper must redact its parent's former key")
 
     def test_a_different_host_never_receives_a_saved_key(self):
         host = self.host()

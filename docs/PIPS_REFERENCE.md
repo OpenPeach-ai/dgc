@@ -6,12 +6,12 @@ Pips API history. For a guided introduction, start with [PIPS.md](PIPS.md).
 
 | Component | Version |
 | --- | --- |
-| DGC CLI | 0.50.0 |
-| VS Code extension | 0.34.x |
-| SDK (Python and TypeScript) | 0.8.0 |
-| Pips API | 68 |
+| DGC CLI | 0.51.0 |
+| VS Code extension | 0.35.0 |
+| SDK (Python and TypeScript) | 0.9.0 |
+| Pips API | 73 |
 | Editor protocol | v14 |
-| Pips registry schema | 47 |
+| Pips registry schema | 51 |
 
 ## Security model
 
@@ -2111,7 +2111,7 @@ notice, loads them automatically. A new or resumed chat starts without them.
 | `pips_context` | `PipsContext` | Allowed | Reads Pips data (below) |
 | `pips_setup` | `PipsSetup` | Allowed: outside auto mode it only saves a card the editor docks above the chat box, whose **Create Pip** is the approval | In auto mode (or on an allow rule, or your Allow on an ask rule) creates or updates the Pip; one with app reads or Pulse commands is always a card |
 | `pips_propose` | `PipsPropose` | Asks | Applies a change to a Pip's name, goal, model (`model_choice`; a Personal Pip, with `scope: "personal"`, may run on your Claude Code or Codex) or context window (`context_window`, its own chat option: no new job version), or to a project Pip's source ref or Excluded folders (`source_exclude`, which moves it to `safe_source_v2`) |
-| `pips_settings` | `PipsSettings` | Asks | Sets the Pips default model (`pips_model`, Settings → Agents → Pips): a model from `pips_context` `models`, or empty to follow DGC |
+| `pips_settings` | `PipsSettings` | Asks | Sets the Pips default model (`pips_model`, Settings → Models → Pips): a model from `pips_context` `models`, or empty to follow DGC |
 | `pips_adapt` | `PipsAdapt` | Asks | Applies a name or source-ref change that the Pip's adaptation policy allows |
 | `run_pip_now` | `PipsRun` | Asks | Queues one run of a Scout, Lens, Rook, Lock or Quill Pip, or a Personal Pip |
 | `handoff_to_pip` | `PipsHandoff` | Asks | Saves a handoff proposal |
@@ -2252,3 +2252,7 @@ Clients check it before using a newer control.
 | 57 | Memory that learns, for Pips: a Personal Pip's own working notes (`pip_working_notes`: the `working_notes` tool, `get_pip_working_notes`, `set_pip_working_notes`), its daily log (`pip_daily_log`: `list_pip_daily_log`), and its chat looked back over for the user's one memory (`pip_memory_review`) |
 | 54 | Pips use the whole desktop (`pip_desktop_eyes`, `pip_apps`): a run whose model sees gets `desktop_look`, `desktop_click`, `desktop_double_click`, `desktop_right_click`, `desktop_hover`, `desktop_drag`, `desktop_scroll`, `desktop_type`, `desktop_key`, `windows`, `focus_window` and `launch_app`, with secrets blacked out of the whole screen; an image editor, a document editor and a PDF viewer, each in its own box, online through the computer's egress proxy like the Terminal; `get_pip_computer_apps`, `set_pip_computer_apps` |
 | 52 | Photos and files in a Pip's chat through the backend's spool: `send_pip_message` takes `spooled_images` (8 MiB a photo, 32 MiB in all, up to 64; HEIC kept as JPEG) and `spooled_files` (a document 16 MiB, text 1 MiB, 32 MiB in all, up to 16), local only; `get_pip_message_image` takes `as_file` and answers with the kept file's `path`. A large photo goes to the model at 2,500 pixels |
+| 70 | DGC Router for Pips: `model_choice` takes `{"mode": "router"}` (any of the user's systems with the Pips job) and `{"mode": "router", "system": id, "model": name}` (that one; a Pip pinned to a system waits for it). A run takes its worker when it leaves the queue, and waits there while every worker that could take it is busy. While the Router is on, `list_pip_models` carries `router` (`enabled`, and each system with its models); with the Router off the list is as in API 69 |
+| 71 | Videos in a Personal Pip's chat: a reply that started a video carries `videos`, each the video's job as DGC last saw it (state, length, resolution, price and, once made, the file). No command is added |
+| 72 | Reviewed local Personal and Project Pip workflow controls: list, get, create and set status. Two to four Pips of one workspace and kind can pass exact results or a committed-source finding through reviewed or unattended routing; each Pip keeps its own external-action permissions. |
+| 73 | A text message can join one running Personal Pip conversation as a mid-turn update. It stays in that run's history and does not start a second reply. |

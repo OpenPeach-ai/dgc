@@ -99,6 +99,7 @@ def speakable(text: str) -> list[str]:
     text = re.sub(r"\s*\[\d+(?:\s*,\s*\d+)*\]", "", text)                  # citations [1], [2, 3]
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"^\s*\|.*\|\s*$", " ", text, flags=re.M)                 # table rows
+    text = re.sub(r"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$", " ", text, flags=re.M)  # a rule, a Pip's --- between messages
     lines = []
     for line in text.splitlines():
         # A heading or a list item is a sentence of its own, so it doesn't run into the next.

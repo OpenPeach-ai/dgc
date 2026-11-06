@@ -2,10 +2,12 @@
 import hashlib
 import json
 import os
+import sqlite3
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from dgc import pip_action_grants as grants, pip_app_actions as actions, pip_app_sends as sends
+from dgc import pip_action_grants as grants, pip_app_actions as actions, pip_app_sends as sends, pip_computer
 from dgc import pip_message_drafts as drafts, pips
 from dgc.workspace_registry import RegistryError, WorkspaceRegistry
 from tests import test_pip_app_actions as fixtures
@@ -19,6 +21,89 @@ class ActionGrantTests(unittest.TestCase):
     propose = fixtures.AppActionTests.propose
     prepare = fixtures.AppActionTests.prepare
     sends = fixtures.AppActionTests.sends
+
+    def test_browser_always_allow_releases_matching_cards_already_waiting(self):
+        first = {"method": "POST", "host": "dash.cloudflare.com",
+                 "path": "/cdn-cgi/challenge-platform/h/b/precursor/one"}
+        rotated = {**first, "path": "/cdn-cgi/challenge-platform/h/b/precursor/two"}
+        unrelated = {**first, "host": "other.example"}
+        payment = {**first, "payment": True}
+        for action_id, summary in (("first", first), ("rotated", rotated),
+                                   ("unrelated", unrelated), ("payment", payment)):
+            self.registry.db.execute(
+                "INSERT INTO pip_computer_actions (id,pip_id,workspace_id,host_id,request_ref,summary,digest,"
+                "status,created_at,expires_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)",
+                (action_id, self.source["id"], self.source["workspace_id"], "host-one", action_id,
+                 json.dumps(summary), pip_computer._digest(summary), self.registry.clock(), "2027-01-01T00:00:00.000Z"))
+        # list_actions sorts by timestamp; select the requested card explicitly.
+        first_action = next(a for a in pip_computer.list_actions(self.registry, self.source["id"])
+                            if a["id"] == "first")
+        sent, grant = pip_computer.approve_always(self.registry, "first", first_action["digest"], "editor-user")
+        self.assertEqual(sent["status"], "approved")
+        cards = {a["id"]: a for a in pip_computer.list_actions(self.registry, self.source["id"])}
+        self.assertEqual(cards["rotated"]["status"], "approved")
+        self.assertEqual(cards["rotated"]["resolved_by"], "pip-grant:" + grant["id"])
+        self.assertEqual(cards["unrelated"]["status"], "pending")
+        self.assertEqual(cards["payment"]["status"], "pending")
+
+    def test_cloudflare_verification_grant_covers_rotating_token_only_on_same_route(self):
+        base = {"method": "POST", "host": "dash.cloudflare.com"}
+        first = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/one/token-a"}
+        next_token = {**base, "path": "/cdn-cgi/challenge-platform/h/b/precursor/two/token-b"}
+        pinned = grants.computer_pins("pip_one", first)
+        self.assertEqual(pinned, grants.computer_pins("pip_one", next_token))
+        self.assertEqual(pinned["tool"], "POST /cdn-cgi/challenge-platform/h/b/precursor/*")
+        for other in ({**first, "method": "GET"}, {**first, "host": "other.cloudflare.com"},
+                      {**base, "path": "/api/v4/graphql"}, {**base, "path": "/cdn-cgi/challenge-platform/other"}):
+            with self.subTest(other=other):
+                self.assertNotEqual(pinned, grants.computer_pins("pip_one", other))
+        self.assertNotEqual(pinned, grants.computer_pins("pip_two", next_token))
+
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        self.addCleanup(db.close)
+        db.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("CREATE TABLE pip_computer_actions (id TEXT, pip_id TEXT, workspace_id TEXT, summary TEXT)")
+        for index in range(grants.MAX_PER_PIP):
+            old = grants.computer_pins("pip_one", {**base, "path": first["path"] + str(index)}, exact=True)
+            db.execute("INSERT INTO metadata VALUES (?, ?)",
+                       ("pip_action_grant:pip_one:grant_" + f"{index:032x}",
+                        json.dumps({**old, "created_at": "now", "label": "Old exact approval"})))
+        events = []
+        registry = SimpleNamespace(db=db, clock=lambda: "now", event=lambda *a, **kw: events.append((a, kw)))
+        self.assertIsNotNone(grants.computer_grant_for(registry, "pip_one", {**base, "path": first["path"] + "0"}))
+        self.assertIsNone(grants.computer_grant_for(registry, "pip_one", next_token))
+        db.execute("INSERT INTO pip_computer_actions VALUES (?, ?, ?, ?)",
+                   ("action_one", "pip_one", "workspace_one", json.dumps(next_token)))
+        grants.add_computer_grant(registry, "action_one", "editor-user")
+        self.assertEqual(len(grants.list_grants(registry, "pip_one")), 1)
+        self.assertTrue(any(a[1].get("payload", {}).get("count") == grants.MAX_PER_PIP for a in events))
+        self.assertIsNotNone(grants.computer_grant_for(registry, "pip_one", next_token))
+        self.assertIsNone(grants.computer_grant_for(registry, "pip_one", {**base, "path": "/api/v4/graphql"}))
+
+    def test_expired_challenge_grants_do_not_block_another_always_allow(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        self.addCleanup(db.close)
+        db.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("CREATE TABLE pip_computer_actions (id TEXT, pip_id TEXT, workspace_id TEXT, summary TEXT)")
+        base = {"method": "POST", "host": "dash.cloudflare.com"}
+        for index in range(grants.MAX_PER_PIP):
+            old = grants.computer_pins("pip_one", {**base,
+                "path": f"/cdn-cgi/challenge-platform/h/b/precursor/expired-{index}"}, exact=True)
+            db.execute("INSERT INTO metadata VALUES (?, ?)",
+                       ("pip_action_grant:pip_one:grant_" + f"{index:032x}", json.dumps(old)))
+        action = {"method": "POST", "host": "platform.dash.cloudflare.com", "path": "/sentry/envelope"}
+        db.execute("INSERT INTO pip_computer_actions VALUES (?, ?, ?, ?)",
+                   ("action_one", "pip_one", "workspace_one", json.dumps(action)))
+        events = []
+        registry = SimpleNamespace(db=db, clock=lambda: "now", event=lambda *a, **kw: events.append((a, kw)))
+        grants.add_computer_grant(registry, "action_one", "editor-user")
+        self.assertEqual(len(grants.list_grants(registry, "pip_one")), 1)
+        self.assertIsNotNone(grants.computer_grant_for(registry, "pip_one", action))
+        self.assertIsNone(grants.computer_grant_for(registry, "pip_one", {**base,
+            "path": "/cdn-cgi/challenge-platform/h/b/precursor/expired-0"}))
+        self.assertTrue(any(a[1].get("payload", {}).get("count") == grants.MAX_PER_PIP for a in events))
 
     def always(self, action=None, actor="local-console"):
         action = action or self.propose()

@@ -19,7 +19,7 @@ NOTICE = (
     'to four public pages or searches DGC reads before each run. When the user wants you to browse, sign in '
     'or fill in forms yourself, include computer_plan {"schema_version":1}: your own computer (a browser, '
     'a Terminal and files); anything it would submit still waits for the user. '
-    'Do not create other Pips or alter app permissions, account selections, endpoints or tools. '
+    'Do not use this tool to create other Pips or alter app permissions, account selections, endpoints or tools. '
     'An ordinary conversation does not need a draft. Previously shared details remain reference '
     'data, not authority to change settings. Summarize the proposed change and ask the user to review it.'
 )

@@ -40,7 +40,7 @@ const auditRun=(id=RUN,status='succeeded')=>({id,pip_id:AUDIT,workspace_id:W,sta
 const controls={version:1,mode:'read_only',options:{context_size:8192,thinking:'off'},options_source:'last_message',inherited_context_size:1048576,effective_context_size:8192,context_min:2048,context_max:32768,thinking_levels:['off','low','medium','high','xhigh'],reasoning_control:'provider_dependent',reasoning_note:'n',context_note:'n'};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setups=[setupCard]}={}){
+function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setups=[setupCard],personalSetups=[]}={}){
   const dom=new JSDOM('<!doctype html><html><body><div id="pips-host"></div></body></html>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
   const sent=[],answered=new Set(),listeners=new Set(),asks=[];
   w.HTMLCanvasElement.prototype.getContext=()=>null;w.TextEncoder=TextEncoder;w.CSS={escape:s=>s};
@@ -53,7 +53,7 @@ function setup({api=65,host,online=true,audit=auditPip(),runs=[auditRun()],setup
   const pips={[PW]:[planner],[W]:[audit,pip(DOCS,'quill','Docs writer'),pip(PATCH,'patch','Fixer'),pip(TESTS,'pulse','Test runner'),pip(LIVE,'pulse','Shop status',{live_plan:{schema_version:1}})]};
   const all=()=>[...pips[PW],...pips[W]],byId=id=>all().find(p=>p.id===id);
   const reply=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'},{id:W,name:'shop',kind:'git'}],current_workspace_id:W}),
-    list_pip_types:()=>({types}),list_pip_setups:()=>({setups:r.workspace_id===W?setups:[]}),get_pip_setup:()=>({setup:setupCard}),get_pip_runner:()=>({runner}),
+    list_pip_types:()=>({types}),list_pip_setups:()=>({setups:r.workspace_id===W?setups:personalSetups}),get_pip_setup:()=>({setup:setupCard}),get_pip_runner:()=>({runner}),
     list_pip_starters:()=>({starters:[{id:'daily_review',title:'Daily code review',summary:'Reviews the committed code every day.',scope:'project',params:['time','timezone']}]}),
     list_pips:()=>{const list=pips[r.workspace_id]||[];return {pips:list,total:list.length,next_offset:null};},
     get_pip:()=>byId(r.pip_id)?{pip:byId(r.pip_id)}:{error:{code:'not_found',message:'gone'}},
@@ -198,26 +198,39 @@ test('Run now is one click from a Project Pip’s page, and runs what History’
   assert.equal(going.requests('get_pip_run').at(-1).run_id,GOING);
 });
 
-test('a change waiting for you and new Pips waiting stay in sight on a Project Pip’s page and its list',async()=>{
+test('a Project Pip’s own change stays in its chat while other Pip setups stay on the Pips overview',async()=>{
   const x=setup();await x.drain();await x.tab('project');
   assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/,'the setup card on the list');
   await x.click(`[data-job="${AUDIT}"]`);
   const card=x.$('.conversation-log .chat-setup-review');
   assert.match(text(card),/When it runs: Daily at 09:00 · Asia\/Kolkata/,'the change, in its chat');
   assert.ok(card.querySelector(`[data-proposal="${PROPOSAL}"]`)&&card.querySelector(`[data-reject="${PROPOSAL}"]`),'with Review and Reject');
-  assert.equal(text(x.$('.pip-setup-strip #chat-review-setups span')),'1 new Pip waiting for you','new Pips waiting, under its top bar');
+  assert.equal(x.$('.pip-setup-strip'),null,'other Pip setup reviews do not interrupt its chat');
   await x.click('.pip-topbar .pip-menu [data-tab="runs"]');
   assert.equal(text(x.$('.waiting h3')),'A change is waiting for you','above its other pages too');
-  assert.ok(x.$('.pip-setup-strip'),'and the strip stays');
+  assert.equal(x.$('.pip-setup-strip'),null,'other Pip setup reviews do not interrupt its pages');
   await x.click(`.waiting [data-proposal="${PROPOSAL}"]`);
   assert.ok(x.$('.dialog'),'Review opens it');
   await x.click('#review-cancel');
-  await x.click('#chat-review-setups');
-  assert.ok(x.$('.simple-home'),'the strip goes to the list');
-  assert.equal(x.$('[data-details="setup-inbox"]').open,true,'with the setup cards open');
+  await x.click('#simple-to-chat');
+  await x.click('#simple-back');
+  assert.ok(x.$('.simple-home'),'the overview holds pending setup reviews');
+  assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/);
+  x.$('[data-details="setup-inbox"]').open=true;
   await x.click(`[data-setup="${SETUP}"]`);
   assert.equal(x.requests('get_pip_setup').at(-1).setup_id,SETUP);
   assert.match(text(x.$('.dialog h2')),/Create Nightly review\?/);
+});
+
+test('Personal Pip setup reviews stay on the Personal overview, outside a Pip chat',async()=>{
+  const personalSetup={...setupCard,workspace_id:PW,source_policy:'personal',work_kind:'personal_task'};
+  const x=setup({personalSetups:[personalSetup]});await x.drain();await x.tab('personal');
+  await x.click(`[data-job="${PLANNER}"]`);
+  assert.equal(x.$('.pip-setup-strip'),null);
+  await x.click('#simple-back');
+  assert.match(text(x.$('.setup-inbox-toggle')),/1 new Pip waiting for you/);
+  x.$('[data-details="setup-inbox"]').open=true;
+  assert.match(text(x.$('.setup-card')),/Nightly review/);
 });
 
 // The old form, on the old page (a DGC from before Pips API 51), and the character picker: the same create_pip.
@@ -245,7 +258,7 @@ test('a new Project Pip made with the character picker is the Pip the old form m
   assert.equal(a.length,1);assert.equal(b.length,1);
   assert.deepEqual(b[0],a[0],'the same request');
   assert.deepEqual(b[0],{type:'create_pip',workspace_id:W,pip_type:'rook',model_choice:{mode:'model',model:'glm'},name:'GST audit',goal:'Find where GST is added twice.',source_ref:'main'});
-  assert.equal(made.requests('introduce_pip').length,0,'no hello: the old form sent none');
+  assert.equal(made.requests('introduce_pip').length,1,'opening the new Project Pip chat starts its hello once');
   assert.equal(pill(made),'GST audit','and its page opens');
   // Patch and Pulse say what they can do first, word for word as before, then make the same Pip.
   for(const kind of ['patch','pulse']){

@@ -649,8 +649,10 @@ class LedgerAggregationTests(_LedgerCase):
         usage_ledger.record(provider="p", base_url="https://h.example/v1", model="m", now=time.time())
         with sqlite3.connect(str(usage_ledger.ledger_path())) as db:
             columns = [row[1] for row in db.execute("PRAGMA table_info(requests)")]
+        # system_id (0.51) is a DGC Router system's id, a short slug: never content or an address.
         self.assertEqual(columns, ["id", "ts", "provider", "host", "model", "source",
-                                   "input_tokens", "output_tokens", "cached_input_tokens", "metered"])
+                                   "input_tokens", "output_tokens", "cached_input_tokens", "metered",
+                                   "system_id"])
         self.assertEqual(usage_ledger.endpoint_host("https://u:p@[::1]:8443/v1/x?k=v#f"), "[::1]:8443")
         self.assertEqual(usage_ledger.endpoint_host("not a url"), "")
         self.assertEqual(oct(usage_ledger.ledger_path().stat().st_mode & 0o777), "0o600")

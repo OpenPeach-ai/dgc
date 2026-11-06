@@ -125,6 +125,26 @@ class ABackgroundChildsStepOutlivesTheTurnTests(unittest.TestCase):
         ui.tool_result("task", "Sub-task 'Count the lines' completed with no file changes.", "call-2")
         self.assertIn("Delegated Count the lines", self.plain(ui._tool_frags(ui.blocks[-1])))
 
+    def test_a_batch_with_no_helpers_never_counts_zero(self):
+        """Seen 11-02: a batched delegation sent without its `tasks` array failed, and its step read "Couldn't
+        delegate 0 helpers". One that never named a helper says only "Couldn't delegate"; its reason is the step's
+        output, one click away. The same summary is what the editor's card and a reload get (dgc/ui.arg_summary)."""
+        from dgc.ui import arg_summary, task_batch_summary
+        reason = "error: task needs a `tasks` array of 1 to 8 helpers, each with a description and a prompt."
+        for n, args in enumerate([{"tasks": None}, {"tasks": []}, {"tasks": "map the repo"}]):
+            self.assertEqual(task_batch_summary(args), "", args)
+            self.assertEqual(arg_summary("task", args), "", args)
+            ui = self.tui()
+            ui._turn.set()
+            ui._turn_t0 = time.monotonic()
+            ui.tool_call("task", args, f"call-{n}")
+            self.assertNotIn("0 helper", self.plain(ui._tool_frags(ui.blocks[-1])))
+            ui.tool_result("task", reason, f"call-{n}")
+            block = self.plain(ui._tool_frags(ui.blocks[-1]))
+            self.assertIn("Couldn't delegate", block)
+            self.assertNotIn("0 helper", block)
+        self.assertEqual(task_batch_summary({"tasks": [{"description": "Map auth"}]}), "1 helper · Map auth")
+
     def test_the_step_keeps_its_command_progress_and_result(self):
         from dgc.agent import _SubUI
         ui = self.tui()

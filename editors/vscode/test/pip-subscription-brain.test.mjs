@@ -1,7 +1,7 @@
 // Pips API 55 (pip_brain): a Personal Pip can run on the user's own Claude Code or Codex. Its model picker lists the
 // ones signed in on this computer, says once that its replies and routines use that plan's usage, and saves
-// {mode: "subscription", engine}; Default names the subscription DGC follows. Below API 55, or for a project
-// Pip, none of it shows, and the host refuses the choice before an older CLI sees it.
+// {mode: "subscription", engine}; Default names the subscription DGC follows. Project Pips use the same
+// restricted model transport while keeping their own policy. Below API 55, the host refuses the choice.
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -62,11 +62,11 @@ test('Default names the subscription DGC follows',async()=>{
  assert.match(x.d.querySelector('[data-usage-line]').textContent,/your Codex plan’s usage/);
 });
 
-test('a project Pip and an older backend show no subscriptions, and the host refuses one below API 55',async()=>{
+test('a project Pip can choose a subscription, while an older backend cannot',async()=>{
  for(const [api,job,kind] of [[54,pip(),'personal'],[55,pip({source_policy:{mode:'committed_only'},pip_type:'rook'}),'project']]){
   const x=setup({api,job,kind});await x.select();await openList(x);
-  assert.equal(x.d.querySelector('[data-chat-model^="subscription:"]'),null,`api ${api}`);
-  assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Your subscriptions/);
+  assert.equal(!!x.d.querySelector('[data-chat-model^="subscription:"]'),api>=55,`api ${api}`);
+  if(api<55)assert.doesNotMatch(x.d.querySelector('.composer-model-menu').textContent,/Your subscriptions/);
  }
  for(const api of [54,55]){
   const sent=[],posted=[];

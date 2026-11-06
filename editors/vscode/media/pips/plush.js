@@ -20,6 +20,7 @@ const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const script=globalThis.document?.currentScript?.src
  ||[...(globalThis.document?.scripts||[])].map(s=>s.src).find(src=>/\/dist\/[A-Za-z]+\.js(?:[?#]|$)/.test(src));
 const asset=script?new URL('../media/pips/plush-bodies.webp',script).href:'../media/pips/plush-bodies.webp';
+const bodyMask=script?new URL('../media/pips/plush-body-mask.png',script).href:'../media/pips/plush-body-mask.png';
 const styles=`
 .dgc-plush{display:inline-block;position:relative;width:100%;height:100%;vertical-align:middle;isolation:isolate;--plush-reach:4.5px;transform-origin:50% 90%;rotate:var(--plush-lean,0deg);animation:dgc-plush-lean 9.7s ease-in-out var(--plush-delay) infinite}
 .dgc-plush[data-character=lens]{--plush-reach:3px}
@@ -34,6 +35,7 @@ const styles=`
 @keyframes dgc-lens-ponder{0%,8%,100%{transform:translate(0,0)}12%,42%{transform:translate(-1px,-.8px)}48%,80%{transform:translate(1px,-.8px)}86%,96%{transform:translate(0,-.4px)}}
 @keyframes dgc-lens-scan{0%,14%,80%,100%{transform:translate(-1.6px,.8px)}18%,32%{transform:translate(-.6px,.8px)}36%,50%{transform:translate(.6px,.8px)}54%,74%{transform:translate(1.6px,.8px)}}
 .dgc-plush-rig{display:block;width:100%;height:100%;overflow:hidden;transform-origin:50% 88%;animation:dgc-plush-breathe 6.7s ease-in-out var(--plush-delay) infinite}
+.dgc-plush-tint{display:none}
 .dgc-plush-look{animation:dgc-plush-look 9.7s ease-in-out var(--plush-delay) infinite}
 .dgc-plush-track{transform:translate(var(--plush-gx,0px),var(--plush-gy,0px))}
 .dgc-plush-eye{transform-box:fill-box;transform-origin:center;animation:dgc-plush-blink 10.6s ease-in-out var(--plush-delay) infinite}
@@ -82,7 +84,8 @@ function markup(pip,state='idle',uid='plush',options={}){
    state==='offline'?`M ${x-3.7} ${cy+1} Q ${x} ${cy+4} ${x+3.7} ${cy+1}`:`M ${x} ${cy-hh/2} L ${x} ${cy+hh/2}`;
   return `<path class="dgc-plush-eye" data-face="${j?'right':'left'}" d="${d}" stroke-width="${state==='success'||state==='offline'?3.5:6.4}"/>`;
  }).join('');
- return `${options.includeStyles===false?'':`<style>${styles}</style>`}<span class="dgc-plush" data-state="${state}" data-character="${ids[i]}" data-name="${escape(pip.name||ids[i])}" data-paused="${options.paused===true}" aria-hidden="true" style="--plush-delay:${-i*.59}s"><svg class="dgc-plush-rig" viewBox="${crops[i].join(' ')}" aria-hidden="true"><image href="${escape(asset)}" width="1660" height="948"/><g transform="translate(${i%4*415} ${i<4?0:474}) scale(4.15 4.74)"><g fill="none" stroke="#fff" stroke-linecap="round"><g class="dgc-plush-look"><g class="dgc-plush-track">${eyes}</g></g></g></g></svg></span>`;
+ const maskId=`${uid}-body-mask`;
+ return `${options.includeStyles===false?'':`<style>${styles}</style>`}<span class="dgc-plush" data-state="${state}" data-character="${ids[i]}" data-name="${escape(pip.name||ids[i])}" data-paused="${options.paused===true}" aria-hidden="true" style="--plush-delay:${-i*.59}s"><svg class="dgc-plush-rig" viewBox="${crops[i].join(' ')}" aria-hidden="true"><image href="${escape(asset)}" width="1660" height="948"/><defs><mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="1660" height="948" style="mask-type:luminance"><image href="${escape(bodyMask)}" width="1660" height="948"/></mask></defs><image class="dgc-plush-tint" href="${escape(asset)}" width="1660" height="948" mask="url(#${maskId})"/><g transform="translate(${i%4*415} ${i<4?0:474}) scale(4.15 4.74)"><g fill="none" stroke="#fff" stroke-linecap="round"><g class="dgc-plush-look"><g class="dgc-plush-track">${eyes}</g></g></g></g></svg></span>`;
 }
 // One visibility subscription and one pointer listener per document; releasing a caller
 // releases only its own rigs. markup() creates no listeners or animation loops, and mount()

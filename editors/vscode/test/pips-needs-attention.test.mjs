@@ -24,7 +24,7 @@ const page=(items,extra={})=>({as_of:new Date().toISOString(),total:items.length
 const link={id:LINK,pip_id:PIP,workspace_id:PW,toolkit:'gmail',app:'Gmail',reason:'To read your new mail.',status:'requested',label:null,error:null,created_at:ago(9),updated_at:new Date().toISOString()};
 async function flush(){for(let i=0;i<15;i++)await Promise.resolve();}
 
-function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
+function setup({found=page([]),apiVersion=44,links=[link],embedded=false,profiles={},proposal=null}={}){
  // embedded: the side bar's Pips view (main.js mounts it in a shadow root and navigates it from the Sessions home).
  const dom=new JSDOM(embedded?'<!doctype html><html><body><div id="pips-host"></div></body></html>':viewModule.pipsDocument(),{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;windows.push(w);
  const sent=[],answered=new Set();
@@ -41,8 +41,8 @@ function setup({found=page([]),apiVersion=44,links=[link],embedded=false}={}){
  const answer=(m,result,ok=true)=>{answered.add(m.id);message({type:'pipsReply',id:m.id,ok,...(ok?{result}:{error:{message:result}})});};
  const requests=type=>sent.filter(m=>m.type==='pipsRequest'&&m.request.type===type);
  const runner={runner_id:'runner',status:'running',online:true,paused:false,counts:{queued:0,running:0,cancelling:0}};
- const pips=[pip(PIP,'Ava'),pip(MAX,'Max')];
- const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'}],current_workspace_id:PW}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:[]}),
+ const pips=[pip(PIP,'Ava',{profile:profiles[PIP]}),pip(MAX,'Max',{profile:profiles[MAX]})];
+ const defaults=r=>({list_workspaces:()=>({workspaces:[{id:PW,name:'Personal',kind:'personal'}],current_workspace_id:PW}),list_pip_types:()=>({types}),list_pip_setups:()=>({setups:proposal?.status==='pending'?[proposal]:[]}),get_pip_setup:()=>({setup:proposal}),reject_pip_setup:()=>{proposal.status='rejected';found.items=found.items.filter(i=>i.card!==proposal.id);found.total=found.items.length;found.by_pip={};return {setup:proposal};},
   list_pips:()=>({pips,total:pips.length,next_offset:null}),get_pip:()=>({pip:pips.find(p=>p.id===r.pip_id)}),list_pip_runs:()=>({runs:[]}),list_pip_starters:()=>({starters:[]}),get_pip_runner:()=>({runner}),
   get_workspace_context:()=>({context:{workspace_id:PW,revision:0,entries:[]}}),list_pip_models:()=>({default_model:'m',models:[],connection:'configured'}),
   list_pip_messages:()=>({pip_id:r.pip_id,workspace_id:PW,messages:[],next_before_id:null,active_run:null,history_context_omitted_count:0,chat_controls:controls}),
@@ -68,7 +68,7 @@ test('Show all from the Sessions home opens the Pips home at Needs attention, al
  const navigating=x.app.navigate({attention:true,all:true,workspace:PW});await x.drain();await navigating;
  assert.ok(x.d.querySelector('.simple-home'),'the Pips home, your Pips listed');
  assert.equal(x.d.querySelectorAll('.attention [data-attention]').length,9,'Needs attention open in full, not the first six');
- assert.ok(x.d.querySelector('[data-attention-more="0"]'),'Show fewer is there to fold it');
+ assert.ok(x.d.querySelector('[data-attention-more="0"]'),'the section can be folded');
 });
 
 test('the home lists what every Pip waits on, newest first, above Your Pips; each Pip row counts its own',async()=>{
@@ -77,8 +77,10 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  const x=setup({found});await x.drain();
  const section=x.d.querySelector('.attention');assert.ok(section,'Needs attention is on the home');
  assert.ok(section.compareDocumentPosition(x.d.querySelector('.simple-home'))&x.w.Node.DOCUMENT_POSITION_FOLLOWING,'above Your Pips');
- assert.match(section.querySelector('h2').textContent,/Needs attention\s*3/);
- const rows=[...section.querySelectorAll('[data-attention]')].map(b=>b.textContent);
+ assert.match(section.querySelector('.attention-toggle').textContent,/Needs attention\s*3/);
+ assert.equal(section.querySelectorAll('[data-attention]').length,0,'the list starts collapsed');
+ x.click('[data-attention-more="1"]');
+ const rows=[...x.d.querySelectorAll('.attention [data-attention]')].map(b=>b.textContent);
  assert.match(rows[0],/Connect Gmail\?To read your new mail\.Ava · App · 1 min ago/);
  assert.match(rows[1],/Send this email to sam@example\.test\?Lunch movedMax · Email · 30 min ago/);
  assert.match(rows[2],/Send this on shop\.example\?Ava · Its computer · 1 h ago/);
@@ -87,9 +89,32 @@ test('the home lists what every Pip waits on, newest first, above Your Pips; eac
  assert.deepEqual(JSON.parse(JSON.stringify(x.requests('list_pip_attention')[0].request)),{type:'list_pip_attention',limit:100});
 });
 
+test('Needs attention uses the current saved face without recolouring its accessories',async()=>{
+ const found=page([item('app_link',LINK,PIP,'Connect Gmail?')]);
+ const x=setup({found,profiles:{[PIP]:{title:'',body:'quill',color:'lens',notify:true}}});await x.drain();
+ x.click('[data-attention-more="1"]');
+ const face=x.d.querySelector(`[data-attention="app_link:${LINK}"] .avatar`);
+ assert.equal(face?.dataset.character,'quill');
+ assert.equal(face?.dataset.tint,undefined,'legacy colour data does not recolour the face or accessories');
+});
+
+test('dismissing a proposed Pip checks its fresh digest, rejects it, then removes its attention row',async()=>{
+ const proposal={id:SETUP,digest:'a'.repeat(64),workspace_id:PW,project_root:'/private/pips',pip_id:null,name:'Blog writer',goal:'Draft a post for review.',pip_type:'scout',work_kind:'personal_task',source_ref:'HEAD',schedule:null,run_now:false,next_run_at:null,status:'pending',created_at:'2099-10-02T04:00:00Z',expires_at:'2099-10-02T06:00:00Z',receipt:null,reason:'Draft posts.',expected_version:null,expected_lifecycle_revision:null,permissions:'read_only',source_policy:'personal',runner_notice:'Runs only while Pips are on.',scope_notice:'Reads only what you share.',run_now_policy:null};
+ const found=page([item('setup',SETUP,null,'Create the Pip “Blog writer”?')]);
+ const x=setup({found,proposal});await x.drain();
+ x.click('[data-attention-more="1"]');
+ assert.equal(x.d.querySelector('.attention-toggle').getAttribute('aria-expanded'),'true');
+ assert.equal(x.requests('reject_pip_setup').length,0);
+ x.click(`[data-attention-dismiss="setup:${SETUP}"]`);await x.drain();
+ assert.deepEqual(JSON.parse(JSON.stringify(x.requests('reject_pip_setup')[0].request)),{type:'reject_pip_setup',setup_id:SETUP,expected_digest:proposal.digest});
+ assert.equal(x.d.querySelector('.attention'),null,'the rejected proposal no longer needs attention');
+ assert.equal(x.requests('accept_pip_setup').length,0);
+});
+
 test('a row opens its Pip at the card: the chat scrolls to the Connect card; a held submit opens its computer',async()=>{
  const found=page([item('app_link',LINK,PIP,'Connect Gmail?'),item('computer_action',HELD,PIP,'Send this on shop.example?')]);
  const x=setup({found});await x.drain();
+ x.click('[data-attention-more="1"]');
  x.click(`[data-attention="app_link:${LINK}"]`);await x.drain();
  const card=x.d.querySelector(`[data-app-link="${LINK}"]`);assert.ok(card,'Ava’s chat is open with the card');
  assert.ok(card.classList.contains('attention-flash'),'the card is shown to you');
@@ -102,9 +127,12 @@ test('a row opens its Pip at the card: the chat scrolls to the Connect card; a h
 test('a long list shows six until you ask for all',async()=>{
  const many=Array.from({length:9},(_,i)=>item('email','maildraft_'+String(i).repeat(32).slice(0,32).replace(/[^a-f0-9]/g,'0'),PIP,`Email ${i+1}`,{created_at:ago(i+1)}));
  const x=setup({found:page(many)});await x.drain();
+ assert.equal(x.d.querySelectorAll('[data-attention]').length,0);
+ x.click('[data-attention-more="1"]');
  assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
- x.click('[data-attention-more="1"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,9);
- x.click('[data-attention-more="0"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
+ x.click('[data-attention-more="2"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,9);
+ x.click('.attention-more');assert.equal(x.d.querySelectorAll('[data-attention]').length,6);
+ x.click('[data-attention-more="0"]');assert.equal(x.d.querySelectorAll('[data-attention]').length,0);
 });
 
 test('nothing waiting: no list; an older CLI is never asked',async()=>{

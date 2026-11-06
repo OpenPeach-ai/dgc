@@ -358,6 +358,7 @@ for (const { name, mod } of PLATFORMS) {
 // The clipboard keys themselves. Chromium on Linux binds them to Ctrl; a Mac's Cmd+C/X/V are its own
 // platform bindings and are covered above by the command VS Code turns them into.
 test("Ctrl: cut a pill out and paste it somewhere else in the box", async (t) => {
+  if (process.platform === "darwin") return t.skip("Mac Chromium binds native clipboard to Cmd; the Mac page exercises that path");
   if (skipOrFail(t)) return;
   const page = pages["Linux and Windows"];
   await fresh(page);

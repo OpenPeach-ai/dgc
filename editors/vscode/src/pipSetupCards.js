@@ -1,13 +1,14 @@
 // Main-chat setup reviews. Tool output supplies an identity only: every actionable
 // card is loaded again from the local registry and approved by its exact digest.
 import '../media/pips/plush.js';
-import {pipSetup,pipSetupResolution,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,scheduleLabel,commandLine} from './pipsModel.js';
+import {pipSetup,pipSetupResolution,pipModels,modelChoice,modelLabel,modelValue,subscriptionUsage,scheduleLabel,commandLine,pipRouter,routerChoices,defaultRunsOn} from './pipsModel.js';
 import {appReadWords} from './pipsAppPicker.js';
 import {mountRunCards} from './pipRunCards.js';
 import {mountEmailCards} from './pipEmailCards.js';
 
 export function mountSetupCards(options) {
  const doc=options.document||document, entries=new Map(), pending=new Map();
+ const dismissed=new Set(Array.isArray(options.getDismissed?.())?options.getDismissed().filter(id=>/^setup_[a-f0-9]{32}$/.test(id)).slice(-200):[]);
  let generation=0, epoch=0, sequence=0, connected=false, supported=false, api=0, backgroundSetup=false, disposed=false, dockView=null;
  const node=(tag,cls,text)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  const request=(type,fields={})=>new Promise((resolve,reject)=>{
@@ -18,8 +19,17 @@ export function mountSetupCards(options) {
  });
  const emails=mountEmailCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'})});
  const runs=mountRunCards({document:doc,request,onOpen:options.onOpenRun,ready:()=>options.postMessage({type:'pipsReady'}),onChange:options.onRunsChange});
- function repaint(entry){for(const view of entry.views){if(view.root.isConnected)paint(entry,view);}if(dockView?.entry===entry&&entry.setup?.status==='pending')paintDock(dockView);else refreshDock();}
- function remap(entry,id){for(const view of entry.views){const tool=view.root.closest('[data-pip-setup]');if(tool)tool.dataset.pipSetup=id;view.root.dataset.setupId=id;}entries.delete(entry.id);entry.id=id;entries.set(id,entry);}
+ function repaint(entry){for(const view of entry.views){if(view.root.isConnected){paint(entry,view);const group=view.root.closest('.pip-setup-batch');if(group)paintGroup(group);}}if(dockView?.entry===entry&&entry.setup?.status==='pending')paintDock(dockView);else refreshDock();}
+ function remap(entry,id){
+  const old=entry.id;
+  for(const view of entry.views){
+   const tool=view.root.closest('[data-pip-setup]');if(tool)tool.dataset.pipSetup=id;
+   view.root.dataset.setupId=id;
+   const group=view.root.closest('.pip-setup-batch');
+   if(group)group.dataset.setupIds=String(group.dataset.setupIds||'').split(',').map(value=>value===old?id:value).join(',');
+  }
+  entries.delete(old);entry.id=id;entries.set(id,entry);
+ }
  function load(entry){
   if(entry.loading||entry.busy||!connected||!supported)return;
   entry.loading=true;entry.error='';repaint(entry);const token=epoch;
@@ -44,7 +54,7 @@ export function mountSetupCards(options) {
  const typeName=t=>t?t[0].toUpperCase()+t.slice(1):'Pip';
  function face(entry,size,pose,uid){
   const span=node('span',`pip-setup-avatar pip-setup-avatar-${size}`);span.setAttribute('aria-hidden','true');const s=entry.setup;
-  if(s&&globalThis.PipConcepts?.plush){try{span.innerHTML=globalThis.PipConcepts.plush.markup({index:TYPES.indexOf(s.pip_type),name:s.name},pose,uid,{paused:true});}catch{span.replaceChildren();}}
+  if(s&&globalThis.PipConcepts?.plush){try{span.innerHTML=globalThis.PipConcepts.plush.markup({index:TYPES.indexOf(s.pip_type),name:s.name},pose,uid,{includeStyles:false});}catch{span.replaceChildren();}}
   return span;
  }
  // What the card's chips say, in the user's words: when it runs, what it reads, what it may do.
@@ -58,7 +68,7 @@ export function mountSetupCards(options) {
   // A live-data Pip (API 60): its approved read-only commands, and that nothing it runs can change anything.
   if(s.live_plan){const n=s.live_plan.commands.length;out.push(`${n} read-only ${n===1?'command':'commands'}`);}
   out.push(s.source_policy==='personal'?'Asks before sending':s.pip_type==='quill'?'Drafts docs':s.live_plan?'Changes nothing':'Reads committed code');
-  out.push(s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
+  out.push(s.model_choice?.mode==='model'?s.model_choice.model:['subscription','router'].includes(s.model_choice?.mode)?modelLabel(s.model_choice):'Default model');
   return out;
  }
  const pendingTitle=s=>(s.pip_id?'Change Pip: ':'New Pip: ')+s.name;
@@ -70,7 +80,7 @@ export function mountSetupCards(options) {
   if(goal)body.append(node('p','pip-setup-goal',s.goal));          // the docked card shows it already
   const facts=node('dl','pip-setup-facts');detail(facts,s.source_policy==='personal'?'Scope':'Project',s.source_policy==='personal'?'Personal':s.project_root);if(s.event_trigger)detail(facts,'Runs',`After each new commit to ${s.source_ref}`);else detail(facts,'Schedule',s.schedule?scheduleLabel(s.schedule):'When you ask');
   if(s.next_run_at)detail(facts,'Next run',`${new Date(s.next_run_at).toLocaleString()} (your local time)`);
-  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:s.model_choice?.mode==='subscription'?modelLabel(s.model_choice):'Default model');
+  detail(facts,'Run once now',s.run_now?'Yes, after you create it':'No');if(s.source_policy!=='personal'&&!s.live_plan)detail(facts,'Source',s.source_ref);detail(facts,s.pip_type==='pulse'&&!s.live_plan?'Chat model':'Model',s.model_choice?.mode==='model'?s.model_choice.model:['subscription','router'].includes(s.model_choice?.mode)?modelLabel(s.model_choice):'Default model');
   if(s.verification_plan){detail(facts,'Runs','Set checks · no model');for(const test of s.verification_plan.action.tests)detail(facts,'Check',s.work_kind==='app_smoke_test'?`GET ${test.argv[1]} → status ${test.argv[2]}`:commandLine(test.argv)+' · in '+test.cwd);}
   if(s.live_plan){detail(facts,'Runs','These exact commands · its model summarizes what they print');for(const line of s.live_plan.commands)detail(facts,'Command',line,'pip-setup-command');}
   if(s.app_plan)for(const words of appReadWords(s.app_plan))detail(facts,'Reads',words);
@@ -82,14 +92,18 @@ export function mountSetupCards(options) {
    const models=node('div','pip-setup-model');
    if(entry.models){
     const label=node('label','','Model for this Pip'),select=node('select');select.setAttribute('aria-label','Model for this Pip');
-    const current=s.model_choice||{mode:'default'}, following=entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
+    const current=s.model_choice||{mode:'default'}, following=api>=70?defaultRunsOn(entry.models):entry.models.default_engine?.name||entry.models.default_model, choices=[{value:'',name:following?`Default (${following})`:'Default'}];
     for(const item of entry.models.models)choices.push({value:typeof item==='string'?item:item.id,name:typeof item==='string'?item:item.name||item.id});
     if(current.mode==='model'&&!choices.some(c=>c.value===current.model))choices.push({value:current.model,name:current.model});
-    // API 55: a personal setup may run on the user's own Claude Code or Codex (pip_brain). "|" is never in a model ID.
-    const subs=api>=55&&s.source_policy==='personal'?entry.models.subscriptions||[]:[];
+    // A signed-in CLI is the model transport for either Pip scope. "|" is never in a model ID.
+    const subs=api>=55?entry.models.subscriptions||[]:[];
     for(const sub of subs)choices.push({value:'subscription|'+sub.engine,name:sub.name+' · your subscription'});
-    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:entry.choice.mode==='subscription'?'subscription|'+entry.choice.engine:'';
-    select.onchange=()=>{const v=select.value;entry.choice=v.startsWith('subscription|')?{mode:'subscription',engine:v.slice(13)}:v?{mode:'model',model:v}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
+    // API 70: DGC Router, while it is on ("router|" + the choice's value; "|" is never in a model ID either).
+    const routed=api>=70?routerChoices(pipRouter(entry.models.router)):[];
+    for(const [value,name] of routed)choices.push({value:'router|'+value,name});
+    if(current.mode==='router'&&!routed.some(([v])=>v===modelValue(current)))choices.push({value:'router|'+modelValue(current),name:modelLabel(current)});
+    for(const choice of choices){const o=node('option','',choice.name);o.value=choice.value;select.append(o);}select.value=entry.choice.mode==='model'?entry.choice.model:entry.choice.mode==='subscription'?'subscription|'+entry.choice.engine:entry.choice.mode==='router'?'router|'+modelValue(entry.choice):'';
+    select.onchange=()=>{const v=select.value;entry.choice=v.startsWith('subscription|')?{mode:'subscription',engine:v.slice(13)}:v.startsWith('router|')?(v==='router|router'?{mode:'router'}:{mode:'router',system:v.slice(14,v.indexOf('/')),model:v.slice(v.indexOf('/')+1)}):v?{mode:'model',model:v}:{mode:'default'};repaint(entry);};label.append(select);models.append(label);
     if(entry.choice.mode==='subscription')models.append(node('p','pip-setup-notice',subscriptionUsage(modelLabel(entry.choice))));
     if(JSON.stringify(entry.choice)!==JSON.stringify(current))models.append(button('Use this model',()=>revise(entry),'pip-setup-secondary'),node('p','pip-setup-notice','The card is saved again with this model. Nothing is created until you choose '+createLabel(s)+'.'));
    }else models.append(button('Choose model',()=>modelsFor(entry),'pip-setup-secondary'));
@@ -140,6 +154,10 @@ export function mountSetupCards(options) {
   view.root.querySelectorAll('button,select,input').forEach(el=>{if(entry.busy)el.disabled=true;});
   // Its first run is this card's own status line ("First run: report ready"), not a second card with the same face.
   if(s?.status==='accepted'&&s.receipt?.run_id)runs.add(view.root,s.receipt.run_id,s.receipt.pip_id,state);
+  if(!view.root.closest('.pip-setup-batch')){
+   view.dispose?.();
+   view.dispose=globalThis.PipConcepts?.plush.mount?.(view.root);
+  }
  }
  // The card docked above the chat box, where questions dock: one waiting Pip at a time.
  function paintDock(view){
@@ -176,7 +194,7 @@ export function mountSetupCards(options) {
  async function revise(entry){
   const token=epoch,s=entry.setup;entry.busy=true;entry.error='';repaint(entry);
   try{
-   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55&&s.source_policy==='personal'?entry.models?.subscriptions||[]:[])});if(token!==epoch)return;
+   const value=await request('revise_pip_setup',{setup_id:s.id,expected_digest:s.digest,model_choice:modelChoice(modelValue(entry.choice),entry.models?.models||[],api>=55?entry.models?.subscriptions||[]:[],api>=70?pipRouter(entry.models?.router):null)});if(token!==epoch)return;
    const next=pipSetup(value.setup,s.workspace_id);if(next.status!=='pending'||next.id===s.id)throw Error('This was changed or answered somewhere else. Refresh to see it.');
    remap(entry,next.id);entry.setup=next;entry.choice=next.model_choice||{mode:'default'};
   }catch(error){if(token===epoch)entry.error=error.message;}finally{if(token===epoch){entry.busy=false;repaint(entry);}}
@@ -228,14 +246,54 @@ export function mountSetupCards(options) {
   const body=card.querySelector('.body');if(!body)return;card.classList.remove('pip-setup-moved');body.replaceChildren();addView(entry,body,false);card.querySelector('.badge').textContent='Review';card.dataset.pipSetup=id;
   card.querySelector('.verb').textContent='New Pip';card.querySelector('.tool-toggle')?.setAttribute('aria-expanded','true');card.classList.add('open');
   if(!connected)options.postMessage({type:'pipsReady'});else load(entry);
+  const block=card.closest('.msg.dgc');
+  if(block?.querySelector('.pip-setup-batch'))queueMicrotask(()=>{if(block.isConnected)finish(block);});
+ }
+ function paintGroup(group){
+  const ids=String(group.dataset.setupIds||'').split(',').filter(Boolean),all=ids.map(id=>entries.get(id)).filter(Boolean);
+  if(all.length<2)return;
+  const pendingCount=all.filter(e=>!e.setup||e.setup.status==='pending').length;
+  const accepted=all.filter(e=>e.setup?.status==='accepted').length;
+  const failed=all.length-accepted-pendingCount;
+  if(!group.dataset.touched){group.dataset.open=pendingCount?'true':'false';}
+  const toggle=group.querySelector('.pip-setup-batch-toggle'),faces=group.querySelector('.pip-setup-batch-faces');
+  const label=group.querySelector('.pip-setup-batch-label'),detail=group.querySelector('.pip-setup-batch-detail');
+  const close=group.querySelector('.pip-setup-batch-dismiss');
+  group.hidden=ids.every(id=>dismissed.has(id));
+  const open=group.dataset.open==='true';toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',`${open?'Hide':'Show'} ${all.length} Pip setups`);
+  group.querySelector('.pip-setup-batch-list').hidden=!open;
+  faces.replaceChildren();for(const [index,entry] of all.slice(0,5).entries()){
+   if(!entry.setup)continue;
+   const holder=node('span','pip-setup-batch-face');holder.append(face(entry,'line',entry.setup.status==='accepted'?'idle':'waiting_approval',`pip-batch-${group.dataset.group}-${index}`));faces.append(holder);
+  }
+  if(all.length>5)faces.append(node('span','pip-setup-batch-extra',`+${all.length-5}`));
+  label.textContent=pendingCount?`${all.length} Pip setups`:`${accepted} ${accepted===1?'Pip':'Pips'} set up`;
+  detail.textContent=[pendingCount&&`${pendingCount} waiting for review`,failed&&`${failed} not created`,!pendingCount&&accepted&&'Open each Pip below'].filter(Boolean).join(' · ');
+  close.hidden=!!pendingCount;
+  // Mount the whole group: the overlapping faces and every expanded Pip row
+  // should breathe and follow the pointer, as they do elsewhere in Work.
+  group._faceCleanup?.();group._faceCleanup=globalThis.PipConcepts?.plush.mount?.(group);
  }
  function finish(block){
   runs.finish(block);
-  const ids=[...block.querySelectorAll('[data-pip-setup]')].map(c=>c.dataset.pipSetup);
-  if(!ids.length)return;let group=block.querySelector(':scope > .pip-setup-pending');if(!group){group=node('section','pip-setup-pending');group.setAttribute('aria-label','New Pips from this reply');block.append(group);}
-  for(const id of new Set(ids)){const entry=entries.get(id);if(!entry)continue;const view=entry.views.find(v=>block.contains(v.root));if(view){const tool=view.root.closest('[data-pip-setup]');group.append(view.root);if(tool)tool.classList.add('pip-setup-moved');}}
+  const ids=[...new Set([...block.querySelectorAll('[data-pip-setup]')].map(c=>c.dataset.pipSetup).filter(id=>entries.has(id)))];
+  if(!ids.length)return;
+  let group=block.querySelector(':scope > .pip-setup-batch, :scope > .pip-setup-pending');
+  if(!group){group=node('section',ids.length>=2?'pip-setup-batch':'pip-setup-pending');group.setAttribute('aria-label','New Pips from this reply');block.append(group);}
+  if(ids.length>=2&&group.classList.contains('pip-setup-pending'))group.className='pip-setup-batch';
+  if(group.classList.contains('pip-setup-batch')&&!group.querySelector('.pip-setup-batch-head')){
+   group.dataset.group=String(++sequence);group.dataset.open='false';
+   const head=node('div','pip-setup-batch-head'),toggle=button('',()=>{group.dataset.open=group.dataset.open==='true'?'false':'true';group.dataset.touched='true';paintGroup(group);},'pip-setup-batch-toggle');
+   const faces=node('span','pip-setup-batch-faces'),copy=node('span','pip-setup-batch-copy'),title=node('strong','pip-setup-batch-label'),detail=node('small','pip-setup-batch-detail');copy.append(title,detail);toggle.append(faces,copy,node('span','pip-setup-batch-chevron codicon codicon-chevron-right'));
+   const close=button('×',()=>{for(const id of String(group.dataset.setupIds||'').split(','))dismissed.add(id);options.setDismissed?.([...dismissed].slice(-200));group.hidden=true;},'pip-setup-batch-dismiss');close.setAttribute('aria-label','Dismiss this Pip setup result');close.title='Dismiss';
+   head.append(toggle,close);group.prepend(head,node('div','pip-setup-batch-list'));
+  }
+  group.dataset.setupIds=ids.join(',');
+  const list=group.querySelector('.pip-setup-batch-list')||group;
+  for(const id of ids){const entry=entries.get(id);if(!entry)continue;const view=entry.views.find(v=>block.contains(v.root));if(view){const tool=view.root.closest('[data-pip-setup]');view.dispose?.();view.dispose=null;list.append(view.root);if(tool)tool.classList.add('pip-setup-moved');}}
+  if(group.classList.contains('pip-setup-batch'))paintGroup(group);
  }
- function reset(){emails.reset();runs.reset();if(dockView){options.dock?.hide(dockView.root);dockView=null;}epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The conversation changed.'));}pending.clear();for(const e of entries.values())for(const v of e.views){v.dispose?.();v.root.remove();}entries.clear();}
+ function reset(){emails.reset();runs.reset();if(dockView){options.dock?.hide(dockView.root);dockView=null;}epoch++;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('The conversation changed.'));}pending.clear();for(const e of entries.values())for(const v of e.views){v.dispose?.();v.root.remove();}for(const group of doc.querySelectorAll('.pip-setup-batch'))group._faceCleanup?.();entries.clear();}
  // The host's dock was taken by a question (yieldDock) or is free again (dockFree).
  function yieldDock(){if(dockView){const old=dockView;dockView=null;options.dock?.hide(old.root);repaint(old.entry);}}
  return {receive,toolResult,finish,reset,yieldDock,dockFree:()=>refreshDock(),runs:()=>runs.list(),openRun:id=>runs.open(id),stopRun:id=>runs.stop(id),dispose(){reset();runs.dispose();disposed=true;}};

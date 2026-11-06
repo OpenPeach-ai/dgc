@@ -18,7 +18,8 @@ How it goes:
    "Allow remote debugging?", each connection). Cancel there ends the borrow; the Pip is told and carries on without it.
 4. **One new tab, the card's sites only.** DGC opens a window of its own in their Chrome and works in that one tab.
    Every request it makes is gated inside Chrome (the Fetch domain, on that tab and its frames only): a page of the tab
-   going anywhere not on the card is stopped before it is sent (each redirect hop too), and anything that would send
+   going anywhere not on the card is stopped before it is sent (each redirect hop too), what a page of it loads (its
+   styles, scripts, pictures, API reads and frames) comes from wherever the site keeps it, and anything that would send
    (a form, a POST from the Pip's step) goes only as the Pip's level allows (pip_levels): at Ask nothing is sent, at
    Approve for me only routine steps, at Full access everything but a payment. A payment never leaves their Chrome.
    Reads are judged by the page actually read (tools._browser_operation with a
@@ -737,6 +738,10 @@ class BorrowedTab(UserChromeSession):
         origin = _origin(url)
         if not origin or origin not in self.allowed_hosts:
             return f"{shown(origin) if origin else str(url)[:80]} isn't on the card the user allowed"
+        return self.denied(url)
+
+    def denied(self, url: str) -> str:
+        """'' unless one of the user's own rules denies URL."""
         why = self.deny(url)
         return f"the user's own rules deny {str(url)[:120]} ({why})" if why else ""
 
@@ -749,22 +754,18 @@ class BorrowedTab(UserChromeSession):
         url = str(request.get("url", ""))
         kind = str(params.get("resourceType", ""))
         document = kind == "Document"
+        top = document and session == self._session_id and str(params.get("frameId", "")) == self._target_id
         if self._stop:
             self._refuse(request_id, session, document)      # given back: nothing more leaves the tab
             return
-        # Chrome's Fetch gate sees subframes, resources and background requests
-        # too. A GET can carry data in its URL, and a page can POST outside the
-        # brief period following a Pip click. Keep every request on the origins
-        # the user allowed, including each redirect hop.
-        why = self.page_refusal(url)
+        # The card's sites are where the tab may go and where it may send. The tab's own page (each redirect hop too)
+        # is only ever one of them. What a page of them loads (its styles, scripts, pictures, fonts, API reads and the
+        # frames it shows: a sign-in or a payment frame) comes from wherever the site keeps it, as in the user's own
+        # tab: a site's CDN or its api. host is rarely the address the Pip asked for. The user's own rules still hold
+        # for each of them.
+        why = self.page_refusal(url) if top else self.denied(url)
         if why:
-            if document:
-                self.refused.append(("site", why))
-            elif verb in READ_METHODS:
-                self.refused.append(("resource", why))
-            else:
-                host = urlsplit(url).hostname or "another site"
-                self.refused.append(("elsewhere", f"Sending to {host}, which isn't on the card"))
+            self.refused.append(("site" if top else "resource", why))
             self._refuse(request_id, session, document)
             return
         if verb in READ_METHODS or kind in TELEMETRY_KINDS:
@@ -775,11 +776,17 @@ class BorrowedTab(UserChromeSession):
             return
         parts = urlsplit(url)
         host = parts.hostname or ""
+        from .permissions import _origin
+        if _origin(url) not in self.allowed_hosts:
+            # Something the Pip's step would send to a site the user didn't put on the card: never.
+            self.refused.append(("elsewhere", f"Sending to {host or 'another site'}, which isn't on the card"))
+            self._refuse(request_id, session, document)
+            return
         post = str(request.get("postData", "") or "")
         headers = {str(k).lower(): str(v) for k, v in (request.get("headers") or {}).items()}
         fields = _fields(post, headers.get("content-type", ""))
         cues = {"method": verb, "host": host, "path": (parts.path or "/") + (("?" + parts.query) if parts.query else ""),
-                "fields": [name for name, _ in fields], "payment": carries_card_number(post), "target": self.target,
+                "fields": [name for name, _ in fields], "payment": carries_card_number(post, loose=document), "target": self.target,
                 "upload": "", "values": {name: str(value)[:300] for name, value in fields if name in ("operationName", "query")}}
         found = pip_levels.classify(cues)
         if found["verdict"] == "payment":
@@ -1253,7 +1260,7 @@ class Session:
             if kind == "site":
                 lines.append(f"DGC stopped the tab going there: {what}. Nothing was sent or read there.")
             elif kind == "resource":
-                lines.append(f"DGC stopped a request outside the card's sites: {what}. Nothing was sent or read there.")
+                lines.append(f"DGC stopped a request of the page: {what}. Nothing was sent or read there.")
             elif kind == "elsewhere":
                 lines.append(f"Not sent: {what}. Nothing of the user's leaves for a site they didn't allow.")
             elif kind == "payment":

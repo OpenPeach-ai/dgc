@@ -242,10 +242,12 @@ def client_for(config, *, model: str | None = None, base_url: str | None = None,
             transport = str(getattr(finished, "api_mode", "") or "")
             provider = ({"ollama": "ollama", "anthropic": "anthropic"}.get(transport)
                         or getattr(finished, "family", "") or "unknown")
+            from .usage_systems import system_for_url
             usage_ledger.record(provider=provider, base_url=getattr(finished, "base_url", ""),
                                 model=getattr(finished, "model", ""), source=source,
                                 input_tokens=usage["input_tokens"], output_tokens=usage["output_tokens"],
-                                cached_input_tokens=usage["cached_input_tokens"], metered=usage_reported(raw))
+                                cached_input_tokens=usage["cached_input_tokens"], metered=usage_reported(raw),
+                                system_id=system_for_url(config, getattr(finished, "base_url", "")))
         except Exception:                          # noqa: BLE001 -- the ledger never breaks a review
             pass
     client.usage_source = source

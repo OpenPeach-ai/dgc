@@ -1,10 +1,12 @@
 // The Pips tab of Token usage: each Pip's share of the same range, from the runs that finished in
 // it. A breakdown of the Everything totals, never an addition to them -- a Pip's requests are in the
-// same ledger -- so the page says how much of everything the Pips used.
+// same ledger -- so the page says how much of everything the Pips used. With DGC Router, the System picker shows
+// what the Pips ran on one system (settingsUsageSystems.js), as the Everything view does.
+import { bySystemTable, fillPicker, systemPickerMarkup, systemsOf, whereLine } from './settingsUsageSystems.js';
 const RANGE = '<label>Range <span id="usage-timezone" class="set-hint">Days follow this computer&rsquo;s local time.</span>'
   + '<select id="usage-range"><option value="today">Today</option><option value="7d" selected>7 days</option><option value="30d">30 days</option>'
   + '<option value="month">This month</option><option value="all">All time</option></select></label>';
-export const pipUsageMarkup = `<section class="set-section usage-section pip-usage-section" data-section="usage">${RANGE}
+export const pipUsageMarkup = `<section class="set-section usage-section pip-usage-section" data-section="usage">${RANGE}${systemPickerMarkup}
   <div class="usage-toolbar">
     <span id="pip-usage-status" class="usage-status" role="status" aria-live="polite"></span>
     <button type="button" id="pip-usage-refresh" class="fbtn usage-refresh" aria-label="Refresh token usage by Pip"><svg viewBox="0 0 21 21" aria-hidden="true"><path d="M14.74 6.26a6 6 0 1 1-4.24-1.76M8.5 2.5 10.5 4.5 8.5 6.5"/></svg><span>Refresh</span></button>
@@ -19,15 +21,16 @@ export const pipUsageMarkup = `<section class="set-section usage-section pip-usa
     <div class="set-group">By Pip <span class="set-hint">sorted by total tokens</span></div>
     <div class="usage-table-wrap" role="region" aria-label="Token usage by Pip" tabindex="0">
       <table class="usage-table">
-        <thead><tr><th scope="col">Pip <span class="usage-th-sub">kind &middot; where</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Runs</th><th scope="col">Share</th></tr></thead>
+        <thead><tr><th scope="col">Pip <span class="usage-th-sub">kind &middot; where</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Runs</th><th scope="col" class="col-share">Share</th></tr></thead>
         <tbody id="pip-usage-rows"></tbody>
       </table>
     </div>
     <p id="pip-usage-omitted" class="set-note" hidden></p>
+    <div id="pip-usage-systems" hidden><div class="set-group">By system <span class="set-hint">what the Pips&rsquo; requests ran on, sorted by total tokens</span></div><div id="pip-usage-systems-table"></div></div>
     <div class="set-group">By model <span class="set-hint">what the Pips&rsquo; requests used, sorted by total tokens</span></div>
     <div class="usage-table-wrap" role="region" aria-label="Pip token usage by model" tabindex="0">
       <table class="usage-table">
-        <thead><tr><th scope="col">Model <span class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Requests</th><th scope="col">Share</th></tr></thead>
+        <thead><tr><th scope="col">Model <span id="pip-usage-th-where" class="usage-th-sub">provider &middot; host</span></th><th scope="col" class="num">Input</th><th scope="col" class="num">Output</th><th scope="col" class="num">Requests</th><th scope="col" class="col-share">Share</th></tr></thead>
         <tbody id="pip-usage-models"></tbody>
       </table>
     </div>
@@ -36,10 +39,14 @@ export const pipUsageMarkup = `<section class="set-section usage-section pip-usa
   <p class="set-note">Each task counts on the day it finished. Pips have no daily limit.</p>
 </section>`;
 
-export function createPipUsage(root, vscode) {
+export function createPipUsage(root, vscode, shared = {}) {
   const $ = id => root.querySelector('#' + id);
   const RANGES = ['today', '7d', '30d', 'month', 'all'];
   let requestId = '', sequence = 0, timer = 0;
+  // As the Everything view: a range is asked for whole first ("list"), for the picker; one system then alone.
+  let phase = 'show', asked = '', systems = [];
+  const getSystem = () => typeof shared.getSystem === 'function' ? String(shared.getSystem() || '') : '';
+  const setSystem = id => { if (typeof shared.setSystem === 'function') shared.setSystem(id); };
   const count = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n) : 0; };
   const exact = v => count(v).toLocaleString();
   const compact = v => {
@@ -50,7 +57,7 @@ export function createPipUsage(root, vscode) {
   const percent = (part, whole) => { const p = whole > 0 ? part / whole * 100 : 0; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
   function shareCell(part, whole, of) {
     const value = whole > 0 ? part / whole * 100 : 0, text = percent(part, whole);
-    const cell = node('td', 'usage-share-cell'), wrap = node('span', 'usage-share'), track = node('span', 'usage-share-track');
+    const cell = node('td', 'usage-share-cell col-share'), wrap = node('span', 'usage-share'), track = node('span', 'usage-share-track');
     const fill = node('span', 'usage-share-fill' + (value > 0 ? ' nonzero' : ''));
     fill.style.width = `${Math.min(100, value)}%`;
     wrap.setAttribute('role', 'img');
@@ -70,14 +77,24 @@ export function createPipUsage(root, vscode) {
     $('pip-usage-status').textContent = text;
     if (busy) root.setAttribute('aria-busy', 'true'); else root.removeAttribute('aria-busy');
   }
-  function request() {
+  function ask(system, step) {
     const range = RANGES.includes($('usage-range').value) ? $('usage-range').value : '7d';
     requestId = `pip-usage-${Date.now().toString(36)}-${++sequence}`;
-    const asked = requestId;
+    phase = step;
+    asked = system;
+    const mine = requestId;
     status('Counting…', true);
     clearTimeout(timer);
-    timer = setTimeout(() => { if (asked === requestId) status('DGC hasn’t answered yet. Try Refresh.', false); }, 15000);
-    vscode.postMessage({ type: 'getPipUsage', range, requestId });
+    timer = setTimeout(() => { if (mine === requestId) status('DGC hasn’t answered yet. Try Refresh.', false); }, 15000);
+    vscode.postMessage({ type: 'getPipUsage', range, requestId, ...(system ? { system } : {}) });
+  }
+  function request() { ask('', getSystem() ? 'list' : 'show'); }
+  function paintSystems() {
+    const pick = root.querySelector('.usage-system-pick'), select = $('usage-system');
+    if (!pick || !select) return;
+    pick.hidden = systems.length < 2;
+    const kept = fillPicker(select, systems, getSystem());
+    if (kept !== getSystem()) setSystem(kept);
   }
   function unavailable(msg) {
     if (msg.requestId && msg.requestId !== requestId) return;
@@ -88,7 +105,15 @@ export function createPipUsage(root, vscode) {
   }
   function receive(ev) {
     if (!ev || ev.request_id !== requestId) return;      // a late answer to an older request
+    if (!ev.error && !asked) {
+      systems = systemsOf(ev.by_model);
+      const wanted = getSystem();
+      paintSystems();
+      if (phase === 'list' && wanted && getSystem() === wanted) { ask(wanted, 'show'); return; }
+    }
     clearTimeout(timer);
+    const chosen = asked ? systems.find(s => s.id === asked) : null;
+    const named = systems.length > 1;
     const zone = String(ev.timezone || '').slice(0, 64);
     $('usage-timezone').textContent = `Days follow this computer’s local time${zone ? ` (${zone})` : ''}.`;
     const pips = (Array.isArray(ev.by_pip) ? ev.by_pip : []).filter(p => p && typeof p === 'object').slice(0, 200);
@@ -102,6 +127,8 @@ export function createPipUsage(root, vscode) {
     status(Number.isNaN(stamp.getTime()) ? 'Updated just now' : `Updated ${stamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, false);
     $('pip-usage-empty').hidden = pips.length > 0;
     $('pip-usage-content').hidden = !pips.length;
+    const emptyTitle = root.querySelector('#pip-usage-empty .usage-empty-title');
+    if (emptyTitle) emptyTitle.textContent = chosen ? `No Pip runs used ${chosen.name} in this range` : 'No Pip runs finished in this range';
     if (!pips.length) return;
     const totals = ev.totals && typeof ev.totals === 'object' ? ev.totals : {};
     const tokensOf = p => count(p.input_tokens) + count(p.output_tokens);
@@ -116,9 +143,16 @@ export function createPipUsage(root, vscode) {
       if (compact(value) !== exact(value)) figure.append(node('span', 'usage-figure-exact', `${exact(value)} ${unit}`));
       figures.append(figure);
     }
+    const onSystem = chosen ? ` on ${chosen.name}` : '';
     $('pip-usage-part').textContent = all > 0
-      ? `Pips used ${percent(pipTokens, all)} of the ${exact(all)} tokens counted in this range. That is part of the Everything total, not added to it, and includes replies in each Pip’s chat.`
+      ? `Pips used ${percent(pipTokens, all)} of the ${exact(all)} tokens counted${onSystem} in this range. That is part of the Everything total, not added to it, and includes replies in each Pip’s chat.`
       : 'That is part of the Everything total, not added to it, and includes replies in each Pip’s chat.';
+    const bySystem = $('pip-usage-systems');
+    bySystem.hidden = !(named && !asked);
+    $('pip-usage-systems-table').replaceChildren(...(bySystem.hidden ? [] : [bySystemTable(systems, id => {
+      setSystem(id); paintSystems(); ask(id, 'show'); $('usage-system')?.focus();
+    }, 'Pip token usage by system')]));
+    $('pip-usage-th-where').textContent = named ? 'system · provider' : 'provider · host';
     const body = $('pip-usage-rows');
     body.replaceChildren();
     for (const p of pips) {
@@ -150,8 +184,8 @@ export function createPipUsage(root, vscode) {
       const model = String(m.model || 'unknown').slice(0, 256), where = [String(m.provider || '').slice(0, 64), String(m.host || '').slice(0, 255)].filter(Boolean).join(' · ');
       cell.title = where ? `${model}\n${where}` : model;
       const first = node('span', 'usage-clip usage-name'), second = node('span', 'usage-clip usage-where');
-      first.append(node('span', 'usage-head', model)); second.append(node('span', 'usage-head', where || '—'));
-      cell.append(first, second);
+      first.className = 'usage-name usage-wrap'; first.textContent = model; second.append(node('span', 'usage-head', where || '—'));
+      cell.append(first, whereLine(m, named) || second);
       tr.append(cell, node('td', 'num', exact(m.input_tokens)), node('td', 'num', exact(m.output_tokens)), node('td', 'num', exact(m.requests)),
         shareCell(tokensOf(m), modelTokens, 'Pip tokens by model'));
       modelRows.append(tr);
@@ -163,5 +197,6 @@ export function createPipUsage(root, vscode) {
   }
   $('usage-range').onchange = request;
   $('pip-usage-refresh').onclick = request;
+  $('usage-system').onchange = () => { const id = String($('usage-system').value || ''); setSystem(id); ask(id, 'show'); };
   return { request, receive, unavailable, dispose() { clearTimeout(timer); } };
 }

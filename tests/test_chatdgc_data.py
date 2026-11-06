@@ -73,6 +73,18 @@ class Tables(unittest.TestCase):
         with patch.object(data, "MAX_ROWS", 1), self.assertRaisesRegex(data.DataError, "more than 1 rows"):
             data._xlsx_sheets(workbook)
 
+    def test_a_workbook_past_the_row_limit_in_all_still_loads_the_sheets_that_fit(self):
+        workbook = made.make({"name": "Book", "format": "xlsx", "sheets": [
+            {"name": "A", "rows": [["n"], [1], [2], [3]]},
+            {"name": "B", "rows": [["n"], [4], [5], [6]]},
+            {"name": "C", "rows": [["n"], [7]]}]}, CONFIG).raw
+        with patch.object(data, "MAX_ROWS", 6):
+            book = data.Data([("Book.xlsx", workbook)])
+        self.addCleanup(book.close)
+        self.assertEqual([t["table"] for t in book.tables], ["book_a", "book_c"])
+        self.assertEqual(book.problems, ["Book.xlsx / B: left out, past 6 rows in all"])
+        self.assertEqual(book.query("SELECT sum(n) FROM book_a")["rows"], [(6,)])
+
 
 class Model:
     def __init__(self, world):

@@ -46,6 +46,56 @@ class Terminal(unittest.TestCase):
         self.assertEqual(lines[-1], "Tally 3 steps  ·  Context ctx 41%")
         self.assertEqual(terminal.band_lines(None, 80), [])
 
+    def test_the_welcome_screen_leaves_room_for_the_mods_lines(self):
+        """0.50 marketing notes: with the Context and Tally mods allowed, the full-screen terminal opened to "Window too
+        small..." at every size. The welcome card took every row above the prompt, the mods' band and status line
+        took more, and prompt_toolkit had more fixed rows than the terminal. The card makes room for them."""
+        import contextlib
+        import copy
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.data_structures import Size
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        from dgc.agent import Agent
+        from dgc.config import Config, DEFAULTS
+        from dgc.tui import TUI
+
+        class Silent:
+            def __getattr__(self, name):
+                if name.startswith("_") or name == "console":
+                    raise AttributeError(name)
+                return lambda *args, **kwargs: None
+
+        root = Path(tempfile.mkdtemp(prefix="dgc-mods-welcome-"))
+        cfg = object.__new__(Config)
+        cfg.project_root, cfg.project_dir, cfg._persist = root, root / ".dgc", False
+        cfg.data = copy.deepcopy(DEFAULTS)
+        cfg.data.update(base_url="http://localhost.invalid/v1", model="fixture", hooks={}, mcp_servers={},
+                        suggest=False, artifact_autostart=False, thinking="off")
+        cfg._stored_secrets, cfg._env_secret_keys = {}, set()
+        cfg.permissions = {"allow": [], "ask": [], "deny": []}
+        agent = Agent(cfg, Silent())
+        self.addCleanup(agent.mcp.stop_all)
+        for rows, columns in ((24, 80), (30, 100), (45, 160), (60, 220)):
+            class Output(DummyOutput):
+                def get_size(self, rows=rows, columns=columns):
+                    return Size(rows=rows, columns=columns)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(create_app_session(input=stack.enter_context(create_pipe_input()), output=Output()))
+                tui = TUI(cfg, agent=agent)
+                tui._sync_width = lambda: None                   # the size is this loop's, not a real terminal's
+                tui._height, tui._width = rows, columns
+                agent.mods = None
+                # Every fixed-height row under the header: status, the prompt's box, shortcuts, the tip, the mods.
+                below = lambda: tui._composer_height() + 4 + (1 if tui._tip_visible() else 0) + tui._mod_band_height()
+                bare = tui._header_height() + below()
+                agent.mods = FakeHost()
+                self.assertEqual(tui._mod_band_height(), 2)         # Tally's band, and the status line
+                fixed = tui._header_height() + below()
+                self.assertLessEqual(fixed, rows, f"{rows}x{columns}: {fixed} fixed rows")
+                self.assertLessEqual(bare, rows)
+                agent.mods = None
+
     def test_a_panel_is_drawn_under_its_name_and_its_buttons_are_pressed(self):
         host = FakeHost()
         pane = terminal.ModPane(host, "tally", "Tally")
