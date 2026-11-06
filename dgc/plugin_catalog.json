@@ -1160,6 +1160,56 @@
    "privacy_url": "https://www.mural.co/terms/privacy-statement"
   },
   {
+   "name": "cloudflare",
+   "display_name": "Cloudflare",
+   "summary": "Read your sites' traffic and analytics from Cloudflare. It can't change anything. Browser sign-in.",
+   "developer": "Cloudflare",
+   "category": "Data Analytics",
+   "install": "allow",
+   "auth": "browser",
+   "audited_on": "2026-11-06",
+   "compatibility_url": "https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/graphql",
+   "requirements": "A Cloudflare account. Cloudflare asks you to allow read access to your account and zones, including their analytics.",
+   "verification": "Cloudflare's sign-in server lets any app register, with PKCE. This server is granted read access only, and Cloudflare's GraphQL API makes no changes. Signing in and the tools need your account (not tested). Cloudflare now points new work to its API server, whose tools can change things, so DGC stays on this read-only one while Cloudflare runs it.",
+   "cloud_execution": true,
+   "source_kind": "preset",
+   "upstream": "https://graphql.mcp.cloudflare.com/",
+   "license": "Cloudflare service terms",
+   "license_url": "https://www.cloudflare.com/website-terms/",
+   "mcp_presets": {
+    "cloudflare": {
+     "url": "https://graphql.mcp.cloudflare.com/mcp"
+    }
+   },
+   "reviewed_reads": [
+    "graphql_schema_search",
+    "graphql_schema_overview",
+    "graphql_type_details",
+    "graphql_complete_schema",
+    "graphql_query",
+    "graphql_api_explorer",
+    "zones_list",
+    "zone_details"
+   ],
+   "metadata": {
+    "display_name": "Cloudflare",
+    "developer": "Cloudflare",
+    "category": "Data Analytics",
+    "long_summary": "Read your sites' traffic and analytics from Cloudflare. It can't change anything. Browser sign-in.",
+    "apps": [],
+    "mcps": [
+     {
+      "name": "cloudflare",
+      "url": "https://graphql.mcp.cloudflare.com/mcp",
+      "command": "",
+      "transport": "remote"
+     }
+    ]
+   },
+   "terms_url": "https://www.cloudflare.com/website-terms/",
+   "privacy_url": "https://www.cloudflare.com/privacypolicy/"
+  },
+  {
    "name": "runway",
    "display_name": "Runway",
    "summary": "Make videos and images with Runway's models. Browser sign-in.",

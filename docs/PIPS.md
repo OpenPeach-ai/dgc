@@ -1224,6 +1224,8 @@ the default gets one with **Give this Pip a computer…**, or `dgc pips computer
 a job change like any other. Ask the main chat for a Pip without a computer and it makes one
 without.
 
+  When a plugin can read what a Pip's job needs, the Pip reads it there rather than driving a browser on its computer:
+  a read needs no approval. **Cloudflare** is the example: its plugin only reads, so a daily traffic Pip runs unattended.
 - **Reading is free.** During a run the Pip opens, reads, scrolls and clicks through public
   websites on its own.
 - **It copes with how pages behave.** It waits for results a page is still loading, follows a link that opens a new

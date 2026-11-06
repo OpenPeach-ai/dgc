@@ -110,11 +110,12 @@ def _info(record, catalog) -> dict:
             # A payment plugin by its installed record or by today's catalog: either one is enough.
             "money": "money" in (record.get("risk"), entry.get("risk")),
             # Tools DGC reviewed as reads for a vendor that marks none (Aave): exact names, from DGC's catalog,
-            # and only for the package DGC reviewed (its own catalog entry at the pinned commit), never for
+            # and only for the package DGC reviewed (its own catalog entry at the pinned commit; a hosted preset has
+            # none, which an install records as "", the catalog as nothing), never for
             # another package that merely calls itself "aave".
             "reads": frozenset(r for r in entry.get("reviewed_reads") or [] if isinstance(r, str))
                      if (record.get("marketplace") == "dgc-curated" and record.get("upstream") == entry.get("upstream")
-                         and record.get("source_pin") == entry.get("sha")) else frozenset(),
+                         and (record.get("source_pin") or "") == (entry.get("sha") or "")) else frozenset(),
             # DGC's own Composio (its catalog preset, not another package that calls itself "composio"): its
             # multi-execute tool counts as a read when every app call inside it is one DGC reviewed (composio_reads).
             "composio": (record["name"] == "composio" and record.get("marketplace") == "dgc-curated"
@@ -1029,4 +1030,6 @@ def instructions(plugins_now) -> str:
             "(an address, an account, an ID) in a tool's inputs: ask the user for it first. "
             "If an enabled plugin supplies the requested app, use plugin_tools and call_plugin; do not ask for a "
             "second Composio sign-in with connect_app. "
+            "When a plugin can read what your job needs, read it there rather than driving a browser on your computer: "
+            "a tool marked [runs] needs no approval and no sign-in on a web page. "
             + ("Your plugins: " + "; ".join(mine) + "." if mine else ""))

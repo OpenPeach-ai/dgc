@@ -11002,7 +11002,8 @@ def test_extension_vsix_guard():
         "extension/media/plugin-logos/atlassian-rovo.png",
         "extension/media/plugin-logos/build-web-apps.png",
         "extension/media/plugin-logos/calendar.png", "extension/media/plugin-logos/canva.png",
-        "extension/media/plugin-logos/cardboard.png", "extension/media/plugin-logos/higgsfield.png",
+        "extension/media/plugin-logos/cardboard.png", "extension/media/plugin-logos/cloudflare.png",
+        "extension/media/plugin-logos/higgsfield.png",
         "extension/media/plugin-logos/runway.png",
         "extension/media/plugin-logos/composio.svg",
         "extension/media/plugin-logos/contacts.png", "extension/media/plugin-logos/dgc.svg",
@@ -11156,7 +11157,7 @@ def test_extension_vsix_guard():
         "extension/licenses/PROSEMIRROR-LICENSES.txt",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 195)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 196)
     # The diagram renderer is the one member allowed past the general size ceiling, and the only
     # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
     # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real

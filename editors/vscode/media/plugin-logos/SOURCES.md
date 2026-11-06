@@ -111,4 +111,5 @@ vendor's plugin; no partnership implied. Bundled locally, no remote image reques
 
 - cardboard: https://cardboard.ai/images/favicon-circle.png (SHA-256 of the download `97c482c1e8074211326a6c8f81741a3676f44241b2b896bb4a4b85ede481c9ea`)
 - higgsfield: https://higgsfield.ai/apple-icon.png (SHA-256 `47f5136c65f9dd2360c59d2b65d06d9e7289230aa4edd7b150f28e6f0582bf1c`)
+- cloudflare: https://developers.cloudflare.com/favicon.png (SHA-256 `a0b50612a24de2d0fbe05e9af46366ff466c2ed879de947e27d557165f0117be`)
 - runway: https://runwayml.com/icon.png (SHA-256 `f545e0e706d0c6be0e8602a8e8d685d4f43ab72880bd5e6a234916e765ff2b70`)
