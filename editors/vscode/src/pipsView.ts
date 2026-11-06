@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import type { Artifacts } from './artifacts';
 import { mcpAppsHost } from './mcpApps';
 import { handleVideoMessage, VIDEO_MESSAGES } from './videoHost';
+import { displayMentions, workspaceFiles } from './mentionsHost';
 
 /** What a Pip's page uses of the artifacts (artifacts.ts): the person's dashboards, and opening one. */
 type PipArtifactsHub = Pick<Artifacts, 'list' | 'open' | 'offers'>;
@@ -61,6 +62,7 @@ export class PipsEditor implements vscode.Disposable {
   private spoolDir = '';
   private backendIdentity?: object;
   private backgroundSetup = false;
+  private displayMentions = false;
   private state: { connected: boolean; supported: boolean; enabled: boolean } = { connected: false, supported: false, enabled: false };
   /** Reads the extension host makes for itself (the attention watcher), never a webview's. */
   private hostReads = new Map<string, (event: any) => void>();
@@ -182,6 +184,7 @@ export class PipsEditor implements vscode.Disposable {
     this.backendIdentity = backendIdentity;
     this.backgroundSetup = capabilities?.pips_setup_notifications === 1;
     this.apiVersion = Number.isSafeInteger(capabilities?.pips_api_version) ? capabilities.pips_api_version : 0;
+    this.displayMentions = capabilities?.pip_display_mentions === 1;
     this.desktopStream = capabilities?.pips_desktop === 1;
     this.learn = Number(capabilities?.learn?.version) >= 1;
     this.spoolDir = capabilities?.image_spool === true && typeof capabilities?.image_spool_dir === 'string' ? capabilities.image_spool_dir : '';
@@ -195,7 +198,7 @@ export class PipsEditor implements vscode.Disposable {
     // Whether a folder is open in this window: with none, the Pips view's Project tab says to open one rather than show
     // the Pips of wherever DGC happened to start. Left out where the editor doesn't say.
     const folder = vscode.workspace ? (vscode.workspace.workspaceFolders?.length ?? 0) > 0 : undefined;
-    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, ...(folder === undefined ? {} : { folder }), ...this.state };
+    const connection = { type: 'pipsConnection', generation: this.generation, apiVersion: this.apiVersion, backgroundSetup:this.backgroundSetup, displayMentions:this.displayMentions, ...(folder === undefined ? {} : { folder }), ...this.state };
     this.post(connection);
     for (const id of this.computers.keys()) this.post(connection, 'computer:' + id);
   }
@@ -519,6 +522,11 @@ export class PipsEditor implements vscode.Disposable {
       if (this.apiVersion >= 67 && ARTIFACT_ID.test(id) && ['doc', 'sheet', 'dashboard'].includes(kind)) this.artifacts?.()?.open(id, { type: kind });
       return;
     }
+    if (message?.type === 'pipsFiles' && !computer) {
+      // A project Pip's @ list: the files of this window's folders, by the paths the Pip reads them at.
+      void workspaceFiles().then(files => this.post({ type: 'pipsFiles', files: files.map(f => ({ label: f.relative_path })) }, surface), () => {});
+      return;
+    }
     if (message?.type === 'pipsPluginLogos' && !computer) {
       // The logos of the plugins a Pip's replies used ("Used [logo] Aave"), by id; "" for one with none.
       const ids = Array.isArray(message.plugins) ? message.plugins.filter((id: unknown) => typeof id === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)).slice(0, 16) : [];
@@ -626,6 +634,11 @@ export class PipsEditor implements vscode.Disposable {
     if ([request.model_choice, request.changes?.model_choice].some(choice => choice?.mode === 'subscription') && this.apiVersion < 55) { fail('Update DGC to run a Pip on your own Claude Code or Codex.'); return; }
     // API 70: a Pip on DGC Router (model_choice mode "router").
     if ([request.model_choice, request.changes?.model_choice].some(choice => choice?.mode === 'router') && this.apiVersion < 70) { fail('Update DGC to run a Pip on DGC Router.'); return; }
+    // Display-only, and only to a DGC that keeps them. Anything off leaves the plain words in the bubble.
+    if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'display_mentions')) {
+      const marks = this.displayMentions ? displayMentions(request.display_mentions) : undefined;
+      if (marks) request.display_mentions = marks; else delete request.display_mentions;
+    }
     if (request.type === 'send_pip_message' && Object.prototype.hasOwnProperty.call(request, 'chat_options') && this.apiVersion < 24) { fail('Update DGC to change context and thinking.'); return; }
     if (request.type === 'send_pip_message' && Number(request.chat_options?.context_size) > 32768 && this.apiVersion < 25) { fail('Update DGC for a context window above 32K tokens.'); return; }
     if (['propose_pip_calendar_action','prepare_pip_calendar_draft'].includes(request.type) && request.event && ['attendees','repeat','send_invitations'].some(key => Object.prototype.hasOwnProperty.call(request.event,key)) && this.apiVersion < 38) { fail('Update DGC for calendar invitations and repeating events.'); return; }

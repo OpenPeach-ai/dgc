@@ -7562,6 +7562,44 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_mentions"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "plugins": {
+              "type": "array"
+            },
+            "pips": {
+              "type": "array"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "plugins",
+            "pips"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_followups"
             },
             "seq": {
@@ -14658,6 +14696,27 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chatdgc_mentions"
+            },
+            "chat_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chatdgc_library_file"
             },
             "chat_id": {
@@ -14776,6 +14835,9 @@
             },
             "model": {
               "type": "string"
+            },
+            "display_mentions": {
+              "type": "array"
             },
             "output": {
               "type": "string",

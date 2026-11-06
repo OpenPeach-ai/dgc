@@ -130,7 +130,7 @@ test("a send refused before it started: a short error with Retry, your text back
     await s.page.keyboard.press("Enter");
     await s.send({ type: "error", message: "No model is set up yet. Choose one in Settings." });
     await s.frame();
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "Summarise my notes", "back in the box");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "Summarise my notes", "back in the box");
     assert.deepEqual(await s.text(".cd-user"), [], "the bubble goes with it");
     assert.match((await s.text(".cd-send-failed"))[0], /^Didn't send: No model is set up yet\. Choose one in Settings\. Retry$/);
     assert.equal(await s.page.locator(".cd-waiting").count(), 0);
@@ -138,7 +138,7 @@ test("a send refused before it started: a short error with Retry, your text back
     const sends = await s.posted("send");
     assert.equal(sends.length, 2);
     assert.equal(sends[1].text, "Summarise my notes");
-    assert.equal(await s.page.locator("#cd-input").inputValue(), "", "sent again from the card");
+    assert.equal(await s.page.evaluate(() => document.getElementById("cd-input").value), "", "sent again from the card");
     assert.equal(await s.page.locator(".cd-send-failed").count(), 0);
     assert.equal(await s.page.locator(".cd-waiting").count(), 1, "waiting again");
     assert.deepEqual(s.errors, []);

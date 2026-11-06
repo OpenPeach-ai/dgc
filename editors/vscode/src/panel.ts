@@ -1,3 +1,4 @@
+import { workspaceFiles } from "./mentionsHost";
 import { APP_CONNECTORS, connectorUrl, ownAppRedirect } from "./appConnectors";
 import { COMPOSIO_CATALOG } from "./composioConnections";
 import * as vscode from "vscode";
@@ -5197,6 +5198,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pipsOpenPhoto":
       case "pipsOpenArtifact":
       case "pipsPluginLogos":
+      case "pipsFiles":
         if (msg.documentId !== this.pipsDocumentId) return;
         this.ensurePipsBridge().receive(msg);
         return;
@@ -5936,18 +5938,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendFiles(): Promise<void> {
-    const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,out,.venv,.next}/**", 600);
-    const multiRoot = (vscode.workspace.workspaceFolders?.length || 0) > 1;
-    const files = uris.map((uri) => {
-      const folder = vscode.workspace.getWorkspaceFolder(uri);
-      return {
-        label: vscode.workspace.asRelativePath(uri, multiRoot),
-        uri: uri.toString(),
-        path: uri.fsPath,
-        relative_path: folder ? vscode.workspace.asRelativePath(uri, false) : uri.fsPath,
-        workspace: folder?.name || "",
-      };
-    }).sort((a, b) => a.label.localeCompare(b.label));
+    const files = await workspaceFiles();
     this.post({ type: "files", files });
   }
 
@@ -9387,6 +9378,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const queueCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.css"));
+    const mentionsCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.css"));
+    const mentionsJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "mentions.js"));
     const queueJs = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "messagequeue.js"));
     const genuiCss = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "genui.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
@@ -9449,6 +9442,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${css}">
 <link rel="stylesheet" href="${genuiCss}">
 <link rel="stylesheet" href="${queueCss}">
+<link rel="stylesheet" href="${mentionsCss}">
 <link rel="stylesheet" href="${voicebarCss}">
 <link rel="stylesheet" href="${pipSetupStyle}">
 <link rel="stylesheet" href="${mcpAppsCss}">
@@ -9697,6 +9691,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${pluginCallsJs}"></script>
 <script nonce="${nonce}" src="${promptRailJs}"></script>
 <script nonce="${nonce}" src="${numberedListJs}"></script>
+<script nonce="${nonce}" src="${mentionsJs}"></script>
 <script nonce="${nonce}" src="${modsJs}"></script>
 <script nonce="${nonce}" src="${readAloudJs}"></script>
 <script nonce="${nonce}" src="${traceJs}"></script>

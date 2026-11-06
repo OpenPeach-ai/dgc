@@ -544,7 +544,7 @@ class ChatService:
              "chatdgc_folder": self._folder, "chatdgc_set_folder": self._set_folder, "chatdgc_work_brief": self._work_brief,
              "chatdgc_projects": self._projects, "chatdgc_project": self._project, "chatdgc_move": self._move,
              "chatdgc_library": self._library, "chatdgc_library_file": self._library_file,
-             "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_draft": self._draft,
+             "chatdgc_action": self._action, "chatdgc_pips": self._pips, "chatdgc_mentions": self._mentions, "chatdgc_draft": self._draft,
              "chatdgc_canvas": self._canvas, "chatdgc_widget_report": self._widget_report, "chatdgc_widgets": self._widgets,
              "chatdgc_context": lambda cmd: self._context_later(cmd["conversation_id"]),
              "chatdgc_context_breakdown": self._breakdown,
@@ -1761,7 +1761,8 @@ class ChatService:
         if personal is None:
             return []
         rows = self._pips_call({"type": "list_pips", "workspace_id": personal["id"], "order": "recent", "limit": 50})
-        return [{"id": p["id"], "name": p.get("name") or "Pip", "goal": str(p.get("goal") or "")[:200]}
+        return [{"id": p["id"], "name": p.get("name") or "Pip", "goal": str(p.get("goal") or "")[:200],
+                 "pip_type": str(p.get("pip_type") or "")}
                 for p in rows.get("pips") or [] if p.get("status") != "archived"]
 
     def _pips(self, cmd: dict) -> None:
@@ -1771,7 +1772,35 @@ class ChatService:
         except Exception as exc:                      # noqa: BLE001 -- Pips off, or the runner can't start: said
             self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=[], error=" ".join(str(exc).split())[:300])
             return
-        self.emit("chatdgc_pips", request_id=cmd["request_id"], pips=pips)
+        self.emit("chatdgc_pips", request_id=cmd["request_id"],
+                  pips=[{key: p[key] for key in ("id", "name", "goal")} for p in pips])
+
+    def _mentions(self, cmd: dict) -> None:
+        """What this box can name with @: the plugins a reply can use, and your Personal Pips."""
+        try:
+            plugins = self.engine.mentionable_plugins()
+        except Exception:                             # noqa: BLE001 -- none listed rather than no list
+            plugins = []
+        error = ""
+        try:
+            pips = self._personal_pips()
+        except Exception as exc:                      # noqa: BLE001 -- Pips off, or the runner can't start: said
+            pips, error = [], " ".join(str(exc).split())[:300]
+        self.emit("chatdgc_mentions", request_id=cmd["request_id"], plugins=plugins, pips=pips,
+                  **({"error": error} if error else {}))
+
+    def _named_pips(self, mentions) -> list:
+        """The Pips a message names, as the model is told of them: looked up here, so a goal is the Pip's own."""
+        from ..prompt_display import named_pips
+        named = named_pips(mentions)
+        if not named:
+            return []
+        try:
+            known = {p["id"]: p for p in self._personal_pips()}
+        except Exception:                             # noqa: BLE001 -- the name and type are still true
+            known = {}
+        return [{"name": mark["label"], "type": mark["pip_type"], "goal": known.get(mark["identity"], {}).get("goal", "")}
+                for mark in named]
 
     def _hand(self, conversation_id, message_id, action_id, pip_id) -> dict:
         pip = next((p for p in self._personal_pips() if p["id"] == pip_id), None)
@@ -1926,12 +1955,16 @@ class ChatService:
     def _send(self, cmd: dict) -> None:
         def run(cancel, on_start, stream_for, activity):
             text = self._mod_message(cmd["conversation_id"], cmd["text"])
+            # Display-only, and only while the words are the ones the marks were drawn on (a mod may have changed them).
+            from ..prompt_display import checked_mentions
+            mentions = checked_mentions(cmd.get("display_mentions"), text)
             try:
                 return self.engine.send(cmd["conversation_id"], text, model=cmd.get("model"),
                                         thinking=cmd.get("thinking"), search=cmd.get("search", "auto"),
                                         attachments=cmd.get("attachments"), study=cmd.get("study"),
                                         voice=cmd.get("voice") is True,
                                         output=cmd.get("output"),
+                                        display_mentions=mentions, named_pips=self._named_pips(mentions),
                                         canvas_selection=cmd.get("canvas_selection"),
                                         on_start=on_start, on_activity=activity, cancel=cancel, **stream_for())
             finally:

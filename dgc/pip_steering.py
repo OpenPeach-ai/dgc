@@ -58,7 +58,12 @@ def send(store, pip, run, req, actor):
                          'VALUES(?,?,?,?,?,?,?,?,?,?)',
                          (message_id, pip['id'], pip['workspace_id'], run['id'], req['text'], req['request_key'], req['digest'], actor, stamp, 'pending'))
         row = store.db.execute('SELECT * FROM pip_chat_steers WHERE id=?', (message_id,)).fetchone()
-    return {'run': store.run(run['id']), 'message': message(row, live['status'])}
+        from .pip_chat import save_mentions
+        save_mentions(store.db, pip['id'], message_id, req.get('display_mentions'))
+    said = message(row, live['status'])
+    if req.get('display_mentions'):
+        said['display_mentions'] = req['display_mentions']
+    return {'run': store.run(run['id']), 'message': said}
 
 
 def message(row, run_status):

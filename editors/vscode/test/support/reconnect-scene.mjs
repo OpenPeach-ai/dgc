@@ -40,7 +40,7 @@ function load() {
   if (assets) return assets;
   const panelSrc = readFileSync(root + "/src/panel.ts", "utf8");
   const css = readFileSync(root + "/media/main.css", "utf8");
-  const mainJs = readFileSync(root + "/media/main.js", "utf8");
+  const mainJs = readFileSync(root + "/media/mentions.js", "utf8") + "\n" + readFileSync(root + "/media/main.js", "utf8");
   const markdownJs = buildSync({ entryPoints: [root + "/src/markdown.ts"], bundle: true,
     format: "iife", globalName: "DgcMarkdown", write: false, platform: "browser" }).outputFiles[0].text;
   const skeleton = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0])

@@ -41,6 +41,26 @@
   }
 
   const log = $("cd-log"), scroller = $("cd-scroll"), input = $("cd-input"), send = $("cd-send"), stop = $("cd-stop");
+  // The box holds marks (@plugins, @Outputs, @Pips, @files) where they were typed, so it is the same kind of box as
+  // Work's, answering this page as the <textarea> it was written against (media/mentions.js).
+  const M = window.DgcMentions;
+  const field = M.box(input, {
+    maxLength: Number(input.dataset.maxlength) || 0,
+    edit: (change) => edit(change),
+    pillOptions: (part) => markLook(part),
+    removed: () => dropUnmarkedFiles(),
+    // Pasted back, a mark this chat can still use is a mark again; any other is the words it was copied as.
+    pasteBack: (part) => {
+      if (part.kind === "plugin") return mentionData.plugins.some((row) => row.id === part.identity);
+      if (part.kind === "artifact") return !!artifactsOffer;
+      if (part.kind === "pip") return M.PIP_TYPES.includes(part.pipType);
+      if (part.kind === "file" && part.identity && state.pending.length < MAX_PENDING) {
+        fileMarkPending(part.identity, part.label);
+        return true;
+      }
+      return false;
+    },
+  });
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.("button.genui-send");
     if (!button || !button.closest("#cd-log .cd-msg.cd-assistant")) return;
@@ -810,6 +830,7 @@
     const names = item.pending.map((p) => p.name).filter(Boolean);
     const model = item.model || state.conversation?.model || state.defaultModel || "";
     state.messages.push({ id: `local-${n}`, role: "user", local: true, text: item.text || names.join(", "),
+                          ...(item.text && item.mentions?.length ? { display_mentions: item.mentions } : {}),
                           created_at: new Date().toISOString() },
                         { id: `local-reply-${n}`, role: "assistant", local: true, text: "", thinking: "",
                           waiting: { model, since: Date.now(), usual_s: 0 }, item });
@@ -961,8 +982,10 @@
   function chips() {
     const box = $("cd-chips");
     // Closed by hand is a decision, not an edit: undo does not bring it back.
-    box.replaceChildren(...state.pending.map((item, i) => chip(item, () => { history?.dismiss(item); state.pending.splice(i, 1); chips(); controls(); input.focus(); })));
-    box.hidden = !state.pending.length;
+    // A file marked in the box shows there, not in a chip as well.
+    const shown = state.pending.map((item, i) => (item.fromPill ? null : chip(item, () => { history?.dismiss(item); state.pending.splice(i, 1); chips(); controls(); input.focus(); }))).filter(Boolean);
+    box.replaceChildren(...shown);
+    box.hidden = !shown.length;
   }
   // ---- images the chat keeps, shown as thumbnails (asked of the backend once each, then remembered)
   const images = new Map();          // attachment id -> {data} | {error} | "asked"
@@ -1492,7 +1515,16 @@
         for (const item of pictures) row.append(thumb(item));
         node.append(row);
       }
-      const others = sent.filter((item) => !pictures.includes(item));
+      // A file marked in its sentence is there, not in a second chip above it.
+      const marks = M.validMarks(String(message.text || ""), message.display_mentions) ? message.display_mentions : [];
+      const marked = marks.filter((m) => m.kind === "file").map((m) => m.label.split("/").pop());
+      const others = sent.filter((item) => {
+        if (pictures.includes(item)) return false;
+        const at = marked.indexOf(item.name);
+        if (at < 0) return true;
+        marked.splice(at, 1);
+        return false;
+      });
       if (others.length) {
         const list = el("ul", "cd-chips cd-sent");
         list.setAttribute("aria-label", "Attached");
@@ -1520,7 +1552,8 @@
       if (state.editing === message.id) node.append(editor(message));
       else if (message.text) {
         const bubble = el("div", "cd-bubble");
-        bubble.textContent = message.text;
+        const drawn = M.sentNode(String(message.text), message.display_mentions, { pillFor: markLook });
+        if (drawn) bubble.append(drawn); else bubble.textContent = message.text;
         node.append(bubble);
       }
       if (message.local === true) {
@@ -3167,6 +3200,73 @@
     announce: (text) => { const say = $("cd-announce"); if (say) say.textContent = text; },
   }) : null;
   mods?.menu(input, { host: $("cd-box"), cleared: () => { grow(); saveDraft(); } });
+  // ---- @ mentions: Work's marks in this box, listing only what a chat can really use. The plugins a reply can call and
+  // your Personal Pips are the backend's to say (chatdgc_mentions); the Outputs are the ones its Output chip offers; a
+  // file is one this window has open, attached the way the paperclip attaches it.
+  const MAX_PENDING = 10;
+  const mentionData = { offered: false, plugins: [], pips: [], loading: false, error: "", files: [], askedAt: 0, filesAsked: false };
+  function askMentionSources() {
+    if (!mentionData.filesAsked) { mentionData.filesAsked = true; vscode.postMessage({ type: "reqFiles" }); }
+    if (Date.now() - mentionData.askedAt < 30000) return;
+    mentionData.askedAt = Date.now(); mentionData.loading = true;
+    vscode.postMessage({ type: "mentionSources" });
+  }
+  /** How a mark looks: a plugin's own logo (asked for once), an Output's icon from the Output menu. */
+  function markLook(part) {
+    const kind = part.kind, id = part.identity;
+    if (kind === "plugin" && PLUGIN_ID.test(id)) wantLogo(id);
+    return { logo: kind === "plugin" ? pluginLogos.get(id) || "" : "",
+             glyph: kind === "artifact" ? OUTPUT_CHOICES.find(([value]) => value === id)?.[3] || "output" : "" };
+  }
+  function fileMarkPending(path, label) {
+    vscode.postMessage({ type: "mentionFile", path });
+    if (!state.pending.some((item) => item.fromPill && item.path === path)) {
+      state.pending = [...state.pending, { kind: "file", path, name: label.split(/[\\/]/).pop() || "file", label, fromPill: true }];
+    }
+  }
+  // A file's mark gone, by Backspace, a selection deleted or an undo: so is what it stood for.
+  function dropUnmarkedFiles() {
+    const shown = new Set([...input.querySelectorAll(".pill-file")].map((node) => node.textContent));
+    const kept = state.pending.filter((item) => !item.fromPill || shown.has(item.label));
+    if (kept.length !== state.pending.length) { state.pending = kept; chips(); controls(); }
+  }
+  input.addEventListener("input", dropUnmarkedFiles);
+  const mentionPicker = M.picker(field, $("cd-pop"), {
+    edit: (change) => edit(change),
+    refresh: askMentionSources,
+    pipsDetail: "Your Personal Pips · no work starts",
+    sources: () => ({
+      plugins: mentionData.plugins,
+      outputs: artifactsOffer ? OUTPUT_CHOICES.filter(([value]) => !Array.isArray(artifactsOffer.outputs) || !artifactsOffer.outputs.length || artifactsOffer.outputs.includes(value)) : [],
+      pips: mentionData.offered ? mentionData.pips.filter((p) => M.PIP_TYPES.includes(p.pip_type)).map((p) => ({ ...p, pip_id: p.id, detail: `Personal · ${p.id.slice(-8)}` })) : undefined,
+      pipsLoading: mentionData.loading, pipsError: mentionData.error, pipsEmpty: "No Personal Pips yet",
+      files: mentionData.files,
+    }),
+    face: (it, i) => {
+      const index = it.pipRow ? M.PIP_TYPES.indexOf(it.pipRow.pip_type) : -1;
+      if (index < 0 || !window.PipConcepts?.plush) return "";
+      M.ensureFaceStyles(document);
+      return `<span class="pi-pip-face" aria-hidden="true">${window.PipConcepts.plush.markup({ index, name: it.pipRow.name }, "idle", `pickerPip${i}`, { includeStyles: false })}</span>`;
+    },
+    icon: (it) => {
+      if (it.pluginId) {
+        wantLogo(it.pluginId);
+        const logo = pluginLogos.get(it.pluginId);
+        return `<span class="pi-icon pi-plugin-mark" aria-hidden="true" data-plugin-mark="${M.esc(it.pluginId)}">${logo ? `<img src="${M.esc(logo)}" alt="">` : '<span class="codicon codicon-plug"></span>'}</span>`;
+      }
+      return it.artifactKind ? `<span class="pi-icon codicon codicon-${M.esc(it.artifactGlyph)}" aria-hidden="true"></span>`
+        : `<span class="pi-icon codicon ${M.rowIconClass(it)}" aria-hidden="true"></span>`;
+    },
+    // The name is the words: the model reads "ask Scout", and what a Pip is comes beside them (chatdgc_send's named Pips).
+    pipPart: (p) => { const name = p.name.replace(/\s+/g, " ").trim(); return { kind: "pip", label: name, wire: name, identity: p.id, pipType: p.pip_type }; },
+    filePart: (file) => (file.path ? { kind: "file", label: file.label, wire: "", identity: file.path } : null),
+    allow: (part) => {
+      if (part.kind !== "file" || state.pending.length < MAX_PENDING) return true;
+      showNotice(`Attach up to ${MAX_PENDING} things to one message.`, "info");
+      return false;
+    },
+    picked: (part) => { if (part.kind === "file") { fileMarkPending(part.identity, part.label); chips(); } },
+  });
   /** Stop: the reply ends where it is, and nothing queued goes after it. */
   function stopReply() { state.stopping = true; vscode.postMessage({ type: "stop" }); }
   stop.addEventListener("click", stopReply);
@@ -3255,7 +3355,8 @@
     if (state.research && !text.trim()) return;
     const item = { text, research: !!state.research, model: modelPick.value || "", thinking: thinkingPick.value || "",
                    search: searchMode(), study: !!state.study, pending: state.pending,
-                   output: !state.research && artifactsOffer && state.output !== "auto" ? state.output : "" };
+                   output: !state.research && artifactsOffer && state.output !== "auto" ? state.output : "",
+                   mentions: state.research ? [] : field.marks(text), parts: field.parts() };
     // One step, so Cmd+Z right after sending brings the message back, chips and all.
     edit(() => { input.value = ""; state.pending = []; });
     grow(); saveDraft(); chips();
@@ -3277,6 +3378,7 @@
     }
     vscode.postMessage({ type: "send", text: item.text, model: item.model, thinking: item.thinking,
                          search: item.search, study: item.study, ...(spoken ? { voice: true } : {}),
+                         ...(item.mentions?.length ? { display_mentions: item.mentions } : {}),
                          ...(item.output ? { output: item.output } : {}),
                          ...(item.pending.length ? { attachments: item.pending.map(({ kind, path, name, data, text: pasted, conversation_id, project_id, attachment_id }) =>
                            ({ kind, name, ...(path ? { path } : {}), ...(data ? { data } : {}), ...(pasted ? { text: pasted } : {}),
@@ -3328,7 +3430,7 @@
   function giveBack(item) {
     const typed = input.value.trim();
     edit(() => {
-      input.value = typed ? `${typed}\n\n${item.text}` : item.text;
+      if (!typed && item.parts) field.writeParts(item.parts); else input.value = typed ? `${typed}\n\n${item.text}` : item.text;
       state.pending = [...state.pending, ...item.pending];
     });
     chips();
@@ -4257,7 +4359,7 @@
         // was typed comes back to the box rather than being lost.
         if (state.busy && !state.replyId && state.lastSent && !input.value.trim()) {
           const sent = state.lastSent;
-          edit(() => { input.value = sent.text; state.pending = sent.pending; });
+          edit(() => { if (sent.item?.parts) field.writeParts(sent.item.parts); else input.value = sent.text; state.pending = sent.pending; });
           grow(); saveDraft(); chips();
           researchMode(state.lastSent.research);
         }
@@ -4316,11 +4418,22 @@
         state.windows = Array.isArray(msg.presets) ? msg.presets.filter((p) => typeof p === "string") : [];
         if (!$("cd-context-pop").hidden) popover();
         return;
+      case "mentionSources":
+        mentionData.offered = msg.offered === true; mentionData.loading = false;
+        mentionData.plugins = (Array.isArray(msg.plugins) ? msg.plugins : []).filter((row) => row && PLUGIN_ID.test(String(row.id || "")) && typeof row.name === "string");
+        mentionData.pips = (Array.isArray(msg.pips) ? msg.pips : []).filter((p) => p && /^pip_[a-f0-9]{32}$/.test(String(p.id || "")) && typeof p.name === "string");
+        mentionData.error = typeof msg.error === "string" ? msg.error : "";
+        mentionPicker.refresh();
+        return;
+      case "files":
+        mentionData.files = (Array.isArray(msg.files) ? msg.files : []).filter((f) => f && typeof f.label === "string" && typeof f.path === "string").slice(0, 600);
+        mentionPicker.refresh();
+        return;
       case "pluginLogos":
         for (const [id, src] of Object.entries(msg.logos && typeof msg.logos === "object" ? msg.logos : {})) {
           if (!PLUGIN_ID.test(id) || typeof src !== "string" || (src && !/^data:image\/(?:png|svg\+xml|x-icon);base64,[A-Za-z0-9+/=]+$/.test(src))) continue;
           pluginLogos.set(id, src);
-          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
+          if (src) for (const mark of document.querySelectorAll(`.cd-plugin-mark[data-plugin-mark="${id}"], .composer-plugin-mark[data-plugin-mark="${id}"], .pi-plugin-mark[data-plugin-mark="${id}"]`)) mark.replaceChildren(logoImage(src));
           // A card's mark: the logo in place of the letter (none: the letter stays).
           if (src) for (const mark of document.querySelectorAll(`.cd-card-mark[data-plugin-mark="${id}"]`)) {
             const img = logoImage(src);
@@ -4390,9 +4503,28 @@
 
   // ---- a draft survives a reload, per chat
   function draftKey() { return `draft:${state.conversation?.id || "new"}`; }
-  function saveDraft() { try { vscode.setState({ ...(vscode.getState() || {}), [draftKey()]: input.value.slice(0, 100000) }); } catch {} }
+  function saveDraft() {
+    try { vscode.setState({ ...(vscode.getState() || {}), [draftKey()]: input.value.slice(0, 100000), [`${draftKey()}:marks`]: field.parts() || undefined }); } catch {}
+  }
   // Another chat's draft starts another history: Cmd+Z in it must not bring back the chat that was left.
-  function restoreDraft() { const saved = (vscode.getState() || {})[draftKey()]; input.value = typeof saved === "string" ? saved : ""; history?.reset(); grow(); }
+  function restoreDraft() {
+    const kept = vscode.getState() || {}, saved = typeof kept[draftKey()] === "string" ? kept[draftKey()] : "";
+    const parts = savedMarks(kept[`${draftKey()}:marks`], saved);
+    state.pending = state.pending.filter((item) => !item.fromPill);
+    if (parts) {
+      for (const part of parts) if (part.kind === "file" && part.identity) fileMarkPending(part.identity, part.label);
+      field.writeParts(parts);
+    } else field.writeParts(saved ? [saved] : []);
+    chips(); history?.reset(); grow();
+  }
+  /** A draft's marks as they were saved, if they still spell its words. Anything else: the plain words. */
+  function savedMarks(parts, text) {
+    if (!Array.isArray(parts) || parts.length > 256) return null;
+    const fine = parts.every((part) => typeof part === "string" || (part && typeof part === "object" && ["plugin", "artifact", "pip", "file"].includes(part.kind)
+      && typeof part.label === "string" && part.label.length <= 8192 && typeof part.wire === "string" && part.wire.length <= 8192 && typeof part.identity === "string" && part.identity.length <= 4096
+      && (part.kind !== "pip" || M.PIP_TYPES.includes(part.pipType))));
+    return fine && parts.map((part) => (typeof part === "string" ? part : part.wire)).join("") === text ? parts : null;
+  }
 
   // ---- keyboard shortcuts (ChatGPT's): Ctrl on Windows and Linux, Cmd on a Mac
   const MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");
