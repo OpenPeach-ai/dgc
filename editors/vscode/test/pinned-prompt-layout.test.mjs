@@ -7,6 +7,7 @@
 // replayed and re-measured transcripts all agree. Every check reads computed style and geometry --
 // a string test cannot see stickiness, and jsdom (pinned-prompt.test.mjs) lays nothing out.
 import { after, before, test } from "node:test";
+import { messageQueueJs } from "./support/webview-dom.mjs";
 import assert from "node:assert/strict";
 import { THEMES, panelHtml } from "./support/options-scene.mjs";
 
@@ -74,7 +75,7 @@ async function openPage({ width = 460, height = 800, theme = "dark-modern", forc
     window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__posted.push(m), getState: () => undefined, setState() {} });
     eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
     eval(mjs);
-  }, [mainJs, markdownJs]);
+  }, [mainJs, messageQueueJs + "\n" + markdownJs]);
   await page.evaluate(pageHelpers);
   const send = (data) => page.evaluate((d) => window.dispatchEvent(new MessageEvent("message", { data: d })), data);
   const events = async (list) => { for (const event of list) await send({ type: "event", event }); };
