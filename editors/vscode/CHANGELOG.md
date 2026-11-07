@@ -2,6 +2,7 @@
 
 ## 0.35.0 — 2026-11-06
 
+- Trace's popup is tighter: smaller type, shorter rows and a narrower window. Dragging its timeline no longer draws a box around it, and Play and Pause are drawn icons in a small purple circle.
 - A plugin's card in a reopened Work chat waits for its plugin to connect, so a window reload no longer leaves it saying "isn't connected in this chat now" with a Retry.
 - A Pip's model menu opens over the Latest button. ChatDGC's model name no longer stays cut short after a window reload. "All quiet" on the home row takes its own line beside many faces.
 - Upgrading keeps your working model: adding your first saved provider no longer moves the default or hides the model you already ran on.

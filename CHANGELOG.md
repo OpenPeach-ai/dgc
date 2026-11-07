@@ -6,6 +6,7 @@ Earlier releases are listed at <https://vibedgc.com/changelog>.
 
 ## 0.51.0 — 2026-11-06
 
+- Trace's popup is tighter: smaller type, shorter rows and a narrower window. Dragging its timeline no longer draws a box around it, and Play and Pause are drawn icons in a small purple circle.
 - A plugin's card in a reopened Work chat waits for its plugin. After a window reload the card asked for its data while the plugin was still connecting, and every part of it said "isn't connected in this chat now" until you pressed its Retry.
 - A Pip's model menu opens over the Latest button, so its last rows can be read and clicked in a narrow side bar. ChatDGC measures the model's name again when the row around it fills in, so the first new chat after a window reload no longer stays cut short. The home row's "All quiet" takes its own line beside many faces.
 - Upgrading keeps your working model. Adding your first saved provider moved the default to it and hid the model you already ran on from every menu, and Pips set to that model then failed. Now a model on a host that needs no key shows as a saved provider from your first look at Settings → Models and stays the default; one with a key stays the default too, listed in Settings and in ChatDGC's and Work's menus as the current host. The new provider is there to choose. Only with no model at all does the first provider become the default.

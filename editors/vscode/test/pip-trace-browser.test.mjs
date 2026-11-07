@@ -98,11 +98,53 @@ test("on a Pip's own page the dialog stands by itself: its colours, its rows, it
         green: getComputedStyle(failed.querySelector(".dgc-trace-bar")).backgroundColor, greenTime: getComputedStyle(failed.querySelector(".dgc-trace-meta span:last-child")).color };
     });
     assert.deepEqual(look, { background: "rgb(30, 30, 30)", color: "rgb(212, 212, 212)", edge: "rgb(60, 60, 60)", scrubPad: "0px", scrubBorder: "0px", glyph: "codicon",
-      height: 40, green: "rgb(118, 138, 0)", greenTime: "rgb(131, 153, 0)" });
+      height: 26, green: "rgb(118, 138, 0)", greenTime: "rgb(131, 153, 0)" });
     assert.deepEqual(await p.locator(".dgc-trace-meta span:first-child").allTextContents(), ["10,634 tk", "6 hits", "Failed", "11,275 tk"]);
     const playBox = await box(p, ".dgc-trace-play"), scrubBox = await box(p, ".dgc-trace-scrub");
-    assert.equal(playBox.width, 44);
+    assert.equal(playBox.width, 24);
     assert.equal(Math.round(playBox.y + playBox.height / 2), Math.round(scrubBox.y + scrubBox.height / 2), "the play button and the timeline on one line");
+    assert.deepEqual(errors, []);
+  } finally { await context.close(); }
+});
+
+test("the dialog is compact: small type, tight rows, a drawn play and pause, and dragging the timeline draws no box (reported 2026-11-07)", async (t) => {
+  if (skipOrFail(t)) return;
+  const { p, errors, context } = await openTrace(1000);
+  try {
+    const sizes = await p.evaluate(() => {
+      const height = (s) => document.querySelector(s).getBoundingClientRect().height;
+      return { width: document.querySelector(".dgc-trace-dialog").getBoundingClientRect().width, head: height(".dgc-trace-head"), ruler: height(".dgc-trace-ruler"),
+        transport: height(".dgc-trace-transport"), font: getComputedStyle(document.querySelector(".dgc-trace-dialog")).fontSize,
+        name: getComputedStyle(document.querySelector(".dgc-trace-head strong")).fontSize };
+    });
+    assert.ok(sizes.width <= 820, `not as wide as the screen allows (${sizes.width})`);
+    assert.ok(sizes.head <= 40 && sizes.ruler <= 25 && sizes.transport <= 41, JSON.stringify(sizes));
+    assert.equal(sizes.font, "11.5px"); assert.equal(sizes.name, "12px");
+
+    const drawn = () => p.evaluate(() => { const play = document.querySelector(".dgc-trace-play");
+      return { text: play.textContent, path: play.querySelector("svg path")?.getAttribute("d") || "", label: play.getAttribute("aria-label") }; });
+    const stopped = await drawn();
+    assert.equal(stopped.text, "", "no glyph from whichever font has one");
+    assert.ok(stopped.path); assert.equal(stopped.label, "Play trace");
+    await p.click(".dgc-trace-play");
+    const playing = await drawn();
+    assert.ok(playing.path && playing.path !== stopped.path, "a pause, drawn"); assert.equal(playing.label, "Pause trace");
+    await p.click(".dgc-trace-play");
+    assert.deepEqual(await drawn(), stopped);
+
+    const scrub = await box(p, ".dgc-trace-scrub");
+    await p.mouse.move(scrub.x + scrub.width * 0.6, scrub.y + scrub.height / 2); await p.mouse.down();
+    await p.mouse.move(scrub.x + scrub.width * 0.3, scrub.y + scrub.height / 2, { steps: 4 });
+    const outline = () => p.evaluate(() => { const n = document.querySelector(".dgc-trace-scrub"), c = getComputedStyle(n);
+      return { focused: document.activeElement === n, style: c.outlineStyle, ring: n.classList.contains("by-pointer") }; });
+    const dragging = await outline();
+    await p.mouse.up();
+    assert.deepEqual(dragging, { focused: true, style: "none", ring: true });
+    assert.deepEqual(await outline(), dragging, "still none when the mouse lets go");
+    const filled = await p.locator(".dgc-trace-scrub").evaluate((n) => parseFloat(n.style.getPropertyValue("--pos")));
+    assert.ok(filled > 20 && filled < 40, `the fill follows the thumb (${filled}%)`);
+    await p.keyboard.press("ArrowRight");
+    assert.equal((await outline()).ring, false, "the keyboard gets its focus ring back, on the thumb");
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });

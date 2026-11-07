@@ -8,59 +8,66 @@
   --text: var(--vscode-foreground, #cccccc);
   --text-strong: var(--vscode-editor-foreground, var(--vscode-foreground, #e6e6e6));
   --muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --trace-accent: #7C5CFF;
 }
 .dgc-trace-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000a; display: grid; place-items: center; padding: 24px; }
-.dgc-trace-dialog { --trace-name-width: 220px; --trace-meta-width: 190px; width: min(1080px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: 0 24px 70px #0008; font: 13px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
-.dgc-trace-head { min-height: 55px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); }
-.dgc-trace-head strong { font-size: 15px; font-weight: 600; }
+.dgc-trace-dialog { --trace-name-width: 168px; --trace-meta-width: 150px; width: min(820px, 100%); max-height: min(760px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; color: var(--text-strong); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 16px 48px #0008; font: 11.5px/1.35 var(--vscode-editor-font-family, ui-monospace, monospace); }
+.dgc-trace-head { min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
+.dgc-trace-head strong { font-size: 12px; font-weight: 600; }
 .dgc-trace-model { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dgc-trace-state { margin-left: auto; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: var(--muted); font: 12px/1.2 var(--vscode-font-family, sans-serif); }
-.dgc-trace-close { border: 0; background: none; color: var(--muted); cursor: pointer; font: 23px/1 sans-serif; padding: 4px 6px; }
+.dgc-trace-state { margin-left: auto; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted); font: 10.5px/1.4 var(--vscode-font-family, sans-serif); }
+.dgc-trace-close { border: 0; background: none; color: var(--muted); cursor: pointer; font: 16px/1 sans-serif; width: 24px; height: 24px; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 0; border-radius: 5px; }
 .dgc-trace-close:hover { color: var(--text-strong); }
-.dgc-trace-ruler { height: 34px; flex: none; position: relative; border-bottom: 1px solid var(--border); }
+.dgc-trace-ruler { height: 24px; flex: none; position: relative; border-bottom: 1px solid var(--border); }
 .dgc-trace-ticks { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); }
-.dgc-trace-ticks span { position: absolute; top: 8px; transform: translateX(-50%); color: var(--muted); font-size: 11px; }
-.dgc-trace-body { position: relative; min-height: 0; overflow: auto; padding: 5px 0; }
+.dgc-trace-ticks span { position: absolute; top: 5px; transform: translateX(-50%); color: var(--muted); font-size: 10px; }
+.dgc-trace-body { position: relative; min-height: 0; overflow: auto; padding: 3px 0; }
 .dgc-trace-grid { position: absolute; inset: 0 var(--trace-meta-width) 0 var(--trace-name-width); pointer-events: none; }
 .dgc-trace-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
-.dgc-trace-row { height: 40px; display: grid; grid-template-columns: var(--trace-name-width) minmax(0,1fr) var(--trace-meta-width); align-items: center; position: relative; }
+.dgc-trace-row { height: 26px; display: grid; grid-template-columns: var(--trace-name-width) minmax(0,1fr) var(--trace-meta-width); align-items: center; position: relative; }
 .dgc-trace-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
 .dgc-trace-row.future { opacity: .45; }
-.dgc-trace-label { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; overflow: hidden; white-space: nowrap; font-weight: 550; }
+.dgc-trace-label { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 12px; overflow: hidden; white-space: nowrap; font-weight: 500; }
 .dgc-trace-label > span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.dgc-trace-glyph { color: var(--muted); flex: none; }
+.dgc-trace-glyph.codicon[class*="codicon-"] { color: var(--muted); flex: none; font-size: 12px; }
 .dgc-trace-lane { height: 100%; position: relative; }
-.dgc-trace-bar { position: absolute; top: 16px; height: 9px; min-width: 3px; border-radius: 9px; background: var(--muted); }
+.dgc-trace-bar { position: absolute; top: calc(50% - 2.5px); height: 5px; min-width: 3px; border-radius: 5px; background: var(--muted); }
 .dgc-trace-row.model .dgc-trace-bar { background: var(--text-strong); }
 .dgc-trace-row.error .dgc-trace-bar { background: var(--err, #768A00); }
-.dgc-trace-meta { display: flex; justify-content: flex-end; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; padding-right: 16px; color: var(--muted); font-size: 11px; }
+.dgc-trace-meta { display: flex; justify-content: flex-end; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; padding-right: 12px; color: var(--muted); font-size: 10.5px; }
 .dgc-trace-meta span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .dgc-trace-meta span:last-child { color: var(--text); flex: none; }
 .dgc-trace-row.error .dgc-trace-meta span:last-child { color: var(--err-text, #839900); }
 .dgc-trace-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-strong); pointer-events: none; }
-.dgc-trace-cursor::before { content: ""; position: absolute; top: 0; left: -4px; width: 9px; height: 9px; background: var(--text-strong); transform: rotate(45deg); }
-.dgc-trace-transport { min-height: 65px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--border); }
-.dgc-trace-play { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--text-strong); color: var(--surface); font: 18px/1 sans-serif; cursor: pointer; padding: 0 0 0 2px; }
-.dgc-trace-scrub { flex: 1; min-width: 0; width: auto; border: 0; padding: 0; background: transparent; accent-color: var(--text-strong); cursor: pointer; }
-.dgc-trace-clock { width: 145px; text-align: right; color: var(--muted); white-space: nowrap; font-size: 12px; }
-@media (max-width: 700px) { .dgc-trace-dialog { --trace-name-width: 135px; --trace-meta-width: 100px; } .dgc-trace-label { padding-inline: 8px; gap: 4px; font-size: 10px; } .dgc-trace-meta { padding-right: 8px; font-size: 9px; } .dgc-trace-clock { width: 95px; font-size: 10px; } }
+.dgc-trace-cursor::before { content: ""; position: absolute; top: 0; left: -3px; width: 7px; height: 7px; background: var(--text-strong); transform: rotate(45deg); }
+.dgc-trace-transport { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-top: 1px solid var(--border); }
+.dgc-trace-play { width: 24px; height: 24px; min-width: 0; min-height: 0; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--trace-accent); color: #fff; cursor: pointer; padding: 0; transition: background-color .12s ease, transform .08s ease; }
+.dgc-trace-play:hover { background: color-mix(in srgb, var(--trace-accent) 86%, #fff); }
+.dgc-trace-play:active { transform: scale(.93); }
+.dgc-trace-play svg { width: 10px; height: 10px; display: block; fill: currentColor; }
+/* Dragging it must never box it: the page's focus ring (main.css :focus-visible) is for the keyboard, and here it goes on the thumb. */
+.dgc-trace-scrub, .dgc-trace-scrub:focus, .dgc-trace-scrub:focus-visible { outline: none; }
+.dgc-trace-scrub { --pos: 100%; -webkit-appearance: none; appearance: none; flex: 1; min-width: 0; width: auto; height: 16px; margin: 0; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.dgc-trace-scrub::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, var(--trace-accent) var(--pos), color-mix(in srgb, var(--text) 18%, transparent) var(--pos)); }
+.dgc-trace-scrub::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 11px; height: 11px; margin-top: -4px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 28%, transparent), 0 1px 2px #0006; }
+.dgc-trace-scrub:focus-visible:not(.by-pointer)::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--trace-accent), 0 0 0 4px color-mix(in srgb, var(--trace-accent) 30%, transparent); }
+.dgc-trace-clock { width: 104px; flex: none; text-align: right; color: var(--muted); white-space: nowrap; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .dgc-trace-dialog { --trace-name-width: 118px; --trace-meta-width: 92px; } .dgc-trace-label { padding-inline: 8px; gap: 4px; font-size: 10px; } .dgc-trace-meta { padding-right: 8px; font-size: 9px; } .dgc-trace-clock { width: 95px; font-size: 10px; } }
 /* The side bar, where a Pip's chat usually is: no room for a lane between a name and its numbers, so the lane takes its own
    line, the full width. The cursor, ruler and grid follow it through the two width tokens. */
 @media (max-width: 520px) {
   .dgc-trace-backdrop { padding: 8px; }
   .dgc-trace-dialog { --trace-name-width: 12px; --trace-meta-width: 12px; border-radius: 12px; }
-  .dgc-trace-head { min-height: 46px; gap: 8px; padding: 0 12px; }
-  .dgc-trace-head strong { font-size: 13px; }
+  .dgc-trace-head { min-height: 34px; gap: 8px; padding: 0 6px 0 10px; }
+  .dgc-trace-head strong { font-size: 11.5px; }
   .dgc-trace-model { display: none; }
   .dgc-trace-ticks span { font-size: 10px; }
-  .dgc-trace-row { height: 50px; grid-template-columns: minmax(0,1fr) auto; grid-template-rows: 30px 14px; grid-template-areas: "label meta" "lane lane"; }
-  .dgc-trace-label { grid-area: label; padding-inline: 12px; gap: 8px; font-size: 12px; }
-  .dgc-trace-meta { grid-area: meta; max-width: 62vw; padding-right: 12px; font-size: 11px; }
-  .dgc-trace-lane { grid-area: lane; margin-inline: 12px; height: 14px; }
-  .dgc-trace-bar { top: 2px; }
-  .dgc-trace-transport { min-height: 56px; gap: 10px; padding: 0 12px; }
-  .dgc-trace-play { width: 36px; height: 36px; font-size: 15px; }
-  .dgc-trace-clock { width: auto; font-size: 11px; }
+  .dgc-trace-row { height: 36px; grid-template-columns: minmax(0,1fr) auto; grid-template-rows: 24px 10px; grid-template-areas: "label meta" "lane lane"; }
+  .dgc-trace-label { grid-area: label; padding-inline: 10px; gap: 6px; font-size: 11px; }
+  .dgc-trace-meta { grid-area: meta; max-width: 62vw; padding-right: 10px; font-size: 10.5px; }
+  .dgc-trace-lane { grid-area: lane; margin-inline: 12px; height: 10px; }
+  .dgc-trace-transport { min-height: 38px; gap: 8px; padding: 0 10px; }
+  .dgc-trace-clock { width: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .dgc-trace-dialog *, .dgc-trace-dialog *::before { animation: none !important; transition: none !important; } }
 body.vscode-light .dgc-trace-row.error .dgc-trace-meta span:last-child { color: var(--err-text, #5C6B00); }
