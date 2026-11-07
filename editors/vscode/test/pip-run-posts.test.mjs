@@ -76,7 +76,7 @@ async function openChat(x){await x.drain();x.click(`[data-job="${PIP}"]`);await 
 const text=el=>el?.textContent.replace(/\s+/g,' ').trim();
 const said=el=>text(el.querySelector('.run-post-body'));
 const attachments=el=>[...el.querySelector('.run-post-attach').children].map(e=>e.matches('details')?text(e.querySelector('summary')):text(e));
-const log=d=>[...d.querySelector('.conversation-log').children].filter(e=>e.matches('[data-run-post],[data-message]'));
+const log=d=>[...d.querySelectorAll('.conversation-log [data-run-post],.conversation-log [data-message]')];
 
 test('a run with findings is the Pip saying what it found, with the report one click away',async()=>{
   const x=setup();await openChat(x);

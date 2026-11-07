@@ -3,7 +3,7 @@
 // animation, even when the rendered message has not changed.
 function key(node) {
   if (node.nodeType !== 1) return '';
-  for (const name of ['id', 'data-message', 'data-run-post', 'data-view', 'data-avatar-key']) {
+  for (const name of ['id', 'data-message', 'data-run-post', 'data-turn', 'data-view', 'data-avatar-key']) {
     const value = node.getAttribute(name);
     if (value) return `${name}:${value}`;
   }

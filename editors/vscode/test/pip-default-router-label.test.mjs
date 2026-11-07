@@ -37,7 +37,7 @@ function setup({api=55,job=pip(),kind='personal',messages=[],catalog={default_mo
  const click=selector=>{const e=w.document.querySelector(selector);assert.ok(e,selector);e.click();};
  return{w,d:w.document,requests,drain,click,message,setCatalog:value=>{cat=value;},select:async()=>{await drain();click(`[data-job="${PIP}"]`);await drain();}};
 }
-const openList=async x=>{x.click('#chat-model');await x.drain();x.click('#chat-model-summary');};
+const openList=async x=>{x.click('#chat-model');await x.drain();};
 const ROUTER={enabled:true,systems:[{id:'nas',name:'NAS',online:true,models:[{name:'qwen3.5:9b',context_window:16384}]}]};
 const catalog=(extra={})=>({default_model:'deepseek-v4.1-flash:cloud',models:[{id:'model-a',name:'Local A'}],connection:'configured',subscriptions:SUBS,router:ROUTER,...extra});
 

@@ -2,6 +2,13 @@
 
 ## 0.35.0 — 2026-11-06
 
+- A Pip's chat follows as Work's does. Sending brings your message into view from wherever you were, the reply is followed unless you scrolled away, the same Latest pill appears (New once more has arrived), and your message pins at the top by Work's rule while you read its answer. A Pip that opens with a long first message opens at its start, where you can read it.
+- Every word on a Pip's approval card shows at any width: the two-line limit cut "Nothing has been sent." to "Nothing..." in the side bar.
+- A Pip's model menu opens on the current provider's models, as Work's does. Under Claude Code or Codex it offers CLI default, that CLI's models and Enter another model, and the choice reaches the Pip's run.
+- Stop all Pips and the other dialogs opened from Controls close that popover first: it hid the dialog's title.
+- A Pip whose card waits says "Waiting for you", not "Waiting for the model".
+- The home row and the Pips page show a Pip's latest in plain words, without "Pip 'X' finished:" under X's name or Markdown marks.
+
 - The agent map's link and a Pip's settings card name Settings → Models, where sub-agent and Pip models now live. The marketplace description says what the extension is now: Work, ChatDGC and Pips, on your own models or a signed-in Claude Code or Codex.
 - In Work, ChatDGC and a Pip's chat, invisible characters in a paste are now removed as it lands, and a quiet row above the prompt box says "Removed 5 invisible characters from the pasted text". It has a close control, and goes when you send or clear the draft. One undo brings the paste back as it was copied. Work's old Remove and Keep bar never appeared after a real paste in VS Code, and a paste folded into a chip skipped the check; both are fixed. Text you type stays as you typed it.
 - A paste keeps the shape it was copied with. List numbers, bullets and nesting that a browser's plain text drops come back from the same copy's HTML, as plain text, and the first line's indentation now reaches the model and the sent message.
@@ -193,8 +200,8 @@
 - Pips → Controls shows the Keep Pips running switch again on Linux, in WSL and on a Mac. It said "The
   keep-running status is invalid" instead (on a Mac since DGC 0.50.0). When the switch still starts an older DGC,
   a line under it says so, and Refresh moves it to this one; while a Pip is working, Refresh waits.
-- The home page's Pips row has Dismiss all: it clears the unread count there, while every message stays unread on the
-  Pips page until you open its chat. Something new brings the row back with only the new count, also after a reload.
+- The home page's Pips row has Dismiss all: it marks every message read, so the Pips page's numbers clear too. Something
+  new brings the row back with only the new count. If DGC refuses a read, the row stays dismissed, also after a reload.
 - On the Pips page, a Pip's purple unread count reads "Read" when you point at it or reach it with the keyboard, and a
   click marks its whole chat read without opening it, in Personal and Project.
 - The same on the home page's Pips row: a Pip's count reads "Read" on hover or focus, and a click marks it read.
