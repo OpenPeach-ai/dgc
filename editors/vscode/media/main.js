@@ -10737,9 +10737,11 @@ function permissionChoices(ev) {
     const time1 = window.DgcTime?.node(Date.parse(String(r.finished_at || "")), "pip-report-line-when");
     if (time1) line1.append(time1);
     const slimActs = el("span", "pip-report-slim-actions");
+    // "Check sign-in" is wider than Fix: beside it the line keeps only ✕, so it fits a 300 px side bar. Open report is
+    // in the opened card.
     if (signIn) button("Check sign-in", "pip-report-signin-slim", signInTitle, checkSignIn, slimActs);
     else if (!quiet) button("Fix", "pip-report-fix-slim", fixTitle, fix, slimActs);
-    button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
+    if (!signIn) button("Open", "pip-report-open-slim", `Open this run of ${r.name} in Pips`, openReport, slimActs);
     const x = button("", "pip-report-dismiss-slim", "Dismiss: remove this card from the chat. The report stays in Pips.", dismiss, slimActs);
     x.setAttribute("aria-label", "Dismiss"); x.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
     const chevron = el("span", "pip-report-chevron codicon codicon-chevron-right"); chevron.setAttribute("aria-hidden", "true");

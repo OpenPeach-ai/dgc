@@ -1348,7 +1348,12 @@ def _format(value):
             from .pip_source_rules import notice
             lines.append(notice(value["source"]["left_out"], heading="Left out of this run's source copy:"))
         if run.get("error"):
-            lines.append("Error: " + str(run["error"].get("message", run["error"])))
+            # In words, as the chat's card says it ("Its model provider turned down the API key."), then what it said.
+            from .pip_report_delivery import _reason
+            reason, detail = _reason(run["error"])
+            lines.append("Error: " + reason)
+            if detail and detail not in reason:
+                lines.append("Detail: " + detail)
         report = run.get("result")
         if manifest.get("pulse_verification") is not None:
             lines += ["Reviewed Pulse command plan; no model was invoked.",
@@ -1425,8 +1430,9 @@ def _format(value):
             lines.append("Queued for the foreground supervisor. Read progress with dgc pips report " + run["id"])
         return "\n".join(lines)
     if "runs" in value:
+        from .pip_report_delivery import _reason
         return "\n".join(f'{row["id"]}  {row["status"]}  {row["created_at"]}'
-                         + (f'  {row["error"].get("code")}: {row["error"].get("message")}'
+                         + (f'  {_reason(row["error"])[0]} ({row["error"].get("code")})'
                             if isinstance(row.get("error"), dict) else '')
                          for row in value["runs"]) or "No runs yet. Use dgc pips run PIP_ID while the supervisor is running."
     if "context" in value:

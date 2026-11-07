@@ -141,7 +141,7 @@ test("a refused key or sign-in offers Check sign-in, which opens Settings at Mod
   const [card] = cards(s);
   assert.equal(card.querySelector(".pip-report-fix, .pip-report-fix-slim"), null, "nothing in the project to fix");
   assert.deepEqual([...card.querySelectorAll(".pip-report-slim-actions button")].map((b) => b.textContent || b.getAttribute("aria-label")),
-    ["Check sign-in", "Open", "Dismiss"]);
+    ["Check sign-in", "Dismiss"], "beside the wider Check sign-in only ✕: it fits a 300 px side bar");
   assert.deepEqual([...card.querySelectorAll(".pip-report-actions button")].map((b) => b.textContent),
     ["Check sign-in", "Open report", "Dismiss"]);
   const before = s.posted.length;
