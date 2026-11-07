@@ -196,11 +196,51 @@ def child_env(launch: dict, extra: dict | None = None) -> dict:
     return env
 
 
+_claude_restricted_seen: dict[tuple, bool] = {}
+
+
+def _claude_takes_restricted(binary: str) -> bool:
+    """Whether this Claude Code has ``--restricted``. An older one refuses the whole command for it, which stopped
+    every ChatDGC reply and Pip run on it (seen with 2.1.220). The rest of claude_argv holds an older one to the same
+    limits: none of its own tools, none of the user's settings or hooks, only DGC's server, nothing that asks. Asked
+    once per installed file. If it can't be asked the flag stays, and a CLI that refuses it says so (refused_option)."""
+    try:
+        info = os.stat(binary)
+        key = (str(binary), info.st_mtime_ns, info.st_size)
+    except OSError:
+        return True
+    if key not in _claude_restricted_seen:
+        try:
+            done = subprocess.run([binary, "--help"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                                  cwd=str(Path(binary).parent), env={
+                                      "PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()),
+                                      "DISABLE_AUTOUPDATER": "1"})
+        except (OSError, subprocess.SubprocessError):
+            return True
+        if done.returncode != 0:
+            return True
+        _claude_restricted_seen[key] = b"--restricted" in done.stdout
+    return _claude_restricted_seen[key]
+
+
+_REFUSED_OPTION = re.compile(r"\b(unknown option|unknown argument|unexpected argument|unrecognized (option|argument))\b",
+                             re.IGNORECASE)
+
+
+def refused_option(line: str) -> bool:
+    """A line where the CLI refuses DGC's command itself, which means this version is older than DGC expects."""
+    return bool(_REFUSED_OPTION.search(line or ""))
+
+
+def too_old(key: str) -> str:
+    return f"This version of {name(key)} is too old for DGC. Update it, then try again."
+
+
 def claude_argv(binary: str, *, mcp_config: Path, system_file: Path, model: str = "", effort: str = "") -> list[str]:
     argv = [binary, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
             "--tools", "",                              # none of Claude Code's own tools: no shell, files or web
-            "--restricted",                              # and no user, project or local settings (their hooks)
-            "--setting-sources", "project",              # (its folder has none)
+            *(["--restricted"] if _claude_takes_restricted(binary) else []),
+            "--setting-sources", "project",              # no user or local settings (their hooks); its folder has none
             "--strict-mcp-config", "--mcp-config", str(mcp_config),   # only DGC's server, not the user's
             "--allowedTools", f"mcp__{SERVER}",          # whose tools need no prompt,
             "--permission-mode", "dontAsk",              # and anything else is refused, never asked
@@ -691,6 +731,9 @@ class Turn:
             return True
         if code == 0 and self.calls:
             agent._last_turn_error = "The model ended without a user-facing response"
+            return False
+        if any(refused_option(line) for line in diagnostics):
+            agent._last_turn_error = too_old(self.brain["engine"])
             return False
         problem = (self.errors[-1] if self.errors else "\n".join(diagnostics) if diagnostics
                    else f"it stopped (exit {code})")

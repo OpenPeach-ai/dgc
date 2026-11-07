@@ -284,6 +284,14 @@ class Turns(unittest.TestCase):
         seen = json.loads((self.bin / "seen.json").read_text())
         return result, seen, launch
 
+    def test_a_pip_runs_on_an_older_claude_code(self):
+        """It doesn't have --restricted and refuses the whole command for it (seen with 2.1.220)."""
+        (self.bin / "old-claude").write_text("")
+        result, seen, _ = self.turn("claude", [{"say": "Your shirts are ready."}], computer=False)
+        self.assertEqual(result["text"], "Your shirts are ready.")
+        self.assertNotIn("--restricted", seen["argv"])
+        self.assertIn("--strict-mcp-config", seen["argv"])
+
     def test_a_codex_turn_sees_its_screen_and_ends_at_its_choices(self):
         result, seen, launch = self.turn("codex", [
             {"say": "I'll open the shop on my computer."}, {"call": "computer", "args": {"op": "look"}},
