@@ -106,7 +106,9 @@ test('a Project Pip gets the Personal Pips page: the paged list, then its top ba
   assert.deepEqual(x.$$('.simple-home-head .pip-menu .tabs-menu button').map(text),['Workspace context','Notifications'],'the project’s own pages, in its menu');
   for(const old of ['aside','.layout','#new-pip','#back-pips','nav.tabs','.hero'])assert.equal(x.$(old),null,`no ${old}`);
   for(const personal of ['#pips-settings-open','.core-offer','.meet-core','.attention'])assert.equal(x.$(personal),null,`not the Personal ${personal}`);
-  assert.equal(x.requests('list_pip_attention').length,attention,'its home doesn’t read the Personal Pips’ cards');
+  // It reads Needs attention's page for its tab's number and its rows' (`projects`), and shows none of the Personal list.
+  assert.ok(x.requests('list_pip_attention').length>=attention);
+  assert.equal(x.$('.attention'),null,'its home doesn’t show the Personal Pips’ cards');
   await x.click(`[data-job="${AUDIT}"]`);
   assert.ok(x.$('.pip-topbar #simple-back'),'back to the list');
   assert.equal(pill(x),'Billing audit');
